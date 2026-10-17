@@ -65,6 +65,7 @@ resolves it (relative to the file holding it, `~` the operator's home, an
 """
 
 import inspect
+import tomllib
 from pathlib import Path
 from shlex import split
 from typing import TYPE_CHECKING
@@ -193,6 +194,58 @@ def repository(worktree: Path) -> Repository:
     return Repository(git=common, worktrees=present, main=main, tree=tree)
 
 
+class Described(Model):
+    """The part of a `pyproject.toml` a lent directory's description is read from."""
+
+    class Project(Model):
+        """`[project]`, for its description."""
+
+        description: str | None = None
+
+    project: Project = Project()
+
+
+class Lent(Model):
+    """A directory the operator lends one launch from its command line: where it is, whether the room may write it, and what's known of it."""
+
+    path: Path
+    """Where it is on the host, absolute and resolved: where the room mounts it."""
+    read_only: bool
+    repository: bool
+    """Whether it's in a git repository, whose history a session reads with git."""
+    about: str | None = None
+    """Its `pyproject.toml`'s description, where it has one: nothing is declared
+    for a directory lent."""
+
+
+def lent(paths: list[Path], *, read_only: bool) -> list[Lent]:
+    """Describe each directory at `paths`, lent to a launch from its command line: `--mount-ro` read-only, `--mount` writable.
+
+    Each is what the launch found there: whether git sees a repository, and its
+    `pyproject.toml`'s description. Nothing is asked of the operator beyond
+    the path.
+    """
+
+    def described(path: Path) -> Lent:
+        pyproject = path / "pyproject.toml"
+        about = (
+            Described.model_validate(
+                tomllib.loads(pyproject.read_text())
+            ).project.description
+            if pyproject.is_file()
+            else None
+        )
+        found = Git(cwd=path).run("rev-parse", "--git-dir", ok=[0, 128])
+        return Lent(
+            path=path.resolve(),
+            read_only=read_only,
+            repository=found.status == 0,
+            about=about,
+        )
+
+    return [described(each) for each in paths]
+
+
 class RelatedRepository(Model):
     """Another repository named for the project's sessions to read, as a launch finds it on the host."""
 
@@ -259,6 +312,7 @@ def maintaining_room(
     *,
     neighbours: list[RelatedRepository],
     shared: dict[str, Path] | None = None,
+    lent: list[Lent] | None = None,
 ) -> Container:
     """Return the maintaining session's room for the worktree at `worktree`.
 
@@ -267,7 +321,9 @@ def maintaining_room(
     project's sessions, as the launch found them (`related`): each mounted one
     is mounted read-only after the project's own. `shared` is where each module
     whose data the room mounts keeps it, by the module's name: each mounted at
-    its path, read-only unless the module says. Raise `RoomError` where the
+    its path, read-only unless the module says. `lent` are the directories the
+    operator lends this launch from its command line, each mounted at its path,
+    last. Raise `RoomError` where the
     repository's tree would hold the operator's home, where `$EDITOR` or
     `$VISUAL` isn't a command line, where the environment's interpreter doesn't
     resolve under the room's mounts, or where another repository overlaps them.
@@ -372,6 +428,7 @@ def maintaining_room(
                 for each in neighbours
                 if each.mounted
             ),
+            *(Mount(source=each.path, read_only=each.read_only) for each in lent or []),
         ],
         env={
             **needs.env,

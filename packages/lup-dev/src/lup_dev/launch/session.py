@@ -61,7 +61,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
     from lup.tools.tool import ToolSpec
-    from lup_dev.launch.room import RelatedRepository
+    from lup_dev.launch.room import Lent, RelatedRepository
 
 
 class LaunchError(LupDevError):
@@ -206,14 +206,15 @@ def terminal_settings(
     tools: list[ToolSpec],
     neighbours: list[RelatedRepository],
     shared: dict[str, Path],
+    lent: list[Lent] | None = None,
 ) -> TerminalSettings:
     """Return what lup adds to the session launched in `worktree`, its files compiled into `directory`.
 
-    `tools` are lup's tools the host service serves it, and `neighbours` the
-    other repositories named for it, as the launch found them, which
-    its guidance lists, and `shared` where each module whose data the room
-    mounts has it. Raise `GuidanceError` naming a section of guidance that
-    can't be read, or doesn't render.
+    `tools` are lup's tools the host service serves it, `neighbours` the other
+    repositories named for it, as the launch found them, and `lent` the
+    directories lent to this launch, which its guidance lists, and `shared`
+    where each module whose data the room mounts has it. Raise `GuidanceError`
+    naming a section of guidance that can't be read, or doesn't render.
     """
     resolved = approved.resolved
     session = session_settings(resolved.session)
@@ -224,7 +225,13 @@ def terminal_settings(
         servers=served(),
         messages=LaunchSockets(directory=ROOM_SOCKETS).messages,
         guidance=render(
-            resolved, approved.root, worktree, tools, neighbours, shared=shared
+            resolved,
+            approved.root,
+            worktree,
+            tools,
+            neighbours,
+            shared=shared,
+            lent=lent,
         ),
         session=session.declared,
         defaults=session.defaults,

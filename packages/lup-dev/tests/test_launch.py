@@ -784,6 +784,56 @@ def test_the_command_passes_every_argument_it_doesnt_know_to_the_cli(
     assert machine.engine.run()[-5:] == ["--resume", "--model", "opus", "-p", "hi"]
 
 
+def test_the_command_lends_each_directory_it_s_given_and_lists_it_in_the_guidance(
+    project: Path, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    machine = Machine(tmp_path, clock)
+    monkeypatch.setattr(cli, "adapters", stubbed(machine))
+    monkeypatch.setattr(cli, "launching", machine.launching)
+    reading = tmp_path / "reading"
+    writing = tmp_path / "writing"
+    reading.mkdir()
+    writing.mkdir()
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "launch",
+            "claude",
+            "--mount-ro",
+            str(reading),
+            "--mount",
+            str(writing),
+            "--resume",
+        ],
+    )
+
+    assert result.exit_code == 7, result.output
+    run = machine.engine.run()
+    assert run[-1] == "--resume"
+    assert f"--mount=type=bind,source={reading},destination={reading},ro=true" in run
+    assert f"--mount=type=bind,source={writing},destination={writing}" in run
+    guidance = machine.engine.guidance or ""
+    assert "## Lent to this launch" in guidance
+    assert f"- `{reading}`, read-only." in guidance
+    assert f"- `{writing}`, which you may write." in guidance
+
+
+def test_the_command_refuses_to_lend_what_isn_t_a_directory(
+    project: Path, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    machine = Machine(tmp_path, clock)
+    monkeypatch.setattr(cli, "adapters", stubbed(machine))
+    monkeypatch.setattr(cli, "launching", machine.launching)
+
+    result = runner.invoke(
+        cli.app, ["launch", "claude", "--mount-ro", str(tmp_path / "nowhere")]
+    )
+
+    assert result.exit_code == 2
+    assert machine.events.said == []
+
+
 def test_the_command_refuses_inside_an_agents_session(
     project: Path, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
