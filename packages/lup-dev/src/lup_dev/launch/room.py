@@ -85,7 +85,7 @@ from lup_dev.layout import (
     LaunchSockets,
 )
 from lup_dev.remote import helper
-from lup_dev.remote.config import room_config
+from lup_dev.remote.config import Gating, room_config
 
 if TYPE_CHECKING:
     from lup_dev.declaration import kinds
@@ -389,6 +389,8 @@ class RoomGit(Model):
     configuration names."""
     launch: LaunchLayout
     """The launch's own places, where both are written."""
+    gating: Gating
+    """What a push runs first, before it updates a gated ref."""
 
     @property
     def mounts(self) -> list[Mount]:
@@ -412,6 +414,7 @@ class RoomGit(Model):
             self.repository,
             self.launch.gitconfig,
             LaunchSockets(directory=ROOM_SOCKETS).request,
+            self.gating,
         )
         self.launch.bin.mkdir(parents=True, exist_ok=True)
         self.launch.helper.write_text(inspect.getsource(helper))
@@ -419,18 +422,18 @@ class RoomGit(Model):
 
 
 def room_git(
-    repository: Path, launch: LaunchLayout, mounts: list[Mount | Mask]
+    repository: Path, launch: LaunchLayout, mounts: list[Mount | Mask], gating: Gating
 ) -> RoomGit:
     """Return what a room gets for git, for the repository whose git directory is `repository`, once its `config` is checked.
 
     `mounts` is everything else the room mounts: the room's own and its
-    terminal's. Raise `RoomError` where the repository's `config` would have the
-    host's git read what the room writes: setting `extensions.worktreeConfig`,
-    or including a file inside one of the room's mounts, through any file it
-    includes in turn.
+    terminal's; `gating`, what a push runs first. Raise `RoomError` where the
+    repository's `config` would have the host's git read what the room writes:
+    setting `extensions.worktreeConfig`, or including a file inside one of the
+    room's mounts, through any file it includes in turn.
     """
     git = Git.pinned(repository)
-    room = RoomGit(repository=repository, launch=launch)
+    room = RoomGit(repository=repository, launch=launch, gating=gating)
     sources = [
         each.source for each in [*mounts, *room.mounts] if isinstance(each, Mount)
     ]

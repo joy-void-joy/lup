@@ -19,6 +19,9 @@ The homes (`docs/judging-writes.md`, *Where things live*):
 - the record of each room image built, in lup's state;
 - lup's inbox, its items and parties one file each, in lup's state;
 - inside a worktree, `.lup/saved/`, where a refused version waits for the agent;
+- inside a repository's own git directory, `lup/passes/`, the gate's passes,
+  which its worktrees and their rooms share, and which outlast a room's session
+  as lup's state there doesn't;
 - inside `lup_dev`, the built engine (`Bundle`).
 """
 
@@ -240,6 +243,18 @@ class CheckoutLayout(Model):
     def saved_copy(self, number: int, path: Path) -> Path:
         """Say where the version refused in refusal `number` is saved, by its path."""
         return self.saved / str(number) / path
+
+
+class GitDirectoryLayout(Model):
+    """What lup keeps in a repository's own git directory: shared by every worktree of it and their rooms, and kept across sessions."""
+
+    common: Path
+    """The repository's common git directory."""
+
+    @property
+    def passes(self) -> Path:
+        """The gate's passes, one file each, named by the files it passed on (`lup_dev.gate`, `GitPasses`)."""
+        return self.common / "lup" / "passes"
 
 
 class PackageLayout(Model):

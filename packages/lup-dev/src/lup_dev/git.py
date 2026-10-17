@@ -99,6 +99,9 @@ class Git(Model):
     common: Path | None = None
     """The repository's common git directory, where git is pinned to it
     (`pinning`); none where git finds its own from `cwd` or `arguments`."""
+    index: Path | None = None
+    """An index git stages in, in place of the worktree's own (`GIT_INDEX_FILE`);
+    none for the worktree's."""
 
     @classmethod
     def pinned(cls, common: Path) -> Git:
@@ -120,7 +123,15 @@ class Git(Model):
             "core.autocrlf=false",
         ]
         pinned = [] if self.common is None else pinning(self.common)
-        program, *words = [*pinned, "git", *safe, *self.arguments, *arguments]
+        staged = [] if self.index is None else ["env", f"GIT_INDEX_FILE={self.index}"]
+        program, *words = [
+            *pinned,
+            *staged,
+            "git",
+            *safe,
+            *self.arguments,
+            *arguments,
+        ]
         try:
             return run(program, *words, cwd=self.cwd, stdin=stdin, ok=ok)
         except ProgramError as failed:

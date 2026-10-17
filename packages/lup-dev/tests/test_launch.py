@@ -227,6 +227,7 @@ class Engine:
         self.ran = ran
         self.processes: list[Process] = []
         self.guidance: str | None = None
+        self.gitconfig: str | None = None
 
     def __call__(self, process: Process) -> Exited:
         self.processes.append(process)
@@ -244,6 +245,12 @@ class Engine:
                 flag = "--append-system-prompt-file"
                 if flag in rest:
                     self.guidance = Path(rest[rest.index(flag) + 1]).read_text()
+                [global_config] = [
+                    each.removeprefix("--env=GIT_CONFIG_GLOBAL=")
+                    for each in rest
+                    if each.startswith("--env=GIT_CONFIG_GLOBAL=")
+                ]
+                self.gitconfig = Path(global_config).read_text()
                 return Exited(status=self.ran)
             case _:
                 message = f"podman asked {process.arguments}"
@@ -380,7 +387,7 @@ def live(project: Path) -> Register:
 
 
 def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
-    project: Path, tmp_path: Path, clock: FakeClock
+    project: Path, tmp_path: Path, clock: FakeClock, shell: Shell
 ) -> None:
     machine = Machine(tmp_path, clock)
     machine.host.served.extend([dead(project), live(project)])
@@ -467,6 +474,15 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
         assert (
             f"--mount=type=bind,source={written},destination={written},ro=true" in run
         )
+    seen = tmp_path / "seen-gitconfig"
+    seen.write_text(machine.engine.gitconfig or "")
+    # The project's declaration runs its tools as the `PATH` finds them (`Plain`).
+    assert json.loads(
+        shell.git(tmp_path, "config", "--file", str(seen), "lup.gate")
+    ) == ["lup-dev", "check", "--at"]
+    assert json.loads(
+        shell.git(tmp_path, "config", "--file", str(seen), "lup.gated")
+    ) == ["refs/heads/dev"]
 
 
 def test_a_repository_whose_config_the_room_could_change_doesnt_launch(
