@@ -70,6 +70,8 @@ from shlex import split
 from typing import TYPE_CHECKING
 
 from lup.rooms.container import Container, Image, Mask, Mount
+from lup.sessions import bridge
+from lup.sessions.terminal import TerminalSettings
 from lup.types import Model
 from lup_dev.catalog.room import Editors, RoomBase
 from lup_dev.declaration.requirements import Needed, Requirement
@@ -417,8 +419,37 @@ class RoomGit(Model):
             self.gating,
         )
         self.launch.bin.mkdir(parents=True, exist_ok=True)
-        self.launch.helper.write_text(inspect.getsource(helper))
+        self.launch.helper.write_text(programs(self.launch)[self.launch.helper])
         self.launch.helper.chmod(0o755)
+
+
+def programs(launch: LaunchLayout) -> dict[Path, str]:
+    """Return the programs a launch writes for its room to run, by where they go: git's remote helper, and lup's MCP bridge for its tool servers."""
+    return {
+        launch.helper: inspect.getsource(helper),
+        TerminalSettings(directory=launch.directory).bridge: inspect.getsource(bridge),
+    }
+
+
+def refreshed(launch: LaunchLayout) -> list[Path]:
+    """Rewrite each program a launch's room runs that differs from this copy's, and return those rewritten.
+
+    A program the launch didn't write stays unwritten: a session with no tool
+    servers has no bridge. Each is rewritten in place, its file kept, since a
+    room mounting that one file (as a runtime's adapter may mount the bridge)
+    keeps seeing the file it mounted, where a replaced one it wouldn't. The
+    room runs the helper anew at each push and fetch; a bridge already running
+    keeps its own code until the next launch.
+    """
+    wanted = programs(launch)
+    changed = [
+        path
+        for path, text in wanted.items()
+        if path.is_file() and path.read_text() != text
+    ]
+    for path in changed:
+        path.write_text(wanted[path])
+    return changed
 
 
 def room_git(

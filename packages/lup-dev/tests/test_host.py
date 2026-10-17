@@ -227,6 +227,7 @@ def service(
     room_routes: list[RoomRoute] | None = None,
     tools: list[RoomTools] | None = None,
     modules: LaunchModules | None = None,
+    refresh: Callable[[Register], list[Path]] | None = None,
 ) -> HostService:
     return HostService(
         layout=layout,
@@ -238,6 +239,7 @@ def service(
         room_routes=room_routes or [],
         tools=tools or [],
         modules=modules,
+        refresh=refresh,
     )
 
 
@@ -365,6 +367,27 @@ def test_a_service_started_again_serves_the_launches_where_their_rooms_mounted_t
         assert send(layout.launch("one").hook, "again") == "first answers again\n"
         assert host.launches() == [registered]
         host.unregister("one")
+
+
+def test_a_service_started_again_brings_each_room_s_programs_up_to_its_copy(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+    registered = launch(tmp_path, "one", "first")
+    asked: list[Register] = []
+
+    def refresh(served: Register) -> list[Path]:
+        asked.append(served)
+        return [tmp_path / "helper"]
+
+    with served(service(layout, Judge(), said, refresh=refresh)):
+        host.register(registered)
+        host.stop()
+    assert asked == []
+    with served(service(layout, Judge(), said, refresh=refresh)):
+        assert asked == [registered]
+        host.unregister("one")
+    assert f"one: {tmp_path / 'helper'} brought up to this copy's" in said
 
 
 def test_a_record_it_cant_serve_is_said_and_left(

@@ -98,7 +98,13 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.tools import InboxTools
 from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
-from lup_dev.launch.room import host_needs, maintaining_room, related, room_git
+from lup_dev.launch.room import (
+    host_needs,
+    maintaining_room,
+    refreshed,
+    related,
+    room_git,
+)
 from lup_dev.launch.session import (
     LaunchError,
     approved_declaration,
@@ -291,6 +297,7 @@ def host_serve(context: typer.Context) -> None:
         room_routes=remote_routes(Remotes(say=typer.echo)),
         modules=Workers(layout=layout.host, say=typer.echo),
         say=typer.echo,
+        refresh=lambda launch: refreshed(layout.launch(launch.launch)),
     )
     asyncio.run(service.serve())
 

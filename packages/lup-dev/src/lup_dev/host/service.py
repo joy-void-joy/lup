@@ -353,6 +353,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     line_limit: int
     """The longest line lup's tool server reads: one MCP message."""
     say: Callable[[str], None]
+    refresh: Callable[[Register], list[Path]] | None = None
+    """Brings the programs a recorded launch's room runs up to this copy's,
+    returning those it rewrote; none leaves them as the launch wrote them."""
     served: dict[str, Served] = {}
     pending: list[asyncio.Task[None]] = []
     """What the launches' modules' hooks are running that nothing waits on."""
@@ -665,7 +668,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         self.say(f"{launch}: ended")
 
     async def reopen(self) -> None:
-        """Serve each launch recorded by a service before, where its room mounted it.
+        """Serve each launch recorded by a service before, where its room mounted it, its room's programs brought up to this copy's (`refresh`).
 
         A record that doesn't read as a launch's, or that this service can't serve,
         is said and left in place.
@@ -676,6 +679,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 await self.open(request)
             except (ValidationError, HostError) as failure:
                 self.say(f"{record} isn't served again: {failure}")
+                continue
+            if self.refresh is not None:
+                for refreshed in self.refresh(request):
+                    self.say(f"{request.launch}: {refreshed} brought up to this copy's")
 
     async def shut(self) -> None:
         """Close every launch's sockets and stop its modules, keeping its record and its directory."""
@@ -780,6 +787,11 @@ class HostService(Model, arbitrary_types_allowed=True):
     line_limit: int = 16 * 1024 * 1024
     """The longest line lup's tool server reads, one MCP message: well above
     asyncio's 64 KiB, which a long message to the operator could pass."""
+    refresh: Callable[[Register], list[Path]] | None = None
+    """Brings the programs a recorded launch's room runs up to this copy's when
+    the service serves it again, returning those it rewrote: git's remote
+    helper and lup's MCP bridge (`cli.py`), so a restart on an approved copy
+    reaches running rooms. None leaves them as the launch wrote them."""
 
     @model_validator(mode="after")
     def distinct(self) -> Self:
@@ -837,6 +849,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             modules=self.modules,
             line_limit=self.line_limit,
             say=self.say,
+            refresh=self.refresh,
         )
         stopped = asyncio.Event()
         own = [

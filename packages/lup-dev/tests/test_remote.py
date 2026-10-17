@@ -28,7 +28,7 @@ from lup_dev.host.client import HostClient, RoomClient, Starter, asked
 from lup_dev.host.courier import Courier, Heard, Telling
 from lup_dev.host.protocol import Done, HostError, Limits, Register, Reply, Stop
 from lup_dev.host.service import Answerer, Asked, HostService, Judged
-from lup_dev.launch.room import RoomError, RoomGit, room_git
+from lup_dev.launch.room import RoomError, RoomGit, programs, refreshed, room_git
 from lup_dev.layout import ROOM_PATH, HostLayout, LaunchLayout, LaunchSockets
 from lup_dev.remote.config import Gating, room_config
 from lup_dev.remote.protocol import (
@@ -942,6 +942,26 @@ def test_a_gate_the_room_s_configuration_garbles_is_said(
         "--at', not a JSON list of strings" in stderr(pushed)
     )
     assert world.on_forge("refs/heads/dev") is None
+
+
+def test_a_room_s_programs_differing_from_this_copy_s_are_rewritten_in_place(
+    bare: Path, tmp_path: Path
+) -> None:
+    launch = LaunchLayout(directory=tmp_path / "launch")
+    room_git(bare, launch, [Mount(source=bare)], UNGATED).write()
+    launch.helper.write_text("an older helper\n")
+    mounted = launch.helper.stat().st_ino
+    bridge = next(path for path in programs(launch) if path != launch.helper)
+
+    rewritten = refreshed(launch)
+    again = refreshed(launch)
+
+    assert rewritten == [launch.helper]
+    assert launch.helper.read_text() == programs(launch)[launch.helper]
+    assert launch.helper.stat().st_ino == mounted
+    assert os.access(launch.helper, os.X_OK)
+    assert again == []
+    assert not bridge.exists()
 
 
 # Refused at launch
