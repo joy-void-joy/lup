@@ -268,7 +268,7 @@ Beyond the rules this document names:
 - **Size thresholds are off:** `C901`, `PLR0912`, `PLR0913`, `PLR0915`, `PLR1702` (complexity, branches, arguments, statements, nesting) measure size, not mistakes, and #33 counts them among the findings an agent spends turns on that change nothing a reader cares about. Whether a function is too big is review's, until #33 settles what's worth an agent's attention. Raising their limits instead would still spend an agent's turns at the raised limit.
 - **`CPY001` is off** until a copyright header is chosen.
 - **Configured rather than off:** `ERA001` takes `lint.task-tags = ["lup"]`; `TC003` takes `lint.flake8-type-checking.runtime-evaluated-base-classes`, listing pydantic's `BaseModel` and `BaseSettings` and lup's `Model`, `MutableModel` and `Settings`, so a field's type isn't moved into a `TYPE_CHECKING` block, which would break the model at runtime.
-- **The gate runs `ruff check --ignore-noqa`:** ruff has no setting for it.
+- **lup runs `ruff check --ignore-noqa`:** ruff has no setting for it.
 
 Each lup rule says which ruff rules it turns off, in `pyproject.toml`.
 

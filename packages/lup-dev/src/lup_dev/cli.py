@@ -47,6 +47,7 @@ from lup_dev.codescan.directives import (
     HostIssues,
     Issues,
     Trackers,
+    without,
 )
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.codescan.reference import reference
@@ -892,27 +893,23 @@ def rules_docs() -> None:
     typer.echo(f"wrote {target}")
 
 
-@rules.command("check")
-def rules_check(
-    paths: Annotated[
-        list[Path] | None,
-        typer.Argument(help="Files to check; every file the roles check, by default."),
-    ] = None,
-) -> None:
-    """Check files as the gate does: lup's rules, pyright, ruff and the deferrals.
+class Scanned(Model):
+    """What checking files as the gate does found: the files checked, and each finding."""
+
+    files: list[Path]
+    findings: list[Finding]
+    unreachable: str | None = None
+    """Why deferrals' issues weren't checked, where they weren't."""
+
+
+def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
+    """Check `paths`, or every file the worktree's roles check, as the gate does.
 
     lup's rules are those the worktree's declaration selects, sent to the engine
     as the judge sends them, and pyright and ruff run through its runner as the
-    judge runs them. `# lup: ignore` applies to every owner's findings. A
-    deferral whose issue is closed, or whose condition holds, fails the check;
-    where the issue tracker can't be reached (no `gh`, no login, offline), the
-    issues go unchecked and the check says why. In a room, which holds no `gh`,
-    the host service is asked each issue's state on the launch's request socket,
-    and an issue it doesn't answer goes unchecked, said. lup's rules read production and
-    protected modules; tests are checked by
-    pyright and ruff only; what the declaration excludes isn't checked. With no
-    paths, it checks every such file in the worktree, as the gate's `rules` step
-    runs it.
+    judge runs them. `# lup: ignore` applies to every owner's findings. With
+    `issues`, a deferral's issue is checked: on GitHub, or in a room through the
+    host service; without, deferrals' issues go unchecked.
     """
     root = toplevel(Path.cwd())
     layout = Layout.of(LupDevSettings())
@@ -930,24 +927,26 @@ def rules_check(
         )
         if (root / name).is_file()
     ]
-    checked = [path for path in listed if worktree.roles.checked(path)]
-    if not checked:
-        typer.echo("lup checked no files.")
-        return
-    sources = [Source(path=path) for path in checked]
+    files = [path for path in listed if worktree.roles.checked(path)]
+    if not files:
+        return Scanned(files=[], findings=[])
+    sources = [Source(path=path) for path in files]
     declaration = worktree.declaration
     reports = engine().check(root, sources, declaration.rules, declaration.runner)
     ruff = Ruff().findings(root, sources, declaration.runner)
     conditions = loaded(root, declaration.conditions)
-    room = RoomClient()
-    issues: Issues = (
-        HostIssues(client=room, say=typer.echo)
-        if room.socket.exists()
-        else GitHubIssues(root=root)
-    )
-    unreachable = issues.unreachable()
+    tracker: Issues | None = None
+    unreachable: str | None = None
+    if issues:
+        room = RoomClient()
+        tracker = (
+            HostIssues(client=room, say=typer.echo)
+            if room.socket.exists()
+            else GitHubIssues(root=root)
+        )
+        unreachable = tracker.unreachable()
     gate = Trackers(
-        issues=issues if unreachable is None else None, conditions=conditions
+        issues=tracker if unreachable is None else None, conditions=conditions
     )
 
     def found(path: Path) -> list[Finding]:
@@ -976,14 +975,75 @@ def rules_check(
         ]
         return [*kept, *problems]
 
-    findings = [each for path in checked for each in found(path)]
-    for line in (line for each in findings for line in finding_lines(each, "")):
+    findings = [each for path in files for each in found(path)]
+    return Scanned(files=files, findings=findings, unreachable=unreachable)
+
+
+@rules.command("check")
+def rules_check(
+    paths: Annotated[
+        list[Path] | None,
+        typer.Argument(help="Files to check; every file the roles check, by default."),
+    ] = None,
+) -> None:
+    """Check files as the gate does: lup's rules, pyright, ruff and the deferrals.
+
+    lup's rules are those the worktree's declaration selects, sent to the engine
+    as the judge sends them, and pyright and ruff run through its runner as the
+    judge runs them. `# lup: ignore` applies to every owner's findings. A
+    deferral whose issue is closed, or whose condition holds, fails the check;
+    where the issue tracker can't be reached (no `gh`, no login, offline), the
+    issues go unchecked and the check says why. In a room, which holds no `gh`,
+    the host service is asked each issue's state on the launch's request socket,
+    and an issue it doesn't answer goes unchecked, said. lup's rules read production and
+    protected modules; tests are checked by
+    pyright and ruff only; what the declaration excludes isn't checked. With no
+    paths, it checks every such file in the worktree, as the gate's `rules` step
+    runs it. An `ignore` that keeps nothing fails it too, until `lup-dev rules
+    fix` removes it.
+    """
+    found = scanned(paths, issues=True)
+    if not found.files:
+        typer.echo("lup checked no files.")
+        return
+    lines = (line for each in found.findings for line in finding_lines(each, ""))
+    for line in lines:
         typer.echo(line)
-    if unreachable is not None:
-        typer.echo(f"Deferrals' issues weren't checked: {unreachable}.")
-    typer.echo(f"lup checked {len(checked)} files: {len(findings)} findings.")
-    if findings:
+    if found.unreachable is not None:
+        typer.echo(f"Deferrals' issues weren't checked: {found.unreachable}.")
+    typer.echo(f"lup checked {len(found.files)} files: {len(found.findings)} findings.")
+    if found.findings:
         raise typer.Exit(code=1)
+
+
+@rules.command("fix")
+def rules_fix(
+    paths: Annotated[
+        list[Path] | None,
+        typer.Argument(help="Files to fix; every file the roles check, by default."),
+    ] = None,
+) -> None:
+    """Remove each `# lup: ignore` that keeps nothing, as `lup-dev check --fix` does.
+
+    An `ignore` whose rule doesn't fire on the line it covers is never told to
+    an agent: it's removed here, its line with it where nothing else is on it,
+    and nothing else changes. The formatter, which `--fix` runs after, tidies
+    what's left.
+    """
+    root = toplevel(Path.cwd())
+    fixing = [
+        each
+        for each in scanned(paths, issues=False).findings
+        if each.owner == "lup" and each.fixable
+    ]
+    lines = {
+        path: [each.span.start.line for each in fixing if each.path == path]
+        for path in dict.fromkeys(each.path for each in fixing)
+    }
+    for path, numbers in lines.items():
+        file = root / path
+        file.write_text(without(file.read_text(), numbers))
+        typer.echo(f"{path}: removed {len(numbers)} `# lup: ignore` keeping nothing")
 
 
 @holds.callback(invoke_without_command=True)
