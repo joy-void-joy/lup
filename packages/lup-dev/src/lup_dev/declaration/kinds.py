@@ -42,7 +42,7 @@ class Rules(Named[str]):
 
     Python only composes and records a rule selection: the engine, which holds the
     rule tables, resolves it, and refuses an id it doesn't hold
-    (`docs/declaration.md`, *Selecting them*).
+    (`docs/declaration.md`, *Selecting the rules*).
 
     >>> mine = Rules().drop("tuple-shape").over(Rules.default().drop("regex"))
     >>> mine.start.kind, [operation.names for operation in mine.operations]

@@ -2,7 +2,7 @@
 
 `CodeRules`' own rules are every rule of the table but these
 (`lup_dev.declaration.modules.code_rules`, `docs/declaration.md`, *Selecting
-them*), so a rule a later release adds runs unless it's listed here. A project
+the rules*), so a rule a later release adds runs unless it's listed here. A project
 that wants one adds it back with `Rules().add(…)`.
 """
 

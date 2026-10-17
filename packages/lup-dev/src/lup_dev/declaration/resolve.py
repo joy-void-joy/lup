@@ -1,7 +1,7 @@
 """A declaration resolved: each kind's entries, from the modules it selects.
 
 Resolving applies every layer in order, then reads each kind from the modules that
-hold it, by the kind's type (`docs/declaration.md`, *What a module is*):
+hold it, by the kind's type (`docs/declaration.md`, *Resolving it*):
 - `Core` is held, and every module a selected module requires is selected,
   without a cycle; lup never adds or drops a module behind the project's back;
 - names are per kind and shared across modules, so one name from two modules
@@ -98,7 +98,7 @@ class Selected(Model):
     The engine resolves `default` from nothing beneath it, then `rules` from that:
     `Rules.default()` there starts from the module's own default, and `Rules()`
     from nothing beneath it, since its operations begin with the default's
-    (`docs/declaration.md`, *Selecting them*).
+    (`docs/declaration.md`, *Selecting the rules*).
     """
 
     module: str
