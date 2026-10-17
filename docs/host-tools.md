@@ -46,6 +46,7 @@ Answered by the operator on 2026-10-14; where they left a decision to the builde
 | `ask` | `question`, `decisions` (each with the agent's lean), `wait` | Asks the operator. With `wait`, the call holds until they answer and returns the answer; without, it returns at once and the answer reaches the agent at a later call | a question |
 | `send` | `to`, `kind` (`note`, `problem`, `disagreement`, `question`), `text` | Sends a message to a party's inbox: the operator in this piece, other agents once spawn gives them one; never holds | a message of that kind |
 | `wait_inbox` | none | Holds until something reaches the agent's inbox, and returns all of it | none |
+| `rename` | `name` | Names the session's launch after its task; called by a subagent, names that subagent alone, under its parent. Refused where another launch, or another subagent of the launch, holds the name, saying whose (`docs/launch.md`, *Names*) | none |
 | `read_issue` | `number`, `repository` | An issue or pull request of this repository, or of another the operator's login can read (`owner/name`), with its comments, and a pull request's checks | none |
 | `find_issues` | `query`, `state`, `repository` | Searches the issues and pull requests of this repository, or of another the operator's login can read (`owner/name`) | none |
 | `file_issue` | `title`, `body` | Opens an issue | none |

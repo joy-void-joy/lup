@@ -12,7 +12,7 @@ from datetime import timedelta
 from lup.sessions.declaration import Declaration
 from lup.sessions.terminal import Hook
 from lup.types import Model
-from lup_dev.host.courier import Heard, Telling
+from lup_dev.host.courier import Heard, Spawned, Telling
 from lup_dev.host.records import Records
 from lup_dev.launch.clis import Channel
 from lup_dev.policy.checkpoint import Bench
@@ -36,6 +36,10 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """Adds to a hook's answer: the payload, the answer (the judge's, or none)
     and what to add in, what the hook prints out instead; none where nothing is
     added, so the answer goes out as it is."""
+    spawned: Callable[[str], Spawned | None]
+    """Reads how the subagent one of its hooks fires for was spawned, as the
+    runtime recorded it: the payload in; none for the session's own
+    conversation, or where nothing's recorded."""
     woken: Callable[[str, str], str] | None
     """Starts a turn of an idle session: its id and what to tell it in, the line
     written to its messaging socket out; none where the runtime has no way, a gap

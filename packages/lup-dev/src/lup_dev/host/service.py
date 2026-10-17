@@ -55,7 +55,16 @@ from lup.tools.serving import Answer, serve
 from lup.tools.tool import Accepted, AgentTool, ToolSpec, lup_tool
 from lup.tools.tool import Refused as Rejected
 from lup.types import Model, MutableModel
-from lup_dev.host.courier import Conversations, Courier, Post, Posted, Telling
+from lup_dev.host.courier import (
+    Conversation,
+    Conversations,
+    Courier,
+    Heard,
+    Post,
+    Posted,
+    Spawns,
+    Telling,
+)
 from lup_dev.host.names import Names, claimed, held, shaped, taken
 from lup_dev.host.protocol import (
     Done,
@@ -70,6 +79,7 @@ from lup_dev.host.protocol import (
     Reply,
     Request,
     Stop,
+    Talker,
     Unregister,
     handle,
 )
@@ -87,11 +97,10 @@ from lup_dev.host.workers import (
     Sent,
 )
 from lup_dev.layout import HostLayout
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-
-    from lup_dev.host.courier import Conversation
 
 
 class Answerer(ABC):
@@ -317,6 +326,31 @@ def relayed(modules: LaunchModules, launch: Register, kind: str) -> Route:
     return Route(kind=kind, answer=answered)
 
 
+class Noted(Model):
+    """A hook's conversation as it stands once what the hook says of subagents is noted, and what it's told of names."""
+
+    conversation: Conversation
+    said: list[str] = []
+
+
+def name_spawns(naming: str) -> str:
+    """Tell a conversation spawning a subagent without a name to give names, `naming` saying how."""
+    return (
+        "lup: that subagent goes without a name, so you and the operator can't "
+        f"call it by one: give each subagent you spawn a name after its task "
+        f"({naming}). It's asked to name itself meanwhile."
+    )
+
+
+def unnamed(path: str) -> str:
+    """Ask a subagent spawned without a name to name itself: it knows its task."""
+    return (
+        f"lup: this subagent is `{path}` for now, with no name of its own: name "
+        "yourself after your task with lup's `rename` tool (`explore-auth`), so "
+        "the operator and other sessions can tell you apart."
+    )
+
+
 def named_here(name: str) -> str:
     """Tell a session starting its launch's name."""
     return (
@@ -369,6 +403,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     say: Callable[[str], None]
     names: Names
     """The name each session last had, so a session resumed takes it back."""
+    spawns: Spawns | None = None
+    """How each runtime recorded its subagents' spawns; none reads nothing, so
+    subagents go without names until they rename themselves."""
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's,
     returning those it rewrote; none leaves them as the launch wrote them."""
@@ -408,7 +445,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         sockets = self.layout.launch(request.launch)
         sockets.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         sockets.directory.chmod(0o700)
-        conversations = Conversations()
+        kept = read_model(self.layout.conversations(request.launch), Conversations)
+        conversations = kept or Conversations()
 
         def said(line: str) -> None:
             self.say(f"{request.launch}: {line}")
@@ -627,6 +665,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             return Spoken(answer=await self.judgement(request, payload))
         conversation = conversations.named(heard.session, heard.agent)
+        noted = self.spawning(request, conversations, conversation, heard, payload)
+        conversation, said = noted.conversation, noted.said
         if heard.event in self.served[request.launch].offered.occasions:
             happening = Happening(
                 occasion=heard.event,
@@ -642,7 +682,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             if starting
             else None
         )
-        naming = [] if name is None else [named_here(name)]
+        naming = [*([] if name is None else [named_here(name)]), *said]
         room = (
             heard.fits
             - len(answer.encode())
@@ -745,8 +785,108 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         if self.modules is not None:
             await self.modules.close(served.launch)
         self.layout.record(launch).unlink(missing_ok=True)
+        self.layout.conversations(launch).unlink(missing_ok=True)
         shutil.rmtree(self.layout.launch(launch).directory)
         self.say(f"{launch}: ended")
+
+    def spawning(
+        self,
+        request: Register,
+        conversations: Conversations,
+        conversation: Conversation,
+        heard: Heard,
+        payload: str,
+    ) -> Noted:
+        """Note what a hook says of subagents, and return the conversation as it stands, with what it's told of names.
+
+        A subagent heard the first time is linked to its spawn as its runtime
+        recorded it (`Spawns`, `Conversations.linked`): its parent, its kind,
+        and the name its parent gave; one with no name is asked to name itself,
+        beside a call, never as the reason its turn's end is held.
+        A conversation spawning one without a name, where it could have given
+        one, is told once to give names. Its launch's conversations are kept, so
+        a service started again knows them.
+        """
+        said: list[str] = []
+        if heard.agent is not None and not conversation.linked:
+            spawned = (
+                None
+                if self.spawns is None
+                else self.spawns.spawned(request.runtime, payload)
+            )
+            conversation = conversations.linked(conversation, spawned)
+            calling = heard.event in ["call-started", "call-finished"]
+            if conversation.name is None and calling:
+                said.append(
+                    unnamed(conversations.path(conversation, self.named(request)))
+                )
+        spawning = heard.spawning
+        if spawning is not None and spawning.name is None and not conversation.nudged:
+            conversation = conversations.kept(
+                conversation.model_copy(update={"nudged": True})
+            )
+            said.append(name_spawns(spawning.naming))
+        write_model(self.layout.conversations(request.launch), conversations)
+        return Noted(conversation=conversation, said=said)
+
+    def subagent_renamed(self, launch: str, subagent: Conversation, name: str) -> str:
+        """Rename `subagent`, a subagent of launch `launch`, and return how it's called: its launch's name, then each name down to it.
+
+        Raise `HostError` where another subagent of the launch has the name,
+        saying which.
+        """
+        served = self.served[launch]
+        conversations = served.conversations
+        holder = conversations.holder(name, subagent.id)
+        named = self.named(served.launch)
+        if holder is not None:
+            message = (
+                f"`{name}` is `{conversations.path(holder, named)}`'s: pick another "
+                "name"
+            )
+            raise HostError(message)
+        renamed = conversations.kept(subagent.model_copy(update={"name": name}))
+        write_model(self.layout.conversations(launch), conversations)
+        path = conversations.path(renamed, named)
+        self.say(f"{launch}: a subagent named itself `{path}`")
+        return path
+
+    def talkers(self, served: Served) -> list[Talker]:
+        """Return a launch's conversations as the operator is shown them: its latest session's own, then each of its subagents under its parent, in the order heard; none before any hook named one."""
+        conversations = served.conversations
+        launch = self.named(served.launch)
+
+        def talker(each: Conversation, depth: int) -> Talker:
+            parent = None if each.parent is None else conversations.calling(each.parent)
+            return Talker(
+                path=conversations.path(each, launch),
+                session=each.session,
+                agent=each.agent,
+                kind=each.kind,
+                parent=None if parent is None else conversations.path(parent, launch),
+                depth=depth,
+            )
+
+        def under(parent: str, depth: int) -> list[Talker]:
+            children = [
+                each
+                for each in conversations.known
+                if each.parent == parent and each.agent is not None
+            ]
+            return [
+                found
+                for each in children
+                for found in [talker(each, depth), *under(each.id, depth + 1)]
+            ]
+
+        main = conversations.main()
+        return [] if main is None else [talker(main, 0), *under(main.id, 1)]
+
+    def named(self, request: Register) -> str:
+        """Return launch `request`'s name as it stands."""
+        served = self.served.get(request.launch)
+        current = request if served is None else served.launch
+        return current.name or current.launch
 
     async def reopen(self) -> None:
         """Serve each launch recorded by a service before, where its room mounted it, its room's programs brought up to this copy's (`refresh`).
@@ -787,22 +927,35 @@ class NewName(Model):
 
 
 class Namer(Model, arbitrary_types_allowed=True):
-    """One launch's session, renaming itself."""
+    """One conversation of a launch's session, renaming itself: the session's own, or a subagent."""
 
     launches: Launches
     launch: str
+    caller: str
+    """lup's id for the conversation calling."""
 
     async def rename(self, new: NewName) -> str:
-        """Name this session after its task.
+        """Name this session or subagent after its task.
 
         Its name is how the operator, lup's commands and other sessions call
         it, and what the operator's inbox says items come from. Call it once
-        you know your task, unless the operator named the session; call it
-        again when the task changes. A name another session holds is refused,
-        saying whose; pick another.
+        you know your task, unless the operator or your parent named you; call
+        it again when the task changes. From a subagent it names that subagent
+        alone, never its session. A name another holds is refused, saying
+        whose; pick another.
         """
         try:
-            named = self.launches.renamed(self.launch, handle(new.name))
+            wanted = handle(new.name)
+            served = self.launches.served[self.launch]
+            caller = served.conversations.calling(self.caller)
+            if caller is not None and caller.agent is not None:
+                path = self.launches.subagent_renamed(self.launch, caller, wanted)
+                return (
+                    f"This subagent is `{path}` to lup and the operator. The name "
+                    "your runtime gave you at your spawn, which your parent's own "
+                    "tools use, stays as it was."
+                )
+            named = self.launches.renamed(self.launch, wanted)
         except (HostError, ValueError) as refused:
             return f"Not renamed: {refused}"
         return f"This session is `{named.name}`."
@@ -825,9 +978,8 @@ class Naming(Model, RoomTools, arbitrary_types_allowed=True):
     async def call(
         self, name: str, arguments: JsonValue, launch: Register, caller: Conversation
     ) -> Answer:
-        """Rename `launch` as its session asks; arguments that don't validate are refused, saying why."""
-        del caller
-        namer = Namer(launches=self.launches, launch=launch.launch)
+        """Rename `caller`, a conversation of `launch`, as it asks; arguments that don't validate are refused, saying why."""
+        namer = Namer(launches=self.launches, launch=launch.launch, caller=caller.id)
         [tool] = [tool for tool in namer.tools() if tool.spec().name == name]
         match await tool.call(arguments):
             case Accepted(answer=answer):
@@ -894,9 +1046,13 @@ class Listing(Model, Handler[ListLaunches]):
 
     @override
     async def answer(self, request: ListLaunches) -> Reply:
+        served = list(self.launches.served.values())
         return Listed(
-            launches=[served.launch for served in self.launches.served.values()],
+            launches=[each.launch for each in served],
             sessions=self.launches.names.all(),
+            talkers={
+                each.launch.launch: self.launches.talkers(each) for each in served
+            },
         )
 
 
@@ -948,6 +1104,9 @@ class HostService(Model, arbitrary_types_allowed=True):
     line_limit: int = 16 * 1024 * 1024
     """The longest line lup's tool server reads, one MCP message: well above
     asyncio's 64 KiB, which a long message to the operator could pass."""
+    spawns: Spawns | None = None
+    """How each runtime recorded its subagents' spawns, read once at a
+    subagent's first hook (`cli.py`'s adapters); none reads nothing."""
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's when
     the service serves it again, returning those it rewrote: git's remote
@@ -1011,6 +1170,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             line_limit=self.line_limit,
             say=self.say,
             names=Names(path=self.layout.names),
+            spawns=self.spawns,
             refresh=self.refresh,
         )
         stopped = asyncio.Event()

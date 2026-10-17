@@ -69,6 +69,9 @@ class Heard(Model):
     """At a session's start, the name the runtime has for it, where the operator
     gave one in the runtime (a rename there), and the runtime says so; none
     otherwise."""
+    spawning: Spawning | None = None
+    """At the start of a call spawning a subagent that could have been given a
+    name, the name it gives; none for any other hook."""
 
 
 class Telling(Model):
@@ -114,6 +117,14 @@ class Courier(ABC):
         """
 
 
+class Spawns(ABC):
+    """How each runtime recorded its subagents' spawns, which the host service reads once a subagent's first hook is heard."""
+
+    @abstractmethod
+    def spawned(self, runtime: str, payload: str) -> Spawned | None:
+        """Return how the subagent one of `runtime`'s hooks fires for was spawned, as the runtime recorded it; none for the session's own conversation, or where nothing's recorded."""
+
+
 class Posted(Model):
     """What a conversation is told at one hook: each item's text, and the numbers of the items it tells."""
 
@@ -146,14 +157,47 @@ class Post(ABC):
         """Put what `posted` told back as waiting: the hook's answer couldn't carry it."""
 
 
+class Spawning(Model):
+    """A call spawning a subagent, as it starts: the name its caller gives the subagent, where it gives one."""
+
+    name: str | None = None
+    naming: str
+    """How such a call gives its subagent a name, in the runtime's own terms, for a caller told to."""
+
+
+class Spawned(Model):
+    """How a subagent was spawned, as its runtime recorded it, read at its first hook."""
+
+    name: str | None = None
+    """The name its parent gave it, where it gave one."""
+    parent: str | None = None
+    """The runtime's id for the subagent that spawned it; none where the
+    session's own conversation did, or where the runtime doesn't say."""
+    kind: str | None = None
+    """What kind of subagent it is, as its runtime calls it (`Explore`)."""
+
+
 class Conversation(Model):
-    """A conversation of a launch's session: lup's id for it, and the runtime's ids it stands for."""
+    """A conversation of a launch's session: lup's id for it, the runtime's ids it stands for, and for a subagent its name, its parent and its kind."""
 
     id: str
     session: str
     """The runtime's id for the session."""
     agent: str | None = None
     """The runtime's id for the subagent; none for the session's own conversation."""
+    name: str | None = None
+    """A subagent's name, as its parent gave it at its spawn or it renamed
+    itself since; none while it has none, and for the session's own
+    conversation, which is named as its launch."""
+    parent: str | None = None
+    """lup's id for the conversation that spawned a subagent; none for the
+    session's own, and where it isn't known."""
+    kind: str | None = None
+    """What kind of subagent it is (`Explore`)."""
+    linked: bool = False
+    """Whether what its runtime recorded of its spawn was read."""
+    nudged: bool = False
+    """Whether it was told, once, to name the subagents it spawns."""
 
 
 class Conversations(MutableModel):
@@ -182,6 +226,59 @@ class Conversations(MutableModel):
         """Return the conversation whose id is `caller`; none where no hook minted it."""
         found = [each for each in self.known if each.id == caller]
         return found[0] if found else None
+
+    def kept(self, conversation: Conversation) -> Conversation:
+        """Keep `conversation` in place of the one with its id, and return it."""
+        self.known = [
+            conversation if each.id == conversation.id else each for each in self.known
+        ]
+        return conversation
+
+    def linked(
+        self, conversation: Conversation, spawned: Spawned | None
+    ) -> Conversation:
+        """Link a subagent to its spawn as its runtime recorded it, and return it: its name, its parent, its kind.
+
+        Its parent is the subagent the runtime names, else the session's own
+        conversation.
+        """
+        above = None if spawned is None else spawned.parent
+        parent = self.named(conversation.session, above)
+        return self.kept(
+            conversation.model_copy(
+                update={
+                    "name": None if spawned is None else spawned.name,
+                    "parent": parent.id,
+                    "kind": None if spawned is None else spawned.kind,
+                    "linked": True,
+                }
+            )
+        )
+
+    def path(self, conversation: Conversation, launch: str) -> str:
+        """Say a conversation as people call it: its launch's name, then each subagent's name down to it, an unnamed one by its kind and its runtime's id."""
+        if conversation.agent is None:
+            return launch
+        parent = (
+            None if conversation.parent is None else self.calling(conversation.parent)
+        )
+        above = launch if parent is None else self.path(parent, launch)
+        own = (
+            conversation.name
+            or f"{conversation.kind or 'subagent'}·{conversation.agent}"
+        )
+        return f"{above}/{own}"
+
+    def holder(self, name: str, asking: str) -> Conversation | None:
+        """Return the subagent other than `asking` named `name` in this launch, or none."""
+        return next(
+            (
+                each
+                for each in self.known
+                if each.agent is not None and each.name == name and each.id != asking
+            ),
+            None,
+        )
 
     def main(self) -> Conversation | None:
         """Return the launch's main conversation, its latest session's own; none before any hook named one."""

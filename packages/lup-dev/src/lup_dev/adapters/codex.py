@@ -170,7 +170,7 @@ from lup.adapters.codex.settings import CodexSettings
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
-from lup_dev.host.courier import Heard, Telling
+from lup_dev.host.courier import Heard, Spawned, Telling
 from lup_dev.host.records import Record, Records, within
 from lup_dev.host.rooms import SERVER, stamp
 from lup_dev.launch.clis import (
@@ -392,7 +392,15 @@ class PreToolUse(Payload):
     arguments, or their text where that isn't JSON."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the call's start: the judge reads every one."""
+        """Read the call's start: the judge reads every one.
+
+        A call spawning a subagent isn't heard as one, since its caller can't
+        be asked to name what it spawns: the first version of `spawn_agent`
+        takes no name (`create_spawn_agent_tool_v1`,
+        `core/src/tools/handlers/multi_agents_spec.rs`, at `rust-v0.163.0`),
+        and the second requires `task_name`. A subagent the first spawns is
+        asked to name itself (`spawned`).
+        """
         return Heard(
             event="call-started",
             session=self.session_id,
@@ -643,6 +651,66 @@ def unanswered(raw: str, failure: str) -> str:
     return output.model_dump_json(by_alias=True, exclude_none=True)
 
 
+class SessionMeta(Model, extra="ignore"):
+    """The part of a thread's `session_meta` lup reads of a subagent: its own id, its root's, its parent's, its path and its role (`protocol/src/protocol.rs`, `SessionMeta`, at `rust-v0.163.0`)."""
+
+    id: str | None = None
+    session_id: str | None = None
+    parent_thread_id: str | None = None
+    agent_path: str | None = None
+    """`/root/<name>/…`: the subagent's name last, each ancestor's before it."""
+    agent_role: str | None = None
+
+
+class MetaLine(Model, extra="ignore"):
+    """A rollout's first line, `{"type": "session_meta", "payload": …}`."""
+
+    type: str
+    payload: SessionMeta
+
+
+class Subagented(Model, extra="ignore"):
+    """Any hook's payload, as far as finding a subagent's record reads it."""
+
+    session_id: str
+    agent_id: str | None = None
+    agent_type: str | None = None
+    transcript_path: Path | None = None
+
+
+def spawned(raw: str) -> Spawned | None:
+    """Return how the subagent a Codex hook fires for was spawned, from its own rollout's first line; none for the session's own conversation.
+
+    A subagent's hooks name its own rollout (`transcript_path`), whose
+    `session_meta` gives its path, `/root/<parent>/<name>`, and its parent's
+    thread; a parent that's the root is the session's own conversation. One
+    spawned by the first version of `spawn_agent`, which takes no name, has no
+    path, and so no name. Its end names the root's rollout instead (measured
+    by the first lup on 0.158.0, `docs/field-notes.md`, *Subagents' records*),
+    so a rollout whose meta is another thread's says nothing of it.
+    """
+    payload = Subagented.model_validate_json(raw)
+    if payload.agent_id is None:
+        return None
+    kind = payload.agent_type or None
+    rollout = payload.transcript_path
+    if rollout is None or not rollout.is_file():
+        return Spawned(kind=kind)
+    with rollout.open() as lines:
+        first = MetaLine.model_validate_json(lines.readline())
+    meta = first.payload
+    if meta.id != payload.agent_id:
+        return Spawned(kind=kind)
+    parent = (
+        None if meta.parent_thread_id == payload.session_id else meta.parent_thread_id
+    )
+    return Spawned(
+        name=None if meta.agent_path is None else PurePosixPath(meta.agent_path).name,
+        parent=parent,
+        kind=meta.agent_role or kind,
+    )
+
+
 def heard(raw: str, fits: int = 10_000) -> Heard:
     """Read one Codex hook as the host service does: who's speaking, about which call, and that the judge reads it.
 
@@ -832,6 +900,7 @@ def adapter() -> Adapter:
         unanswered=unanswered,
         heard=heard,
         told=told,
+        spawned=spawned,
         woken=None,
         hooks=hooks,
         channel=CodexChannel(),

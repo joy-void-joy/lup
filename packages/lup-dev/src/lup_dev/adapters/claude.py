@@ -137,7 +137,7 @@ from lup.adapters.claude.settings import ClaudeSettings
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
-from lup_dev.host.courier import Heard, Telling
+from lup_dev.host.courier import Heard, Spawned, Spawning, Telling
 from lup_dev.host.records import Record, Records, within
 from lup_dev.host.rooms import SERVER, stamp
 from lup_dev.launch.clis import (
@@ -318,6 +318,8 @@ class Payload(Model, ABC):
     cwd: Path
     agent_id: str = ""
     """The subagent the hook fires for; absent for the session's own conversation."""
+    transcript_path: Path | None = None
+    """The session's transcript: its subagents' records are beside it."""
 
     @abstractmethod
     def answer(self, bench: Bench) -> Output | None:
@@ -437,6 +439,14 @@ class PreToolUse(Payload):
             served=self.tool_name.startswith(TOOL_PREFIX),
             judged=self.tool_name in WRITING,
             fits=fits,
+            spawning=(
+                Spawning(
+                    name=AgentCall.model_validate(self.tool_input).name,
+                    naming="`name` on `Agent`",
+                )
+                if self.tool_name in SPAWNING and not self.agent_id
+                else None
+            ),
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -691,6 +701,63 @@ class SubagentStop(Payload):
         return OperatorWarning(system_message=said)
 
 
+SPAWNING = ["Agent", "Task"]
+"""The tool spawning a subagent, by its name and its earlier name."""
+
+
+class AgentCall(Model, extra="ignore"):
+    """The part of a call to `Agent` lup reads: the name the caller gives the subagent (the `sub-agents` docs: "Claude can give a subagent a name by passing a `name` parameter").
+
+    Only the session's own conversation has it: a subagent's `Agent` takes no
+    `name` (measured on 2.1.302, `docs/field-notes.md`, *Subagents' records*).
+    """
+
+    name: str | None = None
+
+
+class SubagentRecord(Model, extra="ignore", alias_generator=to_camel):
+    """What Claude Code records of a subagent beside the session's transcript, `<session>/subagents/agent-<id>.meta.json`.
+
+    Undocumented, read as measured on 2.1.301 and 2.1.302
+    (`docs/field-notes.md`, *Subagents' records*): the subagent's type, the
+    name its parent gave it, and the subagent that spawned it, where one did.
+    """
+
+    agent_type: str | None = None
+    name: str | None = None
+    parent_agent_id: str | None = None
+
+
+class Subagented(Model, extra="ignore"):
+    """Any hook's payload, as far as finding a subagent's record reads it."""
+
+    session_id: str
+    agent_id: str = ""
+    agent_type: str = ""
+    transcript_path: Path | None = None
+
+
+def spawned(raw: str) -> Spawned | None:
+    """Return how the subagent a Claude Code hook fires for was spawned, from its record beside the session's transcript; none for the session's own conversation.
+
+    A subagent whose record isn't there is said by its type alone.
+    """
+    payload = Subagented.model_validate_json(raw)
+    if not payload.agent_id:
+        return None
+    kind = payload.agent_type or None
+    if payload.transcript_path is None:
+        return Spawned(kind=kind)
+    folder = payload.transcript_path.with_suffix("") / "subagents"
+    record = folder / f"agent-{payload.agent_id}.meta.json"
+    if not record.is_file():
+        return Spawned(kind=kind)
+    kept = SubagentRecord.model_validate_json(record.read_text())
+    return Spawned(
+        name=kept.name, parent=kept.parent_agent_id, kind=kept.agent_type or kind
+    )
+
+
 type Received = Annotated[
     SessionStart | PreToolUse | PostToolUse | Stop | SubagentStop,
     Field(discriminator="hook_event_name"),
@@ -925,6 +992,7 @@ def adapter() -> Adapter:
         unanswered=unanswered,
         heard=heard,
         told=told,
+        spawned=spawned,
         woken=woken,
         hooks=hooks,
         channel=ClaudeChannel(),
