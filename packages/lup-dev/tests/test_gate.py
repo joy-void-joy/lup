@@ -283,6 +283,46 @@ def test_a_build_newer_than_its_sources_is_skipped(tmp_path: Path) -> None:
     )
 
 
+class Building(Processes):
+    """Passes every command, `build` writing the engine's bundle as it runs."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.ran: list[list[str]] = []
+
+    @override
+    def run(self, command: list[str], cwd: Path) -> Ran:
+        self.ran.append(command)
+        if command == ["build"]:
+            touch(self.root / "bundle" / "engine.js", 9_000)
+        return Ran(code=0, output="")
+
+
+def test_with_fixes_a_stale_build_runs_before_them_and_once(tmp_path: Path) -> None:
+    touch(tmp_path / "table.ts", 1_000)
+    processes = Building(tmp_path)
+    gated = gate(
+        tmp_path,
+        processes,
+        [ENGINE, *STEPS],
+        fixes=[Step(name="fix", command=["fix"])],
+    )
+    assert processes.ran[:2] == [["build"], ["fix"]]
+    assert processes.ran.count(["build"]) == 1
+    assert [(each.step, each.result) for each in gated.outcomes][:3] == [
+        ("engine", "passed"),
+        ("fix", "passed"),
+        ("engine", "skipped"),
+    ]
+
+
+def test_without_fixes_a_build_runs_once_in_its_place(tmp_path: Path) -> None:
+    touch(tmp_path / "table.ts", 1_000)
+    processes = Building(tmp_path)
+    gate(tmp_path, processes, [*STEPS[:1], ENGINE])
+    assert processes.ran == [["lint", "--strict"], ["build"]]
+
+
 def test_a_build_older_than_a_source_runs(tmp_path: Path) -> None:
     touch(tmp_path / "bundle" / "engine.js", 2_000)
     touch(tmp_path / "src" / "deep" / "rule.ts", 3_000)
