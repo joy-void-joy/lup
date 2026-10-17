@@ -4,10 +4,12 @@ probe is stubbed."""
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import pytest
+from filelock import FileLock
 from typer.testing import CliRunner
 
 from lup_dev import Requirement, cli
@@ -743,6 +745,32 @@ def test_the_gate_in_any_worktree_reads_the_person_s_layer_in_the_main_one(
     processes = Scripted({})
     Check.declared(linked, processes, NODE).run()
     assert processes.ran[0] == ["uv", "run", "build", "it"]
+
+
+def test_a_worktree_a_gone_run_left_is_removed_and_a_running_one_s_kept(
+    repo: Path, shell: Git, clock: FakeClock
+) -> None:
+    left = Path(tempfile.mkdtemp(prefix="lup-gate-"))
+    live = Path(tempfile.mkdtemp(prefix="lup-gate-"))
+    for each in [left, live]:
+        shell.git(repo, "worktree", "add", "--detach", "--quiet", str(each), "HEAD")
+    locks = repo / ".git" / "lup" / "gates"
+    locks.mkdir(parents=True)
+    holding = FileLock(locks / f"{live.name}.lock")
+    holding.acquire()
+    try:
+        _, said, _ = gated_at(repo, "HEAD", Witness(), clock)
+        listed = shell.git(repo, "worktree", "list")
+    finally:
+        holding.release()
+        shell.git(repo, "worktree", "remove", "--force", str(live))
+
+    assert said[0] == (
+        f"Removed {left}, a worktree a run of the gate on a commit left behind."
+    )
+    assert not left.exists()
+    assert str(left) not in listed
+    assert str(live) in listed
 
 
 def test_at_a_revision_naming_no_commit_is_refused(
