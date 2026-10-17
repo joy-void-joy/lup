@@ -136,11 +136,15 @@ root_packages = ["lup", "lup_dev"]
 include_external_packages = true
 
 # The library never imports the environment (`docs/conventions.md`, *Imports and boundaries*).
+# A module's environment side lives in its directory of `lup` too, and imports the
+# environment core it's selected through: each such module is listed here, its
+# library side, where it has one, still held to the contract.
 [[tool.importlinter.contracts]]
-name = "lup never imports lup_dev or lup_dashboard"
+name = "lup's library never imports lup_dev or lup_dashboard"
 type = "forbidden"
 source_modules = ["lup"]
 forbidden_modules = ["lup_dev", "lup_dashboard"]
+ignore_imports = ["lup.github.** -> lup_dev.**"]
 
 [[tool.importlinter.contracts]]
 name = "lup_dev never imports lup_dashboard"

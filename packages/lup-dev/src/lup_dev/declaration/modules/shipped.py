@@ -7,6 +7,7 @@ release adds to the default comes in, and `Modules.only(…)` keeps it out.
 
 from typing import TYPE_CHECKING
 
+from lup.github.module import GitHub
 from lup_dev.declaration.modules.code_rules import CodeRules
 from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.python import Python
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
 def default() -> list[Module]:
     """List lup's default modules, in their order."""
-    return [Core(), Python(), CodeRules()]
+    return [Core(), Python(), CodeRules(), GitHub()]
 
 
 def shipped() -> list[Module]:

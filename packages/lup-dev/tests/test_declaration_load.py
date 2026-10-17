@@ -186,6 +186,7 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
         "core",
         "python",
         "code-rules",
+        "github",
         "lup-development",
     ]
     assert resolved.asks == "protected"

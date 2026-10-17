@@ -25,7 +25,7 @@ once, as the engine resolves a rule selection (`checker/src/catalog.ts`).
 from functools import reduce
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from lup.types import Model
 from lup_dev.declaration.errors import ProjectError
@@ -248,6 +248,35 @@ class Selection[E](Model):
     def named(self, entry: E) -> str:
         """Return the name `entry` goes by among its kind's: itself, for names."""
         return str(entry)
+
+    def given(self) -> list[E]:
+        """Return the entries this selection names itself: those it starts from, adds, puts in place or edits."""
+        started = self.start.entries if isinstance(self.start, Of) else []
+
+        def operated(operation: Add[E] | Drop | Replace[E] | Edit[E]) -> list[E]:
+            match operation:
+                case Add(entries=entries):
+                    return entries
+                case Replace(entry=entry) | Edit(entry=entry):
+                    return [entry]
+                case Drop():
+                    return []
+
+        return [
+            *started,
+            *(each for operation in self.operations for each in operated(operation)),
+        ]
+
+    def complete(self, names: dict[str, type[BaseModel]]) -> None:
+        """Complete each model class among the entries this selection names, `names` resolved beside its own module's.
+
+        A class naming one defined after it, as a module's tools name the module
+        listing them, is completed once that one is; one that still can't be is
+        left, to be completed later.
+        """
+        for entry in self.given():
+            if isinstance(entry, type) and issubclass(entry, BaseModel):
+                entry.model_rebuild(_types_namespace=names, raise_errors=False)
 
     def over(self, below: Self) -> Self:
         """Return this selection as a layer over `below`.

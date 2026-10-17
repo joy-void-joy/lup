@@ -292,7 +292,7 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 
 | File | What it's for |
 |---|---|
-| `host/rooms.py` | A launch's sockets beside its hook: `mcp.sock`, lup's tools for the launch, one MCP session per connection, each call's conversation read from the `caller` its hook stamped, and routed to the module serving that tool (`RoomTools`: `specs`, `call` with the launch and the party); `request.sock`, one typed request per connection, the launch attached, routed to the modules' `RoomHandler`s through `RoomRoute.to`. Two modules serving one tool name, or answering one kind, are refused when the service is built |
+| `host/rooms.py` | A launch's sockets beside its hook: `mcp.sock`, lup's tools for the launch, one MCP session per connection, each call's conversation read from the `caller` its hook stamped, and routed to the module serving that tool (`RoomTools`: `specs`, `call` with the launch and the party); `request.sock`, one typed request per connection, the launch attached, routed to the core's `RoomHandler`s through `RoomRoute.to`. Two serving one tool name, or answering one kind, are refused when the service is built; the launch's modules' are passed to their process (`host/workers.py`) |
 | `host/courier.py` | What the host reads of each runtime's hooks, and how it answers them: `Courier`, an ABC each adapter fills (`heard`: a hook's event, the runtime's session and conversation ids, its call and tool, and whether the judge reads it; `told`: a hook's answer with items added, and a call to lup's tools rewritten to carry its `caller`), with `Heard`; and `Conversations`, the lup id minted for each conversation the first time a hook names it, kept with the runtime ids it stands for |
 | `host/service.py` | `HostService` gains `courier`, `room_routes` and `tools`; a hook the judge doesn't read is answered with what's waiting, without the judge; each launch's room sockets open and close with it |
 | `host/protocol.py` | `Register` gains `repository`, the repository's git directory, and `limits`, a `Limits` of the actions allowed and the protected ref patterns |
@@ -304,7 +304,7 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 | `inbox/protocol.py` | The operator's requests on the control socket (list, show, answer, done, send) and their handlers |
 | `inbox/notices.py` | The desktop's notices: `Notices`, and `NotifySend` through `notify-send` |
 | `forge/github.py` | GitHub through `gh --json`, on one named repository: `GitHub` |
-| `forge/tools.py` | `read_issue`, `find_issues`, `file_issue`, `comment`, `draft_pull_request`, a `RoomTools` |
+| `lup/github/tools.py` | `read_issue`, `find_issues`, `file_issue`, `comment`, `draft_pull_request`, the `GitHub` module's `ModuleTools` |
 | `forge/protocol.py` | `IssueState`, the room's request for an issue's state, and its handler |
 | `remote/helper.py` | The room's helper, `git-remote-lup`, on Python's standard library alone |
 | `remote/protocol.py` | The helper's requests and replies (`Listing`, `Pushing`, `Fetching`) and their handler: the limits, the remote's URL, git run in the repository's git directory, pinned there |

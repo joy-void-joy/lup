@@ -25,7 +25,7 @@ All answered by the operator on 2026-10-14: each lean below taken as stated.
 
 - **The declaration** (`declaration/kinds.py`): `Repository` (`name`, `path`, `about`, `github`), `Repositories` (a `Named` selection), resolved with the rest at the approved commit; a path that's neither relative nor absolute, or two entries of one name with different paths, fails the load naming them.
 - **The room** (`launch/room.py`): each resolved repository that exists mounted read-only at its host path, after the project's own; one that's missing said once; a repository already inside the project's own mounts (the project itself) refused, naming it. A mounted repository's own `config` and `hooks/` are read-only with the rest, so nothing in the room changes how the operator's git runs there.
-- **The GitHub tools** (`forge/tools.py`): `read_issue` and `find_issues` gain `repository`; `find_issues` keeps dropping results from other repositories than the one asked.
+- **The GitHub tools** (`lup/github/tools.py`): `read_issue` and `find_issues` gain `repository`; `find_issues` keeps dropping results from other repositories than the one asked.
 - **The guidance** (`launch/guidance.py`): the list, with each repository's state (mounted, or missing).
 - **The person's layer** (`declaration/load.py`, `launch/trust.py`, `approval.py`): `lup_project.local.py` found beside the declaration, loaded after it and layered on top, gitignored (the repository's `.gitignore`) and a protected path (`catalog/paths.py`); its content in the host zone, its approved copy kept with the approval and read by the judge and the launch.
 

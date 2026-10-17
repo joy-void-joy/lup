@@ -12,6 +12,9 @@ hold it, by the kind's type (`docs/declaration.md`, *What a module is*):
   which each module keeps for its own paths;
 - entries placed `before=` or `after=` another go there, whichever module holds
   it, and the rest keep the order of their modules;
+- each module's toolsets and handlers are made with that module, so each must
+  narrow `module` to its class; a tool's name and a request's kind are shared
+  across modules, so one from two modules fails, naming both;
 - the runner comes from the one module holding one, `Plain()` where none does,
   the session settings from the one holding them, `Core`, with the fields the
   declaration set, which a launch imposes over the person's own, and the limits
@@ -42,6 +45,7 @@ from lup_dev.declaration.kinds import (
     Exemptions,
     Gate,
     Guidance,
+    Handlers,
     Package,
     Packages,
     Paths,
@@ -53,6 +57,7 @@ from lup_dev.declaration.kinds import (
     Section,
     Session,
     TestRoots,
+    Toolsets,
 )
 from lup_dev.declaration.load import load
 from lup_dev.declaration.module import Module
@@ -61,6 +66,12 @@ from lup_dev.declaration.modules.shipped import default, shipped
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Needed
 from lup_dev.declaration.runner import Plain, Prefixed, Runner
+from lup_dev.declaration.serving import (
+    ModuleHandler,
+    ModuleTools,
+    answering,
+    made_with,
+)
 from lup_dev.host.protocol import Limits
 
 
@@ -149,6 +160,27 @@ class Owned(Model):
     name: str
 
 
+class Kept[E](Model):
+    """One entry of a kind, and the module holding it."""
+
+    module: str
+    entry: E
+
+
+class Served(Model):
+    """A class of tools a launch serves, with the module it's made with."""
+
+    module: Module
+    tools: type[ModuleTools]
+
+
+class Handled(Model):
+    """A handler of a launch's room's requests, with the module it's made with."""
+
+    module: Module
+    handler: type[ModuleHandler]
+
+
 class Resolved(Model):
     """A declaration resolved: what its readers need, each kind from every module."""
 
@@ -184,6 +216,11 @@ class Resolved(Model):
     holding some, merged by name; each path as written. A person names theirs
     in their own layer, `lup_project.local.py`."""
     asks: Literal["every", "protected"]
+    served: list[Served] = []
+    """Each module's classes of tools, each with its module: what a launch serves
+    its session."""
+    handled: list[Handled] = []
+    """Each module's handlers of a room's requests, each with its module."""
 
 
 def parts[K](modules: list[Module], kind: type[K]) -> list[Part[K]]:
@@ -216,6 +253,79 @@ def distinct(label: str, owned: list[Owned]) -> None:
         raise ProjectError(message)
 
 
+def own[E](part: Part[Named[E]]) -> list[E]:
+    """Return a module's own default entries of a kind, resolved: what `Kind.default()` starts from there."""
+    if part.default is None:
+        return []
+    return [each.entry for each in part.default.resolve([], [])]
+
+
+def entries[E](modules: list[Module], kind: type[Named[E]]) -> list[Kept[E]]:
+    """Return every module's entries of `kind`, resolved, each with its module's name."""
+    return [
+        Kept(module=part.module, entry=each.entry)
+        for part in parts(modules, kind)
+        for each in part.value.resolve(own(part), own(part))
+    ]
+
+
+def made(label: str, owners: list[Owned], wrong: list[Owned]) -> None:
+    """Raise `ProjectError` where an entry isn't made with the module holding it, or two modules name one alike."""
+    if wrong:
+        named = "; ".join(f"`{each.name}` in `{each.module}`" for each in wrong)
+        message = (
+            f"{label}: {named} narrows its `module` to another module's class, so "
+            "it can't be made with the module holding it"
+        )
+        raise ProjectError(message)
+    distinct(label, owners)
+
+
+def served(modules: list[Module]) -> list[Served]:
+    """Return each module's classes of tools, each with its module, checking each tool's name is one module's."""
+    by_name = {module.name: module for module in modules}
+    found = [
+        Served(module=by_name[each.module], tools=each.entry)
+        for each in entries(modules, Toolsets)
+    ]
+    made(
+        "Tools",
+        [
+            Owned(module=each.module.name, name=spec.name)
+            for each in found
+            for spec in each.tools.specs()
+        ],
+        [
+            Owned(module=each.module.name, name=each.tools.__name__)
+            for each in found
+            if not made_with(each.tools, each.module)
+        ],
+    )
+    return found
+
+
+def handled(modules: list[Module]) -> list[Handled]:
+    """Return each module's handlers, each with its module, checking each kind of request is one module's."""
+    by_name = {module.name: module for module in modules}
+    found = [
+        Handled(module=by_name[each.module], handler=each.entry)
+        for each in entries(modules, Handlers)
+    ]
+    made(
+        "The room's requests",
+        [
+            Owned(module=each.module.name, name=answering(each.handler).named())
+            for each in found
+        ],
+        [
+            Owned(module=each.module.name, name=each.handler.__name__)
+            for each in found
+            if not made_with(each.handler, each.module)
+        ],
+    )
+    return found
+
+
 def held[E](
     kind: Named[E], found: list[Part[Named[E]]], label: str, *, shared: bool = True
 ) -> list[E]:
@@ -227,12 +337,6 @@ def held[E](
     modules fails; without, each module's entries stand beside the others', as
     an exemption's do.
     """
-
-    def own(part: Part[Named[E]]) -> list[E]:
-        if part.default is None:
-            return []
-        return [each.entry for each in part.default.resolve([], [])]
-
     resolved = [part.value.resolve(own(part), own(part)) for part in found]
     if shared:
         distinct(
@@ -452,6 +556,8 @@ def resolve(project: Project) -> Resolved:
         guidance=held(Guidance(), parts(modules, Guidance), "Guidance"),
         repositories=neighbours(modules),
         asks=project.asks,
+        served=served(modules),
+        handled=handled(modules),
     )
 
 

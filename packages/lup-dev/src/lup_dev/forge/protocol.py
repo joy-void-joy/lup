@@ -1,21 +1,17 @@
-"""The room's request for an issue's state, and the host's answer, through `gh` within the launch's limits.
+"""The room's request for an issue's state, and the host's answer.
 
 `docs/host-tools.md`, *The gate in a room*. The gate checks each deferral's
 issue is still open, and a room holds no `gh` and no login, so the gate there
 asks the host on the launch's `request.sock` (`codescan/directives.py`,
-`HostIssues`), which reads the state with the operator's `gh` (`Stating`).
-Reading an issue is the launch's `read-issues` action, refused where the
-project's declaration leaves it out.
+`HostIssues`). The request is the core's, since the gate asks it whatever modules
+a project selects; the `GitHub` module answers it (`lup.github.stating`).
 """
 
-from typing import Literal, override
+from typing import Literal
 
 from pydantic import Field
 
-from lup.types import Model
-from lup_dev.forge.github import GitHub, GitHubError
-from lup_dev.host.protocol import HostError, Register, Reply, Request
-from lup_dev.host.rooms import RoomHandler
+from lup_dev.host.protocol import Reply, Request
 
 
 class IssueState(Request):
@@ -33,23 +29,3 @@ class Stated(Reply):
 
     kind: Literal["stated"] = "stated"
     state: Literal["open", "closed"]
-
-
-class Stating(Model, RoomHandler[IssueState]):
-    """Answers `IssueState` for a launch's room, through `gh` on the host, where the launch's limits allow reading issues."""
-
-    @override
-    def request(self) -> type[IssueState]:
-        return IssueState
-
-    @override
-    async def answer(self, request: IssueState, launch: Register) -> Reply:
-        refusal = launch.limits.refusal("read-issues")
-        if refusal is not None:
-            message = f"lup didn't read the issue's state: {refusal}"
-            raise HostError(message)
-        try:
-            github = GitHub.launched(launch)
-            return Stated(state=await github.state(request.number, request.repository))
-        except GitHubError as failed:
-            raise HostError(str(failed)) from failed

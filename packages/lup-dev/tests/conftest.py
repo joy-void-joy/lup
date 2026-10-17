@@ -22,7 +22,8 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 import sh
 
-from lup_dev import cli
+from lup.types import MutableModel
+from lup_dev import Project, cli
 from lup_dev.clock import Clock
 from lup_dev.codescan.contract import (
     Checker,
@@ -45,11 +46,23 @@ from lup_dev.codescan.directives import (
     Note,
 )
 from lup_dev.codescan.ruff import Linter
+from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.host.client import RoomClient
+from lup_dev.host.workers import (
+    Called,
+    Calling,
+    LaunchModules,
+    Listing,
+    Offered,
+    Relayed,
+    Relaying,
+    Sent,
+)
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench, Services
 from lup_dev.policy.importers import Spawner
 from lup_dev.policy.runtime import Runtime
+from lup_dev.worker import Serving
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -57,6 +70,7 @@ if TYPE_CHECKING:
 
     from lup_dev.declaration.resolve import Selected
     from lup_dev.declaration.runner import Runner
+    from lup_dev.host.protocol import Register, Reply, Request
 
 
 def marked(
@@ -547,3 +561,46 @@ def fakes(kit: Kit, state: Layout, monkeypatch: pytest.MonkeyPatch) -> Kit:
     monkeypatch.setattr(cli, "Ruff", linter)
     monkeypatch.setattr(cli, "services", configured)
     return kit
+
+
+class InProcess(MutableModel, LaunchModules):
+    """A launch's modules served in the test's own process, from a declaration resolved here: the worker's answers, without its process."""
+
+    resolved: Resolved
+    servings: dict[str, Serving] = {}
+    closed: list[str] = []
+
+    async def open(self, launch: Register) -> Offered:
+        serving = Serving(launch=launch, resolved=self.resolved)
+        self.servings[launch.launch] = serving
+        return serving.offered()
+
+    async def ask(self, launch: Register, request: Request) -> Reply:
+        serving = self.servings[launch.launch]
+        match request:
+            case Listing():
+                return serving.offered()
+            case Calling():
+                return Called(answer=await serving.call(request))
+            case Relaying(request=sent):
+                reply = await serving.answer(Sent.model_validate(sent))
+                return Relayed(reply=reply.model_dump())
+            case _:
+                message = f"a launch's modules take no `{request.kind}`"
+                raise AssertionError(message)
+
+    async def close(self, launch: Register) -> None:
+        self.servings.pop(launch.launch, None)
+        self.closed.append(launch.launch)
+
+
+@pytest.fixture
+def default_modules() -> InProcess:
+    """lup's default modules, the GitHub module among them, served in the test's own process."""
+    return InProcess(resolved=resolve(Project()))
+
+
+@pytest.fixture
+def in_process() -> type[InProcess]:
+    """Serves a launch's modules in the test's own process, from the declaration it's given."""
+    return InProcess

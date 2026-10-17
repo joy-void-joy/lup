@@ -344,7 +344,12 @@ def test_modules_edit_with_another_class_points_at_replace() -> None:
 
 def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
     resolved = resolve(Project())
-    assert [each.name for each in resolved.modules] == ["core", "python", "code-rules"]
+    assert [each.name for each in resolved.modules] == [
+        "core",
+        "python",
+        "code-rules",
+        "github",
+    ]
     assert resolved.paths.protected == [
         *CorePaths().protected,
         *PythonPaths().protected,
@@ -497,6 +502,7 @@ def test_a_module_added_starts_from_its_own_defaults() -> None:
         "core",
         "python",
         "code-rules",
+        "github",
         "ledger",
         "narration",
     ]
@@ -511,6 +517,7 @@ def test_a_module_added_goes_where_it_s_placed() -> None:
         "ledger",
         "python",
         "code-rules",
+        "github",
     ]
 
 
@@ -519,6 +526,7 @@ def test_all_is_every_module_lup_ships() -> None:
         "core",
         "python",
         "code-rules",
+        "github",
     ]
 
 
@@ -542,7 +550,12 @@ def test_replace_puts_another_module_in_place_from_its_own_defaults() -> None:
             modules=Modules.default().replace("python", Lean(), why="a Lean project")
         )
     )
-    assert [each.name for each in resolved.modules] == ["core", "lean", "code-rules"]
+    assert [each.name for each in resolved.modules] == [
+        "core",
+        "lean",
+        "code-rules",
+        "github",
+    ]
     assert [each.name for each in resolved.gate] == ["lake"]
     assert resolved.runner == Plain()
     assert "**/pyproject.toml" not in resolved.paths.protected

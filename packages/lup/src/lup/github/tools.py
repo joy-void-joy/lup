@@ -4,33 +4,32 @@
 GitHub, named when the launch started (`Register.github`), but for the two that
 read, which reach another the operator's login can read where a call names it
 (`repository`, `docs/related-repositories.md`); each through the operator's `gh`
-on the host (`forge/github.py`), and only within the limits the
-project's declaration sets (`Register.limits`): a tool's action (`read-issues`,
+on the host (`lup_dev.forge.github`), and only within the limits the project's
+declaration sets (`Register.limits`): a tool's action (`read-issues`,
 `file-issue`, `comment`, `draft-pull-request`) is checked before anything runs,
 and one beyond the limits is refused, saying the declaration doesn't allow it and
 that allowing it is the operator's call. There's no merge tool, and none closes
 or edits an issue: closing one is the operator's judgement, which a comment can
 ask for.
 
-A tool's description is its method's docstring, whose first line is the summary
-each session's guidance lists (`ToolSpec.summary`). Results are text.
+A tool's description is its docstring, whose first line is the summary each
+session's guidance lists (`ToolSpec.summary`). Results are text.
 """
 
-import inspect
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Literal, Self, override
 
-from pydantic import Field, JsonValue, PositiveInt, ValidationError, model_validator
+from pydantic import Field, PositiveInt, model_validator
 
-from lup.tools.serving import Answer
-from lup.tools.tool import ToolSpec
+from lup.tools.tool import lup_tool
 from lup.types import Model
-from lup_dev.forge.github import GitHub, GitHubError, terms
-from lup_dev.host.protocol import Action, GitHubRepository, Register
-from lup_dev.host.rooms import RoomTools
+from lup_dev.declaration.serving import ModuleTools
+from lup_dev.forge import github as gh
+from lup_dev.forge.github import GitHubError, terms
+from lup_dev.host.protocol import Action, GitHubRepository
+from lup_dev.settings import LupDevSettings
 
 if TYPE_CHECKING:
-    from lup_dev.host.courier import Conversation
+    from lup.github.module import GitHub
 
 
 class Arguments(Model, extra="forbid"):
@@ -126,87 +125,23 @@ class NewDraft(Arguments):
     )
 
 
-class GitHubTool(Model, arbitrary_types_allowed=True):
-    """One GitHub tool as a launch's session is served it: what the session is told, and its answer to a call."""
-
-    spec: ToolSpec
-    answer: Callable[[JsonValue, Register], Awaitable[Answer]]
-
-    @classmethod
-    def of[I: Arguments](
-        cls,
-        action: Action,
-        model: type[I],
-        act: Callable[[GitHub, I], Awaitable[str]],
-    ) -> GitHubTool:
-        """Serve `act` as a tool named after it and described by its docstring, its arguments read as `model`, doing `action` with the operator's credentials.
-
-        A call is answered by `act` only where the launch's limits allow
-        `action`, its arguments read as `model`, and the repository they name
-        is there: another on GitHub where they name one, else the launch's own,
-        named when it started. Otherwise, and where `gh` fails, the answer says
-        why.
-        """
-        name = act.__name__
-        spec = ToolSpec(
-            name=name,
-            description=inspect.getdoc(act) or "",
-            input_schema=model.model_json_schema(),
-        )
-
-        async def answered(arguments: JsonValue, launch: Register) -> Answer:
-            refusal = launch.limits.refusal(action)
-            if refusal is not None:
-                return Answer(text=f"lup didn't run `{name}`: {refusal}.", error=True)
-            try:
-                asked = model.model_validate(arguments)
-            except ValidationError as invalid:
-                return Answer(text=f"`{name}`'s arguments: {invalid}", error=True)
-            try:
-                github = GitHub.launched(launch, asked.elsewhere())
-                return Answer(text=await act(github, asked))
-            except GitHubError as failed:
-                return Answer(text=f"`{name}` didn't run: {failed}", error=True)
-
-        return cls(spec=spec, answer=answered)
-
-
-class GitHubTools(Model, RoomTools):
+class GitHubTools(ModuleTools):
     """lup's GitHub tools, served to each launched session: they write to its repository alone, and read any the operator's login can."""
 
-    integration: str
-    """The branch a draft pull request goes into: `LUP_INTEGRATION_BRANCH`, as
-    trust on launch reads it."""
-    limit: int = 100
-    """The most matches `find_issues` asks GitHub for."""
+    module: GitHub
 
-    def served(self) -> list[GitHubTool]:
-        """List the tools, each with the action it takes and the arguments it reads."""
-        return [
-            GitHubTool.of("read-issues", Numbered, self.read_issue),
-            GitHubTool.of("read-issues", Query, self.find_issues),
-            GitHubTool.of("file-issue", NewIssue, self.file_issue),
-            GitHubTool.of("comment", NewComment, self.comment),
-            GitHubTool.of("draft-pull-request", NewDraft, self.draft_pull_request),
-        ]
+    def github(self, action: Action, asked: Arguments) -> gh.GitHub:
+        """Return GitHub, through `gh`, for `action` on the repository `asked` names, or the launch's own.
 
-    @override
-    def specs(self) -> list[ToolSpec]:
-        return [tool.spec for tool in self.served()]
+        Raise `GitHubError` where the launch's limits don't allow `action`.
+        """
+        refusal = self.launch.limits.refusal(action)
+        if refusal is not None:
+            raise GitHubError(refusal)
+        return gh.GitHub.launched(self.launch, asked.elsewhere())
 
-    @override
-    async def call(
-        self, name: str, arguments: JsonValue, launch: Register, caller: Conversation
-    ) -> Answer:
-        tools = [tool for tool in self.served() if tool.spec.name == name]
-        if not tools:
-            return Answer(
-                text=f"lup's GitHub tools have none named `{name}`", error=True
-            )
-        [tool] = tools
-        return await tool.answer(arguments, launch)
-
-    async def read_issue(self, github: GitHub, asked: Numbered) -> str:
+    @lup_tool
+    async def read_issue(self, asked: Numbered) -> str:
         """Read an issue or pull request, with its comments.
 
         Any issue or pull request of this repository on GitHub, by its number,
@@ -216,9 +151,11 @@ class GitHubTools(Model, RoomTools):
         whether it's a draft, its review decision, and each check on its head
         with how it stands and where to look.
         """
+        github = self.github("read-issues", asked)
         return (await github.thread(asked.number)).text()
 
-    async def find_issues(self, github: GitHub, asked: Query) -> str:
+    @lup_tool
+    async def find_issues(self, asked: Query) -> str:
         """Search a repository's issues and pull requests.
 
         GitHub's search over this repository on GitHub, or over another the
@@ -228,7 +165,8 @@ class GitHubTools(Model, RoomTools):
         relevance. `read_issue` reads one whole. Searching before filing an
         issue finds one already open.
         """
-        search = await github.search(asked.query, asked.state, self.limit)
+        github = self.github("read-issues", asked)
+        search = await github.search(asked.query, asked.state, self.module.limit)
         found = [each.text() for each in search.found]
         heading = (
             f"{len(found)} {asked.state} in {github.repository} for `{asked.query}`:"
@@ -257,15 +195,18 @@ class GitHubTools(Model, RoomTools):
         )
         return "\n".join([heading, *found, *more, *elsewhere])
 
-    async def file_issue(self, github: GitHub, asked: NewIssue) -> str:
+    @lup_tool
+    async def file_issue(self, asked: NewIssue) -> str:
         """File an issue in this repository.
 
         It opens on GitHub at once, in the operator's name, so `find_issues`
         first, to find one already open. Its link is the answer.
         """
+        github = self.github("file-issue", asked)
         return f"Filed: {await github.file(asked.title, asked.body)}"
 
-    async def comment(self, github: GitHub, asked: NewComment) -> str:
+    @lup_tool
+    async def comment(self, asked: NewComment) -> str:
         """Comment on an issue or pull request.
 
         On any issue or pull request of this repository on GitHub, by its
@@ -273,25 +214,27 @@ class GitHubTools(Model, RoomTools):
         comment: closing one is the operator's call. The comment's link is the
         answer.
         """
+        github = self.github("comment", asked)
         return f"Commented: {await github.comment(asked.number, asked.body)}"
 
-    async def draft_pull_request(self, github: GitHub, asked: NewDraft) -> str:
+    @lup_tool
+    async def draft_pull_request(self, asked: NewDraft) -> str:
         """Open a draft pull request from a pushed branch.
 
         From `branch`, which must be on GitHub already (`git push` puts it
         there), into the project's integration branch, as a draft the operator
         reviews and merges: there's no merging here. Its link is the answer.
         """
+        github = self.github("draft-pull-request", asked)
         if not await github.pushed(asked.branch):
             message = (
                 f"`{asked.branch}` isn't a branch of {github.repository} on GitHub: "
                 "push it there first (`git push`), then open its pull request"
             )
             raise GitHubError(message)
-        link = await github.draft(
-            asked.branch, self.integration, asked.title, asked.body
-        )
+        integration = LupDevSettings().lup_integration_branch
+        link = await github.draft(asked.branch, integration, asked.title, asked.body)
         return (
             f"Opened a draft pull request from `{asked.branch}` into "
-            f"`{self.integration}`: {link}"
+            f"`{integration}`: {link}"
         )

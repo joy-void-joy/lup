@@ -56,15 +56,13 @@ from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM, GitHubError, named
-from lup_dev.forge.protocol import Stating
-from lup_dev.forge.tools import GitHubTools
 from lup_dev.gate import Check, Shell, failed, report
 from lup_dev.git import Git, nul_separated
 from lup_dev.host.client import Detached, HostClient, RoomClient
 from lup_dev.host.courier import Courier, Heard, Telling
 from lup_dev.host.protocol import GitHubRepository, HostError, Register
-from lup_dev.host.rooms import RoomRoute
 from lup_dev.host.service import Answerer, HostService
+from lup_dev.host.workers import Workers
 from lup_dev.inbox.delivery import Delivery, opening, what, who
 from lup_dev.inbox.notices import NotifySend
 from lup_dev.inbox.protocol import (
@@ -123,9 +121,11 @@ from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.remote.protocol import Remotes
 from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
+from lup_dev.worker import worked
 
 if TYPE_CHECKING:
     from lup.tools.tool import ToolSpec
+    from lup_dev.declaration.resolve import Resolved
     from lup_dev.host.rooms import RoomTools
     from lup_dev.policy.runtime import Runtime
 
@@ -284,34 +284,40 @@ def host_serve(context: typer.Context) -> None:
         post=delivery,
         routes=inbox_routes(delivery),
         tools=room_tools(delivery),
-        room_routes=[
-            RoomRoute.to(Stating()),
-            *remote_routes(Remotes(say=typer.echo)),
-        ],
+        room_routes=remote_routes(Remotes(say=typer.echo)),
+        modules=Workers(layout=layout.host, say=typer.echo),
         say=typer.echo,
     )
     asyncio.run(service.serve())
 
 
 def room_tools(delivery: Delivery) -> list[RoomTools]:
-    """List the modules' tools the host service serves each launched session."""
-    return [
-        InboxTools(delivery=delivery),
-        GitHubTools(integration=LupDevSettings().lup_integration_branch),
-    ]
+    """List the core's tools the host service serves each launched session: the inbox's."""
+    return [InboxTools(delivery=delivery)]
 
 
-def served_tools() -> list[ToolSpec]:
-    """List what a launched session is told of each of lup's tools, which its guidance lists.
+def served_tools(resolved: Resolved) -> list[ToolSpec]:
+    """List what a launched session is told of each of lup's tools, which its guidance lists: the core's, then its modules'.
 
-    Read from the tools the service is handed, made over a delivery without its
-    fields: what a tool is doesn't depend on whom it delivers to.
+    The core's are read from the tools the service is handed, made over a
+    delivery without its fields: what a tool is doesn't depend on whom it
+    delivers to. The modules' are read from their classes, with no instance.
     """
-    return [
+    core = [
         spec
         for tools in room_tools(Delivery.model_construct())
         for spec in tools.specs()
     ]
+    modules = [spec for each in resolved.served for spec in each.tools.specs()]
+    return [*core, *modules]
+
+
+@app.command("worker", hidden=True)
+def worker(
+    socket: Annotated[Path, typer.Argument(help="Where to answer the host service.")],
+) -> None:
+    """Serve a launch's modules on `socket`, its registration on standard input's first line: for the host service."""
+    worked(socket, services())
 
 
 @host.command("stop")
@@ -761,7 +767,7 @@ def launched(
             own.directory,
             cached.cli,
             hooked(adapter.hooks),
-            tools=served_tools(),
+            tools=served_tools(declared.resolved),
             neighbours=neighbours,
         )
         git = room_git(
