@@ -1075,6 +1075,7 @@ def test_credentials_are_lup_s_by_default() -> None:
     assert resolve(Project()).limits == Limits(
         actions=EVERY_BUT_LUP_S_WITHHELD,
         protected=["refs/heads/main", "refs/tags/*"],
+        gated=["refs/heads/dev"],
     )
     [force, delete] = CredentialDefaults().withheld
     assert lup_actions() == Actions.all().drop("force-push", why=force.why).drop(
@@ -1104,6 +1105,7 @@ def test_credentials_layer_across_a_base_and_a_project() -> None:
             "draft-pull-request",
         ],
         protected=["refs/heads/main", "refs/tags/*", "refs/heads/release/*"],
+        gated=["refs/heads/dev"],
     )
     assert module(resolved, "core").origins.of("credentials") == Origin(
         field="credentials",
@@ -1111,6 +1113,20 @@ def test_credentials_layer_across_a_base_and_a_project() -> None:
         why="feature branches are rebased before review",
     )
     assert limits(base).actions == EVERY_BUT_LUP_S_WITHHELD
+
+
+def test_a_project_gates_its_own_integration_branch_in_its_declaration() -> None:
+    project = Modules.default().edit(
+        Core(
+            credentials=Credentials(
+                gated=Refs()
+                .drop("refs/heads/dev", why="this project integrates on `main`")
+                .add("refs/heads/main", "refs/heads/release/*")
+            )
+        ),
+        why="work lands on `main`, and on release branches",
+    )
+    assert limits(project).gated == ["refs/heads/main", "refs/heads/release/*"]
 
 
 def allowed(chosen: Actions) -> list[str]:

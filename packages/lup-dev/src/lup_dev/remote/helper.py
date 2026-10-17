@@ -43,6 +43,7 @@ import socket
 # lup: ignore("subprocess", why="the room's Python runs the helper on the standard library alone, without lup's `programs`")
 import subprocess
 import sys
+from fnmatch import fnmatchcase
 from itertools import takewhile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -180,7 +181,8 @@ class Helper:
         """The launch's request socket."""
         self.gate = gate
         self.gated = gated or []
-        """Full ref names, as a push's destination is."""
+        """Patterns over full ref names, git's glob as the host reads a
+        protected ref's."""
         self.force = False
         self.dry_run = False
         self.atomic = False
@@ -325,7 +327,8 @@ class Helper:
         gating = {
             each.destination: each.source
             for each in updates
-            if each.source is not None and each.destination in self.gated
+            if each.source is not None
+            and any(fnmatchcase(each.destination, pattern) for pattern in self.gated)
         }
         reasons = {
             source: self.failing(self.gate, source, destination)

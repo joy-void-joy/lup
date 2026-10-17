@@ -856,10 +856,9 @@ def launched(
             neighbours=neighbours,
             shared=shared,
         )
-        integration = LupDevSettings().lup_integration_branch
         gating = Gating(
             command=declared.resolved.runner.command(["lup-dev", "check", "--at"]),
-            refs=[f"refs/heads/{integration}"],
+            refs=declared.resolved.limits.gated,
         )
         git = room_git(
             repository,

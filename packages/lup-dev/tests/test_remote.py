@@ -183,7 +183,7 @@ class World:
             launch=self.launch,
             gating=Gating(
                 command=[sys.executable, str(gate), str(self.log)],
-                refs=["refs/heads/dev", "refs/heads/release/1"],
+                refs=["refs/heads/dev", "refs/heads/release/*"],
             ),
         )
         self.room.write()
