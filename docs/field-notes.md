@@ -100,11 +100,11 @@ Read from its docs and its source at `rust-v0.156.1`; nothing run.
 
 ## The Codex SDK, `openai-codex` 0.162 (bundling codex-cli 0.162)
 
-Read from its source and checked against the bundled binary with a local mock Responses endpoint; no live model run yet.
+Read from its source and checked against the bundled binary with a local mock Responses endpoint; one typed ask has run live since (*The library's asks*).
 - Only the low-level `openai_codex.client.CodexClient` takes a server-request handler, and it runs synchronously on the client's one reader thread: a request through the same client from inside it deadlocks.
 - Dynamic tools are declared on `thread/start` only, fixed for the thread's life; a call arrives as the server request `item/tool/call` and is answered `{"contentItems": [...], "success": bool}`.
 - `thread/start` takes no `effort`; it goes on `turn/start`.
-- `environments: []` disables environment access; `agents.enabled=false` in the thread's config removes the subagent tools; web search, skills, the built-in instructions and features are launch `-c` overrides (listed in `docs/library.md`).
+- `environments: []` disables environment access; `agents.enabled=false` in the thread's config removes the subagent tools; web search, skills, the built-in instructions and features are launch `-c` overrides (listed in `LAUNCH`, `lup/adapters/codex/runtime.py`).
 - The default model `gpt-6.1-sol` and about ten others are `code_mode_only`: every tool, lup's included, sits behind a JavaScript `exec` tool, with `wait` and `request_user_input_async`; no setting removed them. Other models, such as `gpt-5.4`, carry only the declared tools.
 - `exec` reaches nothing beyond the declared tools (probed on 0.162 against a mock endpoint): no `fetch`, `require`, `process`, `Deno`, `WebSocket`, `Worker` or `WebAssembly`; every import refused ("unsupported import in exec"); none of the built-in tools (`exec_command`, `shell`, `apply_patch`, `spawn_agent`, `web_search`, `view_image`). Its nested tools are the declared ones (called as `await tools.submit({...})`), `clock__curr_time`, and MCP resource readers that return nothing without servers. `request_user_input_async` answers `{"accepted": true}` and sends the client nothing. Turning `features.code_mode_host` off makes `exec` answer "code-mode host is disabled", so the declared tools become unreachable.
 - With `baseInstructions: ""`, a thread sends no developer message at all; leaving it out sends Codex's 17 KB coding-agent prompt. A project's `AGENTS.md` isn't injected into an app-server thread.
@@ -112,6 +112,19 @@ Read from its source and checked against the bundled binary with a local mock Re
 - `usageLimitExceeded` carries its reset time only in the global notification `account/rateLimits/updated` (`rateLimits.primary.resetsAt`); the message's "try again at" is local-time text.
 - `auth.json` is written through a symlink under the `file` credentials store; under `keyring` or `auto`, a refresh deletes it. A keyring login is keyed on the canonical `CODEX_HOME` path, so it isn't visible from another home.
 - The SDK's high-level `TurnResult` raises a plain `RuntimeError` for a failed turn, losing `codexErrorInfo`, and reports a thread's usage snapshot.
+
+## The library's asks (claude-agent-sdk 0.2.165 with Claude Code 2.1.294; openai-codex 0.162.0 with codex-cli 0.162.0)
+
+For `docs/library.md`.
+- **Live, with the operator's logins:** one typed ask on each runtime. Claude Code on `haiku`: lup's MCP server through the real CLI, the `init` check passing, the answer through `mcp__lup__submit`, no transcript written. Codex on `gpt-6.1-sol`, in code mode: `exec` calling `submit`, everything written in lup's own Codex home and nothing in the operator's.
+- With `--system-prompt ""`, Claude Code still adds one identity line of its own: "You are a Claude agent, built on Anthropic's Claude Agent SDK." (read in the bundled CLI).
+- Installed, `claude_agent_sdk` with its bundled CLI is about 240 MB and `codex_cli_bin` about 360 MB (`du`).
+- Codex's docs say app-server authentication "has never been permitted for commercial or hosted services".
+- Codex reports the rate limits that came with a usage limit before the error, outside any turn's stream (`next_notification`), and the adapter's watcher thread keeps the last; nothing synchronises it with the turn's stream, so a real run could miss the reset. `account/rateLimits/read` after the error would ask for it directly.
+- **Not yet seen live:**
+  - on Claude Code, the `Stop` guard holding an unanswered turn, and the error classification; how a spent window surfaces under a subscription login (an API key's 429 emitted no `RateLimitEvent`); what a dropped connection reports (taken as an API error with no status);
+  - on Codex, a dynamic tool called directly on a model without code mode; that the model's request carries only lup's tools, which no API lists, so it's checked by hand on each pinned version;
+  - parallel asks: simultaneous Claude Code starts on the operator's default home (concurrent starts on one config volume corrupted `.claude.json` in the first lup, *From the first lup's rooms*), and parallel Codex app-servers starting on lup's one home.
 
 ## Claude Code 2.1.296: launching a session
 
@@ -436,6 +449,27 @@ Probed on the operator's host with throwaway containers from the room's base ima
   - files git ignores;
   - code that runs inside the same call (a planted `core.fsmonitor` ran).
 
+## Judging writes
+
+What the judge (`docs/judging-writes.md`) rests on, measured on the operator's machine; the spikes' evidence is under `tmp/spikes/` in the `main` checkout.
+- **A checkpoint's cost,** through the store's own code, for each worktree a session holds: 70 to 100 ms where nothing changed, about nine git processes, of which the snapshot is 5 ms at lup's size and 10 to 15 ms at nori's 4,000 files; a worktree's first snapshot 40 to 50 ms at lup's size and 2.5 to 3.6 s at nori's. The downstream projects have 161 to 3,721 tracked files. With the tests' stub engine on a 97-file clone of lup, a call's start and finish where nothing changed took 52 ms and 8 git processes holding one worktree, 148 ms and 20 holding three; a checkpoint alone, 37 to 43 ms. Judging every worktree of a repository rather than those a session holds would cost about 80 ms each: 0.25 s for 3 worktrees, about 3.5 s for nori's 36. The target is under 300 ms per checkpoint, type check included, for a session holding one or two worktrees.
+- **Reading a commit's declaration:** exporting lup's tip (141 Python modules, from git's objects) took about 100 ms, then 1 ms to load it.
+- **Calls no hook finishes:** a configuration hooking only `PreToolUse` counts each call it lets through and finishes none. While a checkpoint waited on every session's calls in its worktree, lup's own Claude Code sessions and a launched Claude Code room left 9,858 calls counted across 48 of lup's worktrees by 2026-10-13, and a Codex session launched in `dev` had no write judged (its patch adding `import subprocess` stayed), which is why a checkpoint waits only on its own session's calls.
+- **The engine's spike** (pyright 1.1.414, about 970 lines of TypeScript, `tmp/spikes/pyright-rules/`):
+  - the same answers as pyright: on the first lup's library, 32 of 32 type errors matched the CLI's exactly;
+  - the rules cost under 1% of the check, at most 8 ms a file;
+  - warm re-checks of one changed file took 65–270 ms median (10–620 ms range), of ten files 0.5–2.7 s, nearly all of it pyright's own re-check, on a heavily loaded machine;
+  - the typed `string-split` leaves out `shlex.split` and `re.split`, which a syntax-only rule flags; `tuple-shape` caught every alias form tried;
+  - the rule code compiled unchanged against pyright releases 17 months apart, and about 40 lines of project setup broke;
+  - a 3.5 MB bundle plus 28 MB of standard-library stubs, and 1.5–2.7 GB of memory on a 700-file project, for each worktree's engine.
+- **Loading lup's project** in the engine takes 1.4 s, which an engine per hook would pay at every hook. The importers pass run whole, rather than a file at a time, would hold a check behind 27 s of re-checking on the first lup's library.
+- **Rules in Python over `ast`,** asking the warm engine by position (`tmp/spikes/rule-shape/`): the same findings as the table on 739 files, but their checks cost 10 to 20 times more, and they miss types pyright reads in strings outside annotations (`cast("tuple[int, str]", value)`) unless the engine lists them.
+- **uv in the judge's path:** `uv run` adds about 12 ms to a ruff call (26 ms against 14 ms for one file's check), and `--no-sync` saves about 3 ms of it; asking uv for the interpreter costs about 28 ms a program, against 1.4 s for the program; making lup's environment from uv's cache took 0.7 s. Plain `uv run` relocks a stale or missing lock: a `pyproject.toml` holding only `[tool.pyright]` got a `.venv` and a `uv.lock`.
+- **The gate on lup,** with pytest on one worker: pytest was 75 of the gate's 85 s, lup's rules 8 s warm. Over 66 files, the rules step took 1.3 s warm and 5.6 s with the engine cold.
+- **What the judge relies on from Claude Code's hooks reference:** `PreToolUse` "runs before a tool call executes", `PostToolUse` "after a tool call succeeds", `PostToolUseFailure` "after a tool call fails", each with the call's `tool_use_id`, and matching hooks "run in parallel"; a call the operator declines at its prompt reports neither. `cwd` "follows Claude: the `cwd` field in the hook's input JSON is the worktree root after Claude enters a worktree, and the new directory after Claude runs `cd`." `SubagentStop` "Runs when a Claude Code subagent has finished responding" and takes "the same decision control format as Stop hooks"; a `Stop` hook's `additionalContext`, like a block's `reason`, means "The conversation continues so Claude can act on it". From its environment-variable reference, `CLAUDE_CODE_CHILD_SESSION` is "set to `1` in subprocesses Claude Code spawns via the Bash, PowerShell, and Monitor tools, hook commands, and status line commands", and unlike `CLAUDECODE` is "only set by Claude Code itself when it launches a subprocess and not by IDE extensions" (observed in a session's commands). Its own record of a command's edits (`bashEditDiff`) misses files, a protected one among them.
+- **What the judge relies on from Codex** (its docs, and its source at `rust-v0.156.1`): its `PermissionRequest` for `apply_patch` carries the patch and no file list (`core/src/tools/approvals.rs`), and fires only for a patch needing approval: under `on-request`, one writing outside the writable roots or retried after a sandbox denial; under `never`, never. Its `PreToolUse` can't ask: "`permissionDecision: "ask"` … [is] parsed but not supported yet". Its hooks' `cwd` is the "Working directory for the session", and "`Bash` and `apply_patch` use `tool_input.command`". A hook's `timeout` defaults to 600 s with no maximum (`timeout_sec.unwrap_or(600).max(1)`, `hooks/src/engine/discovery.rs`), and a hook that times out fails open. Codex sets `CODEX_THREAD_ID` in every command its agent runs, after the shell environment policy so a profile can't strip it, with `CODEX_CI=1` (`core/src/unified_exec/process_manager.rs`); its hooks run without them. A `PostToolUse` hook's `additionalContext` "is added as extra developer context", where `decision: block` would replace the call's result; `Stop` takes no `additionalContext`, and a block's `reason` becomes "a new continuation prompt". A subagent's tool hooks carry its `agent_id`, and each of its turns ends with `SubagentStop` (`core/src/hook_runtime.rs`), whose input carries `stop_hook_active` (`subagent-stop.command.input`).
+- **Unchecked:** whether a `PreToolUse` hook's `allow` skips auto mode's classifier (Claude Code's permission docs say a mod's approval does, and nothing of a hook's); whether Claude Code's `cwd` follows a `cd` in a subagent's calls, whose shell starts each call in the project's directory; and whether either runtime reports `SubagentStop` for a subagent the operator stops, or one that fails. Claude Code's `Stop` input lists the session's `background_tasks`, subagents among them, "present when the task registry is reachable", which would tell there.
+
 ## Package age gates
 
 - uv's `exclude-newer` accepts "3 days" (`UV_EXCLUDE_NEWER`);
@@ -449,6 +483,40 @@ Probed on the operator's host with throwaway containers from the room's base ima
 - a workspace member with its own `[tool.ruff]` and no `extend` is cut off from the root's settings;
 - pyright reads a TOML base's `[tool.pyright]`;
 - Node strips TypeScript types by default from 23.6.0 and 22.18.0, never under `node_modules`.
+
+## The declaration
+
+For `docs/declaration.md`: what its code and its next pieces (a project's own rule tables, lup's settings for ruff and pyright, the command line) rest on.
+- **Node for rule tables in TypeScript** (Node's `api/typescript.html` and `api/module.html`):
+  - type stripping runs without its experimental warning from 24.3.0 and 22.18.0, and is marked stable from 25.2.0 and 24.12.0;
+  - `module.registerHooks` arrived in 23.5.0 and 22.15.0;
+  - so 22.18 is the oldest Node that runs both without a flag, the version `CodeRules`' requirement takes;
+  - stripping refuses enums, namespaces holding values and parameter properties.
+- **A table loaded through the engine's bundle:**
+  - an esbuild 0.28.2 CommonJS bundle, built as `build.py` builds the engine (`--platform=node --target=node20`), kept `import()` as written;
+  - through that bundle, Node 26.10 loaded a `.ts` table holding an interface and a typed constant, with no flag;
+  - a `registerHooks` resolve hook registered from the bundle resolved a fixed bare name, `lup-engine`, for the stripped table.
+- **TypeScript's compiler:** pyright 1.1.414 pins `typescript ~6.0.3`, whose `lib/typescript.js` is 8.8 MB unminified.
+- **Probes print bare versions:** `node -p process.versions.node` printed `26.10.0`, `uv self version --short` printed `0.12.23`, and `podman version --format '{{.Client.Version}}'` printed `6.1.3`.
+- **ruff's target version** (0.16.10):
+  - it's inferred from `requires-python` in the `pyproject.toml` holding `extend` (3.12 from `>=3.12`);
+  - in a uv workspace whose root `pyproject.toml` has no `[project]`, as lup's, a member without its own `[tool.ruff]` gets none (`linter.unresolved_target_version = none`), and the formatter falls back to 3.10.
+- **ruff in a workspace:**
+  - a member without a `[tool.ruff]` gets the root's settings;
+  - a member's `extend = "../../pyproject.toml"` chains through the root to the base the root extends, with the member's own `ignore` on top and its own `requires-python` as its target version.
+- **pyright's configuration** (1.1.414):
+  - it's parsed as JSON with comments (`JSONC.parse`, `analyzer/service.ts`);
+  - an `extends` target ending in `.toml` is read as a `pyproject.toml`'s `[tool.pyright]` (`_getExtendedConfigurations`), with its comments.
+- **`.gitignore`** (git 2.56): `.lup/` followed by `!.lup/settings/` leaves `settings/` ignored, since git never looks inside an ignored directory; un-ignoring it takes `/.lup/*`.
+- **`uv sync --managed-python`** moved a `.venv` on `/usr/bin/python3.14` onto uv's own 3.14. That's the remedy `Uv` gives when a room can't reach the interpreter.
+- **`uv init --lib --build-backend uv --vcs git`** writes:
+  - `pyproject.toml`, `src/<name>/__init__.py` and `py.typed`;
+  - `.python-version`, `.gitignore` and a README;
+  - a git repository.
+
+  Its `hello()` has no docstring, which ruff refuses.
+- **grimp 3.17,** which import-linter 2.15 brings, answered `chain_exists(importer=…, imported="lup_dev", as_packages=True)` and `find_shortest_chain` on lup's packages.
+- **click's help listing** calls `get_command` for every entry (`click/core.py`, `format_commands`), so a lazy group has to list from its own data.
 
 ## From the downstream projects
 
@@ -485,3 +553,12 @@ What each runtime records of a subagent's spawn, which lup reads to name it and 
 - **Codex** heads each subagent's own rollout with a `session_meta` (`protocol/src/protocol.rs`, `SessionMeta`): its `id` (the hooks' `agent_id`), `session_id` (the root thread's, shared by the tree, and the hooks' `session_id`), `parent_thread_id`, `agent_role` and `agent_path`, `/root/<name>/…`, each ancestor's name before its own. The first lup measured on 0.158.0 that every event fired inside a subagent names that rollout as `transcript_path`, and `SubagentStop` names the root's and adds `agent_transcript_path`; so a rollout whose `id` isn't the subagent's says nothing of it.
   - **Naming a spawn:** the first `spawn_agent` takes no name (`create_spawn_agent_tool_v1`, `core/src/tools/handlers/multi_agents_spec.rs`: `message`, `items`, `agent_type`, `fork_context`, `model`, `reasoning_effort`), and spawns with no `agent_path` (`tools/handlers/multi_agents/spawn.rs` passes `task_name` as `None`). The second requires `task_name`, `[a-z0-9_]`, and joins it onto the parent's path.
   - **Its tool's name in hooks:** `spawn_agent` for the first, or for the second without a namespace (`core/src/tools/registry.rs`, `function_hook_tool_name`, with `Agent` as a matcher alias); the second is namespaced `collaboration` by default (`DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE`), and a namespaced tool's hook name is the namespace and the name joined with nothing between, `collaborationspawn_agent` (`core/src/tools/mod.rs`, `flat_tool_name`).
+
+## A conversation resumed in a later launch (read 2026-10-16)
+
+For `docs/resume-guidance.md`: Claude Code's docs (code.claude.com/docs/en: *hooks*, *cli-reference*, *sessions*) and its 2.1.301 binary's help; Codex's docs (developers.openai.com/codex: *hooks*, *config-reference*) and its source at `rust-v0.163.0` (paths under `codex-rs/`), the same at `rust-v0.162.1` where checked.
+- **Claude Code records the system prompt.** It builds it once, at a conversation's first request, with the system prompt flags' text, records it in the session, and until the conversation is compacted every later request uses the record, after `--resume` or `--continue` too (*cli-reference*, *System prompt flags in resumed conversations*). `--system-prompt-snapshot off` (2.1.257 and later): "never record; the prompt is rendered fresh every request". At a resume whose prompt cache has likely expired it says so (`prompt_cache_likely_expired`).
+- **Codex sends a resumed thread later `developer_instructions` only once it's compacted.** They're part of the initial context (`core/src/session/mod.rs`, `build_initial_context_with_world_state`), written only to a thread with no recorded turn context, and again at a compaction (`core/src/compact.rs`); a resumed thread has one from its rollout, and after it only changes to the world state are written (`record_context_updates_and_set_reference_context_item`; the test `record_initial_history_restores_world_state_baseline` writes nothing on resume). `additional_developer_instructions`, a managed requirement, are in the world state (`core/src/context/world_state/managed_developer_instructions.rs`): kept by their hash, and where they changed, sent again whole, opening "These managed developer instructions replace all previously provided managed developer instructions." The markers and that notice add 169 bytes to the text (`validate_managed_developer_instructions`).
+- **Both keep the conversation's id on resume, and say it's one.** Claude Code's `SessionStart` `source` is `resume` for "`--resume`, `--continue`, or `/resume`" (*hooks*), and `--fork-session` makes "a new session ID instead of reusing the original" (*cli-reference*). Codex's is `resume` too, run at the thread's first turn after it (`core/src/hook_runtime.rs`), its id the rollout's (`core/src/session/session.rs`). Each also has `startup`, `clear`, `compact` and `fork`; a fork's hook names no parent on either.
+- **What a `SessionStart` hook tells reaches the model, and stays.** Claude Code puts `additionalContext` in a system reminder "at the point where the hook fired", and `/resume` "waits for the hooks to finish"; it saves the text in the transcript and replays it (*hooks*, *Add context for Claude*). Codex adds it "as extra developer context", and its rollout keeps it. So what's told at one resume is still there, perhaps stale, at the next. Each hook's cap on what it tells whole: `docs/host-tools.md`, *Told once*.
+- **Sizes:** on 2026-10-17 lup's own guidance's section files came to about 23 KB (`AGENTS.md` 10.9 KB, `Core`'s 8.6 KB), before lup's tools and other repositories are listed: past either hook's cap whole, and over half of Codex's 40,000 bytes of managed instructions.
