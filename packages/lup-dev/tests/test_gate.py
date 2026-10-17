@@ -23,16 +23,23 @@ from lup_dev.gate import (
     Check,
     Fixes,
     Gated,
+    GateError,
     Outcome,
+    Passed,
+    Passes,
     Processes,
     Ran,
     Shell,
+    Standing,
+    at_commit,
     failed,
     report,
+    standing,
 )
 
 if TYPE_CHECKING:
-    from conftest import Kit
+    from conftest import FakeClock, Kit
+    from conftest import Shell as Git
 
 
 class Scripted(Processes):
@@ -406,6 +413,291 @@ def test_the_gates_rules_leave_tests_scratch_and_excluded_paths_out(
     assert Path("tmp/try.py") not in sent
 
 
+# Passes, recorded by the files they passed on.
+
+
+def kept(root: Path, processes: Processes, clock: FakeClock, **fields: object) -> Check:
+    """The gate over `root` with lup's three scripted steps, its passes kept in its repository."""
+    return Check.model_validate(
+        {
+            "root": root,
+            "processes": processes,
+            "tools": Stubbed([]),
+            "runner": Plain(),
+            "steps": STEPS,
+            "passes": Passes.of(root, clock),
+            **fields,
+        }
+    )
+
+
+class Writing(Processes):
+    """Passes every command, the one named `at` writing `text` into `path` as it runs."""
+
+    def __init__(self, at: str, path: Path, text: str) -> None:
+        self.at = at
+        self.path = path
+        self.text = text
+        self.ran: list[list[str]] = []
+
+    @override
+    def run(self, command: list[str], cwd: Path) -> Ran:
+        self.ran.append(command)
+        if command[0] == self.at:
+            self.path.write_text(self.text)
+        return Ran(code=0, output="")
+
+
+def test_a_pass_is_recorded_for_the_files_and_answers_the_next_run(
+    repo: Path, clock: FakeClock
+) -> None:
+    processes = Scripted({})
+    first = kept(repo, processes, clock).run()
+    second = kept(repo, processes, clock).run()
+
+    files = standing(repo)
+    assert first.recorded == Passed(
+        files=files, at=clock.now(), steps=["lint", "types", "tests"]
+    )
+    assert len(processes.ran) == len(STEPS)
+    assert second.outcomes == []
+    assert second.found == first.recorded
+    assert report(second) == (
+        "The gate passed on these files already, at 2026-10-01 12:00 UTC (tree "
+        f"`{files.tree}`): nothing ran. `--again` runs it anyway."
+    )
+    assert report(first).endswith(
+        f"The gate passed. It's recorded for these files (tree `{files.tree}`), so "
+        "running it again on them, or pushing them, runs nothing."
+    )
+
+
+def test_a_file_changed_or_added_runs_the_gate_again_and_one_ignored_doesnt(
+    repo: Path, clock: FakeClock
+) -> None:
+    processes = Scripted({})
+    kept(repo, processes, clock).run()
+    (repo / ".venv").mkdir()
+    (repo / ".venv" / "ignored.py").write_text("x = 1\n")
+    ignored = kept(repo, processes, clock).run()
+    (repo / "src" / "pkg" / "new.py").write_text("y = 2\n")
+    added = kept(repo, processes, clock).run()
+    (repo / "README.md").write_text("# Changed\n")
+    changed = kept(repo, processes, clock).run()
+
+    assert ignored.found is not None
+    assert added.found is None
+    assert changed.found is None
+    assert len(processes.ran) == 3 * len(STEPS)
+
+
+def test_again_runs_every_step_where_a_pass_is_recorded(
+    repo: Path, clock: FakeClock
+) -> None:
+    processes = Scripted({})
+    kept(repo, processes, clock).run()
+    again = kept(repo, processes, clock).run(again=True)
+    assert again.found is None
+    assert again.recorded is not None
+    assert len(processes.ran) == 2 * len(STEPS)
+
+
+def test_a_failing_run_records_nothing(repo: Path, clock: FakeClock) -> None:
+    processes = Scripted({"types": Ran(code=1, output="no\n")})
+    failing = kept(repo, processes, clock).run()
+    assert failing.recorded is None
+    assert Passes.of(repo, clock).found(standing(repo)) is None
+
+
+def test_files_a_step_changes_leave_the_pass_unrecorded(
+    repo: Path, clock: FakeClock
+) -> None:
+    processes = Writing("types", repo / "README.md", "# Written by a step\n")
+    moved = kept(repo, processes, clock).run()
+    assert moved.moved
+    assert moved.recorded is None
+    assert report(moved).endswith(
+        "The gate passed. The worktree's files changed while it ran, so it isn't "
+        "recorded."
+    )
+    assert Passes.of(repo, clock).found(standing(repo)) is None
+
+
+def test_the_pass_is_recorded_for_the_files_after_the_fixes(
+    repo: Path, clock: FakeClock
+) -> None:
+    processes = Writing("fix", repo / "README.md", "# Fixed\n")
+    fixed = kept(
+        repo, processes, clock, fixes=[Step(name="fix", command=["fix"])]
+    ).run()
+    assert fixed.recorded is not None
+    assert fixed.recorded.files == standing(repo)
+    assert fixed.recorded.steps == ["lint", "types", "tests"]
+    assert kept(repo, processes, clock).run().found == fixed.recorded
+
+
+def test_the_person_s_layer_is_part_of_the_files(repo: Path, clock: FakeClock) -> None:
+    (repo / ".gitignore").write_text(".venv/\n.lup/\nlup_project.local.py\n")
+    processes = Scripted({})
+    without = kept(repo, processes, clock).run().recorded
+    (repo / "lup_project.local.py").write_text("project = None\n")
+    layered = kept(repo, processes, clock).run()
+
+    assert without is not None
+    assert without.files.layer is None
+    assert layered.found is None
+    assert layered.recorded is not None
+    assert layered.recorded.files.tree == without.files.tree
+    assert layered.recorded.files.layer is not None
+    assert layered.recorded.files.name == (
+        f"{without.files.tree}-{layered.recorded.files.layer}"
+    )
+
+
+def test_reading_the_files_leaves_the_worktree_s_index_as_it_was(
+    repo: Path, shell: Git
+) -> None:
+    (repo / "README.md").write_text("# Changed\n")
+    (repo / "new.py").write_text("x = 1\n")
+    before = shell.git(repo, "status", "--porcelain")
+    standing(repo)
+    assert shell.git(repo, "status", "--porcelain") == before
+    assert shell.git(repo, "diff", "--cached", "--name-only") == ""
+
+
+def test_every_worktree_of_a_repository_finds_its_passes(
+    repo: Path, linked: Path, clock: FakeClock
+) -> None:
+    processes = Scripted({})
+    recorded = kept(repo, processes, clock).run().recorded
+    found = kept(linked, processes, clock).run().found
+    assert recorded is not None
+    assert found == recorded
+
+
+# The gate on a commit, in a worktree made at it.
+
+
+class Witness(Processes):
+    """Answers the gate run on a commit as told, seeing where it ran and what was there."""
+
+    def __init__(self, code: int = 0) -> None:
+        self.code = code
+        self.ran: list[tuple[list[str], Path]] = []
+        self.readme: list[str] = []
+        self.layer: list[str | None] = []
+
+    @override
+    def run(self, command: list[str], cwd: Path) -> Ran:
+        self.ran.append((command, cwd))
+        self.readme.append((cwd / "README.md").read_text())
+        local = cwd / "lup_project.local.py"
+        self.layer.append(local.read_text() if local.is_file() else None)
+        return Ran(code=self.code, output=f"the report, ending {self.code}\n")
+
+
+def gated_at(
+    repo: Path,
+    revision: str,
+    processes: Processes,
+    clock: FakeClock,
+    *,
+    again: bool = False,
+) -> tuple[Passed | Ran, list[str], list[Path]]:
+    """Run the gate at `revision` from `repo`: what it gave, what it said, and each worktree it stopped."""
+    said: list[str] = []
+    stopped: list[Path] = []
+    outcome = at_commit(
+        repo,
+        revision,
+        processes,
+        Passes.of(repo, clock),
+        Uv(),
+        say=said.append,
+        stop=stopped.append,
+        again=again,
+    )
+    return outcome, said, stopped
+
+
+def test_at_a_commit_the_gate_runs_in_a_worktree_made_at_it_and_removed_after(
+    repo: Path, shell: Git, clock: FakeClock
+) -> None:
+    first = shell.git(repo, "rev-parse", "HEAD")
+    (repo / "README.md").write_text("# Second\n")
+    shell.commit(repo, "second")
+    (repo / "README.md").write_text("# Not committed\n")
+    processes = Witness()
+
+    outcome, said, stopped = gated_at(repo, "HEAD~1", processes, clock)
+
+    [(command, made)] = processes.ran
+    assert command == Uv().judging(["lup-dev", "check"])
+    assert made != repo
+    assert processes.readme == ["# Work\n"]
+    assert outcome == Ran(code=0, output="the report, ending 0\n")
+    assert said == [f"The gate runs on {first}, in a worktree made for it at {made}."]
+    assert stopped == [made]
+    assert not made.exists()
+    assert str(made) not in shell.git(repo, "worktree", "list")
+    tree = shell.git(repo, "rev-parse", f"{first}^{{tree}}")
+    found = Passes.of(repo, clock).found(Standing(tree=tree))
+    assert found == Passed(files=Standing(tree=tree), at=clock.now(), steps=[])
+
+
+def test_at_a_commit_whose_files_passed_nothing_runs(
+    repo: Path, clock: FakeClock
+) -> None:
+    recorded = kept(repo, Scripted({}), clock).run().recorded
+    processes = Witness()
+
+    outcome, said, stopped = gated_at(repo, "HEAD", processes, clock)
+
+    assert outcome == recorded
+    assert processes.ran == []
+    assert said == []
+    assert stopped == []
+
+
+def test_at_a_commit_again_runs_the_gate_where_its_files_passed(
+    repo: Path, clock: FakeClock
+) -> None:
+    kept(repo, Scripted({}), clock).run()
+    processes = Witness()
+    gated_at(repo, "HEAD", processes, clock, again=True)
+    [(command, _)] = processes.ran
+    assert command == Uv().judging(["lup-dev", "check", "--again"])
+
+
+def test_at_a_commit_whose_gate_fails_nothing_is_recorded(
+    repo: Path, shell: Git, clock: FakeClock
+) -> None:
+    processes = Witness(code=1)
+
+    outcome, _, stopped = gated_at(repo, "HEAD", processes, clock)
+
+    assert outcome == Ran(code=1, output="the report, ending 1\n")
+    assert not stopped[0].exists()
+    tree = shell.git(repo, "rev-parse", "HEAD^{tree}")
+    assert Passes.of(repo, clock).found(Standing(tree=tree)) is None
+
+
+def test_at_a_commit_the_person_s_layer_joins_its_files(
+    repo: Path, clock: FakeClock
+) -> None:
+    (repo / "lup_project.local.py").write_text("project = None\n")
+    processes = Witness()
+    gated_at(repo, "HEAD", processes, clock)
+    assert processes.layer == ["project = None\n"]
+
+
+def test_at_a_revision_naming_no_commit_is_refused(
+    repo: Path, clock: FakeClock
+) -> None:
+    with pytest.raises(GateError, match="`nowhere` names no commit in"):
+        gated_at(repo, "nowhere", Witness(), clock)
+
+
 # `lup-dev check`, reading the worktree's declaration.
 
 DECLARED = """\
@@ -462,7 +754,14 @@ def scripted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Scripted:
     def machine() -> Tools:
         return NODE
 
+    def scrapped(worktree: Path, runner: object) -> None:
+        processes.ran.append(["scrapped", str(worktree)])
+
+    git = ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test"]
+    for arguments in [["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "one"]]:
+        Shell().run([*git, *arguments], tmp_path)
     monkeypatch.setattr(cli, "Shell", shell)
+    monkeypatch.setattr(cli, "scrapped", scrapped)
     monkeypatch.setattr(cli, "Machine", machine)
     monkeypatch.setattr(cli, "toplevel", toplevel)
     return processes
@@ -499,7 +798,9 @@ def test_lup_dev_check_exits_non_zero_when_a_step_fails(
     assert result.exit_code == exit_code
     assert scripted.ran == [["lint", "--strict"], ["types"], ["tests", "-q"]]
     last = result.output.strip().splitlines()[-1]
-    assert last == ("The gate passed." if code == 0 else "The gate failed: types.")
+    assert last.startswith(
+        "The gate passed. It's recorded" if code == 0 else "The gate failed: types."
+    )
 
 
 def test_lup_dev_check_fix_rewrites_first(scripted: Scripted, tmp_path: Path) -> None:
@@ -541,4 +842,49 @@ def test_lup_dev_check_fails_on_a_declaration_that_doesnt_load(
     assert "is a `builtins.int`, not a `lup_dev.declaration.project.Project`" in str(
         result.exception
     )
+    assert scripted.ran == []
+
+
+def test_lup_dev_check_twice_on_the_same_files_runs_the_steps_once(
+    scripted: Scripted, tmp_path: Path
+) -> None:
+    (tmp_path / "lup_project.py").write_text(DECLARED)
+    first = CliRunner().invoke(cli.app, ["check"])
+    second = CliRunner().invoke(cli.app, ["check", "--fix"])
+    again = CliRunner().invoke(cli.app, ["check", "--again"])
+    assert [result.exit_code for result in [first, second, again]] == [0, 0, 0]
+    assert second.output.startswith("The gate passed on these files already, at ")
+    assert [command[0] for command in scripted.ran] == 2 * ["lint", "types", "tests"]
+
+
+def test_lup_dev_check_at_a_commit_runs_its_gate_in_a_worktree_made_at_it(
+    scripted: Scripted, tmp_path: Path
+) -> None:
+    result = CliRunner().invoke(cli.app, ["check", "--at", "HEAD"])
+    assert result.exit_code == 0, result.output
+    [ran, scrapped] = scripted.ran
+    assert ran == Uv().judging(["lup-dev", "check"])
+    assert scrapped[0] == "scrapped"
+    assert result.output.startswith("The gate runs on ")
+    assert result.output.endswith("env ok\n")
+    repeated = CliRunner().invoke(cli.app, ["check", "--at", "HEAD"])
+    assert repeated.output.startswith("The gate passed on these files already, at ")
+    assert len(scripted.ran) == 2
+
+
+def test_lup_dev_check_at_a_commit_exits_as_its_gate_did(
+    scripted: Scripted,
+) -> None:
+    scripted.answers = {"env": Ran(code=1, output="The gate failed: tests.\n")}
+    result = CliRunner().invoke(cli.app, ["check", "--at", "HEAD"])
+    assert result.exit_code == 1
+    assert result.output.endswith("The gate failed: tests.\n")
+
+
+def test_lup_dev_check_at_a_commit_doesnt_fix(scripted: Scripted) -> None:
+    result = CliRunner().invoke(
+        cli.app, ["check", "--at", "HEAD", "--fix"], env={"COLUMNS": "300"}
+    )
+    assert result.exit_code == 2
+    assert "`--at` checks a commit's files as committed" in result.output
     assert scripted.ran == []

@@ -48,14 +48,17 @@ from lup_dev.codescan.directives import (
     Trackers,
     without,
 )
-from lup_dev.codescan.engine import EngineChecker
+from lup_dev.codescan.engine import EngineChecker, EngineError
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
+from lup_dev.declaration.load import load
 from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
+from lup_dev.declaration.resolve import resolve
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM, GitHubError, named
-from lup_dev.gate import Check, Shell, failed, report
+from lup_dev.gate import Check, Passed, Passes, Shell, at_commit, failed, report
+from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, nul_separated
 from lup_dev.host.client import Detached, HostClient, RoomClient
 from lup_dev.host.courier import Courier, Heard, Telling
@@ -117,6 +120,7 @@ from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.remote.config import Gating
 from lup_dev.remote.protocol import Remotes
 from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
@@ -125,6 +129,7 @@ from lup_dev.worker import worked
 if TYPE_CHECKING:
     from lup.tools.tool import ToolSpec
     from lup_dev.declaration.resolve import Resolved
+    from lup_dev.declaration.runner import Runner
     from lup_dev.host.rooms import RoomTools
     from lup_dev.policy.runtime import Runtime
 
@@ -778,8 +783,16 @@ def launched(
             neighbours=neighbours,
             shared=shared,
         )
+        integration = LupDevSettings().lup_integration_branch
+        gating = Gating(
+            command=declared.resolved.runner.command(["lup-dev", "check", "--at"]),
+            refs=[f"refs/heads/{integration}"],
+        )
         git = room_git(
-            repository, own, [*room.mounts, *adapter.agent().terminal(settings).mounts]
+            repository,
+            own,
+            [*room.mounts, *adapter.agent().terminal(settings).mounts],
+            gating,
         )
         registered = Register(
             launch=launch,
@@ -1133,6 +1146,24 @@ def check(
             help="First apply ruff's safe fixes and the formatter, rewriting files.",
         ),
     ] = False,
+    again: Annotated[
+        bool,
+        typer.Option(
+            "--again",
+            help="Run every step even where the gate passed on these files already.",
+        ),
+    ] = False,
+    at: Annotated[
+        str | None,
+        typer.Option(
+            "--at",
+            metavar="COMMIT",
+            help=(
+                "Run the gate on a commit, in a worktree made at it, unless it "
+                "passed on that commit's files already."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run the gate, every step even after one fails, and fail if any did.
 
@@ -1145,11 +1176,64 @@ def check(
     is non-zero when any step failed. With `--fix`, which the session landing work
     runs on the merged result, ruff's safe fixes and the formatter rewrite the
     worktree first.
+
+    A pass is recorded for the worktree's files, in the repository's git
+    directory, and a later run on the same files finds it and runs nothing,
+    unless `--again`. With `--at`, the gate runs on a commit, in a worktree made
+    at it and removed after, unless it passed on the commit's files already: a
+    push to the integration branch from a room runs it so.
     """
-    gated = Check.declared(toplevel(Path.cwd()), Shell(), Machine(), fix=fix).run()
-    typer.echo(report(gated))
-    if failed(gated.outcomes):
-        raise typer.Exit(code=1)
+    root = toplevel(Path.cwd())
+    passes = Passes.of(root, SystemClock())
+    if at is None:
+        gated = Check.declared(root, Shell(), Machine(), fix=fix, passes=passes).run(
+            again=again
+        )
+        typer.echo(report(gated))
+        if failed(gated.outcomes):
+            raise typer.Exit(code=1)
+        return
+    if fix:
+        message = (
+            "`--fix` rewrites the worktree's files, and `--at` checks a commit's "
+            "files as committed"
+        )
+        raise typer.BadParameter(message, param_hint="'--fix'")
+    runner = resolve(load(root).project).runner
+
+    def stop(made: Path) -> None:
+        scrapped(made, runner)
+
+    outcome = at_commit(
+        root, at, Shell(), passes, runner, say=typer.echo, stop=stop, again=again
+    )
+    match outcome:
+        case Passed():
+            typer.echo(outcome.said())
+        case GateRan(code=code, output=output):
+            typer.echo(output, nl=False)
+            if code != 0:
+                raise typer.Exit(code=code)
+
+
+def scrapped(worktree: Path, runner: Runner) -> None:
+    """End what a gate run left for the worktree at `worktree`, which goes next: its engine, and the store keeping the engine's lock and log.
+
+    An engine that can't be told to stop is said, and stops on its own once
+    idle (`LUP_ENGINE_IDLE`).
+    """
+    settings = LupDevSettings()
+    try:
+        EngineChecker.configured(settings).stop(worktree, runner)
+    except EngineError as failure:
+        typer.echo(
+            f"The engine the gate started for {worktree} wasn't stopped: {failure}. "
+            "It stops on its own once idle.",
+            err=True,
+        )
+    store = Layout.of(settings).store(worktree).home
+    if store.exists():
+        shutil.rmtree(store)
 
 
 @app.command("trust")

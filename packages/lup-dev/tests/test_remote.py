@@ -30,7 +30,7 @@ from lup_dev.host.protocol import Done, HostError, Limits, Register, Reply, Stop
 from lup_dev.host.service import Answerer, Asked, HostService, Judged
 from lup_dev.launch.room import RoomError, RoomGit, room_git
 from lup_dev.layout import ROOM_PATH, HostLayout, LaunchLayout, LaunchSockets
-from lup_dev.remote.config import room_config
+from lup_dev.remote.config import Gating, room_config
 from lup_dev.remote.protocol import (
     Advertised,
     Fetched,
@@ -136,6 +136,23 @@ DEFAULT = Limits(
     protected=["refs/heads/main", "refs/tags/*"],
 )
 
+UNGATED = Gating(command=["false"], refs=[])
+"""A room whose pushes run no gate: no ref is gated."""
+
+GATE = """
+import json, os, sys
+from pathlib import Path
+
+log, commit = Path(sys.argv[1]), sys.argv[2]
+seen = {"commit": commit, "cwd": os.getcwd(), "git_dir": os.environ.get("GIT_DIR")}
+with log.open("a") as written:
+    written.write(json.dumps(seen) + "\\n")
+print(f"the gate's report on {commit}")
+sys.exit(1 if (log.parent / "failing").exists() else 0)
+"""
+"""A gate that records each commit it ran on, where and with which git
+directory, prints a report, and fails where a `failing` file is beside its log."""
+
 
 class World:
     """The host's repository, its forge, a launch of it served, and its room's git."""
@@ -156,7 +173,18 @@ class World:
         shim = tmp_path / "shim"
         shim.mkdir()
         (shim / "python3").symlink_to(sys.executable)
-        self.room = RoomGit(repository=bare, launch=self.launch)
+        gate = tmp_path / "gate.py"
+        gate.write_text(GATE)
+        self.log = tmp_path / "gate" / "ran.jsonl"
+        self.log.parent.mkdir()
+        self.room = RoomGit(
+            repository=bare,
+            launch=self.launch,
+            gating=Gating(
+                command=[sys.executable, str(gate), str(self.log)],
+                refs=["refs/heads/dev", "refs/heads/release/1"],
+            ),
+        )
         self.room.write()
         git(
             tmp_path,
@@ -230,6 +258,16 @@ class World:
         made = self.room_git("commit", "-q", "--allow-empty", "-m", message)
         assert made.exit_code == 0, made.stderr.decode()
         return git(self.worktree, "rev-parse", "HEAD")
+
+    def gated(self) -> list[dict[str, str | None]]:
+        """Return each run of the gate, in order: its commit, where it ran, and the git directory it was given."""
+        if not self.log.exists():
+            return []
+        return [json.loads(line) for line in self.log.read_text().splitlines()]
+
+    def failing(self) -> None:
+        """Have every later run of the gate fail."""
+        (self.log.parent / "failing").touch()
 
     def on_forge(self, ref: str) -> str | None:
         found = subprocess.run(
@@ -747,7 +785,15 @@ def test_the_room_s_configuration_sends_every_remote_url_through_the_helper(
     git(bare, "remote", "add", "mirror", "https://mirror.example/a b.git")
     written = tmp_path / "launch" / "gitconfig"
 
-    room_config(bare, written, Path("/run/lup/request.sock"))
+    room_config(
+        bare,
+        written,
+        Path("/run/lup/request.sock"),
+        Gating(
+            command=["uv", "run", "lup-dev", "check", "--at"],
+            refs=["refs/heads/dev"],
+        ),
+    )
 
     def read(key: str) -> list[str]:
         return git(tmp_path, "config", "--file", str(written), "--get-all", key).split(
@@ -764,13 +810,17 @@ def test_the_room_s_configuration_sends_every_remote_url_through_the_helper(
     assert read("branch.autoSetupMerge") == ["false"]
     assert read("push.default") == ["current"]
     assert read("lup.requestSocket") == ["/run/lup/request.sock"]
+    assert [json.loads(each) for each in read("lup.gate")] == [
+        ["uv", "run", "lup-dev", "check", "--at"]
+    ]
+    assert [json.loads(each) for each in read("lup.gated")] == [["refs/heads/dev"]]
 
 
 def test_a_launch_writes_the_helper_and_puts_it_first_on_the_room_s_path(
     bare: Path, tmp_path: Path
 ) -> None:
     launch = LaunchLayout(directory=tmp_path / "launch")
-    room = room_git(bare, launch, [Mount(source=bare)])
+    room = room_git(bare, launch, [Mount(source=bare)], UNGATED)
 
     room.write()
 
@@ -789,12 +839,117 @@ def test_a_launch_writes_the_helper_and_puts_it_first_on_the_room_s_path(
     ) == str(LaunchSockets(directory=Path("/run/lup")).request)
 
 
+# Gating
+
+
+def test_a_push_to_a_gated_ref_runs_the_gate_on_its_commit_first(
+    world: World, clock: FakeClock
+) -> None:
+    tip = world.commit("first")
+
+    with world.served(clock):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/dev")
+        released = world.room_git("push", "origin", "HEAD:refs/heads/release/1")
+
+    assert pushed.exit_code == 0, stderr(pushed)
+    assert released.exit_code == 0, stderr(released)
+    assert world.on_forge("refs/heads/dev") == tip
+    assert world.on_forge("refs/heads/release/1") == tip
+    ran = {"commit": tip, "cwd": str(world.worktree), "git_dir": None}
+    assert world.gated() == [ran, ran]
+    assert f"lup: the gate, on {tip}, before it reaches refs/heads/dev" in stderr(
+        pushed
+    )
+    assert f"the gate's report on {tip}" in stderr(pushed)
+
+
+def test_an_update_whose_gate_fails_is_held_saying_why_and_the_others_go(
+    world: World, clock: FakeClock
+) -> None:
+    tip = world.commit("first")
+    world.failing()
+
+    with world.served(clock):
+        held = world.room_git(
+            "push", "origin", "HEAD:refs/heads/dev", "HEAD:refs/heads/feat"
+        )
+
+    assert held.exit_code != 0
+    assert world.on_forge("refs/heads/dev") is None
+    assert world.on_forge("refs/heads/feat") == tip
+    assert f"the gate failed on {tip}, its report above, so it isn't pushed" in (
+        stderr(held)
+    )
+    assert f"the gate's report on {tip}" in stderr(held)
+
+
+def test_an_atomic_push_with_an_update_held_pushes_none(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("first")
+    world.failing()
+
+    with world.served(clock):
+        held = world.room_git(
+            "push", "--atomic", "origin", "HEAD:refs/heads/dev", "HEAD:refs/heads/feat"
+        )
+
+    assert held.exit_code != 0
+    assert world.on_forge("refs/heads/dev") is None
+    assert world.on_forge("refs/heads/feat") is None
+    assert "not pushed: the push is atomic, and `refs/heads/dev` was held" in stderr(
+        held
+    )
+
+
+def test_a_ref_nothing_gates_a_dry_run_and_a_deletion_run_no_gate(
+    world: World, clock: FakeClock
+) -> None:
+    tip = world.commit("first")
+    allowing = Limits(actions=["fetch", "push", "delete-ref"], protected=[])
+
+    with world.served(clock, allowing):
+        assert world.room_git("push", "origin", "HEAD:refs/heads/dev").exit_code == 0
+        feat = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+        dry = world.room_git("push", "--dry-run", "origin", "HEAD:refs/heads/dev")
+        deleted = world.room_git("push", "origin", ":refs/heads/dev")
+
+    for each in [feat, dry, deleted]:
+        assert each.exit_code == 0, stderr(each)
+    assert [each["commit"] for each in world.gated()] == [tip]
+    assert world.on_forge("refs/heads/dev") is None
+
+
+def test_a_gate_the_room_s_configuration_garbles_is_said(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("first")
+    git(
+        world.tmp_path,
+        "config",
+        "--file",
+        str(world.launch.gitconfig),
+        "lup.gate",
+        "uv run lup-dev check --at",
+    )
+
+    with world.served(clock):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/dev")
+
+    assert pushed.exit_code != 0
+    assert (
+        "lup: `lup.gate` in the room's git configuration is 'uv run lup-dev check "
+        "--at', not a JSON list of strings" in stderr(pushed)
+    )
+    assert world.on_forge("refs/heads/dev") is None
+
+
 # Refused at launch
 
 
 def refused(bare: Path, tmp_path: Path, mounts: list[Mount | Mask]) -> str:
     with pytest.raises(RoomError) as refusal:
-        room_git(bare, LaunchLayout(directory=tmp_path / "launch"), mounts)
+        room_git(bare, LaunchLayout(directory=tmp_path / "launch"), mounts, UNGATED)
     return str(refusal.value)
 
 
@@ -860,7 +1015,12 @@ def test_a_link_outside_the_mounts_into_them_is_refused_and_an_include_outside_t
     (outside / "more.cfg").write_text("[core]\n\tabbrev = 12\n")
     git(bare, "config", "include.path", str(outside / "plain.cfg"))
 
-    room_git(bare, LaunchLayout(directory=tmp_path / "launch"), [Mount(source=bare)])
+    room_git(
+        bare,
+        LaunchLayout(directory=tmp_path / "launch"),
+        [Mount(source=bare)],
+        UNGATED,
+    )
 
     (outside / "linked.cfg").symlink_to(bare / "info" / "exclude")
     git(bare, "config", "--add", "include.path", str(outside / "linked.cfg"))
@@ -935,7 +1095,7 @@ def test_the_room_s_git_is_written_from_the_repository_s_own_config_past_a_plant
     git(theirs, "config", "include.path", "config")
     launch = LaunchLayout(directory=tmp_path / "launch")
 
-    room_git(bare, launch, [Mount(source=bare)]).write()
+    room_git(bare, launch, [Mount(source=bare)], UNGATED).write()
 
     assert (
         git(

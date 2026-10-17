@@ -18,7 +18,10 @@ mounts*): "if `GIT_CONFIG_GLOBAL` is set, neither `$HOME/.gitconfig` nor
   to `config` fail, so nothing records an upstream there, and a branch's push
   names its remote or relies on `push.default`;
 - `lup.requestSocket`, the launch's request socket as the room sees it, where the
-  helper sends its requests.
+  helper sends its requests;
+- `lup.gate` and `lup.gated` (`Gating`), each a JSON list: the command the helper
+  runs on a commit before a push puts it on a gated ref, and those refs' full
+  names.
 
 The URLs are read from the repository's `config` as written, which is what the
 room's git rewrites; git writes each value (`git config --file`), quoting it.
@@ -26,15 +29,29 @@ git runs in the repository's git directory pinned there (`Git.pinned`), so a
 `commondir` a room planted at its top leads it to no other `config`.
 """
 
+import json
 from typing import TYPE_CHECKING
 
+from lup.types import Model
 from lup_dev.git import Git, nul_separated
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def room_config(repository: Path, path: Path, requests: Path) -> None:
+class Gating(Model):
+    """What a push from the room runs first: the gate on the commit it would put on a gated ref (`remote/helper.py`)."""
+
+    command: list[str]
+    """The command running the gate on a commit, whose object id the helper
+    gives after it: `lup-dev check --at`, through the project's runner."""
+    refs: list[str]
+    """Full ref names: the refs a push updates only once the gate passed on the
+    commit, the integration branch's. Names, not patterns: one branch needs
+    none, and the helper's import contract names each module it may import."""
+
+
+def room_config(repository: Path, path: Path, requests: Path, gating: Gating) -> None:
     """Write the room's git configuration to `path`, for the repository whose git directory is `repository`.
 
     `requests` is the launch's request socket, where the room mounts it.
@@ -63,3 +80,5 @@ def room_config(repository: Path, path: Path, requests: Path) -> None:
     git.run("config", "--file", written, "branch.autoSetupMerge", "false")
     git.run("config", "--file", written, "push.default", "current")
     git.run("config", "--file", written, "lup.requestSocket", str(requests))
+    git.run("config", "--file", written, "lup.gate", json.dumps(gating.command))
+    git.run("config", "--file", written, "lup.gated", json.dumps(gating.refs))

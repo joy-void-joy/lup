@@ -22,6 +22,16 @@ directory, within the limits the project's declaration sets
 - `fetch`: the objects fetched on the host into the repository's own store,
   which the room shares, so git writes the room's refs itself.
 
+Before a push updates a ref the room's configuration gates (`lup.gated`, the
+integration branch), the gate runs on the commit it would name: the command
+`lup.gate` holds (`lup-dev check --at`, through the project's runner), the
+commit's object id after it, which answers at once where the gate passed on that
+commit's files already. It runs in the room, outside the repository git runs the
+helper for: without the variables naming it (`git rev-parse --local-env-vars`),
+as it would run from a terminal. What it prints is shown on git's standard
+error. An update whose gate fails isn't sent, its `error` saying so, and with
+`--atomic`, none is; a dry run runs no gate.
+
 The room's Python runs it, with the standard library alone (an import contract
 keeps it so): it writes the host's requests as JSON by hand, so a test runs it
 under git and reads what it sends as the host's models.
@@ -30,7 +40,7 @@ under git and reads what it sends as the host's models.
 import json
 import socket
 
-# lup: ignore("subprocess", why="the room's Python has no sh: the helper runs on the standard library alone")
+# lup: ignore("subprocess", why="the room's Python runs the helper on the standard library alone, without lup's `programs`")
 import subprocess
 import sys
 from itertools import takewhile
@@ -61,6 +71,43 @@ def git(*arguments: str) -> str | None:
     return ran.stdout.strip() if ran.returncode == 0 else None
 
 
+def configured(key: str) -> list[str] | None:
+    """Return the words the room's git configuration holds at `key`, written as a JSON list, or none where it holds nothing there."""
+    value = git("config", "--get", key)
+    if value is None:
+        return None
+    message = (
+        f"`{key}` in the room's git configuration is {value!r}, not a JSON list "
+        "of strings"
+    )
+    try:
+        parsed: Json = json.loads(value)
+    except json.JSONDecodeError as unreadable:
+        raise failed(message) from unreadable
+    words = (
+        [each for each in parsed if isinstance(each, str)]
+        if isinstance(parsed, list)
+        else []
+    )
+    if not isinstance(parsed, list) or len(words) != len(parsed):
+        raise failed(message)
+    return words
+
+
+def outside() -> list[str]:
+    """Return the command that runs a program outside the repository git runs the helper for: `env` without git's variables naming it.
+
+    git names the repository to the helper (`GIT_DIR`, `GIT_PREFIX`), and a
+    program run with them reads that repository wherever it runs, a worktree
+    made elsewhere too.
+    """
+    local = git("rev-parse", "--local-env-vars")
+    if local is None:
+        message = "git didn't list the variables naming a repository"
+        raise failed(message)
+    return ["env", *(f"--unset={name}" for name in local.splitlines())]
+
+
 def parted(text: str) -> list[str]:
     """Return the two sides of `text` around its last `:`, as git writes a push's refspec and a lease.
 
@@ -75,25 +122,35 @@ def parted(text: str) -> list[str]:
     return sides
 
 
-def update(refspec: str) -> dict[str, Json]:
-    """Return one update of a push as the host reads it, from git's `[+]<src>:<dst>`.
+class Update:
+    """One update of a push: the object it names, its destination, and whether git was asked to force it."""
 
-    The source is resolved in the room's repository; an empty one is a deletion.
-    """
-    source, destination = parted(refspec.removeprefix("+"))
-    resolved = (
-        git("rev-parse", "--verify", "--quiet", "--end-of-options", source)
-        if source
-        else None
-    )
-    if source and resolved is None:
-        message = f"`{source}` names no object in this repository"
-        raise failed(message)
-    return {
-        "source": resolved,
-        "destination": destination,
-        "forced": refspec.startswith("+"),
-    }
+    def __init__(self, refspec: str) -> None:
+        """Read one update from git's `[+]<src>:<dst>`.
+
+        The source is resolved in the room's repository; an empty one is a
+        deletion, which names no object.
+        """
+        source, destination = parted(refspec.removeprefix("+"))
+        resolved = (
+            git("rev-parse", "--verify", "--quiet", "--end-of-options", source)
+            if source
+            else None
+        )
+        if source and resolved is None:
+            message = f"`{source}` names no object in this repository"
+            raise failed(message)
+        self.source = resolved
+        self.destination = destination
+        self.forced = refspec.startswith("+")
+
+    def sent(self) -> dict[str, Json]:
+        """Return the update as the host reads it."""
+        return {
+            "source": self.source,
+            "destination": self.destination,
+            "forced": self.forced,
+        }
 
 
 def lease(value: str) -> dict[str, Json]:
@@ -105,12 +162,25 @@ def lease(value: str) -> dict[str, Json]:
 class Helper:
     """One run of the helper, for one remote: the options git set, and where the host answers."""
 
-    def __init__(self, remote: str, requests: Path) -> None:
-        """Start a run for `remote`, asking the host on the socket at `requests`."""
+    def __init__(
+        self,
+        remote: str,
+        requests: Path,
+        gate: list[str] | None = None,
+        gated: list[str] | None = None,
+    ) -> None:
+        """Start a run for `remote`, asking the host on the socket at `requests`.
+
+        A push updating one of the `gated` refs runs `gate` first, a commit's
+        object id after it; none runs where there's no `gate`.
+        """
         self.remote = remote
         """The remote, by the name git gave: one of the repository's, or a URL."""
         self.requests = requests
         """The launch's request socket."""
+        self.gate = gate
+        self.gated = gated or []
+        """Full ref names, as a push's destination is."""
         self.force = False
         self.dry_run = False
         self.atomic = False
@@ -214,14 +284,23 @@ class Helper:
                 raise failed(message)
 
     def pushed(self, refspecs: list[str]) -> None:
-        """Push one batch through the host, and print each destination's `ok` or `error`."""
-        updates = [update(each) for each in refspecs]
-        destinations = [parted(each)[1] for each in refspecs]
+        """Push one batch through the host, its gated updates held where their gate fails, and print each destination's `ok` or `error`."""
+        updates = [Update(each) for each in refspecs]
+        destinations = [each.destination for each in updates]
+        held = self.held(updates)
+        sending = [each.sent() for each in updates if each.destination not in held]
+        stopped = [f"error {each} {why}" for each, why in held.items()]
+        if held and (self.atomic or not sending):
+            first = next(iter(held))
+            atomic = f"not pushed: the push is atomic, and `{first}` was held"
+            rest = [each for each in destinations if each not in held]
+            self.said(*stopped, *(f"error {each} {atomic}" for each in rest), "")
+            return
         reply = self.asked(
             {
                 "kind": "remote-push",
                 "remote": self.remote,
-                "updates": list[Json](updates),
+                "updates": list[Json](sending),
                 "force": self.force,
                 "leases": self.leases,
                 "dry_run": self.dry_run,
@@ -231,12 +310,51 @@ class Helper:
         )
         match reply:
             case {"kind": "remote-pushed", "updates": list() as outcomes}:
-                self.said(*(self.outcome(each) for each in outcomes), "")
+                self.said(*(self.outcome(each) for each in outcomes), *stopped, "")
             case {"kind": "refused", "error": str() as error}:
-                self.said(*(f"error {each} {error}" for each in destinations), "")
+                sent = [each for each in destinations if each not in held]
+                self.said(*(f"error {each} {error}" for each in sent), *stopped, "")
             case _:
                 message = f"lup's host service answered {reply!r} to a push"
                 raise failed(message)
+
+    def held(self, updates: list[Update]) -> dict[str, str]:
+        """Run the gate on each commit the push would put on a gated ref, and return why each update whose gate failed is held, by its destination."""
+        if self.gate is None or self.dry_run:
+            return {}
+        gating = {
+            each.destination: each.source
+            for each in updates
+            if each.source is not None and each.destination in self.gated
+        }
+        reasons = {
+            source: self.failing(self.gate, source, destination)
+            for destination, source in gating.items()
+        }
+        return {
+            destination: reason
+            for destination, source in gating.items()
+            if (reason := reasons[source]) is not None
+        }
+
+    def failing(self, gate: list[str], commit: str, destination: str) -> str | None:
+        """Run `gate` on `commit` before it reaches `destination`, what it prints shown on git's standard error, and say why it's held, or none where the gate passed."""
+        sys.stderr.write(
+            f"lup: the gate, on {commit}, before it reaches {destination}\n"
+        )
+        sys.stderr.flush()
+        try:
+            ran = subprocess.run(
+                [*outside(), *gate, commit],
+                stdin=subprocess.DEVNULL,
+                stdout=sys.stderr,
+                check=False,
+            )
+        except OSError as missing:
+            return f"the gate couldn't run ({missing}), so `{commit}` isn't pushed"
+        if ran.returncode != 0:
+            return f"the gate failed on {commit}, its report above, so it isn't pushed"
+        return None
 
     def outcome(self, updated: Json) -> str:
         """Return how one update ended, as git reads it: `ok <dst>`, or `error <dst> <why>`."""
@@ -277,7 +395,12 @@ def main() -> None:
             "pushes and fetches through lup's host service, from a launched room"
         )
         raise failed(message)
-    Helper(remote=sys.argv[1], requests=Path(requests)).run(iter(sys.stdin))
+    Helper(
+        remote=sys.argv[1],
+        requests=Path(requests),
+        gate=configured("lup.gate"),
+        gated=configured("lup.gated"),
+    ).run(iter(sys.stdin))
 
 
 if __name__ == "__main__":
