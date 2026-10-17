@@ -163,6 +163,14 @@ lup-dev inbox send <launch> <text>    a message to the session a launch runs, by
 - **A desktop notice** when an item for the operator arrives, through `notify-send`: the repository's worktree, the kind, and the item's first line. `Notices` and `NotifySend` are the inbox's (`inbox/notices.py`). `notify-send` is an optional requirement of the host, said once where it's missing.
 - **Set aside:** bridging into the first lup's dashboard (#56 suggested it as the inbox's first face), which costs a keeper parking each review again as the dashboard expires it, an hour after it's parked, and a bridge loaded by path: the stopgap lup stops building on.
 
+### Watching
+
+A face that stays open, the dashboard first, sees what the operator's commands fetch as it changes, with nothing polled (`host/watch.py`):
+- **A watch is a connection on the host's watch socket** (`HostLayout.watch`, beside the control socket, on the host only), carrying one control request on its first line, any kind the control socket answers. The service answers it at once, then again each time what it holds may have changed, sending the reply, one JSON line, where it differs from the one it sent last. A refusal is the last line. The sender keeps its side open while it watches, so its closing is heard and the watch ends with it; the control socket's own protocol, a request read to its end and one reply, stays as it is.
+- **What it holds changes in three places alone,** each telling the service's `Changes`: a request answered on the control socket or a room's `request.sock`, a hook answered, and an item of the inbox written (`Inbox.kept`), which catches a question asked with `wait`, made while its call is still held.
+- **From an event loop,** `host/client.py`'s `requested` asks one request and `watching` yields a request's replies as they change, raising `HostError` once the service closes the watch, as a service stopping does.
+- **What each conversation is doing** comes with the launches listed (`Talker.activity`): running a call, its tool by the runtime's name and whether it's one of lup's, which may hold it until the operator answers; between calls; or ended, a subagent whose conversation is over; each since its hook, through `lup_dev.clock`. It's held in memory, so a service started again knows a conversation's from its next hook.
+
 ## Credentials on the host
 
 `DESIGN.md` (*Policy*): "credentials (a host service doing one action without asking, within limits the declaration sets, such as no push to `main` and no force push)"; "pushes happen from the host". The room holds no SSH agent, key, token or `gh` login (`docs/launch.md`, *The mounts*), and this piece lends it none.

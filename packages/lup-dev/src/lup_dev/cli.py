@@ -65,6 +65,7 @@ from lup_dev.host.courier import Courier, Heard, Spawned, Spawns, Telling
 from lup_dev.host.names import shaped
 from lup_dev.host.protocol import GitHubRepository, HostError, Listed, Register
 from lup_dev.host.service import Answerer, HostService, Naming
+from lup_dev.host.watch import Changes
 from lup_dev.host.workers import Workers
 from lup_dev.inbox.delivery import Delivery, opening, what, who
 from lup_dev.inbox.notices import NotifySend
@@ -320,8 +321,9 @@ def host_serve(context: typer.Context) -> None:
     known = Adapters(known=adapters())
     couriers = Couriers(adapters=known)
     layout = Layout.of(LupDevSettings())
+    changes = Changes()
     delivery = Delivery(
-        inbox=Inbox.opened(layout.inbox),
+        inbox=Inbox.opened(layout.inbox, changes),
         courier=couriers,
         layout=layout.host,
         notices=NotifySend(),
@@ -340,6 +342,7 @@ def host_serve(context: typer.Context) -> None:
         modules=Workers(layout=layout.host, say=typer.echo),
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
+        changes=changes,
     )
     asyncio.run(service.serve())
 

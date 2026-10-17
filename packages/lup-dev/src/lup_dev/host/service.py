@@ -55,6 +55,7 @@ from lup.tools.serving import Answer, serve
 from lup.tools.tool import Accepted, AgentTool, ToolSpec, lup_tool
 from lup.tools.tool import Refused as Rejected
 from lup.types import Model, MutableModel
+from lup_dev.clock import Clock, SystemClock
 from lup_dev.host.courier import (
     Conversation,
     Conversations,
@@ -67,6 +68,7 @@ from lup_dev.host.courier import (
 )
 from lup_dev.host.names import Names, claimed, held, shaped, taken
 from lup_dev.host.protocol import (
+    Activity,
     Done,
     HostError,
     Listed,
@@ -84,6 +86,7 @@ from lup_dev.host.protocol import (
     handle,
 )
 from lup_dev.host.rooms import SERVER, LaunchTools, RoomRoute, RoomTools
+from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
     Called,
     Calling,
@@ -218,12 +221,15 @@ def bound(room: RoomRoute, launch: Register) -> Route:
 
 
 class Dispatcher(Model, arbitrary_types_allowed=True):
-    """One typed request per connection, answered by the route its kind names, and one reply."""
+    """One typed request per connection, answered by the route its kind names, and one reply; on the watch socket, a request's replies as they change."""
 
     routes: dict[str, Route]
     answering: str
     """Who answers on the socket, as a refusal names it."""
     say: Callable[[str], None]
+    changes: Changes
+    """Told once each request is answered, since it may have changed what the
+    service holds; waited on by each watch."""
 
     async def connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -238,12 +244,44 @@ class Dispatcher(Model, arbitrary_types_allowed=True):
         try:
             if raw:
                 reply = await self.answered(raw)
+                self.changes.changed()
                 writer.write(reply.model_dump_json().encode())
                 await writer.drain()
             writer.close()
             await writer.wait_closed()
         except ConnectionError as gone:
             self.say(f"a request's sender left before its reply: {gone}")
+
+    async def watching(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        """Answer one request, its line read, at once and again at each change where its reply differs, one JSON line each, until its sender closes the connection.
+
+        A refusal is the last line. The sender keeps its side open while it
+        watches, so its closing is heard, and the watch ends with it.
+        """
+        raw = (await reader.readline()).decode()
+        gone = asyncio.ensure_future(reader.read())
+        sent = ""
+        try:
+            while not gone.done():
+                seen = self.changes.count
+                reply = await self.answered(raw)
+                line = reply.model_dump_json()
+                if line != sent:
+                    writer.write(f"{line}\n".encode())
+                    await writer.drain()
+                    sent = line
+                if isinstance(reply, Refused):
+                    return
+                changed = asyncio.ensure_future(self.changes.after(seen))
+                await asyncio.wait([changed, gone], return_when=asyncio.FIRST_COMPLETED)
+                changed.cancel()
+        except ConnectionError as left:
+            self.say(f"a watch's sender left: {left}")
+        finally:
+            gone.cancel()
+            writer.close()
 
     async def answered(self, raw: str) -> Reply:
         """Answer one request with the route its kind names.
@@ -409,9 +447,16 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's,
     returning those it rewrote; none leaves them as the launch wrote them."""
+    changes: Changes
+    """Told once each hook is answered, and each room's request."""
+    clock: Clock
+    """When each conversation's activity began."""
     served: dict[str, Served] = {}
     pending: list[asyncio.Task[None]] = []
     """What the launches' modules' hooks are running that nothing waits on."""
+    activities: dict[str, Activity] = {}
+    """By lup's id for each conversation, what its latest hook said it's doing,
+    in memory."""
 
     async def open(self, registering: Register) -> Register:
         """Serve a launch: its name, its directory, its sockets inside, its record; and return it as it stands, named.
@@ -463,6 +508,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             routes={**relaying, **own},
             answering="a room's request socket",
             say=said,
+            changes=self.changes,
         )
 
         async def hook(
@@ -628,6 +674,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             told = "".join(traceback.format_exception(failure))
             self.say(f"{request.launch}: answering a hook failed:\n{told}")
             spoken = Spoken(answer="")
+        self.changes.changed()
         try:
             writer.write(spoken.answer.encode())
             await writer.drain()
@@ -667,6 +714,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         conversation = conversations.named(heard.session, heard.agent)
         noted = self.spawning(request, conversations, conversation, heard, payload)
         conversation, said = noted.conversation, noted.said
+        self.activities = {**self.activities, conversation.id: self.activity(heard)}
         if heard.event in self.served[request.launch].offered.occasions:
             happening = Happening(
                 occasion=heard.event,
@@ -865,6 +913,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 kind=each.kind,
                 parent=None if parent is None else conversations.path(parent, launch),
                 depth=depth,
+                activity=self.activities.get(each.id),
             )
 
         def under(parent: str, depth: int) -> list[Talker]:
@@ -881,6 +930,19 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
         main = conversations.main()
         return [] if main is None else [talker(main, 0), *under(main.id, 1)]
+
+    def activity(self, heard: Heard) -> Activity:
+        """Return what a hook says its conversation is doing, from the hook on: running the call it starts, between calls, or ended."""
+        at = self.clock.now()
+        match heard.event:
+            case "call-started":
+                return Activity(
+                    state="calling", since=at, tool=heard.tool, lups=heard.served
+                )
+            case "conversation-ended":
+                return Activity(state="ended", since=at)
+            case _:
+                return Activity(state="idle", since=at)
 
     def named(self, request: Register) -> str:
         """Return launch `request`'s name as it stands."""
@@ -1112,6 +1174,12 @@ class HostService(Model, arbitrary_types_allowed=True):
     the service serves it again, returning those it rewrote: git's remote
     helper and lup's MCP bridge (`cli.py`), so a restart on an approved copy
     reaches running rooms. None leaves them as the launch wrote them."""
+    changes: Changes = Field(default_factory=Changes)
+    """Told wherever what the service holds may have changed, so each watch
+    answers its request again: the service's own sockets tell it, and so does
+    the inbox's store, given the same (`cli.py`)."""
+    clock: Clock = Field(default_factory=SystemClock)
+    """When each conversation's activity began; a test gives its own."""
 
     @model_validator(mode="after")
     def distinct(self) -> Self:
@@ -1172,6 +1240,8 @@ class HostService(Model, arbitrary_types_allowed=True):
             names=Names(path=self.layout.names),
             spawns=self.spawns,
             refresh=self.refresh,
+            changes=self.changes,
+            clock=self.clock,
         )
         stopped = asyncio.Event()
         own = [
@@ -1185,16 +1255,21 @@ class HostService(Model, arbitrary_types_allowed=True):
             routes={route.kind: route for route in [*own, *self.routes]},
             answering="the service",
             say=self.say,
+            changes=self.changes,
         )
         try:
             await launches.reopen()
             server = await asyncio.start_unix_server(
                 control.connection, path=self.layout.control
             )
+            watches = await asyncio.start_unix_server(
+                control.watching, path=self.layout.watch, limit=self.line_limit
+            )
             self.say(f"The host service listens on {self.layout.control}.")
             try:
                 yield Serving(stopped=stopped)
             finally:
+                await closed(watches)
                 await closed(server)
         finally:
             await launches.shut()

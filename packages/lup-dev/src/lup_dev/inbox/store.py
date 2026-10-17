@@ -37,6 +37,7 @@ from pydantic import Field, ValidationError
 
 from lup.types import Model, MutableModel
 from lup_dev.host.protocol import HostError
+from lup_dev.host.watch import Changes
 from lup_dev.layout import InboxLayout
 from lup_dev.stored import read_model, write_model
 
@@ -272,10 +273,13 @@ class Inbox(MutableModel):
     """By number."""
     whereabouts: dict[str, Whereabouts] = {}
     """By conversation's key."""
+    changes: Changes | None = None
+    """Told each time an item is written, so the host service's watches see it
+    (`host/watch.py`); none tells nothing."""
 
     @classmethod
-    def opened(cls, layout: InboxLayout) -> Inbox:
-        """Read the inbox kept at `layout`; one never written is empty.
+    def opened(cls, layout: InboxLayout, changes: Changes | None = None) -> Inbox:
+        """Read the inbox kept at `layout`, telling `changes` of each item written; one never written is empty.
 
         Raise `InboxError` naming a file that doesn't read.
         """
@@ -285,12 +289,15 @@ class Inbox(MutableModel):
             layout=layout,
             items={item.number: item for item in items},
             whereabouts={place.conversation.key(): place for place in places},
+            changes=changes,
         )
 
     def kept(self, item: Item) -> Item:
         """Write `item` through to its file, and hold it."""
         write_model(self.layout.item(item.number), item)
         self.items = {**self.items, item.number: item}
+        if self.changes is not None:
+            self.changes.changed()
         return item
 
     def made(

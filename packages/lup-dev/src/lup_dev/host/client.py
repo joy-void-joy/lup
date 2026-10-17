@@ -15,10 +15,12 @@ answer, holds its connection open (`HostClient.held`, `Outstanding`), with no
 time limit: it's waited on for as long as the operator takes.
 """
 
+import asyncio
 import select
 import socket
 import sys
 from abc import ABC, abstractmethod
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -46,7 +48,7 @@ from lup_dev.host.protocol import (
 from lup_dev.layout import ROOM_SOCKETS, HostLayout, LaunchSockets
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncGenerator, Callable
 
 
 def read_reply[R: Reply](answer: bytes, reply: type[R]) -> R:
@@ -96,6 +98,69 @@ def asked[R: Reply](
         message = "the host service closed the connection without answering"
         raise HostError(message)
     return read_reply(answer, reply)
+
+
+async def requested[R: Reply](path: Path, request: Request, reply: type[R]) -> R:
+    """Send one request on the host service's socket at `path` from an event loop, and read its reply as `reply`.
+
+    A refusal raises `HostError` with the service's reason, as does finding no
+    service to ask on `path`, or a connection closed without a reply.
+    """
+    async with opened(path) as connected:
+        connected.writer.write(request.model_dump_json().encode())
+        connected.writer.write_eof()
+        answer = await connected.reader.read()
+    if not answer:
+        message = "the host service closed the connection without answering"
+        raise HostError(message)
+    return read_reply(answer, reply)
+
+
+async def watching[R: Reply](
+    path: Path, request: Request, reply: type[R]
+) -> AsyncGenerator[R]:
+    """Watch `request` on the host service's watch socket at `path`: its reply as `reply` at once, then again each time it changes, until the generator is closed.
+
+    The connection stays open both ways while it watches, so the service hears
+    it close. A refusal raises `HostError` with the service's reason, as does
+    finding no service to ask on `path`, or the service closing the watch, as a
+    service stopping does.
+    """
+    async with opened(path) as connected:
+        connected.writer.write(f"{request.model_dump_json()}\n".encode())
+        await connected.writer.drain()
+        async for line in connected.reader:
+            yield read_reply(line, reply)
+    message = "the host service closed the watch"
+    raise HostError(message)
+
+
+@asynccontextmanager
+async def opened(
+    path: Path, limit: int = 16 * 1024 * 1024
+) -> AsyncGenerator[Connected]:
+    """Connect to the host service's socket at `path` from an event loop, and close the connection on leaving.
+
+    Its replies are read as lines of up to `limit` bytes, past asyncio's 64 KiB,
+    which an inbox's list with long items passes. Finding no service to ask on
+    `path` raises `HostError`.
+    """
+    try:
+        reader, writer = await asyncio.open_unix_connection(str(path), limit=limit)
+    except (FileNotFoundError, ConnectionRefusedError) as gone:
+        message = f"no host service answers on {path}"
+        raise HostError(message) from gone
+    try:
+        yield Connected(reader=reader, writer=writer)
+    finally:
+        writer.close()
+
+
+class Connected(Model, arbitrary_types_allowed=True):
+    """A connection to the host service from an event loop: what it reads, and what it writes."""
+
+    reader: asyncio.StreamReader
+    writer: asyncio.StreamWriter
 
 
 class Outstanding(Model, arbitrary_types_allowed=True):

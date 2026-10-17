@@ -42,6 +42,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.host.protocol import Register, Reply
 from lup_dev.host.records import Records
 from lup_dev.host.service import Dispatcher, Handler, Route
+from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
     Called,
     Calling,
@@ -286,6 +287,7 @@ async def serve(modules: Serving, socket: Path, say: Callable[[str], None]) -> N
         },
         answering=f"launch {modules.launch.launch}'s modules",
         say=say,
+        changes=Changes(),
     )
     server = await asyncio.start_unix_server(dispatcher.connection, path=socket)
     sys.stdout.write("ready\n")

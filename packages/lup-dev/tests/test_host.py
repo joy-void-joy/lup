@@ -40,13 +40,24 @@ from lup_dev import (
     cli,
 )
 from lup_dev.declaration.resolve import resolve
-from lup_dev.host.client import HostClient, RoomClient, Starter
+from lup_dev.host.client import (
+    HostClient,
+    RoomClient,
+    Starter,
+    requested,
+    watching,
+)
 from lup_dev.host.courier import Conversation, Courier, Heard, Telling
 from lup_dev.host.protocol import (
+    Activity,
+    Done,
     HostError,
     Limits,
+    Listed,
+    ListLaunches,
     Refused,
     Register,
+    Registered,
     Reply,
     Request,
     Stop,
@@ -71,6 +82,7 @@ if TYPE_CHECKING:
     from conftest import FakeClock, InProcess, Kit
     from mcp.client._transport import TransportStreams
 
+    from lup.sessions.terminal import Event
     from lup_dev.clock import Clock
 
 runner = CliRunner()
@@ -228,8 +240,9 @@ def service(
     tools: list[RoomTools] | None = None,
     modules: LaunchModules | None = None,
     refresh: Callable[[Register], list[Path]] | None = None,
+    clock: Clock | None = None,
 ) -> HostService:
-    return HostService(
+    built = HostService(
         layout=layout,
         answerer=answerer or Stub(),
         courier=courier or Hears(),
@@ -241,6 +254,7 @@ def service(
         modules=modules,
         refresh=refresh,
     )
+    return built if clock is None else built.model_copy(update={"clock": clock})
 
 
 def launch(tmp_path: Path, name: str, runtime: str) -> Register:
@@ -1235,3 +1249,139 @@ def test_a_launch_s_modules_are_told_the_moments_they_listen_to(
     assert call.tool == "mcp__lup__echo"
     assert call.conversation is not None
     assert modules.closed == ["one"]
+
+
+class Reads(Courier):
+    """Hears each payload as the `Heard` it is, and adds nothing."""
+
+    def heard(self, runtime: str, payload: str) -> Heard:
+        return Heard.model_validate_json(payload)
+
+    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
+        return answer
+
+    def woken(self, runtime: str, session: str, text: str) -> str | None:
+        return None
+
+
+def hook(event: Event, **fields: object) -> str:
+    """A hook of session `s1` the judge doesn't read, as `Reads` hears it."""
+    return json.dumps(
+        {"event": event, "session": "s1", "judged": False, "fits": 10_000, **fields}
+    )
+
+
+@contextmanager
+def watched(layout: HostLayout, request: Request) -> Generator[Callable[[], str]]:
+    """Watch `request` on the service's watch socket, its connection open both ways: each call reads its next reply's line, empty once the watch ends."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(60)
+        connection.connect(str(layout.watch))
+        connection.sendall(f"{request.model_dump_json()}\n".encode())
+        with connection.makefile("rb") as stream:
+            yield lambda: stream.readline().decode()
+
+
+def names(listed: str) -> list[str | None]:
+    return [each.name for each in Listed.model_validate_json(listed).launches]
+
+
+def test_a_watch_answers_at_once_then_again_each_time_its_reply_changes(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    with (
+        served(service(layout, Judge(), said)),
+        watched(layout, ListLaunches()) as following,
+    ):
+        first = following()
+        own.register(launch(tmp_path, "one", "first"))
+        second = following()
+        own.listed()
+        own.rename("one", "renamed")
+        third = following()
+    assert names(first) == []
+    assert names(second) == ["one"]
+    assert names(third) == ["renamed"]
+
+
+def test_a_hook_reaches_a_watch_each_conversation_saying_what_its_doing(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    with served(service(layout, Judge(), said, courier=Reads(), clock=clock)):
+        own.register(launch(tmp_path, "one", "first"))
+        hooks = layout.launch("one").hook
+        with watched(layout, ListLaunches()) as following:
+            before = following()
+            send(hooks, hook("session-started"))
+            started = following()
+            send(hooks, hook("call-started", call="c1", tool="Bash"))
+            calling = following()
+            asking = hook(
+                "call-started", agent="a1", call="c2", tool="mcp__lup__ask", served=True
+            )
+            send(hooks, asking)
+            held = following()
+            send(hooks, hook("conversation-ended", agent="a1"))
+            ended = following()
+
+    def doing(listed: str) -> list[tuple[str, Activity | None]]:
+        talkers = Listed.model_validate_json(listed).talkers["one"]
+        return [(each.path, each.activity) for each in talkers]
+
+    at = clock.now()
+    bash = Activity(state="calling", since=at, tool="Bash")
+    assert doing(before) == []
+    assert doing(started) == [("one", Activity(state="idle", since=at))]
+    assert doing(calling) == [("one", bash)]
+    assert doing(held) == [
+        ("one", bash),
+        (
+            "one/subagent·a1",
+            Activity(state="calling", since=at, tool="mcp__lup__ask", lups=True),
+        ),
+    ]
+    assert doing(ended) == [
+        ("one", bash),
+        ("one/subagent·a1", Activity(state="ended", since=at)),
+    ]
+
+
+def test_a_watch_of_what_cant_be_answered_is_refused_and_ends(
+    layout: HostLayout, said: list[str]
+) -> None:
+    with (
+        served(service(layout, Judge(), said)),
+        watched(layout, Request(kind="nowhere")) as following,
+    ):
+        refused = Refused.model_validate_json(following())
+        after = following()
+    assert refused.error == (
+        "no handler for `nowhere`; the service answers list, register, rename, "
+        "stop, unregister"
+    )
+    assert after == ""
+
+
+def test_a_client_on_an_event_loop_asks_watches_and_hears_the_service_stop(
+    layout: HostLayout, said: list[str], tmp_path: Path
+) -> None:
+    async def watching_launches() -> tuple[list[list[str | None]], str]:
+        seen: list[list[str | None]] = []
+        try:
+            async for listed in watching(layout.watch, ListLaunches(), Listed):
+                seen.append([each.name for each in listed.launches])
+                if len(seen) == 1:
+                    one = launch(tmp_path, "one", "first")
+                    await requested(layout.control, one, Registered)
+                if len(seen) == 2:
+                    await requested(layout.control, Stop(), Done)
+        except HostError as closed:
+            return seen, str(closed)
+        return seen, "the watch ended without a word"
+
+    with served(service(layout, Judge(), said)):
+        seen, closed = asyncio.run(watching_launches())
+    assert seen == [[], ["one"]]
+    assert closed == "the host service closed the watch"

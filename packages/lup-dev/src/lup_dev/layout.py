@@ -377,6 +377,11 @@ class HostLayout(Model):
         return self.sockets / "control.sock"
 
     @property
+    def watch(self) -> Path:
+        """The watch socket, on the host only: each connection one control request, answered again each time its reply changes (`host/watch.py`)."""
+        return self.sockets / "watch.sock"
+
+    @property
     def lock(self) -> Path:
         """The lock the running service holds for its whole life, which the OS frees."""
         return self.sockets / "service.lock"
