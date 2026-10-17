@@ -168,17 +168,26 @@ async def serve(
     is dropped. Closing the connection is the caller's. A message is one line, so
     it must fit the reader's limit (`asyncio.start_unix_server`'s `limit`). Where
     reading breaks, the session ends there, and the reader's error is raised.
+
+    The server says its tools may change (`listChanged`): the bridge a room
+    reaches it through tells the runtime they did once it reaches a restarted
+    server (`lup.sessions.bridge`), and a runtime acts on that only for a server
+    that said so.
     """
+    from mcp.server.lowlevel.server import NotificationOptions
     from mcp.shared.memory import create_client_server_memory_streams
 
     server = tool_server(toolset, name)
+    options = server.create_initialization_options(
+        NotificationOptions(tools_changed=True)
+    )
     async with create_client_server_memory_streams() as (ours, theirs):
         outgoing, incoming = ours
         requests, answers = theirs
         listening = asyncio.create_task(listened(reader, incoming))
         answering = asyncio.create_task(answered(outgoing, writer))
         try:
-            await server.run(requests, answers, server.create_initialization_options())
+            await server.run(requests, answers, options)
             await listening
             await answering
         finally:

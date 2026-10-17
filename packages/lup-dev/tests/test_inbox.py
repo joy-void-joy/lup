@@ -136,7 +136,7 @@ def send(path: Path, payload: str) -> str:
 
 @asynccontextmanager
 async def bridged(path: Path) -> AsyncGenerator[TransportStreams]:
-    """Carry a client's messages over a connection to `path`, one JSON-RPC message a line, as the room's socat does."""
+    """Carry a client's messages over a connection to `path`, one JSON-RPC message a line, as the room's bridge carries them."""
     reader, writer = await asyncio.open_unix_connection(str(path))
     async with create_client_server_memory_streams() as (theirs, ours):
         sent, received = ours

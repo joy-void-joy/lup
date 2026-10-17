@@ -8,6 +8,7 @@ guidance, the session's settings, the paths to trust, and where its messaging
 socket goes. A room then runs the result in its container (`lup.rooms`).
 """
 
+import inspect
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
@@ -17,6 +18,7 @@ from pydantic import AfterValidator, model_validator
 
 from lup.errors import LupError
 from lup.rooms.container import AbsolutePath, Mount
+from lup.sessions import bridge
 from lup.types import Model
 
 
@@ -98,10 +100,10 @@ class Hook(Model):
 class ToolServer(Model):
     """An MCP server the session loads, listening on a Unix socket in the room.
 
-    The session reaches it through a stdio server that bridges its standard
-    input and output to the socket, which each runtime's adapter chooses, so
-    the server itself runs wherever the socket's other end is: on the host,
-    through a directory the room mounts.
+    The session reaches it through lup's bridge (`lup.sessions.bridge`), a
+    stdio server carrying its standard input and output to the socket across
+    the server's restarts, so the server itself runs wherever the socket's other
+    end is: on the host, through a directory the room mounts.
     """
 
     name: str
@@ -184,6 +186,26 @@ class TerminalSettings(Model):
             message = f"more than one tool server is named {', '.join(twice)}"
             raise ValueError(message)
         return self
+
+    @property
+    def bridge(self) -> Path:
+        """Where lup's bridge is written, in the launch's directory, for each tool server's stdio entry to run."""
+        return self.directory / "mcp-bridge.py"
+
+    def bridged(self, server: ToolServer) -> list[str]:
+        """Return the command a runtime runs as `server`'s stdio server: lup's bridge to its socket, on the room's Python, isolated from any project's environment (`-I`).
+
+        >>> settings = TerminalSettings(directory=Path("/launch"))
+        >>> settings.bridged(ToolServer(name="lup", socket=Path("/run/lup/mcp.sock")))
+        ['python3', '-I', '/launch/mcp-bridge.py', '/run/lup/mcp.sock']
+        """
+        return ["python3", "-I", str(self.bridge), str(server.socket)]
+
+    def bridges(self) -> dict[Path, str]:
+        """Return the bridge's file to write, by its path, where the session has tool servers; nothing otherwise."""
+        if not self.servers:
+            return {}
+        return {self.bridge: inspect.getsource(bridge)}
 
     def passed(self, theirs: list[str]) -> SessionSettings:
         """Return the session settings a terminal passes, where the person's own set the fields `theirs` names.

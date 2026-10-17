@@ -191,6 +191,26 @@ ignore_imports = [
     "lup_dev.remote.helper -> typing",
 ]
 
+# lup's MCP bridge runs on a room's Python too, as each runtime's stdio server for
+# lup's tools (`lup/sessions/bridge.py`): the standard library's modules alone.
+[[tool.importlinter.contracts]]
+name = "lup.sessions.bridge imports the standard library alone"
+type = "forbidden"
+source_modules = ["lup.sessions.bridge"]
+forbidden_modules = ["*", "lup.**", "lup_dev.**"]
+as_packages = false
+ignore_imports = [
+    "lup.sessions.bridge -> collections",
+    "lup.sessions.bridge -> itertools",
+    "lup.sessions.bridge -> json",
+    "lup.sessions.bridge -> pathlib",
+    "lup.sessions.bridge -> socket",
+    "lup.sessions.bridge -> sys",
+    "lup.sessions.bridge -> threading",
+    "lup.sessions.bridge -> time",
+    "lup.sessions.bridge -> typing",
+]
+
 # A runtime's SDK is imported only in its adapter, so a project installing one
 # extra never reaches the other (`docs/conventions.md`, *Imports and boundaries*).
 [[tool.importlinter.contracts]]
