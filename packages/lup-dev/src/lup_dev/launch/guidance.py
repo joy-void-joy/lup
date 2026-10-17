@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from lup.tools.tool import ToolSpec
     from lup_dev.declaration.kinds import Section
     from lup_dev.declaration.resolve import Resolved
-    from lup_dev.launch.room import RelatedRepository
+    from lup_dev.launch.room import Lent, RelatedRepository
 
 OPENING = (
     "This guidance adds to your runtime's own instructions and replaces none of "
@@ -159,6 +159,42 @@ def repositories(neighbours: list[RelatedRepository]) -> str:
     return "\n".join(["## Other repositories", "", opening, "", *lines])
 
 
+def lent_here(lent: list[Lent]) -> str:
+    """Return the section listing the directories lent to this launch: each by its path, whether the room may write it, whether it's a repository, and its description where it has one.
+
+    >>> from pathlib import Path
+    >>> from lup_dev.launch.room import Lent
+    >>> print(lent_here([
+    ...     Lent(path=Path("/src/atlas"), read_only=True, repository=True, about="A made-up library."),
+    ...     Lent(path=Path("/data/scratch"), read_only=False, repository=False),
+    ... ]))
+    ## Lent to this launch
+    <BLANKLINE>
+    The operator lent these directories to this launch alone, each at its path, as it is on the host.
+    <BLANKLINE>
+    - `/src/atlas`, read-only, in a git repository, whose history `git log` and `git show` read. A made-up library.
+    - `/data/scratch`, which you may write.
+    """
+
+    def entry(each: Lent) -> str:
+        access = "read-only" if each.read_only else "which you may write"
+        said = [f"`{each.path}`", access]
+        if each.repository:
+            said.append(
+                "in a git repository, whose history `git log` and `git show` read"
+            )
+        about = "" if each.about is None else f" {each.about}"
+        return f"- {', '.join(said)}.{about}"
+
+    opening = (
+        "The operator lent these directories to this launch alone, each at its "
+        "path, as it is on the host."
+    )
+    return "\n".join(
+        ["## Lent to this launch", "", opening, "", *(entry(each) for each in lent)]
+    )
+
+
 def render(
     resolved: Resolved,
     project: Path,
@@ -167,6 +203,7 @@ def render(
     neighbours: list[RelatedRepository],
     *,
     shared: dict[str, Path] | None = None,
+    lent: list[Lent] | None = None,
 ) -> str:
     """Render the session's guidance from `resolved`'s sections, the tools it's served, and the other repositories it may read.
 
@@ -175,7 +212,8 @@ def render(
     person's own in `worktree`, the worktree launched. The sections go in the
     order the declaration gives them, then lup's `tools` (`listed`), then the
     other repositories named for it, as the launch found them
-    (`repositories`), then the person's own, where there's one. Raise
+    (`repositories`), then the directories lent to this launch
+    (`lent_here`), then the person's own, where there's one. Raise
     `GuidanceError` naming the section that can't be read, or doesn't render.
     `shared` is where each module whose data the room mounts has it, by the
     module's name.
@@ -222,10 +260,11 @@ def render(
     ]
     served = [listed(tools)] if tools else []
     beside = [repositories(neighbours)] if neighbours else []
+    lending = [lent_here(lent)] if lent else []
     local = CheckoutLayout(root=worktree).local_guidance
     own = (
         [rendered(f"the person's own section (`{local}`)", local.read_text())]
         if local.is_file()
         else []
     )
-    return "\n\n".join([OPENING, *declared, *served, *beside, *own]) + "\n"
+    return "\n\n".join([OPENING, *declared, *served, *beside, *lending, *own]) + "\n"

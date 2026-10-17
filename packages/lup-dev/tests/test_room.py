@@ -17,8 +17,10 @@ from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import resolve
 from lup_dev.launch.images import definition
 from lup_dev.launch.room import (
+    Lent,
     RelatedRepository,
     RoomError,
+    lent,
     maintaining_room,
     related,
     repository,
@@ -471,6 +473,56 @@ def test_each_repository_there_is_mounted_read_only_at_its_host_path_after_the_p
         Mount(source=tmp_path / "cache" / "lup" / "pyright"),
         *localtime,
         Mount(source=(tmp_path / "work").resolve(), read_only=True),
+    ]
+
+
+def test_each_directory_lent_is_mounted_at_its_path_last_read_only_or_writable(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    layout = Layout(state=tmp_path / "state", cache=tmp_path / "cache" / "lup")
+    reading = tmp_path / "reading"
+    writing = tmp_path / "writing"
+    reading.mkdir()
+    writing.mkdir()
+    lending = [
+        *lent([reading], read_only=True),
+        *lent([writing], read_only=False),
+    ]
+
+    room = maintaining_room(
+        resolve(plain()),
+        worktree,
+        layout,
+        terminal(),
+        AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+        neighbours=[],
+        lent=lending,
+    )
+
+    assert room.mounts[-2:] == [
+        Mount(source=reading.resolve(), read_only=True),
+        Mount(source=writing.resolve(), read_only=False),
+    ]
+
+
+def test_a_directory_lent_says_whether_it_s_a_repository_and_its_description(
+    repo: Path, tmp_path: Path
+) -> None:
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "work"\ndescription = "A made-up library."\n'
+    )
+    plain_directory = tmp_path / "plain"
+    plain_directory.mkdir()
+
+    assert lent([repo, plain_directory], read_only=True) == [
+        Lent(
+            path=repo.resolve(),
+            read_only=True,
+            repository=True,
+            about="A made-up library.",
+        ),
+        Lent(path=plain_directory.resolve(), read_only=True, repository=False),
     ]
 
 

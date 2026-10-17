@@ -99,7 +99,9 @@ from lup_dev.inbox.tools import InboxTools
 from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
+    Lent,
     host_needs,
+    lent,
     maintaining_room,
     refreshed,
     related,
@@ -772,7 +774,11 @@ def swept(launcher: Launcher) -> None:
 
 
 def launched(
-    adapter: Adapter, arguments: list[str], worktree: Path, launcher: Launcher
+    adapter: Adapter,
+    arguments: list[str],
+    worktree: Path,
+    launcher: Launcher,
+    lending: list[Lent] | None = None,
 ) -> int:
     """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, and return its CLI's exit status.
 
@@ -838,6 +844,7 @@ def launched(
             launcher.tools,
             neighbours=neighbours,
             shared=shared,
+            lent=lending,
         )
         built = build(
             room.image, launcher.podman, launcher.clock, launcher.layout.builds
@@ -855,6 +862,7 @@ def launched(
             tools=served_tools(declared.resolved),
             neighbours=neighbours,
             shared=shared,
+            lent=lending,
         )
         gating = Gating(
             command=declared.resolved.runner.command(["lup-dev", "check", "--at"]),
@@ -956,11 +964,34 @@ def launching(say: Callable[[str], None]) -> Launcher:
 def launch(
     context: typer.Context,
     runtime: Annotated[str, typer.Argument(help="The runtime to launch, by its name.")],
+    *,
+    mount: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--mount",
+            exists=True,
+            file_okay=False,
+            resolve_path=True,
+            help="A directory this session may read and write, at its path; repeat it.",
+        ),
+    ] = None,
+    mount_ro: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--mount-ro",
+            exists=True,
+            file_okay=False,
+            resolve_path=True,
+            help="A directory this session may read, at its path; repeat it.",
+        ),
+    ] = None,
 ) -> None:
     """Launch a runtime's session in a room for this worktree, in this terminal.
 
     Run it yourself, in your own terminal: it first checks what the host runs for
-    this repository, asking where that changed, as `trust` does. Every argument
+    this repository, asking where that changed, as `trust` does. `--mount` and
+    `--mount-ro` lend a directory to this launch alone, mounted at its path and
+    listed in the session's guidance, with nothing declared. Every argument
     after the runtime's name that lup doesn't know reaches the runtime's CLI as
     given, so `lup-dev launch <runtime> --resume` resumes. It ends with the CLI's
     exit status.
@@ -973,7 +1004,13 @@ def launch(
         raise LaunchError(message)
     adapter = Adapters(known=adapters()).named(runtime)
     launcher = launching(typer.echo)
-    status = launched(adapter, list(context.args), toplevel(Path.cwd()), launcher)
+    lending = [
+        *lent(mount_ro or [], read_only=True),
+        *lent(mount or [], read_only=False),
+    ]
+    status = launched(
+        adapter, list(context.args), toplevel(Path.cwd()), launcher, lending
+    )
     raise typer.Exit(code=status)
 
 
