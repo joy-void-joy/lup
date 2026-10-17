@@ -43,7 +43,7 @@ The operator hears of each item that reaches them through the desktop's notices.
 
 **An approval** (trust on launch's) is the operator's alone, never told to a
 conversation: a launch puts it in their inbox and waits on it (`settled`), and
-every launch asking about the same zone while it waits joins it (`asked`). It's
+every launch asking about the same zone while it waits joins it (`asked`); one asked about a newer zone of the same repository supersedes it. It's
 answered once, by whichever terminal answers first (`decided`), which wakes every
 launch waiting on it; an answer after that changes nothing.
 
@@ -79,6 +79,7 @@ from lup_dev.inbox.store import (
     Question,
     Reason,
     Ruling,
+    Superseded,
     Told,
     Verdict,
     Waiting,
@@ -568,7 +569,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         Where one waits already about the same zone, a launch asking the same
         question meanwhile, that one is returned instead, for this launch to
-        wait on too.
+        wait on too. Each one waiting about another zone of the same repository
+        is superseded by it, off the operator's list, and every launch waiting on
+        one is woken to ask about the zone at the tip instead.
         """
         joined = self.inbox.asking(approval.repository, approval.fingerprint)
         if joined is not None:
@@ -577,8 +580,29 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             approval, Operator(), Operator(), worktree, self.clock.now()
         )
         self.inbox.attached(item.number, diff)
+        replaced = [
+            each
+            for each in self.inbox.waiting(Operator())
+            if isinstance(each.reason, Approval)
+            and each.reason.repository == approval.repository
+            and each.number != item.number
+        ]
+        superseded = Superseded(at=self.clock.now(), by=item.number)
+        for each in replaced:
+            self.inbox.kept(each.model_copy(update={"state": superseded}))
+            self.settle(each.number)
+            self.say(f"item {each.number}, an approval, is superseded by {item.number}")
         await self.noticed(item)
         return item
+
+    def settle(self, number: int) -> None:
+        """Wake every launch waiting on approval `number`, once it's answered or superseded."""
+        settling = self.settling.get(number)
+        self.settling = {
+            each: event for each, event in self.settling.items() if each != number
+        }
+        if settling is not None:
+            settling.set()
 
     def approval(self, number: int) -> Item:
         """Return item `number`, or say it isn't an approval."""
@@ -608,12 +632,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             return item
         decided = Decided(at=self.clock.now(), approved=approved)
         answered = self.inbox.kept(item.model_copy(update={"state": decided}))
-        settling = self.settling.get(number)
-        self.settling = {
-            each: event for each, event in self.settling.items() if each != number
-        }
-        if settling is not None:
-            settling.set()
+        self.settle(number)
         said = "approved" if approved else "declined"
         self.say(f"item {number}, an approval, was {said}")
         return answered
