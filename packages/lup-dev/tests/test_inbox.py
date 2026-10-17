@@ -40,7 +40,6 @@ from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import (
     Answered,
     Conversation,
-    Done,
     Inbox,
     InboxError,
     Message,
@@ -940,72 +939,6 @@ def test_numbered_decisions_are_each_answered_once_and_a_message_is_done(
     assert [line.split()[0] for line in listed.splitlines()] == ["1", "3"]
 
 
-def test_lup_dev_inbox_walks_through_each_item_at_a_terminal(
-    machine: Layout,
-    clock: FakeClock,
-    notices: Raised,
-    said: list[str],
-    tmp_path: Path,
-    *,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cli, "at_terminal", lambda: True)
-    two: dict[str, JsonValue] = {
-        "question": "Which?",
-        "decisions": [
-            {"decision": "First", "lean": "a"},
-            {"decision": "Second", "lean": "b"},
-        ],
-    }
-    with inboxed(machine, clock, notices, said) as delivery:
-        launched(machine, clock, tmp_path, "one", "claude")
-        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
-        mcp = machine.host.launch("one").mcp
-        call(mcp, "note", {"remark": "Read me."})
-        call(mcp, "ask", two)
-        call(mcp, "note", {"remark": "Later."})
-        call(mcp, "note", {"remark": "Never reached."})
-        result = runner.invoke(
-            cli.app,
-            ["inbox"],
-            input="\n" + "\n" + "\n\n" + "u\nwhy not\n" + "Thanks.\n" + "s\n" + "q\n",
-        )
-        states = [delivery.inbox.item(number).state for number in [1, 2, 3, 4]]
-        answer = delivery.inbox.item(5).reason
-    assert result.exit_code == 0, result.output
-    assert "(1 of 4)" in result.output
-    assert "Read me." in result.output
-    assert "Answered: item 5, for claude session s1." in result.output
-    assert isinstance(states[0], Done)
-    assert isinstance(states[1], Answered)
-    assert isinstance(states[2], Waiting)
-    assert isinstance(states[3], Waiting)
-    assert answer.model_dump() == {
-        "reason": "answer",
-        "question": 2,
-        "rulings": [
-            {"decision": 1, "verdict": "leaning", "comment": ""},
-            {"decision": 2, "verdict": "undecided", "comment": "why not"},
-        ],
-        "comment": "Thanks.",
-    }
-    assert "That's everything waiting." not in result.output
-
-
-def test_lup_dev_inbox_lists_where_input_isn_t_a_terminal(
-    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
-) -> None:
-    with inboxed(machine, clock, notices, said):
-        launched(machine, clock, tmp_path, "one", "claude")
-        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
-        call(machine.host.launch("one").mcp, "note", {"remark": "Read me."})
-        plain = inbox()
-        listed = inbox("list")
-    assert plain == listed
-    assert listed.startswith("   1  ")
-    assert listed.rstrip().endswith("Read me.")
-
-
 def test_lup_dev_inbox_answer_asks_each_decision_in_turn_at_a_terminal(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
@@ -1027,7 +960,7 @@ def test_lup_dev_inbox_answer_asks_each_decision_in_turn_at_a_terminal(
         )
         answer = delivery.inbox.item(2).reason
     assert result.exit_code == 0, result.output
-    assert "Enter, u or o; or `leaning`, `undecided`, `leave open`." in result.output
+    assert "A verdict is `leaning`, `undecided` or `leave open`." in result.output
     assert answer.model_dump() == {
         "reason": "answer",
         "question": 1,

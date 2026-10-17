@@ -477,33 +477,21 @@ def shown(item: Item) -> str:
     return "\n".join([heading(item), *body])
 
 
-VERDICTS: dict[str, Verdict] = {
-    "": "leaning",
-    "l": "leaning",
-    "u": "undecided",
-    "o": "leave open",
-}
-"""A decision's verdict by the key the operator answers with, Enter going with the agent's lean."""
-
-
 def verdict(decision: int) -> Verdict:
-    """Ask the operator for decision `decision`'s verdict, until it's one: a key (`VERDICTS`), or the verdict in words."""
+    """Ask the operator for decision `decision`'s verdict, until it's one."""
     while True:
         said = typer.prompt(
-            f"{decision}: Enter goes with the lean, u undecided, o leave open",
-            default="",
-            show_default=False,
-        ).strip()
-        if said in VERDICTS:
-            return VERDICTS[said]
+            f"{decision}: leaning, undecided or leave open?", default="leaning"
+        )
         try:
             return TypeAdapter[Verdict](Verdict).validate_python(said)
         except ValidationError:
-            typer.echo("Enter, u or o; or `leaning`, `undecided`, `leave open`.")
+            typer.echo("A verdict is `leaning`, `undecided` or `leave open`.")
 
 
 def prompted(item: Item) -> AnswerItem:
-    """Ask the operator their answer to a question shown them, each decision in turn, then a comment on the whole; a plain question in words."""
+    """Ask the operator their answer to a question, each decision in turn, then a comment on the whole; a plain question in words."""
+    typer.echo(shown(item))
     match item.reason:
         case Question(decisions=[]):
             words = typer.prompt("Your answer")
@@ -527,87 +515,15 @@ def prompted(item: Item) -> AnswerItem:
             raise InboxError(message)
 
 
-def at_terminal() -> bool:
-    """Say whether the operator is at a terminal, which a walk through the inbox asks at; a test says."""
-    return sys.stdin.isatty()
-
-
 @inbox.callback(invoke_without_command=True)
-def inbox_walk(context: typer.Context) -> None:
-    """Go through what waits for you from your agents, oldest first, as `trust` asks: each item whole, then what you do with it.
+def inbox_list(context: typer.Context) -> None:
+    """List what waits for you from your agents, oldest first.
 
-    Run it yourself, in your own terminal. A note is read with Enter, which takes
-    it off your list; a question is answered, each decision with a key; an
-    approval is answered as a launch asks it. `s` leaves an item for later, `q`
-    stops. Where input isn't a terminal, it lists them, as `lup-dev inbox list`
-    does; `show`, `answer`, `done` and `send` each do one thing by its number.
+    Run it yourself, in your own terminal. Each item has a number, which `show`,
+    `answer` and `done` take.
     """
     if context.invoked_subcommand is not None:
         return
-    if not at_terminal():
-        listed()
-        return
-    client = answering()
-    approvals = InboxApprovals(host=client)
-    waiting = client.ask(ListInbox(), Items).items
-    if not waiting:
-        typer.echo("Nothing waits for you.")
-        return
-    for count, each in enumerate(waiting, start=1):
-        item = client.ask(ShowItem(number=each.number), Shown).item
-        if not isinstance(item.state, Waiting):
-            continue
-        typer.echo(f"\n({count} of {len(waiting)})")
-        if not walked(client, approvals, item):
-            return
-    typer.echo("\nThat's everything waiting.")
-
-
-def walked(client: HostClient, approvals: InboxApprovals, item: Item) -> bool:
-    """Show the operator one waiting item and do what they say with it; say whether to go on to the next."""
-    match item.reason:
-        case Approval() as approval:
-            typer.echo(line(item))
-            if (chosen := choice("Enter answers it")) != "":
-                return chosen != "q"
-            asked_approval(client, approvals, item, approval)
-        case Question():
-            typer.echo(shown(item))
-            if (chosen := choice("Enter answers it")) != "":
-                return chosen != "q"
-            answered = client.ask(prompted(item), Shown).item
-            typer.echo(
-                f"Answered: item {answered.number}, for {who(answered.recipient)}."
-            )
-        case _:
-            typer.echo(shown(item))
-            if (chosen := choice("Enter takes it off your list")) != "":
-                return chosen != "q"
-            client.ask(FinishItem(number=item.number), Shown)
-    return True
-
-
-def choice(enter: str) -> str:
-    """Ask what to do with an item shown: Enter (`enter`), `s` to leave it for later, `q` to stop; return the key, empty for Enter."""
-    while True:
-        said = typer.prompt(
-            f"{enter}; s leaves it for later; q stops",
-            default="",
-            show_default=False,
-        ).strip()
-        if said in ["", "s", "q"]:
-            return said
-        typer.echo("Enter, s or q.")
-
-
-@inbox.command("list")
-def inbox_list() -> None:
-    """List what waits for you from your agents, oldest first, each by its number, which `show`, `answer` and `done` take."""
-    listed()
-
-
-def listed() -> None:
-    """Print what waits for the operator, a line each, oldest first."""
     items = answering().ask(ListInbox(), Items).items
     if not items:
         typer.echo("Nothing waits for you.")
@@ -662,26 +578,6 @@ def acted_on(approval: Approval, given: Given) -> str | None:
             "the code you read: `lup-dev trust` asks about it."
         )
     return outcome.report()
-
-
-def asked_approval(
-    client: HostClient, approvals: InboxApprovals, item: Item, approval: Approval
-) -> None:
-    """Ask the operator an approval at this terminal as a launch asks it, summary first and the whole diff on request, and act on a yes given here."""
-    asking = Approving(
-        asker=Terminal(),
-        approvals=approvals,
-        number=item.number,
-        summary=f"{heading(item)}\n{approval.summary}",
-        question=approval.text,
-        diff=client.ask(ShowDiff(number=item.number), Whole).text,
-    )
-    answered = asking.given()
-    if answered.here:
-        typer.echo(approved_here(item.number, answered))
-    acted = acted_on(approval, answered)
-    if acted is not None:
-        typer.echo(acted)
 
 
 @inbox.command("answer")
@@ -747,11 +643,23 @@ def inbox_answer(
     if not given and comment is None:
         item = client.ask(ShowItem(number=number), Shown).item
         match item.reason:
-            case Approval() as approval:
-                asked_approval(client, approvals, item, approval)
+            case Approval(text=text, summary=summary) as approval:
+                asking = Approving(
+                    asker=Terminal(),
+                    approvals=approvals,
+                    number=number,
+                    summary=f"{heading(item)}\n{summary}",
+                    question=text,
+                    diff=client.ask(ShowDiff(number=number), Whole).text,
+                )
+                answered = asking.given()
+                if answered.here:
+                    typer.echo(approved_here(number, answered))
+                acted = acted_on(approval, answered)
+                if acted is not None:
+                    typer.echo(acted)
                 return
             case _:
-                typer.echo(shown(item))
                 request = prompted(item)
     else:
         request = AnswerItem(number=number, rulings=given, comment=comment or "")
