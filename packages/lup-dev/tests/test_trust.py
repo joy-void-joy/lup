@@ -1890,6 +1890,10 @@ def test_an_approval_of_a_newer_zone_supersedes_the_one_waiting(
     assert isinstance(running.delivery.inbox.item(other).state, Waiting)
     assert f"{older:>4}  " not in listed
     assert f"{newer:>4}  " in listed
+    assert (
+        f"(`answer {newer}` shows its summary, offers its whole diff, and asks; "
+        f"`show {newer} --diff` pages the diff alone)"
+    ) in listed
     assert isinstance(late.exception, SupersededError)
     assert str(late.exception) == (
         f"Item {older} was superseded by item {newer}, an approval of the host zone "

@@ -408,11 +408,17 @@ def clocked(at: datetime) -> str:
 
 
 def line(item: Item) -> str:
-    """Say an item in a line: its number, when it was made, what it is, from whom, and its first line."""
+    """Say an item in a line: its number, when it was made, what it is, from whom, and its first line; for an approval, how to read it whole and answer it."""
     where = "" if item.worktree is None else f" in {item.worktree}"
+    reading = (
+        f" (`answer {item.number}` shows its summary, offers its whole diff, and "
+        f"asks; `show {item.number} --diff` pages the diff alone)"
+        if isinstance(item.reason, Approval)
+        else ""
+    )
     return (
         f"{item.number:>4}  {clocked(item.made)}  {what(item)} from "
-        f"{who(item.sender)}{where}: {opening(item)}"
+        f"{who(item.sender)}{where}: {opening(item)}{reading}"
     )
 
 
@@ -478,11 +484,13 @@ def shown(item: Item) -> str:
 
 
 def verdict(decision: int) -> Verdict:
-    """Ask the operator for decision `decision`'s verdict, until it's one."""
+    """Ask the operator for decision `decision`'s verdict, until it's one.
+
+    Nothing is taken for an answer: an empty line asks again, so going with
+    the agent's lean is said, never assumed.
+    """
     while True:
-        said = typer.prompt(
-            f"{decision}: leaning, undecided or leave open?", default="leaning"
-        )
+        said = typer.prompt(f"{decision}: leaning, undecided or leave open?")
         try:
             return TypeAdapter[Verdict](Verdict).validate_python(said)
         except ValidationError:

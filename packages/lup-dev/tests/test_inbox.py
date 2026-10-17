@@ -956,10 +956,12 @@ def test_lup_dev_inbox_answer_asks_each_decision_in_turn_at_a_terminal(
         result = runner.invoke(
             cli.app,
             ["inbox", "answer", "1"],
-            input="\nsure\nmaybe\nleave open\n\nThanks.\n",
+            input="\nleaning\nsure\nmaybe\nleave open\n\nThanks.\n",
         )
         answer = delivery.inbox.item(2).reason
     assert result.exit_code == 0, result.output
+    # An empty line isn't taken for the lean: it's asked again.
+    assert result.output.count("1: leaning, undecided or leave open?") == 2
     assert "A verdict is `leaning`, `undecided` or `leave open`." in result.output
     assert answer.model_dump() == {
         "reason": "answer",
