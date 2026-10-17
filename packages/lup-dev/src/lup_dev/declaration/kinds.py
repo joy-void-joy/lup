@@ -33,7 +33,7 @@ from lup_dev.declaration.grammar import (
     Replace,
     listed,
 )
-from lup_dev.declaration.serving import ModuleHandler, ModuleTools
+from lup_dev.declaration.serving import ModuleHandler, ModuleHooks, ModuleTools
 from lup_dev.host.protocol import GitHubRepository, Limits, actions
 
 
@@ -541,3 +541,21 @@ class Handlers(Named[type[ModuleHandler]]):
     @override
     def named(self, entry: type[ModuleHandler]) -> str:
         return entry.__name__
+
+
+class Hooks(Named[type[ModuleHooks]]):
+    """What a module does at lup's moments, each class named by its name."""
+
+    @override
+    def named(self, entry: type[ModuleHooks]) -> str:
+        return entry.__name__
+
+
+class Mounted(Model, extra="forbid"):
+    """The module's own data directory for the repository, mounted into each of its rooms.
+
+    At its host path, read-only unless it says, so a session reads what the
+    module keeps (`Transcripts`' copies of past sessions); the guidance says where.
+    """
+
+    read_only: bool = True

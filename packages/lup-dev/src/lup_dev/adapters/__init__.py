@@ -13,6 +13,7 @@ from lup.sessions.declaration import Declaration
 from lup.sessions.terminal import Hook
 from lup.types import Model
 from lup_dev.host.courier import Heard, Telling
+from lup_dev.host.records import Records
 from lup_dev.launch.clis import Channel
 from lup_dev.policy.checkpoint import Bench
 from lup_dev.policy.runtime import Runtime
@@ -46,3 +47,5 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """Its release channel, which a launch fetches the latest CLI from."""
     agent: Callable[[], Declaration]
     """The declaration a launched session runs."""
+    records: Records
+    """Where it keeps each session's record on this machine, which a module copies."""

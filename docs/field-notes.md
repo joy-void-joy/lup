@@ -458,3 +458,9 @@ Read in its code and history (`lup-legacy`), with each commit there:
   - a pytest test root gave its files no test role;
   - xdist was looked up in the wrong environment.
 - **harmon** (a Discord agent that waited inside a tool, woken by events): the waiting held up; timing rules loaded onto the agent through its prompt starved its replies, and a reply took 21–68 s.
+
+## Where each runtime keeps its sessions' records (2026-10-17)
+
+Read on the operator's machine for the `Transcripts` module (`lup/transcripts/`), and from the first lup's own reading of Codex's rollouts (its `test_native_transcripts.py`); Codex's was not read on a live home, since this machine has none.
+- **Claude Code** (its directory, `~/.claude` or `CLAUDE_CONFIG_DIR`): `projects/<folder>/<session>.jsonl` per session, the folder one per directory sessions ran in; beside a session's record, `projects/<folder>/<session>/subagents/` and `tool-results/`; and `file-history/<session>/`. A record's lines carry `cwd`, the first ones (`mode`, `permission-mode`, `file-history-snapshot`) without it, so the directory a folder's sessions ran in is read off its first line naming one. A launched room writes into the operator's own directory, mounted read-write at its path.
+- **Codex** (`~/.codex` or `CODEX_HOME`): `sessions/YYYY/MM/DD/rollout-*.jsonl`, whose first line is `{"type": "session_meta", "payload": {"cwd": …}}`.

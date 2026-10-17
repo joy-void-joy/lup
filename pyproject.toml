@@ -144,7 +144,10 @@ name = "lup's library never imports lup_dev or lup_dashboard"
 type = "forbidden"
 source_modules = ["lup"]
 forbidden_modules = ["lup_dev", "lup_dashboard"]
-ignore_imports = ["lup.github.** -> lup_dev.**"]
+ignore_imports = [
+    "lup.github.** -> lup_dev.**",
+    "lup.transcripts.** -> lup_dev.**",
+]
 
 [[tool.importlinter.contracts]]
 name = "lup_dev never imports lup_dashboard"

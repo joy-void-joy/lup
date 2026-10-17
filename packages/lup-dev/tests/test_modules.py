@@ -15,11 +15,13 @@ from typing import Literal, override
 import pytest
 import sh
 
-from lup.tools.tool import lup_tool
+from lup.tools.hook import lup_hook
+from lup.tools.tool import ToolError, lup_tool
 from lup.types import Model
 from lup_dev import (
     Core,
     Handlers,
+    Hooks,
     Module,
     ModuleHandler,
     Modules,
@@ -28,15 +30,25 @@ from lup_dev import (
     ProjectError,
     Toolsets,
 )
+from lup_dev.declaration.kinds import Mounted
 from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.serving import ModuleHooks, Moment
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Limits, Register, Reply, Request
-from lup_dev.host.workers import Called, Calling, Sent, Workers
-from lup_dev.layout import HostLayout
+from lup_dev.host.records import Record, Records
+from lup_dev.host.workers import Called, Calling, Happening, Sent, Workers
+from lup_dev.layout import HostLayout, Layout
 from lup_dev.worker import Serving
 
 CALLER = Conversation(id="c1", session="s1")
+
+
+class Nothing(Records):
+    """A runtime that keeps no records."""
+
+    def kept(self, under: list[Path]) -> list[Record]:
+        return []
 
 
 class Said(Model):
@@ -177,7 +189,12 @@ def test_tools_made_with_another_module_are_refused() -> None:
 
 def serving(tmp_path: Path, volume: int = 1) -> Serving:
     resolved = resolve(Project(modules=Modules.only(Core(), Echo(volume=volume))))
-    return Serving(launch=launch(tmp_path), resolved=resolved)
+    return Serving(
+        launch=launch(tmp_path),
+        resolved=resolved,
+        records=Nothing(),
+        layout=Layout(state=tmp_path, data=tmp_path),
+    )
 
 
 def test_a_launch_s_modules_offer_their_tools_and_kinds(tmp_path: Path) -> None:
@@ -302,3 +319,113 @@ def test_a_launch_s_own_process_serves_its_committed_declaration_s_modules(
     assert gone
     assert not host.modules("one").exists()
     assert any("starting it again" in line for line in said)
+
+
+# Hooks: what a module does at lup's moments.
+
+
+class Noted(ModuleHooks):
+    """Notes each moment in its module's data directory, and fails when the launch stops."""
+
+    module: Listening
+
+    @lup_hook(on=["launched", "call_started", "stopped"])
+    async def note(self, moment: Moment) -> None:
+        """Note the moment, and the tool where there's one."""
+        with (self.data / "moments").open("a", encoding="utf-8") as notes:
+            notes.write(f"{moment.name} {moment.tool}\n")
+
+    @lup_hook
+    async def stopped(self, moment: Moment) -> None:
+        """Fail when the launch stops."""
+        message = f"it broke at {moment.name}"
+        raise RuntimeError(message)
+
+
+class Listening(Module):
+    """Listening to lup's moments."""
+
+    name = "listening"
+
+    hooks: Hooks = Hooks.of(Noted)
+    data: Mounted = Mounted()
+
+
+def listening(tmp_path: Path) -> Serving:
+    resolved = resolve(Project(modules=Modules.only(Core(), Listening())))
+    return Serving(
+        launch=launch(tmp_path),
+        resolved=resolved,
+        records=Nothing(),
+        layout=Layout(state=tmp_path, data=tmp_path / "data"),
+    )
+
+
+def test_a_hook_naming_no_moment_of_lups_is_refused() -> None:
+    with pytest.raises(ProjectError, match=r"runs `landed` at `landed`"):
+        # lup: ignore("reportUnusedClass", why="defining it is the test: its definition is refused")
+        class Landing(ModuleHooks):
+            """Runs at a moment lup doesn't have."""
+
+            module: Listening
+
+            @lup_hook
+            async def landed(self, moment: Moment) -> None:
+                """Never runs."""
+
+
+def test_a_module_s_hooks_offer_the_occasions_they_run_at(tmp_path: Path) -> None:
+    assert listening(tmp_path).offered().occasions == [
+        "launched",
+        "stopped",
+        "call-started",
+    ]
+
+
+def test_a_moment_runs_each_hook_with_its_module_s_data_and_tells_what_failed(
+    tmp_path: Path,
+) -> None:
+    serving = listening(tmp_path)
+    started = Happening(occasion="call-started", conversation=CALLER, tool="Bash")
+    assert asyncio.run(serving.happen(started)).failures == []
+    stopped = asyncio.run(serving.happen(Happening(occasion="stopped")))
+    [failure] = stopped.failures
+    assert failure.startswith("`Noted.stopped` failed at stopped:")
+    assert "it broke at stopped" in failure
+    data = tmp_path / "data" / "modules" / "listening"
+    [notes] = list(data.rglob("moments"))
+    assert notes.read_text() == "call_started Bash\nstopped None\n"
+
+
+def test_a_module_s_data_each_room_mounts_resolves_by_its_name() -> None:
+    resolved = resolve(Project(modules=Modules.only(Core(), Listening())))
+    assert [(each.module, each.read_only) for each in resolved.shared] == [
+        ("listening", True)
+    ]
+
+
+def test_a_hook_or_a_tool_named_like_a_field_is_refused() -> None:
+    with pytest.raises(ToolError, match=r"`Shadowing`'s hook `launch` takes the name"):
+        # lup: ignore("reportUnusedClass", why="defining it is the test: its definition is refused")
+        class Shadowing(ModuleHooks):
+            """Names a hook after the launch it's made with."""
+
+            module: Listening
+
+            @lup_hook(on="launched")
+            # lup: ignore("reportIncompatibleVariableOverride", why="the clash is the test: the class is refused for it")
+            async def launch(self, moment: Moment) -> None:
+                """Would vanish under the field."""
+
+    with pytest.raises(ToolError, match=r"`Hiding`'s tool `caller` takes the name"):
+        # lup: ignore("reportUnusedClass", why="defining it is the test: its definition is refused")
+        class Hiding(ModuleTools):
+            """Names a tool after the conversation calling."""
+
+            module: Echo
+
+            @lup_tool
+            # lup: ignore("reportIncompatibleVariableOverride", why="the clash is the test: the class is refused for it")
+            async def caller(self, said: Said) -> str:
+                """Would vanish under the field."""
+                return said.text

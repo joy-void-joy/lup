@@ -7,8 +7,9 @@ process instead (`lup_dev.worker`), started from the repository's approved copy
 for that repository, and one project's module never runs inside the process
 serving the others' launches. The service asks it, on a socket beside the
 launch's record that the room doesn't mount, what its modules serve, then
-passes it each call to one of their tools and each room's request of a kind
-they answer, one typed request per connection, one reply. It's stopped when
+passes it each call to one of their tools, each room's request of a kind
+they answer, and each moment their hooks run at, one typed request per
+connection, one reply. It's stopped when
 the launch ends, and started again where it died.
 """
 
@@ -20,6 +21,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
+from lup.sessions.terminal import Event
 from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec
 from lup.types import JsonObject, MutableModel
@@ -50,12 +52,37 @@ class Listing(Request):
     kind: Literal["module-listing"] = "module-listing"
 
 
+type Occasion = Event | Literal["launched", "stopped"]
+"""When a module's hooks may run, as the service tells it: the launch opening, the
+launch ending once its session has fully stopped, and each event a runtime's
+hooks are read as."""
+
+
 class Offered(Reply):
-    """What a launch's modules serve: each tool, and each kind of the room's requests they answer."""
+    """What a launch's modules serve: each tool, each kind of the room's requests they answer, and each occasion their hooks run at."""
 
     kind: Literal["module-offered"] = "module-offered"
     tools: list[ToolSpec] = []
     kinds: list[str] = []
+    occasions: list[Occasion] = []
+
+
+class Happening(Request):
+    """Tell a launch's modules an occasion their hooks run at."""
+
+    kind: Literal["module-happening"] = "module-happening"
+    occasion: Occasion
+    conversation: Conversation | None = None
+    """The conversation it's of, for a session's events."""
+    call: str | None = None
+    tool: str | None = None
+
+
+class Happened(Reply):
+    """The hooks ran: what failed among them, each said whole."""
+
+    kind: Literal["module-happened"] = "module-happened"
+    failures: list[str] = []
 
 
 class Calling(Request):
@@ -90,7 +117,9 @@ class Relayed(Reply):
     reply: JsonObject
 
 
-type Answered = Annotated[Offered | Called | Relayed, Field(discriminator="kind")]
+type Answered = Annotated[
+    Offered | Called | Relayed | Happened, Field(discriminator="kind")
+]
 """Whatever a launch's modules reply, told apart by its `kind`."""
 
 

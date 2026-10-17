@@ -43,7 +43,7 @@ import shutil
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Self, override
@@ -71,6 +71,8 @@ from lup_dev.host.rooms import SERVER, LaunchTools, RoomRoute, RoomTools
 from lup_dev.host.workers import (
     Called,
     Calling,
+    Happened,
+    Happening,
     LaunchModules,
     Offered,
     Passed,
@@ -352,6 +354,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     """The longest line lup's tool server reads: one MCP message."""
     say: Callable[[str], None]
     served: dict[str, Served] = {}
+    pending: list[asyncio.Task[None]] = []
+    """What the launches' modules' hooks are running that nothing waits on."""
 
     async def open(self, request: Register) -> Path:
         """Serve a launch: its directory, its sockets inside, its record.
@@ -428,6 +432,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             offered=offered,
         )
         self.layout.record(request.launch).write_text(request.model_dump_json(indent=2))
+        if "launched" in offered.occasions:
+            self.background(self.happened(request, Happening(occasion="launched")))
         self.say(
             f"{request.launch}: served, {request.runtime} in {request.worktree}, "
             f"judged by {request.judge}, its sockets in {sockets.directory}"
@@ -461,7 +467,35 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         return Offered(
             tools=[spec for spec in offered.tools if spec.name not in names],
             kinds=[kind for kind in offered.kinds if kind not in kinds],
+            occasions=offered.occasions,
         )
+
+    def background(self, running: Coroutine[None, None, None]) -> None:
+        """Run a launch's modules' hooks without waiting on them, keeping the task until it's done."""
+        task = asyncio.create_task(running)
+        self.pending = [*(each for each in self.pending if not each.done()), task]
+
+    async def happened(self, request: Register, happening: Happening) -> None:
+        """Tell the launch's modules an occasion their hooks run at, and say what failed among them."""
+        if self.modules is None:
+            return
+        try:
+            reply = await self.modules.ask(request, happening)
+        except HostError as failed:
+            self.say(
+                f"{request.launch}: its modules' hooks didn't run at "
+                f"{happening.occasion}: {failed}"
+            )
+            return
+        match reply:
+            case Happened(failures=failures):
+                for failure in failures:
+                    self.say(f"{request.launch}: {failure}")
+            case _:
+                self.say(
+                    f"{request.launch}: its modules replied {reply.kind} at "
+                    f"{happening.occasion}"
+                )
 
     async def hook(
         self,
@@ -522,6 +556,14 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             return Spoken(answer=await self.judgement(request, payload))
         conversation = conversations.named(heard.session, heard.agent)
+        if heard.event in self.served[request.launch].offered.occasions:
+            happening = Happening(
+                occasion=heard.event,
+                conversation=conversation,
+                call=heard.call,
+                tool=heard.tool,
+            )
+            self.background(self.happened(request, happening))
         answer = await self.judgement(request, payload) if heard.judged else ""
         room = heard.fits - len(answer.encode())
         posted = (
@@ -614,6 +656,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             raise HostError(message)
         for server in served.servers:
             await closed(server)
+        if "stopped" in served.offered.occasions:
+            await self.happened(served.launch, Happening(occasion="stopped"))
         if self.modules is not None:
             await self.modules.close(served.launch)
         self.layout.record(launch).unlink(missing_ok=True)

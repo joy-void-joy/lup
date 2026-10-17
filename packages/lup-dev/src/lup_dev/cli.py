@@ -317,7 +317,8 @@ def worker(
     socket: Annotated[Path, typer.Argument(help="Where to answer the host service.")],
 ) -> None:
     """Serve a launch's modules on `socket`, its registration on standard input's first line: for the host service."""
-    worked(socket, services())
+    records = {adapter.runtime.name(): adapter.records for adapter in adapters()}
+    worked(socket, services(), records)
 
 
 @host.command("stop")
@@ -746,6 +747,12 @@ def launched(
                     f"sessions to read isn't at {each.path}, so the room doesn't "
                     "mount it, and its guidance says it's missing."
                 )
+        shared = {
+            each.module: launcher.layout.module_data(each.module, repository)
+            for each in declared.resolved.shared
+        }
+        for place in shared.values():
+            place.mkdir(parents=True, exist_ok=True)
         room = maintaining_room(
             declared.resolved,
             worktree,
@@ -753,6 +760,7 @@ def launched(
             launcher.terminal,
             launcher.tools,
             neighbours=neighbours,
+            shared=shared,
         )
         built = build(
             room.image, launcher.podman, launcher.clock, launcher.layout.builds
@@ -769,6 +777,7 @@ def launched(
             hooked(adapter.hooks),
             tools=served_tools(declared.resolved),
             neighbours=neighbours,
+            shared=shared,
         )
         git = room_git(
             repository, own, [*room.mounts, *adapter.agent().terminal(settings).mounts]

@@ -46,6 +46,8 @@ from lup_dev.declaration.kinds import (
     Gate,
     Guidance,
     Handlers,
+    Hooks,
+    Mounted,
     Package,
     Packages,
     Paths,
@@ -68,6 +70,7 @@ from lup_dev.declaration.requirements import Needed
 from lup_dev.declaration.runner import Plain, Prefixed, Runner
 from lup_dev.declaration.serving import (
     ModuleHandler,
+    ModuleHooks,
     ModuleTools,
     answering,
     made_with,
@@ -181,6 +184,21 @@ class Handled(Model):
     handler: type[ModuleHandler]
 
 
+class Hooked(Model):
+    """A class of hooks a launch runs at lup's moments, with the module it's made with."""
+
+    module: Module
+    hooks: type[ModuleHooks]
+
+
+class Shared(Model):
+    """A module whose own data directory for the repository each room mounts."""
+
+    module: str
+    """The module's name."""
+    read_only: bool
+
+
 class Resolved(Model):
     """A declaration resolved: what its readers need, each kind from every module."""
 
@@ -221,6 +239,10 @@ class Resolved(Model):
     its session."""
     handled: list[Handled] = []
     """Each module's handlers of a room's requests, each with its module."""
+    hooked: list[Hooked] = []
+    """Each module's classes of hooks, each with its module."""
+    shared: list[Shared] = []
+    """The modules whose own data directory each room mounts."""
 
 
 def parts[K](modules: list[Module], kind: type[K]) -> list[Part[K]]:
@@ -321,6 +343,25 @@ def handled(modules: list[Module]) -> list[Handled]:
             Owned(module=each.module.name, name=each.handler.__name__)
             for each in found
             if not made_with(each.handler, each.module)
+        ],
+    )
+    return found
+
+
+def hooked(modules: list[Module]) -> list[Hooked]:
+    """Return each module's classes of hooks, each with its module, checking each is made with it."""
+    by_name = {module.name: module for module in modules}
+    found = [
+        Hooked(module=by_name[each.module], hooks=each.entry)
+        for each in entries(modules, Hooks)
+    ]
+    made(
+        "Hooks",
+        [],
+        [
+            Owned(module=each.module.name, name=each.hooks.__name__)
+            for each in found
+            if not made_with(each.hooks, each.module)
         ],
     )
     return found
@@ -558,6 +599,11 @@ def resolve(project: Project) -> Resolved:
         asks=project.asks,
         served=served(modules),
         handled=handled(modules),
+        hooked=hooked(modules),
+        shared=[
+            Shared(module=part.module, read_only=part.value.read_only)
+            for part in parts(modules, Mounted)
+        ],
     )
 
 

@@ -523,6 +523,10 @@ class Layout(Model):
         """Where lup's inbox keeps its items and its parties, one per user."""
         return InboxLayout(home=self.state / "inbox")
 
+    def module_data(self, module: str, repository: Path) -> Path:
+        """Say where module `module` keeps its own data for the repository whose git directory is `repository`."""
+        return self.data / "modules" / module / digest(repository)
+
     def judge(self, repository: Path) -> JudgeLayout:
         """Say where a repository's own copy of `lup-dev` is installed, by its git directory."""
         return JudgeLayout(home=self.data / "judges" / digest(repository))

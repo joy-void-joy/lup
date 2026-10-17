@@ -42,9 +42,10 @@ from lup_dev.host.protocol import (
     Stop,
     actions,
 )
+from lup_dev.host.records import Record, Records
 from lup_dev.host.service import Answerer, Asked, HostService, Judged
 from lup_dev.host.workers import Calling
-from lup_dev.layout import HostLayout
+from lup_dev.layout import HostLayout, Layout
 from lup_dev.worker import Serving
 
 if TYPE_CHECKING:
@@ -58,6 +59,14 @@ if TYPE_CHECKING:
 RECORDED = Path(__file__).parent / "payloads" / "gh-2.102.0"
 LUP = GitHubRepository(owner="joy-void-joy", name="lup")
 CALLER = Conversation(id="c1", session="s1")
+
+
+class Nothing(Records):
+    """A runtime that keeps no records."""
+
+    def kept(self, under: list[Path]) -> list[Record]:
+        return []
+
 
 STAND_IN = """#!{python}
 import json, os, sys
@@ -170,7 +179,12 @@ def called(
 ) -> Answer:
     """Call one of the GitHub module's tools as a launch's own process calls it."""
     declared = Project(modules=Modules.default().edit(GitHub(limit=limit)))
-    serving = Serving(launch=registered, resolved=resolve(declared))
+    serving = Serving(
+        launch=registered,
+        resolved=resolve(declared),
+        records=Nothing(),
+        layout=Layout(state=registered.worktree, data=registered.worktree),
+    )
     calling = Calling(name=name, arguments=arguments, caller=CALLER)
     return asyncio.run(serving.call(calling))
 

@@ -12,20 +12,36 @@ A room's request is answered the same way: a `ModuleHandler` names the request
 it answers by narrowing its `request` field to that request's model, and
 `answer` replies, the module and the launch through `self`.
 
+What a module does at lup's moments is a `ModuleHooks` class, each method run at
+a moment marked with the library's `@lup_hook`: at the one its name names, or
+those its `on` names. lup's moments are its own two, a launch opening and a
+launch ending once its session has fully stopped, and the five each runtime's
+hooks are read as (`lup.sessions.terminal.Event`). A hook observes: it can't hold
+or answer the moment. Through `self` it reaches its module, the launch, where
+the launch's runtime keeps its sessions' records, and the module's own data
+directory for the repository.
+
 Each runs on the host, in the launch's own process of the repository's approved
 copy (`lup_dev.worker`), never in the host service that serves every launch.
 """
 
 from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal, get_args
 
 from pydantic import BaseModel, PydanticUndefinedAnnotation
 
+from lup.tools.hook import hooks
 from lup.tools.tool import AgentTool, ToolSpec, bound, declared
 from lup.types import Model
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.module import Module
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Register, Reply, Request
+from lup_dev.host.records import Records
+
+if TYPE_CHECKING:
+    from lup.sessions.terminal import Event
 
 
 def narrowed(owner: type[BaseModel], field: str) -> type:
@@ -115,3 +131,83 @@ def answering(handler: type[ModuleHandler]) -> type[Request]:
         )
         raise ProjectError(message)
     return model
+
+
+type MomentName = Literal[
+    "launched",
+    "stopped",
+    "session_started",
+    "call_started",
+    "call_finished",
+    "turn_ended",
+    "conversation_ended",
+]
+"""lup's moments, which a module's hooks run at: a launch opening; a launch ending,
+its session fully stopped; and the five each runtime's hooks are read as."""
+
+HEARD: dict[Event, MomentName] = {
+    "session-started": "session_started",
+    "call-started": "call_started",
+    "call-finished": "call_finished",
+    "turn-ended": "turn_ended",
+    "conversation-ended": "conversation_ended",
+}
+"""The moment each of the events a runtime's hooks are read as is."""
+
+
+class Moment(Model):
+    """What's known of a moment a module's hook runs at."""
+
+    name: MomentName
+    conversation: Conversation | None = None
+    """The conversation it's of, for a session's moments; none for a launch's."""
+    call: str | None = None
+    """The call's id, at a call's start or finish."""
+    tool: str | None = None
+    """The tool called, by the runtime's name for it."""
+
+
+class ModuleHooks(Model, arbitrary_types_allowed=True):
+    """What a module does at lup's moments: each method marked with `@lup_hook`.
+
+    A subclass narrows `module` to its own module's class, as a class of tools
+    does. A hook naming no moment of lup's fails the class's definition.
+    """
+
+    module: Module
+    launch: Register
+    records: Records
+    """Where the launch's runtime keeps its sessions' records on this machine."""
+    data: Path
+    """The module's own directory for the repository, under lup's data."""
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: object) -> None:
+        """Refuse a hook naming a moment that isn't lup's."""
+        super().__pydantic_init_subclass__(**kwargs)
+        known = get_args(MomentName.__value__)
+        unknown = [
+            f"`{name}` at `{moment}`"
+            for name, moments in hooks(cls).items()
+            for moment in moments
+            if moment not in known
+        ]
+        if unknown:
+            message = (
+                f"`{cls.__name__}` runs {', '.join(unknown)}, which isn't one of "
+                f"lup's moments: {', '.join(known)}"
+            )
+            raise ProjectError(message)
+
+
+def listening(hooked: type[ModuleHooks]) -> list[MomentName]:
+    """Return the moments a class of hooks runs at, in lup's order."""
+    marked = [moment for moments in hooks(hooked).values() for moment in moments]
+    return [moment for moment in get_args(MomentName.__value__) if moment in marked]
+
+
+def at(instance: ModuleHooks, moment: MomentName) -> list[str]:
+    """Return the names of `instance`'s hooks that run at `moment`, in the order declared."""
+    return [
+        name for name, moments in hooks(type(instance)).items() if moment in moments
+    ]

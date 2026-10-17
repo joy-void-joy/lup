@@ -125,17 +125,20 @@ Its release channel (`ClaudeChannel`) is the one its native installer reads
 """
 
 from abc import ABC, abstractmethod
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import Field, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
 
 import lup
+from lup.adapters.claude.layout import ClaudeLayout
+from lup.adapters.claude.settings import ClaudeSettings
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
 from lup_dev.host.courier import Heard, Telling
+from lup_dev.host.records import Record, Records, within
 from lup_dev.host.rooms import SERVER, stamp
 from lup_dev.launch.clis import (
     Channel,
@@ -842,6 +845,63 @@ class ClaudeChannel(Channel):
         return found
 
 
+class Located(Model, extra="ignore"):
+    """One line of a Claude Code session's record, for the directory it ran in, where it says."""
+
+    cwd: Path | None = None
+
+
+class ClaudeRecords(Model, Records):
+    """Claude Code's records: a folder per directory sessions ran in, under `projects/`, and each session's file history.
+
+    A folder's directory is read off its records' own lines, the first naming one,
+    never from the folder's name.
+    """
+
+    directory: Path
+    """The operator's Claude Code directory, `~/.claude` or `CLAUDE_CONFIG_DIR`."""
+
+    @override
+    def kept(self, under: list[Path]) -> list[Record]:
+        projects = self.directory / "projects"
+        folders = sorted(projects.iterdir()) if projects.is_dir() else []
+        ours = [
+            folder
+            for folder in folders
+            if folder.is_dir() and (ran := ran_in(folder)) and within(ran, under)
+        ]
+        histories = [
+            self.directory / "file-history" / session.stem
+            for folder in ours
+            for session in sorted(folder.glob("*.jsonl"))
+        ]
+        return [
+            *(
+                Record(source=folder, place=PurePosixPath("projects", folder.name))
+                for folder in ours
+            ),
+            *(
+                Record(source=each, place=PurePosixPath("file-history", each.name))
+                for each in histories
+                if each.is_dir()
+            ),
+        ]
+
+
+def ran_in(folder: Path) -> Path | None:
+    """Return the directory the sessions recorded in `folder` ran in, read off their first line naming one; none where none does."""
+    for record in sorted(folder.glob("*.jsonl")):
+        with record.open(encoding="utf-8", errors="replace") as lines:
+            for line in lines:
+                try:
+                    located = Located.model_validate_json(line)
+                except ValidationError:
+                    continue
+                if located.cwd is not None:
+                    return located.cwd
+    return None
+
+
 def adapter() -> Adapter:
     """Return what lup needs of Claude Code: its hooks answered, and its launch."""
     return Adapter(
@@ -854,4 +914,5 @@ def adapter() -> Adapter:
         hooks=hooks,
         channel=ClaudeChannel(),
         agent=agent,
+        records=ClaudeRecords(directory=ClaudeLayout.of(ClaudeSettings()).directory),
     )

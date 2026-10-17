@@ -28,6 +28,8 @@ from lup_dev.declaration.kinds import (
     Gate,
     Guidance,
     Handlers,
+    Hooks,
+    Mounted,
     Package,
     Packages,
     Paths,
@@ -50,7 +52,7 @@ from lup_dev.declaration.modules.python import Python
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Requirement, Tools
 from lup_dev.declaration.runner import Interpreter, Plain, RoomNeeds, Runner, Uv
-from lup_dev.declaration.serving import ModuleHandler, ModuleTools
+from lup_dev.declaration.serving import ModuleHandler, ModuleHooks, ModuleTools, Moment
 
 __all__ = [
     "Actions",
@@ -62,11 +64,15 @@ __all__ = [
     "Gate",
     "Guidance",
     "Handlers",
+    "Hooks",
     "Interpreter",
     "Module",
     "ModuleHandler",
+    "ModuleHooks",
     "ModuleTools",
     "Modules",
+    "Moment",
+    "Mounted",
     "Named",
     "Package",
     "Packages",

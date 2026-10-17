@@ -256,13 +256,16 @@ def maintaining_room(
     tools: Tools,
     *,
     neighbours: list[RelatedRepository],
+    shared: dict[str, Path] | None = None,
 ) -> Container:
     """Return the maintaining session's room for the worktree at `worktree`.
 
     `tools` is how the runner asks the host where its environment's parts are;
     a test stubs it. `neighbours` are the other repositories named for the
     project's sessions, as the launch found them (`related`): each mounted one
-    is mounted read-only after the project's own. Raise `RoomError` where the
+    is mounted read-only after the project's own. `shared` is where each module
+    whose data the room mounts keeps it, by the module's name: each mounted at
+    its path, read-only unless the module says. Raise `RoomError` where the
     repository's tree would hold the operator's home, where `$EDITOR` or
     `$VISUAL` isn't a command line, where the environment's interpreter doesn't
     resolve under the room's mounts, or where another repository overlaps them.
@@ -331,6 +334,11 @@ def maintaining_room(
         Mount(source=pyright),
         *editors(),
         *([Mount(source=LOCALTIME, read_only=True)] if LOCALTIME.exists() else []),
+        *(
+            Mount(source=place, read_only=each.read_only)
+            for each in resolved.shared
+            if (place := (shared or {}).get(each.module)) is not None
+        ),
     ]
     if needs.interpreter is not None:
         reached(needs.interpreter, mounts)
