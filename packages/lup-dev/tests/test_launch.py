@@ -499,6 +499,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
             hooks,
             tools=cli.served_tools(declared.resolved),
             neighbours=[],
+            shared={"transcripts": tmp_path / "transcripts"},
         )
         exported = declared.root
         choices = declared.resolved.session

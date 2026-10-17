@@ -262,7 +262,8 @@ def test_a_missing_package_is_refused_naming_it(root: Path) -> None:
 def test_lup_s_own_sections_render_through_the_project_s_runner(
     tmp_path: Path,
 ) -> None:
-    rendered = render(resolve(Project()), tmp_path, tmp_path, [], [])
+    shared = {"transcripts": tmp_path / "transcripts"}
+    rendered = render(resolve(Project()), tmp_path, tmp_path, [], [], shared=shared)
     assert rendered.startswith(f"{OPENING}\n\n# The room\n")
     assert "`uv run lup-dev check`" in rendered
     assert "{{" not in rendered
@@ -277,5 +278,18 @@ def test_no_section_of_lup_s_spells_the_runner() -> None:
         files(section.package or "").joinpath(*section.path.parts).read_text()
         for section in resolve(Project()).guidance
     ]
-    assert len(texts) == 3
+    assert len(texts) == 4
     assert all("uv run" not in text for text in texts)
+
+
+def test_a_section_names_where_a_module_s_data_is_mounted(root: Path) -> None:
+    (root / "AGENTS.md").write_text('Kept at {{ data("transcripts") }}.\n')
+    shared = {"transcripts": Path("/data/transcripts/abc")}
+    rendered = render(declared(), root, root, [], [], shared=shared)
+    assert "Kept at /data/transcripts/abc." in rendered
+
+
+def test_a_section_naming_data_no_module_shares_is_refused(root: Path) -> None:
+    (root / "AGENTS.md").write_text('Kept at {{ data("ledger") }}.\n')
+    with pytest.raises(GuidanceError, match=r"`data\('ledger'\)` names no module"):
+        render(declared(), root, root, [], [], shared={"transcripts": Path("/d")})

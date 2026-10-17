@@ -260,6 +260,10 @@ class Method[S, I: BaseModel, O: BaseModel | str](property):
         self.function = function
         super().__init__(self.bound)
 
+    def __set_name__(self, owner: type, name: str) -> None:
+        """Refuse a name its class gives a field: the field would hide the tool."""
+        refuse_taken(owner, name, "tool")
+
     def bound(self, instance: S) -> Tool[I, O]:
         """Return the tool, its function called with `instance` first."""
         return Tool[I, O](
@@ -288,6 +292,26 @@ class Method[S, I: BaseModel, O: BaseModel | str](property):
             description=self.shape.description,
             input_schema=self.shape.parameter.annotation.model_json_schema(),
         )
+
+
+def refuse_taken(owner: type, name: str, what: str) -> None:
+    """Raise `ToolError` where `owner`, or a class it derives from, gives `name` to a field of its model.
+
+    pydantic drops a class's attribute named after a base's field, so a method
+    named so would vanish without a word.
+    """
+    fields = [
+        field
+        for base in owner.__mro__[1:]
+        if issubclass(base, BaseModel)
+        for field in base.model_fields
+    ]
+    if name in fields:
+        message = (
+            f"`{owner.__name__}`'s {what} `{name}` takes the name of a field of its "
+            "model, which would hide it: name it otherwise"
+        )
+        raise ToolError(message)
 
 
 def declared(owner: type[BaseModel]) -> dict[str, ToolSpec]:

@@ -158,17 +158,20 @@ unavailable; a launch runs what's kept instead.
 """
 
 from abc import ABC, abstractmethod
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
 
 import lup
+from lup.adapters.codex.layout import CodexLayout
+from lup.adapters.codex.settings import CodexSettings
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
 from lup_dev.host.courier import Heard, Telling
+from lup_dev.host.records import Record, Records, within
 from lup_dev.host.rooms import SERVER, stamp
 from lup_dev.launch.clis import (
     Channel,
@@ -777,6 +780,50 @@ class CodexChannel(Channel):
         return release.tag_name.removeprefix(self.tag)
 
 
+class Started(Model, extra="ignore"):
+    """What a Codex rollout's first line says of the session: where it ran."""
+
+    class Meta(Model, extra="ignore"):
+        """The session's own facts."""
+
+        cwd: Path
+
+    type: Literal["session_meta"]
+    payload: Meta
+
+
+class CodexRecords(Model, Records):
+    """Codex's records: a rollout per session under `sessions/`, its first line saying where it ran."""
+
+    home: Path
+    """The operator's Codex home, `~/.codex` or `CODEX_HOME`."""
+
+    @override
+    def kept(self, under: list[Path]) -> list[Record]:
+        sessions = self.home / "sessions"
+        rollouts = (
+            sorted(sessions.rglob("rollout-*.jsonl")) if sessions.is_dir() else []
+        )
+        return [
+            Record(
+                source=rollout,
+                place=PurePosixPath("sessions", rollout.relative_to(sessions)),
+            )
+            for rollout in rollouts
+            if (ran := started_in(rollout)) is not None and within(ran, under)
+        ]
+
+
+def started_in(rollout: Path) -> Path | None:
+    """Return the directory the session of `rollout` ran in, from its first line; none where it doesn't say."""
+    with rollout.open(encoding="utf-8", errors="replace") as lines:
+        first = lines.readline()
+    try:
+        return Started.model_validate_json(first).payload.cwd
+    except ValidationError:
+        return None
+
+
 def adapter() -> Adapter:
     """Return what lup needs of Codex: its hooks answered, and its launch."""
     return Adapter(
@@ -789,4 +836,5 @@ def adapter() -> Adapter:
         hooks=hooks,
         channel=CodexChannel(),
         agent=agent,
+        records=CodexRecords(home=CodexLayout.of(CodexSettings()).operator_home),
     )

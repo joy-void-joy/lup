@@ -259,6 +259,24 @@ def test_without_a_git_identity_none_is_passed(
     assert not any(name.startswith("GIT_") for name in room.env)
 
 
+def test_a_module_s_data_is_mounted_read_only_where_the_launch_places_it(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    machine = Machine(tmp_path, worktree)
+    kept = tmp_path / "data" / "modules" / "transcripts" / "digest"
+    room = maintaining_room(
+        resolve(Project()),
+        worktree,
+        machine.layout,
+        terminal(),
+        machine.tools(),
+        neighbours=[],
+        shared={"transcripts": kept},
+    )
+    assert room.mounts[-1] == Mount(source=kept, read_only=True)
+
+
 def test_a_plain_runner_mounts_and_checks_nothing_of_uv(
     bare: Path, tmp_path: Path, home: Path
 ) -> None:

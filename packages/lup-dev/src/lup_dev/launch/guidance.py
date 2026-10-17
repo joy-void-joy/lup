@@ -8,6 +8,8 @@ installed `lup_dev` for lup's own, and rendered with Jinja (`docs/launch.md`,
 *Guidance*):
 - a section names the project's commands through its runner, `{{ run("lup-dev
   check") }}`, which the runner spells, so no section spells uv;
+- a module's section names where its own data is mounted in the room,
+  `{{ data("transcripts") }}`, for a module whose data each room mounts;
 - a name the section doesn't have is refused, rather than rendered as nothing;
 - the environment is Jinja's sandbox, since an agent can write a section's file
   and the rendering runs on the host, outside every room.
@@ -163,6 +165,8 @@ def render(
     worktree: Path,
     tools: list[ToolSpec],
     neighbours: list[RelatedRepository],
+    *,
+    shared: dict[str, Path] | None = None,
 ) -> str:
     """Render the session's guidance from `resolved`'s sections, the tools it's served, and the other repositories it may read.
 
@@ -173,8 +177,23 @@ def render(
     other repositories named for it, as the launch found them
     (`repositories`), then the person's own, where there's one. Raise
     `GuidanceError` naming the section that can't be read, or doesn't render.
+    `shared` is where each module whose data the room mounts has it, by the
+    module's name.
     """
     runner = resolved.runner
+    mounted = shared or {}
+
+    def data(module: str) -> str:
+        """Name where module `module`'s own data is mounted in the room."""
+        place = mounted.get(module)
+        if place is None:
+            known = ", ".join(sorted(mounted)) or "none"
+            message = (
+                f"`data({module!r})` names no module whose data the room mounts; "
+                f"it mounts {known}'s"
+            )
+            raise TemplateRuntimeError(message)
+        return str(place)
 
     def run(command: str) -> str:
         """Spell `command` as the project's runner runs it."""
@@ -189,7 +208,7 @@ def render(
 
     def rendered(where: str, text: str) -> str:
         try:
-            return sandbox.from_string(text).render(run=run).strip()
+            return sandbox.from_string(text).render(run=run, data=data).strip()
         except TemplateError as error:
             message = (
                 f"Guidance: {where} doesn't render: {error}. A section can use "

@@ -17,6 +17,7 @@ import sys
 import time
 import tokenize
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import pytest
@@ -48,9 +49,11 @@ from lup_dev.codescan.directives import (
 from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.host.client import RoomClient
+from lup_dev.host.records import Record, Records
 from lup_dev.host.workers import (
     Called,
     Calling,
+    Happening,
     LaunchModules,
     Listing,
     Offered,
@@ -66,7 +69,6 @@ from lup_dev.worker import Serving
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from pathlib import Path
 
     from lup_dev.declaration.resolve import Selected
     from lup_dev.declaration.runner import Runner
@@ -563,15 +565,32 @@ def fakes(kit: Kit, state: Layout, monkeypatch: pytest.MonkeyPatch) -> Kit:
     return kit
 
 
-class InProcess(MutableModel, LaunchModules):
+class NoRecords(Records):
+    """A runtime that keeps no records."""
+
+    def kept(self, under: list[Path]) -> list[Record]:
+        return []
+
+
+class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     """A launch's modules served in the test's own process, from a declaration resolved here: the worker's answers, without its process."""
 
     resolved: Resolved
+    records: Records = NoRecords()
+    layout: Layout = Layout(state=Path("/nowhere"), data=Path("/nowhere"))
+    """Where lup keeps its data, each module's own among it: a test that runs
+    hooks gives its own."""
     servings: dict[str, Serving] = {}
     closed: list[str] = []
+    told: list[Happening] = []
 
     async def open(self, launch: Register) -> Offered:
-        serving = Serving(launch=launch, resolved=self.resolved)
+        serving = Serving(
+            launch=launch,
+            resolved=self.resolved,
+            records=self.records,
+            layout=self.layout,
+        )
         self.servings[launch.launch] = serving
         return serving.offered()
 
@@ -585,6 +604,9 @@ class InProcess(MutableModel, LaunchModules):
             case Relaying(request=sent):
                 reply = await serving.answer(Sent.model_validate(sent))
                 return Relayed(reply=reply.model_dump())
+            case Happening():
+                self.told.append(request)
+                return await serving.happen(request)
             case _:
                 message = f"a launch's modules take no `{request.kind}`"
                 raise AssertionError(message)

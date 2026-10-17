@@ -205,12 +205,14 @@ def terminal_settings(
     *,
     tools: list[ToolSpec],
     neighbours: list[RelatedRepository],
+    shared: dict[str, Path],
 ) -> TerminalSettings:
     """Return what lup adds to the session launched in `worktree`, its files compiled into `directory`.
 
     `tools` are lup's tools the host service serves it, and `neighbours` the
     other repositories named for it, as the launch found them, which
-    its guidance lists. Raise `GuidanceError` naming a section of guidance that
+    its guidance lists, and `shared` where each module whose data the room
+    mounts has it. Raise `GuidanceError` naming a section of guidance that
     can't be read, or doesn't render.
     """
     resolved = approved.resolved
@@ -221,7 +223,9 @@ def terminal_settings(
         hooks=hooks,
         servers=served(),
         messages=LaunchSockets(directory=ROOM_SOCKETS).messages,
-        guidance=render(resolved, approved.root, worktree, tools, neighbours),
+        guidance=render(
+            resolved, approved.root, worktree, tools, neighbours, shared=shared
+        ),
         session=session.declared,
         defaults=session.defaults,
         trusted=trusted(worktree),

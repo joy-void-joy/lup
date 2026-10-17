@@ -23,10 +23,22 @@ from mcp.types import TextContent, jsonrpc_message_adapter
 from pydantic import JsonValue, ValidationError
 from typer.testing import CliRunner
 
+from lup.tools.hook import lup_hook
 from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec, lup_tool
 from lup.types import Model
-from lup_dev import Core, Module, Modules, ModuleTools, Project, Toolsets, cli
+from lup_dev import (
+    Core,
+    Hooks,
+    Module,
+    ModuleHooks,
+    Modules,
+    ModuleTools,
+    Moment,
+    Project,
+    Toolsets,
+    cli,
+)
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation, Courier, Heard, Telling
@@ -1146,3 +1158,51 @@ def test_a_module_s_tool_named_like_a_core_tool_is_left_to_the_core(
         heard = call(layout.launch("one").mcp, "shout", arguments)
     assert heard == (f"one heard {arguments['caller']}", False)
     assert any("which the core serves already" in line for line in said)
+
+
+class Moments(ModuleHooks):
+    """Listens when a call starts, and when the launch opens and stops, so the service tells it."""
+
+    module: Listener
+
+    @lup_hook
+    async def call_started(self, moment: Moment) -> None:
+        """Listen."""
+
+    @lup_hook(on=["launched", "stopped"])
+    async def bounds(self, moment: Moment) -> None:
+        """Listen."""
+
+
+class Listener(Module):
+    """Listening."""
+
+    name = "listener"
+
+    hooks: Hooks = Hooks.of(Moments)
+
+
+def test_a_launch_s_modules_are_told_the_moments_they_listen_to(
+    layout: HostLayout,
+    clock: FakeClock,
+    said: list[str],
+    tmp_path: Path,
+    in_process: type[InProcess],
+) -> None:
+    host = client(layout, clock)
+    modules = in_process(
+        resolved=resolve(Project(modules=Modules.only(Core(), Listener()))),
+        layout=Layout(state=tmp_path / "state", data=tmp_path / "data"),
+    )
+    with served(on_claude(layout, Quiet(), said, [Recording()], modules)):
+        host.register(launch(tmp_path, "one", "claude"))
+        send(layout.launch("one").hook, claude("SessionStart", source="startup"))
+        send(layout.launch("one").hook, lups("echo", "t1"))
+        host.unregister("one")
+    told = [each.occasion for each in modules.told]
+    assert sorted(told) == ["call-started", "launched", "stopped"]
+    assert told[-1] == "stopped"
+    [call] = [each for each in modules.told if each.occasion == "call-started"]
+    assert call.tool == "mcp__lup__echo"
+    assert call.conversation is not None
+    assert modules.closed == ["one"]

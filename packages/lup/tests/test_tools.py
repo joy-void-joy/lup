@@ -6,7 +6,8 @@ import pytest
 from pydantic import BaseModel
 
 from lup.sessions.submission import End, GiveUp, KeepGoing, Toolbox
-from lup.tools import Allow, Deny, Submit, Tool, lup_tool
+from lup.tools import Allow, Deny, Hook, Submit, Tool, lup_hook, lup_tool
+from lup.tools.hook import hooks
 from lup.tools.serving import Answer
 from lup.tools.speaking import Heard, Problem, note, report
 from lup.tools.tool import Accepted, Refused, ToolError, ToolSpec, bound, declared
@@ -219,3 +220,54 @@ def test_a_call_to_an_unknown_tool_says_which_exist() -> None:
     assert answer == Answer(
         text="There's no tool named forecast; the tools are: weather.", error=True
     )
+
+
+class Happened(BaseModel):
+    """What's known of a moment."""
+
+    what: str
+
+
+class Watcher(BaseModel):
+    """A class of hooks, each run at its moments."""
+
+    seen: list[str] = []
+
+    @lup_hook
+    async def stopped(self, moment: Happened) -> None:
+        """Run when it stops."""
+        self.seen.append(f"stopped: {moment.what}")
+
+    @lup_hook(on=["launched", "stopped"])
+    async def both(self, moment: Happened) -> None:
+        """Run at both."""
+        self.seen.append(f"both: {moment.what}")
+
+
+def test_a_hook_runs_at_the_moment_its_name_names_or_those_on_names() -> None:
+    assert hooks(Watcher) == {"stopped": ["stopped"], "both": ["launched", "stopped"]}
+
+
+def test_a_hook_read_through_an_instance_is_its_function_of_the_moment() -> None:
+    watcher = Watcher()
+    asyncio.run(watcher.stopped(Happened(what="x")))
+    asyncio.run(watcher.both(Happened(what="y")))
+    assert watcher.seen == ["stopped: x", "both: y"]
+    assert isinstance(Watcher.both, Hook)
+
+
+def test_a_hook_takes_one_model_besides_self() -> None:
+    async def loose(self: Watcher, what: str) -> None:
+        """Takes a string."""
+
+    with pytest.raises(ToolError, match="must be a method taking one pydantic model"):
+        # lup: ignore("reportArgumentType", why="the wrong shape, on purpose, to see it refused")
+        lup_hook(loose)
+
+
+def test_a_hook_runs_at_some_moment() -> None:
+    async def nowhere(self: Watcher, moment: Happened) -> None:
+        """Runs at nothing."""
+
+    with pytest.raises(ToolError, match="runs at no moment"):
+        lup_hook(on=[])(nowhere)
