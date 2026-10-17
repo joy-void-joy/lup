@@ -252,6 +252,40 @@ def test_across_a_restart_a_held_call_fails_and_the_session_carries_on(
             pytest.fail(f"the restarted server heard {second.heard}")
 
 
+def test_a_server_that_takes_the_connection_but_never_answers_isn_t_joined(
+    runtime: Runtime, path: Path
+) -> None:
+    first = Host(path)
+    introduced(runtime)
+    first.stop()
+    # A server going away: it takes the bridge's connection, reads its
+    # introduction, and closes without answering.
+    listening = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listening.bind(str(path))
+    listening.listen(1)
+    listening.settimeout(PATIENT)
+    taken, _ = listening.accept()
+    with taken.makefile("r", encoding="utf-8") as lines:
+        introduction = json.loads(lines.readline())
+    taken.close()
+    listening.close()
+    path.unlink()
+
+    runtime.call(2, "waited")
+    second = Host(path)
+    changed = runtime.heard()
+    waited = runtime.heard()
+    second.stop()
+
+    match introduction:
+        case {"method": "initialize", "id": str() as ours}:
+            assert ours.startswith("lup-bridge-")
+        case _:
+            pytest.fail(f"the bridge sent the silent server {introduction}")
+    assert changed == {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}
+    assert (waited["id"], text(waited)) == (2, "waited")
+
+
 def test_a_request_the_server_never_takes_is_answered_with_an_error(
     path: Path,
 ) -> None:
