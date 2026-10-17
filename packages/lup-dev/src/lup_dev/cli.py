@@ -841,7 +841,7 @@ def launched(
         unknown = [each for each in modules or [] if each not in lendable]
         if unknown:
             message = (
-                f"`--mount-ro {unknown[0]}` names neither a directory nor a module "
+                f"`--mount {unknown[0]}` names neither a directory nor a module "
                 f"whose data a launch lends: those are {', '.join(lendable) or 'none'}"
             )
             raise LaunchError(message)
@@ -993,32 +993,33 @@ def launch(
     runtime: Annotated[str, typer.Argument(help="The runtime to launch, by its name.")],
     *,
     mount: Annotated[
-        list[Path] | None,
-        typer.Option(
-            "--mount",
-            exists=True,
-            file_okay=False,
-            resolve_path=True,
-            help="A directory this session may read and write, at its path; repeat it.",
-        ),
-    ] = None,
-    mount_ro: Annotated[
         list[str] | None,
         typer.Option(
-            "--mount-ro",
+            "--mount",
             help=(
                 "A directory this session may read, at its path, or a module whose "
                 "data a launch lends, by its name (`transcripts`); repeat it."
             ),
         ),
     ] = None,
+    mount_rw: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--mount-rw",
+            exists=True,
+            file_okay=False,
+            resolve_path=True,
+            help="A directory this session may read and write, at its path; repeat it.",
+        ),
+    ] = None,
 ) -> None:
     """Launch a runtime's session in a room for this worktree, in this terminal.
 
     Run it yourself, in your own terminal: it first checks what the host runs for
-    this repository, asking where that changed, as `trust` does. `--mount` and
-    `--mount-ro` lend a directory to this launch alone, mounted at its path and
-    listed in the session's guidance, with nothing declared. Every argument
+    this repository, asking where that changed, as `trust` does. `--mount`
+    lends a directory to this launch alone, read-only, and `--mount-rw` one it
+    may write, each mounted at its path and listed in the session's guidance,
+    with nothing declared. Every argument
     after the runtime's name that lup doesn't know reaches the runtime's CLI as
     given, so `lup-dev launch <runtime> --resume` resumes. It ends with the CLI's
     exit status.
@@ -1031,10 +1032,10 @@ def launch(
         raise LaunchError(message)
     adapter = Adapters(known=adapters()).named(runtime)
     launcher = launching(typer.echo)
-    reading = [Path(each).expanduser() for each in mount_ro or []]
+    reading = [Path(each).expanduser() for each in mount or []]
     lending = [
         *lent([each for each in reading if each.is_dir()], read_only=True),
-        *lent(mount or [], read_only=False),
+        *lent(mount_rw or [], read_only=False),
     ]
     named = [str(each) for each in reading if not each.is_dir()]
     status = launched(
@@ -1055,13 +1056,14 @@ def mount(
         typer.Argument(
             help=(
                 "The directory to lend, or a module whose data a launch lends, by "
-                "its name (`transcripts`), which is lent read-only."
+                "its name (`transcripts`)."
             )
         ),
     ],
     *,
-    read_only: Annotated[
-        bool, typer.Option("--ro", help="Lend the directory read-only.")
+    writable: Annotated[
+        bool,
+        typer.Option("--rw", help="Lend the directory writable; read-only otherwise."),
     ] = False,
     to: Annotated[
         str | None,
@@ -1074,8 +1076,7 @@ def mount(
     """Lend a directory to a launch's running room, at once, without restarting it.
 
     Run it yourself, in your own terminal. The room finds it under `/lent`, by
-    its name, read-only with `--ro` and writable otherwise, until the launch
-    ends; the session is told where, through the inbox. The launch is the one
+    its name, read-only, or writable with `--rw`, until the launch ends; the session is told where, through the inbox. The launch is the one
     whose worktree holds the directory this runs in, the only one running
     where there's one, or the one `--launch` names.
     """
@@ -1113,7 +1114,7 @@ def mount(
             "repository's launches lend"
         )
         raise RoomError(message)
-    sealed = read_only or module
+    sealed = not writable or module
     room = lend(
         Podman(),
         layout.launch(launch.launch),

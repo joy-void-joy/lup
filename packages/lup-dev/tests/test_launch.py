@@ -820,9 +820,9 @@ def test_the_command_lends_each_directory_it_s_given_and_lists_it_in_the_guidanc
         [
             "launch",
             "claude",
-            "--mount-ro",
-            str(reading),
             "--mount",
+            str(reading),
+            "--mount-rw",
             str(writing),
             "--resume",
         ],
@@ -847,15 +847,15 @@ def test_the_command_refuses_to_lend_what_s_neither_a_directory_nor_a_module(
     monkeypatch.setattr(cli, "launching", machine.launching)
 
     named = runner.invoke(
-        cli.app, ["launch", "claude", "--mount-ro", str(tmp_path / "nowhere")]
+        cli.app, ["launch", "claude", "--mount", str(tmp_path / "nowhere")]
     )
     writable = runner.invoke(
-        cli.app, ["launch", "claude", "--mount", str(tmp_path / "nowhere")]
+        cli.app, ["launch", "claude", "--mount-rw", str(tmp_path / "nowhere")]
     )
 
     assert isinstance(named.exception, LaunchError)
     assert str(named.exception) == (
-        f"`--mount-ro {tmp_path / 'nowhere'}` names neither a directory nor a "
+        f"`--mount {tmp_path / 'nowhere'}` names neither a directory nor a "
         "module whose data a launch lends: those are transcripts"
     )
     assert writable.exit_code == 2
