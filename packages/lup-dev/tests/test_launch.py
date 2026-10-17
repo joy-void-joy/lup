@@ -819,19 +819,60 @@ def test_the_command_lends_each_directory_it_s_given_and_lists_it_in_the_guidanc
     assert f"- `{writing}`, which you may write." in guidance
 
 
-def test_the_command_refuses_to_lend_what_isn_t_a_directory(
+def test_the_command_refuses_to_lend_what_s_neither_a_directory_nor_a_module(
     project: Path, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     machine = Machine(tmp_path, clock)
     monkeypatch.setattr(cli, "adapters", stubbed(machine))
     monkeypatch.setattr(cli, "launching", machine.launching)
 
-    result = runner.invoke(
+    named = runner.invoke(
         cli.app, ["launch", "claude", "--mount-ro", str(tmp_path / "nowhere")]
     )
+    writable = runner.invoke(
+        cli.app, ["launch", "claude", "--mount", str(tmp_path / "nowhere")]
+    )
 
-    assert result.exit_code == 2
-    assert machine.events.said == []
+    assert isinstance(named.exception, LaunchError)
+    assert str(named.exception) == (
+        f"`--mount-ro {tmp_path / 'nowhere'}` names neither a directory nor a "
+        "module whose data a launch lends: those are transcripts"
+    )
+    assert writable.exit_code == 2
+
+
+def test_transcripts_are_mounted_and_told_only_in_a_launch_lending_them(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    common = (
+        run(
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+            cwd=project,
+        )
+        .text()
+        .strip()
+    )
+    kept = Machine(tmp_path / "plain", clock)
+    plain = cli.launched(kept.adapter, [], project, kept.launcher)
+    lending = Machine(tmp_path / "lending", clock)
+    lent = cli.launched(
+        lending.adapter, [], project, lending.launcher, modules=["transcripts"]
+    )
+
+    data = lending.layout.module_data("transcripts", Path(common))
+    assert (plain, lent) == (7, 7)
+    assert not any("modules/transcripts" in each for each in kept.engine.run())
+    assert "# Past sessions" not in (kept.engine.guidance or "")
+    assert f"--mount=type=bind,source={data},destination={data},ro=true" in (
+        lending.engine.run()
+    )
+    assert (
+        f"# Past sessions\n\nEvery session of this repository is kept, whole, at `{data}`"
+        in (lending.engine.guidance or "")
+    )
 
 
 def test_the_command_refuses_inside_an_agents_session(

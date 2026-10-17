@@ -1,4 +1,4 @@
-"""`Transcripts`, the module: every session's record of the repository kept, and mounted read-only in each room."""
+"""`Transcripts`, the module: every session's record of the repository kept, and mounted read-only in a launch that lends it."""
 
 from pathlib import Path
 
@@ -15,7 +15,11 @@ class Transcripts(Module):
     hooks: Hooks = Hooks.of(TranscriptsHooks)
     """Copying what the runtime added or grew, when a launch opens and when it stops."""
     data: Mounted = Mounted()
-    """The copies, read-only in each room."""
+    """The copies, read-only in a room whose launch lends them
+    (`lup-dev launch <runtime> --mount-ro transcripts`), or in every room where
+    the person's own layer says `Transcripts(data=Mounted(always=True))`: an old
+    discussion read there can pass for a decision, and the operator's history
+    isn't every session's to read."""
     guidance: Guidance = Guidance.of(
         Section(name="transcripts", package="lup.transcripts", path=Path("guidance.md"))
     )

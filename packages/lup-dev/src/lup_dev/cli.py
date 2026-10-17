@@ -779,6 +779,8 @@ def launched(
     worktree: Path,
     launcher: Launcher,
     lending: list[Lent] | None = None,
+    *,
+    modules: list[str] | None = None,
 ) -> int:
     """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, and return its CLI's exit status.
 
@@ -830,9 +832,18 @@ def launched(
                     f"sessions to read isn't at {each.path}, so the room doesn't "
                     "mount it, and its guidance says it's missing."
                 )
+        lendable = [each.module for each in declared.resolved.shared]
+        unknown = [each for each in modules or [] if each not in lendable]
+        if unknown:
+            message = (
+                f"`--mount-ro {unknown[0]}` names neither a directory nor a module "
+                f"whose data a launch lends: those are {', '.join(lendable) or 'none'}"
+            )
+            raise LaunchError(message)
         shared = {
             each.module: launcher.layout.module_data(each.module, repository)
             for each in declared.resolved.shared
+            if each.always or each.module in (modules or [])
         }
         for place in shared.values():
             place.mkdir(parents=True, exist_ok=True)
@@ -976,13 +987,13 @@ def launch(
         ),
     ] = None,
     mount_ro: Annotated[
-        list[Path] | None,
+        list[str] | None,
         typer.Option(
             "--mount-ro",
-            exists=True,
-            file_okay=False,
-            resolve_path=True,
-            help="A directory this session may read, at its path; repeat it.",
+            help=(
+                "A directory this session may read, at its path, or a module whose "
+                "data a launch lends, by its name (`transcripts`); repeat it."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -1004,12 +1015,19 @@ def launch(
         raise LaunchError(message)
     adapter = Adapters(known=adapters()).named(runtime)
     launcher = launching(typer.echo)
+    reading = [Path(each).expanduser() for each in mount_ro or []]
     lending = [
-        *lent(mount_ro or [], read_only=True),
+        *lent([each for each in reading if each.is_dir()], read_only=True),
         *lent(mount or [], read_only=False),
     ]
+    named = [str(each) for each in reading if not each.is_dir()]
     status = launched(
-        adapter, list(context.args), toplevel(Path.cwd()), launcher, lending
+        adapter,
+        list(context.args),
+        toplevel(Path.cwd()),
+        launcher,
+        lending,
+        modules=named,
     )
     raise typer.Exit(code=status)
 

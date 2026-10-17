@@ -558,10 +558,14 @@ class Hooks(Named[type[ModuleHooks]]):
 
 
 class Mounted(Model, extra="forbid"):
-    """The module's own data directory for the repository, mounted into each of its rooms.
+    """The module's own data directory for the repository, mounted into its rooms.
 
     At its host path, read-only unless it says, so a session reads what the
-    module keeps (`Transcripts`' copies of past sessions); the guidance says where.
+    module keeps (`Transcripts`' copies of past sessions); the guidance says
+    where. In every room where `always`; otherwise in a launch that lends it by
+    the module's name (`lup-dev launch <runtime> --mount-ro transcripts`).
     """
 
     read_only: bool = True
+    always: bool = False
+    """Whether every room mounts it; otherwise only a launch lending it."""
