@@ -61,6 +61,10 @@ class Mount(Model):
     target: AbsolutePath | None = None
     """Where it appears in the room; none for the source's own path."""
     read_only: bool = False
+    receives: bool = False
+    """Whether what's mounted under its source on the host after the room
+    starts reaches the room (`rslave` propagation), the source made a shared
+    mount first (`Podman.shared`); otherwise nothing does."""
 
     @property
     def destination(self) -> Path:

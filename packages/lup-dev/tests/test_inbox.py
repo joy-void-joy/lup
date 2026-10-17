@@ -24,6 +24,8 @@ from pydantic import Field
 from typer.testing import CliRunner
 
 from lup.github.tools import GitHubTools
+from lup.rooms import Podman
+from lup.rooms.engine import Exited, Process
 from lup.tools.speaking import Problem, Remark
 from lup_dev import Modules, Project, cli
 from lup_dev.declaration.resolve import resolve
@@ -46,6 +48,7 @@ from lup_dev.inbox.store import (
     Waiting,
 )
 from lup_dev.inbox.tools import specs
+from lup_dev.launch.room import RoomError
 from lup_dev.layout import InboxLayout, Layout
 
 if TYPE_CHECKING:
@@ -221,10 +224,15 @@ def machine(
     xdg = tmp_path_factory.mktemp("xdg")
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg / "run"))
     monkeypatch.setenv("XDG_STATE_HOME", str(xdg / "state"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg / "data"))
     monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
     monkeypatch.setattr(cli, "SystemClock", lambda: clock)
-    return Layout(state=xdg / "state" / "lup", runtime=xdg / "run" / "lup")
+    return Layout(
+        state=xdg / "state" / "lup",
+        runtime=xdg / "run" / "lup",
+        data=xdg / "data" / "lup",
+    )
 
 
 @pytest.fixture
@@ -902,6 +910,88 @@ def test_lup_dev_inbox_send_names_a_launch_by_its_id_or_its_worktree(
     )
     assert unheard == (
         "no session of launch `two` has reached lup yet, so nothing there can be told"
+    )
+
+
+def test_lup_dev_mount_lends_a_directory_to_a_running_room_and_tells_its_session(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran: list[list[str]] = []
+
+    def recorded(process: Process) -> Exited:
+        ran.append(process.arguments)
+        return Exited(status=0)
+
+    monkeypatch.setattr(cli, "Podman", lambda: Podman(execute=recorded))
+    own = machine.launch("one")
+    for each in [own.lent, own.stage]:
+        each.mkdir(parents=True)
+    atlas = tmp_path / "atlas"
+    atlas.mkdir()
+    data = machine.module_data("transcripts", tmp_path / ".git")
+    data.mkdir(parents=True)
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        sealed = runner.invoke(cli.app, ["mount", "--ro", str(atlas)])
+        open_ = runner.invoke(cli.app, ["mount", str(atlas), "--launch", "one"])
+        module = runner.invoke(cli.app, ["mount", "transcripts", "--launch", "one"])
+        nothing = runner.invoke(cli.app, ["mount", "nowhere", "--launch", "one"])
+        texts = [delivery.inbox.item(number).reason for number in [1, 2, 3]]
+
+    assert sealed.output == (
+        f"Lent {atlas} to launch one, read-only, at /lent/atlas in its room; "
+        "item 1 tells its session.\n"
+    )
+    assert "writable, at /lent/atlas-2 in its room" in open_.output
+    assert "read-only, at /lent/transcripts in its room" in module.output
+    assert isinstance(nothing.exception, RoomError)
+    staged = str(own.stage / "atlas")
+    assert ran[:4] == [
+        ["podman", "unshare", "mount", "--bind", str(atlas), staged],
+        ["podman", "unshare", "mount", "-o", "remount,bind,ro", staged],
+        ["podman", "unshare", "mount", "--bind", staged, str(own.lent / "atlas")],
+        ["podman", "unshare", "umount", staged],
+    ]
+    assert ran[4] == [
+        "podman",
+        "unshare",
+        "mount",
+        "--bind",
+        str(atlas),
+        str(own.lent / "atlas-2"),
+    ]
+    assert isinstance(texts[0], Message)
+    assert texts[0].text == (
+        f"The operator lent `{atlas}` to this session, read-only, at "
+        "`/lent/atlas`: it's there now, until the session ends."
+    )
+    assert isinstance(texts[2], Message)
+    assert texts[2].text.startswith(
+        f"The operator lent the `transcripts` module's data (`{data}`) to this "
+        "session, read-only, at `/lent/transcripts`"
+    )
+
+
+def test_lup_dev_mount_refuses_a_room_that_started_before_it_could_receive(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        result = runner.invoke(cli.app, ["mount", str(tmp_path), "--launch", "one"])
+    assert isinstance(result.exception, RoomError)
+    assert "started before a running room could be lent a directory" in str(
+        result.exception
     )
 
 

@@ -30,7 +30,7 @@ from filelock import Timeout as Held
 from pydantic import TypeAdapter, ValidationError
 
 from lup.errors import LupError
-from lup.rooms import Mount, Podman, Room
+from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.types import Model
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
@@ -100,12 +100,16 @@ from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
     Lent,
+    RoomError,
     host_needs,
+    lend,
     lent,
     maintaining_room,
+    receiving,
     refreshed,
     related,
     room_git,
+    unlent,
 )
 from lup_dev.launch.session import (
     LaunchError,
@@ -762,6 +766,7 @@ def swept(launcher: Launcher) -> None:
             except HostError as gone:
                 launcher.say(f"Launch {each.launch} was ended already: {gone}")
                 continue
+            released(launcher, each.launch)
             if own.directory.is_dir():
                 shutil.rmtree(own.directory)
             launcher.say(
@@ -902,6 +907,7 @@ def launched(
                 sockets = launcher.host.register(registered)
                 try:
                     git.write()
+                    receives = receiving(launcher.podman, own)
                     walled = room.model_copy(
                         update={
                             "name": registered.container,
@@ -909,6 +915,7 @@ def launched(
                                 *room.mounts,
                                 *git.mounts,
                                 Mount(source=sockets, target=ROOM_SOCKETS),
+                                receives,
                             ],
                             "env": {**room.env, **git.env},
                         }
@@ -936,9 +943,18 @@ def ended(launcher: Launcher, launch: str) -> None:
             f"The host service didn't end launch {launch}: {failed}. The next "
             "launch ends it."
         )
-    directory = launcher.layout.launch(launch).directory
-    if directory.is_dir():
-        shutil.rmtree(directory)
+    own = launcher.layout.launch(launch)
+    released(launcher, launch)
+    if own.directory.is_dir():
+        shutil.rmtree(own.directory)
+
+
+def released(launcher: Launcher, launch: str) -> None:
+    """Unmount what was lent to a launch's room while it ran; where podman can't, say so."""
+    try:
+        unlent(launcher.podman, launcher.layout.launch(launch))
+    except ContainerError as failed:
+        launcher.say(f"What was lent to launch {launch} wasn't unmounted: {failed}")
 
 
 def launching(say: Callable[[str], None]) -> Launcher:
@@ -1030,6 +1046,97 @@ def launch(
         modules=named,
     )
     raise typer.Exit(code=status)
+
+
+@app.command("mount")
+def mount(
+    lending: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The directory to lend, or a module whose data a launch lends, by "
+                "its name (`transcripts`), which is lent read-only."
+            )
+        ),
+    ],
+    *,
+    read_only: Annotated[
+        bool, typer.Option("--ro", help="Lend the directory read-only.")
+    ] = False,
+    to: Annotated[
+        str | None,
+        typer.Option(
+            "--launch",
+            help="The launch, by its id or its worktree; by default, the one here.",
+        ),
+    ] = None,
+) -> None:
+    """Lend a directory to a launch's running room, at once, without restarting it.
+
+    Run it yourself, in your own terminal. The room finds it under `/lent`, by
+    its name, read-only with `--ro` and writable otherwise, until the launch
+    ends; the session is told where, through the inbox. The launch is the one
+    whose worktree holds the directory this runs in, the only one running
+    where there's one, or the one `--launch` names.
+    """
+    client = answering()
+    launches = client.launches()
+    named = Path(to or ".").resolve()
+    here = [
+        each
+        for each in launches
+        if to == each.launch or named.is_relative_to(each.worktree)
+    ]
+    found = here if here or to is not None else launches
+    match found:
+        case [launch]:
+            pass
+        case []:
+            message = f"no launch served is `{to or named}`, by its id or its worktree"
+            raise InboxError(message)
+        case _:
+            message = (
+                "several launches run: "
+                f"{', '.join(f'{each.launch} in {each.worktree}' for each in found)}; "
+                "name one with `--launch`"
+            )
+            raise InboxError(message)
+    layout = Layout.of(LupDevSettings())
+    given = Path(lending).expanduser()
+    data = layout.module_data(lending, launch.repository)
+    source, module = (
+        (given.resolve(), False) if given.is_dir() else (data, data.is_dir())
+    )
+    if not source.is_dir():
+        message = (
+            f"`{lending}` names neither a directory nor a module whose data this "
+            "repository's launches lend"
+        )
+        raise RoomError(message)
+    sealed = read_only or module
+    room = lend(
+        Podman(),
+        layout.launch(launch.launch),
+        source,
+        read_only=sealed,
+        name=lending if module else None,
+    )
+    access = "read-only" if sealed else "writable"
+    what = f"the `{lending}` module's data (`{source}`)" if module else f"`{source}`"
+    told = client.ask(
+        SendItem(
+            launch=launch.launch,
+            text=(
+                f"The operator lent {what} to this session, {access}, at `{room}`: "
+                "it's there now, until the session ends."
+            ),
+        ),
+        Shown,
+    ).item
+    typer.echo(
+        f"Lent {source} to launch {launch.launch}, {access}, at {room} in its room; "
+        f"item {told.number} tells its session."
+    )
 
 
 @rules.command("list")

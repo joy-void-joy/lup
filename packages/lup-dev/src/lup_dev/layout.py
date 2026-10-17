@@ -42,6 +42,9 @@ LOCALTIME = Path("/etc/localtime")
 ROOM_SOCKETS = Path("/run/lup")
 """Where a room mounts its launch's socket directory, so its hook finds the host service."""
 
+ROOM_LENT = Path("/lent")
+"""Where a room finds each directory the operator lends it while it runs (`lup-dev mount`), one per name."""
+
 ROOM_PATH = [
     Path("/usr/local/sbin"),
     Path("/usr/local/bin"),
@@ -456,6 +459,16 @@ class LaunchLayout(Model):
     def helper(self) -> Path:
         """The remote helper git runs for a `lup::` URL, found on the `PATH` by its name."""
         return self.bin / "git-remote-lup"
+
+    @property
+    def lent(self) -> Path:
+        """Where what the operator lends the room while it runs is mounted, each directory by its name: a shared mount in podman's namespace, which the room mounts at `ROOM_LENT` and receives mounts through; removed when the launch ends."""
+        return self.directory.with_name(f"{self.directory.name}.lent")
+
+    @property
+    def stage(self) -> Path:
+        """Where a directory lent read-only is made so before it's mounted in `lent`: a private mount in podman's namespace; removed when the launch ends."""
+        return self.directory.with_name(f"{self.directory.name}.stage")
 
 
 class CliCacheLayout(Model):
