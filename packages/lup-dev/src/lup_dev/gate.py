@@ -41,6 +41,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
 
+from filelock import FileLock, Timeout
+
 from lup import programs
 from lup.types import Model
 from lup_dev.catalog.gate import Step
@@ -445,19 +447,63 @@ def at_commit(
     found = None if again else passes.found(files)
     if found is not None:
         return found
-    made = Path(tempfile.mkdtemp(prefix="lup-gate-"))
-    try:
-        git.run("worktree", "add", "--detach", "--quiet", str(made), commit)
-    except GitError:
-        made.rmdir()
-        raise
-    try:
-        say(f"The gate runs on {commit}, in a worktree made for it at {made}.")
-        command = ["lup-dev", "check", *(["--again"] if again else [])]
-        ran = processes.run(runner.judging(command), made)
-    finally:
-        stop(made)
-        git.run("worktree", "remove", "--force", str(made))
+    common = git.text("rev-parse", "--path-format=absolute", "--git-common-dir")
+    locks = GitDirectoryLayout(common=Path(common)).gates
+    locks.mkdir(parents=True, exist_ok=True)
+    for each in leftovers(git, locks):
+        say(f"Removed {each}, a worktree a run of the gate on a commit left behind.")
+    made = Path(tempfile.mkdtemp(prefix=MADE))
+    with FileLock(locks / f"{made.name}.lock"):
+        try:
+            git.run("worktree", "add", "--detach", "--quiet", str(made), commit)
+        except GitError:
+            made.rmdir()
+            raise
+        try:
+            say(f"The gate runs on {commit}, in a worktree made for it at {made}.")
+            command = ["lup-dev", "check", *(["--again"] if again else [])]
+            ran = processes.run(runner.judging(command), made)
+        finally:
+            stop(made)
+            git.run("worktree", "remove", "--force", str(made))
+    (locks / f"{made.name}.lock").unlink(missing_ok=True)
     if ran.code == 0 and passes.found(files) is None:
         passes.record(files, [])
     return ran
+
+
+MADE = "lup-gate-"
+"""What the name of each worktree a run of the gate on a commit makes starts with, in the system's temporary directory."""
+
+
+def leftovers(git: Git, locks: Path) -> list[Path]:
+    """Remove each worktree a run of the gate on a commit made and left behind, its run gone, and return them.
+
+    A run that's gone holds no lock on its worktree (`GitDirectoryLayout.gates`),
+    as one still running does, so the two are told apart, and a run killed
+    mid-gate, as a push timed out from its session might be, leaves nothing for
+    long. git's records of worktrees whose directories are gone are pruned too.
+    """
+    scratch = Path(tempfile.gettempdir())
+    made = [
+        each
+        for each in git.worktrees()
+        if each.parent == scratch and each.name.startswith(MADE)
+    ]
+    gone = [each for each in made if not running(locks / f"{each.name}.lock")]
+    for each in gone:
+        git.run("worktree", "remove", "--force", str(each))
+        (locks / f"{each.name}.lock").unlink(missing_ok=True)
+    git.run("worktree", "prune")
+    return gone
+
+
+def running(lock: Path) -> bool:
+    """Say whether a run of the gate holds the lock at `lock`, on the worktree it made."""
+    held = FileLock(lock, timeout=0)
+    try:
+        held.acquire()
+    except Timeout:
+        return True
+    held.release()
+    return False

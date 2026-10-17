@@ -257,6 +257,11 @@ class GitDirectoryLayout(Model):
         return self.common / "lup" / "passes"
 
     @property
+    def gates(self) -> Path:
+        """The lock each run of the gate on a commit holds on the worktree it made, by that worktree's name, so a later run tells one left by a run that's gone from one still running (`lup_dev.gate`, `at_commit`)."""
+        return self.common / "lup" / "gates"
+
+    @property
     def due(self) -> Path:
         """The deferred work the gate last found due, which a session is told at its start (`codescan.contract.Due`)."""
         return self.common / "lup" / "due.json"
