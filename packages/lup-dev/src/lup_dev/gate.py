@@ -45,13 +45,13 @@ from lup import programs
 from lup.types import Model
 from lup_dev.catalog.gate import Step
 from lup_dev.clock import Clock
-from lup_dev.declaration.load import load
+from lup_dev.declaration.load import load, person_layer
 from lup_dev.declaration.requirements import Checked, Needed, Tools, check
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.runner import Runner
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git, GitError
-from lup_dev.layout import CheckoutLayout, GitDirectoryLayout
+from lup_dev.layout import GitDirectoryLayout
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
@@ -133,8 +133,8 @@ class Standing(Model):
 
 
 def layer(root: Path) -> str | None:
-    """Return the digest of the person's own layer of the declaration in the worktree at `root`, or none where it has none."""
-    local = CheckoutLayout(root=root).local_declaration
+    """Return the digest of the person's own layer of the declaration for the worktree at `root` (`person_layer`), or none where there's none."""
+    local = person_layer(root)
     if not local.is_file():
         return None
     return hashlib.sha256(local.read_bytes()).hexdigest()
@@ -286,7 +286,7 @@ class Check(Model, arbitrary_types_allowed=True):
         Raise `ProjectError` where it can't be loaded or doesn't resolve: the gate
         never falls back to the defaults.
         """
-        resolved = resolve(load(root).project)
+        resolved = resolve(load(root, local=person_layer(root)).project)
         return cls(
             root=root,
             processes=processes,
@@ -443,9 +443,6 @@ def at_commit(
         made.rmdir()
         raise
     try:
-        local = CheckoutLayout(root=root).local_declaration
-        if local.is_file():
-            shutil.copyfile(local, CheckoutLayout(root=made).local_declaration)
         say(f"The gate runs on {commit}, in a worktree made for it at {made}.")
         command = ["lup-dev", "check", *(["--again"] if again else [])]
         ran = processes.run(runner.judging(command), made)

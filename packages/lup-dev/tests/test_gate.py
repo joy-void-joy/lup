@@ -585,14 +585,11 @@ class Witness(Processes):
         self.code = code
         self.ran: list[tuple[list[str], Path]] = []
         self.readme: list[str] = []
-        self.layer: list[str | None] = []
 
     @override
     def run(self, command: list[str], cwd: Path) -> Ran:
         self.ran.append((command, cwd))
         self.readme.append((cwd / "README.md").read_text())
-        local = cwd / "lup_project.local.py"
-        self.layer.append(local.read_text() if local.is_file() else None)
         return Ran(code=self.code, output=f"the report, ending {self.code}\n")
 
 
@@ -683,12 +680,29 @@ def test_at_a_commit_whose_gate_fails_nothing_is_recorded(
 
 
 def test_at_a_commit_the_person_s_layer_joins_its_files(
-    repo: Path, clock: FakeClock
+    repo: Path, linked: Path, clock: FakeClock, shell: Git
 ) -> None:
+    (repo / ".gitignore").write_text(".venv/\n.lup/\nlup_project.local.py\n")
+    shell.commit(repo, "ignore the person's layer")
     (repo / "lup_project.local.py").write_text("project = None\n")
+    recorded = kept(repo, Scripted({}), clock).run().recorded
     processes = Witness()
-    gated_at(repo, "HEAD", processes, clock)
-    assert processes.layer == ["project = None\n"]
+
+    outcome, _, _ = gated_at(linked, "main", processes, clock)
+
+    assert recorded is not None
+    assert recorded.files.layer is not None
+    assert outcome == recorded
+    assert processes.ran == []
+
+
+def test_the_gate_in_any_worktree_reads_the_person_s_layer_in_the_main_one(
+    repo: Path, linked: Path
+) -> None:
+    (repo / "lup_project.local.py").write_text(BUILDING)
+    processes = Scripted({})
+    Check.declared(linked, processes, NODE).run()
+    assert processes.ran[0] == ["uv", "run", "build", "it"]
 
 
 def test_at_a_revision_naming_no_commit_is_refused(

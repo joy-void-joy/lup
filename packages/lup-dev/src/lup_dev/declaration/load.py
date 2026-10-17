@@ -8,10 +8,13 @@ imported or binds no `Project`, the load fails, never falling back to the defaul
 which would judge with the wrong roles. The same function reads a worktree's root
 and a directory a commit was exported to.
 
-Beside it, the person's own layer, `lup_project.local.py`, which git ignores, is
-loaded after it and layered on top, in the same grammar
-(`docs/related-repositories.md`, decision 7). The judge and a launch read the
-copy trust on launch approved, put beside the commit's export.
+The person's own layer, `lup_project.local.py`, which git ignores, is loaded
+after it and layered on top, in the same grammar
+(`docs/related-repositories.md`, decision 7). It lives beside the declaration in
+the repository's main worktree, a clone's root or a bare repository's own
+directory, shared by every worktree (`person_layer`), so the gate in any of them
+reads it there. The judge and a launch read the copy trust on launch approved,
+put beside the commit's export.
 """
 
 import importlib
@@ -26,6 +29,7 @@ from lup.types import Model
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import applied, set_fields
 from lup_dev.declaration.project import Project
+from lup_dev.git import Git
 from lup_dev.layout import CheckoutLayout
 
 if TYPE_CHECKING:
@@ -43,8 +47,9 @@ class Declared(Model):
     """The declaration's file, relative to the root: `lup_project.py`, or the
     package's `__init__.py`; none for the defaults."""
     local: Path | None = None
-    """The person's own layer, relative to the root, `lup_project.local.py`,
-    where one was read and layered on top; none otherwise."""
+    """The person's own layer, `lup_project.local.py`, where one was read and
+    layered on top: relative to the root where it's beside the declaration,
+    else where it was read; none otherwise."""
 
 
 class Pyproject(Model):
@@ -112,11 +117,14 @@ def read_by_import(path: PurePath) -> bool:
 
 
 @contextmanager
-def importable(roots: list[Path], root: Path, name: str) -> Generator[None]:
+def importable(
+    roots: list[Path], root: Path, name: str, *, outside: list[Path] | None = None
+) -> Generator[None]:
     """Put `roots` first on the import path for the duration, then restore it.
 
-    The modules imported meanwhile from the worktree at `root` are dropped from
-    `sys.modules` afterwards. Every worktree's declaration is the module `name`,
+    The modules imported meanwhile from the worktree at `root`, or from one of
+    the files `outside` it (the person's layer, read from the main worktree),
+    are dropped from `sys.modules` afterwards. Every worktree's declaration is the module `name`,
     `lup_project`, and Python keeps a module once it's imported, so a second
     worktree's load in the same process would otherwise get the first's; one
     imported before from elsewhere is set aside meanwhile and put back after. No
@@ -143,7 +151,11 @@ def importable(roots: list[Path], root: Path, name: str) -> Generator[None]:
         if spec is None:
             return False
         places = [spec.origin, *(spec.submodule_search_locations or [])]
-        return any(Path(place).is_relative_to(root) for place in places if place)
+        return any(
+            Path(place).is_relative_to(root) or Path(place) in (outside or [])
+            for place in places
+            if place
+        )
 
     try:
         yield
@@ -203,22 +215,36 @@ def executed(path: Path, name: str) -> ModuleType:
     return module
 
 
-def load(root: Path) -> Declared:
+def person_layer(worktree: Path) -> Path:
+    """Return where the person's own layer is for the worktree at `worktree`: beside the declaration in its repository's main worktree.
+
+    The main worktree is the one `git worktree list` gives first: a clone's
+    root, or a bare repository's own directory. Every worktree of the
+    repository shares it, as trust on launch reads it, whichever worktree is
+    asked about.
+    """
+    return CheckoutLayout(root=Git(cwd=worktree).main_worktree()).local_declaration
+
+
+def load(root: Path, *, local: Path | None = None) -> Declared:
     """Load the declaration at `root`, the person's own layer on top where there's one, or the defaults where there's neither.
 
-    The person's own layer, `lup_project.local.py` beside the declaration,
-    binds `project` too, a `Project` written as a layer on the project's: what
-    it sets changes the project's, as a module layers (`applied`), so
-    `Modules().add(…)` adds to the project's modules. It runs in the same import
-    as the declaration, so it can import the project's own modules and edit
-    them. Raise `ProjectError` where both forms of the declaration are there, or
+    The person's own layer binds `project` too, a `Project` written as a layer
+    on the project's: what it sets changes the project's, as a module layers
+    (`applied`), so `Modules().add(…)` adds to the project's modules. It runs in
+    the same import as the declaration, so it can import the project's own
+    modules and edit them. It's read at `local` where given, a worktree's in its
+    repository's main worktree (`person_layer`); otherwise beside the
+    declaration, as in a commit's export, where the approved copy is written.
+    Raise `ProjectError` where both forms of the declaration are there, or
     where the declaration or the person's layer can't be imported or binds no
     `Project`. Whatever importing one raises (a name the installed `lup_dev`
     lacks, conflict markers, a module edited with another's class) is that.
     """
     layout = CheckoutLayout(root=root)
     package = layout.declaration_package
-    local = layout.local_declaration
+    local = layout.local_declaration if local is None else local
+    named = local.relative_to(root) if local.is_relative_to(root) else local
     match [layout.declaration.is_file(), package.is_dir()]:
         case [False, False]:
             source = None
@@ -239,7 +265,7 @@ def load(root: Path) -> Declared:
         return Declared(project=Project())
     shown = None if source is None else source.relative_to(root)
     roots = import_roots(root, Pyproject.read(layout.pyproject))
-    with importable(roots, root, layout.declaration.stem):
+    with importable(roots, root, layout.declaration.stem, outside=[local]):
         if shown is None:
             project = Project()
         else:
@@ -251,12 +277,7 @@ def load(root: Path) -> Declared:
             project = bound(module, shown)
         if not local.is_file():
             return Declared(project=project, source=shown)
-        mine = bound(
-            executed(local, f"{layout.declaration.stem}_local"),
-            local.relative_to(root),
-        )
+        mine = bound(executed(local, f"{layout.declaration.stem}_local"), named)
     return Declared(
-        project=applied(mine, project, set_fields(mine)),
-        source=shown,
-        local=local.relative_to(root),
+        project=applied(mine, project, set_fields(mine)), source=shown, local=named
     )

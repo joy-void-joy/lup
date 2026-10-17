@@ -9,7 +9,7 @@ import pytest
 
 from lup_dev import Project, Section
 from lup_dev.declaration.errors import ProjectError
-from lup_dev.declaration.load import load
+from lup_dev.declaration.load import load, person_layer
 from lup_dev.declaration.resolve import Declaration, resolve
 
 DECLARATION = """
@@ -351,6 +351,28 @@ def test_the_person_s_layer_is_layered_on_the_project_s(tmp_path: Path) -> None:
     assert resolved.asks == "protected"
     assert not any(name.startswith("lup_project") for name in sys.modules)
     assert not (tmp_path / "__pycache__").exists()
+
+
+def test_the_person_s_layer_is_read_where_it_s_given(tmp_path: Path) -> None:
+    root = tmp_path / "worktree"
+    write(root / "lup_project.py", OURS)
+    write(root / "lup_project.local.py", "this, beside the declaration, isn't read\n")
+    elsewhere = tmp_path / "main" / "lup_project.local.py"
+    write(elsewhere, MINE)
+    declared = load(root, local=elsewhere)
+    assert declared.local == elsewhere
+    assert [each.name for each in resolve(declared.project).repositories] == [
+        "atlas",
+        "beacon",
+    ]
+
+
+def test_a_worktree_s_layer_is_in_its_repository_s_main_worktree(
+    repo: Path, linked: Path, bare: Path
+) -> None:
+    assert person_layer(repo) == repo / "lup_project.local.py"
+    assert person_layer(linked) == repo / "lup_project.local.py"
+    assert person_layer(bare / "tree" / "main") == bare / "lup_project.local.py"
 
 
 def test_without_the_person_s_layer_nothing_changes(tmp_path: Path) -> None:
