@@ -162,6 +162,7 @@ def test_each_step_runs_through_the_runner_unless_it_says_not(tmp_path: Path) ->
     ).run()
     assert processes.ran == [
         ["uv", "run", "ruff", "check", "--fix-only", "--ignore-noqa"],
+        ["uv", "run", "lup-dev", "rules", "fix"],
         ["uv", "run", "ruff", "format"],
         ["uv", "run", "ruff", "check"],
         ["make", "all"],
@@ -311,21 +312,14 @@ def test_a_command_not_installed_fails_its_step(tmp_path: Path) -> None:
 
 def test_the_catalogs_gate_runs_lups_rules_then_the_tools() -> None:
     commands = {step.name: step.command for step in Gate().steps}
-    assert list(commands) == [
-        "rules",
-        "ruff",
-        "format",
-        "pyright",
-        "pytest",
-        "lint-imports",
-    ]
+    assert list(commands) == ["rules", "format", "pytest", "lint-imports"]
     assert commands["rules"] == ["lup-dev", "rules", "check"]
-    assert commands["ruff"] == ["ruff", "check", "--ignore-noqa"]
 
 
-def test_the_fixes_are_ruffs_safe_fixes_then_the_formatter() -> None:
+def test_the_fixes_are_ruffs_then_unused_ignores_removed_then_the_formatter() -> None:
     assert [step.command for step in Fixes().steps] == [
         ["ruff", "check", "--fix-only", "--ignore-noqa"],
+        ["lup-dev", "rules", "fix"],
         ["ruff", "format"],
     ]
 
@@ -512,9 +506,16 @@ def test_lup_dev_check_fix_rewrites_first(scripted: Scripted, tmp_path: Path) ->
     (tmp_path / "lup_project.py").write_text(DECLARED)
     result = CliRunner().invoke(cli.app, ["check", "--fix"])
     assert result.exit_code == 0
-    assert scripted.ran[:2] == [step.command for step in Fixes().steps]
-    assert [command[0] for command in scripted.ran[2:]] == ["lint", "types", "tests"]
-    assert result.output.startswith("passed   fix\npassed   reformat\npassed   lint\n")
+    fixes = [step.command for step in Fixes().steps]
+    assert scripted.ran[: len(fixes)] == fixes
+    assert [command[0] for command in scripted.ran[len(fixes) :]] == [
+        "lint",
+        "types",
+        "tests",
+    ]
+    assert result.output.startswith(
+        "passed   fix\npassed   ignores\npassed   reformat\npassed   lint\n"
+    )
 
 
 def test_lup_dev_check_runs_nothing_without_a_required_tool(

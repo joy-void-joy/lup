@@ -191,6 +191,30 @@ def test_rules_check_reports_every_owner_through_lups_ignore(
     assert lines[-1] == "lup checked 3 files: 3 findings."
 
 
+def test_rules_fix_removes_each_ignore_keeping_nothing_and_rules_check_reports_it(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    core = repo / "src" / "pkg" / "core.py"
+    core.write_text(
+        'x = 1  # lup: ignore("regex", why="nothing fires")\n'
+        '# lup: ignore("tuple-shape", why="nothing fires")\n'
+        "y = 2\n"
+        'z = (1, 2)  # BAD tuple-shape  # lup: ignore("tuple-shape", why="sh")\n'
+    )
+    monkeypatch.chdir(repo)
+    checked = runner.invoke(cli.app, ["rules", "check"])
+    assert checked.exit_code == 1
+    assert sum("unused-ignore" in line for line in checked.output.splitlines()) == 2
+    fixed = runner.invoke(cli.app, ["rules", "fix"])
+    assert fixed.exit_code == 0
+    assert core.read_text() == (
+        "x = 1\n"
+        "y = 2\n"
+        'z = (1, 2)  # BAD tuple-shape  # lup: ignore("tuple-shape", why="sh")\n'
+    )
+    assert runner.invoke(cli.app, ["rules", "check"]).exit_code == 0
+
+
 PLAIN = (
     "from lup_dev import Modules, Plain, Project, Python\n"
     "project = Project(modules=Modules.default().edit(Python(runner=Plain())))\n"

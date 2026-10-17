@@ -354,9 +354,7 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
     assert resolved.paths.excluded == []
     assert [each.name for each in resolved.gate] == [
         "rules",
-        "ruff",
         "format",
-        "pyright",
         "pytest",
         "lint-imports",
     ]
@@ -634,13 +632,13 @@ def test_a_pattern_from_two_modules_is_one_pattern() -> None:
 
 def test_a_name_from_two_modules_is_refused_naming_both() -> None:
     class Linting(Module):
-        """Another ruff."""
+        """Another pytest."""
 
         name = "linting"
 
-        gate: Gate = Gate.of(Step(name="ruff", command=["ruff"]))
+        gate: Gate = Gate.of(Step(name="pytest", command=["pytest"]))
 
-    with pytest.raises(ProjectError, match=r"`ruff` from `python` and `linting`"):
+    with pytest.raises(ProjectError, match=r"`pytest` from `python` and `linting`"):
         resolve(Project(modules=Modules.default().add(Linting())))
 
 

@@ -77,16 +77,18 @@ class Shell(Processes):
 class Fixes(Model):
     """What `lup-dev check --fix` runs before the gate's steps, rewriting files.
 
-    ruff's safe fixes, then the formatter: what the agent is never told of
-    (`docs/judging-writes.md`, *Type errors and ruff's findings*), applied by the
-    session landing the work on the merged result (`AGENTS.md`). `--fix-only`
-    applies them without reporting what's left, which the gate's own ruff step
-    reports. Without `--fix`, as in CI, the gate only checks. Each runs through
-    the project's runner, as the gate's steps do.
+    ruff's safe fixes, then each `# lup: ignore` that keeps nothing removed, then
+    the formatter: what the agent is never told of (`docs/judging-writes.md`,
+    *Type errors and ruff's findings*), applied by the session landing the work
+    on the merged result (`AGENTS.md`). `--fix-only` applies ruff's without
+    reporting what's left, which the gate's `rules` step reports. Without
+    `--fix`, as in CI, the gate only checks. Each runs through the project's
+    runner, as the gate's steps do.
     """
 
     steps: list[Step] = [
         Step(name="fix", command=["ruff", "check", "--fix-only", "--ignore-noqa"]),
+        Step(name="ignores", command=["lup-dev", "rules", "fix"]),
         Step(name="reformat", command=["ruff", "format"]),
     ]
 

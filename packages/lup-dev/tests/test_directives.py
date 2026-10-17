@@ -66,6 +66,7 @@ def test_an_ignore_whose_rule_doesnt_fire_there_is_a_finding() -> None:
     checking = Checking(fired=[Fired(rule="regex", line=3)])
     [problem] = ignore().problems(checking)
     assert problem.rule == "unused-ignore"
+    assert problem.fixable
     assert ignore().problems(Checking(fired=[Fired(rule="tuple-shape", line=3)])) == []
 
 
