@@ -1,6 +1,7 @@
 """Each runtime's terminal compile: the command, variables, files and mounts, compared whole."""
 
 import asyncio
+import inspect
 import json
 import sys
 import tomllib
@@ -16,6 +17,7 @@ from lup.adapters.claude import Claude
 from lup.adapters.codex import Codex
 from lup.adapters.codex.terminal import toml
 from lup.rooms.container import Mount
+from lup.sessions import bridge
 from lup.sessions.errors import RuntimeMissingError
 from lup.sessions.terminal import (
     Cli,
@@ -181,12 +183,13 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
             "mcpServers": {
                 "lup": {
                     "type": "stdio",
-                    "command": "socat",
-                    "args": ["STDIO", "UNIX-CONNECT:/run/lup/mcp.sock"],
+                    "command": "python3",
+                    "args": ["-I", str(launch / "mcp-bridge.py"), "/run/lup/mcp.sock"],
                     "timeout": 90_000_000,
                 }
             }
         },
+        launch / "mcp-bridge.py": inspect.getsource(bridge),
         launch / "guidance.md": GUIDANCE,
     }
     assert terminal.mounts == [
@@ -209,6 +212,7 @@ def test_claude_loads_no_server_and_moves_no_socket_where_lup_gives_none(
         flag for flag in terminal.command if "mcp" in flag or "messaging" in flag
     ]
     assert launch / "mcp.json" not in terminal.files
+    assert launch / "mcp-bridge.py" not in terminal.files
     assert "crossSessionInbound" not in lup_settings(terminal, launch)
 
 
@@ -228,8 +232,8 @@ def test_claude_waits_on_a_server_with_no_timeout_as_it_would(
         "mcpServers": {
             "tools": {
                 "type": "stdio",
-                "command": "socat",
-                "args": ["STDIO", "UNIX-CONNECT:/run/tools.sock"],
+                "command": "python3",
+                "args": ["-I", str(launch / "mcp-bridge.py"), "/run/tools.sock"],
             }
         }
     }
@@ -514,7 +518,8 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
         "-c",
         (
             'mcp_servers={node_repl = {enabled = false},"docs.search" = {enabled = false},'
-            'lup = {command = "socat",args = ["STDIO", "UNIX-CONNECT:/run/lup/mcp.sock"],'
+            f'lup = {{command = "python3",args = ["-I", "{launch / "mcp-bridge.py"}", '
+            '"/run/lup/mcp.sock"],'
             'tool_timeout_sec = 90000,default_tools_approval_mode = "approve"}}'
         ),
         "-c",
@@ -532,7 +537,8 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
                 "PreToolUse": [{"matcher": "Edit|Write", "hooks": [timed]}],
                 "PostToolUse": [{"hooks": [command]}],
             },
-        }
+        },
+        launch / "mcp-bridge.py": inspect.getsource(bridge),
     }
     assert terminal.mounts == [
         Mount(source=codex_home),
@@ -542,6 +548,7 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
             target=Path("/etc/codex/requirements.toml"),
             read_only=True,
         ),
+        Mount(source=launch / "mcp-bridge.py", read_only=True),
     ]
 
 
@@ -576,8 +583,12 @@ def test_every_codex_override_parses_as_toml_rather_than_falling_back_to_text(
         "mcp_servers": {
             "node_repl": {"enabled": False},
             "lup": {
-                "command": "socat",
-                "args": ["STDIO", "UNIX-CONNECT:/run/lup/mcp.sock"],
+                "command": "python3",
+                "args": [
+                    "-I",
+                    str(tmp_path / "launch" / "mcp-bridge.py"),
+                    "/run/lup/mcp.sock",
+                ],
                 "tool_timeout_sec": 90000,
                 "default_tools_approval_mode": "approve",
             },
@@ -601,9 +612,9 @@ def test_codex_serves_lup_s_tools_where_the_operator_has_no_server(
     assert terminal.command[-4:] == [
         "-c",
         (
-            'mcp_servers={tools = {command = "socat",'
-            'args = ["STDIO", "UNIX-CONNECT:/run/tools.sock"],'
-            'default_tools_approval_mode = "approve"}}'
+            'mcp_servers={tools = {command = "python3",'
+            f'args = ["-I", "{tmp_path / "launch" / "mcp-bridge.py"}", '
+            '"/run/tools.sock"],default_tools_approval_mode = "approve"}}'
         ),
         "-c",
         "project_doc_max_bytes=0",
@@ -756,7 +767,11 @@ def test_codex_has_no_idle_compaction_to_turn_off(
         terminal = Codex().terminal(
             settings(tmp_path / "launch", CODEX_CLI, session=session)
         )
-        assert not any("compact" in argument for argument in terminal.command)
+        # The launch's directory, in each path to the bridge, holds the test's name.
+        assert not any(
+            "compact" in argument.replace(str(tmp_path), "")
+            for argument in terminal.command
+        )
 
 
 def test_codex_uses_the_operators_default_home(tmp_path: Path, home: Path) -> None:

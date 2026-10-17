@@ -55,9 +55,10 @@ A variable in the room's own environment would lose to their file's `env`,
 which Claude Code applies over its environment at start; their shell's
 variables don't reach the room.
 
-**lup's tool servers** are stdio servers in `mcp.json`, each `socat STDIO
-UNIX-CONNECT:<socket>`, a bridge from its standard input and output to the
-server's socket (socat is in every room, for the hooks), with the server's
+**lup's tool servers** are stdio servers in `mcp.json`, each lup's bridge to
+the server's socket (`lup.sessions.bridge`, written into the launch's directory,
+which the room mounts), which carries the session across the server's
+restarts, with the server's
 `timeout` in milliseconds where it gives one: Claude Code aborts a stdio call
 with no answer and no progress for 30 minutes, and a `timeout` raises that idle
 limit along with the call's own. `--strict-mcp-config` keeps every other MCP
@@ -219,11 +220,12 @@ class Servers(Wire):
     mcp_servers: dict[str, StdioServer]
 
 
-def bridged(server: ToolServer) -> StdioServer:
-    """Return the entry for one of lup's tool servers: `socat` bridging standard input and output to its socket."""
+def bridged(server: ToolServer, settings: TerminalSettings) -> StdioServer:
+    """Return the entry for one of lup's tool servers: lup's bridge to its socket (`TerminalSettings.bridged`)."""
+    program, *arguments = settings.bridged(server)
     return StdioServer(
-        command="socat",
-        args=["STDIO", f"UNIX-CONNECT:{server.socket}"],
+        command=program,
+        args=arguments,
         timeout=None
         if server.timeout is None
         else server.timeout // timedelta(milliseconds=1),
@@ -368,7 +370,9 @@ def compiled(
         projects={str(path): Trusted() for path in settings.trusted},
     )
     servers = Servers(
-        mcp_servers={server.name: bridged(server) for server in settings.servers}
+        mcp_servers={
+            server.name: bridged(server, settings) for server in settings.servers
+        }
     )
     moved = {} if layout.configured is None else {CONFIG_DIR: str(layout.configured)}
     prompt = {} if system_prompt is None else {launch.system_prompt: system_prompt}
@@ -388,6 +392,7 @@ def compiled(
         ),
         launch.state: state.model_dump_json(by_alias=True, indent=2),
         **served,
+        **settings.bridges(),
         **prompt,
         **guidance,
     }

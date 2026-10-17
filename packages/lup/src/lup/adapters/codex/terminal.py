@@ -48,9 +48,10 @@ Codex applies the table's entries in the order of their keys, an older key
 switching the same feature, so their `connectors = true` would apply after
 lup's `apps = false` alone. Theirs count as set by either key.
 
-**lup's tool servers** are stdio servers, each `socat STDIO UNIX-CONNECT:<socket>`,
-a bridge from its standard input and output to the server's socket (socat is in
-every room, for the hooks), with the server's timeout as `tool_timeout_sec`
+**lup's tool servers** are stdio servers, each lup's bridge to the server's
+socket (`lup.sessions.bridge`, written into the launch's directory and mounted
+read-only at its path), which carries the session across the server's
+restarts, with the server's timeout as `tool_timeout_sec`
 where it gives one (Codex's own is 300 s) and `default_tools_approval_mode =
 "approve"`, so no call asks. They go in one `mcp_servers` table with the
 operator's turned off, since a later `-c` of the same key replaces an earlier
@@ -328,11 +329,12 @@ class StdioServer(Model):
     """Every call to the server's tools approved without asking."""
 
 
-def bridged(server: ToolServer) -> StdioServer:
-    """Return the entry for one of lup's tool servers: `socat` bridging standard input and output to its socket."""
+def bridged(server: ToolServer, settings: TerminalSettings) -> StdioServer:
+    """Return the entry for one of lup's tool servers: lup's bridge to its socket (`TerminalSettings.bridged`)."""
+    program, *arguments = settings.bridged(server)
     return StdioServer(
-        command="socat",
-        args=["STDIO", f"UNIX-CONNECT:{server.socket}"],
+        command=program,
+        args=arguments,
         tool_timeout_sec=None
         if server.timeout is None
         else server.timeout // timedelta(seconds=1),
@@ -359,7 +361,9 @@ def served(
         raise TerminalError(message)
     off: JsonObject = {name: {"enabled": False} for name in theirs.mcp_servers}
     lups: JsonObject = {
-        server.name: bridged(server).model_dump(mode="json", exclude_none=True)
+        server.name: bridged(server, settings).model_dump(
+            mode="json", exclude_none=True
+        )
         for server in settings.servers
     }
     return {**off, **lups}
@@ -460,7 +464,7 @@ def compiled(
             ),
         ],
         env={"CODEX_HOME": str(layout.operator_home)},
-        files={launch.requirements: written},
+        files={launch.requirements: written, **settings.bridges()},
         mounts=[
             Mount(source=layout.operator_home),
             cli.mount,
@@ -469,5 +473,6 @@ def compiled(
                 target=MANAGED_REQUIREMENTS,
                 read_only=True,
             ),
+            *(Mount(source=path, read_only=True) for path in settings.bridges()),
         ],
     )
