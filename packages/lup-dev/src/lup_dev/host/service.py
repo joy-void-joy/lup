@@ -1015,7 +1015,14 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         A record that doesn't read as a launch's, or that this service can't serve,
         is said and left in place.
         """
-        for record in sorted(self.layout.launches.glob("*.json")):
+        # Each launch's conversations are kept beside its record, and aren't a record.
+        records = [
+            each
+            for each in sorted(self.layout.launches.glob("*.json"))
+            if each
+            != self.layout.conversations(each.stem.removesuffix(".conversations"))
+        ]
+        for record in records:
             try:
                 request = Register.model_validate_json(record.read_text())
                 await self.open(request)

@@ -14,9 +14,11 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
+from datetime import timedelta
 from typing import TYPE_CHECKING, Literal, override
 
 import pytest
+from filelock import FileLock
 from mcp import Client
 from mcp.shared.memory import create_client_server_memory_streams
 from mcp.shared.message import SessionMessage
@@ -402,6 +404,63 @@ def test_a_service_started_again_serves_the_launches_where_their_rooms_mounted_t
         assert send(layout.launch("one").hook, "again") == "first answers again\n"
         assert host.launches() == [registered]
         host.unregister("one")
+
+
+class Lingering(LaunchModules):
+    """A launch's modules slow to stop: closing them waits until the test lets them go, as a worker's process takes its time."""
+
+    def __init__(self) -> None:
+        self.closing = threading.Event()
+        self.go = threading.Event()
+
+    @override
+    async def open(self, launch: Register) -> Offered:
+        return Offered()
+
+    @override
+    async def ask(self, launch: Register, request: Request) -> Reply:
+        message = "nothing is served to ask"
+        raise AssertionError(message)
+
+    @override
+    async def close(self, launch: Register) -> None:
+        self.closing.set()
+        await asyncio.to_thread(self.go.wait, 60)
+
+
+def test_stopping_waits_until_the_service_has_exited_so_a_restart_can_start(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+    lingering = Lingering()
+    with served(service(layout, Judge(), said, modules=lingering)):
+        host.register(launch(tmp_path, "one", "first"))
+        stopping = threading.Thread(target=host.stop)
+        stopping.start()
+        # Its control socket closed, it still closes its launches, holding its lock.
+        assert lingering.closing.wait(60)
+        stopping.join(timeout=0.2)
+        still_stopping = stopping.is_alive()
+        lingering.go.set()
+        stopping.join(timeout=60)
+    assert still_stopping
+    assert not stopping.is_alive()
+    # Started at once, as a restart starts the copy just installed.
+    with served(service(layout, Judge(), said)):
+        assert host.launches() == [launch(tmp_path, "one", "first")]
+        host.unregister("one")
+    assert not any("runs already" in each for each in said)
+
+
+def test_a_lock_held_past_patience_is_said(
+    layout: HostLayout, clock: FakeClock
+) -> None:
+    impatient = client(layout, clock).model_copy(update={"patience": timedelta(0)})
+    layout.sockets.mkdir(parents=True, exist_ok=True)
+    holder = FileLock(layout.lock)
+    with holder, pytest.raises(HostError, match="still holds"):
+        impatient.exited()
+    impatient.exited()
 
 
 def test_a_service_started_again_brings_each_room_s_programs_up_to_its_copy(
@@ -1386,6 +1445,7 @@ def test_what_a_conversation_is_doing_outlasts_a_restart_of_the_service(
         listed = own.listed()
     [talker] = listed.talkers["one"]
     assert talker.activity == Activity(state="calling", since=clock.now(), tool="Bash")
+    assert not any("isn't served again" in each for each in said)
 
 
 def test_the_operator_holds_each_flagged_write_of_one_conversation(
