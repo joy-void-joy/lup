@@ -115,6 +115,7 @@ from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import (
     Answer,
     Approval,
+    ChangedFile,
     Comment,
     HeldChange,
     Inbox,
@@ -129,6 +130,7 @@ from lup_dev.inbox.store import (
 )
 from lup_dev.inbox.store import Conversation as InboxConversation
 from lup_dev.inbox.tools import InboxTools
+from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
@@ -418,6 +420,7 @@ def host_serve(context: typer.Context) -> None:
             layout, change, approved=approved, comment=said
         ),
     )
+    types = TypeReader(delivery=delivery, read=typed_reading, say=typer.echo)
     service = HostService(
         layout=layout.host,
         answerer=known,
@@ -439,9 +442,16 @@ def host_serve(context: typer.Context) -> None:
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
         changes=changes,
-        companions=[] if dashboard is None else [dashboard],
+        companions=[types, *([] if dashboard is None else [dashboard])],
     )
     asyncio.run(service.serve())
+
+
+def typed_reading(
+    approval: Approval, worktree: Path, files: list[ChangedFile]
+) -> list[ChangedFile]:
+    """Read an approval's files wholly, types and lup's rules included, as trust in the worktree it was asked from reads them, on this machine (`Trust.typed`)."""
+    return machine_trust(worktree, []).typed(approval.repository, files)
 
 
 async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) -> None:

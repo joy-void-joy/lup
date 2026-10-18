@@ -31,6 +31,7 @@ from lup.rooms.engine import Exited, Process
 from lup.tools.speaking import Problem, Remark
 from lup_dev import Modules, Project, cli
 from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts
+from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.courier import Conversation as Caller
@@ -77,6 +78,7 @@ from lup_dev.inbox.store import (
     Decided,
     Done,
     Draft,
+    Found,
     HeldChange,
     Inbox,
     InboxError,
@@ -85,6 +87,7 @@ from lup_dev.inbox.store import (
     Message,
     Operator,
     Quote,
+    Reading,
     Review,
     Sent,
     Talk,
@@ -94,6 +97,7 @@ from lup_dev.inbox.store import (
     Waiting,
 )
 from lup_dev.inbox.tools import specs
+from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import InboxLayout, Layout
 from lup_dev.policy.before import Overwrite, Replacement, before
@@ -302,8 +306,11 @@ def inboxed(
     recorded: dict[str, Recorded] | None = None,
     *,
     judging: Layout | None = None,
+    typed: Callable[[Approval, Path, list[ChangedFile]], list[ChangedFile]]
+    | None = None,
+    told: Callable[[str], None] | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s."""
+    """A host service with lup's inbox, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     changes = Changes()
@@ -315,6 +322,12 @@ def inboxed(
         clock=clock,
         say=said.append,
     )
+
+    def saying(line: str) -> None:
+        said.append(line)
+        if told is not None:
+            told(line)
+
     service = HostService(
         layout=machine.host,
         answerer=known,
@@ -326,6 +339,11 @@ def inboxed(
         judge=Quiet(),
         say=said.append,
         changes=changes,
+        companions=(
+            []
+            if typed is None
+            else [TypeReader(delivery=delivery, read=typed, say=saying)]
+        ),
     )
     with served(service):
         yield delivery
@@ -2052,13 +2070,16 @@ def asking_approval(
     fingerprint: str,
     pushed_by: Conversation | None = None,
     files: list[ChangedFile] | None = None,
+    *,
+    typing: bool = False,
 ) -> AskApproval:
-    """An approval of the repository at `tmp_path`, its zone at `fingerprint`, asked by `pushed_by`'s push, or by a launch."""
+    """An approval of the repository at `tmp_path`, its zone at `fingerprint`, asked by `pushed_by`'s push, or by a launch; its files read from their parse alone where `typing`."""
     return AskApproval(
         question="Approve the host zone at abc?",
         summary="A summary.",
         diff="+the diff\n",
         files=files or [],
+        typing=typing,
         repository=tmp_path / ".git",
         fingerprint=fingerprint,
         worktree=tmp_path,
@@ -2091,6 +2112,147 @@ def test_an_approval_keeps_each_file_it_changes_whole_and_shows_them_on_request(
     assert str(unasked.value) == (
         f"item {asked.number + 1} isn't an approval or a held change, but a note"
     )
+
+
+# An approval's types, read once it's asked.
+
+
+PARSED = [
+    ChangedFile(
+        path=Path("src/a.py"),
+        before=Text(text="a = 1\n"),
+        after=Text(text="a = 2\n"),
+        reading=Reading(role="production"),
+    )
+]
+"""An approval's file as it's asked, read from its parse alone."""
+
+TYPED = [
+    each.model_copy(
+        update={
+            "reading": Reading(
+                role="production",
+                findings=[
+                    Found(rule="regex", message="m", start=1, end=1, taken="told")
+                ],
+            )
+        }
+    )
+    for each in PARSED
+]
+"""The same file, its types read."""
+
+
+class Typing:
+    """Reads an approval's types once the test lets it go: `TYPED`, or what it's given to raise."""
+
+    def __init__(self, raising: Exception | None = None) -> None:
+        self.asked: list[tuple[str, Path, list[ChangedFile]]] = []
+        """Each approval read, by its fingerprint, with its worktree and files."""
+        self.going = threading.Event()
+        self.raising = raising
+
+    def __call__(
+        self, approval: Approval, worktree: Path, files: list[ChangedFile]
+    ) -> list[ChangedFile]:
+        self.asked.append((approval.fingerprint, worktree, files))
+        assert self.going.wait(timeout=60)
+        if self.raising is not None:
+            raise self.raising
+        return TYPED
+
+
+def hearing(words: str) -> tuple[threading.Event, Callable[[str], None]]:
+    """An event set once the service says `words`, and what it's told by."""
+    heard = threading.Event()
+
+    def told(line: str) -> None:
+        if words in line:
+            heard.set()
+
+    return heard, told
+
+
+def approval_numbered(items: list[Item], number: int) -> Approval:
+    [item] = [each for each in items if each.number == number]
+    assert isinstance(item.reason, Approval)
+    return item.reason
+
+
+def test_an_approvals_types_are_read_after_it_and_its_files_kept_again(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    typing = Typing()
+    read, told = hearing("its types are read")
+    with inboxed(machine, clock, notices, said, typed=typing, told=told):
+        host = client(machine.host, clock)
+        asked = host.ask(
+            asking_approval(tmp_path, "zone", files=PARSED, typing=True), Shown
+        ).item
+        first = host.ask(asking_approval(tmp_path / "other", "zone"), Shown).item
+        before = host.ask(ShowFiles(number=asked.number), Files).files
+        waiting = host.ask(ListInbox(), Items).items
+        typing.going.set()
+        assert read.wait(timeout=60)
+        after = host.ask(ShowFiles(number=asked.number), Files).files
+        items = host.ask(ListInbox(), Items).items
+    assert before == PARSED
+    assert approval_numbered(waiting, asked.number).typing
+    assert after == TYPED
+    typed = approval_numbered(items, asked.number)
+    assert (typed.typing, typed.summary) == (False, "A summary.")
+    # One asked with its whole reading, a first approval's, isn't read again.
+    assert not approval_numbered(items, first.number).typing
+    assert typing.asked == [("zone", tmp_path, PARSED)]
+
+
+def test_where_an_approvals_types_cant_be_read_its_first_reading_stays_and_it_says_why(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    typing = Typing(raising=EngineError("the engine is gone"))
+    typing.going.set()
+    failed, told = hearing("couldn't be read")
+    with inboxed(machine, clock, notices, said, typed=typing, told=told):
+        host = client(machine.host, clock)
+        asked = host.ask(
+            asking_approval(tmp_path, "zone", files=PARSED, typing=True), Shown
+        ).item
+        assert failed.wait(timeout=60)
+        files = host.ask(ShowFiles(number=asked.number), Files).files
+        items = host.ask(ListInbox(), Items).items
+    assert files == PARSED
+    unread = approval_numbered(items, asked.number)
+    assert not unread.typing
+    assert unread.summary.splitlines() == [
+        "A summary.",
+        "The judge couldn't read the change's types, so the review reads each "
+        "file by its parse alone: the engine is gone",
+    ]
+    assert any("EngineError: the engine is gone" in each for each in said)
+
+
+def test_an_approval_left_with_its_first_reading_is_read_by_the_next_service(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    kept = Inbox.opened(machine.inbox)
+    for fingerprint in ["zone", "decided"]:
+        approval = asking_approval(tmp_path, fingerprint, typing=True).approval()
+        item = kept.made(approval, Operator(), Operator(), tmp_path, clock.now())
+        kept.attached(item.number, "", PARSED)
+    kept.kept(
+        kept.item(2).model_copy(
+            update={"state": Decided(at=clock.now(), approved=False)}
+        )
+    )
+    typing = Typing()
+    typing.going.set()
+    read, told = hearing("its types are read")
+    with inboxed(machine, clock, notices, said, typed=typing, told=told):
+        host = client(machine.host, clock)
+        assert read.wait(timeout=60)
+        files = host.ask(ShowFiles(number=1), Files).files
+    assert files == TYPED
+    assert typing.asked == [("zone", tmp_path, PARSED)]
 
 
 def test_a_comment_on_an_approval_a_push_asked_reaches_the_session_that_pushed(

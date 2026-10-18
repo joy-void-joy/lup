@@ -20,6 +20,7 @@ put beside the commit's export.
 import importlib
 import importlib.util
 import sys
+import threading
 import tomllib
 from contextlib import contextmanager
 from pathlib import Path, PurePath
@@ -130,21 +131,10 @@ def importable(
     imported before from elsewhere is set aside meanwhile and put back after. No
     bytecode is written meanwhile: a `__pycache__/` the judge left in a worktree
     that doesn't ignore it would be judged at the next checkpoint as a file the
-    session wrote.
+    session wrote. Loads in one process take turns (`IMPORTING`): the import
+    path and `sys.modules` are the process's own, and the host service reads
+    declarations in threads, trust's for a push and an approval's types.
     """
-    before = list(sys.path)
-    known = dict(sys.modules)
-    aside = {
-        each: module
-        for each, module in known.items()
-        if each == name or each.startswith(f"{name}.")
-    }
-    writes = sys.dont_write_bytecode
-    for each in aside:
-        del sys.modules[each]
-    sys.path[:0] = [str(each) for each in roots]
-    sys.dont_write_bytecode = True
-    importlib.invalidate_caches()
 
     def within(module: ModuleType) -> bool:
         spec = module.__spec__
@@ -157,19 +147,37 @@ def importable(
             if place
         )
 
-    try:
-        yield
-    finally:
-        sys.path[:] = before
-        sys.dont_write_bytecode = writes
-        imported = [
-            each
-            for each, module in sys.modules.items()
-            if each not in known and within(module)
-        ]
-        for each in imported:
+    with IMPORTING:
+        before = list(sys.path)
+        known = dict(sys.modules)
+        aside = {
+            each: module
+            for each, module in known.items()
+            if each == name or each.startswith(f"{name}.")
+        }
+        writes = sys.dont_write_bytecode
+        for each in aside:
             del sys.modules[each]
-        sys.modules.update(aside)
+        sys.path[:0] = [str(each) for each in roots]
+        sys.dont_write_bytecode = True
+        importlib.invalidate_caches()
+        try:
+            yield
+        finally:
+            sys.path[:] = before
+            sys.dont_write_bytecode = writes
+            imported = [
+                each
+                for each, module in sys.modules.items()
+                if each not in known and within(module)
+            ]
+            for each in imported:
+                del sys.modules[each]
+            sys.modules.update(aside)
+
+
+IMPORTING = threading.RLock()
+"""Held while a declaration is imported (`importable`), so loads in threads of one process take turns."""
 
 
 def bound(module: ModuleType, shown: Path) -> Project:
