@@ -1541,7 +1541,7 @@ def body(rows: list[str]) -> list[str]:
 
 A comment or docstring telling how the code came to be means something only against a version the reader never sees.
 
-**Steer:** Say what is: "the call waits", not "the call now waits"; "a file being created", not "a new file". History belongs in the commit message.
+**Steer:** Say what is: "the call waits", not "the call now waits"; "the parser", not "the new parser". History belongs in the commit message.
 
 **Flags:**
 
@@ -1565,12 +1565,66 @@ def pause(seconds: float) -> None:
     time.sleep(max(seconds, 1))
 ```
 
+```python
+def field(record: dict[str, str], name: str) -> str | None:
+    """Read one field of a record: a missing one no longer raises."""
+    return record.get(name)
+```
+
+Done the steer's way:
+
+```python
+def field(record: dict[str, str], name: str) -> str | None:
+    """Read one field of a record: none where it's missing."""
+    return record.get(name)
+```
+
+```python
+def width(text: str) -> int:
+    """Count the columns a line takes, with the new parser."""
+    return len(text.expandtabs())
+```
+
+Done the steer's way:
+
+```python
+def width(text: str) -> int:
+    """Count the columns a line takes, tabs expanded."""
+    return len(text.expandtabs())
+```
+
+```python
+def joined(lines: list[str]) -> str:
+    """Join lines, which fixed the trailing newline."""
+    return "\n".join(lines)
+```
+
+Done the steer's way:
+
+```python
+def joined(lines: list[str]) -> str:
+    """Join lines, with no newline after the last."""
+    return "\n".join(lines)
+```
+
 **Leaves alone:**
 
 ```python
 def described(old: str, replacement: str) -> str:
     """Describe an edit: its `old_string` and `new_string`, which "the new text" names."""
     return f"{old} -> {replacement}"
+```
+
+```python
+def reply(draft: str) -> str:
+    """Send what's drafted as a new reply, from now on to every agent; for now, the draft is kept as written."""
+    return draft
+```
+
+```python
+def tools(names: list[str]) -> list[str]:
+    """List a thread's tools, fixed for its life: a fixed set, since right now the lock is held, and now that it is, nothing changes them."""
+    return sorted(names)
 ```
 
 

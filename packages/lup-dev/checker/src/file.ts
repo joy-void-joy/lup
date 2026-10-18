@@ -43,7 +43,7 @@ import { ParseFileResults } from 'pyright/parser/parser';
 import { OperatorType, StringTokenFlags } from 'pyright/parser/tokenizerTypes';
 
 import { CommentPart, commentParts } from './comments';
-import { codeMarks, comments, Mark, Mention, mentions, Prose, Word, wordsOf, written } from './prose';
+import { codeMarks, comments, Mark, Mention, mentions, phrasesOf, Prose, Word, written } from './prose';
 import { ImportedModule, importedByImportAs, importedByImportFrom } from './imports';
 import { Used, usesOf } from './references';
 import { denotes, describeType, Meaning, resolve } from './semantics';
@@ -667,10 +667,10 @@ export class File {
         return [...comments(this.parse), ...this.docstrings()];
     }
 
-    // The words of a piece of prose, leaving out code in backticks, text in double
-    // quotes, and doctest examples.
-    words(prose: Prose): Word[] {
-        return wordsOf(prose);
+    // The phrases of a piece of prose, each a run of words no punctuation breaks,
+    // leaving out code in backticks, text in double quotes, and doctest examples.
+    phrases(prose: Prose): Word[][] {
+        return phrasesOf(prose);
     }
 
     // The reStructuredText marks in a piece of prose: double backticks, Sphinx roles.

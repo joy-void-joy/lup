@@ -1,7 +1,7 @@
-// The prose in a file, its comments and docstrings, read as words: code in backticks,
-// text in double quotes and doctest examples are left out, since they're quoted
-// rather than said. No grammar is parsed: the scan only tells prose from what it
-// quotes.
+// The prose in a file, its comments and docstrings, read as phrases of words: code in
+// backticks, text in double quotes and doctest examples are left out, since they're
+// quoted rather than said. No grammar is parsed: a rule reads a word's role from the
+// words beside it in its phrase, English's function words among them.
 
 import { TextRange } from 'pyright/common/textRange';
 import { ParseFileResults } from 'pyright/parser/parser';
@@ -47,10 +47,19 @@ function isLetter(char: string): boolean {
     return char.toLowerCase() !== char.toUpperCase();
 }
 
-// The words of a piece of prose, outside backticks, double quotes and doctests.
-export function wordsOf(prose: Prose): Word[] {
+// The phrases of a piece of prose: each run of words with only spaces and line breaks
+// between them, outside backticks, double quotes and doctests. Punctuation, a blank
+// line, or code or text quoted between two words ends a phrase.
+export function phrasesOf(prose: Prose): Word[][] {
     const text = prose.text;
-    const words: Word[] = [];
+    const phrases: Word[][] = [];
+    let phrase: Word[] = [];
+    const end = () => {
+        if (phrase.length > 0) {
+            phrases.push(phrase);
+            phrase = [];
+        }
+    };
     let index = 0;
     let lineStart = true;
     let inDoctest = false;
@@ -68,13 +77,24 @@ export function wordsOf(prose: Prose): Word[] {
                 first++;
             }
             const blank = first >= text.length || text[first] === '\n';
+            if (blank) {
+                end();
+            }
             // A doctest runs from its `>>>` to the next blank line.
             inDoctest = text.startsWith('>>>', first) || (inDoctest && !blank);
             if (inDoctest) {
-                const end = text.indexOf('\n', first);
-                index = end === -1 ? text.length : end;
+                end();
+                const next = text.indexOf('\n', first);
+                index = next === -1 ? text.length : next;
                 continue;
             }
+        }
+        if (char === ' ' || char === '\t') {
+            index++;
+            continue;
+        }
+        if (!isLetter(char)) {
+            end();
         }
         if (char === '`') {
             let run = 0;
@@ -97,23 +117,24 @@ export function wordsOf(prose: Prose): Word[] {
             continue;
         }
         if (isLetter(char)) {
-            let end = index;
+            let last = index;
             // A letter run, an apostrophe or a hyphen inside it included: `don't`, and
             // a compound such as `fixed-width`, which is read whole.
             const joins = (at: number) => (text[at] === "'" || text[at] === '-') && isLetter(text[at + 1] ?? '');
-            while (end < text.length && (isLetter(text[end]) || joins(end))) {
-                end++;
+            while (last < text.length && (isLetter(text[last]) || joins(last))) {
+                last++;
             }
-            words.push({
-                range: { start: prose.range.start + index, length: end - index },
-                text: text.substring(index, end).toLowerCase(),
+            phrase.push({
+                range: { start: prose.range.start + index, length: last - index },
+                text: text.substring(index, last).toLowerCase(),
             });
-            index = end;
+            index = last;
             continue;
         }
         index++;
     }
-    return words;
+    end();
+    return phrases;
 }
 
 function isRoleChar(char: string): boolean {

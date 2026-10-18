@@ -1841,23 +1841,37 @@ export const rules = {
     'historical-voice': {
         mistake: 'A comment or docstring telling how the code came to be means something only against a version the reader never sees.',
         steer:
-            'Say what is: "the call waits", not "the call now waits"; "a file being created", not "a new file". ' +
+            'Say what is: "the call waits", not "the call now waits"; "the parser", not "the new parser". ' +
             'History belongs in the commit message.',
         check(file) {
-            const single = ['new', 'newly', 'now', 'fixed', 'previously', 'formerly', 'anymore'];
-            const pairs = [['no', 'longer']];
+            // Each word is read beside its neighbours in its phrase, since most of them also
+            // name a moment or a thing of the running code: "for now", "a new reply" and
+            // "fixed for its life" tell nothing of the code's past.
+            const always = ['previously', 'formerly', 'anymore'];
+            // `now` names a moment of the running code after these, or before `that` or `on`.
+            const moment = ['for', 'right', 'from', 'just', 'by'];
+            // `new` and `newly` set a thing against what it replaced after these; after
+            // `a` they name an instance the code makes.
+            const against = ['the', 'this', 'these', 'our'];
+            // `fixed` tells of a repair after these, or before what was repaired.
+            const done = ['was', 'were', 'been', 'is', 'are', 'has', 'have', 'had', 'got', 'gets'];
+            const repaired = ['a', 'an', 'the', 'this', 'that', 'these', 'those', 'its', 'their', 'bug', 'bugs'];
             for (const prose of file.prose()) {
-                const words = file.words(prose);
-                words.forEach((word, index) => {
-                    const next = words[index + 1];
-                    const pair = pairs.find(([first, second]) => word.text === first && next?.text === second);
-                    if (pair) {
-                        file.report(word.range, `"${pair.join(' ')}" tells how the code came to be`);
-                    }
-                    if (single.includes(word.text)) {
-                        file.report(word.range, `"${word.text}" tells how the code came to be`);
-                    }
-                });
+                for (const phrase of file.phrases(prose)) {
+                    phrase.forEach((word, index) => {
+                        const before = phrase[index - 1]?.text ?? '';
+                        const after = phrase[index + 1]?.text ?? '';
+                        const said =
+                            (always.includes(word.text) && word.text) ||
+                            (word.text === 'no' && after === 'longer' && 'no longer') ||
+                            (word.text === 'now' && !moment.includes(before) && !['that', 'on'].includes(after) && 'now') ||
+                            (['new', 'newly'].includes(word.text) && against.includes(before) && word.text) ||
+                            (word.text === 'fixed' && (done.includes(before) || repaired.includes(after)) && 'fixed');
+                        if (said) {
+                            file.report(word.range, `"${said}" tells how the code came to be`);
+                        }
+                    });
+                }
             }
         },
         examples: {
@@ -1880,12 +1894,58 @@ export const rules = {
                             time.sleep(max(seconds, 1))
                     `,
                 },
+                {
+                    code: python`
+                        def field(record: dict[str, str], name: str) -> str | None:
+                            """Read one field of a record: a missing one no longer raises."""
+                            return record.get(name)
+                    `,
+                    rewritten: python`
+                        def field(record: dict[str, str], name: str) -> str | None:
+                            """Read one field of a record: none where it's missing."""
+                            return record.get(name)
+                    `,
+                },
+                {
+                    code: python`
+                        def width(text: str) -> int:
+                            """Count the columns a line takes, with the new parser."""
+                            return len(text.expandtabs())
+                    `,
+                    rewritten: python`
+                        def width(text: str) -> int:
+                            """Count the columns a line takes, tabs expanded."""
+                            return len(text.expandtabs())
+                    `,
+                },
+                {
+                    code: python`
+                        def joined(lines: list[str]) -> str:
+                            """Join lines, which fixed the trailing newline."""
+                            return "\\n".join(lines)
+                    `,
+                    rewritten: python`
+                        def joined(lines: list[str]) -> str:
+                            """Join lines, with no newline after the last."""
+                            return "\\n".join(lines)
+                    `,
+                },
             ],
             passes: [
                 python`
                     def described(old: str, replacement: str) -> str:
                         """Describe an edit: its \`old_string\` and \`new_string\`, which "the new text" names."""
                         return f"{old} -> {replacement}"
+                `,
+                python`
+                    def reply(draft: str) -> str:
+                        """Send what's drafted as a new reply, from now on to every agent; for now, the draft is kept as written."""
+                        return draft
+                `,
+                python`
+                    def tools(names: list[str]) -> list[str]:
+                        """List a thread's tools, fixed for its life: a fixed set, since right now the lock is held, and now that it is, nothing changes them."""
+                        return sorted(names)
                 `,
             ],
         },
