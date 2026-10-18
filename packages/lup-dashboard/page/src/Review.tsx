@@ -156,6 +156,16 @@ function decorations(laidOut: Laid, draft: Draft): DecorationSet {
             (draft.parked ?? []).includes(number) ? "is-parked" : "",
         ].join(" ");
         marks.push({ from: region.header.from, to: region.header.from, value: Decoration.line({ class: states }) });
+        if (region.item.reason.reason === "approval") {
+            let at = region.body.from;
+            for (const line of laidOut.text.slice(region.body.from, region.body.to).split("\n")) {
+                const kind = diffLine(line);
+                if (kind !== null) {
+                    marks.push({ from: at, to: at, value: Decoration.line({ class: kind }) });
+                }
+                at += line.length + 1;
+            }
+        }
         for (const asked of region.decisions) {
             const given = (draft.verdicts ?? []).find((each) => each.item === number && each.decision === asked.number);
             if (given !== undefined) {
@@ -193,6 +203,37 @@ function decorations(laidOut: Laid, draft: Draft): DecorationSet {
     return builder.finish();
 }
 
+/** Return how a line of a diff is drawn: added, removed, a hunk's header or a file's; none for a line of context or of anything else. */
+function diffLine(line: string): string | null {
+    if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff --git")) {
+        return "diff-file";
+    }
+    if (line.startsWith("@@")) {
+        return "diff-hunk";
+    }
+    if (line.startsWith("+")) {
+        return "diff-added";
+    }
+    if (line.startsWith("-")) {
+        return "diff-removed";
+    }
+    return null;
+}
+
+/** Return where the cursor goes once the text is laid out again: at item `landing`'s header where one is named, else on the same item, as far into it as it was; at the same place where its item is gone. */
+function followed(before: Laid | null, after: Laid, head: number, landing: number | null): number {
+    const clamped = Math.min(head, after.text.length);
+    if (landing !== null) {
+        return after.regions.find((each) => each.item.number === landing)?.header.from ?? clamped;
+    }
+    const was = before === null ? undefined : regionAt(before.regions, head);
+    const now = was === undefined ? undefined : after.regions.find((each) => each.item.number === was.item.number);
+    if (was === undefined || now === undefined) {
+        return clamped;
+    }
+    return Math.min(now.header.from + (head - was.header.from), after.text.length);
+}
+
 function when(made: string): string {
     const at = new Date(made);
     return at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -201,6 +242,8 @@ function when(made: string): string {
 export function Review({ items, draft, change, name, diffs, open, send, approve }: Props) {
     const parent = useRef<HTMLDivElement>(null);
     const view = useRef<EditorView | null>(null);
+    const shown = useRef<Laid | null>(null);
+    const landing = useRef<number | null>(null);
     const [writing, setWriting] = useState<Writing | null>(null);
     const [said, setSaid] = useState("");
     const parked = draft.parked ?? [];
@@ -263,13 +306,16 @@ export function Review({ items, draft, change, name, diffs, open, send, approve 
         if (editor === null) {
             return;
         }
-        const head = Math.min(editor.state.selection.main.head, laidOut.text.length);
         if (editor.state.doc.toString() !== laidOut.text) {
+            const head = followed(shown.current, laidOut, editor.state.selection.main.head, landing.current);
             editor.dispatch({
                 changes: { from: 0, to: editor.state.doc.length, insert: laidOut.text },
                 selection: { anchor: head },
+                scrollIntoView: true,
             });
         }
+        shown.current = laidOut;
+        landing.current = null;
         editor.dispatch({ effects: drawn.of(decorations(laidOut, draft)) });
     }, [laidOut, draft]);
 
@@ -310,6 +356,10 @@ export function Review({ items, draft, change, name, diffs, open, send, approve 
             const editor = view.current;
             const region = editor === null ? undefined : regionAt(laidOut.regions, editor.state.selection.main.head);
             if (region !== undefined) {
+                if (list === "parked") {
+                    const at = laidOut.regions.indexOf(region);
+                    landing.current = (laidOut.regions[at + 1] ?? region).item.number;
+                }
                 change(toggled(draft, list, region.item.number));
             }
         },

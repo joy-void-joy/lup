@@ -515,3 +515,20 @@ kbd {
     outline: 2px solid var(--focus);
     padding: 0 2ch;
 }
+
+.diff-added {
+    background: var(--add-bg);
+}
+
+.diff-removed {
+    background: var(--del-bg);
+}
+
+.diff-hunk {
+    color: var(--info);
+}
+
+.diff-file {
+    color: var(--muted);
+    font-weight: 700;
+}
