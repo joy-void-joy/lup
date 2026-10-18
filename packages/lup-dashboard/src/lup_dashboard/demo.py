@@ -25,15 +25,19 @@ from lup_dev.host.protocol import (
 from lup_dev.host.records import Called, Entry, Said
 from lup_dev.inbox.protocol import (
     Context,
+    Conversed,
     Drafted,
     Items,
     KeepDraft,
     ListInbox,
     Reviewed,
     SendDraft,
+    SendItem,
     ShowContext,
+    ShowConversation,
     ShowDiff,
     ShowDraft,
+    Shown,
     Whole,
 )
 from lup_dev.inbox.store import (
@@ -62,6 +66,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     runtimes: list[str] = ["claude", "codex"]
     """The runtimes the demo's launches run, by name: the first for most, the second for one."""
     draft: Draft = Draft()
+    sent: list[SendItem] = []
+    """The operator's messages sent from the page, kept in memory: they reach no agent."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -82,6 +88,26 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return Whole(text=diff())
             case ShowContext(number=number):
                 return self.context(number)
+            case SendItem() as sending:
+                self.sent = [*self.sent, sending]
+                first, _ = self.runtimes
+                return Shown(
+                    item=Item(
+                        number=100 + len(self.sent),
+                        reason=Message(kind="note", text=sending.text),
+                        sender=Operator(),
+                        recipient=Conversation(
+                            repository=Path("/home/op/lup.git"),
+                            runtime=first,
+                            session="s1",
+                            agent=sending.agent,
+                        ),
+                        made=self.clock.now(),
+                    )
+                )
+            case ShowConversation(session=session, agent=agent, since=since):
+                steps = self.conversation(session, agent)
+                return Conversed(entries=steps[since:], since=since, total=len(steps))
             case _:
                 return Refused(error=f"the demo doesn't answer `{request.kind}`")
 
@@ -348,6 +374,45 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             if isinstance(each, Called) and each.id == f"call-{number}"
         ]
         return Context(number=number, entries=entries, anchor=anchor)
+
+    def conversation(self, session: str, agent: str | None) -> list[Entry]:
+        """Return a stand-in conversation: for the parser subagent, its moment around item 51 with what led to it; for any other, a short exchange."""
+        if (session, agent) == ("s1", "a02"):
+            return [
+                Said(
+                    by="operator",
+                    text="Look into reading transcripts.",
+                    at=self.ago(30),
+                ),
+                Said(
+                    by="agent",
+                    text=(
+                        "Starting with the record's layout. Each session is a JSONL "
+                        "file;\nsubagents get their own beside it."
+                    ),
+                    at=self.ago(29),
+                ),
+                Called(tool="Bash", at=self.ago(28)),
+                Called(tool="Read", at=self.ago(27)),
+                *self.moment(51),
+            ]
+        return [
+            Said(
+                by="operator",
+                text="Carry on with what you were doing.",
+                at=self.ago(20),
+            ),
+            Said(by="agent", text="On it: reading the code first.", at=self.ago(19)),
+            Called(tool="Grep", at=self.ago(18)),
+            Called(tool="Read", at=self.ago(17)),
+            Called(tool="Read", at=self.ago(17)),
+            Said(by="agent", text="Found it. Writing the fix next.", at=self.ago(15)),
+        ]
+
+    def moment(self, number: int) -> list[Entry]:
+        """Return the stand-in steps around item `number`, none where it has none."""
+        found = self.context(number)
+        return found.entries if isinstance(found, Context) else []
 
 
 def diff() -> str:
