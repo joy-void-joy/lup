@@ -228,7 +228,7 @@ From the source at `rust-v0.162.1` (paths under `codex-rs/`), and one `codex exe
 
 ## MCP in a launched session (read 2026-10-13)
 
-Read for `docs/host-tools.md`: Claude Code's docs (code.claude.com, cited by page) and its 2.1.296 binary (a byte search, no model called); Codex's source at `rust-v0.162.1` (paths under `codex-rs/`) and the rmcp crate it pins; `mcp` 2.3.0's source. Nothing here was run against a model; the live checks are owed (`docs/host-tools.md`, *Checks owed*).
+Read for `docs/host-tools.md`: Claude Code's docs (code.claude.com, cited by page) and its 2.1.296 binary (a byte search, no model called); Codex's source at `rust-v0.162.1` (paths under `codex-rs/`) and the rmcp crate it pins; `mcp` 2.3.0's source. Nothing here was run against a model; what was seen live is under *Piece 2, live*.
 
 - **Claude Code 2.1.296:**
   - **Servers from the launch:** `--mcp-config` loads servers interactively too; `--strict-mcp-config` is "Only use MCP servers from `--mcp-config`, ignoring all other MCP configurations" (`cli-reference`), managed servers dropped "along with every other configured server" (`managed-mcp`). Managed `allowedMcpServers` and `deniedMcpServers` filter `--mcp-config`'s servers, and `disableSideloadFlags` refuses the flag (`managed-mcp`). Under `bypassPermissions` no MCP tool prompts but one marked `_meta["anthropic/requiresUserInteraction"]` (`mcp`, *Require approval for a specific tool*).
@@ -277,6 +277,10 @@ Read for `docs/host-tools.md`: Claude Code's docs (code.claude.com, cited by pag
   - **A hold doesn't hold a code-mode agent.** GPT-6-Astra runs tools in code mode: the patch ran in a cell, and the model read "Script running with cell ID 4", polled it, said the call was still pending, and ended its turn after 7 min 49 s, the hook still waiting. A held call is visible to it as pending, not invisible.
   - Two Claude sessions starting in the worktree while the patch was held accepted it as it stood, so the decline put back nothing (fixed on its own branch: a held file stays out of other sessions' accepted tree).
   - With the host service stopped, a shell call's hooks failed: Codex showed "Hook failed — hook exited with code 1", not what the hook wrote to standard error, and the call went on. Quitting then, the launcher's client started the service again, which served the recorded launch and ended it.
+- **Not seen live, as far as these notes record:**
+  - Claude Code: the session settings' variables in the `env` of the launch's settings taking effect over the same in the operator's own `env`, as read in the 2.1.296 binary, and `idleCompaction: false` stopping idle compaction. lup's own variables (`CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS`, `DISABLE_AUTOUPDATER`) are in the room's environment, which a variable of the same name in the operator's own `env` would overwrite at start.
+  - Codex: `allow_managed_hooks_only` dropping every hook source but the mounted requirements file; `features.memories` and `features.apps`, overridden with the older key the operator's `config.toml` uses, holding as the source reads; the room's `--no-daemon` beside the host's daemon on the same home.
+  - Both: a hook held for hours, past the hour seen.
 
 ## Piece 2, live (2026-10-14)
 
@@ -292,6 +296,12 @@ Read for `docs/host-tools.md`: Claude Code's docs (code.claude.com, cited by pag
 - **GitHub:** `read_issue` and `find_issues` answered from GitHub; the write tools wait for their first real use.
 - **`lup-dev inbox send` in a worktree with two launches** refused, naming both, until one was named by its id.
 - **Desktop notices:** `notify-send` failed, "GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable": no notification daemon on the operator's session bus. lup logs it and goes on.
+- **Not seen live, as far as these notes record:**
+  - Claude Code: whether Esc on a held call sends `notifications/cancelled`; `--resume` keeping the session's id, so a resumed session finds what waited for it.
+  - Codex: in code mode, what the model sees of a held call answered after its turn ended (the hold above stayed a direct call); resuming keeping the thread's id.
+  - Both: lup's MCP bridge carrying a session across a restart of the host service.
+  - GitHub's write tools, `file_issue`, `comment` (on a pull request's number too) and `draft_pull_request`, at their first real use from a launched session.
+  - A protected ref refused by lup's own check: the push to `main` above met git's own refusal first. lup's rule is tested, and was seen against a stand-in forge in a room.
 
 ## Host-side git in a repository the room writes (git 2.56.0, 2026-10-14)
 
@@ -328,7 +338,7 @@ Found since, on the room's git 2.55.0 (2026-10-16), on scratch repositories laid
 
 ## A hook the judge doesn't read (measured, 2026-10-14)
 
-What `docs/host-tools.md` owes before Claude Code hooks every call (*How an agent is told*, decision 6): the cost of a hook the host service answers itself, without starting the judge. On the operator's machine (32 cores, Linux 7.2.6, Python 3.14.0, socat 1.8.1.3), `feat-room-sockets`' `lup-dev host` ran in the background with its XDG directories in a scratch directory, one launch registered for Claude Code, its judge the branch's own `lup-dev`. Each hook was the room's exact command (`launch/session.py`, `piped`: `sh -c 'socat -t 90000 - UNIX-CONNECT:<hook.sock> || …'`), its payload on standard input, timed from spawning `sh` to its exit, 300 runs each from a Python loop on the host. Script in the session's scratchpad.
+What `docs/host-tools.md` owes before Claude Code hooks every call (*How an agent is told*): the cost of a hook the host service answers itself, without starting the judge. On the operator's machine (32 cores, Linux 7.2.6, Python 3.14.0, socat 1.8.1.3), `feat-room-sockets`' `lup-dev host` ran in the background with its XDG directories in a scratch directory, one launch registered for Claude Code, its judge the branch's own `lup-dev`. Each hook was the room's exact command (`launch/session.py`, `piped`: `sh -c 'socat -t 90000 - UNIX-CONNECT:<hook.sock> || …'`), its payload on standard input, timed from spawning `sh` to its exit, 300 runs each from a Python loop on the host. Script in the session's scratchpad.
 
 | Hook | Median | p90 | Min | Max |
 |---|---|---|---|---|
@@ -340,7 +350,7 @@ What `docs/host-tools.md` owes before Claude Code hooks every call (*How an agen
 
 - **The service's own part is under a millisecond** (4.54 against 3.75 ms): reading the payload, the courier's parse, minting or finding the conversation's id, and its answer. Most of a hook is spawning `sh` and `socat`, which a room pays for every hook already.
 - **A hook the judge reads costs about 150 times as much,** almost all of it the judge's process starting (Python and `lup-dev`'s imports), so hooking every call on Claude Code adds about 5 ms a call, where judging every call would add two-thirds of a second. The first lup's guard in the same place took 7.85 ms against its dispatcher's 107 ms (its `17321798b`).
-- Not measured: what Claude Code itself spends around a hook (spawning it, and parsing its answer), the same for a judged hook and an unjudged one; and the room's own overhead, the hook running inside a container whose `sh` and `socat` are the image's. Owed live (`docs/host-tools.md`, *Checks owed*).
+- Not measured: what Claude Code itself spends around a hook (spawning it, and parsing its answer), the same for a judged hook and an unjudged one; and the room's own overhead, the hook running inside a container whose `sh` and `socat` are the image's.
 
 ## GitHub through `gh` on the host (gh 2.102.0, 2026-10-14)
 

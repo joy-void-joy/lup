@@ -59,8 +59,8 @@ turn, through a socket moved by `--messaging-socket-path` too (its
 (`68eaa2e2e`). The 2.1.296 binary agrees (a byte search, `docs/field-notes.md`):
 a `user` frame's `message.content` must be a non-empty string, a `session_id`
 other than the session's own drops it, and a missing `priority` is `next`, which
-interrupts nothing. Owed live on the version a launch runs (`docs/host-tools.md`,
-*Checks owed*). Seen live on 2.1.296: it refuses to start with the socket's
+interrupts nothing. Owed live on the version a launch runs
+(`docs/field-notes.md`, *Piece 2, live*). Seen live on 2.1.296: it refuses to start with the socket's
 directory at mode 0755 ("--messaging-socket-path directory /run/lup is not
 private (mode 755); the socket directory must be mode 0700 so no other user or
 group can reach or replace the socket"), so the host service keeps each launch's
@@ -76,7 +76,7 @@ What the host's part relies on, from Claude Code's hooks reference
   silent on it alone. The first lup measured on Claude Code 2.1.283 that "a
   rewrite with no decision reached the server even for a tool with
   `additionalProperties: false`" (its `docs/platform-differentiation.md`); owed
-  live on the version a launch runs (`docs/host-tools.md`, *Checks owed*);
+  live on the version a launch runs (`docs/field-notes.md`, *Piece 2, live*);
 - `PreToolUse`'s `additionalContext` is a "String added to Claude's context
   alongside the tool result", `SessionStart`'s one "added to Claude's context at
   the start of the conversation", and a hook's `additionalContext` is "capped at
