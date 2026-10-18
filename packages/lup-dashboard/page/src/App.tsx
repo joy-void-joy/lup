@@ -130,10 +130,11 @@ export function App() {
     }, []);
 
     useEffect(() => {
-        // Each item's context, and an approval's whole diff, asked once it's in the inbox.
+        // Each agent's item's context, and an approval's whole diff, asked once it's in the inbox;
+        // an approval, which no agent's call made, has no context to ask for.
         for (const item of waiting) {
             const number = item.number;
-            if (!asked.current.contexts.has(number)) {
+            if (item.sender.party === "conversation" && !asked.current.contexts.has(number)) {
                 asked.current.contexts.add(number);
                 void answered({ kind: "inbox-show-context", number }, (answer) =>
                     answer.kind === "inbox-context" ? answer : null,
