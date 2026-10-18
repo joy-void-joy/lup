@@ -209,6 +209,7 @@ kbd {
 
 .agent-row .label {
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .agent-row .label.repository {
@@ -230,6 +231,9 @@ kbd {
 
 .agent-row .state {
     margin-left: auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 400;
 }
