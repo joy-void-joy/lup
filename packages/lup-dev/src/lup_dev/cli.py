@@ -1,4 +1,4 @@
-"""The `lup-dev` command: the hooks, the gate's rule check, holds and verdicts.
+"""The `lup-dev` command: the hooks, the gate's rule check, the inbox and verdicts.
 
 It stands in for the real `lup` command tree until the declaration and command
 line piece builds it; the commands keep their meaning there, and their final
@@ -82,12 +82,14 @@ from lup_dev.host.workers import Workers
 from lup_dev.inbox.delivery import Delivery, opening, what, who
 from lup_dev.inbox.notices import NotifySend
 from lup_dev.inbox.protocol import (
+    AnswerApproval,
     AnswerItem,
     Context,
     FinishItem,
     Items,
     ListInbox,
     SendItem,
+    Settled,
     ShowContext,
     ShowDiff,
     ShowItem,
@@ -102,6 +104,7 @@ from lup_dev.inbox.store import (
     Comment,
     Decided,
     Done,
+    HeldChange,
     Inbox,
     InboxError,
     Item,
@@ -156,7 +159,7 @@ from lup_dev.layout import (
     Layout,
 )
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
-from lup_dev.policy.holds import Hold, Response, answer, waiting
+from lup_dev.policy.holds import InboxAnnouncing, Response, answer
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
@@ -178,7 +181,6 @@ if TYPE_CHECKING:
 
 app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
-holds = typer.Typer(help="Changes waiting for your answer.")
 host = typer.Typer(help="lup's host service, which rooms call.")
 inbox = typer.Typer(help="What your agents tell and ask you, and your answers.")
 transcripts = typer.Typer(
@@ -189,7 +191,6 @@ transcripts = typer.Typer(
     ),
 )
 app.add_typer(rules, name="rules")
-app.add_typer(holds, name="holds")
 app.add_typer(host, name="host")
 app.add_typer(inbox, name="inbox")
 app.add_typer(transcripts, name="transcripts")
@@ -301,6 +302,9 @@ def services() -> Services:
         layout=Layout.of(settings),
         spawner=BackgroundSpawner(),
         integration=settings.lup_integration_branch,
+        announcing=InboxAnnouncing(
+            layout=Layout.of(settings).host, clock=SystemClock()
+        ),
     )
 
 
@@ -396,6 +400,9 @@ def host_serve(context: typer.Context) -> None:
         notices=NotifySend(),
         clock=SystemClock(),
         say=typer.echo,
+        settle_hold=lambda change, approved, said: hold_answered(
+            layout, change, approved=approved, comment=said
+        ),
     )
     service = HostService(
         layout=layout.host,
@@ -584,6 +591,19 @@ def heading(item: Item) -> str:
     )
 
 
+def hold_answered(
+    layout: Layout, change: HeldChange, *, approved: bool, comment: str
+) -> None:
+    """Write the operator's answer to a held change where its hook waits for it, or a later checkpoint tells it."""
+    answer(
+        layout,
+        change.key,
+        Response(approved=approved, comment=comment),
+        runtimes(),
+        SystemClock(),
+    )
+
+
 def shown(item: Item) -> str:
     """Say an item whole, for the operator: an approval by its summary, its whole diff on request."""
     match item.reason:
@@ -602,7 +622,10 @@ def shown(item: Item) -> str:
                 for each in rulings
             ]
             body = [f"To item {question}.", *decided, comment]
-        case Approval(text=text, summary=summary):
+        case (
+            Approval(text=text, summary=summary)
+            | HeldChange(text=text, summary=summary)
+        ):
             body = [
                 summary,
                 "",
@@ -897,11 +920,19 @@ def inbox_answer(
     Every launch waiting on it goes on with the answer; approved, the copy is
     installed here where no launch did it first, the host service restarted on
     it for lup's own repository.
+
+    A held change shows what's held and its diff, then asks whether to let it
+    land, and a comment for the agent; `--approve` or `--decline`, with
+    `--comment`, answer without asking. The agent waiting on it goes on with
+    the answer.
     """
     client = answering()
     approvals = InboxApprovals(host=client)
+    item = client.ask(ShowItem(number=number), Shown).item
+    if isinstance(item.reason, HeldChange):
+        held_answer(client, item, approve=approve, comment=comment)
+        return
     if approve is not None:
-        item = client.ask(ShowItem(number=number), Shown).item
         given_here = approvals.answer(number, approved=approve)
         typer.echo(approved_here(number, given_here))
         if isinstance(item.reason, Approval):
@@ -915,7 +946,6 @@ def inbox_answer(
         *(Ruling(decision=each, verdict="leave open") for each in leave_open or []),
     ]
     if not given and comment is None:
-        item = client.ask(ShowItem(number=number), Shown).item
         match item.reason:
             case Approval(text=text, summary=summary) as approval:
                 asking = Approving(
@@ -943,6 +973,35 @@ def inbox_answer(
     typer.echo(
         f"{done} item {number}: your {noun}, item {answer.number}, is for "
         f"{who(answer.recipient)}."
+    )
+
+
+def held_answer(
+    client: HostClient, item: Item, *, approve: bool | None, comment: str | None
+) -> None:
+    """Answer a held change: as given, or asked at this terminal after its summary and diff."""
+    if approve is None:
+        typer.echo(shown(item))
+        Terminal().show(client.ask(ShowDiff(number=item.number), Whole).text)
+    landing = (
+        typer.confirm("Let it land?", default=False) if approve is None else approve
+    )
+    said: str = (
+        typer.prompt(
+            "A comment for the agent (optional)", default="", show_default=False
+        )
+        if comment is None
+        else comment
+    )
+    settled = client.ask(
+        AnswerApproval(number=item.number, approved=landing, comment=said),
+        Settled,
+    )
+    told = "let it land" if landing else "declined it"
+    typer.echo(
+        f"Item {item.number}: you {told}; the agent waiting on it goes on."
+        if settled.here
+        else f"Item {item.number} was answered already, elsewhere: yours changes nothing."
     )
 
 
@@ -1654,69 +1713,6 @@ def rules_fix(
         file = root / path
         file.write_text(without(file.read_text(), numbers))
         typer.echo(f"{path}: removed {len(numbers)} `# lup: ignore` keeping nothing")
-
-
-@holds.callback(invoke_without_command=True)
-def holds_list(context: typer.Context) -> None:
-    """List the changes waiting for your answer, with their diffs.
-
-    What a move of `HEAD` asks is listed apart: it's committed already, no agent
-    waits on it, and a decline changes no file.
-    """
-    if context.invoked_subcommand is not None:
-        return
-    held = waiting(Layout.of(LupDevSettings()))
-    if not held:
-        typer.echo("Nothing is waiting.")
-        return
-
-    def shown(hold: Hold, where: str) -> None:
-        typer.echo(f"{hold.key}  {hold.worktree}  ({where})")
-        for each in hold.files:
-            for asked in each.asks:
-                typer.echo(f"  {each.path}: {asked}")
-        typer.echo(hold.diff)
-
-    for hold in held:
-        if hold.commit is None:
-            shown(hold, f"session {hold.session}")
-    moved = [hold for hold in held if hold.commit is not None]
-    if moved:
-        typer.echo("Asked after the fact, about commits already made (no agent waits):")
-    for hold in moved:
-        shown(hold, f"commit {hold.commit}")
-
-
-@holds.command("approve")
-def holds_approve(
-    key: str,
-    comment: Annotated[str, typer.Option(help="Passed on to the agent.")] = "",
-) -> None:
-    """Approve a held change: it's accepted as it stands."""
-    answer(
-        Layout.of(LupDevSettings()),
-        key,
-        Response(approved=True, comment=comment),
-        runtimes(),
-        SystemClock(),
-    )
-    typer.echo(f"Approved {key}.")
-
-
-@holds.command("decline")
-def holds_decline(
-    key: str,
-    comment: Annotated[str, typer.Option(help="Why, for the agent.")],
-) -> None:
-    """Decline a held change: it's put back, and the agent's version saved."""
-    answer(
-        Layout.of(LupDevSettings()),
-        key,
-        Response(approved=False, comment=comment),
-        runtimes(),
-        SystemClock(),
-    )
-    typer.echo(f"Declined {key}.")
 
 
 @app.command("check")

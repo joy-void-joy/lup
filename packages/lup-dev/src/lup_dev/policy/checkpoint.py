@@ -62,7 +62,7 @@ from lup_dev.declaration.resolve import Declaration
 from lup_dev.git import Git
 from lup_dev.inbox import ends
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, Layout
-from lup_dev.policy.holds import HeldFile, Hold, Holds, answered
+from lup_dev.policy.holds import Announcing, HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
 from lup_dev.policy.judge import Change, Judge, Judgement, RemovedNote
 from lup_dev.policy.report import (

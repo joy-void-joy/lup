@@ -16,7 +16,7 @@ from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
 from lup_dev.declaration.resolve import Declaration, Selected
 from lup_dev.declaration.runner import Plain, Prefixed
-from lup_dev.policy.before import Overwrite, Replacement, before
+from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     CallFinished,
     CallStarted,
@@ -98,6 +98,18 @@ def shell_write(kit: Kit, repo: Path, key: str, path: Path, content: str) -> Rep
     call(kit, repo, key)
     (repo / path).write_text(content)
     return finish(kit, repo, key)
+
+
+def held(kit: Kit, deciding: Callable[[], Decision]) -> bool:
+    """Judge a file tool's write, and say whether it was held for the operator and let through on the yes the kit gives."""
+    count = len(kit.announced.holds)
+    decision = deciding()
+    return decision.outcome == "allow" and len(kit.announced.holds) == count + 1
+
+
+def last_asks(kit: Kit) -> list[str]:
+    """Return what the latest hold put before the operator asks, each file's asks in turn."""
+    return [ask for each in kit.announced.holds[-1].files for ask in each.asks]
 
 
 def log(kit: Kit, repo: Path) -> VerdictLog:
@@ -230,18 +242,14 @@ def test_a_session_starting_accepts_the_worktree_whatever_another_session_runs(
     assert "# BAD regex" in (repo / CORE).read_text()
 
 
-def test_a_new_file_through_the_shell_comes_back_through_the_file_tools(
+def test_a_new_file_through_the_shell_is_held_and_lands_on_a_yes(
     kit: Kit, repo: Path
 ) -> None:
     start(kit, repo)
     reply = shell_write(kit, repo, "c1", Path("src/pkg/new.py"), '"""New."""\n')
-    assert (
-        "Made through the shell, so it comes back through your file tools"
-        in reply.context
-    )
-    assert "src/pkg/new.py is a new production file" in reply.context
-    assert not (repo / "src" / "pkg" / "new.py").exists()
-    assert (repo / ".lup" / "saved" / "1" / "src" / "pkg" / "new.py").exists()
+    assert reply.context.startswith("The operator approved the held change to")
+    assert last_asks(kit) == [f"{repo}/src/pkg/new.py is a new production file"]
+    assert (repo / "src" / "pkg" / "new.py").read_text() == '"""New."""\n'
 
 
 def test_tests_docs_and_scratch_through_the_shell_are_allowed(
@@ -295,6 +303,7 @@ def test_a_write_committed_in_the_same_call_is_judged_once_as_the_commits(
 def test_a_module_committed_through_the_shell_stays_and_asks_the_operator_after(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:
+    kit.announced.answering = None
     start(kit, repo)
     new = repo / "src" / "pkg" / "new.py"
     call(kit, repo, "c1")
@@ -303,7 +312,8 @@ def test_a_module_committed_through_the_shell_stays_and_asks_the_operator_after(
     told = finish(kit, repo, "c1").context
     assert f"asks: {new} is a new production file" in told
     [hold] = waiting(kit.layout)
-    assert told.endswith(f"(hold {hold.key}, `lup-dev holds`).")
+    assert told.endswith(f"in their inbox (hold {hold.key}).")
+    assert kit.announced.holds == [hold]
     assert hold.commit == shell.git(repo, "rev-parse", "HEAD")
     assert new.read_text() == '"""New."""\n'
     call(kit, repo, "c2")
@@ -315,6 +325,7 @@ def test_a_module_committed_through_the_shell_stays_and_asks_the_operator_after(
 def test_a_moves_hold_is_answered_after_the_fact(
     kit: Kit, repo: Path, shell: Shell, runtimes: list[FakeRuntime]
 ) -> None:
+    kit.announced.answering = None
     start(kit, repo)
     call(kit, repo, "c1")
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
@@ -418,7 +429,7 @@ def test_a_branch_judged_in_another_worktree_merges_unjudged(
         old="    return x\n",
         new="    return x\n\n\nclass Adapter:\n    pass\n",
     )
-    assert before(kit.bench, edit, SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, edit, SESSION, repo))
     call(kit, repo, "e1", tool="Edit")
     (linked / CORE).write_text(edit.content((linked / CORE).read_text()) or "")
     finish(kit, repo, "e1")
@@ -458,16 +469,15 @@ def test_an_edit_judged_before_it_lands_is_accepted_as_judged(
         old="    return x\n",
         new="    return x\n" + added,
     )
-    decision = before(kit.bench, edit, SESSION, repo)
-    assert decision.outcome == "ask"
-    assert decision.reason == f"lup asks: {repo}/src/pkg/core.py adds the class `Room`"
+    assert held(kit, lambda: before(kit.bench, edit, SESSION, repo))
+    assert last_asks(kit) == [f"{repo}/src/pkg/core.py adds the class `Room`"]
     call(kit, repo, "e1", tool="Edit")
     (repo / CORE).write_text(edit.content((repo / CORE).read_text()) or "")
     assert finish(kit, repo, "e1").context == ""
     assert session(kit, repo).approved == [CORE]
     [verdict] = log(kit, repo).read()
     assert (verdict.outcome, verdict.answer, verdict.reasons) == (
-        "ask",
+        "hold",
         "approved",
         ["public-api"],
     )
@@ -483,7 +493,7 @@ def test_an_approval_covers_the_path_for_the_rest_of_the_session(
         path=repo / "src" / "pkg" / "new.py",
         text='"""New."""\n',
     )
-    assert before(kit.bench, write, SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, write, SESSION, repo))
     call(kit, repo, "w1", tool="Write")
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
     finish(kit, repo, "w1")
@@ -529,29 +539,31 @@ def protected_module(repo: Path, shell: Shell) -> None:
     shell.commit(repo, "a protected module")
 
 
-def test_a_protected_modules_change_through_the_shell_comes_back_through_the_tools(
+def test_a_protected_modules_change_through_the_shell_is_held_and_put_back_on_a_no(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:
     protected_module(repo, shell)
     start(kit, repo)
+    kit.announced.answering = Response(approved=False, comment="leave the hook")
     original = (repo / HOOK).read_text()
     reply = shell_write(kit, repo, "c1", HOOK, original + "y = 2  # BAD regex\n")
     assert reply.context.startswith("lup refused 1 file.")
-    assert "Made through the shell" in reply.context
+    assert "The operator declined it: leave the hook" in reply.context
     assert (repo / HOOK).read_text() == original
 
 
-def test_a_clean_change_to_a_protected_module_asks_through_the_file_tools(
+def test_a_clean_change_to_a_protected_module_through_the_shell_is_held(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:
     protected_module(repo, shell)
     start(kit, repo)
     changed = (repo / HOOK).read_text().replace("return x", "return x + 1")
     reply = shell_write(kit, repo, "c1", HOOK, changed)
-    assert "Made through the shell, so it comes back through your file tools" in (
-        reply.context
+    assert reply.context.startswith("The operator approved the held change to")
+    assert any(
+        ".claude/hooks/check.py is a protected path" in each for each in last_asks(kit)
     )
-    assert ".claude/hooks/check.py is a protected path" in reply.context
+    assert (repo / HOOK).read_text() == changed
 
 
 def test_a_protected_modules_type_errors_keep_the_turn_from_ending(
@@ -561,7 +573,7 @@ def test_a_protected_modules_type_errors_keep_the_turn_from_ending(
     start(kit, repo)
     broken = (repo / HOOK).read_text() + "y: int = 'a'  # TYPE\n"
     edit = Overwrite(call="w1", tool="Write", path=repo / HOOK, text=broken)
-    assert before(kit.bench, edit, SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, edit, SESSION, repo))
     call(kit, repo, "w1", tool="Write")
     (repo / HOOK).write_text(broken)
     finish(kit, repo, "w1")
@@ -642,7 +654,7 @@ def test_a_file_tools_write_goes_to_the_conversation_that_made_it(
     new = repo / "src" / "pkg" / "new.py"
     text = '"""New."""\nz: str = 1  # TYPE\n'
     write = Overwrite(call="w1", tool="Write", path=new, text=text)
-    assert before(kit.bench, write, SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, write, SESSION, repo))
     call(kit, repo, "c1")
     call(kit, repo, "w1", tool="Write", agent="worker")
     new.write_text(text)
@@ -663,7 +675,7 @@ def test_a_subagent_is_at_work_until_its_end_lets_it_go(kit: Kit, repo: Path) ->
     call(kit, repo, "worker-lost", agent="worker")
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
     first = subagent_ends(kit, repo, "worker").block
-    assert first.startswith("lup refused 1 file.")
+    assert first.startswith("The operator approved the held change to")
     assert "lup won't end the turn yet" not in first
     mailed = end(kit, repo).block
     assert "lup won't end the turn yet" not in mailed
@@ -687,8 +699,7 @@ def test_a_turns_end_leaves_a_subagents_call_in_flight_to_its_finish(
     assert end(kit, repo) == Reply()
     assert new.exists()
     told = finish(kit, repo, "w1", agent="worker").context
-    assert told.startswith("lup refused 1 file.")
-    assert "Made through the shell" in told
+    assert told.startswith("The operator approved the held change to")
 
 
 def test_a_subagents_file_tool_write_landed_before_its_call_finished_stays(
@@ -697,7 +708,7 @@ def test_a_subagents_file_tool_write_landed_before_its_call_finished_stays(
     start(kit, repo)
     new = repo / "src" / "pkg" / "new.py"
     write = Overwrite(call="w1", tool="Write", path=new, text='"""New."""\n')
-    assert before(kit.bench, write, SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, write, SESSION, repo))
     call(kit, repo, "w1", tool="Write", agent="worker")
     new.write_text('"""New."""\n')
     assert end(kit, repo) == Reply()
@@ -713,7 +724,7 @@ def test_what_the_turns_end_must_tell_still_blocks_while_a_subagent_works(
     call(kit, repo, "lost")
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
     block = end(kit, repo).block
-    assert block.startswith("lup refused 1 file.")
+    assert block.startswith("The operator approved the held change to")
     assert "A subagent of this session at work touched these files too" in block
     assert "lup won't end the turn yet" not in block
 
@@ -1197,11 +1208,10 @@ def test_every_worktree_is_judged_by_the_integration_branchs_declaration(
     declare(linked, PROTECTING_NOTHING)
     shell.commit(linked, "feat: protect nothing")
     start(kit, repo)
-    asked = before(kit.bench, core_edit(linked), SESSION, repo)
-    assert asked.outcome == "ask"
-    assert asked.reason == (
-        f"lup asks: {linked}/src/pkg/core.py is a protected path (src/pkg/core.py)"
-    )
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
+    assert last_asks(kit) == [
+        f"{linked}/src/pkg/core.py is a protected path (src/pkg/core.py)"
+    ]
     assert Worktree.at(linked, kit.layout).roles.protecting(CORE) is None
 
 
@@ -1213,7 +1223,7 @@ def test_the_integration_branchs_declaration_changes_when_committed(
     shell.commit(repo, "dev: protect the core")
     start(kit, repo)
     (repo / "lup_project.py").write_text(PROTECTING_NOTHING)
-    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
     shell.commit(repo, "dev: protect nothing")
     assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "allow"
 
@@ -1225,7 +1235,7 @@ def test_without_the_integration_branch_a_worktree_is_judged_by_its_head(
     shell.commit(repo, "main: protect the core")
     (repo / "lup_project.py").write_text(PROTECTING_NOTHING)
     start(kit, repo)
-    assert before(kit.bench, core_edit(repo), SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, core_edit(repo), SESSION, repo))
 
 
 def approve(kit: Kit, repo: Path, commit: str, local: str | None = None) -> None:
@@ -1270,7 +1280,7 @@ def test_the_approved_copy_of_the_person_s_layer_judges_not_the_worktree_s(
         "from lup_dev import Project\nproject = Project()\n"
     )
     start(kit, repo)
-    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
     approve(kit, repo, head)
     (repo / "lup_project.local.py").write_text(LOCAL_PROTECTING_CORE)
     assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "allow"
@@ -1298,7 +1308,7 @@ def test_the_approved_commits_declaration_judges_not_the_tip(
     declare(repo, PROTECTING_NOTHING)
     shell.commit(repo, "dev: protect nothing, not approved yet")
     start(kit, repo)
-    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
     approve(kit, repo, shell.git(repo, "rev-parse", "HEAD"))
     assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "allow"
 
@@ -1310,11 +1320,10 @@ def test_an_approved_commit_gone_from_the_repository_has_the_stand_in(
     declare(repo, PROTECTING_CORE)
     shell.commit(repo, "dev: protect the core")
     start(kit, repo)
-    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
     gone = "0" * 40
     approve(kit, repo, gone)
-    stood_in = before(kit.bench, core_edit(linked), SESSION, repo)
-    assert stood_in.outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
     call(kit, linked, "c1")
     (linked / "README.md").write_text("# Changed\n")
     told = finish(kit, linked, "c1").context
@@ -1360,12 +1369,12 @@ def test_an_approval_covers_a_path_in_its_worktree_only(
             call=key, tool="Write", path=root / "src/pkg/new.py", text='"""New."""\n'
         )
 
-    assert before(kit.bench, write(repo, "w1"), SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, write(repo, "w1"), SESSION, repo))
     call(kit, repo, "w1", tool="Write")
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
     finish(kit, repo, "w1")
     assert before(kit.bench, write(repo, "w2"), SESSION, repo).outcome == "allow"
-    assert before(kit.bench, write(linked, "w3"), SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, write(linked, "w3"), SESSION, repo))
 
 
 def test_a_session_started_in_a_bare_repositorys_directory_is_judged(
@@ -1423,12 +1432,13 @@ def test_a_write_in_the_repositorys_git_directory_asks(kit: Kit, bare: Path) -> 
     hook = Overwrite(
         call="w1", tool="Write", path=bare / "hooks" / "pre-commit", text="#!/bin/sh\n"
     )
-    decision = before(kit.bench, hook, SESSION, main)
-    assert decision.outcome == "ask"
-    assert decision.reason == (
-        f"lup asks: {bare}/hooks/pre-commit is in the repository's git directory, "
-        "which runs outside the agent's reach"
-    )
+    assert held(kit, lambda: before(kit.bench, hook, SESSION, main))
+    assert last_asks(kit) == [
+        (
+            f"{bare}/hooks/pre-commit is in the repository's git directory, "
+            "which runs outside the agent's reach"
+        )
+    ]
     [verdict] = VerdictLog(path=kit.layout.verdicts(bare)).read()
     assert (verdict.worktree, verdict.path) == (bare, Path("hooks/pre-commit"))
 
@@ -1487,15 +1497,14 @@ def test_the_last_declaration_that_loaded_stands_in_for_one_that_cant(
     shell.commit(repo, "dev: protect the core")
     loaded = shell.git(repo, "rev-parse", "HEAD")
     start(kit, repo)
-    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
     (repo / "lup_project.py").write_text(
         "from lup_dev import Unheard\n" + PROTECTING_CORE
     )
     shell.commit(repo, "dev: a name the judge lacks")
     broken = shell.git(repo, "rev-parse", "HEAD")
-    stood_in = before(kit.bench, core_edit(linked), SESSION, repo)
-    assert stood_in.outcome == "ask"
-    assert "is a protected path (src/pkg/core.py)" in stood_in.reason
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
+    assert any("is a protected path (src/pkg/core.py)" in ask for ask in last_asks(kit))
     call(kit, linked, "c1")
     (linked / "README.md").write_text("# Changed\n")
     told = finish(kit, linked, "c1").context
@@ -1513,14 +1522,13 @@ def test_a_declaration_that_doesnt_resolve_has_the_same_stand_in(
     declare(repo, PROTECTING_CORE)
     shell.commit(repo, "dev: protect the core")
     start(kit, repo)
-    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
     (repo / "lup_project.py").write_text(
         PROTECTING_CORE.replace(".add(Guard())", '.add(Guard()).drop("ledger")')
     )
     shell.commit(repo, "dev: drop a module that isn't there")
-    stood_in = before(kit.bench, core_edit(linked), SESSION, repo)
-    assert stood_in.outcome == "ask"
-    assert "is a protected path (src/pkg/core.py)" in stood_in.reason
+    assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
+    assert any("is a protected path (src/pkg/core.py)" in ask for ask in last_asks(kit))
 
 
 def test_with_no_declaration_kept_one_that_cant_load_fails(

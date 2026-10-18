@@ -1663,7 +1663,7 @@ def greet(name: str) -> str:
 
 A runtime named outside its adapter builds a feature for one runtime above the seam, where the others quietly lack it.
 
-**Steer:** Speak in lup's own words and capabilities (`runtime.asks_before()`); the runtime's spelling, and the evidence behind a capability, belong in its adapter.
+**Steer:** Speak in lup's own words and capabilities (`runtime.inside()`); the runtime's spelling, and the evidence behind a capability, belong in its adapter.
 
 **Flags:**
 

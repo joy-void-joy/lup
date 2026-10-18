@@ -63,6 +63,7 @@ from lup_dev.host.workers import (
 )
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench, Services
+from lup_dev.policy.holds import Announcing, Hold, Response, answer
 from lup_dev.policy.importers import Spawner
 from lup_dev.policy.runtime import Runtime
 from lup_dev.worker import Serving
@@ -367,18 +368,12 @@ class FakeSpawner(Spawner):
 
 
 class FakeRuntime(Runtime):
-    def __init__(
-        self, name: str = "asking", *, asks_before: bool = True, inside: bool = False
-    ) -> None:
+    def __init__(self, name: str = "asking", *, inside: bool = False) -> None:
         self.called = name
-        self.asks = asks_before
         self.within = inside
 
     def name(self) -> str:
         return self.called
-
-    def asks_before(self) -> bool:
-        return self.asks
 
     def inside(self) -> bool:
         return self.within
@@ -492,10 +487,35 @@ def bare(repo: Path, tmp_path: Path) -> Path:
     return root
 
 
+class Announced(Announcing):
+    """Records each hold put before the operator, and who made it; and answers it at once with `answering`, where one is given, as an operator watching would."""
+
+    def __init__(
+        self, layout: Layout, clock: FakeClock, answering: Response | None
+    ) -> None:
+        self.layout = layout
+        self.clock = clock
+        self.answering = answering
+        self.holds: list[Hold] = []
+        self.runtimes: list[str] = []
+
+    def announced(self, hold: Hold, runtime: str, repository: Path) -> None:
+        del repository
+        self.holds.append(hold)
+        self.runtimes.append(runtime)
+        if self.answering is not None:
+            answer(self.layout, hold.key, self.answering, [], self.clock)
+
+
 class Kit:
     """A bench with its fakes, for one test."""
 
-    def __init__(self, state: Path, runtime: FakeRuntime) -> None:
+    def __init__(
+        self,
+        state: Path,
+        runtime: FakeRuntime,
+        answering: Response | None = None,
+    ) -> None:
         self.engine = FakeEngine()
         self.linter = FakeLinter()
         self.clock = FakeClock()
@@ -504,6 +524,7 @@ class Kit:
         # trust installs live there.
         self.layout = Layout(state=state, data=state.parent / "data")
         self.runtime = runtime
+        self.announced = Announced(self.layout, self.clock, answering)
         self.bench = Bench(
             runtime=runtime,
             services=Services(
@@ -513,6 +534,7 @@ class Kit:
                 layout=self.layout,
                 spawner=self.spawner,
                 integration="dev",
+                announcing=self.announced,
             ),
         )
 
@@ -525,14 +547,14 @@ def runtimes() -> list[FakeRuntime]:
 
 @pytest.fixture
 def kit(tmp_path: Path) -> Kit:
-    """A bench for a runtime that asks before a call."""
-    return Kit(tmp_path / "state", FakeRuntime("asking", asks_before=True))
+    """A bench for a runtime whose file tools say what they'll write before they write it, each hold approved as it's put before the operator."""
+    return Kit(tmp_path / "state", FakeRuntime("asking"), Response(approved=True))
 
 
 @pytest.fixture
 def holding_kit(tmp_path: Path) -> Kit:
-    """A bench for a runtime that can't ask before a call, so it holds."""
-    return Kit(tmp_path / "state", FakeRuntime("holding", asks_before=False))
+    """A bench for a runtime whose writes are all judged at the checkpoint, each hold left for the test to answer."""
+    return Kit(tmp_path / "state", FakeRuntime("holding"))
 
 
 @pytest.fixture

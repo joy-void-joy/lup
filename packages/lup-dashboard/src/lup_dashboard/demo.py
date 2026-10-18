@@ -41,6 +41,7 @@ from lup_dev.inbox.store import (
     Conversation,
     Decision,
     Draft,
+    HeldChange,
     Item,
     Message,
     Operator,
@@ -193,7 +194,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def items(self) -> Items:
-        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, and an approval of a host zone."""
+        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, and a session's write held for them."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         parser = Conversation(repository=lup, runtime=first, session="s1", agent="a02")
@@ -267,6 +268,22 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     recipient=Operator(),
                     worktree=lup / "tree" / "dev",
                     made=self.ago(1),
+                ),
+                Item(
+                    number=55,
+                    reason=HeldChange(
+                        text="Let the change to pyproject.toml land?",
+                        summary=(
+                            "pyproject.toml: /home/op/lup.git/tree/dev/pyproject.toml "
+                            "is a protected path (pyproject.toml)"
+                        ),
+                        worktree=lup / "tree" / "dev",
+                        key="a1b2c3",
+                    ),
+                    sender=Conversation(repository=lup, runtime=first, session="s1"),
+                    recipient=Operator(),
+                    worktree=lup / "tree" / "dev",
+                    made=self.ago(0.5),
                 ),
             ]
         )

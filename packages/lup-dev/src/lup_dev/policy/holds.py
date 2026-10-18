@@ -32,7 +32,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.inbox.protocol import AskHold, Shown
-from lup_dev.inbox.store import Conversation, Held
+from lup_dev.inbox.store import Conversation, HeldChange
 from lup_dev.layout import HostLayout, Layout, StoreLayout
 from lup_dev.policy.roles import Role
 from lup_dev.policy.verdicts import Verdict, VerdictLog
@@ -109,7 +109,7 @@ class Announcing(ABC):
         """Put `hold` before the operator, from the session of `runtime` that made the change, in `repository`."""
 
 
-def asked(hold: Hold) -> Held:
+def asked(hold: Hold) -> HeldChange:
     """Return what a hold asks the operator, as an item of their inbox: let the change land, or keep what a commit brought, and what each file asks."""
     paths = [str(each.path) for each in hold.files]
     named = paths[0] if len(paths) == 1 else f"{len(paths)} files"
@@ -121,7 +121,7 @@ def asked(hold: Hold) -> Held:
     summary = "\n".join(
         f"{each.path}: {ask}" for each in hold.files for ask in each.asks
     )
-    return Held(
+    return HeldChange(
         text=text,
         summary=summary,
         worktree=hold.worktree,
@@ -142,7 +142,7 @@ class InboxAnnouncing(Model, Announcing, arbitrary_types_allowed=True):
             repository=repository, runtime=runtime, session=hold.session
         )
         host = HostClient(layout=self.layout, clock=self.clock, starter=Detached())
-        host.ask(AskHold(held=asked(hold), sender=sender, diff=hold.diff), Shown)
+        host.ask(AskHold(change=asked(hold), sender=sender, diff=hold.diff), Shown)
 
 
 def answered(

@@ -300,15 +300,6 @@ def unheld(findings: list[Finding], why: Literal["working", "repeated"]) -> str:
     )
 
 
-def asked(asks: list[Ask]) -> str:
-    """Say what a change asks the operator, for the runtime's prompt.
-
-    >>> asked([Ask(kind="new-file", reason="src/a.py is a new production file")])
-    'lup asks: src/a.py is a new production file'
-    """
-    return f"lup asks: {'; '.join(ask.reason for ask in asks)}"
-
-
 def judge_failed(failure: Exception) -> str:
     """Warn the operator that the judge failed at a turn's end, which ended anyway.
 

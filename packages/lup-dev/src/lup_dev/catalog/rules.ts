@@ -1998,7 +1998,7 @@ export const rules = {
             'A runtime named outside its adapter builds a feature for one runtime above the seam, where the others ' +
             'quietly lack it.',
         steer:
-            "Speak in lup's own words and capabilities (`runtime.asks_before()`); the runtime's spelling, and the " +
+            "Speak in lup's own words and capabilities (`runtime.inside()`); the runtime's spelling, and the " +
             'evidence behind a capability, belong in its adapter.',
         check(file) {
             for (const mention of file.mentionsOf(['claude', 'codex'])) {

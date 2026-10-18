@@ -8,8 +8,10 @@
 | `Stop` | `TurnEnded` |
 | `SubagentStop` | `ConversationEnded` |
 
-Claude Code asks the operator in its own prompt: `PreToolUse` answers `allow`, `ask`
-or `deny`, and a hook's `ask` prompts in auto mode too. The agent hears a
+A file tool's write that asks is held in `PreToolUse` for the operator's answer
+in their inbox, then let through (`allow`) or denied (`deny`) with it: Claude
+Code's own prompt isn't used, so a hold is answered the same way on every
+runtime. The agent hears a
 checkpoint's report as `additionalContext` beside the call's result, and a turn,
 the session's or a subagent's, can't end while a `Stop` or `SubagentStop` hook
 answers `decision: block`; `Stop`'s `stop_hook_active` says the session's turn's

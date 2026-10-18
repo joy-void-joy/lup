@@ -31,7 +31,7 @@ from lup_dev.inbox.store import (
     Approval,
     Conversation,
     Draft,
-    Held,
+    HeldChange,
     Item,
     Operator,
     Ruling,
@@ -144,7 +144,7 @@ class AskHold(Request):
     """Put a held change in the operator's inbox: what's held and why, its diff, and the session that made it."""
 
     kind: Literal["inbox-ask-hold"] = "inbox-ask-hold"
-    held: Held
+    change: HeldChange
     sender: Conversation
     diff: str
 
@@ -352,7 +352,9 @@ class HoldAsking(Model, Handler[AskHold], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: AskHold) -> Reply:
-        item = await self.delivery.held(request.held, request.sender, request.diff)
+        item = await self.delivery.held_change(
+            request.change, request.sender, request.diff
+        )
         return Shown(item=item)
 
 

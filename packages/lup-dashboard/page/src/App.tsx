@@ -130,17 +130,18 @@ export function App() {
     }, []);
 
     useEffect(() => {
-        // Each agent's item's context, and an approval's whole diff, asked once it's in the inbox;
-        // an approval, which no agent's call made, has no context to ask for.
+        // Each item's context, where an agent's call made it, and the whole diff of an approval or a
+        // held change, asked once it's in the inbox.
         for (const item of waiting) {
             const number = item.number;
-            if (item.sender.party === "conversation" && !asked.current.contexts.has(number)) {
+            if (item.call != null && !asked.current.contexts.has(number)) {
                 asked.current.contexts.add(number);
                 void answered({ kind: "inbox-show-context", number }, (answer) =>
                     answer.kind === "inbox-context" ? answer : null,
                 ).then((context) => setContexts((before) => new Map(before).set(number, context)));
             }
-            if (item.reason.reason === "approval" && !asked.current.diffs.has(number)) {
+            const diffed = item.reason.reason === "approval" || item.reason.reason === "held";
+            if (diffed && !asked.current.diffs.has(number)) {
                 asked.current.diffs.add(number);
                 void answered({ kind: "inbox-show-diff", number }, (answer) =>
                     answer.kind === "inbox-diff" ? answer.text : null,
@@ -149,11 +150,27 @@ export function App() {
         }
     }, [waiting]);
 
-    const approve = useCallback((number: number, approved: boolean) => {
-        void ask({ kind: "inbox-answer-approval", number, approved }).then((answer) => {
-            setSaid(answer.kind === "refused" ? answer.error : `#${number} ${approved ? "approved" : "declined"}.`);
-        });
-    }, []);
+    const drafted = useRef(draft);
+    drafted.current = draft;
+
+    // An approval or a held change answered, the comments written under it going with the answer,
+    // and off the draft: a held change's agent reads them with its yes or no.
+    const approve = useCallback(
+        (number: number, approved: boolean) => {
+            const now = drafted.current;
+            const own = (now.comments ?? []).filter((each) => each.item === number && each.text.trim() !== "");
+            const comment = own.map((each) => each.text.trim()).join("\n\n");
+            void ask({ kind: "inbox-answer-approval", number, approved, comment }).then((answer) => {
+                if (answer.kind === "refused") {
+                    setSaid(answer.error);
+                    return;
+                }
+                setSaid(`#${number} ${approved ? "approved" : "declined"}.`);
+                change({ ...now, comments: (now.comments ?? []).filter((each) => each.item !== number) });
+            });
+        },
+        [change],
+    );
 
     async function sent() {
         setConfirming(false);

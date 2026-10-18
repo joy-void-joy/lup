@@ -14,6 +14,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import pytest
@@ -57,8 +58,10 @@ from lup_dev.inbox.store import (
     Answered,
     Comment,
     Conversation,
+    Decided,
     Done,
     Draft,
+    HeldChange,
     Inbox,
     InboxError,
     Item,
@@ -72,10 +75,10 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.tools import specs
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import InboxLayout, Layout
+from lup_dev.policy.holds import HeldFile, Hold, Holds, InboxAnnouncing
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator
-    from pathlib import Path
 
     from conftest import FakeClock
     from mcp.client._transport import TransportStreams
@@ -1764,6 +1767,66 @@ def test_a_message_only_marked_read_tells_its_sender_nothing_nor_wakes_it(
     assert isinstance(state, Done)
     assert waiting == []
     assert frames == []
+
+
+def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    worktree = tmp_path / "w"
+    worktree.mkdir()
+    holds = Holds(layout=machine.store(worktree))
+    hold = holds.put(
+        Hold(
+            key=holds.unused(),
+            worktree=worktree,
+            session="s1",
+            created=clock.now(),
+            files=[
+                HeldFile(
+                    path=Path("src/new.py"),
+                    role="production",
+                    blob="abc",
+                    reasons=["new-file"],
+                    asks=["src/new.py is a new production file"],
+                )
+            ],
+            diff="+new\n",
+        )
+    )
+    with inboxed(machine, clock, notices, said) as delivery:
+        delivery.settle_hold = lambda change, approved, comment: cli.hold_answered(
+            machine, change, approved=approved, comment=comment
+        )
+        InboxAnnouncing(layout=machine.host, clock=clock).announced(
+            hold, "claude", tmp_path / ".git"
+        )
+        [item] = delivery.inbox.waiting(Operator())
+        shown = inbox("show", str(item.number))
+        diff = inbox("show", str(item.number), "--diff")
+        declined = inbox(
+            "answer", str(item.number), "--decline", "--comment", "not this one"
+        )
+        again = inbox("answer", str(item.number), "--approve", "--comment", "")
+        answered = holds.get(hold.key)
+        state = delivery.inbox.item(item.number).state
+    assert item.reason == HeldChange(
+        text="Let the change to src/new.py land?",
+        summary="src/new.py: src/new.py is a new production file",
+        worktree=worktree,
+        key=hold.key,
+    )
+    assert "Let the change to src/new.py land?" in shown
+    assert "+new" in diff
+    assert "you declined it; the agent waiting on it goes on" in declined
+    assert "was answered already, elsewhere" in again
+    assert answered is not None
+    assert answered.answer is not None
+    assert (answered.answer.approved, answered.answer.comment) == (
+        False,
+        "not this one",
+    )
+    assert isinstance(state, Decided)
+    assert state.comment == "not this one"
 
 
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(

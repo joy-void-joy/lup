@@ -73,7 +73,7 @@ from lup_dev.inbox.store import (
     Conversation,
     Decided,
     Done,
-    Held,
+    HeldChange,
     How,
     Inbox,
     InboxError,
@@ -131,7 +131,7 @@ def what(item: Item) -> str:
             return "an answer"
         case Approval():
             return "an approval"
-        case Held():
+        case HeldChange():
             return "a held change"
         case Review():
             return "a review"
@@ -140,8 +140,11 @@ def what(item: Item) -> str:
 def opening(item: Item) -> str:
     """Return an item's first line: its text's, an answer's comment's, or a review's first comment's."""
     match item.reason:
-        case Message(text=text) | Question(text=text) | Approval(text=text) | Held(
-            text=text
+        case (
+            Message(text=text)
+            | Question(text=text)
+            | Approval(text=text)
+            | HeldChange(text=text)
         ):
             said = text
         case Answer(comment=comment):
@@ -160,7 +163,7 @@ def body(item: Item) -> str:
                 for at, each in enumerate(decisions, start=1)
             ]
             return "\n".join([text, *numbered])
-        case Message(text=text) | Approval(text=text) | Held(text=text):
+        case Message(text=text) | Approval(text=text) | HeldChange(text=text):
             return text
         case Answer(comment=comment):
             return comment
@@ -291,7 +294,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     settling: dict[int, asyncio.Event] = {}
     """By approval's number, in memory: set once the approval is answered, which
     wakes every launch waiting on it."""
-    holding: Callable[[Held, bool, str], None] | None = None
+    settle_hold: Callable[[HeldChange, bool, str], None] | None = None
     """Writes the operator's answer to a held change where its hook waits for
     it, yes or no and their comment; none where this service answers no hold."""
 
@@ -398,7 +401,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 Message(text=text)
                 | Question(text=text)
                 | Approval(text=text)
-                | Held(text=text)
+                | HeldChange(text=text)
             ):
                 return f"{head}{passed}:\n{text}"
             case Answer() as answer:
@@ -789,7 +792,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case Item(reason=Message(), recipient=Operator(), state=Waiting()):
                 done = Done(at=self.clock.now())
                 return self.inbox.kept(item.model_copy(update={"state": done}))
-            case Item(reason=Question() | Approval() | Held(), state=Waiting()):
+            case Item(reason=Question() | Approval() | HeldChange(), state=Waiting()):
                 message = (
                     f"item {number} is {what(item)}: answer it, `lup-dev inbox answer "
                     f"{number}`"
@@ -849,8 +852,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     def approval(self, number: int) -> Item:
         """Return item `number`, or say it isn't an approval or a held change."""
         item = self.inbox.item(number)
-        if not isinstance(item.reason, Approval | Held):
-            message = f"item {number} isn't an approval or a held change, but {what(item)}"
+        if not isinstance(item.reason, Approval | HeldChange):
+            message = (
+                f"item {number} isn't an approval or a held change, but {what(item)}"
+            )
             raise InboxError(message)
         return item
 
@@ -872,11 +877,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         item = self.approval(number)
         if not isinstance(item.state, Waiting):
             return item
-        if isinstance(item.reason, Held):
-            if self.holding is None:
-                message = f"item {number} is a held change, which this service can't answer"
+        if isinstance(item.reason, HeldChange):
+            if self.settle_hold is None:
+                message = (
+                    f"item {number} is a held change, which this service can't answer"
+                )
                 raise InboxError(message)
-            self.holding(item.reason, approved, comment)
+            self.settle_hold(item.reason, approved, comment)
         decided = Decided(at=self.clock.now(), approved=approved, comment=comment)
         answered = self.inbox.kept(item.model_copy(update={"state": decided}))
         self.settle(number)
@@ -884,10 +891,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.say(f"item {number}, {what(item)}, was {said}")
         return answered
 
-    async def held(self, held: Held, sender: Conversation, diff: str) -> Item:
+    async def held_change(
+        self, change: HeldChange, sender: Conversation, diff: str
+    ) -> Item:
         """Put a held change in the operator's inbox from the session that made it, its diff kept beside it, and raise its notice."""
         item = self.inbox.made(
-            held, sender, Operator(), held.worktree, self.clock.now()
+            change, sender, Operator(), change.worktree, self.clock.now()
         )
         self.inbox.attached(item.number, diff)
         await self.noticed(item)

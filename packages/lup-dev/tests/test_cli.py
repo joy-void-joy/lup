@@ -18,7 +18,6 @@ from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.forge.protocol import IssueState, Stated
 from lup_dev.host.client import RoomClient
 from lup_dev.host.protocol import Refused, Reply
-from lup_dev.policy.holds import HeldFile, Hold, HoldError, Holds, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.stored import read_model
@@ -30,82 +29,6 @@ if TYPE_CHECKING:
     from lup_dev.layout import Layout
 
 runner = CliRunner()
-
-
-def hold(state: Layout, kit: Kit, worktree: Path, commit: str | None = None) -> str:
-    files = [
-        HeldFile(
-            path=Path("src/new.py"),
-            role="production",
-            blob="abc",
-            reasons=["new-file"],
-            asks=["src/new.py is a new production file"],
-        )
-    ]
-    holds = Holds(layout=state.store(worktree))
-    held = Hold(
-        key=holds.unused(),
-        worktree=worktree,
-        session="s1",
-        created=kit.clock.now(),
-        files=files,
-        diff="+new\n",
-        commit=commit,
-    )
-    return holds.put(held).key
-
-
-def test_holds_lists_whats_waiting_with_its_diff(
-    state: Layout, kit: Kit, tmp_path: Path
-) -> None:
-    key = hold(state, kit, tmp_path)
-    result = runner.invoke(cli.app, ["holds"])
-    assert result.exit_code == 0
-    assert key in result.output
-    assert "src/new.py: src/new.py is a new production file" in result.output
-    assert "+new" in result.output
-
-
-def test_holds_lists_a_moves_asks_apart(
-    state: Layout, kit: Kit, tmp_path: Path
-) -> None:
-    waited = hold(state, kit, tmp_path / "a")
-    moved = hold(state, kit, tmp_path / "b", commit="1a2b3c")
-    result = runner.invoke(cli.app, ["holds"])
-    assert result.exit_code == 0
-    agents, commits = result.output.split("Asked after the fact")
-    assert waited in agents
-    assert moved not in agents
-    assert f"{moved}  {tmp_path / 'b'}  (commit 1a2b3c)" in commits
-
-
-def test_holds_approve_and_decline(state: Layout, kit: Kit, tmp_path: Path) -> None:
-    first = hold(state, kit, tmp_path)
-    second = hold(state, kit, tmp_path)
-    assert (
-        runner.invoke(
-            cli.app, ["holds", "approve", first, "--comment", "fine"]
-        ).exit_code
-        == 0
-    )
-    assert runner.invoke(cli.app, ["holds", "decline", second]).exit_code != 0
-    assert (
-        runner.invoke(
-            cli.app, ["holds", "decline", second, "--comment", "no"]
-        ).exit_code
-        == 0
-    )
-    assert waiting(state) == []
-
-
-def test_holds_arent_answered_from_inside_a_session(
-    state: Layout, kit: Kit, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    key = hold(state, kit, tmp_path)
-    monkeypatch.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
-    result = runner.invoke(cli.app, ["holds", "approve", key])
-    assert isinstance(result.exception, HoldError)
-    assert [each.key for each in waiting(state)] == [key]
 
 
 def test_verdicts_summarizes_this_repository(

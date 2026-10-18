@@ -61,7 +61,7 @@ def pre_tool_use(
     )
 
 
-def test_claude_asks_before_a_new_production_file(
+def test_claude_holds_a_new_production_file_in_its_hook_and_lets_it_through_on_a_yes(
     on_claude: Bench, repo: Path, kit: Kit
 ) -> None:
     raw = pre_tool_use(
@@ -70,16 +70,36 @@ def test_claude_asks_before_a_new_production_file(
         {"file_path": str(repo / "src/pkg/new.py"), "content": '"""New."""\n'},
     )
     output = json.loads(claude.hook(raw, on_claude))
+    [hold] = kit.announced.holds
     assert output == {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "ask",
-            "permissionDecisionReason": (
-                f"lup asks: {repo}/src/pkg/new.py is a new production file"
-            ),
+            "permissionDecision": "allow",
         }
     }
+    assert [each.asks for each in hold.files] == [
+        [f"{repo}/src/pkg/new.py is a new production file"]
+    ]
+    assert kit.announced.runtimes == ["claude"]
     assert running(kit, repo) == ["t1"]
+
+
+def test_claude_denies_a_held_write_the_operator_declined(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    kit.announced.answering = Response(approved=False, comment="not that module")
+    raw = pre_tool_use(
+        repo,
+        "Write",
+        {"file_path": str(repo / "src/pkg/new.py"), "content": '"""New."""\n'},
+    )
+    output = json.loads(claude.hook(raw, on_claude))["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    assert output["permissionDecisionReason"].endswith(
+        "  The operator declined it: not that module"
+    )
+    assert running(kit, repo) == []
+    assert not (repo / "src/pkg/new.py").exists()
 
 
 def test_claude_allows_an_edit_with_a_finding_and_counts_it_running(
@@ -199,7 +219,7 @@ def test_claude_subagent_stop_doesnt_hold_on_the_subagents_own_files(
     assert claude.hook(stop, on_claude) == ""
 
 
-def test_claude_subagent_stop_holds_once_on_a_refusal(
+def test_claude_subagent_stop_holds_once_on_a_held_changes_answer(
     on_claude: Bench, repo: Path
 ) -> None:
     claude.hook(
@@ -219,7 +239,7 @@ def test_claude_subagent_stop_holds_once_on_a_refusal(
     )
     first = json.loads(claude.hook(subagent_stop, on_claude))
     assert first["decision"] == "block"
-    assert first["reason"].startswith("lup refused 1 file.")
+    assert first["reason"].startswith("The operator approved")
     assert claude.hook(subagent_stop, on_claude) == ""
 
 
@@ -347,7 +367,6 @@ def test_claude_knows_its_own_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
     assert claude.Claude().inside()
     monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION")
     assert not claude.Claude().inside()
-    assert claude.Claude().asks_before()
 
 
 def test_codex_pre_tool_use_counts_the_call_and_prints_nothing(
@@ -535,7 +554,7 @@ def test_codex_subagent_stop_doesnt_hold_on_the_subagents_own_files(
     assert codex.hook(codex_stop(repo, after_block=False), on_codex) == ""
 
 
-def test_codex_subagent_stop_holds_once_on_a_refusal(
+def test_codex_subagent_stop_holds_once_on_a_held_changes_answer(
     on_codex: Bench, repo: Path
 ) -> None:
     codex.hook(
@@ -553,7 +572,7 @@ def test_codex_subagent_stop_holds_once_on_a_refusal(
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
     first = json.loads(codex.hook(codex_subagent_stop(repo), on_codex))
     assert first["decision"] == "block"
-    assert first["reason"].startswith("lup refused 1 file.")
+    assert first["reason"].startswith("The operator approved the held change to")
     assert codex.hook(codex_subagent_stop(repo), on_codex) == ""
 
 
@@ -687,7 +706,6 @@ def test_codex_knows_its_own_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
     assert codex.Codex().inside()
     monkeypatch.delenv("CODEX_THREAD_ID")
     assert not codex.Codex().inside()
-    assert not codex.Codex().asks_before()
 
 
 def test_claude_judges_a_worktree_its_working_directory_moves_to(
@@ -763,9 +781,10 @@ def test_codex_reads_each_hook_0_162_1_sent(
     assert isinstance(received, kind)
 
 
-def test_codex_0_162_1_patch_is_refused_after_its_call(
+def test_codex_0_162_1_patch_is_held_after_its_call_and_put_back_on_a_no(
     on_codex: Bench, repo: Path, kit: Kit
 ) -> None:
+    kit.announced.answering = Response(approved=False, comment="not here")
     codex.hook(captured("1-session-start", repo), on_codex)
     assert codex.hook(captured("2-pre-tool-use-add", repo), on_codex) == ""
     (repo / "livecheck.py").write_text(LIVECHECK)
@@ -773,6 +792,8 @@ def test_codex_0_162_1_patch_is_refused_after_its_call(
     said = output["hookSpecificOutput"]["additionalContext"]
     assert said.startswith("lup refused 1 file.")
     assert f"{repo}/livecheck.py" in said
+    assert "The operator declined it: not here" in said
+    assert kit.announced.runtimes == ["codex"]
     assert not (repo / "livecheck.py").exists()
     assert running(kit, repo) == []
 
@@ -800,9 +821,9 @@ def test_codex_judges_a_patch_in_a_worktree_a_claude_write_was_allowed_in(
     codex.hook(captured("2-pre-tool-use-add", repo), on_codex)
     (repo / "livecheck.py").write_text(LIVECHECK)
     output = codex.hook(captured("3-post-tool-use-add", repo), on_codex)
-    assert not (repo / "livecheck.py").exists()
+    assert (repo / "livecheck.py").exists()
     assert json.loads(output)["hookSpecificOutput"]["additionalContext"].startswith(
-        "lup refused 1 file."
+        "The operator approved the held change to"
     )
     assert running(kit, repo) == ["toolu_1"]
 
@@ -825,8 +846,8 @@ def test_codex_judges_a_patch_after_one_that_failed_at_the_turns_end(
     assert running(kit, repo) == [FAILED_PATCH]
     output = json.loads(codex.hook(captured("9-stop", repo), on_codex))
     assert output["decision"] == "block"
-    assert output["reason"].startswith("lup refused 1 file.")
-    assert not (repo / "livecheck.py").exists()
+    assert output["reason"].startswith("The operator approved the held change to")
+    assert (repo / "livecheck.py").exists()
     assert running(kit, repo) == []
 
 
@@ -842,9 +863,9 @@ def test_codex_clears_a_failed_patchs_call_at_the_turns_end(
     (repo / "livecheck.py").write_text(LIVECHECK)
     output = json.loads(codex.hook(captured("3-post-tool-use-add", repo), on_codex))
     assert output["hookSpecificOutput"]["additionalContext"].startswith(
-        "lup refused 1 file."
+        "The operator approved the held change to"
     )
-    assert not (repo / "livecheck.py").exists()
+    assert (repo / "livecheck.py").exists()
 
 
 # In a launched room

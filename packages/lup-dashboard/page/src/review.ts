@@ -89,6 +89,8 @@ export function body(item: Item): string {
         }
         case "approval":
             return `${reason.text}\n${plain(reason.summary)}`;
+        case "held":
+            return `${reason.text}\n${reason.summary}`;
         case "answer":
             return reason.comment;
         case "review":
@@ -174,7 +176,7 @@ function told(item: Item, context: Context): string {
 function beneath(item: Item, around: Around): Under[] {
     const shown: Under[] = [];
     const diff = around.diffs.get(item.number);
-    if (item.reason.reason === "approval" && diff !== undefined) {
+    if ((item.reason.reason === "approval" || item.reason.reason === "held") && diff !== undefined) {
         const whole = "shown" in diff ? plain(diff.shown).replace(/\n+$/, "") : "";
         const lines = whole === "" ? [] : whole.split("\n");
         shown.push({

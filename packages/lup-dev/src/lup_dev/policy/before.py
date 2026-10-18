@@ -37,8 +37,8 @@ from lup_dev.policy.checkpoint import (
     holding,
     verdict,
 )
+from lup_dev.policy.holds import HeldFile, Hold, answered
 from lup_dev.policy.judge import Ask, Change, Judgement
-from lup_dev.policy.holds import Hold, HeldFile, answered
 from lup_dev.policy.report import Refused, refusal
 from lup_dev.policy.worktrees import place
 
@@ -140,7 +140,7 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
             "the agent's reach"
         )
         judgement = Judgement(
-            path=written,
+            path=here.path,
             role="protected",
             outcome="ask",
             asks=[Ask(kind="protected", reason=reason)],
@@ -156,7 +156,16 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
             )
         keeping = Worktree.of(home.worktree, held.repository, services)
         earlier = disk.read_text() if disk.is_file() else None
-        return held_write(bench, keeping, session, proposal, earlier, after, judgement)
+        return held_write(
+            bench,
+            keeping,
+            session=session,
+            proposal=proposal,
+            earlier=earlier,
+            after=after,
+            judgement=judgement,
+            outside=here.repository,
+        )
     worktree = Worktree.of(here.worktree, held.repository, services)
     path = here.path
     store = worktree.store
@@ -181,6 +190,7 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
                 call=proposal.call,
                 path=path,
                 blob=store.keep(after.encode()),
+                asked=False,
                 verdict=logged,
                 removed=judgement.removed,
             )
@@ -188,7 +198,13 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
             worktree.keep(record)
     if logged is None:
         return held_write(
-            bench, worktree, session, proposal, change.before, after, judgement
+            bench,
+            worktree,
+            session=session,
+            proposal=proposal,
+            earlier=change.before,
+            after=after,
+            judgement=judgement,
         )
     worktree.verdicts(services.layout).append([logged])
     return Decision(outcome="allow")
@@ -197,16 +213,21 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
 def held_write(
     bench: Bench,
     worktree: Worktree,
+    *,
     session: str,
     proposal: Proposal,
     earlier: str | None,
     after: str,
     judgement: Judgement,
+    outside: Path | None = None,
 ) -> Decision:
     """Hold a write that asks before it lands, the call waiting in its hook, and answer as the operator does.
 
     The hold is kept in `worktree`'s store and put in the operator's inbox
-    (`Announcing`); no lock is held while it waits. Approved, the write is let
+    (`Announcing`); no lock is held while it waits. A write `outside` the
+    worktree, in its repository's git directory, is kept in the store of the
+    worktree the session works in, its verdict the git directory's, and is no
+    write of that worktree's once let through. Approved, the write is let
     through, the approval covering the path for the rest of the session as an
     asked call that ran does (`confirm`), and their comment told; declined, or
     left unanswered within the patience, it's denied, and the agent's version
@@ -216,7 +237,8 @@ def held_write(
     store = worktree.store
     holds = worktree.holds()
     path = judgement.path
-    to = Attributed(worktree=worktree.root, session=session, tool=proposal.tool)
+    where = worktree.root if outside is None else outside
+    to = Attributed(worktree=where, session=session, tool=proposal.tool)
     with worktree.lock():
         key = holds.unused()
         logged = verdict(bench, to, judgement, key)
@@ -242,6 +264,10 @@ def held_write(
     log.append([logged])
     services.announcing.announced(hold, bench.runtime.name(), worktree.repository)
     answer = holds.wait(key, services.clock)
+    if answer is not None and answer.approved and outside is not None:
+        log.append(answered(hold, "approved"))
+        said = f"The operator approved it: {answer.comment}" if answer.comment else ""
+        return Decision(outcome="allow", reason=said)
     if answer is not None and answer.approved:
         with worktree.lock():
             record = worktree.session(session, bench.runtime)
@@ -267,7 +293,7 @@ def held_write(
         holds.mark(key, abandoned=True)
     log.append(answered(hold, "unanswered" if answer is None else "declined"))
     refused = Refused(
-        path=worktree.root / path,
+        path=where / path,
         saved=saved,
         new=earlier is None,
         declined=None if answer is None else answer.comment,

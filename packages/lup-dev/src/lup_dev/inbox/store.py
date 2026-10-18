@@ -157,7 +157,7 @@ class Approval(Model):
     approval waiting for it."""
 
 
-class Held(Model):
+class HeldChange(Model):
     """A change held for the operator's answer, yes or no: what's held and why, its diff kept beside the item (`Inbox.diff`).
 
     The judge's (`lup_dev.policy.holds`): a write that asks waits for the
@@ -212,7 +212,7 @@ class Review(Model):
 
 
 type Reason = Annotated[
-    Message | Question | Answer | Approval | Held | Review,
+    Message | Question | Answer | Approval | HeldChange | Review,
     Field(discriminator="reason"),
 ]
 """Why an item is there."""
