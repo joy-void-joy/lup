@@ -89,6 +89,7 @@ def test_a_write_that_asks_is_held_for_the_operator_and_let_through_on_a_yes(
     ]
     assert hold.diff.startswith("--- a/src/pkg/core.py\n+++ b/src/pkg/core.py\n")
     assert kit.announced.runtimes == ["asking"]
+    assert (hold.call, hold.agent) == ("w1", None)
     session = read_model(kit.layout.store(repo).session("s1"), Session)
     assert session is not None
     assert [(each.path, each.asked) for each in session.pending] == [(CORE, True)]

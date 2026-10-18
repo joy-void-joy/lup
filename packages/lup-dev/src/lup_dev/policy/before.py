@@ -118,8 +118,14 @@ class Decision(Model):
     empty for a plain allow."""
 
 
-def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decision:
-    """Judge a file tool's proposed write before it lands.
+def before(
+    bench: Bench,
+    proposal: Proposal,
+    session: str,
+    cwd: Path,
+    agent: str | None = None,
+) -> Decision:
+    """Judge a file tool's proposed write before it lands; `agent` is the runtime's id for the subagent writing, none for the session's own conversation.
 
     A file outside the session's repository isn't judged: edits in another
     repository come with launch and spawn.
@@ -164,6 +170,7 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
             earlier=earlier,
             after=after,
             judgement=judgement,
+            agent=agent,
             outside=here.repository,
         )
     worktree = Worktree.of(here.worktree, held.repository, services)
@@ -205,6 +212,7 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
             earlier=change.before,
             after=after,
             judgement=judgement,
+            agent=agent,
         )
     worktree.verdicts(services.layout).append([logged])
     return Decision(outcome="allow")
@@ -219,6 +227,7 @@ def held_write(
     earlier: str | None,
     after: str,
     judgement: Judgement,
+    agent: str | None = None,
     outside: Path | None = None,
 ) -> Decision:
     """Hold a write that asks before it lands, the call waiting in its hook, and answer as the operator does.
@@ -254,6 +263,8 @@ def held_write(
                 key=key,
                 worktree=worktree.root,
                 session=session,
+                agent=agent,
+                call=proposal.call,
                 created=services.clock.now(),
                 files=[held],
                 diff=unified(path, earlier, after),

@@ -875,6 +875,11 @@ class Decided(Model):
     verdicts: list[Verdict]
     hold: str | None
     """The key a hold of this checkpoint is kept under; none where nothing's held."""
+    agent: str = ""
+    """The runtime's id for the subagent whose call's finish ran it; empty for the
+    session's own conversation."""
+    call: str | None = None
+    """The runtime's id for the call whose finish ran it; none at a turn's end."""
 
 
 def act(
@@ -916,6 +921,8 @@ def act(
                 key=decided.hold,
                 worktree=root,
                 session=snapshot.session,
+                agent=decided.agent or None,
+                call=decided.call,
                 created=bench.services.clock.now(),
                 files=held,
                 diff=held_diff(store, tree, held),
@@ -1036,8 +1043,10 @@ def moving(worktree: Worktree, heads: Heads, head: str | None) -> Move | None:
     return Move(before=last, after=head, paths=worktree.store.moved(last, head))
 
 
-def checkpoint(bench: Bench, worktree: Worktree, key: str, agent: str) -> Checked:
-    """Judge what changed since the accepted tree, act on it, and report.
+def checkpoint(
+    bench: Bench, worktree: Worktree, key: str, agent: str, call: str | None = None
+) -> Checked:
+    """Judge what changed since the accepted tree, act on it, and report; `call` is the call whose finish ran it, which a hold it makes is anchored to.
 
     Holds, on a runtime that can't ask before a call, are waited on once the
     store is released, then settled, and the checkpoint runs again for what the
@@ -1096,7 +1105,9 @@ def checkpoint(bench: Bench, worktree: Worktree, key: str, agent: str) -> Checke
             for judgement in judgements
             if judgement.path in deciding
         ]
-        decided = Decided(fates=fated, plans=plans, verdicts=logged, hold=hold)
+        decided = Decided(
+            fates=fated, plans=plans, verdicts=logged, hold=hold, agent=agent, call=call
+        )
         acted = act(bench, worktree, snapshot, decided)
         worktree.verdicts(services.layout).append(logged)
         commits = brought(bench, worktree, snapshot, plans)
@@ -1723,7 +1734,8 @@ class CallFinished(Event):
         for worktree in opened:
             confirm(bench, worktree, self.session, self.agent, self.call)
         checked = [
-            checkpoint(bench, worktree, self.session, self.agent) for worktree in idle
+            checkpoint(bench, worktree, self.session, self.agent, self.call)
+            for worktree in idle
         ]
         waiting = [
             mail_for(worktree, self.session, self.agent, bench.runtime)
