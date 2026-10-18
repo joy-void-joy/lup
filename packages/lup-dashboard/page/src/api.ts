@@ -13,8 +13,8 @@ export type Replied = Asking["responses"][200]["content"]["application/json"];
 /** A reply of one kind. */
 export type ReplyOf<K extends Replied["kind"]> = Extract<Replied, { kind: K }>;
 
-/** Where a watch stands: its reply arriving, or the dashboard out of reach and tried again. */
-export type Connection = "connecting" | "live" | "retrying";
+/** Where a watch stands: its reply arriving, the dashboard out of reach and tried again, or the page's token refused, which trying again can't mend. */
+export type Connection = "connecting" | "live" | "retrying" | "refused";
 
 /** Why a call to the API failed: its status and what the server said. */
 export class ApiError extends Error {
@@ -55,7 +55,8 @@ export async function ask(request: Asked): Promise<Replied> {
  * Watch one of the host's requests: `received` gets its reply at once, then again each time it changes.
  *
  * Where the dashboard is out of reach, or the watch ends, it's tried again after
- * `retry` milliseconds, doubling up to a minute, until `stop` is called.
+ * `retry` milliseconds, doubling up to a minute, until `stop` is called; where
+ * the page's token is refused, it stops and says so.
  */
 export function watch(
     request: Asked,
@@ -73,6 +74,10 @@ export function watch(
                     ...posting(request),
                     signal: stopping.signal,
                 });
+                if (response.status === 401 || response.status === 403) {
+                    connection("refused");
+                    return;
+                }
                 if (!response.ok || response.body === null) {
                     throw await failure(response);
                 }

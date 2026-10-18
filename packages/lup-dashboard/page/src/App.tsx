@@ -17,6 +17,7 @@ const SAID = {
     connecting: "connecting",
     live: "live",
     retrying: "out of reach, trying again",
+    refused: "this page's token is refused: open the dashboard again from `lup-dev dashboard`",
 };
 
 export function App() {

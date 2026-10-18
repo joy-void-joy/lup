@@ -136,6 +136,10 @@ kbd {
     color: var(--warn);
 }
 
+.connection[data-state="refused"] {
+    color: var(--err);
+}
+
 /* The windows: a title bar over a buffer, framed. */
 .win {
     display: flex;

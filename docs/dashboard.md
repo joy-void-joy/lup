@@ -26,7 +26,7 @@ The page asks the host service only what the operator's commands ask it: the hos
 
 Rooms share the host's network, so being on localhost keeps out only other machines.
 
-- Every call to the API carries the token: in the page's cookie (`HttpOnly`, `SameSite=Strict`) or as a bearer.
+- Every call to the API carries the token: in the page's cookie (`HttpOnly`, `SameSite=Strict`, named after the port, since a browser shares localhost's cookies across ports) or as a bearer. A page whose token is refused says so and stops watching, rather than retrying what retrying can't mend.
 - The page is handed the token in its address's fragment, which no request carries, trades it for the cookie (`POST /api/session`) and takes it out of the address.
 - A request naming another host than `127.0.0.1` or `localhost` is refused, as is a call from a page of another origin.
 

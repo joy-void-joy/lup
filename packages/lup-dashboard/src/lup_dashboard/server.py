@@ -46,11 +46,17 @@ class Access(Model):
     token: str
     port: int
     """The port it listens on, on localhost."""
-    cookie: str = "lup-dashboard"
-    """The cookie the page holds the token in, once it's traded it."""
     hosts: list[str] = ["127.0.0.1", "localhost"]
     """The names it answers to: a request naming another host, as a page served
     elsewhere rebinding its name to localhost would, is refused."""
+
+    def cookie(self) -> str:
+        """Name the cookie the page holds the token in, once it's traded it: one per port, since a browser shares localhost's cookies across its ports, and two dashboards' would overwrite each other.
+
+        >>> Access(token="t", port=8766).cookie()
+        'lup-dashboard-8766'
+        """
+        return f"lup-dashboard-{self.port}"
 
     def origins(self) -> list[str]:
         """List the origins whose pages may call the API: the dashboard's own.
@@ -78,7 +84,7 @@ def application(
         redoc_url=None,
     )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=access.hosts)
-    cookie = APIKeyCookie(name=access.cookie, auto_error=False)
+    cookie = APIKeyCookie(name=access.cookie(), auto_error=False)
     bearer = HTTPBearer(auto_error=False)
 
     def authorized(
@@ -101,7 +107,7 @@ def application(
     def session(response: Response) -> None:
         """Trade the token the page was handed for the cookie it calls the API with."""
         response.set_cookie(
-            access.cookie, access.token, httponly=True, samesite="strict", path="/"
+            access.cookie(), access.token, httponly=True, samesite="strict", path="/"
         )
 
     @api.get("/about")

@@ -143,6 +143,7 @@ def test_the_page_trades_its_token_for_the_cookie_it_calls_with(page: Path) -> N
     traded = served.post("/api/session", headers=bearing())
     asked = served.post("/api/ask", json=ListLaunches().model_dump())
     assert traded.status_code == 204
+    assert traded.headers["set-cookie"].startswith("lup-dashboard-8766=")
     assert "httponly" in traded.headers["set-cookie"].lower()
     assert "samesite=strict" in traded.headers["set-cookie"].lower()
     assert asked.status_code == 200
