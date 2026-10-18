@@ -252,6 +252,7 @@ export function App() {
                         confirming={confirming}
                         inserting={setInserting}
                         epoch={epoch}
+                        shown
                     />
                     <div className="status">
                         {numbers.length === 0 ? (

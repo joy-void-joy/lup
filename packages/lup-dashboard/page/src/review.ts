@@ -2,14 +2,29 @@
 // and move through, their comments in it, each under the line it's on, and under
 // each item what folds there: its context, and an approval's whole diff. Pure:
 // the editor (`Review.tsx`) draws it, folds it and lets the comments be edited,
-// and the host keeps the draft (`docs/dashboard.md`, *The review*).
+// and the host keeps the draft (`docs/dashboard.md`, *The review*). What it
+// shares with a conversation's text is in `comments.ts`.
 import { since } from "./agents";
+import {
+    calls,
+    passage,
+    saying,
+    shownIn,
+    spoken,
+    starts as startsOf,
+    under,
+    type Block,
+    type Line,
+    type Span,
+} from "./comments";
 import type { components } from "./generated/api";
+
+export { calls, type Block, type Line, type Span };
 
 export type Item = components["schemas"]["Item"];
 export type Draft = components["schemas"]["Draft"];
 export type Comment = components["schemas"]["Comment"];
-export type Quote = components["schemas"]["Quote"];
+export type { Quote } from "./comments";
 export type Context = components["schemas"]["Context"];
 
 /** What the host answered, asked for more of an item than its own text: what it showed, or why it refused. */
@@ -38,22 +53,6 @@ export interface Fold extends Span {
     item: number;
     kind: "context" | "diff";
     summary: Span;
-}
-
-/** A stretch of the text, from its start to its end. */
-export interface Span {
-    from: number;
-    to: number;
-}
-
-/** One line of an item's own text, where it's shown, and where it starts in that text. */
-export interface Line extends Span {
-    own: number;
-}
-
-/** One comment, where its lines are shown: `comment` is its place in the draft. */
-export interface Block extends Span {
-    comment: number;
 }
 
 /** One item, where it's shown: the banner of the group it opens, if it's the first of one; its header line, its own lines, and its comments among them; then the lines under it, and what of them folds. */
@@ -116,20 +115,6 @@ interface Under {
     lines: Row[];
 }
 
-/** Say a run of calls in a line, each tool once with how many times in a row: `· called Bash ×2, Read`. */
-export function calls(tools: string[]): string {
-    const runs: { tool: string; times: number }[] = [];
-    for (const tool of tools) {
-        const last = runs.at(-1);
-        if (last?.tool === tool) {
-            last.times += 1;
-        } else {
-            runs.push({ tool, times: 1 });
-        }
-    }
-    return `· called ${runs.map(({ tool, times }) => (times === 1 ? tool : `${tool} ×${times}`)).join(", ")}`;
-}
-
 /** Return an item's context as the lines it's shown in: each thing said after who said it, its own lines kept; each run of calls in one line; and the call that made the item, marked. */
 export function steps(context: Context): Row[] {
     const shown: Row[] = [];
@@ -151,10 +136,7 @@ export function steps(context: Context): Row[] {
             return;
         }
         const who: Kind = entry.by === "operator" ? "you" : "agent";
-        const said = entry.text.split("\n").map((line) => line.trimEnd()).filter((line) => line.trim() !== "");
-        const indent = " ".repeat(who.length + 2);
-        shown.push({ kind: who, text: `${who}:${said.length === 0 ? "" : ` ${said[0]}`}` });
-        shown.push(...said.slice(1).map((line) => ({ kind: who, text: `${indent}${line}` })));
+        shown.push(...spoken(who, entry.text, false).map((row) => ({ kind: who, text: row.text })));
     });
     ran();
     return shown;
@@ -200,12 +182,6 @@ function beneath(item: Item, around: Around): Under[] {
         });
     }
     return shown;
-}
-
-/** Return the line of `text` an offset is on, counting from 0. */
-function lineOf(starts: number[], offset: number): number {
-    const found = starts.findLastIndex((each) => each <= offset);
-    return Math.max(found, 0);
 }
 
 /** Return `items` in groups, each under its banner, the groups in the banners' order and the items in theirs. */
@@ -254,16 +230,12 @@ export function laid(
 
     function layItem(item: Item, opening: Span | null, isParked: boolean): void {
         const own = body(item).split("\n");
-        const starts = own.map((_, at) => own.slice(0, at).reduce((sum, line) => sum + line.length + 1, 0));
+        const starts = startsOf(own);
         const mine = comments.flatMap((comment, at) => (comment.item === item.number ? [{ comment, at }] : []));
-        const under = (line: number | null) =>
-            mine.filter(({ comment }) =>
-                comment.quote == null ? line === null : line !== null && lineOf(starts, Math.max(comment.quote.end - 1, comment.quote.start)) === line,
-            );
         const blocks: Block[] = [];
         const lines: Line[] = [];
         const writeBlocks = (line: number | null) => {
-            for (const { comment, at } of under(line)) {
+            for (const { comment, at } of mine.filter(({ comment }) => under(starts, comment.quote) === line)) {
                 const from = text.length;
                 text += `${comment.text}\n`;
                 blocks.push({ comment: at, from, to: from + comment.text.length });
@@ -380,16 +352,13 @@ export function quoted(laidOut: Laid, from: number, to: number): Comment | undef
     if (region === undefined || first === undefined || last === undefined || to <= from) {
         return undefined;
     }
-    const start = first.own + (from - first.from);
-    const end = last.own + (Math.min(to, last.to) - last.from);
     const own = region.lines.map((each) => laidOut.text.slice(each.from, each.to)).join("\n");
-    return { item: region.item.number, quote: { text: own.slice(start, end), start, end }, text: "" };
+    return { item: region.item.number, quote: passage(own, first, last, from, to), text: "" };
 }
 
 /** Return where in the text an offset of an item's own text is shown. */
 export function shownAt(region: Region, offset: number): number {
-    const line = [...region.lines].reverse().find((each) => each.own <= offset) ?? region.lines[0];
-    return line === undefined ? region.header.to : Math.min(line.from + (offset - line.own), line.to);
+    return shownIn(region.lines, offset, region.header.to);
 }
 
 /** Return `draft` with `number` in `list` if it wasn't, and out of it if it was. */
@@ -411,5 +380,5 @@ export function covered(draft: Draft): number[] {
 
 /** Return `draft` without the comments that say nothing. */
 export function pruned(draft: Draft): Draft {
-    return { ...draft, comments: (draft.comments ?? []).filter((each) => each.text.trim() !== "") };
+    return { ...draft, comments: saying(draft.comments ?? []) };
 }
