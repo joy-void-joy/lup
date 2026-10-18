@@ -16,14 +16,15 @@ started with another runner is replaced as one from another build is.
 import json
 import socket
 from datetime import timedelta
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, override
 
 from filelock import FileLock
+from pydantic import TypeAdapter
 from tenacity import Retrying, retry_if_exception_type, stop_after_attempt
 
 from lup.programs import ProgramError, run
 from lup.types import Model
-from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
+from lup_dev.codescan.contract import Checker, FileReport, Parser, Rule, Source
 from lup_dev.declaration.resolve import Selected
 from lup_dev.errors import LupDevError
 from lup_dev.layout import Bundle, Layout
@@ -147,14 +148,7 @@ class EngineChecker(Model, Checker):
 
     def script(self) -> Path:
         """Return the built engine's script, or say how to build it."""
-        if not self.bundle.script.is_file():
-            message = (
-                f"the engine isn't built at {self.bundle.directory}: "
-                "build it with `uv run packages/lup-dev/checker/build.py` "
-                "from a checkout of lup"
-            )
-            raise EngineMissingError(message)
-        return self.bundle.script
+        return built(self.bundle)
 
     @property
     def build(self) -> str:
@@ -303,11 +297,7 @@ class EngineChecker(Model, Checker):
 
     def run_engine(self, *arguments: str) -> str:
         """Run the engine's command line, and return what it printed."""
-        try:
-            return run(self.node, str(self.script()), *arguments).output.decode()
-        except ProgramError as failure:
-            message = f"the engine's `{arguments[0]}` failed: {failure}"
-            raise EngineError(message) from failure
+        return printed(self.node, self.bundle, *arguments).decode()
 
     def exchange(
         self, path: Path, request: CheckRequest | ImportersRequest | PlainRequest
@@ -337,6 +327,80 @@ class EngineChecker(Model, Checker):
             )
             raise EngineGoneError(message)
         return answer
+
+
+class ParsedSource(Model):
+    """A file the engine's `parse` command reads: its path from the root, and its content."""
+
+    path: str
+    content: str
+
+
+class EngineParser(Model, Parser):
+    """lup's engine reading files from their parse alone: its `parse` command, a process of its own.
+
+    It loads no project and reads no environment, so it costs Node's start and
+    a parse, whichever worktree it's for and whatever its engine is doing,
+    where a check pays the program's load and a type check (`docs/field-notes.md`,
+    *Judging writes*).
+    """
+
+    bundle: Bundle = Bundle()
+    node: str = "node"
+    """The Node executable that runs the engine."""
+
+    @override
+    def parsed(self, root: Path, sources: list[Source]) -> list[FileReport]:
+        given = [
+            ParsedSource(
+                path=str(source.path),
+                content=(
+                    (root / source.path).read_text()
+                    if source.content is None
+                    else source.content
+                ),
+            )
+            for source in sources
+        ]
+        output = printed(
+            self.node, self.bundle, "parse", stdin=PARSED.dump_json(given)
+        )
+        reports = REPORTS.validate_json(output)
+        if len(reports) != len(sources):
+            message = (
+                f"the engine's `parse` read {len(reports)} files of the "
+                f"{len(sources)} it was given"
+            )
+            raise EngineError(message)
+        return reports
+
+
+PARSED = TypeAdapter(list[ParsedSource])
+"""What the engine's `parse` command reads on its input."""
+
+REPORTS = TypeAdapter(list[FileReport])
+"""What it prints."""
+
+
+def built(bundle: Bundle) -> Path:
+    """Return the built engine's script, or say how to build it."""
+    if not bundle.script.is_file():
+        message = (
+            f"the engine isn't built at {bundle.directory}: "
+            "build it with `uv run packages/lup-dev/checker/build.py` "
+            "from a checkout of lup"
+        )
+        raise EngineMissingError(message)
+    return bundle.script
+
+
+def printed(node: str, bundle: Bundle, *arguments: str, stdin: bytes | None = None) -> bytes:
+    """Run the engine's command line with `arguments`, `stdin` on its input, and return what it printed."""
+    try:
+        return run(node, str(built(bundle)), *arguments, stdin=stdin).output
+    except ProgramError as failure:
+        message = f"the engine's `{arguments[0]}` failed: {failure}"
+        raise EngineError(message) from failure
 
 
 def answers(path: Path) -> bool:

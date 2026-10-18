@@ -24,7 +24,13 @@ from lup_dev import CodeRules, Module, Modules, Rules
 from lup_dev import Project as Declaration
 from lup_dev.codescan.contract import FileReport, Rule, Source
 from lup_dev.codescan.directives import Defer, Ignore, Malformed, Note
-from lup_dev.codescan.engine import EngineChecker, EngineError, EngineStatus
+from lup_dev.codescan.engine import (
+    EngineChecker,
+    EngineError,
+    EngineParser,
+    EngineStatus,
+    printed,
+)
 from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.declaration.runner import Plain, RoomNeeds, Runner
 from lup_dev.declaration.runner import Uv as UvRunner
@@ -915,6 +921,90 @@ def test_a_package_root_exports_its_names_or_its_all(project: Project) -> None:
     )
     assert report.surface.exported == ["thing"]
     assert report.surface.place("export", "thing") == declared.count("\n")
+
+
+# Read from the parse alone.
+
+SURFACED = (
+    "from collections.abc import Sequence\n\n"
+    "class Outer:\n"
+    '    """A class."""\n\n'
+    "    def method(self, first: int, /, *rest: Sequence[ str ], flag: bool) -> None:\n"
+    '        """A method."""\n'
+    '        return None  # lup: ignore("tuple-shape", why="a pair")\n\n\n'
+    "def function(value: 'list[int]') -> int:  # lup: the count\n"
+    '    """A function."""\n'
+    "    return len(value)\n"
+)
+
+
+def test_a_file_read_from_its_parse_alone_has_what_a_check_finds_but_types(
+    project: Project,
+) -> None:
+    content = DOCSTRING + SURFACED
+    checked = project.check("parsed.py", content)
+    [parsed] = EngineParser().parsed(
+        project.root, [Source(path=Path("example/parsed.py"), content=content)]
+    )
+    assert parsed.path == Path("example/parsed.py")
+    assert parsed.directives == checked.directives
+    assert parsed.surface.classes == checked.surface.classes
+    assert parsed.surface.places == checked.surface.places
+    assert [each.name for each in parsed.surface.signatures] == [
+        each.name for each in checked.surface.signatures
+    ]
+    assert (parsed.findings, parsed.imports) == ([], [])
+    [method, function] = parsed.surface.signatures
+    # As written, its spacing aside, where the check prints the type it declares.
+    assert [each.annotation for each in method.parameters] == [
+        "",
+        "int",
+        "Sequence[str]",
+        "bool",
+    ]
+    assert function.parameters[0].annotation == "'list[int]'"
+    [_, checked_function] = checked.surface.signatures
+    assert checked_function.parameters[0].annotation == "list[int]"
+
+
+def test_a_package_root_read_from_its_parse_alone_exports_what_it_binds_or_its_all(
+    tmp_path: Path,
+) -> None:
+    bound = (
+        "import json\nimport os.path\nfrom .inner import thing as alias\n"
+        "from . import sibling\n\nVERSION = 1\n\nif VERSION:\n    LATER = 2\n"
+        "for each in []:\n    pass\n"
+    )
+    declared = "from .inner import thing, other\n\n__all__ = ['thing']\n"
+    root = Path("pkg/__init__.py")
+    [binding, listing, module] = EngineParser().parsed(
+        tmp_path,
+        [
+            Source(path=root, content=bound),
+            Source(path=root, content=declared),
+            Source(path=Path("pkg/module.py"), content=declared),
+        ],
+    )
+    # A package root's relative import binds its submodule too, as pyright has it.
+    assert binding.surface.exported == [
+        "LATER",
+        "VERSION",
+        "alias",
+        "each",
+        "inner",
+        "json",
+        "os",
+        "sibling",
+    ]
+    assert binding.surface.place("export", "alias") == 3
+    assert listing.surface.exported == ["thing"]
+    assert listing.surface.place("export", "thing") == 3
+    assert module.surface.exported == []
+
+
+def test_the_parse_command_refuses_what_isnt_a_list_of_files() -> None:
+    with pytest.raises(EngineError, match="JSON list"):
+        printed("node", Bundle(), "parse", stdin=b'{"path": "a.py"}')
 
 
 def test_imports_are_named_in_full_relative_ones_included(project: Project) -> None:

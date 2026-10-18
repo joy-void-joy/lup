@@ -11,7 +11,7 @@ import { File } from './file';
 import { WarmProgram } from './program';
 import { FileReport, Finding } from './protocol';
 import { positionOf } from './spans';
-import { surfaceOf } from './surface';
+import { byType, surfaceOf } from './surface';
 
 // The file's full report: pyright's errors and warnings, the selected rules' findings,
 // its directives, its public surface and its imports.
@@ -44,7 +44,7 @@ export function fullReport(warm: WarmProgram, uri: Uri, reportedPath: string, ru
         path: reportedPath,
         findings: [...pyrightFindings(parse, diagnostics, reportedPath), ...lup],
         directives: readDirectives(parse),
-        surface: surfaceOf(parse, program.evaluator!, reader, isPackageRoot),
+        surface: surfaceOf(parse, byType(program.evaluator!), reader, isPackageRoot),
         imports: [...new Set(file.importedModules().map((imported) => imported.module))].sort(),
     };
 }

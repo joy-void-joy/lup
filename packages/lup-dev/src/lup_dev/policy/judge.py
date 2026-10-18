@@ -37,6 +37,7 @@ from lup_dev.codescan.contract import (
     Checker,
     FileReport,
     Finding,
+    Parser,
     Position,
     Source,
     Span,
@@ -347,6 +348,41 @@ class Judge(Model, arbitrary_types_allowed=True):
                     before=before.get(change.path),
                     baseline=baseline.get(change.path),
                     ruff=[found for found in ruff if found.path == change.path],
+                ),
+            )
+            for change in changes
+        ]
+
+    def parsed(self, changes: list[Change], parser: Parser) -> list[Judgement]:
+        """Judge each change from the parse `parser` makes of its versions alone, with no types: what it asks by its path, its content, its public names and its directives.
+
+        Every version is read in one request and none is type-checked, so it
+        costs a parse where `judge` costs a check. No rule runs, and ruff
+        doesn't: its findings are its directives' own problems, and a rule the
+        declaration holds or flags, which asks through its findings, asks
+        nothing here. A signature's annotations are compared as written.
+        """
+        ruled = [change for change in changes if self.roles.ruled(change.path)]
+        wanted = list(
+            dict.fromkeys(
+                Source(path=change.path, content=content)
+                for change in ruled
+                for content in [change.after, change.before, change.baseline]
+                if content is not None
+            )
+        )
+        read = dict(zip(wanted, parser.parsed(self.root, wanted), strict=True))
+
+        def report(path: Path, content: str | None) -> FileReport | None:
+            return read.get(Source(path=path, content=content))
+
+        return [
+            self.one(
+                change,
+                Versions(
+                    after=report(change.path, change.after),
+                    before=report(change.path, change.before),
+                    baseline=report(change.path, change.baseline),
                 ),
             )
             for change in changes

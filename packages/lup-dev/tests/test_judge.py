@@ -663,6 +663,78 @@ def test_a_file_that_asks_nothing_reads_as_its_role_alone(judge: Judging) -> Non
     assert reading == Reading(role="test")
 
 
+# Judged from the parse alone.
+
+
+def test_from_the_parse_alone_a_change_asks_what_the_whole_judgement_asks_but_rules(
+    kit: Kit, tmp_path: Path
+) -> None:
+    project = Project(
+        held=["protected", "operator", "ignore", "regex"],
+        flagged=["new-file", "whole-file", "public-api", "tuple-shape"],
+    )
+    judging = Judge(
+        root=tmp_path,
+        roles=Roles(root=tmp_path, declaration=Declaration.of(project)),
+        checker=kit.engine,
+        linter=kit.linter,
+    )
+    after = (
+        CORE.replace("def ask(self, prompt: str)", "def ask(self, prompt: int)")
+        + "y = 2  # BAD regex\n"
+        + "z = 3  # RUFF E501\n"
+        + "\n\nclass Room:\n"
+        + '    # lup: ignore("string-split", why="a fixed format")\n'
+        + "    pass\n"
+    )
+    changes = [
+        edit("src/pkg/core.py", CORE, after),
+        edit("src/pkg/fresh.py", None, CORE, baseline=None),
+        edit(PROTECTED, CORE, CORE + "y = 2  # BAD regex\n"),
+        edit("pyproject.toml", "a\n", "b\n"),
+        edit("docs/a.md", None, "# A\n"),
+    ]
+    parsed = judging.parsed(changes, kit.parser)
+    assert kit.engine.checked == []
+    assert kit.linter.runners == []
+    # One request, each version once: a file's start and the content before its
+    # change are one here.
+    assert [
+        [(str(each.path), each.content == CORE) for each in asked]
+        for asked in kit.parser.parsed_asked
+    ] == [
+        [
+            ("src/pkg/core.py", False),
+            ("src/pkg/core.py", True),
+            ("src/pkg/fresh.py", True),
+            (PROTECTED, False),
+            (PROTECTED, True),
+        ]
+    ]
+    typed = judging.judge(changes, inform=False)
+    assert [each.reading().asks for each in parsed] == [
+        each.reading().asks for each in typed
+    ]
+    assert [each.outcome for each in parsed] == [each.outcome for each in typed]
+    assert [each.findings for each in parsed] == [[], [], [], [], []]
+    assert [finding.rule for finding in typed[0].findings] == ["regex"]
+
+
+def test_from_the_parse_alone_a_directives_own_problem_is_told(
+    kit: Kit, tmp_path: Path
+) -> None:
+    judging = Judge(
+        root=tmp_path,
+        roles=Roles(root=tmp_path, declaration=Declaration.of(EVERY_HELD)),
+        checker=kit.engine,
+        linter=kit.linter,
+        conditions=["other"],
+    )
+    after = CORE + 'x = 1  # lup: defer(when=ready, why="wait")\n'
+    [judgement] = judging.parsed([edit("src/pkg/core.py", CORE, after)], kit.parser)
+    assert [finding.rule for finding in judgement.findings] == ["defer-condition"]
+
+
 def test_verdict_reasons() -> None:
     assert Judgement(path=Path("a"), role="docs", outcome="allow").reasons() == ["docs"]
     assert Judgement(path=Path("a"), role="production", outcome="allow").reasons() == [

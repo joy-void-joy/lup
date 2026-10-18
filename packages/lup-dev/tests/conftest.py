@@ -32,6 +32,7 @@ from lup_dev.codescan.contract import (
     FileReport,
     Finding,
     Parameter,
+    Parser,
     Placed,
     Position,
     Rule,
@@ -286,6 +287,29 @@ class FakeEngine(Checker):
         self.importers_asked.append(changed)
         self.runners.append(runner)
         return self.importer_reports
+
+
+class FakeParser(Parser):
+    """The engine's reading of a file's parse alone: the fake engine's directives and surface, scripted from the same markers, with no finding."""
+
+    def __init__(self) -> None:
+        self.parsed_asked: list[list[Source]] = []
+        """The sources each request was sent, in order."""
+
+    def parsed(self, root: Path, sources: list[Source]) -> list[FileReport]:
+        self.parsed_asked.append(sources)
+
+        def read(source: Source) -> FileReport:
+            content = source.content
+            if content is None:
+                content = (root / source.path).read_text()
+            return FileReport(
+                path=source.path,
+                directives=directives(content),
+                surface=surface(source.path, content),
+            )
+
+        return [read(source) for source in sources]
 
 
 class FakeLinter(Linter):
@@ -573,6 +597,7 @@ class Kit:
         answering: Response | None = None,
     ) -> None:
         self.engine = FakeEngine()
+        self.parser = FakeParser()
         self.linter = FakeLinter()
         self.clock = FakeClock()
         self.spawner = FakeSpawner()
