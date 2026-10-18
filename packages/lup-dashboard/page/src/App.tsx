@@ -58,19 +58,20 @@ export function App() {
     const shown = found(served, agents, selected);
     const talkers = useMemo(() => agents.map((each) => each.talker), [agents]);
 
-    const named = useCallback(
-        (item: Item) => {
-            const sender = item.sender;
-            if (sender.party === "operator") {
+    // A party as it's called: a conversation by its path in the tree, else by its runtime's ids.
+    const called = useCallback(
+        (party: Item["sender"]) => {
+            if (party.party === "operator") {
                 return "you";
             }
             const talker = talkers.find(
-                (each) => each.session === sender.session && (each.agent ?? null) === (sender.agent ?? null),
+                (each) => each.session === party.session && (each.agent ?? null) === (party.agent ?? null),
             );
-            return talker?.path ?? `${sender.runtime} ${sender.session}${sender.agent ? ` / ${sender.agent}` : ""}`;
+            return talker?.path ?? `${party.runtime} ${party.session}${party.agent ? ` / ${party.agent}` : ""}`;
         },
         [talkers],
     );
+    const named = useCallback((item: Item) => called(item.sender), [called]);
 
     const banner = useCallback(
         (item: Item) => {
@@ -245,7 +246,17 @@ export function App() {
             return;
         }
         if (answer.kind === "inbox-reviewed") {
-            setSaid(`Sent: ${answer.items.map((each) => `#${each.number} to ${named(each)}`).join(", ") || "nothing new"}.`);
+            const list = (items: { number: number }[]) => items.map((each) => `#${each.number}`).join(", ");
+            const approved = answer.approved ?? [];
+            const noted = answer.noted ?? [];
+            const kept = answer.kept ?? [];
+            const done = [
+                ...answer.items.map((each) => `#${each.number} to ${called(each.recipient)}`),
+                ...(approved.length === 0 ? [] : [`approved ${list(approved)}`]),
+                ...noted.map((each) => `comments to ${called(each.recipient)} as #${each.number}`),
+                ...(kept.length === 0 ? [] : [`comments on ${kept.map((each) => `#${each}`).join(", ")} kept: no session's push asked it`]),
+            ];
+            setSaid(`Sent: ${done.join("; ") || "nothing new"}.`);
         }
         const after = await ask({ kind: "inbox-draft" });
         if (after.kind === "inbox-drafted") {
@@ -256,14 +267,33 @@ export function App() {
 
     const numbers = covered(draft);
     const commented = numbers.filter((number) => (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== ""));
-    // Told: the agents with a comment on their items, or a question among them, which
-    // an answer lets go; a message only marked read reaches no one.
-    const told = waiting.filter(
-        (each) =>
-            numbers.includes(each.number) && (commented.includes(each.number) || each.reason.reason === "question"),
+    const coveredItems = waiting.filter((each) => numbers.includes(each.number));
+    const yesOrNo = (item: Item) => item.reason.reason === "approval" || item.reason.reason === "held";
+    // Approved by the send: an approval or a held change marked read alone, and a held change
+    // commented on, its comments going with the yes.
+    const approving = coveredItems.filter(
+        (each) => yesOrNo(each) && (each.reason.reason === "held" || !commented.includes(each.number)),
     );
-    const reached = [...new Set(told.map(named))];
-    const read = numbers.filter((number) => !commented.includes(number));
+    // An approval commented on stays unanswered, its comments going to the session whose push asked it.
+    const unanswered = coveredItems.filter((each) => each.reason.reason === "approval" && commented.includes(each.number));
+    const pushers = unanswered.flatMap((each) =>
+        each.reason.reason === "approval" && each.reason.pushed_by != null ? [called(each.reason.pushed_by)] : [],
+    );
+    // Told: the agents with a comment on their messages or questions, or a question among them,
+    // which an answer lets go; a message only marked read reaches no one.
+    const told = coveredItems.filter(
+        (each) => !yesOrNo(each) && (commented.includes(each.number) || each.reason.reason === "question"),
+    );
+    const reached = [...new Set([...told.map(named), ...pushers])];
+    const onMessages = commented.filter((number) => told.some((each) => each.number === number));
+    const read = coveredItems.filter((each) => !yesOrNo(each) && !commented.includes(each.number)).map((each) => each.number);
+    const hashed = (list: number[]) => list.map((each) => `#${each}`).join(", ");
+    const covering = [
+        ...(onMessages.length === 0 ? [] : [`comments on ${hashed(onMessages)}`]),
+        ...(read.length === 0 ? [] : [`read ${hashed(read)}`]),
+        ...(approving.length === 0 ? [] : [`approving ${hashed(approving.map((each) => each.number))}`]),
+        ...(unanswered.length === 0 ? [] : [`comments on ${hashed(unanswered.map((each) => each.number))}, left unanswered`]),
+    ];
     return (
         <div className="layout">
             <header className="bar">
@@ -360,8 +390,7 @@ export function App() {
                             <span className="muted">No reply drafted.</span>
                         ) : (
                             <span>
-                                Your reply: {commented.length === 0 ? "" : `comments on ${commented.map((each) => `#${each}`).join(", ")}`}
-                                {read.length === 0 ? "" : `${commented.length === 0 ? "" : "; "}read ${read.map((each) => `#${each}`).join(", ")}`}
+                                Your reply: {covering.join("; ")}
                                 {reached.length === 0
                                     ? ", telling no one"
                                     : ` — to ${reached.join(", ")}${reached.length > 1 ? ", each getting all of it" : ""}`}
