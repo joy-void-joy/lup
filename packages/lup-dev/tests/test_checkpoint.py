@@ -16,7 +16,7 @@ from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
 from lup_dev.declaration.resolve import Declaration, Selected
 from lup_dev.declaration.runner import Plain, Prefixed
-from lup_dev.inbox.store import ChangedFile, Text
+from lup_dev.inbox.store import Asked, ChangedFile, Reading, Text
 from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     CallFinished,
@@ -322,6 +322,9 @@ def test_a_protected_file_committed_through_the_shell_stays_and_asks_the_operato
                 path=Path(".github/ci.yml"),
                 before=None,
                 after=Text(text="on: push\n"),
+                reading=Reading(
+                    role="protected", asks=[Asked(name="protected", taken="held")]
+                ),
             )
         ]
     ]
@@ -916,6 +919,9 @@ def test_an_ask_is_held_until_the_operator_approves(
                 path=Path("src/pkg/new.py"),
                 before=None,
                 after=Text(text='"""New."""\n'),
+                reading=Reading(
+                    role="production", asks=[Asked(name="new-file", taken="held")]
+                ),
             )
         ]
     ]

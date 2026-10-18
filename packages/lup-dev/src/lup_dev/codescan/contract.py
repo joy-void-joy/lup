@@ -123,6 +123,21 @@ class Signature(Model):
     """The declared return type as pyright prints it."""
 
 
+type Named = Literal["export", "class", "signature"]
+"""Which of a surface's names one is: an export, a class, or a function's or
+method's signature."""
+
+
+class Placed(Model):
+    """Where one name of a file's surface is written: the line its name is on."""
+
+    kind: Named
+    name: str
+    line: int
+    """Counted from 1: an export's entry in `__all__` or its binding, a class's
+    `class`, a function's `def`."""
+
+
 class Surface(Model):
     """What other code can depend on in one file.
 
@@ -134,6 +149,26 @@ class Surface(Model):
     classes: list[str] = []
     """Every class the module defines, by its dotted name inside the module."""
     signatures: list[Signature] = []
+    places: list[Placed] = []
+    """Where each of the names above is written, which the review marks; a name
+    `__all__` takes from another module's has none."""
+
+    def place(self, kind: Named, name: str) -> int | None:
+        """Return the line `name`, of `kind`, is written on; none where it isn't placed.
+
+        >>> Surface(places=[Placed(kind="class", name="Client", line=4)]).place(
+        ...     "class", "Client"
+        ... )
+        4
+        """
+        return next(
+            (
+                each.line
+                for each in self.places
+                if each.kind == kind and each.name == name
+            ),
+            None,
+        )
 
 
 class Source(Model):

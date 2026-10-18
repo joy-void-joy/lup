@@ -30,7 +30,11 @@ anything else, and `lup-dev trust` compare the tip's zone with it (`Trust.check`
 Where it changed, or nothing was approved, the operator reads a summary first
 (`Change.summary`): what's approved and why it runs on the host, the commit
 approved before and the tip, and git's own count of each file changed since
-(`git diff --stat --compact-summary`), coloured, as git prints it. Then they're
+(`git diff --stat --compact-summary`), coloured, as git prints it; each file
+changed is kept whole with the judge's reading of it, the change judged as a move
+of `HEAD` is, by the declaration approved last, or lup's defaults before any,
+never the tip's own, which importing would run (`Trust.read`), for the
+dashboard's review. Then they're
 asked whether to show the whole diff, no by default, a yes showing it through the
 terminal's pager; then whether to approve, no by default (`Asker`). The question
 is an item in the operator's inbox from the start (`Approvals`, the host service
@@ -83,6 +87,10 @@ from lup.programs import run
 from lup.types import Model, MutableModel
 from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool, approved
 from lup_dev.clock import Clock, SystemClock
+from lup_dev.codescan import conditions
+from lup_dev.codescan.contract import Checker
+from lup_dev.codescan.engine import EngineChecker
+from lup_dev.codescan.ruff import Linter, Ruff
 from lup_dev.declaration.load import (
     Pyproject,
     import_roots,
@@ -90,7 +98,8 @@ from lup_dev.declaration.load import (
     person_layer,
     read_by_import,
 )
-from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.project import Project
+from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
 from lup_dev.git import Git
@@ -103,8 +112,21 @@ from lup_dev.inbox.protocol import (
     Settled,
     Shown,
 )
-from lup_dev.inbox.store import ChangedFile, Conversation, Decided, Item, Superseded
+from lup_dev.inbox.store import (
+    Binary,
+    ChangedFile,
+    Content,
+    Conversation,
+    Decided,
+    Item,
+    Superseded,
+)
 from lup_dev.layout import CheckoutLayout, JudgeLayout, Layout
+from lup_dev.policy.checkpoint import Judging, Worktree
+from lup_dev.policy.judge import Change as FileChange
+from lup_dev.policy.judge import Judge
+from lup_dev.policy.roles import Roles
+from lup_dev.policy.store import Store
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
 
@@ -412,13 +434,17 @@ class Change(Model):
     """The person's own layer, from the copy approved before to the worktree's;
     empty where it's the same."""
     files: list[ChangedFile]
-    """Each file the diff shows, whole on each side, in its order: what the
-    dashboard shows (`docs/dashboard.md`, *The review*)."""
+    """Each file the diff shows, whole on each side, in its order, with the
+    judge's reading of it: what the dashboard shows (`docs/dashboard.md`, *The
+    review*)."""
     tool: list[str]
     """How the `lup-dev` release changed, line by line; none for the workspace's
     own source, whose change is in the diff."""
     unread: list[str] = []
     """What of the declaration couldn't be followed, so the zone may miss a file it runs."""
+    unjudged: str = ""
+    """Why the judge couldn't read the zone's change, so its files carry no
+    reading; empty where it read them."""
 
     def before(self) -> str:
         """Say which commit was approved before, and whether the zone is shown since it or whole."""
@@ -438,8 +464,8 @@ class Change(Model):
         then those joining the zone, shown whole. The person's own layer, which
         git doesn't hold, is shown whole where it changed: its diff, not a count,
         since it's short and nothing else shows it. A release's change is said
-        by its versions, and what of the declaration couldn't be followed is
-        said last.
+        by its versions, then what of the declaration couldn't be followed, and
+        last why the judge couldn't read the change, where it couldn't.
         """
         changed = self.changed.stat.splitlines() or ["No file of the zone changed."]
         joined = (
@@ -459,6 +485,8 @@ class Change(Model):
         unread = (
             [unknown, *(f"  {each}" for each in self.unread)] if self.unread else []
         )
+        failed = "The judge couldn't read the zone's change, so the review opens"
+        unjudged = [f"{failed} every file: {self.unjudged}"] if self.unjudged else []
         said = [
             WHY,
             "",
@@ -470,6 +498,7 @@ class Change(Model):
             *local,
             *self.tool,
             *unread,
+            *unjudged,
         ]
         return "\n".join(said)
 
@@ -1402,6 +1431,21 @@ def layer_changed(approved: str | None, current: str | None) -> list[ChangedFile
     ]
 
 
+def judged(content: Content | None) -> str | None:
+    """Return one side of a changed file as the judge reads it: its text, an empty one where it isn't text, none where the file isn't there.
+
+    >>> judged(Binary(size=3))
+    ''
+    """
+    match content:
+        case None:
+            return None
+        case Binary():
+            return ""
+        case _:
+            return content.text
+
+
 class Trust(Model, arbitrary_types_allowed=True):
     """The check, and the question, a launch makes about what the host runs for a repository."""
 
@@ -1418,6 +1462,11 @@ class Trust(Model, arbitrary_types_allowed=True):
     toolchain: Toolchain
     host: HostClient
     clock: Clock
+    checker: Checker
+    """The engine the zone's change is judged with, for the review's reading of
+    each file."""
+    linter: Linter
+    """ruff, which judging runs beside the engine."""
     inside: list[str]
     """The runtimes whose session this runs inside, by name, as their adapters
     tell: inside one, nothing is asked."""
@@ -1555,7 +1604,9 @@ class Trust(Model, arbitrary_types_allowed=True):
         The first time, or where the repository doesn't hold the approved commit,
         every path whole. The person's own layer, from the copy approved to the
         worktree's, where they differ (`compared`). Each file the diff shows is
-        read whole on each side too (`files_between`, `layer_changed`).
+        read whole on each side too (`files_between`, `layer_changed`), with the
+        judge's reading of it (`read`); where the judge fails, the files go
+        unread and the summary says why.
         """
         git = Git(cwd=self.root)
         zone = standing.zone
@@ -1573,36 +1624,110 @@ class Trust(Model, arbitrary_types_allowed=True):
             == 0
         )
         if approval is None or not held:
-            return Change(
+            files = [*files_between(git, nothing, zone.commit, zone.paths), *layer]
+            change = Change(
                 commit=zone.commit,
                 approved=approval.commit if approval is not None else None,
                 since=None,
                 changed=diffed(git, nothing, zone.commit, zone.paths),
                 joined=Diffed(),
                 local=local,
-                files=[
-                    *files_between(git, nothing, zone.commit, zone.paths),
-                    *layer,
-                ],
+                files=files,
                 tool=tool,
                 unread=zone.unread,
             )
-        kept = [path for path in zone.paths if path in approval.paths]
-        joined = [path for path in zone.paths if path not in approval.paths]
-        return Change(
-            commit=zone.commit,
-            approved=approval.commit,
-            since=approval.commit,
-            changed=diffed(git, approval.commit, zone.commit, kept),
-            joined=diffed(git, nothing, zone.commit, joined),
-            local=local,
-            files=[
+        else:
+            kept = [path for path in zone.paths if path in approval.paths]
+            joined = [path for path in zone.paths if path not in approval.paths]
+            files = [
                 *files_between(git, approval.commit, zone.commit, kept),
                 *files_between(git, nothing, zone.commit, joined),
                 *layer,
-            ],
-            tool=tool,
-            unread=zone.unread,
+            ]
+            change = Change(
+                commit=zone.commit,
+                approved=approval.commit,
+                since=approval.commit,
+                changed=diffed(git, approval.commit, zone.commit, kept),
+                joined=diffed(git, nothing, zone.commit, joined),
+                local=local,
+                files=files,
+                tool=tool,
+                unread=zone.unread,
+            )
+        try:
+            read = self.read(self.repository(), approval, files)
+        except LupDevError as failure:
+            return change.model_copy(update={"unjudged": str(failure)})
+        return change.model_copy(update={"files": read})
+
+    def read(
+        self, repository: Path, approval: Approval | None, files: list[ChangedFile]
+    ) -> list[ChangedFile]:
+        """Return `files` with the judge's reading of each, which the review opens them by.
+
+        The zone's change is judged as a move of `HEAD` is, each file against
+        what it was, by the declaration the host runs for the repository: the one
+        approved last (`judge`). A side that isn't text is judged as an empty
+        one: no rule reads it, and only whether it's there decides what it asks.
+        Raise what the judge raises.
+        """
+        judge = self.judge(repository, approval, files)
+        changes = [
+            FileChange(
+                path=each.path,
+                before=judged(each.before),
+                after=judged(each.after),
+                baseline=judged(each.before),
+            )
+            for each in files
+        ]
+        judgements = judge.judge(changes, inform=False)
+        return [
+            each.model_copy(update={"reading": judgement.reading()})
+            for each, judgement in zip(files, judgements, strict=True)
+        ]
+
+    def judge(
+        self, repository: Path, approval: Approval | None, files: list[ChangedFile]
+    ) -> Judge:
+        """Return the judge of the zone's change: by the declaration approved last, read as the checkpoint reads it, from its commit with the person's own layer approved beside it.
+
+        Before any approval, by lup's defaults, never the tip's own declaration,
+        which importing would run before the operator is asked; the tip's
+        declaration, among `files`, is the protected path it always is.
+        """
+        if approval is None:
+            layout = CheckoutLayout(root=Path())
+            declaring = [
+                layout.declaration,
+                CheckoutLayout(root=layout.declaration_package).package,
+            ]
+            source = next(
+                (
+                    each.path
+                    for each in files
+                    if each.path in declaring and each.after is not None
+                ),
+                None,
+            )
+            declaration = Declaration.of(Project(), source)
+            named = None
+        else:
+            worktree = Worktree(
+                root=self.root,
+                repository=repository,
+                store=Store(layout=self.layout.store(self.root), worktree=self.root),
+                judging=Judging(integration=self.integration, layout=self.layout),
+            )
+            declaration = worktree.declaration
+            named = conditions.declared(worktree.loaded.root, declaration.conditions)
+        return Judge(
+            root=self.root,
+            roles=Roles(root=self.root, declaration=declaration),
+            checker=self.checker,
+            linter=self.linter,
+            conditions=named,
         )
 
     def ensure(self) -> Outcome:
@@ -1806,7 +1931,7 @@ class Trust(Model, arbitrary_types_allowed=True):
 
 
 def machine_trust(root: Path, inside: list[str]) -> Trust:
-    """Return trust on launch for the repository at `root`, with this machine's settings, the terminal, the inbox in the host service, uv and the service's client.
+    """Return trust on launch for the repository at `root`, with this machine's settings, the terminal, the inbox in the host service, uv, the service's client, and the engine and ruff to judge the zone's change with.
 
     `inside` names the runtimes whose session this runs inside.
     """
@@ -1823,6 +1948,8 @@ def machine_trust(root: Path, inside: list[str]) -> Trust:
         toolchain=UvToolchain(),
         host=host,
         clock=clock,
+        checker=EngineChecker.configured(settings),
+        linter=Ruff(),
         inside=inside,
     )
 

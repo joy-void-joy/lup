@@ -23,6 +23,8 @@ from typer.testing import CliRunner
 from lup.types import Model
 from lup_dev import cli
 from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool
+from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
+from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import Detached, HostClient, Starter
@@ -33,17 +35,21 @@ from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.protocol import AskApproval
 from lup_dev.inbox.protocol import routes as inbox_routes
-from lup_dev.inbox.store import Approval as StoredApproval
 from lup_dev.inbox.store import (
+    ApiChanged,
+    Asked,
     Binary,
     ChangedFile,
     Conversation,
     Decided,
+    Found,
     Inbox,
     InboxError,
+    Reading,
     Superseded,
     Waiting,
 )
+from lup_dev.inbox.store import Approval as StoredApproval
 from lup_dev.inbox.store import Text as TextContent
 from lup_dev.launch.trust import (
     WHOLE,
@@ -73,6 +79,9 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from conftest import FakeClock, Kit, Shell
+
+    from lup_dev.declaration.resolve import Selected
+    from lup_dev.declaration.runner import Runner
 
 LUP_LOCK = """\
 version = 1
@@ -424,6 +433,8 @@ def trusting(
             running=running,
         ),
         clock=kit.clock,
+        checker=kit.engine,
+        linter=kit.linter,
         inside=list(inside or []),
     )
 
@@ -718,28 +729,196 @@ def test_an_approval_carries_each_file_changed_whole_a_binary_by_its_size(
     trust.proposed()
     assert isinstance(trust.approvals, Here)
     [asking] = trust.approvals.asking
+    production = Reading(role="production")
     assert asking.files == [
         ChangedFile(
             path=Path("packages/lup/src/library/__init__.py"),
             before=TextContent(text='"""The library."""\n'),
             after=None,
+            reading=production,
         ),
         ChangedFile(
             path=Path("packages/lup-dev/src/environment/__init__.py"),
             before=TextContent(text='"""The environment."""\n'),
             after=TextContent(text='"""Changed."""\n'),
+            reading=production,
         ),
         ChangedFile(
             path=Path("packages/lup-dev/src/environment/icon.png"),
             before=None,
             after=Binary(size=6),
+            reading=Reading(
+                role="production", asks=[Asked(name="new-file", taken="flagged")]
+            ),
         ),
         ChangedFile(
             path=Path("lup_project.local.py"),
             before=None,
             after=TextContent(text=LAYER),
+            reading=Reading(
+                role="protected",
+                asks=[
+                    Asked(name="protected", taken="held"),
+                    Asked(name="new-file", taken="flagged"),
+                    Asked(
+                        name="public-api",
+                        taken="flagged",
+                        line=8,
+                        api=ApiChanged(kind="class-added", name="Mine"),
+                    ),
+                ],
+            ),
         ),
     ]
+
+
+CORE = (
+    '"""Core."""\n\n\n'
+    "class Client:\n"
+    "    def ask(self, prompt: str) -> str:\n"
+    "        return prompt\n"
+)
+
+CORE_CHANGED = (
+    '"""Core."""\n'
+    "\n"
+    "import re  # BAD regex\n"
+    "\n"
+    "\n"
+    "class Client:\n"
+    "    def ask(self, prompt: str, quiet: bool = False) -> str:\n"
+    "        return prompt\n"
+    "\n"
+    "\n"
+    "class Room:\n"
+    '    # lup: ignore("tuple-shape", why="kept")\n'
+    "    pass\n"
+)
+"""`CORE` with a finding of lup's on line 3, a signature changed on line 7, a
+class added on line 11 and an `ignore` added on line 12."""
+
+CORE_PATH = "packages/lup-dev/src/environment/core.py"
+
+
+def test_each_file_of_an_approval_carries_the_judges_reading_each_line_placed(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    changed(lup, {CORE_PATH: CORE}, shell)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    changed(lup, {CORE_PATH: CORE_CHANGED}, shell)
+    trust = trusting(lup, kit, unasked())
+    trust.proposed()
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    [core] = asking.files
+    assert core.reading == Reading(
+        role="production",
+        asks=[
+            Asked(name="ignore", taken="held", line=12),
+            Asked(
+                name="public-api",
+                taken="flagged",
+                line=11,
+                api=ApiChanged(kind="class-added", name="Room"),
+            ),
+            Asked(
+                name="public-api",
+                taken="flagged",
+                line=7,
+                api=ApiChanged(kind="signature-changed", name="Client.ask"),
+            ),
+        ],
+        findings=[
+            Found(
+                rule="regex",
+                message="regex fires here",
+                steer="do it the other way",
+                start=3,
+                end=3,
+                taken="told",
+            )
+        ],
+    )
+
+
+def test_before_any_approval_lups_defaults_judge_the_zone_never_the_tips_own(
+    lup: Path, kit: Kit, shell: Shell, tmp_path: Path
+) -> None:
+    ran = tmp_path / "imported"
+    trapped = (
+        '"""A declaration that leaves a mark where imported."""\n\n'
+        "from pathlib import Path\n\n"
+        "from lup_dev import Project\n\n"
+        f"Path({str(ran)!r}).write_text('imported')\n"
+        "project = Project(flagged=[])\n"
+    )
+    changed(lup, {"lup_project.py": trapped}, shell)
+    trust = trusting(lup, kit, unasked())
+    trust.proposed()
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    readings = {each.path: each.reading for each in asking.files}
+    assert readings[Path("packages/lup/src/library/__init__.py")] == Reading(
+        role="production", asks=[Asked(name="new-file", taken="flagged")]
+    )
+    assert not ran.exists()
+
+
+def test_once_approved_the_declaration_approved_judges_the_zones_change(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    unflagged = DECLARED.replace("Project()", "Project(flagged=[])")
+    changed(lup, {"lup_project.py": unflagged}, shell)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    extra = "packages/lup/src/library/extra.py"
+    changed(lup, {extra: '"""Extra."""\n', "lup_project.py": DECLARED}, shell)
+    trust = trusting(lup, kit, unasked())
+    trust.proposed()
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    readings = {each.path: each.reading for each in asking.files}
+    assert readings[Path(extra)] == Reading(role="production")
+
+
+class Broken(Checker):
+    """An engine that fails each request."""
+
+    def rules(self) -> list[Rule]:
+        message = "the engine is gone"
+        raise EngineError(message)
+
+    def check(
+        self,
+        root: Path,
+        sources: list[Source],
+        selected: list[Selected],
+        runner: Runner,
+    ) -> list[FileReport]:
+        message = "the engine is gone"
+        raise EngineError(message)
+
+    def importers(
+        self, root: Path, changed: list[Path], runner: Runner
+    ) -> list[FileReport]:
+        message = "the engine is gone"
+        raise EngineError(message)
+
+
+def test_where_the_judge_fails_the_files_go_unread_and_the_summary_says_why(
+    lup: Path, kit: Kit
+) -> None:
+    trust = trusting(lup, kit, unasked()).model_copy(update={"checker": Broken()})
+    trust.proposed()
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    assert asking.files != []
+    assert all(each.reading is None for each in asking.files)
+    assert asking.summary.splitlines()[-1] == (
+        "The judge couldn't read the zone's change, so the review opens every "
+        "file: the engine is gone"
+    )
 
 
 def test_a_branchs_own_change_isnt_the_tips_and_asks_nothing(
@@ -817,7 +996,16 @@ def test_a_zone_proposed_puts_its_approval_in_the_inbox_and_asks_nothing_here(
     assert all(each.before is None for each in asking.files)
     assert (
         ChangedFile(
-            path=Path("lup_project.py"), before=None, after=TextContent(text=DECLARED)
+            path=Path("lup_project.py"),
+            before=None,
+            after=TextContent(text=DECLARED),
+            reading=Reading(
+                role="protected",
+                asks=[
+                    Asked(name="protected", taken="held"),
+                    Asked(name="new-file", taken="flagged"),
+                ],
+            ),
         )
         in asking.files
     )
@@ -1295,7 +1483,12 @@ def test_an_approved_commit_gone_from_the_repository_shows_everything(
         ),
         f"The tip: {zone.commit}.",
     ]
-    assert lines[-1].startswith(" 12 files changed")
+    assert lines[-2].startswith(" 12 files changed")
+    assert lines[-1] == (
+        "The judge couldn't read the zone's change, so the review opens every file: "
+        f"the commit approved last, {'0' * 40}, isn't in the repository: approve "
+        "the integration branch's tip with `lup-dev trust`"
+    )
 
 
 def test_a_lock_that_doesnt_pin_lup_dev_or_pins_it_from_elsewhere_refuses() -> None:

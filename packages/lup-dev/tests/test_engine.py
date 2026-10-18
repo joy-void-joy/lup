@@ -880,6 +880,13 @@ def test_a_modules_surface_holds_its_classes_and_signatures(project: Project) ->
     ]
     assert method.returns == "str | None"
     assert (function.name, function.returns) == ("function", "int")
+    start = DOCSTRING.count("\n")
+    assert [(each.kind, each.name, each.line - start) for each in surface.places] == [
+        ("class", "Outer", 1),
+        ("class", "Outer.Inner", 4),
+        ("signature", "Outer.method", 7),
+        ("signature", "function", 15),
+    ]
 
 
 def test_a_package_root_exports_its_names_or_its_all(project: Project) -> None:
@@ -893,6 +900,11 @@ def test_a_package_root_exports_its_names_or_its_all(project: Project) -> None:
         project.root, [Source(path=Path("example/pkg/__init__.py"))], EVERY
     )
     assert report.surface.exported == ["VERSION", "thing"]
+    start = DOCSTRING.count("\n")
+    assert [(each.name, each.line - start) for each in report.surface.places] == [
+        ("VERSION", 3),
+        ("thing", 1),
+    ]
     declared = (
         DOCSTRING + "from example.pkg.inner import thing\n\n__all__ = ['thing']\n"
     )
@@ -902,6 +914,7 @@ def test_a_package_root_exports_its_names_or_its_all(project: Project) -> None:
         EVERY,
     )
     assert report.surface.exported == ["thing"]
+    assert report.surface.place("export", "thing") == declared.count("\n")
 
 
 def test_imports_are_named_in_full_relative_ones_included(project: Project) -> None:

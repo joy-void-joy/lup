@@ -1,6 +1,7 @@
 // What other code can depend on in one file, for the judge's public-API ask: a
 // package root's names, every class the module defines, and each function's and
-// method's signature (`docs/judging-writes.md`, *The public-API ask*).
+// method's signature, each placed on the line its name is on, which the review
+// marks (`docs/judging-writes.md`, *The public-API ask*).
 
 import * as AnalyzerNodeInfo from 'pyright/analyzer/analyzerNodeInfo';
 import { DeclarationType } from 'pyright/analyzer/declaration';
@@ -12,30 +13,42 @@ import {
     ModuleNode,
     ParamCategory,
     ParameterNode,
+    ParseNode,
     ParseNodeType,
     StatementNode,
 } from 'pyright/parser/parseNodes';
+import { ParseFileResults } from 'pyright/parser/parser';
 
-import { Parameter, ParameterKind, Signature, Surface } from './protocol';
+import { Parameter, ParameterKind, Placed, Signature, Surface } from './protocol';
+import { positionOf } from './spans';
 
 export function surfaceOf(
-    module: ModuleNode,
+    parse: ParseFileResults,
     evaluator: TypeEvaluator,
     reader: AnalyzerNodeInfo.AnalyzerNodeInfoReader,
     isPackageRoot: boolean
 ): Surface {
+    const module = parse.parserOutput.parseTree;
     const classes: string[] = [];
     const signatures: Signature[] = [];
+    const places: Placed[] = [];
+    const place = (kind: Placed['kind'], name: string, node: ParseNode) => {
+        places.push({ kind, name, line: positionOf(parse, node.start).line });
+    };
     const visit = (statements: StatementNode[], prefix: string) => {
         for (const statement of statements) {
             switch (statement.nodeType) {
                 case ParseNodeType.Class:
                     classes.push(prefix + statement.d.name.d.value);
+                    place('class', prefix + statement.d.name.d.value, statement.d.name);
                     visit(statement.d.suite.d.statements, `${prefix}${statement.d.name.d.value}.`);
                     break;
-                case ParseNodeType.Function:
-                    signatures.push(signatureOf(statement, prefix, evaluator));
+                case ParseNodeType.Function: {
+                    const signature = signatureOf(statement, prefix, evaluator);
+                    signatures.push(signature);
+                    place('signature', signature.name, statement.d.name);
                     break;
+                }
                 case ParseNodeType.If:
                     visit(statement.d.ifSuite.d.statements, prefix);
                     if (statement.d.elseSuite) {
@@ -56,24 +69,43 @@ export function surfaceOf(
         }
     };
     visit(module.d.statements, '');
-    return { exported: isPackageRoot ? exportedBy(module, reader) : [], classes, signatures };
+    const exported = isPackageRoot ? exportedBy(module, reader) : [];
+    for (const each of exported) {
+        if (each.node) {
+            place('export', each.name, each.node);
+        }
+    }
+    return { exported: exported.map((each) => each.name), classes, signatures, places };
 }
 
-// The names a package's root binds: its `__all__` when it declares one, otherwise
-// every name it binds itself.
-function exportedBy(module: ModuleNode, reader: AnalyzerNodeInfo.AnalyzerNodeInfoReader): string[] {
+// A name a package's root exports, and the node naming it there: none for a name
+// `__all__` takes from another module's, which no string of its own names.
+interface Exported {
+    name: string;
+    node: ParseNode | undefined;
+}
+
+// The names a package's root binds: its `__all__` when it declares one, each at its
+// first entry there, otherwise every name it binds itself, each at its first binding.
+function exportedBy(module: ModuleNode, reader: AnalyzerNodeInfo.AnalyzerNodeInfoReader): Exported[] {
     const declared = AnalyzerNodeInfo.getDunderAllInfo(module, reader);
     if (declared) {
-        return [...new Set(declared.names)].sort();
+        return [...new Set(declared.names)].sort().map((name) => ({
+            name,
+            node: declared.stringNodes.find((node) => node.d.value === name),
+        }));
     }
     const scope = AnalyzerNodeInfo.getScope(module, reader);
-    const bound: string[] = [];
+    const bound: Exported[] = [];
     scope?.symbolTable.forEach((symbol, name) => {
-        if (symbol.getDeclarations().some((declaration) => declaration.type !== DeclarationType.Intrinsic)) {
-            bound.push(name);
+        const binding = symbol
+            .getDeclarations()
+            .find((declaration) => declaration.type !== DeclarationType.Intrinsic);
+        if (binding) {
+            bound.push({ name, node: binding.node });
         }
     });
-    return bound.sort();
+    return bound.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 function signatureOf(node: FunctionNode, prefix: string, evaluator: TypeEvaluator): Signature {

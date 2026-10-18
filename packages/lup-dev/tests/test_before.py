@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup_dev.inbox.store import ChangedFile, Text
+from lup_dev.inbox.store import Asked, ChangedFile, Reading, Text
 from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import Session, SessionStarted
 from lup_dev.policy.holds import Holds, Response
@@ -84,7 +84,16 @@ def test_a_write_that_asks_is_held_for_the_operator_and_let_through_on_a_yes(
     decision = before(kit.bench, write, "s1", repo)
     [hold] = kit.announced.holds
     assert kit.announced.files == [
-        [ChangedFile(path=CORE, before=Text(text=was), after=Text(text=was + "\n"))]
+        [
+            ChangedFile(
+                path=CORE,
+                before=Text(text=was),
+                after=Text(text=was + "\n"),
+                reading=Reading(
+                    role="production", asks=[Asked(name="whole-file", taken="held")]
+                ),
+            )
+        ]
     ]
     assert decision == Decision(outcome="allow")
     assert [each.asks for each in hold.files] == [

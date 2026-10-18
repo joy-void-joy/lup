@@ -33,7 +33,7 @@ from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.host.protocol import Holding, HostError, ShowHolding
 from lup_dev.inbox.protocol import AskHold, Shown
-from lup_dev.inbox.store import ChangedFile, Conversation, HeldChange
+from lup_dev.inbox.store import ChangedFile, Conversation, HeldChange, Reading
 from lup_dev.layout import HostLayout, Layout, StoreLayout
 from lup_dev.policy.roles import Role
 from lup_dev.policy.verdicts import Verdict, VerdictLog
@@ -73,6 +73,9 @@ class HeldFile(Model):
     """The kinds of ask, as the verdict log records them."""
     asks: list[str]
     """What the change asks, one line each, for the operator."""
+    reading: Reading | None = None
+    """The judge's reading of the change to it, which the review opens it by;
+    none where none was kept."""
 
 
 class Hold(Model):

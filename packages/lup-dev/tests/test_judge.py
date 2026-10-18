@@ -16,6 +16,7 @@ from lup_dev import (
     Rules,
 )
 from lup_dev.declaration.resolve import Declaration
+from lup_dev.inbox.store import ApiChanged, Asked, Found, Reading, Taken
 from lup_dev.policy.judge import (
     Change,
     EngineError,
@@ -576,6 +577,90 @@ def test_a_defer_naming_an_undeclared_condition_is_told(judge: Judging) -> None:
     )
     judgement = judge(edit("src/pkg/core.py", CORE, after), conditions=["other"])
     assert [finding.rule for finding in judgement.findings] == ["defer-condition"]
+
+
+# The reading the review opens a file by.
+
+
+TAKEN: list[tuple[str, int, Taken]] = [
+    ("regex", 11, "held"),
+    ("tuple-shape", 12, "flagged"),
+    ("string-split", 13, "told"),
+]
+"""Each finding the reading test's change makes: its rule, its line, and how the
+declaration there takes it."""
+
+
+def test_a_reading_says_what_a_file_asks_held_or_flagged_each_on_its_line(
+    judge: Judging,
+) -> None:
+    project = Project(
+        held=["protected", "operator", "ignore", "regex"],
+        flagged=["new-file", "whole-file", "public-api", "tuple-shape"],
+    )
+    after = (
+        CORE.replace("def ask(self, prompt: str)", "def ask(self, prompt: int)")
+        + "y = 2  # BAD regex\n"
+        + "z = 3  # BAD tuple-shape\n"
+        + "w = 4  # BAD string-split\n"
+        + "\n\n"
+        + "class Room:\n"
+        + '    # lup: ignore("string-split", why="a fixed format")\n'
+        + "    pass\n"
+    )
+    reading = judge(edit("src/pkg/core.py", CORE, after), project=project).reading()
+    assert reading == Reading(
+        role="production",
+        asks=[
+            Asked(name="ignore", taken="held", line=17),
+            Asked(
+                name="public-api",
+                taken="flagged",
+                line=16,
+                api=ApiChanged(kind="class-added", name="Room"),
+            ),
+            Asked(
+                name="public-api",
+                taken="flagged",
+                line=5,
+                api=ApiChanged(kind="signature-changed", name="Client.ask"),
+            ),
+        ],
+        findings=[
+            Found(
+                rule=rule,
+                message=f"{rule} fires here",
+                steer="do it the other way",
+                start=line,
+                end=line,
+                taken=taken,
+            )
+            for rule, line, taken in TAKEN
+        ],
+    )
+
+
+def test_a_reading_places_a_name_taken_out_of_a_package_root_where_it_was(
+    judge: Judging,
+) -> None:
+    init = '"""Pkg."""\n__all__ = [\n    "Client",\n    "Room",\n]\n'
+    reading = judge(
+        edit("src/pkg/__init__.py", init, init.replace('    "Client",\n', ""))
+    ).reading()
+    assert reading.asks == [
+        Asked(
+            name="public-api",
+            taken="held",
+            line=3,
+            side="before",
+            api=ApiChanged(kind="export-removed", name="Client"),
+        )
+    ]
+
+
+def test_a_file_that_asks_nothing_reads_as_its_role_alone(judge: Judging) -> None:
+    reading = judge(edit("tests/test_a.py", None, "x = 1  # BAD regex\n")).reading()
+    assert reading == Reading(role="test")
 
 
 def test_verdict_reasons() -> None:
