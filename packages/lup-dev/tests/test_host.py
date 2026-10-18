@@ -182,11 +182,16 @@ class Background:
         return self
 
     def stop(self) -> None:
-        """Stop the service if it still serves, and wait for its thread."""
+        """Stop the service if it still serves, and wait for its thread.
+
+        A service a test stopped itself may be gone (no socket, or none
+        listening), or still shutting down, closing the connection it accepted
+        for this `Stop`.
+        """
         if self.thread.is_alive():
             try:
                 send(self.service.layout.control, Stop().model_dump_json())
-            except FileNotFoundError, ConnectionRefusedError:
+            except FileNotFoundError, ConnectionRefusedError, ConnectionResetError:
                 pass
         self.thread.join(timeout=60)
         assert not self.thread.is_alive()
