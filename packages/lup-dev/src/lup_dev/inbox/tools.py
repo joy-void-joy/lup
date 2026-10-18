@@ -1,4 +1,4 @@
-"""The inbox's tools in a launched session: `report`, `note`, `ask`, `send` and `wait_inbox`.
+"""The inbox's tools in a launched session: `report`, `note`, `ask`, `send`, `wait_inbox` and `inbox`.
 
 `docs/host-tools.md`, *lup's tools*. Each is a function of the conversation
 calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
@@ -12,7 +12,9 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
 - `send` is the inbox's general verb, a message of a kind to a party's inbox:
   the operator's, in this piece;
 - `wait_inbox` holds until something reaches the agent's inbox. It isn't called
-  `wait`, a name a runtime has for a tool of its own.
+  `wait`, a name a runtime has for a tool of its own;
+- `inbox` reads the inbox of the agent's repository, changing nothing: each
+  item in a line, and the agent's own read whole.
 
 A tool's docstring's first line is its summary, 50 characters at most, which the
 guidance lists (`launch/guidance.py`); the rest is its description, which the
@@ -30,15 +32,26 @@ from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec, lup_tool
 from lup.types import Model
 from lup_dev.host.protocol import Register
 from lup_dev.host.rooms import RoomTools
-from lup_dev.inbox.delivery import Delivery
+from lup_dev.inbox.delivery import (
+    Delivery,
+    body,
+    clocked,
+    opening,
+    standing,
+    what,
+    who,
+)
 from lup_dev.inbox.store import (
     Answered,
     Conversation,
     Decision,
+    Item,
     Kind,
     Message,
     Operator,
+    Party,
     Question,
+    Waiting,
 )
 
 if TYPE_CHECKING:
@@ -97,6 +110,25 @@ class Sending(Model):
 
 class Nothing(Model):
     """No input."""
+
+
+class Reading(Model):
+    """What of the inbox to read."""
+
+    number: int | None = Field(
+        default=None,
+        description=(
+            "An item to read whole: one you sent, or that was sent to you. Left "
+            "out, the items are listed, a line each."
+        ),
+    )
+    every: bool = Field(
+        default=False,
+        description=(
+            "List every item, those answered, done or told too; left out, those "
+            "still waiting alone."
+        ),
+    )
 
 
 class Speaker(Model, arbitrary_types_allowed=True):
@@ -205,6 +237,64 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         return Said(text=await self.delivery.held(self.party, arrived))
 
+    async def inbox(self, reading: Reading) -> Said:
+        """Read this repository's inbox, changing nothing.
+
+        Lists the items about this repository, oldest first, a line each: its
+        number, when it was made, what it is, from whom to whom, where it
+        stands, and its first line. Those still waiting, for the operator or
+        for an agent, by default; every one with `every`. Given an item's
+        `number`, one you sent or that was sent to you, it's read whole. It
+        marks nothing read and answers nothing: what reaches you still comes
+        through `wait_inbox` and beside your calls.
+        """
+        items = self.delivery.inbox.about(self.party.repository)
+        if reading.number is not None:
+            return Said(text=self.whole(reading.number, items))
+        listed = [
+            item for item in items if reading.every or isinstance(item.state, Waiting)
+        ]
+        if not listed:
+            return Said(
+                text="Nothing about this repository is in the inbox."
+                if reading.every
+                else "Nothing about this repository waits in the inbox."
+            )
+        return Said(text="\n".join(self.line(item) for item in listed))
+
+    def named(self, party: Party) -> str:
+        """Name a party for this conversation: itself as you."""
+        return "you" if party == self.party else who(party)
+
+    def line(self, item: Item) -> str:
+        """Say an item in a line, as `inbox` lists it."""
+        return (
+            f"{item.number}  {clocked(item.made)}  {what(item)} from "
+            f"{self.named(item.sender)} to {self.named(item.recipient)}, "
+            f"{standing(item)}: {opening(item)}"
+        )
+
+    def whole(self, number: int, items: list[Item]) -> str:
+        """Say item `number` of `items` whole, where it's this conversation's own: as it was told, where it was sent to it; as it was written, where it sent it. One not among them, or another conversation's, is said and not read."""
+        item = next((each for each in items if each.number == number), None)
+        if item is None:
+            return (
+                f"Item {number} isn't among this repository's: `inbox` reads this "
+                "repository's items alone."
+            )
+        if self.party in (item.recipient, item.addressed):
+            return f"{self.delivery.said(item)}\n\nIt's {standing(item)}."
+        if item.sender == self.party:
+            return (
+                f"Item {number}, {what(item)} you sent to {who(item.recipient)} at "
+                f"{clocked(item.made)}, {standing(item)}:\n{body(item)}"
+            )
+        return (
+            f"Item {number} is {what(item)} from {who(item.sender)} to "
+            f"{who(item.recipient)}, which isn't yours: only your own items are read "
+            f"whole. Its first line: {opening(item)}"
+        )
+
     def tools(self) -> list[AgentTool]:
         """Return the inbox's tools, each calling this conversation's function."""
         spoken = [
@@ -221,7 +311,12 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 }
             ),
         ]
-        own = [lup_tool(self.ask), lup_tool(self.send), lup_tool(self.wait_inbox)]
+        own = [
+            lup_tool(self.ask),
+            lup_tool(self.send),
+            lup_tool(self.wait_inbox),
+            lup_tool(self.inbox),
+        ]
         return [*spoken, *own]
 
 

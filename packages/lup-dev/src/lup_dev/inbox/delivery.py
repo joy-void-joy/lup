@@ -175,6 +175,30 @@ def body(item: Item) -> str:
             return "\n".join(each.text for each in comments)
 
 
+def clocked(at: datetime) -> str:
+    """Say a moment as the host's clock reads it, to the minute: the operator's own time zone's, where the inbox keeps UTC."""
+    return f"{at.astimezone():%Y-%m-%d %H:%M}"
+
+
+def standing(item: Item) -> str:
+    """Say where an item stands."""
+    match item.state:
+        case Waiting(announced=announced):
+            if announced is None:
+                return "waiting"
+            return f"waiting, announced at {clocked(announced)} as too long to tell"
+        case Told(at=at, how=how):
+            return f"told at {clocked(at)} ({how})"
+        case Answered(at=at, answer=answer):
+            return f"answered at {clocked(at)}, item {answer}"
+        case Done(at=at):
+            return f"done at {clocked(at)}"
+        case Decided(at=at, approved=approved):
+            return f"{'approved' if approved else 'declined'} at {clocked(at)}"
+        case Superseded(at=at, by=by):
+            return f"superseded at {clocked(at)} by item {by}"
+
+
 def doorbell(waiting: list[Item]) -> str:
     """Say what waits in a conversation's inbox, each item by its number, kind and sender, for the agent to read through `wait_inbox`.
 

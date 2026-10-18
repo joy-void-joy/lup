@@ -21,7 +21,7 @@ import shutil
 import sys
 import webbrowser
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import timedelta
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, override
@@ -87,7 +87,14 @@ from lup_dev.host.records import Called, Recorded
 from lup_dev.host.service import Answerer, HostService, Naming, Route
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import Workers
-from lup_dev.inbox.delivery import Delivery, opening, what, who
+from lup_dev.inbox.delivery import (
+    Delivery,
+    clocked,
+    opening,
+    standing,
+    what,
+    who,
+)
 from lup_dev.inbox.notices import NotifySend
 from lup_dev.inbox.protocol import (
     AnswerApproval,
@@ -107,11 +114,8 @@ from lup_dev.inbox.protocol import (
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import (
     Answer,
-    Answered,
     Approval,
     Comment,
-    Decided,
-    Done,
     HeldChange,
     Inbox,
     InboxError,
@@ -121,10 +125,7 @@ from lup_dev.inbox.store import (
     Question,
     Review,
     Ruling,
-    Superseded,
-    Told,
     Verdict,
-    Waiting,
 )
 from lup_dev.inbox.store import Conversation as InboxConversation
 from lup_dev.inbox.tools import InboxTools
@@ -536,14 +537,6 @@ def answering(what: str = "the inbox") -> HostClient:
     return client
 
 
-def clocked(at: datetime) -> str:
-    """Say a moment as the operator's own clock reads it, to the minute.
-
-    The inbox keeps its times in UTC; the operator reads their own time zone's.
-    """
-    return f"{at.astimezone():%Y-%m-%d %H:%M}"
-
-
 def line(item: Item, listed: Listed | None = None) -> str:
     """Say an item in a line: its number, when it was made, what it is, from whom (as it's called, where `listed` knows it), and its first line; for an approval, how to read it whole and answer it."""
     where = "" if item.worktree is None else f" in {item.worktree}"
@@ -575,25 +568,6 @@ def sender_named(party: Party, listed: Listed) -> str:
             return f"`{listed.sessions[session]}` ({who(party)})"
         case _:
             return who(party)
-
-
-def standing(item: Item) -> str:
-    """Say where an item stands."""
-    match item.state:
-        case Waiting(announced=announced):
-            if announced is None:
-                return "waiting"
-            return f"waiting, announced at {clocked(announced)} as too long to tell"
-        case Told(at=at, how=how):
-            return f"told at {clocked(at)} ({how})"
-        case Answered(at=at, answer=answer):
-            return f"answered at {clocked(at)}, item {answer}"
-        case Done(at=at):
-            return f"done at {clocked(at)}"
-        case Decided(at=at, approved=approved):
-            return f"{settled(approved=approved)} at {clocked(at)}"
-        case Superseded(at=at, by=by):
-            return f"superseded at {clocked(at)} by item {by}"
 
 
 def settled(*, approved: bool) -> str:
