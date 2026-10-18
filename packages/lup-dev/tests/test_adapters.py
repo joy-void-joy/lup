@@ -1061,7 +1061,7 @@ def test_claude_stamps_a_call_to_lups_tools_with_its_caller_and_no_decision() ->
     assert json.loads(claude.told(raw, "", TOLD) or "") == {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "updatedInput": {"problem": "stuck", "caller": "c1"},
+            "updatedInput": {"problem": "stuck", "caller": "c1", "call": "t1"},
         }
     }
     other = pre_tool_use(Path("/w"), "mcp__other__report", {"problem": "stuck"})
@@ -1188,8 +1188,9 @@ def test_codex_stamps_each_call_of_one_conversation_with_one_id_beside_allow() -
         return output["hookSpecificOutput"]["updatedInput"]
 
     first, second = stamped("stuck"), stamped("still stuck")
-    assert first == {"problem": "stuck", "caller": first["caller"]}
-    assert second == {"problem": "still stuck", "caller": first["caller"]}
+    call = json.loads(codex_lups({}))["tool_use_id"]
+    assert first == {"problem": "stuck", "caller": first["caller"], "call": call}
+    assert second == {"problem": "still stuck", "caller": first["caller"], "call": call}
     assert codex.told(codex_lups("not json"), "", TOLD) is None
     bash = (CAPTURED / "6-pre-tool-use-bash.json").read_text()
     assert codex.told(bash, "", TOLD) is None
@@ -1205,7 +1206,11 @@ def test_codex_stamps_a_call_its_judge_couldnt_answer_and_keeps_the_warning() ->
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
-            "updatedInput": {"problem": "stuck", "caller": "c1"},
+            "updatedInput": {
+                "problem": "stuck",
+                "caller": "c1",
+                "call": json.loads(raw)["tool_use_id"],
+            },
         },
     }
 

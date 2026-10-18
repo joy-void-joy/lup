@@ -75,6 +75,7 @@ from lup_dev.host.dashboard import (
 )
 from lup_dev.host.names import shaped
 from lup_dev.host.protocol import GitHubRepository, HostError, Listed, Register
+from lup_dev.host.records import Called, Recorded
 from lup_dev.host.service import Answerer, HostService, Naming, Route
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import Workers
@@ -82,10 +83,12 @@ from lup_dev.inbox.delivery import Delivery, opening, what, who
 from lup_dev.inbox.notices import NotifySend
 from lup_dev.inbox.protocol import (
     AnswerItem,
+    Context,
     FinishItem,
     Items,
     ListInbox,
     SendItem,
+    ShowContext,
     ShowDiff,
     ShowItem,
     Shown,
@@ -205,6 +208,14 @@ def adapters() -> list[Adapter]:
         # lup: ignore("runtime-mention", why="the one place listing the adapters")
         codex.adapter(),
     ]
+
+
+def recorded() -> dict[str, Recorded]:
+    """Return each runtime's records on this machine, and how they're read, by its name."""
+    return {
+        adapter.runtime.name(): Recorded(records=adapter.records, reader=adapter.reader)
+        for adapter in adapters()
+    }
 
 
 def runtimes() -> list[Runtime]:
@@ -392,7 +403,10 @@ def host_serve(context: typer.Context) -> None:
         courier=couriers,
         spawns=SpawnRecords(adapters=known),
         post=delivery,
-        routes=[*inbox_routes(delivery), Route.to(dashboard_shown(dashboard))],
+        routes=[
+            *inbox_routes(delivery, recorded()),
+            Route.to(dashboard_shown(dashboard)),
+        ],
         tools=room_tools(delivery),
         room_routes=[
             *remote_routes(Remotes(say=typer.echo, landed=proposed_after)),
@@ -774,13 +788,36 @@ def inbox_show(
         bool,
         typer.Option("--diff", help="An approval's whole diff, through your pager."),
     ] = False,
+    context: Annotated[
+        bool,
+        typer.Option(
+            "--context",
+            help="Its moment in the conversation that sent it, after it.",
+        ),
+    ] = False,
 ) -> None:
-    """Show one item whole: an approval by its summary, its whole diff with `--diff`."""
+    """Show one item whole: an approval by its summary, its whole diff with `--diff`; with `--context`, its moment in its sender's conversation."""
     client = answering()
     if diff:
         Terminal().show(client.ask(ShowDiff(number=number), Whole).text)
         return
     typer.echo(shown(client.ask(ShowItem(number=number), Shown).item))
+    if context:
+        typer.echo(f"\n{momented(client.ask(ShowContext(number=number), Context))}")
+
+
+def momented(found: Context) -> str:
+    """Say an item's moment, as `lup-dev transcripts show --all` says a session: each step in order, the call that made the item marked."""
+    call = found.entries[found.anchor]
+    tool = call.tool if isinstance(call, Called) else "?"
+    return "\n\n".join(
+        [
+            "Its moment in the conversation that sent it:",
+            *views.stepped(found.entries[: found.anchor]),
+            f"→ called {tool}: this item",
+            *views.stepped(found.entries[found.anchor + 1 :]),
+        ]
+    )
 
 
 def approved_here(number: int, given: Given) -> str:

@@ -477,7 +477,11 @@ class PreToolUse(Payload):
         ):
             return told
         stamped = given.model_copy(
-            update={"updated_input": stamp(self.tool_input, telling.caller)}
+            update={
+                "updated_input": stamp(
+                    self.tool_input, telling.caller, self.tool_use_id
+                )
+            }
         )
         return told.model_copy(update={"hook_specific_output": stamped})
 
@@ -946,6 +950,17 @@ class ClaudeRecords(Model, Records):
     """The operator's Claude Code directory, `~/.claude` or `CLAUDE_CONFIG_DIR`."""
 
     @override
+    def conversation(self, session: str, agent: str | None) -> Path | None:
+        projects = self.directory / "projects"
+        name = (
+            f"{session}.jsonl"
+            if agent is None
+            else f"{session}/subagents/agent-{agent}.jsonl"
+        )
+        found = sorted(projects.glob(f"*/{name}")) if projects.is_dir() else []
+        return next(iter(found), None)
+
+    @override
     def kept(self, under: list[Path]) -> list[Record]:
         projects = self.directory / "projects"
         folders = sorted(projects.iterdir()) if projects.is_dir() else []
@@ -1000,10 +1015,11 @@ class TextBlock(Model, extra="ignore"):
 
 
 class ToolUse(Model, extra="ignore"):
-    """A call to a tool, by its name."""
+    """A call to a tool, by its name, and its id, which the call's hooks carry as `tool_use_id`."""
 
     type: Literal["tool_use"]
     name: str
+    id: str | None = None
 
 
 class OtherBlock(Model, extra="ignore"):
@@ -1138,12 +1154,17 @@ class ClaudeTranscripts(Model, Reader):
     def read(self, record: Path) -> Transcript:
         lines = list(parsed(record))
         ran = [each.cwd for each in lines if isinstance(each, UserLine) and each.cwd]
+        # A subagent's own record, `<session>/subagents/agent-<id>.jsonl`, is all
+        # sidechain; a session's own is its main line.
+        sidechain = record.parent.name == "subagents"
         return Transcript(
             runtime=Claude().name(),
             session=record.stem,
             title=named(lines),
             directory=next(iter(ran), None),
-            entries=[entry for each in lines for entry in entries(each)],
+            entries=[
+                entry for each in lines for entry in entries(each, sidechain=sidechain)
+            ],
         )
 
 
@@ -1166,13 +1187,15 @@ def named(lines: list[Line]) -> str | None:
     return next((names[-1] for names in [custom, agents, titles] if names), None)
 
 
-def entries(line: Line) -> list[Entry]:
-    """Return the steps one line of a record holds: the operator's words, the agent's text, the tools it called."""
+def entries(line: Line, *, sidechain: bool = False) -> list[Entry]:
+    """Return the steps one line of a record holds: the operator's words, the agent's text, the tools it called; the agent's on the record's own line, its main one or, in a subagent's record, its `sidechain`."""
     match line:
         case UserLine(timestamp=at) as user:
             words = user.operators()
             return [] if words is None else [Spoken(by="operator", text=words, at=at)]
-        case AssistantLine(is_sidechain=False, timestamp=at, message=message):
+        case AssistantLine(timestamp=at, message=message) as agent if (
+            agent.is_sidechain == sidechain
+        ):
             return [
                 step
                 for block in message.content
@@ -1195,8 +1218,8 @@ def said_by_agent(block: Block, at: datetime | None) -> Entry | None:
     match block:
         case TextBlock(text=text):
             return Spoken(by="agent", text=text, at=at)
-        case ToolUse(name=name):
-            return Called(tool=name, at=at)
+        case ToolUse(name=name, id=id_):
+            return Called(tool=name, id=id_, at=at)
         case _:
             return None
 

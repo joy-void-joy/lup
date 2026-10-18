@@ -443,7 +443,9 @@ class PreToolUse(Payload):
                 stamped = given.model_copy(
                     update={
                         "permission_decision": "allow",
-                        "updated_input": stamp(self.tool_input, telling.caller),
+                        "updated_input": stamp(
+                            self.tool_input, telling.caller, self.tool_use_id
+                        ),
                     }
                 )
                 return told.model_copy(update={"hook_specific_output": stamped})
@@ -878,6 +880,18 @@ class CodexRecords(Model, Records):
     """The operator's Codex home, `~/.codex` or `CODEX_HOME`."""
 
     @override
+    def conversation(self, session: str, agent: str | None) -> Path | None:
+        # A subagent is a thread of its own, its id its rollout's, as a session's is.
+        sessions = self.home / "sessions"
+        thread = session if agent is None else agent
+        found = (
+            sorted(sessions.rglob(f"rollout-*-{thread}.jsonl"))
+            if sessions.is_dir()
+            else []
+        )
+        return next(iter(found), None)
+
+    @override
     def kept(self, under: list[Path]) -> list[Record]:
         sessions = self.home / "sessions"
         rollouts = (
@@ -986,6 +1000,8 @@ class ToolCalled(Model, extra="ignore"):
     type: Literal["function_call", "custom_tool_call"]
     name: str
     namespace: str | None = None
+    call_id: str | None = None
+    """The call's id, which its hooks carry as `tool_use_id`."""
 
     def tool(self) -> str:
         """Return the tool's name as Codex shows it: its namespace before its name, but for the default one (`protocol/src/tool_name.rs`)."""
@@ -998,6 +1014,7 @@ class ShellCalled(Model, extra="ignore"):
     """A `local_shell_call`: a command, with no tool's name."""
 
     type: Literal["local_shell_call"]
+    call_id: str | None = None
 
 
 class OtherItem(Model, extra="ignore"):
@@ -1095,9 +1112,9 @@ def stepped(line: Rolled) -> list[Entry]:
         ):
             return [Spoken(by="agent", text=item.text(), at=at)]
         case ResponseRecord(payload=ToolCalled() as called, timestamp=at):
-            return [Called(tool=called.tool(), at=at)]
-        case ResponseRecord(payload=ShellCalled(), timestamp=at):
-            return [Called(tool="shell", at=at)]
+            return [Called(tool=called.tool(), id=called.call_id, at=at)]
+        case ResponseRecord(payload=ShellCalled(call_id=id_), timestamp=at):
+            return [Called(tool="shell", id=id_, at=at)]
         case _:
             return []
 

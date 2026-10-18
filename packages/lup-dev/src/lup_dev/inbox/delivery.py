@@ -555,10 +555,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             each.arrived.set()
 
     async def posted(
-        self, reason: Reason, sender: Party, recipient: Party, worktree: Path | None
+        self,
+        reason: Reason,
+        sender: Party,
+        recipient: Party,
+        worktree: Path | None,
+        *,
+        call: str | None = None,
     ) -> Item:
-        """Make an item and deliver it (`delivered`)."""
-        item = self.inbox.made(reason, sender, recipient, worktree, self.clock.now())
+        """Make an item and deliver it (`delivered`); `call` is the runtime's id for the agent's call that made it, where one did."""
+        item = self.inbox.made(
+            reason, sender, recipient, worktree, self.clock.now(), call=call
+        )
         await self.delivered(item)
         return item
 

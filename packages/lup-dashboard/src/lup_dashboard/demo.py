@@ -22,13 +22,16 @@ from lup_dev.host.protocol import (
     Register,
     Talker,
 )
+from lup_dev.host.records import Called, Entry, Said
 from lup_dev.inbox.protocol import (
+    Context,
     Drafted,
     Items,
     KeepDraft,
     ListInbox,
     Reviewed,
     SendDraft,
+    ShowContext,
     ShowDiff,
     ShowDraft,
     Whole,
@@ -76,6 +79,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return Reviewed(items=[])
             case ShowDiff():
                 return Whole(text=diff())
+            case ShowContext(number=number):
+                return self.context(number)
             case _:
                 return Refused(error=f"the demo doesn't answer `{request.kind}`")
 
@@ -245,6 +250,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                         sender=sender,
                         recipient=Operator(),
                         worktree=sender.repository / "tree" / worktree,
+                        call=f"call-{number}",
                         made=self.ago(minutes),
                     )
                     for number, reason, sender, worktree, minutes in made
@@ -259,6 +265,67 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ),
             ]
         )
+
+    def context(self, number: int) -> Context | Refused:
+        """Return a stand-in moment for each item an agent's call made: the operator's last words, what the agent said and called after them, the call, and what came after; the approval, which no call made, has none."""
+
+        def operator(text: str, minutes: float) -> Said:
+            return Said(by="operator", text=text, at=self.ago(minutes))
+
+        def agent(text: str, minutes: float) -> Said:
+            return Said(by="agent", text=text, at=self.ago(minutes))
+
+        def called(tool: str, minutes: float, id_: str | None = None) -> Called:
+            return Called(tool=tool, id=id_, at=self.ago(minutes))
+
+        moments: dict[int, list[Entry]] = {
+            51: [
+                operator(
+                    "Build the transcript reader, both runtimes. Ask me about the "
+                    "shape before you build on it.",
+                    9,
+                ),
+                agent(
+                    "Reading the first runtime's records, to see what each line holds.",
+                    8,
+                ),
+                called("Bash", 8),
+                called("Bash", 7.8),
+                called("Read", 7.5),
+                agent(
+                    "Twenty kinds of line; four carry what was said. Two ways to read "
+                    "them: a model per kind, or a dict walked by hand.",
+                    5,
+                ),
+                called("mcp__lup__ask", 4, "call-51"),
+                agent("While that waits, I'll read the second runtime's.", 3.9),
+                called("Grep", 3.8),
+            ],
+            52: [
+                operator("Keep going on the guidance rewrite.", 30),
+                agent("Checking how the records are encoded before I search them.", 14),
+                called("Bash", 13),
+                called("mcp__lup__note", 12, "call-52"),
+                agent("Carrying on with the search command.", 11.9),
+            ],
+            53: [
+                operator("Render the second scene at full size.", 20),
+                agent("Rendering frames 1 to 600.", 10),
+                called("exec_command", 9),
+                called("exec_command", 3),
+                agent("ffmpeg stops at frame 412, on the source clip.", 2.2),
+                called("report", 2, "call-53"),
+            ],
+        }
+        entries = moments.get(number)
+        if entries is None:
+            return Refused(error=f"item {number} was made by no agent's call")
+        [anchor] = [
+            at
+            for at, each in enumerate(entries)
+            if isinstance(each, Called) and each.id == f"call-{number}"
+        ]
+        return Context(number=number, entries=entries, anchor=anchor)
 
 
 def diff() -> str:

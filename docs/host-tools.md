@@ -74,6 +74,7 @@ The launch is the socket's: the service hears a call on the launch's own `mcp.so
 - **lup mints it** the first time a hook names a conversation: a session's start, a subagent's start, or its first call. Each runtime's adapter reads its own ids from the hook's payload (a session's, a subagent's), as it does today, and the service keeps which runtime ids each lup id stands for. Nothing past the adapter knows a runtime's ids.
 - **The hook stamps it.** The `call-started` hook on a call to one of lup's tools answers with the call's input rewritten to carry a field the model's schema doesn't show, `caller`, set to that conversation's id. The server reads `caller` and nothing else of who's calling. The first lup did the same with a hidden `caller` field (its `docs/platform-differentiation.md`): measured on Claude Code 2.1.283, "a rewrite with no decision reached the server even for a tool with `additionalProperties: false`"; on Codex 0.158.0 the rewrite reached the server beside `permissionDecision: "allow"`, and without it "was dropped — the call ran as the model wrote it". Owed live on the versions a launch runs.
 - **Set aside: reading each runtime's own ids at the server,** each call's `_meta` (Codex's `callId`, `threadId`, `sessionId`; Claude Code's `claudecode/toolUseId`, joined to its session through the hook). It would put each runtime's spelling in the server too, and the first lup found wiring back to each runtime separately didn't stay uniform, where its own interface did.
+- **The hook stamps the call's id too,** `call`: the runtime's id for the tool call (`tool_use_id` on both runtimes), which the conversation's record keeps beside the call. An item the call makes keeps it (`Item.call`), its anchor in the record (*An item's moment*).
 - **A call with no `caller`,** a hook that didn't run, is taken as the launch's main conversation, and the service's log says so.
 - A process in the room could write another conversation's id into a call. It stays within its own launch, so it can only speak as another conversation of the same session.
 
@@ -166,6 +167,13 @@ lup-dev inbox send <launch> <text>    a message to the session a launch runs, by
 - **Each is a request on the control socket,** the inbox's own kinds, starting the service where none runs, as a launch does. Each refuses inside an agent's session (`Runtime.inside`), as `trust` does; the room can't reach the control socket at all, and the store isn't mounted.
 - **A desktop notice** when an item for the operator arrives, through `notify-send`: the repository's worktree, the kind, and the item's first line. `Notices` and `NotifySend` are the inbox's (`inbox/notices.py`). `notify-send` is an optional requirement of the host, said once where it's missing.
 - **Set aside:** bridging into the first lup's dashboard (#56 suggested it as the inbox's first face), which costs a keeper parking each review again as the dashboard expires it, an hour after it's parked, and a bridge loaded by path: the stopgap lup stops building on.
+
+### An item's moment
+
+An item an agent's call made keeps the runtime's id for that call (`Item.call`), and `ShowContext` reads its moment from the conversation's record as it stands (`inbox/context.py`): from the operator's last words before the call, through the call, to their next words or the record's end.
+- **Each runtime's adapter finds one conversation's record,** growing while the session runs (`Records.conversation`): Claude Code's `projects/<folder>/<session>.jsonl`, a subagent's `<session>/subagents/agent-<id>.jsonl` beside it, read as its own line of steps; Codex's rollout of the thread, a subagent's its own thread's. It reads it (`Reader.read`), each call with its id (`Called.id`).
+- **`lup-dev inbox show N --context`** prints it after the item, each run of tool calls a line and the call marked; the dashboard's review folds it under the item (`docs/dashboard.md`, *The review*).
+- **An item without one** says why: no agent's call made it, lup can't read its runtime's records, its record isn't on this machine, or the record doesn't hold the call.
 
 ### Watching
 

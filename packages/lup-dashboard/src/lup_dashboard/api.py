@@ -23,6 +23,7 @@ from lup_dev.host.protocol import (
 from lup_dev.inbox.protocol import (
     AnswerApproval,
     AnswerItem,
+    Context,
     Drafted,
     FinishItem,
     Items,
@@ -32,6 +33,7 @@ from lup_dev.inbox.protocol import (
     SendDraft,
     SendItem,
     Settled,
+    ShowContext,
     ShowDiff,
     ShowDraft,
     ShowItem,
@@ -49,6 +51,7 @@ type Asked = Annotated[
     | SendItem
     | AnswerApproval
     | ShowDiff
+    | ShowContext
     | ShowDraft
     | KeepDraft
     | SendDraft,
@@ -56,11 +59,21 @@ type Asked = Annotated[
 ]
 """A request the page may send: the launches served and their conversations,
 a launch renamed, and the operator's inbox, its items read, answered, finished
-and sent, an approval answered and its diff read, and the operator's draft
-reply shown, kept and sent."""
+and sent, an approval answered and its diff read, an item's moment in its
+sender's conversation read, and the operator's draft reply shown, kept and
+sent."""
 
 type Replied = Annotated[
-    Listed | Renamed | Items | Shown | Settled | Whole | Drafted | Reviewed | Refused,
+    Listed
+    | Renamed
+    | Items
+    | Shown
+    | Settled
+    | Whole
+    | Context
+    | Drafted
+    | Reviewed
+    | Refused,
     Field(discriminator="kind"),
 ]
 """The host's reply to one: what each request returns, or why it was refused."""

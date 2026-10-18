@@ -50,6 +50,9 @@ class Nothing(Records):
     def kept(self, under: list[Path]) -> list[Record]:
         return []
 
+    def conversation(self, session: str, agent: str | None) -> Path | None:
+        return None
+
 
 class Said(Model):
     """What to shout."""

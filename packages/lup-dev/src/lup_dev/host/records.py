@@ -35,6 +35,10 @@ class Records(ABC):
     def kept(self, under: list[Path]) -> list[Record]:
         """Return each record of a session the runtime ran in one of `under`, or in a directory inside one."""
 
+    @abstractmethod
+    def conversation(self, session: str, agent: str | None) -> Path | None:
+        """Return the record of one conversation as the runtime keeps it, growing while it runs: session `session`'s own, or its subagent `agent`'s; none where there's none."""
+
 
 class Said(Model):
     """Something said in a session: the operator's words, or the agent's."""
@@ -50,6 +54,9 @@ class Called(Model):
 
     kind: Literal["called"] = "called"
     tool: str
+    id: str | None = None
+    """The runtime's id for the call, where its record keeps one: what an inbox
+    item made by the call is anchored to."""
     at: datetime | None = None
 
 
@@ -105,6 +112,13 @@ class Reader(ABC):
 
         Lines the runtime writes that this doesn't know are passed over.
         """
+
+
+class Recorded(Model, arbitrary_types_allowed=True):
+    """A runtime's records on this machine, and how they're read: what reads a conversation's record without naming the runtime."""
+
+    records: Records
+    reader: Reader
 
 
 def within(directory: Path, under: list[Path]) -> bool:

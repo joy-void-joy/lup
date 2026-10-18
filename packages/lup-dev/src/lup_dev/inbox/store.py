@@ -272,6 +272,9 @@ class Item(Model):
     ended; none where it wasn't."""
     worktree: Path | None = None
     """The worktree of the launch it was made in; none for the operator's own."""
+    call: str | None = None
+    """The runtime's id for the tool call that made it, its moment in its
+    sender's record; none where no agent's call did (`ShowContext`)."""
     made: datetime
     state: State = Waiting()
 
@@ -380,8 +383,10 @@ class Inbox(MutableModel):
         recipient: Party,
         worktree: Path | None,
         at: datetime,
+        *,
+        call: str | None = None,
     ) -> Item:
-        """Make an item, numbered after every other, and keep it.
+        """Make an item, numbered after every other, and keep it; `call` is the runtime's id for the agent's call that made it, where one did.
 
         One for a conversation that has ended goes to its session's main
         conversation, saying whose it was.
@@ -394,6 +399,7 @@ class Inbox(MutableModel):
             recipient=recipient if addressed is None else addressed.main(),
             addressed=addressed,
             worktree=worktree,
+            call=call,
             made=at,
         )
         return self.kept(item)

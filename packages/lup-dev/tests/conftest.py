@@ -571,6 +571,9 @@ class NoRecords(Records):
     def kept(self, under: list[Path]) -> list[Record]:
         return []
 
+    def conversation(self, session: str, agent: str | None) -> Path | None:
+        return None
+
 
 class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     """A launch's modules served in the test's own process, from a declaration resolved here: the worker's answers, without its process."""

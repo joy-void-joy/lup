@@ -1542,7 +1542,7 @@ class Background:
             answerer=known,
             courier=couriers,
             post=self.delivery,
-            routes=inbox_routes(self.delivery) if inboxed else [],
+            routes=inbox_routes(self.delivery, {}) if inboxed else [],
             say=self.said.append,
         )
         self.bound = threading.Event()

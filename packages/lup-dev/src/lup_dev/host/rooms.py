@@ -50,11 +50,17 @@ class RoomTools(ABC):
 
     @abstractmethod
     async def call(
-        self, name: str, arguments: JsonValue, launch: Register, caller: Conversation
+        self,
+        name: str,
+        arguments: JsonValue,
+        launch: Register,
+        caller: Conversation,
+        call: str | None,
     ) -> Answer:
         """Run a call to the tool `name` for `caller`, a conversation of `launch`, and return what the model reads.
 
         The arguments are the model's, as it sent them: the tool validates them.
+        `call` is the runtime's id for the call, where its hook stamped it.
         """
 
 
@@ -91,25 +97,28 @@ class RoomRoute(Model, arbitrary_types_allowed=True):
 
 
 class Stamped(Model, extra="allow"):
-    """A call's arguments as the server reads them: the `caller` its hook stamped, and the rest, the tool's."""
+    """A call's arguments as the server reads them: the `caller` and `call` its hook stamped, and the rest, the tool's."""
 
     caller: str | None = None
     """lup's id for the conversation calling; none where no hook stamped it."""
+    call: str | None = None
+    """The runtime's id for the call, as its record keeps it: what an item the
+    call makes is anchored to."""
 
     def given(self) -> JsonObject:
-        """Return the arguments the tool reads: all but `caller`."""
+        """Return the arguments the tool reads: all but what the hook stamped."""
         return dict(self.model_extra or {})
 
 
-def stamp(arguments: JsonObject, caller: str) -> JsonObject:
-    """Return a call's arguments carrying `caller`, as a hook rewrites a call to lup's tools for the server to read.
+def stamp(arguments: JsonObject, caller: str, call: str) -> JsonObject:
+    """Return a call's arguments carrying `caller` and `call`, as a hook rewrites a call to lup's tools for the server to read.
 
-    The model's own `caller`, where it wrote one, gives way to lup's.
+    The model's own `caller` or `call`, where it wrote one, gives way to lup's.
 
-    >>> stamp({"text": "hi", "caller": "mine"}, "c1")
-    {'text': 'hi', 'caller': 'c1'}
+    >>> stamp({"text": "hi", "caller": "mine"}, "c1", "t1")
+    {'text': 'hi', 'caller': 'c1', 'call': 't1'}
     """
-    return {**arguments, **Stamped(caller=caller).model_dump()}
+    return {**arguments, **Stamped(caller=caller, call=call).model_dump()}
 
 
 class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
@@ -149,9 +158,10 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
                         text=f"this call's `caller` isn't one lup's hook stamps: {unread}",
                         error=True,
                     )
-                stamp, given = stamped.caller, stamped.given()
+                given: JsonValue = stamped.given()
             case _:
-                stamp, given = None, arguments
+                stamped, given = Stamped(), arguments
+        stamp = stamped.caller
         if stamp is not None:
             caller = self.conversations.calling(stamp)
             if caller is None:
@@ -162,7 +172,7 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
                     ),
                     error=True,
                 )
-            return await owner.call(name, given, self.launch, caller)
+            return await owner.call(name, given, self.launch, caller, stamped.call)
         main = self.conversations.main()
         if main is None:
             return Answer(
@@ -176,4 +186,4 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
             f"{self.launch.launch}: a call to `{name}` carried no `caller`, so it's "
             f"taken as the main conversation's, {main.id}"
         )
-        return await owner.call(name, given, self.launch, main)
+        return await owner.call(name, given, self.launch, main, stamped.call)
