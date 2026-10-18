@@ -156,7 +156,7 @@ class AskHold(Request):
     sender: Conversation
     diff: str
     files: list[ChangedFile]
-    """Each file held, whole: what it holds now, and what the change makes it."""
+    """Each file held, whole: what it holds, and what the change makes it."""
     call: str | None = None
     """The runtime's id for the call that made the change, which the item keeps."""
 

@@ -1369,9 +1369,8 @@ def files_between(
 
     before = listed(start)
     after = listed(end)
-    changed = sorted(
-        path for path in {*before, *after} if before.get(path) != after.get(path)
-    )
+    either = dict.fromkeys([*before, *after])
+    changed = sorted(path for path in either if before.get(path) != after.get(path))
     wanted = [
         blob
         for path in changed

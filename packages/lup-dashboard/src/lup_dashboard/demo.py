@@ -637,7 +637,7 @@ build-backend = "uv_build"
 
 AGENTS_MD_HEAD = """# Working on lup
 
-lup is the environment sessions on Claude Code and Codex work in.
+lup is the environment agents' sessions work in.
 
 ## How work goes
 
