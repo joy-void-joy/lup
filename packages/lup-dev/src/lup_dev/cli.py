@@ -583,9 +583,9 @@ def shown(item: Item) -> str:
             body = [text, *numbered]
         case Answer(question=question, rulings=rulings, comment=comment):
             decided = [
-                f"{ruling.decision}. {ruling.verdict}"
-                + (f": {ruling.comment}" if ruling.comment else "")
-                for ruling in rulings
+                f"{each.decision}. {each.verdict or 'in words'}"
+                + (f": {each.comment}" if each.comment else "")
+                for each in rulings
             ]
             body = [f"To item {question}.", *decided, comment]
         case Approval(text=text, summary=summary):
@@ -610,18 +610,23 @@ def commented(comment: Comment) -> str:
     return f'On item {comment.item}, "{comment.quote.text}": {comment.text}'
 
 
-def verdict(decision: int) -> Verdict:
-    """Ask the operator for decision `decision`'s verdict, until it's one.
+def ruling(decision: int) -> Ruling:
+    """Ask the operator their answer to decision `decision`: a verdict, then what they add if anything; or their answer in their own words.
 
     Nothing is taken for an answer: an empty line asks again, so going with
     the agent's lean is said, never assumed.
     """
-    while True:
-        said = typer.prompt(f"{decision}: leaning, undecided or leave open?")
-        try:
-            return TypeAdapter[Verdict](Verdict).validate_python(said)
-        except ValidationError:
-            typer.echo("A verdict is `leaning`, `undecided` or `leave open`.")
+    said = typer.prompt(
+        f"{decision}: leaning, undecided, leave open, or your answer in words"
+    )
+    try:
+        chosen = TypeAdapter[Verdict](Verdict).validate_python(said)
+    except ValidationError:
+        return Ruling(decision=decision, comment=said)
+    comment = typer.prompt(
+        f"{decision}: a comment (optional)", default="", show_default=False
+    )
+    return Ruling(decision=decision, verdict=chosen, comment=comment)
 
 
 def prompted(item: Item) -> AnswerItem:
@@ -635,15 +640,7 @@ def prompted(item: Item) -> AnswerItem:
             words = typer.prompt("Your answer")
             return AnswerItem(number=item.number, comment=words)
         case Question(decisions=decisions):
-
-            def ruled(decision: int) -> Ruling:
-                chosen = verdict(decision)
-                comment = typer.prompt(
-                    f"{decision}: a comment (optional)", default="", show_default=False
-                )
-                return Ruling(decision=decision, verdict=chosen, comment=comment)
-
-            rulings = [ruled(decision) for decision in range(1, len(decisions) + 1)]
+            rulings = [ruling(decision) for decision in range(1, len(decisions) + 1)]
             whole = typer.prompt(
                 "A comment on the whole (optional)", default="", show_default=False
             )
@@ -848,7 +845,7 @@ def inbox_answer(
         ),
     ] = None,
 ) -> None:
-    """Answer a question, each decision leaning, undecided or leave open, then a comment; reply to a message; or answer an approval, yes or no.
+    """Answer a question, each decision leaning, undecided, leave open or in your words, then a comment; reply to a message; or answer an approval, yes or no.
 
     At a terminal, each numbered decision is asked in turn, with an optional
     comment, then a comment on the whole; a plain question takes its answer in

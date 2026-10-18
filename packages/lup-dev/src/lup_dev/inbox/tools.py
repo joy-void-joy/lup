@@ -142,7 +142,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
         For a decision that's the operator's. List its decisions, each with your
         lean: they're numbered in order, and the operator answers each
         "leaning" (they go with your lean), "undecided" or "leave open", with a
-        comment; or ask a plain question, answered in words. With `wait`, this call holds until they answer and
+        comment, or in their own words; or ask a plain question, answered in
+        words. With `wait`, this call holds until they answer and
         returns the answer, which may take hours. Without it, the call returns
         at once, and the answer reaches you at a later call, or through
         `wait_inbox`.

@@ -48,6 +48,7 @@ from lup_dev.inbox.protocol import (
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import (
+    Answer,
     Answered,
     Comment,
     Conversation,
@@ -1016,8 +1017,8 @@ def test_numbered_decisions_are_each_answered_once_and_a_message_is_done(
         nothing = refused("show", "9")
         listed = inbox()
     assert missing == (
-        "item 1 asks 2 decisions, each taking one verdict (`leaning`, `undecided` or "
-        "`leave open`); these were given for [1]"
+        "item 1 asks 2 decisions, each taking one answer (`leaning`, `undecided`, "
+        "`leave open`, or words); these were given for [1]"
     )
     assert "these were given for [1, 1, 2]" in twice
     assert wordless == "item 3 is a question answered in words: give them"
@@ -1047,22 +1048,32 @@ def test_lup_dev_inbox_answer_asks_each_decision_in_turn_at_a_terminal(
         result = runner.invoke(
             cli.app,
             ["inbox", "answer", "1"],
-            input="\nleaning\nsure\nmaybe\nleave open\n\nThanks.\n",
+            input="\nleaning\nsure\nSure, no strong preference.\nThanks.\n",
         )
         answer = delivery.inbox.item(2).reason
+        assert isinstance(answer, Answer)
+        told = delivery.answered(answer)
     assert result.exit_code == 0, result.output
     # An empty line isn't taken for the lean: it's asked again.
-    assert result.output.count("1: leaning, undecided or leave open?") == 2
-    assert "A verdict is `leaning`, `undecided` or `leave open`." in result.output
+    asked = "1: leaning, undecided, leave open, or your answer in words"
+    assert result.output.count(asked) == 2
+    # Words that aren't a verdict are the decision's answer, with nothing to add.
+    assert "2: a comment" not in result.output
     assert answer.model_dump() == {
         "reason": "answer",
         "question": 1,
         "rulings": [
             {"decision": 1, "verdict": "leaning", "comment": "sure"},
-            {"decision": 2, "verdict": "leave open", "comment": ""},
+            {"decision": 2, "verdict": None, "comment": "Sure, no strong preference."},
         ],
         "comment": "Thanks.",
     }
+    assert told == (
+        "Asked: Which?\n"
+        "1. First (lean: a): leaning: they go with the lean. They add: sure\n"
+        "2. Second (lean: b): they answer: Sure, no strong preference.\n"
+        "Their comment on the whole: Thanks."
+    )
 
 
 def named_at_start(answer: str) -> tuple[str, str]:
