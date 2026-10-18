@@ -197,8 +197,34 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
     )
     names = [each["name"] for each in listed.json()["launches"]]
     assert names == ["lup-impl", "guidance-voice", "main", "nori-search"]
-    assert [each["number"] for each in items.json()["items"]] == [51, 52]
+    assert [each["number"] for each in items.json()["items"]] == [51, 52, 53, 54]
     assert other.json() == {
         "kind": "refused",
         "error": "the demo doesn't answer `inbox-show`",
+    }
+
+
+def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) -> None:
+    served = client(Demo(clock=Fixed()), page)
+    draft = {
+        "comments": [
+            {"item": 51, "text": "Yes."},
+            {"item": 53, "text": "Later."},
+            {"text": "Overall: go."},
+        ],
+        "verdicts": [{"item": 51, "decision": 1, "verdict": "leaning"}],
+        "parked": [53],
+    }
+    kept = served.post(
+        "/api/ask", json={"kind": "inbox-keep-draft", "draft": draft}, headers=bearing()
+    )
+    sent = served.post("/api/ask", json={"kind": "inbox-send-draft"}, headers=bearing())
+    left = served.post("/api/ask", json={"kind": "inbox-draft"}, headers=bearing())
+    assert kept.json()["draft"]["verdicts"] == draft["verdicts"]
+    assert sent.json() == {"kind": "inbox-reviewed", "items": []}
+    assert left.json()["draft"] == {
+        "comments": [{"item": 53, "quote": None, "text": "Later."}],
+        "verdicts": [],
+        "done": [],
+        "parked": [53],
     }

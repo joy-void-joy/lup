@@ -55,6 +55,7 @@ from lup_dev.inbox.store import (
     Draft,
     Inbox,
     InboxError,
+    Item,
     Message,
     Operator,
     Quote,

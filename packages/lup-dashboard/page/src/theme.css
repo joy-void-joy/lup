@@ -86,7 +86,7 @@ kbd {
 
 .layout {
     display: grid;
-    grid-template-columns: minmax(36ch, 52ch) minmax(0, 1fr);
+    grid-template-columns: minmax(32ch, 44ch) minmax(0, 1fr) minmax(30ch, 44ch);
     grid-template-rows: auto minmax(0, 1fr);
     height: 100vh;
 }
@@ -327,4 +327,191 @@ kbd {
 .palette [cmdk-empty] {
     color: var(--muted);
     padding: 0 1ch;
+}
+
+/* The agent selected, under the tree. */
+.agent-details {
+    border-top: 1px solid var(--border);
+    max-height: 40%;
+    overflow: auto;
+}
+
+.wb .all {
+    margin-left: auto;
+    border: 0;
+    background: none;
+    color: var(--link);
+    cursor: pointer;
+    font-weight: 400;
+}
+
+.bar .said {
+    color: var(--info);
+}
+
+/* The review: one buffer, moved through with vim. */
+.review {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+.review-buffer {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.review-buffer .cm-editor {
+    height: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: var(--fs);
+}
+
+.review-buffer .cm-editor.cm-focused {
+    outline: none;
+}
+
+.review-buffer .cm-scroller {
+    font-family: var(--mono);
+    line-height: var(--lh);
+}
+
+.review-buffer .cm-content {
+    padding: 0 1ch;
+    caret-color: var(--focus);
+}
+
+.review-buffer .cm-fat-cursor {
+    background: var(--focus) !important;
+    color: var(--bg) !important;
+}
+
+.review-buffer .cm-selectionBackground,
+.review-buffer .cm-editor.cm-focused .cm-selectionBackground,
+.review-buffer .cm-selectionLayer .cm-selectionBackground {
+    background: var(--sel-bg) !important;
+}
+
+.review-buffer .cm-panels {
+    background: var(--float-bg);
+    color: var(--fg);
+    border-top: 1px solid var(--border);
+}
+
+.review-header {
+    color: var(--orange);
+    font-weight: 700;
+}
+
+.review-header.is-done {
+    color: var(--muted);
+    text-decoration: line-through;
+}
+
+.review-header.is-parked {
+    color: var(--muted);
+}
+
+.commented {
+    text-decoration: underline 2px var(--warn);
+    text-underline-offset: 3px;
+}
+
+.remark {
+    color: var(--warn);
+    padding-left: 4ch;
+    white-space: pre-wrap;
+}
+
+.ruling-leaning {
+    color: var(--ok);
+}
+
+.ruling-undecided {
+    color: var(--warn);
+}
+
+.ruling-leave-open {
+    color: var(--purple);
+}
+
+.writing {
+    border-top: 1px solid var(--border);
+    padding: 0 1ch;
+}
+
+.writing-on {
+    color: var(--info);
+}
+
+.writing textarea {
+    width: 100%;
+    min-height: 5lh;
+    background: var(--float-bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 0 1ch;
+    resize: vertical;
+}
+
+.keys {
+    border-top: 1px solid var(--border);
+    padding: 0 1ch;
+}
+
+.keys kbd {
+    border: 0;
+    padding: 0;
+    color: var(--fg);
+}
+
+/* The draft reply. */
+.draft {
+    padding: 0 1ch;
+}
+
+.draft .comments {
+    list-style: none;
+    padding: 0;
+    margin: 1lh 0;
+}
+
+.draft .comments li {
+    border-left: 2px solid var(--warn);
+    padding-left: 1ch;
+    margin-bottom: 1lh;
+}
+
+.draft .on {
+    color: var(--info);
+}
+
+.draft .said {
+    white-space: pre-wrap;
+}
+
+.draft .drop {
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.draft .verdicts {
+    padding-left: 2ch;
+}
+
+.confirm {
+    position: fixed;
+    inset: 30vh auto auto 50%;
+    transform: translateX(-50%);
+    width: min(80ch, 92vw);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    outline: 2px solid var(--focus);
+    padding: 0 2ch;
 }
