@@ -409,10 +409,10 @@ export function App() {
                         </div>
                     ) : (
                         <div className="keys muted">
-                            comment: <kbd>c</kbd> item · <kbd>o</kbd>/<kbd>C</kbd> line · <kbd>v</kbd>…<kbd>c</kbd>{" "}
-                            selection · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>␣d</kbd> read · <kbd>␣z</kbd> later ·{" "}
-                            <kbd>␣a</kbd>/<kbd>␣x</kbd> approve/decline · <kbd>za</kbd> fold · <kbd>zR</kbd>/
-                            <kbd>zM</kbd> unfold/fold all · <kbd>J</kbd>/<kbd>K</kbd> items · <kbd>␣h</kbd> agents
+                            comment: <kbd>␣c</kbd> item · <kbd>c</kbd>+motion passage · <kbd>o</kbd>/<kbd>C</kbd> line ·{" "}
+                            <kbd>v</kbd>…<kbd>c</kbd> selection · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>␣d</kbd> read ·{" "}
+                            <kbd>␣z</kbd> later · <kbd>␣a</kbd>/<kbd>␣x</kbd> approve/decline · <kbd>za</kbd> fold ·{" "}
+                            <kbd>zR</kbd>/<kbd>zM</kbd> unfold/fold all · <kbd>]]</kbd>/<kbd>[[</kbd> items · <kbd>␣h</kbd> agents
                         </div>
                     )}
                 </div>

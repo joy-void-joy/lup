@@ -1,9 +1,9 @@
 // The review: everything waiting for the operator in one buffer moved through
 // with vim (`editor.ts`), in groups, one per agent, their comments written into
-// it, each under the line it's on: `c` opens one on the item whole. Ctrl+Enter
+// it, each under the line it's on: Space `c` opens one on the item whole. Ctrl+Enter
 // elsewhere than in a comment sends. Space `d` marks an item read, Space `z`
 // leaves it for later, Space `a` or `x` answers an approval or a held change;
-// `J` and `K` go to the next and previous item. Under an approval or a held
+// `]]` and `[[` go to the next and previous item. Under an approval or a held
 // change, each file it changes, whole, its lines numbered, marked and
 // highlighted as they come into view; under each item, its context. The
 // context and each run of unchanged lines fold, folded until opened
@@ -288,6 +288,9 @@ export function Review({
             if (arriving === null && kept !== undefined) {
                 current.dispatch({ effects: kept });
             }
+        } else {
+            // What folds can change with the text the same, as an item marked read folds.
+            refold(current, laidFor.folds, unfolded.current);
         }
         before.current = laidOut;
         landing.current = null;

@@ -2,7 +2,7 @@
 // in one buffer moved through with vim (`editor.ts`), the items of lup's inbox it
 // sent and was sent among its steps, watched so an answer arriving shows, what
 // came before the operator's last words folded, growing as the agent works.
-// Their comments are written into it under the agent's lines, `c` writing their
+// Their comments are written into it under the agent's lines, Space `c` writing their
 // message on the whole, and Ctrl+Enter sends them to the conversation as one
 // message, through lup. As it grows, the view follows only a reader on its last
 // line, or writing their message at its end; anyone else keeps their cursor,
@@ -487,9 +487,10 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
                     </div>
                 ) : (
                     <div className="keys muted">
-                        comment: <kbd>o</kbd>/<kbd>C</kbd> line · <kbd>v</kbd>…<kbd>c</kbd> selection · <kbd>c</kbd>{" "}
-                        message · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>za</kbd> fold · <kbd>zR</kbd>/
-                        <kbd>zM</kbd> unfold/fold all · <kbd>J</kbd>/<kbd>K</kbd> turns · <kbd>␣r</kbd> review · <kbd>␣h</kbd> agents
+                        comment: <kbd>c</kbd>+motion passage · <kbd>o</kbd>/<kbd>C</kbd> line · <kbd>v</kbd>…<kbd>c</kbd>{" "}
+                        selection · <kbd>␣c</kbd> message · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>za</kbd> fold ·{" "}
+                        <kbd>zR</kbd>/<kbd>zM</kbd> unfold/fold all · <kbd>]]</kbd>/<kbd>[[</kbd> turns · <kbd>␣r</kbd> review ·{" "}
+                        <kbd>␣h</kbd> agents
                     </div>
                 )}
             </div>
