@@ -10,7 +10,7 @@ and a directory a commit was exported to.
 
 The person's own layer, `lup_project.local.py`, which git ignores, is loaded
 after it and layered on top, in the same grammar
-(`docs/related-repositories.md`, decision 7). It lives beside the declaration in
+(`docs/related-repositories.md`, *A person's own layer*). It lives beside the declaration in
 the repository's main worktree, a clone's root or a bare repository's own
 directory, shared by every worktree (`person_layer`), so the gate in any of them
 reads it there. The judge and a launch read the copy trust on launch approved,

@@ -1,6 +1,8 @@
 # Conventions: how code in lup is written
 
-**One sentence:** every convention lup's code follows is decided once, here, with its reason and what enforces it, so no session has to pick between two ways of doing the same thing.
+**One sentence:** every convention lup's code follows is written once, here, with its reason and what enforces it, so no session has to pick between two ways of doing the same thing.
+
+Many of these are a pick between two good ways, made so sessions don't split between them, rather than a claim that the other way is wrong. Where one gets in your way, say so: a convention that costs more than the divergence it prevents is worth changing.
 
 ## Why this comes first
 
@@ -14,7 +16,7 @@ A convention a rule enforces is followed; one written only in prose splits, each
 
 Every concern has exactly one owner, so two tools never report the same thing in two ways or steer in opposite directions.
 
-- **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/judging-writes.md`, *The engine*) and read one typed tree, not as ruff `banned-api` entries beside a syntax checker, which would split where they live and grow into a patchwork. Each rule names the mistake it prevents and where it steers, and has a timing (`DESIGN.md`, *Code rules and the gate*):
+- **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/judging-writes.md`, *The engine: one typed tree*) and read one typed tree, not as ruff `banned-api` entries beside a syntax checker, which would split where they live and grow into a patchwork. Each rule names the mistake it prevents and where it steers, and has a timing (`DESIGN.md`, *Keeping the operator in the loop*):
   - **at the edit,** the rules that pick an approach other code gets built on (parsers over regex and splitting, named fields over tuples and sets, the library for each job, errors and types, suppressions, truncation, historical voice): a finding on the lines an edit touches refuses it before it lands;
   - **at the gate,** the rules about how a correct thing is spelled (`elif`, `collection-loop`, `private-name`, `docstring-code`, `constant-home`): reported once before landing, and fixed silently where ruff has a fixer. A gate rule still blocks landing.
 
@@ -44,7 +46,7 @@ Every concern has exactly one owner, so two tools never report the same thing in
 - **Frozen by default, without saying so.** Every model derives from `lup.types.Model`, which is frozen. A model that must change derives from `lup.types.MutableModel` instead, so mutability is a choice written in the header. Settings derive from `lup.types.Settings`, also frozen. No model writes `frozen` itself.
   - **Why the bases are built this way.** pyright reads a model's frozenness from its own header, defaulting to not frozen, and refuses a not-frozen class inheriting a frozen one, so without help every model would have to write `frozen=True`. `Model`'s metaclass tells pyright that its subclasses are frozen by default (PEP 681's `frozen_default`), so silence means frozen and pyright still refuses `point.x = 2`. The metaclass extends pydantic's own, from a private module: the lockfile pins pydantic, and `lup`'s tests fail at once if an upgrade moves it.
   - **Why `Settings` differs.** pyright also refuses a frozen class over pydantic-settings' base, so `Settings` freezes through `model_config`, the one place it's set. pyright doesn't see that freeze; pydantic enforces it.
-- **`BaseModel` everywhere; no `TypedDict` of our own,** not even where pydantic feels too heavy. A `TypedDict` appears only where a third-party API is typed with one, and then it's theirs: Anthropic's SDK, for one, takes its request parameters as `TypedDict`s (`MessageParam`) and returns pydantic models.
+- **`BaseModel` everywhere; no `TypedDict` of our own,** including where pydantic feels heavy, so a shape has one way to be declared. A `TypedDict` appears only where a third-party API is typed with one, and then it's theirs: Anthropic's SDK, for one, takes its request parameters as `TypedDict`s (`MessageParam`) and returns pydantic models.
 
 **Why.** One way to declare a shape, validated where it's declared. Configuration in the class header reads with the class.
 
@@ -64,7 +66,7 @@ Every concern has exactly one owner, so two tools never report the same thing in
 ## Dispatch
 
 **Decision.**
-- **No `elif`,** however short the chain. A decision on a value's structure is a `match`. A comparison with no pattern to write is a guard clause that returns:
+- **No `elif`.** A decision on a value's structure is a `match`. A comparison with no pattern to write is a guard clause that returns:
   ```python
   if seconds < 60:
       return "s"
@@ -119,7 +121,7 @@ In its home, a constant needs no suppression. The rule reads the constant's type
 - **No hand-splitting a `str` or `bytes`:** `.split(sep)`, `.rsplit(sep)`, `.partition`, `.rpartition`. `.split()` with no separator and `.splitlines()` are fine.
 - **No slicing a `str` or `bytes`** to take it apart by position.
 - **No `.strip(chars)` or `.replace` on a `str` or `bytes`** to take it apart or rewrite it: same reason. `.strip()` with no argument trims whitespace and is fine.
-- An agent's output is never hand-parsed: typed answers come through lup's `submit` tool (`DESIGN.md`, *Calling agents*; `docs/library.md`).
+- An agent's output is never hand-parsed: typed answers come through lup's `submit` tool (`DESIGN.md`, *Calling agents from code*; `docs/library.md`).
 
 The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.parse`, `pathlib`, `email`, `shlex`, `ast`, `datetime.fromisoformat`, `packaging.version` and `packaging.requirements`, `trafilatura` or `beautifulsoup4` for web pages. A grammar of our own gets a parser library.
 

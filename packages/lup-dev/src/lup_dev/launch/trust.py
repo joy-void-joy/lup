@@ -19,7 +19,7 @@ layer beside it:
 - the person's own layer of the declaration, `lup_project.local.py` in the
   repository's main worktree (`person_layer`), which git ignores, so it's in the zone by its
   content (`Zone.local`), and what it imports of the commit with the rest
-  (`docs/related-repositories.md`, decision 8). A room writes the worktree, so
+  (`docs/related-repositories.md`, *Trusted by its content*). A room writes the worktree, so
   an edit made there runs nowhere until approved: the judge and a launch read
   the copy kept with the approval. Where it changed, its diff is in the summary
   itself (`compared`).

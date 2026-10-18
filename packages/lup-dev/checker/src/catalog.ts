@@ -48,7 +48,7 @@ export function selected(selections: Selected[]): [string, Rule][] {
     return Object.entries(table).filter(([id]) => chosen.has(id));
 }
 
-// One module's rules (`docs/declaration.md`, *Selecting them*). Its own default is
+// One module's rules (`docs/declaration.md`, *Selecting the rules*). Its own default is
 // resolved from nothing beneath it. Its selection is every layer applied over that
 // default, so its operations begin with the default's: `Rules()` starts from nothing
 // beneath them, and a layer's `Rules.default()` from the default resolved.

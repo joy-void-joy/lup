@@ -1,6 +1,6 @@
 """The fields every declaration has, its two compilations, and `ask`: the layers around the adapter.
 
-A declaration compiles two ways (`DESIGN.md`, *Calling agents*): to its runtime's SDK
+A declaration compiles two ways (`DESIGN.md`, *Calling agents from code*): to its runtime's SDK
 for an ask from code, and to its runtime's CLI for a terminal (`terminal`, in
 `lup.sessions.terminal`'s terms). Each runtime's declaration is a `Declaration`,
 which is an `Agent`, and answers `ask` through `Asking`, which runs the turn on the

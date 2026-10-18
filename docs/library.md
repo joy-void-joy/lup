@@ -1,413 +1,245 @@
-# The library, first slice: asking an agent from code
+# The library: asking an agent from code
 
-**One sentence:** `lup` lets production code ask Claude or Codex a question and get a typed answer back, and lets that code's tests run without reaching a real agent.
+`lup` (`packages/lup/src/lup/`) is what a project imports to ask Claude or Codex a question from code and get a typed answer back, and to test that code without reaching a real agent. The same package compiles a declaration for a terminal and runs it in a room (`docs/launch.md`), and holds the tools a launched session gets (`docs/host-tools.md`); this doc is the ask.
 
-This is the first step of `DESIGN.md`'s build order. `DESIGN.md` (*Calling agents*) is the design; this note is the slice as built. It covers:
-- the `Claude` and `Codex` declarations, `Agent`, and `ask`;
-- typed answers through `submit`, a lup tool that validates and reviews each answer, and the guard that keeps a typed turn open until one is accepted;
-- the speaking tools, `report` and `note`, served on every ask;
-- tools as typed Python functions, and how each runtime is given them;
-- the layers an ask runs in: timeout, recovery, submission, trace;
-- the guarantee that an ask can only call lup's tools, and keeping asks out of the operator's history;
-- the errors, the call record, the fake agent and the test guard;
-- each runtime's adapter.
+## What we have
 
-What comes after is under *Later slices*. A choice the operator hasn't confirmed is marked **(leaning)** where it's stated.
-
-## Who it serves first
-
-live-translator moves onto this slice as soon as it lands. It needs five things (`docs/field-notes.md`, *From the downstream projects*):
-
-| Need | In this slice |
-|---|---|
-| A provider switch | `Claude(...)` and `Codex(...)` are both an `Agent` |
-| A timeout | `layers.timeout` |
-| A trace | `layers.trace`, one `CallRecord` per ask |
-| A guarantee of no tools | each adapter's configuration (*No tools but lup's own*), checked on every Claude call |
-| A fake for tests | the `fake_agents` fixture, where stubbing one call by hand took about 70 lines |
-
-## The public API
+### An ask, from a project
 
 ```python
+# forecasts.py
 from datetime import timedelta
 from pathlib import Path
 
-from lup import Claude, SessionLayers
+from lup import Agent, Claude, ProblemReportedError, SessionLayers
+from lup.tools import Allow, Deny, Submit
+from pydantic import BaseModel
 
-translator = Claude(
+
+class Forecast(BaseModel):
+    probability: float
+    sources: list[str]
+
+
+async def cites_sources(forecast: Forecast) -> Allow | Deny:
+    if not forecast.sources:
+        return Deny(reason="Cite at least one source for the probability.")
+    return Allow()
+
+
+forecaster = Claude(
     model="opus",
-    system_prompt=PROMPT,
+    system_prompt="You forecast the weather for the question you're given.",
     effort="low",
-    layers=SessionLayers(timeout=timedelta(seconds=30), trace=Path("traces/translator.jsonl")),
+    layers=SessionLayers(
+        timeout=timedelta(minutes=2), trace=Path("traces/forecasts.jsonl")
+    ),
 )
 
-result = await translator.ask(segment.model_dump_json(), Translations)
-result.output            # Translations
-result.notes             # the remarks the agent attached, if any
-result.usage.cost_usd    # where the runtime reports it
+
+async def forecast(question: str, agent: Agent = forecaster) -> Forecast | None:
+    try:
+        result = await agent.ask(question, Submit(Forecast, before=[cites_sources]))
+    except ProblemReportedError:
+        return None  # the agent called `report`: it says the question can't be answered
+    return result.output  # a Forecast; result.notes, .rejected and .usage sit beside it
 ```
 
-- **`ask(prompt, output)` returns a `TurnResult[T]`:** `output`, `usage`, `duration`, `session_id`, `rejected` (the submissions refused before the accepted one, oldest first) and `notes`. `output` is an instance of the output model, or the final message's text when no model is given. Returning the result, not the bare output, keeps the cost, the refusals and the notes beside the answer; the output plus an opt-in recorder would split what one ask said in two.
-  - `Usage` holds `input_tokens` (the input not read from cache), `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, and `cost_usd`, none where the runtime reports tokens only. It's the usage of the attempt that answered.
-  - A `Rejection` holds what was submitted, as the agent sent it, and the reason it was refused.
-- **`output` is a model type or an output tool.** `ask(prompt, Forecast)` builds `Submit(Forecast)`; to review an answer before it's accepted, build the tool with `before` hooks (*Typed answers*).
-- **A failure is always an error,** never an empty result (*Errors*).
-- **Async only,** with no sync wrapper beside each method.
-- **The front door** (`lup/__init__.py`) binds the runtime-neutral names (`Agent`, `TurnResult`, `Usage`, `Rejection`, `SessionLayers`, `Recovery`, `Submission`, and the errors), and `Claude` and `Codex` from their adapters. Each adapter imports its runtime's SDK when an ask first runs, so `import lup` reaches neither SDK, a declaration compiles for a terminal without its extra (a launch runs the CLI it fetches, `docs/launch.md`), and asking a runtime whose extra isn't installed raises `RuntimeMissingError` naming the extra.
-
-**`Agent` is what code naming no runtime holds.** It's an ABC with one abstract method, `ask`, typed by overloads: `ask(prompt)` returns a `TurnResult[str]`, `ask(prompt, Forecast)` a `TurnResult[Forecast]`. Both declarations inherit it, as anything a project writes to stand in for one would. It's an ABC, not a `Protocol` matched by shape, as every interface lup owns is (`docs/conventions.md`, *Interfaces*): the declarations and the fake are lup's, and inherit.
-
 ```python
-from lup import Agent, Claude, Codex
-
-def translator_for(settings: Settings) -> Agent:
-    match settings.runtime:
-        case "claude":
-            return Claude(model="opus", system_prompt=PROMPT)
-        case "codex":
-            return Codex(model="gpt-6.1-sol", system_prompt=PROMPT)
-```
-
-Testing it:
-
-```python
+# test_forecasts.py
 import asyncio
 
 from lup.testing import FakeAgents
 
-def test_translates_a_segment(fake_agents: FakeAgents) -> None:
-    fake_agents.answer(Translations, Translations(lines=["Bonjour"]))
+from forecasts import Forecast, forecast
 
-    result = asyncio.run(translate(segment))
 
-    assert result.lines == ["Bonjour"]
-    assert fake_agents.calls[0].prompt == segment.model_dump_json()
+def test_a_forecast_must_cite_its_sources(fake_agents: FakeAgents) -> None:
+    cited = Forecast(probability=0.7, sources=["Met Office"])
+    fake_agents.reject_then(Forecast, {"probability": 0.7, "sources": []}, cited)
+
+    assert asyncio.run(forecast("Will it rain in London tomorrow?")) == cited
+    assert fake_agents.calls[0].prompt == "Will it rain in London tomorrow?"
 ```
+
+- **The answer is a tool call.** The ask serves `submit`, a tool whose input is `Forecast`: pydantic validates each call, then `cites_sources` reviews the typed value, and a refusal is the tool's answer, so the agent fixes its answer in the same turn. `ask(question, Forecast)` gives the plain `Submit(Forecast)`.
+- **Every ask also serves `report` and `note`:** `report` ends the turn without an answer, and the ask raises `ProblemReportedError`; `note` attaches a remark, read in `result.notes`.
+- **`result` is a `TurnResult[Forecast]`:** `output`, `usage` (tokens, and `cost_usd` where the runtime reports it), `duration`, `session_id`, `rejected` (the refused submissions, oldest first) and `notes`. `ask(prompt)` with no model returns the final message's text, a `TurnResult[str]`.
+- **`Codex(model="gpt-6.1-sol", ...)` in place of `Claude(...)`** changes nothing else: both are an `Agent`, which is what code that shouldn't care holds.
+- **The test** runs the real ask, its layers, the tool and the hook; only the turn is scripted. The hook refuses the first submission, so `rejected` holds it.
+
+A project's own tools can't be served on an ask yet (*Where it's going*).
+
+### The front door
+
+`lup/__init__.py` binds `Agent`, `Claude`, `Codex`, `TurnResult`, `Usage`, `Rejection`, `SessionLayers`, `Recovery`, `Submission`, `LupError` and the ask's errors; `lup.tools` holds `lup_tool`, `Tool`, `Allow`, `Deny`, `Submit` and `Receipt` (with `lup_hook` and `Hook`, for a launched session's modules, `docs/declaration.md`); `lup.testing` holds `FakeAgents`, `FakeCall` and `UnscriptedAskError`. Everything is async.
+
+Each declaration imports its runtime's SDK inside `ask`, under `needs_extra` (`sessions/errors.py`). So `import lup` reaches neither SDK, a declaration compiles for a terminal without its extra, and an ask on a runtime whose extra isn't installed raises `RuntimeMissingError` saying which to install.
 
 ### What a declaration holds
 
-`Claude` and `Codex` are frozen models, each a `Declaration` and an `Agent`. In this slice their fields are **(leaning)**:
-- `model`: the runtime's model id, passed as given; none leaves it to the runtime (the operator's decision): in a terminal, the person's own settings choose, and in an ask, the runtime's default, since an ask loads none of their settings. So an ask passes no model to either SDK (`claude_agent_sdk` then passes no `--model`, and Codex's `thread/start` leaves its optional `model` out), and the trace records none;
-- `system_prompt`: replaces the runtime's own prompt; none sends no prompt of lup's own (what reaches the model is in each adapter's section);
-- `effort`: in each runtime's own levels, Claude Code's `low`, `medium`, `high`, `xhigh`, `max`, and Codex's `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; none leaves it to the runtime;
+`Claude` and `Codex` (`adapters/<runtime>/__init__.py`) are frozen models, each a `Declaration` (`sessions/declaration.py`) and so an `Agent`:
+- `model`: the runtime's model id, passed as given. None passes none, so the runtime's default runs (an ask loads none of the operator's settings to choose another), and the trace records none.
+- `system_prompt`: replaces the runtime's own prompt, which describes tools an ask doesn't have; none sends an empty one.
+- `effort`: in the runtime's own levels (`Effort`, beside each declaration); none leaves it to the runtime.
 - `layers` (*The layers an ask runs in*).
 
-A field arrives with the slice that uses it, not before. What a declaration doesn't hold:
-- tools, which are `lup_tool` constructs (the tools slice adds the field that takes them);
-- an endpoint and an API key, given as one connection value when a client is created;
-- resume and history, which belong to the session holder (`open`);
-- transcripts, which belong to lup's own writer;
-- permissions (a permission mode, allowed and disallowed tools), which are derived from the declared tools, so a declaration can't contradict its own tools.
+A field arrives with the piece that uses it, so a declaration holds nothing an ask doesn't read: no tools, connection or history yet. Permissions are never a field: each adapter derives them from the turn's tools, so a declaration can't contradict them.
 
-### How a declaration asks
+`Agent` (`sessions/surface.py`) is an ABC with one abstract method, `ask`, whose overloads type the result by the output given. Something a project writes to stand in for an agent inherits it, as every interface lup owns is an ABC (`docs/conventions.md`, *Interfaces*).
 
-An adapter (`Adapter`, `sessions/contract.py`) runs one turn on its runtime. It's given a `TurnRequest`: the prompt, the turn's `Toolbox`, and `output`, the answer's model (none for an untyped turn), on which the fake matches its scripts. It serves the toolbox's tools, routes the model's calls to them, holds the turn open until the toolbox lets it end, and reports a `RawTurn`: the final message's text, the usage, and the session's id. It raises the errors of *Errors*.
+### How an ask runs
 
-Each declaration's `ask` builds its runtime's adapter from its own fields and hands the ask to `Asking` (`sessions/declaration.py`), which runs it inside the layers on the adapter the seam chooses: the declaration's own, unless a test's fake stands in (*Testing*). The shared behaviour is composed into each declaration through `Asking`, since an ABC carries no behaviour of its own (`docs/conventions.md`, *Interfaces*).
+A declaration's `ask` builds its runtime's adapter from its own fields and hands the ask to `Asking` (`sessions/declaration.py`), the behaviour every declaration shares. The adapter takes the fields, not the declaration, since the declaration's module imports the adapter and pydantic reads field types at runtime: an adapter holding a `Claude` would import it back in a cycle.
 
-The adapter takes the declaration's fields, not the declaration **(leaning)**. The declaration's module imports its adapter, and pydantic reads a field's type at runtime, so an adapter holding a `Claude` would import its declaration back: a cycle no `TYPE_CHECKING` import breaks. The cost is that each field is passed by hand in `ask`.
+`Asking` gives each attempt a fresh `Toolbox` (`sessions/submission.py`) of `report`, `note` and, on a typed ask, `submit`, and runs it on the adapter `seam` chooses (`sessions/contract.py`): the declaration's own, unless a test set the fake. An `Adapter` takes a `TurnRequest` (prompt, toolbox, output model) and returns a `RawTurn` (final text, usage, session id). It serves the toolbox's specs, routes each call to `Toolbox.call`, asks `Toolbox.end` when the model tries to end its turn, and raises the errors of *Errors*.
 
-## Typed answers: the output tool and its guard
+The calls the toolbox records are the one source of what a turn said: the last accepted `submit` is the answer, the refused ones are `rejected`, the `report` and `note` calls the problem and the notes. A turn that both answered and reported raises the report.
 
-1. **The tool.** A typed ask gives the session `submit`, an ordinary lup tool whose input is the output model: `Submit(Forecast)`, built for you when `ask` is given the model type. How each runtime shows it is in *The output tool's name*.
-2. **It validates, then reviews.** pydantic validates the arguments as the model sent them, then the tool's `before` hooks run in order on the validated value. A hook receives the typed answer and returns `Allow()` or `Deny(reason)`:
+### Typed answers: the output tool and its guard
 
-   ```python
-   from lup.tools import Allow, Deny, Submit
+- **Validated, then reviewed.** `Submit` (`tools/submit.py`) is an ordinary lup tool: the arguments are validated as sent, then each `before` hook runs in order on the typed value, returning `Allow()` or `Deny(reason)`. Review is a hook on the tool, so the answer keeps its type through it.
+- **A refusal answers the call:** every validation error at once, or the hook's reason, as `Refused: …`, marked as an error. No new prompt is sent; the agent corrects itself with its own context. An accepted answer gets a `Receipt` ("Your answer is accepted. End your turn.").
+- **The guard.** A typed turn can't end until an answer is accepted or a problem reported. `Toolbox.end` decides, the same on both runtimes: `End`, `GiveUp`, or `KeepGoing` with a reason naming the tools as the model sees them ("Call the `mcp__lup__submit` tool with your final answer, or `mcp__lup__report` if it can't be answered: your turn can't end until one is accepted."). Claude Code hears it through a `Stop` hook, Codex as another turn on the same thread.
+- **Bounded.** `Submission.attempts` (3) counts rejected answers and refused endings together, checked when the model tries to end. Past it, the turn ends and the ask raises `OutputMissingError` with every rejection. An agent that keeps submitting without trying to end is bounded by the timeout.
 
-   async def cites_sources(forecast: Forecast) -> Allow | Deny:
-       if not forecast.sources:
-           return Deny(reason="Cite at least one source for the probability.")
-       return Allow()
+It's one mechanism on both runtimes, and neither's native structured output: Codex's (`outputSchema`) shapes the final message, so nothing could refuse an answer inside the turn. A tool keeps hooks, and the guard keeps the agent in its turn, where a correction sent as a new prompt would start it over.
 
-   result = await forecaster.ask(question, Submit(Forecast, before=[cites_sources]))
-   ```
+The tool is `submit`. Claude Code shows it as `mcp__lup__submit`, a tool of lup's MCP server `lup` (`SERVER`, `TOOL_PREFIX` in `adapters/claude/runtime.py`); Codex as a dynamic `function` tool `submit` with no namespace, which a code-mode model calls from JavaScript as `await tools.submit({...})`.
 
-   A review is a hook on the output tool, not a separate gate. A `gate=` parameter on `ask`, or a resolver on the declaration from output type to gate, would erase the answer's type and validate it again to get it back; a review method on the output model lacks the context a reviewer needs.
-3. **A refusal answers the call.** Every validation error at once, or the hook's reason, goes back as the tool's answer (`Refused: …`, marked as an error), and the agent corrects its answer within the same turn, with its own context. No new prompt is sent. An accepted answer gets a receipt ("Your answer is accepted. End your turn."), and the last accepted call is the answer.
-4. **The turn can't end without an accepted answer or a reported problem.** That's lup's own guard, decided by the turn's `Toolbox` (`sessions/submission.py`) the same way on every runtime: when the model tries to end its turn, the toolbox says to end, to keep going with a reason the model reads, or to give up. The reason is "Call the `submit` tool with your final answer, or `report` if it can't be answered: your turn can't end until one is accepted." Each adapter delivers it: a `Stop` hook on Claude, a continuation of the same thread on Codex.
-5. **Bounded.** `layers.submission.attempts` (3 by default) counts rejected answers and refused endings together, checked when the model tries to end its turn. Once they're spent, the guard lets the turn end, and the ask raises `OutputMissingError` with every rejected attempt in full.
-6. **An untyped ask** has no output tool; its answer is the final message's text. It still serves the speaking tools.
+### The speaking tools
 
-`rejected` on the result keeps the attempts refused before the accepted one, so a caller (and the trace) can see why an answer took three tries.
+`report` and `note` (`tools/speaking.py`) are served on every ask, typed or not. They act on nothing, so they're safe where an agent has no other tool.
+- **`report(problem)`** stops the turn without an answer and says what's wrong: the question can't be answered, something needed is missing, an instruction seems wrong. The ask raises `ProblemReportedError` with the agent's words, so a caller tells "the agent says this can't be done" from a failure. It isn't retried: asking again gets the same problem.
+- **`note(remark)`** attaches an assumption, a doubt or a counterargument without ending the turn, read in `TurnResult.notes` or `ProblemReportedError.notes`.
 
-**One mechanism on both runtimes, and native structured output on neither.** Codex's native output is the shape of the final message, not a tool call, so nothing could refuse an answer inside the turn, and its strict-schema subset needs a carrier for any schema outside it. A tool keeps everything a tool has, hooks included, and a guard keeps the agent in its turn and its context where a re-sent correction would start over.
+### Tools
 
-### The output tool's name
+`@lup_tool` (`tools/tool.py`) makes an async function taking one pydantic model a tool, returning a model (answered as JSON) or `str` (answered in those words); on a method, each instance's own tool (`Method`). Its name is the function's and its description the docstring, required since it's what the model reads. Its summary is the docstring's first line, standing alone, 50 characters at most, which a session finding tools through tool search lists (`ToolSpec.summary`); read with `pydoc.splitdoc`, so a first sentence wrapped onto a second line is refused rather than cut. Anything else raises `ToolError`, for a `Tool` or `ToolSpec` made directly too. Any tool can carry `before` hooks. A tool runs in the caller's process.
 
-The tool is named `submit` **(leaning; issue #50)**. Each runtime shows it to the model its own way:
-- **Claude:** `mcp__lup__submit`, a tool of lup's MCP server, which is named `lup` (`SERVER` and `TOOL_PREFIX` in `adapters/claude/runtime.py`). The speaking tools are `mcp__lup__report` and `mcp__lup__note`. Those three names are what the session pre-approves and what its tool check accepts.
-- **Codex:** a dynamic tool of type `function` named `submit`, with no namespace (`DynamicTool` in `adapters/codex/runtime.py`, from the tool's spec); a call arrives as `item/tool/call` with `tool: "submit"`. On a code-mode model it's a nested tool of `exec`, called from JavaScript as `await tools.submit({...})`: the pinned app-server's own description of `exec` puts every nested tool on a global `tools` object, named as a JavaScript identifier, which `submit` already is.
+**Serving tools over MCP** (`tools/serving.py`): what a server serves is a `Toolset`, an ABC (`specs()`, `call(name, arguments) -> Answer`). A turn's `Toolbox` is one; the tools a launch gives its session another (`docs/host-tools.md`).
+- `tool_server(toolset, name="lup")` is an MCP server on `mcp`'s low-level `Server`, handing each call over with its arguments as sent, so lup validates, refuses, counts and records a malformed call like any other; the SDK's `create_sdk_mcp_server` would refuse it before lup saw it.
+- `serve(toolset, reader, writer, name="lup")` serves one MCP session over a connection's streams, newline-delimited JSON-RPC as stdio carries it, so a stdio server that only bridges to a socket reaches a toolset served there.
+- Results are `content` only, one text block, never `structuredContent`, which Codex would show in its place (`docs/field-notes.md`, *MCP in a launched session*).
 
-The alternative, `lup_submit`, would repeat the server's name on Claude (`mcp__lup__lup_submit`). On Codex a bare name could collide with a project's own tool called `submit` once project tools exist; Codex's protocol has namespaced dynamic tools (`type: "namespace"`), which the tools slice can use for that.
+Claude Code gets a turn's tools through lup's MCP server, in-process. Codex gets them as the thread's dynamic tools, declared when the thread starts and fixed for its life, each call arriving as an `item/tool/call` request.
 
-## The speaking tools
+### The layers an ask runs in
 
-Every ask serves `report` and `note` (`lup/tools/speaking.py`), typed or not. They act on nothing, so they're served even where an agent has no other tool (`DESIGN.md`, *Calling agents*).
-- **`report(problem)`** stops the turn without an answer and says what's wrong: the question can't be answered, something needed is missing, an instruction seems wrong. The ask raises `ProblemReportedError` with the agent's words and the notes it attached, so a caller tells "the agent says this can't be done" from a failure. It isn't retried: asking again gets the same problem. A report lets a typed turn end as an accepted answer does, and a turn that both answered and reported raises the report.
-- **`note(remark)`** attaches an assumption, a doubt or a counterargument to the answer without ending the turn. The caller reads it in `TurnResult.notes`, or `ProblemReportedError.notes`; the trace keeps it.
-
-## Tools
-
-A lup tool is an async Python function taking one pydantic model and returning another, declared with `@lup_tool`. Its name is the function's, its description the docstring (required: it's what the model reads), its input schema the parameter's model. A function shaped otherwise raises `ToolError`.
-
-**A tool's summary is its docstring's first line,** standing alone (a blank line after it where more follows), 50 characters at most, as a git commit's subject line is; the rest of the docstring is its full description, as long as it needs (`docs/host-tools.md`, *Found through tool search, listed in the guidance*). A session that finds tools through its runtime's tool search lists each by its name and summary (`ToolSpec.summary`), so the agent knows what's there. A tool whose description has no such line raises `ToolError` naming it when it's made, whether by `@lup_tool` or as a `Tool` given its description (as `submit`, `report` and `note` are), and so does a `ToolSpec` made directly. The line is read with `pydoc.splitdoc`, which finds no summary where the first line runs onto the second without a blank line between, so a wrapped first sentence is refused rather than cut. Set aside: a description field on `lup_tool`, a second place to say what the docstring says.
-
-```python
-from lup.tools import lup_tool
-
-@lup_tool
-async def weather(query: Query) -> Weather:
-    """Look up today's weather in a city."""
-    ...
-```
-
-A tool can carry `before` hooks, typed on its input, which run on the validated input before the function. A validation error, with every error at once, or a hook's `Deny`, answers the call instead, so one answer tells the agent everything to fix. An accepted call answers with the function's output as JSON.
-
-A tool runs in the caller's process. Each adapter serves a turn's tools (`Toolbox.specs`) and routes every call to `Toolbox.call`, which records it. The calls recorded are the one source of what the turn said: the answer, the rejections, the problem and the notes.
-- **Claude:** through lup's own MCP server over the turn's toolbox (`tool_server`, below), served in-process by the SDK. Every call reaches lup with its arguments as the model sent them, so lup validates, refuses, counts and records a malformed call like any other. The SDK's own helper, `create_sdk_mcp_server`, would check the arguments against the schema before the handler ran and answer the refusal itself, out of lup's sight.
-- **Codex:** as the thread's dynamic tools, declared when the thread starts and fixed for its life. Codex sends each call to the client as an `item/tool/call` request, answered in-process (*The Codex adapter*).
-
-In this slice the only tools are `submit` and the speaking tools. The construct is public (`lup.tools`: `lup_tool`, `Tool`, `Allow`, `Deny`, `Submit`, `Receipt`) for the tools slice to build on.
-
-### Serving tools over MCP
-
-What an MCP server serves is a seam, `Toolset` (`lup/tools/serving.py`, an ABC: `specs`, and `call(name, arguments) -> Answer`), so a turn's `Toolbox` is one implementation and the tools a launch gives its session another (`docs/host-tools.md`, *Modules and public API*):
-- **`tool_server(toolset, name="lup")`** is an MCP server over a toolset, on `mcp`'s low-level `Server`: it lists the specs and hands each call, arguments as sent, to `Toolset.call`. Claude's asks serve their toolbox through it.
-- **`serve(toolset, reader, writer, name="lup")`** serves one MCP session over one connection's streams, until the connection closes: newline-delimited JSON-RPC, one message a line, as a stdio server's input and output carry it, each line read with `mcp`'s own message model. A stdio server in a room that only bridges its input and output to a Unix socket (`socat`) reaches a toolset served on the host there. When the other side closes, a call still running is cancelled; what the session would still write to a side that has gone is dropped, as `mcp` drops a write onto a closed transport; a read that breaks raises its error. Closing the connection is the caller's, and a message must fit the reader's line limit.
-- **Results are `content` only,** one text block, never `structuredContent`: Codex shows the model only a result's `structuredContent` where it has one, dropping its content blocks, where Claude Code reads `content`, so a result with both would read differently on the two runtimes (`docs/field-notes.md`, *MCP in a launched session*).
-- **`mcp` is imported when a server is first made,** not with the module: a toolset is named wherever a turn's tools are, the judge's process for every hook among them, and importing `mcp`'s server took `lup_dev.cli`'s imports from about 0.43 s to 0.89 s.
-
-## The layers an ask runs in
-
-`layers: SessionLayers` is one field on the declaration, applied around every ask, rather than flat fields on the declaration:
+`layers: SessionLayers` (`sessions/layers.py`) wraps every ask:
 
 | Layer | Field | Default | What it does |
 |---|---|---|---|
-| Timeout | `timeout: timedelta \| None` | none | Bounds the whole ask, recovery and submission included. When it passes, the turn is interrupted and the ask raises `TurnTimeoutError` |
-| Recovery | `recovery: Recovery` | `stop=stop_after_attempt(3)`, `wait=wait_exponential(multiplier=1, max=30)` | Retries `AgentUnavailableError`, each attempt a fresh turn, with tenacity's own strategies, which a caller combines (`stop_after_attempt(5) \| stop_after_delay(120)`). Both runtimes retry API errors themselves first, so this catches what they gave up on |
+| Timeout | `timeout: timedelta \| None` | none | Bounds the whole ask, recovery and submission included; when it passes, the turn is interrupted and the ask raises `TurnTimeoutError` |
+| Recovery | `recovery: Recovery` | `stop_after_attempt(3)`, `wait_exponential(multiplier=1, max=30)` | Retries `AgentUnavailableError`, each attempt a fresh turn, with tenacity's strategies, which combine (`stop_after_attempt(5) \| stop_after_delay(120)`). The runtimes retry API errors first; this catches what they gave up on |
 | Submission | `submission: Submission` | `attempts=3` | Bounds rejected answers and refused endings together |
-| Trace | `trace: Path \| None` | none | Appends each ask's `CallRecord` to the file, as one JSON line |
+| Trace | `trace: Path \| None` | none | Appends each ask's `CallRecord` to the file, one JSON line each |
 
-Recovery is tenacity's, not a retry loop of lup's own.
+### No tools but lup's own
 
-## No tools but lup's own
+An ask from code can't run commands, touch files, reach the network or start agents: it can only call lup's tools. Each adapter configures its runtime for that (the module docstrings list each setting and what it rests on).
+- **Claude Code:** no built-in tools, skills or plugins, and no MCP server but lup's; lup's tools pre-approved and every other call denied (`dontAsk`); no settings files, so the operator's and the project's hooks, `CLAUDE.md` and servers don't load, and auto memory off by its variable; prompts delivered verbatim, so text from data can't attach a local file with `@path`. **Checked on every call:** the session's `init` message lists the tools and servers it loaded, and anything beyond lup's interrupts the turn with `ToolsPresentError` before the model runs. A turn whose `init` never came raises `TurnError`, since its check never ran.
+- **Codex:** an ephemeral thread with no environment (no shell, no file tools), Codex's subagents off, approvals never asked, a read-only sandbox; `LAUNCH`'s overrides turn off web search, skills, each built-in feature that brings a tool and the instructions describing them; lup's own Codex home, so the operator's configuration, servers, hooks and skills and a project's `AGENTS.md` don't load. A question for the user is answered that no one can answer, pointing at `report`; any other request from Codex fails the ask.
+  - **Code mode.** On `code_mode_only` models, the default `gpt-6.1-sol` among them, every tool is reached through a JavaScript `exec` tool, beside `wait` (which polls a running cell) and `request_user_input_async`, and no setting removes them. None of the three reaches a shell, files, the network or another agent (`docs/field-notes.md`, *The Codex SDK*), so code-mode models are accepted, with the code-mode host on, since lup's tools are out of reach without it.
+  - **The declared gap:** Codex has no API listing a session's tools, so nothing checks them per call; a check by hand on each pinned version confirms the model's request carries only lup's tools.
 
-The guarantee is about what can happen: an ask from code can't run commands, touch files, reach the network or start agents; it can only call lup's tools (`DESIGN.md`, *Calling agents*). Each adapter configures its runtime for it, and checks it on every call where the runtime lets it.
+### Out of the operator's history
 
-- **Claude** (`adapters/claude/runtime.py`):
-  - **Configuration.** No built-in tools (`tools=[]`, which the SDK passes as `--tools ""`); no MCP server but lup's own (`strict_mcp_config`); no skills or plugins (`skills=[]`, `plugins=[]`); lup's tools pre-approved (`allowed_tools`), and every other call denied (`permission_mode="dontAsk"`).
-  - **No settings files** (`setting_sources=[]`), so the operator's and the project's hooks, `CLAUDE.md` and MCP servers don't load. Auto memory is read whatever the settings say, so `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` turns it off.
-  - **No `@path` expansion.** Prompts are delivered verbatim (`verbatim_prompts`), so text from data can't make Claude Code read a local file: without it, `@/etc/hostname` in a prompt attached the file, even with no tools. Slash commands aren't dispatched either.
-  - **Checked on every call.** The session's first message (`init`) lists the tools and MCP servers it loaded. A tool beyond lup's own, or a server other than lup's, interrupts the turn and raises `ToolsPresentError` before the model can use it. The message also lists skills, plugins, agents and slash commands, even when nothing can call them (no `Skill` or `Agent` tool is loaded, and a verbatim prompt dispatches no slash command), so only tools and servers are checked. A turn whose `init` never came raises `TurnError`, since its check never ran, rather than trusting the configuration **(leaning)**.
-- **Codex** (`adapters/codex/runtime.py`):
-  - **The thread** is ephemeral and has no environment (`environments: []`, from the app-server protocol, sent through the SDK's raw `request`), so no shell and no file tools, and Codex's own subagents are off (`agents.enabled=false` in its config). Approvals are never asked (`approvalPolicy: "never"`), and the sandbox is read-only.
-  - **The launch.** Each app-server starts with these `--config` overrides (`LAUNCH`):
-    - web search disabled (`web_search="disabled"`);
-    - skills' instructions and bundled skills off (`skills.include_instructions`, `skills.bundled.enabled`);
-    - the instructions describing the environment, permissions, apps and collaboration modes off (`include_environment_context`, `include_permissions_instructions`, `include_apps_instructions`, `include_collaboration_mode_instructions`);
-    - the experimental user-input tool off (`tools.experimental_request_user_input.enabled`);
-    - every built-in feature that brings a tool off: `features.` `goals`, `sleep_tool`, `image_generation`, `multi_agent`, `apps`, `plugins`, `remote_plugin`, `skill_search`, `tool_suggest`, `view_image`, `browser_use`, `computer_use`, `shell_tool`, `unified_exec`, `hooks`, `workspace_dependencies`;
-    - credentials kept in a file (`cli_auth_credentials_store="file"`, *Out of the operator's history*).
-  - **Code mode.** On models whose catalog entry says `tool_mode: code_mode_only` (the default `gpt-6.1-sol` among them), every tool, lup's included, is reached through a JavaScript `exec` tool, beside `wait` and `request_user_input_async`, and no setting removes them. An `exec` call trying each way out, against a local mock of the Responses endpoint, found a V8 isolate with no `fetch`, `require`, `process` or `WebAssembly`, every import refused, and for nested tools only lup's, a clock, and MCP's resource readers, which read nothing without an MCP server. `request_user_input_async` only queues a question, with no request to the client. So code mode can't reach a shell, files, the network or another agent, and code-mode models are accepted, as `DESIGN.md` (*Runtimes*) allows when that holds. The code-mode host stays on: turned off, `exec` answers "code-mode host is disabled", leaving lup's tools out of reach on those models.
-  - **Isolation.** It runs in lup's own Codex home, so the operator's configuration, MCP servers, hooks and skills don't load. Nor does a project's `AGENTS.md`: checked from a checkout holding one.
-  - **Nothing else answered.** A request from Codex to the client other than a call to lup's tools (an approval, an elicitation) fails the ask **(leaning)**. A question for the user is answered that no one can answer, pointing at `report`, so the agent carries on or says what's missing.
-  - **A declared gap.** Codex has no API listing a session's tools, so nothing checks them on each call. A live check, run by hand whenever the pinned version changes, confirms the model's request carries only lup's tools (*Checks owed*); it joins the capability check when that exists.
+An ask persists no session and loads none of the operator's settings.
+- **Claude Code:** `--no-session-persistence`, so no transcript reaches their history or resume list. It runs on the operator's own config home and CLI login: a home of lup's own would need a copy of the login, which goes stale as Claude Code replaces its credentials file on a refresh, and with nothing loaded and nothing kept the default home serves.
+- **Codex:** ephemeral threads, in lup's own home, `$XDG_STATE_HOME/lup/codex` (`adapters/codex/layout.py`), whose `auth.json` is a symbolic link to the operator's (`$CODEX_HOME/auth.json`). Codex rewrites that file in place, so a refresh writes through to the one real copy, and a logout from lup's home removes only the link. Credentials stay in the file store, since under `keyring` or `auto` a refresh deletes `auth.json`. The login is checked (`account/read`) before the thread starts; without one, `AuthMissingError` names both homes.
 
-## Out of the operator's history
+The operator's CLI login fits their own use; a product other people use needs an API key (`docs/field-notes.md`, *Claude Code 2.1.291* and *The library's asks*), which comes with the connection (*Where it's going*).
 
-Calls from code persist no session and load no user settings (`DESIGN.md`, *Calling agents*).
-- **Claude:**
-  - no session persistence: `--no-session-persistence`, which has no SDK field, passed through `extra_args`. No transcript is written, so nothing reaches the operator's history or resume list;
-  - no settings files, and no auto memory (*No tools but lup's own*);
-  - the operator's own config home and CLI login. A home of lup's own would need a copy of the login, since Claude Code replaces its credentials file on a refresh, and the copy would go stale; with nothing loaded and nothing kept, the default home serves.
-- **Codex:**
-  - ephemeral threads, which persist nothing;
-  - lup's own Codex home, `$XDG_STATE_HOME/lup/codex` (`~/.local/state/lup/codex` by default), so the operator's configuration, MCP servers, hooks, skills and history don't reach a call from code. Its `auth.json` is a symbolic link to the operator's login (`$CODEX_HOME/auth.json`, or `~/.codex/auth.json`). Codex rewrites that file in place, so a refresh writes through the link to the one real copy, and a logout from lup's home removes only the link. A link pointing elsewhere is replaced; an `auth.json` that is lup's home's own, a real file, is left alone;
-  - credentials pinned to the file store **(leaning)**: under `keyring` or `auto`, a refresh deletes `auth.json`, which in lup's home is the link;
-  - the login checked before the thread starts (`account/read`). Without one, the ask raises `AuthMissingError` naming both homes. A login kept in the system keyring can't be seen from lup's home, since the keyring's key derives from the home's path, so the error says to switch to the file store and log in again. A provider that needs no login goes ahead.
+### Errors
 
-Sessions that are kept run under their own config home (`DESIGN.md`, *Calling agents*); on Claude that arrives with conversations (*Later slices*).
+Every error lup raises descends from `LupError` (`lup/errors.py`), so one `except` catches them all (`docs/conventions.md`, *Errors*). An ask's errors (`sessions/errors.py`) are classified from what the runtime reports in structured form, never its message, so a caller branches on the type; each adapter's mapping is in its module's docstring.
 
-**Logins and terms.** The operator's CLI login is the default, which fits their own use. A product other people use declares an API key: Anthropic's terms reserve subscription logins for ordinary individual use, and Codex's docs say app-server authentication "has never been permitted for commercial or hosted services". How a declaration names one comes with the connection (*Later slices*).
-
-## Errors
-
-Every error lup raises descends from `LupError` (`lup/errors.py`), and every name ends in `Error` (`docs/conventions.md`, *Errors*). It's one root per package, not one per area, so a caller catches everything the library raises in one `except`. An ask's errors are classified from what the runtime reports in structured form, never from its message, so a caller branches on the type.
-
-| Error | When | Retried by recovery |
+| Error | When | Retried |
 |---|---|---|
-| `TurnError` | The base of every error below but the last two; raised itself for any other failure the runtime reports, carrying what it said | No |
+| `TurnError` | The base of the ask's errors; raised itself for a failure not classified below, carrying what the runtime said | No |
 | `AgentUnavailableError` | The model is out of reach for a while: overload, a rate limit, a server error, a connection that failed or dropped | Yes |
-| `UsageLimitReachedError` | The account's usage window is spent; `reset_at` says when it resets, where reported | No |
+| `UsageLimitReachedError` | The account's usage window is spent; `reset_at` where the runtime said | No |
 | `AuthMissingError` | No usable login, or the login refused | No |
-| `OutputMissingError` | No answer accepted within `submission.attempts`; `rejected` holds every refused attempt in full | No |
-| `ProblemReportedError` | The agent called `report`; `problem` and `notes` are its words | No |
-| `ToolsPresentError` | The session loaded tools beyond lup's own; `tools` lists what it loaded | No |
-| `TurnTimeoutError` | The timeout passed, and the turn was interrupted | No |
-| `RuntimeMissingError` | An ask runs on a runtime whose extra isn't installed ("install `lup[codex]`"), or its runtime is missing | No |
-| `RealCallInTestError` | A test reached a real agent (*Testing*) | No |
+| `OutputMissingError` | No answer accepted within `submission.attempts`; `rejected`, `notes`, `usage` | No |
+| `ProblemReportedError` | The agent called `report`; `problem`, `notes`, `usage` | No |
+| `ToolsPresentError` | The session loaded tools beyond lup's; `tools` lists what it loaded | No |
+| `TurnTimeoutError` | The timeout passed and the turn was interrupted; also the built-in `TimeoutError` | No |
+| `RuntimeMissingError` | The runtime's extra isn't installed, or Claude Code's bundled CLI is missing; a `LupError`, not a `TurnError` | No |
+| `RealCallInTestError` | A test reached a real agent (*Testing*); a `LupError` | No |
 
-- `TurnTimeoutError` is also the built-in `TimeoutError` **(leaning)**, so code catching that catches it, and so does `except LupError`.
-- Unclassified failures raise the base `TurnError` itself **(leaning)**, rather than a guess at a subclass a caller would act on wrongly.
-- Outside an ask: `ToolError` (`lup.tools.tool`), a function that can't be a tool, and `UnscriptedAskError` (`lup.testing.fake`), an ask the fake has no script for.
-- A spent budget has no error in this slice: budgets come later.
+Outside an ask: `ToolError` (`lup.tools.tool`) and `UnscriptedAskError` (`lup.testing.fake`).
 
-Each adapter's classification is in its section.
+### The call record
 
-## The call record
+With `layers.trace` set, every ask, answered or failed, appends one `CallRecord` (`observability/trace.py`): the runtime, the model named, the start and duration, the prompt and system prompt, the output (the model as JSON, or the text) or the error's type and message, the rejections, the notes and the usage, all in full. A failed ask keeps the notes and usage where its turn ran, and the rejections on `OutputMissingError`. The record is derived from the result or the error, and the request, so the two can't disagree. Codex reports no cost.
 
-Every ask, answered or failed, appends one `CallRecord` (`observability/trace.py`) to `layers.trace` when it's set. A record holds:
-- the runtime and the model the declaration named, none where it left the choice to the runtime;
-- the start time and the duration;
-- the prompt and the system prompt, in full;
-- the output in full (the model as JSON, or the text), or the error's type and message;
-- the rejected attempts, on an answer and on `OutputMissingError`;
-- the notes, on an answer and on `ProblemReportedError`;
-- the token usage, with the cost where the runtime reports it, on an answer; none on a failure.
+### Testing: the fake and the guard
 
-It's derived from the result, or the error, and the request, so the record and the result can't disagree. Claude reports cost; Codex reports tokens only. The dashboard reads the same records once events exist.
+**The fake replaces the adapter, not the agent** (`testing/fake.py`): a test's `Claude(...)` goes through the real `ask`, with its layers, tools, hooks and record, and only the turn is scripted, its answers, notes and reports going through the real tools. It stands in at the seam, so nothing is patched, and no project writes its own stub (live-translator's took about 70 lines, `docs/field-notes.md`, *From the downstream projects*).
+- `answer(Output, value, notes=[...])` queues an accepted answer for the next ask of that output type; `answer_text(text, notes=[...])` the next untyped one's.
+- `reject_then(Output, invalid, value)` queues a refused submission, then the accepted one.
+- `report(Output, problem, notes=[...])` queues a reported problem (`Output` is `None` for an untyped ask); `fail(Output, error)` makes the next such ask raise `error`.
+- `calls` lists every ask as a `FakeCall`: the declaration, the prompt, the output model.
 
-## Testing: the fake and the guard
+Scripts match by output type, first queued first; an ask with none raises `UnscriptedAskError` naming the type and the prompt. A fake turn reports zero usage and the session ids `fake-1`, `fake-2`, and so on.
 
-**The fake replaces the adapter, not the agent.** A test's `Claude(...)` goes through the real `ask`: the layers, the output tool and its guard, the record. Only the turn is scripted, and a scripted answer, note or report goes through the real tools, so validation and `before` hooks run as they would on a real turn. It stands in at the seam (`sessions/contract.py`), a context variable holding what chooses each declaration's adapter. A fake `Agent` would skip the layers a test should exercise; monkeypatching would repeat the stub in every project.
-- `fake_agents.answer(Output, value, notes=[...])` queues an accepted answer for the next ask of that output type, after the notes.
-- `fake_agents.answer_text(text, notes=[...])` queues the answer to the next untyped ask.
-- `fake_agents.reject_then(Output, invalid, value)` queues a refused submission before the accepted one: arguments that don't validate, or a value a `before` hook denies.
-- `fake_agents.report(Output, problem, notes=[...])` queues a reported problem; `Output` is `None` for an untyped ask.
-- `fake_agents.fail(Output, error)` makes the next ask raise `error`, as a runtime would.
-- `fake_agents.calls` lists every ask, each a `FakeCall` with its declaration, prompt and output model.
-- An ask with nothing scripted raises `UnscriptedAskError`, naming the output type and the prompt.
+**The guard** is on in every test session that has `lup` installed, through its pytest plugin (a `pytest11` entry point, `testing/plugin.py`):
+- outside `fake_agents`, every declaration's turns raise `RealCallInTestError`, naming the fixture; the plugin also sets `guarded`, which each adapter's client factory checks before it starts a runtime, so an adapter built directly refuses too;
+- connections are refused except to loopback (unless the project names its hosts) and Unix sockets, through `pytest-socket`, whose `enable_socket` marker lifts it for a test;
+- without `lup[testing]`, the plugin stops the session and names the extra, rather than run unguarded.
 
-Scripts are matched by output type, the first queued first. A fake turn reports no usage and the session ids `fake-1`, `fake-2`, and so on.
+### The adapters
 
-**The guard is on in every test session of every project that installs lup,** through the pytest plugin `lup` declares (a `pytest11` entry point, `testing/plugin.py`), rather than opt-in per project:
-- **Real turns:** outside `fake_agents`, the seam refuses every declaration's turns with `RealCallInTestError`, naming the fixture to use instead. A real adapter built directly in a test refuses too **(leaning)**: the plugin sets `guarded`, which each adapter's client factory checks before it starts its runtime, so nothing reaches a runtime around the seam. `RealCallInTestError` sits with the session errors **(leaning)**, so an adapter raises it without importing pytest.
-- **Network:** connections are refused except to loopback (`127.0.0.1` and `::1`, unless the project names its own hosts) and Unix sockets, through `pytest-socket`, whose per-test `enable_socket` marker lifts it.
-- **Missing extra:** without `lup[testing]`, the plugin stops the session and names the extra, rather than running unguarded.
+Each is the only module importing its SDK, and its docstring holds what it relies on, read in the SDK's source and checked against the runtime it pins (and `docs/field-notes.md`, *The Claude Agent SDK 0.2.165*, *The Codex SDK*, *The library's asks*).
+- **`ClaudeAdapter`** (`adapters/claude/runtime.py`) runs each turn in a Claude Code process of its own through `ClaudeSDKClient`, the SDK's one client that can interrupt. Its `Stop` hook answers `decision: block` with the guard's reason; Claude Code honours 8 blocks in a row, so the submission attempts run out first. A failed turn raises nothing in the SDK, so the adapter classifies the result's status and the assistant messages' errors. Usage includes Claude Code's cost.
+- **`CodexAdapter`** (`adapters/codex/runtime.py`) starts a `codex app-server` of its own per ask, and closes it whatever happens. It drives the SDK's lower `CodexClient`, the one that takes a handler for Codex's requests to the client; the handler runs on the SDK's reader thread and hands each tool call to the ask's event loop, kept free by running every blocking client call in a worker thread. Codex's hooks are commands in files, not callbacks, so the adapter guards the end itself, continuing the same thread with the reason; the thread keeps its history, so the prompt isn't sent again. A spent window's reset comes from the last rate-limit report, which arrives outside the turn's stream. Usage is the thread's running total, with cached input counted apart as on Claude Code.
+- **Both** interrupt a cancelled turn before the cancellation goes on, and take their client factory as a field (`client`, `connect`), so their tests drive the real server, hook and handler on a scripted client.
 
-## The Claude adapter
+### Modules
 
-`adapters/claude/` holds the declaration (`__init__.py`) and `ClaudeAdapter` (`runtime.py`), the only module importing `claude_agent_sdk`. Each turn runs in a Claude Code process of its own, through the SDK's `ClaudeSDKClient`, the SDK's one client that can interrupt, with the options of *No tools but lup's own* and *Out of the operator's history*, lup's MCP server over the turn's toolbox (`tool_server`), and the `Stop` hook.
+| Module (`packages/lup/src/lup/`) | What it holds |
+|---|---|
+| `__init__.py` | The front door |
+| `types.py` | `Model`, `MutableModel` and `Settings`, the bases every model starts from; `JsonObject` |
+| `errors.py` | `LupError` |
+| `sessions/surface.py` | `Agent` |
+| `sessions/declaration.py` | `Declaration`, the fields every declaration has; `Asking`, an ask inside its layers |
+| `sessions/contract.py` | `Adapter`, `TurnRequest`, `RawTurn`; the seam and `guarded` |
+| `sessions/layers.py` | `SessionLayers`, `Recovery`, `Submission` |
+| `sessions/submission.py` | `Toolbox`: one turn's tools, the calls made to them, and the guard |
+| `sessions/results.py` | `TurnResult`, `Usage`, `Rejection` |
+| `sessions/errors.py` | The ask's errors, `RuntimeMissingError`, `RealCallInTestError`; `needs_extra` |
+| `tools/tool.py` | `@lup_tool`, `Tool`, `Method`, `AgentTool`, `ToolSpec` and `summary_of`; `Allow`, `Deny`; `ToolError` |
+| `tools/submit.py` | `Submit` and its `Receipt` |
+| `tools/speaking.py` | `report` and `note` |
+| `tools/serving.py` | `Toolset`, `Answer`, `tool_server`, `serve` |
+| `observability/trace.py` | `CallRecord` |
+| `testing/fake.py`, `testing/plugin.py` | `FakeAgents`, `FakeCall`, `UnscriptedAskError`; the pytest plugin, its guard and `fake_agents` |
+| `adapters/claude/__init__.py`, `adapters/codex/__init__.py` | `Claude` and `Codex`, with their `Effort` |
+| `adapters/claude/runtime.py`, `adapters/codex/runtime.py` | `ClaudeAdapter`, `CodexAdapter` (with `LAUNCH`) |
+| `adapters/codex/layout.py`, `adapters/codex/settings.py` | `CodexLayout`, lup's Codex home and the login it links to; `CodexSettings`, the variables it reads |
 
-- **System prompt.** `system_prompt` becomes `--system-prompt`, which replaces Claude Code's whole prompt; none sends an empty one. Claude Code still adds an identity line of its own ("You are a Claude agent, built on Anthropic's Claude Agent SDK.", read in the bundled CLI).
-- **The guard** is an in-process `Stop` hook asking the toolbox whether the turn may end. A refusal (`decision: block`) keeps the same turn going, and the model reads the reason. Claude Code honours 8 refusals in a row, a tool call resetting the count, so the submission attempts (3 by default) run out first; once they have, the hook lets the turn end and the ask raises `OutputMissingError`. `Stop` doesn't fire on an interrupt or an API error.
-- **Errors.** `ClaudeSDKClient` raises nothing when a turn fails: the result's `is_error` says so. The adapter classifies the failure from the result's fields (`api_error_status`, `terminal_reason`) and the assistant messages' `error`, in this order:
-  - `AuthMissingError`: an assistant message's `authentication_failed`, or an API status of 401. A missing login shows only in the assistant message, with no status;
-  - `UsageLimitReachedError`: the turn failed and the last `RateLimitEvent` said `rejected`, with the window's reset (`resets_at`) where given. It's raised for the failed turn, not on the event **(leaning)**: a rejected window that still lets the turn finish (overage) isn't an error;
-  - `AgentUnavailableError`: an API status of 429 or 5xx (an overloaded API is 529), an assistant message's `rate_limit` or `server_error`, or an API error (`terminal_reason` `api_error`) with no status, meaning no response arrived, which is how a dropped connection is taken;
-  - `RuntimeMissingError`: the bundled CLI is missing (`CLINotFoundError`);
-  - `TurnError` for anything else: a refused request (400), a crashed CLI, a turn with no result. A `ResultError` the SDK raises is classified the same way.
-- **Cancellation.** A cancelled turn, as when the timeout passes, is interrupted before the cancellation goes on; the client is disconnected either way.
-- **Usage** is the result's input, output, cache-read and cache-write tokens, with its `total_cost_usd`. The session id is Claude Code's.
-- **Tests** drive it on a scripted client: the client factory is a field (`client`), defaulting to the SDK's own behind the guard **(leaning)**, so a test runs the real MCP server and hook without patching the SDK.
+Beside the ask, in other docs: the terminal a declaration compiles to (`sessions/terminal.py`, each adapter's `terminal.py`, `adapters/claude/layout.py` and `settings.py`) and rooms (`rooms/`), in `docs/launch.md`; the bridge to lup's tool server (`sessions/bridge.py`) and the GitHub tools (`github/`), in `docs/host-tools.md`; transcripts (`transcripts/`), in `docs/resume-guidance.md`; `@lup_hook` (`tools/hook.py`), in `docs/declaration.md`; and running a program (`programs.py`).
 
-What it relies on, from claude-agent-sdk 0.2.165 and the Claude Code 2.1.294 it bundles, read in the SDK's source and checked against the bundled CLI with a scripted Messages API, is in `runtime.py`'s docstring and `docs/field-notes.md`.
+Runtime-neutral code lives under `sessions/` and `tools/`; everything a runtime spells its own way lives in its adapter under `adapters/` (`docs/conventions.md`, *Imports and boundaries*), named so rather than `providers`, which also means a model provider or an endpoint. Import contracts in the root `pyproject.toml` keep each SDK in its adapter, and anything inside `lup` from importing its front door, which imports the adapters. The tests are in `packages/lup/tests/`.
 
-## The Codex adapter
+### Repository layout and packages
 
-`adapters/codex/` holds the declaration (`__init__.py`); `CodexAdapter` (`runtime.py`), the only module importing `openai_codex`; lup's Codex home (`layout.py`); and the variables the adapter reads (`settings.py`: `CODEX_HOME`, `XDG_STATE_HOME`). The home and its variables live in the adapter, not in lup's own settings and layout **(leaning)**, since a runtime is named only in its adapter (`docs/conventions.md`, *Imports and boundaries*).
+A uv workspace with one lock file, whose packages are versioned and installed separately: `packages/lup/`, the library, and `packages/lup-dev/`, the environment (`lup_dev`), which depends on it. The library imports nothing of the environment but in a module's environment side kept in its directory of `lup` (`github/`, `transcripts/`), which the import contract lists.
 
-- **The client.** The adapter drives the SDK's lower `CodexClient` **(leaning)**: the documented `Codex` and `AsyncCodex` take no handler for Codex's requests to the client, which lup's tools need. Its raw `request` reaches what the SDK doesn't wrap (`account/read`, and `thread/start` with `environments`).
-- **A process per ask (leaning).** Each ask starts a `codex app-server` of its own in lup's home: start, initialize, check the login, start the thread with lup's tools, take turns. The process is closed at the end, whatever happened.
-- **System prompt.** `system_prompt` is the thread's `baseInstructions`, which replaces Codex's own prompt and arrives as the first developer message. None sends it empty, so no developer message at all **(leaning)**: left out, Codex would send its own coding agent's prompt, describing tools the session doesn't have.
-- **Effort** goes on each `turn/start`; `thread/start` takes none.
-- **lup's tools.** Codex's `item/tool/call` requests reach a handler on the SDK's one reader thread, which hands each call to the event loop the ask runs on and waits for the toolbox's answer (`contentItems` and `success`). The loop stays free for it because every blocking client call runs in a worker thread. A question for the user is answered with a refusal, and any other request fails the ask (*No tools but lup's own*).
-- **The guard.** Codex's hooks are commands configured in files, not callbacks, so the end of a turn is guarded in the adapter: once a turn completes, the toolbox says whether it may end, and where it may not, the same thread takes another turn whose one message is the toolbox's reason. The thread keeps its history, so the prompt isn't sent again.
-- **Errors** are classified from the `codexErrorInfo` of the last error Codex reported without retrying it (`willRetry: false`), or the turn's own error:
-  - `AgentUnavailableError`: `serverOverloaded`, `internalServerError`, `rateLimitExceeded`, and a connection that failed or dropped (`httpConnectionFailed`, `responseStreamConnectionFailed`, `responseStreamDisconnected`, `responseTooManyFailedAttempts`) with no status, a 408, a 429 or a 5xx; also an app-server too busy to take the ask;
-  - `UsageLimitReachedError`: `usageLimitExceeded`, with the reset from the last `account/rateLimits/updated`. That's the latest reset among the windows reported full, or the primary window's where none is **(leaning)**, so a spent weekly window resets when it does, not when the shorter one does;
-  - `AuthMissingError`: `unauthorized`, a connection error with a 401, or no login before the thread starts;
-  - `TurnError` for anything else: a connection error with another 4xx, which isn't retried since the request itself was refused **(leaning)**; a full context window, a bad request, a policy, a kind lup doesn't know; a turn Codex ended as interrupted without being asked; the app-server failing.
-- **The reset arrives outside the turn.** Codex reports the rate limits that came with a usage limit before the error, outside any turn's stream (`next_notification`). A watcher thread per session keeps the last report; nothing synchronises it with the turn's stream, so a reset can in principle be missed (*Checks owed*).
-- **Usage** is the thread's running total once its turns are done (`thread/tokenUsage/updated`'s `total`), since the per-request count is sent again on turns that made no request. The thread is the ask's own, so the total started at zero. Codex counts cached input among its input tokens; lup counts it apart, so `input_tokens` is the input not read from cache, as on Claude. Codex reports no cost. The session id is the thread's.
-- **Cancellation** interrupts the turn (`turn/interrupt`) before the cancellation goes on; an interrupt that fails is noted on the cancellation.
-- **Tests** drive it on a scripted client: the client factory is a field (`connect`) **(leaning)**, and Codex's requests go through the real handler, so tool calls reach the real toolbox.
+**Dependencies:** `pydantic`, `pydantic-settings`, `tenacity`, `mcp`, `tomlkit`. **Extras:** `lup[claude]` (`claude-agent-sdk`), `lup[codex]` (`openai-codex`), `lup[testing]` (`pytest`, `pytest-socket`). Each SDK ships its runtime's binary, a few hundred MB (`docs/field-notes.md`, *The library's asks*), so a project installs only the side it asks through; that's the one reason for an extra, so every other library is a dependency, even one a single adapter uses. lup's own development group installs all three, since every shared construct is tested on both runtimes.
 
-What it relies on, from `openai-codex` 0.162.0 and the codex-cli 0.162.0 it pins, read in their source and checked against a local mock of the Responses endpoint, is in `runtime.py`'s docstring and `docs/field-notes.md`. No real model has run it yet (*Checks owed*).
+**Pinned runtimes.** An ask runs the runtime its SDK bundles, not whatever is on `PATH`, so the lock file pins it: claude-agent-sdk 0.2.165 bundles Claude Code 2.1.294, and openai-codex 0.162.0 pins codex-cli 0.162.0. The guarantees above are checked against those versions.
 
-## Modules
+**Python 3.14 or later,** for lazily evaluated annotations: an earlier Python would need `from __future__ import annotations` in every file, which turns them into strings, and pydantic then fails on names imported only for type checking and on models defined inside functions.
 
-```
-packages/lup/src/lup/
-  __init__.py              the front door: the neutral names, Claude and Codex
-  types.py                 Model, MutableModel and Settings, the bases every model starts from; JsonObject
-  errors.py                LupError, the root of every error lup raises
-  sessions/
-    surface.py             Agent, the ABC code naming no runtime holds
-    declaration.py         Declaration, the fields every declaration has; Asking, an ask inside its layers
-    contract.py            Adapter, TurnRequest and RawTurn: what a runtime's adapter implements; the seam and `guarded`
-    layers.py              SessionLayers, Recovery, Submission
-    submission.py          Toolbox, a Toolset: one turn's tools, the calls made to them, and the guard
-    results.py             TurnResult, Usage, Rejection
-    errors.py              the errors an ask raises, RuntimeMissingError and RealCallInTestError; needs_extra
-    terminal.py            TerminalSettings, SessionSettings, Hook, ToolServer, Cli, Terminal: a declaration compiled for a terminal (docs/launch.md)
-  tools/
-    tool.py                @lup_tool, Tool, AgentTool and ToolSpec, with a tool's summary (summary_of); Allow and Deny; ToolError
-    serving.py             Toolset and Answer; tool_server, an MCP server over a toolset; serve, one connection served
-    submit.py              Submit, the output tool, and its Receipt
-    speaking.py            report and note
-  observability/
-    trace.py               CallRecord, and appending it to the trace
-  testing/
-    fake.py                FakeAgents, FakeCall, UnscriptedAskError
-    plugin.py              the pytest plugin: the guard, and the fake_agents fixture
-  adapters/
-    claude/__init__.py     Claude, the declaration
-    claude/runtime.py      ClaudeAdapter: the options, lup's MCP server over the toolbox, the Stop hook, the init check, the errors
-    claude/terminal.py     Claude Code's terminal: its flags, lup's settings file, its tool servers and messaging socket, and which session settings the operator's own file sets
-    codex/__init__.py      Codex, the declaration
-    codex/runtime.py       CodexAdapter: the launch, the thread, dynamic tools, the continuation, the errors, usage
-    codex/terminal.py      Codex's terminal: its flags and overrides, its tool servers, the requirements file, and which session settings the operator's config.toml sets
-    codex/layout.py        CodexLayout: lup's own Codex home, and the operator's login it links to
-    codex/settings.py      CodexSettings: CODEX_HOME and XDG_STATE_HOME
-```
+## Where it's going
 
-Runtime-neutral code lives under `sessions/` and `tools/`, one adapter per runtime under `adapters/`: named `adapters`, not `providers`, since a provider also means a model provider or a compatible endpoint, which the connection will name. An adapter imports its runtime's SDK inside `ask`, under `needs_extra`, which is how a missing extra becomes `RuntimeMissingError` naming the extra instead of an import error deep inside; the declaration, its effort levels (`Effort`, in the adapter's `__init__.py`) and its terminal compile never import it. Import contracts in the root `pyproject.toml` keep each SDK in its adapter (`claude_agent_sdk` in `lup.adapters.claude`, `openai_codex` in `lup.adapters.codex`), keep anything inside `lup` from importing its front door, and keep the library from importing the environment.
-
-The tests are in `packages/lup/tests/`: `test_ask.py` (an ask through the real layers, on the fake), `test_tools.py` (tools, their summaries and the toolbox's guard), `test_serving.py` (a toolset served over a socket pair to `mcp`'s own client), `test_types.py` (the model bases), and `test_claude.py` and `test_codex.py` (each adapter on a scripted client: no process, no network). The docstrings' examples run as doctests.
-
-## Repository layout and packages
-
-As built for this slice. `DESIGN.md` (*What a module is*) turns it into a distribution per module, the library core a package requiring its modules, with each runtime and the test kit modules of their own, pulled in by the same extras.
-
-One repository, a uv workspace sharing one lock file, whose packages are versioned and installed separately, rather than one distribution with extras:
-- `packages/lup/`: the library, `lup`;
-- `packages/lup-dev/`: the environment, `lup-dev` (imported as `lup_dev`);
-- `packages/lup-dashboard/`: the dashboard, behind its typed protocol, once it starts.
-
-Dependencies run one way: the dashboard, then `lup-dev`, then `lup`.
-
-**Dependencies:** `pydantic`, `pydantic-settings`, `tenacity` for recovery, `mcp` for lup's own tool server, and `tomlkit` for the settings a runtime reads as TOML. **Extras:**
-- `lup[claude]`: `claude-agent-sdk`;
-- `lup[codex]`: `openai-codex`;
-- `lup[testing]`: `pytest` and `pytest-socket`.
-
-Each SDK ships its runtime's binary (about 240 MB and 360 MB installed), so a project installs only the side it uses. That's the one reason for an extra: every other library, even one a single runtime's adapter uses today, is a dependency of the package, so the split stays one rule rather than one per library. The SDKs drive the runtimes, rather than runtime clients of lup's own. lup's own development group installs all three extras, since every shared construct is tested on both runtimes.
-
-**Pinned runtimes.** A runtime is the one its SDK bundles, not whatever is on `PATH`, so the lock file pins it: claude-agent-sdk 0.2.165 bundles Claude Code 2.1.294, and openai-codex 0.162.0 pins codex-cli 0.162.0.
-
-**Python 3.14 or later**, for its lazily evaluated annotations. Python 3.12 would need `from __future__ import annotations` in every file, which turns annotations into strings; pydantic then fails on names imported only for type checking, and on models defined inside functions.
-
-## Later slices
-
-On the same declarations:
-- **Conversations** (`DESIGN.md`, *Calling agents*): `async with agent.open(resume=None)` gives a fresh session, and `session.ask()` returns a lazy `Turn[T]`, awaited for its result or iterated for its content, with `live()` and `interrupt()`. History comes from the runtime's own record, with lup's writer keeping a scrubbed copy, and a refused resume raises. Sessions that are kept run under their own config home, on Claude too. On Codex a conversation declares its output types when it opens, since a thread's tools are fixed when it starts. Forking at a turn needs a turn id, which `TurnResult` doesn't carry yet.
-- **Tools and events:** project tools, their groups and the declaration's `tools` field, each tool declaring where it runs (`runs="inside"` or `"outside"`); the neutral hooks on the runtime's own tools; a large result written to a file, the agent getting its path and a preview; keeping a tool server out of tool search; passing a third-party MCP server through; the result's messages, once a turn has something in it; the events anything long-running emits.
-- **Checked model ids,** with portable tiers, and an effort a model can't take refused at declaration.
-- **The usage-limit wait (leaning):** waiting for a spent window to reset, on by default and bounded by the timeout.
-- **The connection:** an endpoint and an API key as one value, given when a client is created, for products other people use.
-- **Rooms,** `spawn` and `launch`, with containers and mounts, Bash and the tools that write.
-- **Runs** and the outcome loop; `SharedBudget`.
-- **The gate listing each `enable_socket` marker,** like a suppression.
-- **The capability check,** which takes in Codex's live tool check.
-
-## Checks owed
-
-- **Live runs beyond a typed answer.** One typed ask ran live on each runtime, with the operator's logins: Claude on `haiku` (lup's MCP server through the real CLI, the `init` check passing, the answer through `mcp__lup__submit`; no transcript written) and Codex on `gpt-6.1-sol` (code mode: `exec` calling `submit`; everything in lup's own home, nothing in the operator's). Still owed live:
-  - on Claude, the `Stop` guard holding an unanswered turn, and the error classification;
-  - on Codex, the dynamic tool called directly on a model without code mode, and the tool-free configuration, that the model's request carries only lup's tools. That last is the declared gap's check, owed again on each pinned version.
-- **A subscription's spent window on Claude:** how a `RateLimitEvent` with status `rejected` surfaces under a subscription login. An API key's 429 emitted none.
-- **A dropped connection on Claude:** what it reports; it's taken as an API error with no status.
-- **The Codex reset time** arrives on a thread of its own, before the error and outside the turn's stream. Nothing synchronises the two, so a real run could miss it and report no reset; the deterministic alternative is asking `account/rateLimits/read` after the error.
-- **Parallel startups.** Simultaneous Claude Code startups have corrupted `~/.claude.json` in earlier versions, and the adapter uses the default home, so a live check must show whether 2.1.294 still does. On Codex, parallel asks each start an app-server on lup's one home: that their startups don't conflict over its state.
+- **A project's own tools on an ask:** a `tools` field on the declaration, taking `lup_tool`s and their groups, each tool saying whether it runs in the caller's process or inside a room; neutral hooks on the runtime's own tools; a large result written to a file, the agent given its path and a preview; a third-party MCP server passed through. On Codex a project's tool could share `submit`'s name, which Codex's namespaced dynamic tools can keep apart.
+- **Conversations:** `async with agent.open()` holding a session across asks, its history from the runtime's own record with lup keeping a scrubbed copy; each turn awaited for its result or iterated for its content, and interruptible. Kept sessions run under a config home of their own. Forking at a turn needs a turn id, which `TurnResult` doesn't carry yet.
+- **The connection:** an endpoint and an API key as one value, given when a client is made, for products other people use.
+- **Checked model ids,** with portable tiers, and an effort a model can't take refused when the declaration is made.
+- **Rooms from code:** a `Room` that's an `Agent`, asking and spawning in a container (`docs/launch.md`); runs, durable work outliving the call that started it, and the outcome loop; budgets shared across processes.
+- **Events** from anything long-running, which the dashboard reads beside the call records; the capability check, which takes in Codex's hand-run tool check.
+- **A distribution per module:** the library core requiring its modules, each runtime and the test kit modules of their own, pulled in by the same extras.

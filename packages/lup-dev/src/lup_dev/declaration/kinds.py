@@ -42,7 +42,7 @@ class Rules(Named[str]):
 
     Python only composes and records a rule selection: the engine, which holds the
     rule tables, resolves it, and refuses an id it doesn't hold
-    (`docs/declaration.md`, *Selecting them*).
+    (`docs/declaration.md`, *Selecting the rules*).
 
     >>> mine = Rules().drop("tuple-shape").over(Rules.default().drop("regex"))
     >>> mine.start.kind, [operation.names for operation in mine.operations]
@@ -518,7 +518,7 @@ class Repositories(Named[Repository]):
     Any module may hold one; `Core` holds none. Which repositories a person
     relates, and what each is, are theirs, so they go in a module of their own
     layer, `lup_project.local.py`, never in a committed declaration
-    (`docs/related-repositories.md`, decision 7). One name from two modules is
+    (`docs/related-repositories.md`, *A person's own layer*). One name from two modules is
     one repository, the first's, where both give it the same path; with
     different paths, the load fails naming both.
     """

@@ -13,8 +13,9 @@ imports is bound here, lup's modules among them (`docs/declaration.md`):
         modules=Modules.default().edit(CodeRules(rules=Rules().drop("tuple-shape"))),
     )
 
-It imports only the declaration's models, so loading a declaration costs little
-more than pydantic.
+It imports the declaration's models and what they name (the catalog, the host
+service's client, and `lup`'s sessions, adapters, rooms and tools), never the
+judge's, the gate's or the code scanner's code, nor a runtime's SDK.
 """
 
 from lup_dev.catalog.gate import Step

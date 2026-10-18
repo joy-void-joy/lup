@@ -1,6 +1,6 @@
 """What a room's wall is made of: its image, what's mounted, its variables, its network.
 
-A room runs its agent in a container (`DESIGN.md`, *Calling agents*). Everything is mounted
+A room runs its agent in a container (`DESIGN.md`, *Defaults*). Everything is mounted
 at its host path unless a mount names a target: a linked worktree's `.git` file and
 an environment's links hold absolute paths, and the runtimes key their history on
 the working directory's path (`docs/launch.md`, *The mounts*).

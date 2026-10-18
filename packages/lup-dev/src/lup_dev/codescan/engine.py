@@ -1,6 +1,6 @@
 """The typed engine's client: one warm engine per worktree, found or started on demand.
 
-The engine (`packages/lup-dev/checker/`, `docs/judging-writes.md`, *The engine*) is a
+The engine (`packages/lup-dev/checker/`, `docs/judging-writes.md`, *The engine: one typed tree*) is a
 long-lived Node process holding pyright's program for one worktree. Hooks are short
 processes, so each finds the worktree's engine on its socket, starts it if none
 answers, asks one question, and leaves it running for the next. An engine stops on

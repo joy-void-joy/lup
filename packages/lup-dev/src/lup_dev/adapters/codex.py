@@ -27,7 +27,7 @@ runs the room's hook on `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` and
 `SubagentStop` (`hooks`): the checkpoint after each call, the only place its
 hooks see a patch, and each conversation's turn's end, which clears the calls it
 left that no `PostToolUse` finishes. That end is the judge's whole set's
-(`docs/judging-writes.md`, *While a subagent works*): the session's `Stop` runs a
+(`docs/judging-writes.md`, *The turn's end*): the session's `Stop` runs a
 checkpoint, waits for the importers pass, and holds the turn (`decision:
 "block"`, a continuation prompt to Codex) on the type errors and ruff's findings
 left in the files its own conversation touched, until the same findings follow a

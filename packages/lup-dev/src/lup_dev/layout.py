@@ -224,7 +224,7 @@ class CheckoutLayout(Model):
         """The person's own layer of the declaration, which git ignores.
 
         Loaded after the project's declaration and layered on top of it, in the
-        same grammar (`docs/related-repositories.md`, decision 7); trust on
+        same grammar (`docs/related-repositories.md`, *A person's own layer*); trust on
         launch approves it by its content.
         """
         return self.root / f"{self.declaration.stem}.local.py"

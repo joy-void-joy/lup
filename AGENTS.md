@@ -46,7 +46,7 @@ lup's code rules enforce most of these, at the edit and in the gate (`docs/rules
 - **Errors:** raise on what can't be recovered, retry what's transient, validate early, never swallow an error silently.
 - **Don't truncate** data to make it fit. Where a format forces a limit, keep the full copy and point at it.
 - **Code reads as if it was always this way:** no compatibility shims, and no "new" or "fixed" in comments; that belongs in commit messages.
-- **A library side never imports an environment side.** What code calling agents imports, wherever it runs, is a module's library side; what only a project's sessions get is an environment side. As built, `lup` never imports `lup_dev`.
+- **A library side never imports an environment side.** What code calling agents imports, wherever it runs, is a module's library side; what only a project's sessions get is an environment side. As built, `lup`'s library code never imports `lup_dev`; the environment sides of modules that live in `lup`'s directory (`lup.github`, `lup.transcripts`) do, and the import contract in `pyproject.toml` lists each.
 - **Both runtimes.** A shared construct is done when it works on Claude Code and on Codex, shown by their tests, or when the runtime that can't do it declares the gap with evidence. Codex rotted in the first lup because features were built per runtime above the adapter.
 
 ## Tests

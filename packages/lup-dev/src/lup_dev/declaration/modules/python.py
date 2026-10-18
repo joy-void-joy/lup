@@ -27,8 +27,8 @@ class Python(Module):
     tests: TestRoots = TestRoots.of(Pytest(root=Path("tests")))
     """The test roots: the test role, and what pytest's `testpaths` must cover."""
     gate: Gate = Gate.of(*lup_gate.Gate().steps)
-    """ruff, the formatter, pyright, pytest and import-linter, as the catalog has
-    them."""
+    """The catalog's steps: lup's rules with pyright and ruff, the formatter,
+    pytest and import-linter."""
     guidance: Guidance = Guidance.of(
         Section(
             name="python",
