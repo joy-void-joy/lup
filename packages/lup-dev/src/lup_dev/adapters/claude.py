@@ -621,6 +621,9 @@ class Stop(Payload):
     hook_event_name: Literal["Stop"]
     stop_hook_active: bool = False
     """Whether the turn goes on because a `Stop` hook blocked it already."""
+    last_assistant_message: str | None = None
+    """"Text content of the last assistant message before stopping" (2.1.302's
+    hook input schema)."""
 
     def heard(self, fits: int) -> Heard:
         """Read the turn's end: in a room, with no checkpoint, the judge doesn't read it."""
@@ -631,6 +634,7 @@ class Stop(Payload):
             judged=False,
             after_block=self.stop_hook_active,
             fits=fits,
+            said=self.last_assistant_message,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -817,6 +821,16 @@ def heard(raw: str, fits: int = 10_000) -> Heard:
     `ValidationError` where the payload isn't one of the hooks this adapter reads.
     """
     return TypeAdapter[Received](Received).validate_json(raw).heard(fits)
+
+
+def ends(printed: str) -> bool:
+    """Say whether what a turn's end hook prints lets the turn end: it holds the turn with `decision: "block"`.
+
+    >>> ends(""), ends('{"decision":"block","reason":"wait"}')
+    (True, False)
+    """
+    said = Said.model_validate_json(printed) if printed.strip() else Said()
+    return said.decision != "block"
 
 
 def told(raw: str, answer: str, telling: Telling) -> str | None:
@@ -1238,6 +1252,7 @@ def adapter() -> Adapter:
         unanswered=unanswered,
         heard=heard,
         told=told,
+        ends=ends,
         spawned=spawned,
         woken=woken,
         hooks=hooks,

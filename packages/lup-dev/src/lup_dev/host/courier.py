@@ -73,6 +73,9 @@ class Heard(Model):
     spawning: Spawning | None = None
     """At the start of a call spawning a subagent that could have been given a
     name, the name it gives; none for any other hook."""
+    said: str | None = None
+    """At a turn's end, the agent's last message before it, as the runtime hands
+    it to the hook; none for any other hook, or where it has none."""
 
 
 class Telling(Model):
@@ -90,6 +93,15 @@ class Telling(Model):
     own name for the session where it has a way; none leaves it."""
 
 
+class Printed(Model):
+    """What a hook prints, and whether it lets a turn end."""
+
+    text: str
+    ends: bool = True
+    """At a turn's end, whether the answer lets the turn end; one holding it
+    doesn't. Every other hook's answer ends nothing, and says so."""
+
+
 class Courier(ABC):
     """What the host service reads of each runtime's hooks, and how it adds to their answers."""
 
@@ -101,8 +113,10 @@ class Courier(ABC):
         """
 
     @abstractmethod
-    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
-        """Return what one of `runtime`'s hooks prints: `answer`, the judge's or none, with `telling` added.
+    def told(
+        self, runtime: str, payload: str, answer: str, telling: Telling
+    ) -> Printed:
+        """Return what one of `runtime`'s hooks prints, `answer`, the judge's or none, with `telling` added, and whether it lets a turn end.
 
         An answer the service gives itself is what the runtime takes as no
         decision, plus what `telling` adds; it never blocks a call. Raise
@@ -156,6 +170,12 @@ class Post(ABC):
     @abstractmethod
     def returned(self, posted: Posted) -> None:
         """Put what `posted` told back as waiting: the hook's answer couldn't carry it."""
+
+    @abstractmethod
+    async def concluded(
+        self, launch: Register, conversation: Conversation, said: str
+    ) -> None:
+        """Put the last message of a turn of `conversation` of `launch`, a session's own, before the operator, its turn having ended."""
 
 
 class Spawning(Model):

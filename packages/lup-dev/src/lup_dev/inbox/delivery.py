@@ -351,6 +351,21 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return self.told(party, room, heard.fits, "call")
 
     @override
+    async def concluded(
+        self, launch: Register, conversation: Caller, said: str
+    ) -> None:
+        """Put a session's last message of a turn in the operator's inbox, as a note from it: they read what it ended its turn saying there, without it sending it again."""
+        party = Conversation(
+            repository=launch.repository,
+            runtime=launch.runtime,
+            session=conversation.session,
+            agent=conversation.agent,
+        )
+        await self.posted(
+            Message(kind="note", text=said), party, Operator(), launch.worktree
+        )
+
+    @override
     def returned(self, posted: Posted) -> None:
         for number in posted.numbers:
             item = self.inbox.item(number)
