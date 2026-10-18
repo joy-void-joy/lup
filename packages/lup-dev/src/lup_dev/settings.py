@@ -24,6 +24,10 @@ class LupDevSettings(Settings):
     """`XDG_CACHE_HOME`, where per-user caches, what can be fetched again, live; `layout.py` says the default."""
     xdg_data_home: Path | None = None
     """`XDG_DATA_HOME`, where per-user data lives, programs installed for the user among it; `layout.py` says the default."""
+    wayland_display: str | None = None
+    """`WAYLAND_DISPLAY`: the Wayland session the host service runs in, whose clipboard rooms reach (`clipboard/desktop.py`)."""
+    display: str | None = None
+    """`DISPLAY`: the X session the host service runs in, where there's no Wayland one."""
     lup_dashboard_port: int = 8766
     """`LUP_DASHBOARD_PORT`: the port the dashboard listens on, on localhost
     (`host/dashboard.py`); the same at each start, so a page left open finds it again."""

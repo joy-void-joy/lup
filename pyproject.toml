@@ -178,7 +178,7 @@ allowed_importers = ["lup_dev.cli"]
 name = "lup_dev's subsystems import downwards"
 type = "layers"
 containers = ["lup_dev"]
-layers = ["adapters", "launch", "policy", "codescan", "declaration", "catalog", "remote | forge", "inbox", "host"]
+layers = ["adapters", "launch", "policy", "codescan", "declaration", "catalog", "remote | forge | clipboard", "inbox", "host"]
 
 # git's remote helper runs on a room's own Python, which has the standard library
 # alone (`docs/host-tools.md`, *git through a remote helper*): it imports nothing
@@ -199,6 +199,23 @@ ignore_imports = [
     "lup_dev.remote.helper -> subprocess",
     "lup_dev.remote.helper -> sys",
     "lup_dev.remote.helper -> typing",
+]
+
+# The clipboard's `wl-paste` and `wl-copy` run on a room's Python too
+# (`docs/host-tools.md`, *The clipboard*): the standard library's modules alone.
+[[tool.importlinter.contracts]]
+name = "lup_dev.clipboard.shim imports the standard library alone"
+type = "forbidden"
+source_modules = ["lup_dev.clipboard.shim"]
+forbidden_modules = ["*", "lup.**", "lup_dev.**"]
+as_packages = false
+ignore_imports = [
+    "lup_dev.clipboard.shim -> argparse",
+    "lup_dev.clipboard.shim -> base64",
+    "lup_dev.clipboard.shim -> json",
+    "lup_dev.clipboard.shim -> pathlib",
+    "lup_dev.clipboard.shim -> socket",
+    "lup_dev.clipboard.shim -> sys",
 ]
 
 # lup's MCP bridge runs on a room's Python too, as each runtime's stdio server for

@@ -261,6 +261,15 @@ class Credentials(Layer):
 
 The gate checks each `defer(issue=…)`'s issue is still open, through `gh` (`Issues`, `codescan/directives.py`). In a room it crashed on `CommandNotFound: gh`, and since then leaves those issues unchecked there and says why (`docs/field-notes.md`, *Launch, live*). **`HostIssues`,** an `Issues` asking the host for an issue's state over `request.sock` (`IssueState`), answered by the forge's handler with `gh`, is the gate's choice wherever `/run/lup/request.sock` is there; elsewhere `GitHubIssues`, as today. So `uv run lup-dev check` in a room checks deferrals again. The gate runs the project's own `lup-dev` against the per-user service, so a kind the service doesn't know is refused with its name, and the gate says the issue went unchecked and why.
 
+### The clipboard
+
+A room has no display, so nothing in it reaches the operator's clipboard on its own. The host service reaches it for the room (`clipboard/`):
+- **In the room,** `wl-paste` and `wl-copy` are first on the `PATH`, beside git's helper: one program under both names (`clipboard/shim.py`), on the room's Python with the standard library alone, written into the launch's `bin` and refreshed with the host (`launch/room.py`, `RoomClipboard`, `programs`). The room names a Wayland display (`WAYLAND_DISPLAY=lup`, none behind it), so a program choosing its clipboard by it reaches for them: Claude Code copies through `wl-copy` and pastes an image by listing types with `wl-paste -l` and reading `wl-paste --type image/png` (`docs/field-notes.md`, *The clipboard*).
+- **On the request socket,** three requests (`clipboard/protocol.py`): the types the clipboard offers, what it holds as one of them (as text where none is named), and text to put on it; each for the clipboard or the primary selection.
+- **On the host,** the desktop's own programs answer them (`clipboard/desktop.py`, `Desktop`): `wl-paste` and `wl-copy` where the service's environment names a Wayland session, `xclip` where it names an X one; where it names neither, as for a service started outside the graphical session, each request is refused saying so. A read is bounded: a clipboard holding more than 32 MiB is refused rather than read whole, and a program not answering within 5 s is stopped. `wl-paste` or `xclip` is an optional requirement of the host, said once where both are missing.
+- **What it costs:** anything in a room can read what the operator copies, a password among it, and replace it. Lending every room the clipboard is the operator's choice.
+- **Codex** reads the clipboard natively, through X or Wayland's own protocol, rather than through a program, so it isn't reached this way: a gap, until rooms run a private display bridged to the host (as the first lup's did).
+
 ## Trust on launch: the summary first
 
 The first approval on lup's own repository showed its whole host zone, about 110 files and 24,000 lines (`docs/launch.md`, *Trust on launch*), which the operator found unusable. The question becomes, in order **(leaning)**:
