@@ -17,7 +17,7 @@ Its package is `packages/lup-dashboard/` (`lup_dashboard`), which imports `lup-d
 The page asks the host service only what the operator's commands ask it: the host's own control requests, relayed as they are.
 
 - `POST /api/ask` takes one request (`lup_dashboard.api.Asked`) and returns its reply (`Replied`), a refusal among them.
-- `POST /api/watch` takes one and streams its replies as server-sent events: at once, then again each time the reply changes, through the host's watch socket (`docs/host-tools.md`, *Watching*).
+- `/api/socket`, a WebSocket, carries every watch a page holds: the page starts one with a number it picks (`Watch`) and stops it (`Unwatch`), and the server sends each reply under its number (`Watched`), at once, then again each time it changes, through the host's watch socket (`docs/host-tools.md`, *Watching*); a watch the host ends, or can't serve, is said (`Ended`), and the page starts it again after a wait. One socket for every watch, since a browser keeps six connections to a host, which a stream per watch used up in three tabs. A socket whose token or origin is refused is closed with 4401 or 4403, which the page says rather than retrying.
 - The requests the page may send: the launches served and their conversations (`ListLaunches`), a launch renamed, the operator's inbox listed, an item shown, answered, finished or sent, an approval answered and its diff read, and the operator's draft shown, kept and sent. Any other is refused before it reaches the host.
 - The server (`lup_dashboard/server.py`, FastAPI) talks to the host through `Host`, a seam its tests fill with a stand-in; `Sockets` reaches the running service, through `lup_dev/host/client.py`'s `answer` and `replies`.
 - The API's description is the server's own OpenAPI document (`lup-dashboard openapi`), made from the host's pydantic models; the page's types are generated from it.
@@ -50,6 +50,6 @@ Rooms share the host's network, so being on localhost keeps out only other machi
 
 ## Tests
 
-- `packages/lup-dashboard/tests/test_server.py`: the API on a stand-in host, a request relayed and its reply returned, a refusal returned as a reply, a watch streamed as events, a request the page may not send refused before the host, the token and the origin required, the cookie traded for the token, another host's name refused, a host out of reach said, and the page served for every other path.
+- `packages/lup-dashboard/tests/test_server.py`: the API on a stand-in host, a request relayed and its reply returned, a refusal returned as a reply, watches carried on one socket under their numbers, a stopped one sending nothing more, a host out of reach ending one with why, the socket's token and origin required, a request the page may not send refused before the host, the token and the origin required, the cookie traded for the token, another host's name refused, a host out of reach said, and the page served for every other path.
 - `packages/lup-dev/tests/test_host.py`: the dashboard begun with the service and handed its token on its input, the token kept between starts and readable by its owner alone, the dashboard ending with the service, started again when its address is asked after it died, and one that can't listen, or isn't installed, said.
 - `page/src/agents.test.ts`: the tree each conversation is placed in, and what each is said to be doing.

@@ -1,6 +1,6 @@
 """The dashboard's server, on a stand-in host: its API relaying requests and streaming their replies, and who may call it."""
 
-import json
+import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, override
 
@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from pathlib import Path
 
+    from pydantic import JsonValue
+
     from lup_dashboard.api import Asked, Replied
 
 
@@ -25,10 +27,16 @@ class StandIn(Host):
     """Answers each request from what it was given, recording each asked."""
 
     def __init__(
-        self, answers: dict[str, list[Replied]], *, reachable: bool = True
+        self,
+        answers: dict[str, list[Replied]],
+        *,
+        reachable: bool = True,
+        lasting: bool = False,
     ) -> None:
         self.answers = answers
         self.reachable = reachable
+        self.lasting = lasting
+        """Whether a watch, its replies given, waits for a change that never comes, as the host's do, rather than ending."""
         self.asked: list[Asked] = []
 
     @override
@@ -43,11 +51,19 @@ class StandIn(Host):
     @override
     async def watch(self, request: Asked) -> AsyncGenerator[Replied]:
         self.asked.append(request)
+        if not self.reachable:
+            message = "no host service answers on watch.sock"
+            raise HostError(message)
         for replied in self.answers[request.kind]:
             yield replied
+        if self.lasting:
+            await asyncio.Event().wait()
 
 
 GIVEN = "stand-in"
+
+SOCKET = "ws://127.0.0.1:8766/api/socket"
+"""The page's socket, by the address it's served at: another host name is refused."""
 
 
 @pytest.fixture
@@ -90,21 +106,88 @@ def test_a_refusal_is_a_reply_like_any_other(page: Path) -> None:
     assert response.json() == {"kind": "refused", "error": "no item 9"}
 
 
-def test_watch_streams_each_reply_as_an_event(page: Path) -> None:
+def watched(number: int, request: Asked) -> JsonValue:
+    """The page's frame starting watch `number` of `request`."""
+    return {"kind": "watch", "number": number, "request": request.model_dump()}
+
+
+def test_the_socket_sends_a_watchs_replies_under_its_number_then_its_end(
+    page: Path,
+) -> None:
     host = StandIn({"inbox-list": [Items(items=[]), Refused(error="stopped")]})
-    with client(host, page).stream(
-        "POST", "/api/watch", json=ListInbox().model_dump(), headers=bearing()
-    ) as response:
-        events = [
-            json.loads(line.removeprefix("data: "))
-            for line in response.iter_lines()
-            if line.startswith("data: ")
-        ]
-    assert response.headers["content-type"].startswith("text/event-stream")
-    assert events == [
-        {"kind": "inbox-items", "items": []},
-        {"kind": "refused", "error": "stopped"},
+    with client(host, page).websocket_connect(SOCKET, headers=bearing()) as socket:
+        socket.send_json(watched(7, ListInbox()))
+        frames = [socket.receive_json() for _ in range(3)]
+    assert frames == [
+        {"kind": "watched", "number": 7, "reply": {"kind": "inbox-items", "items": []}},
+        {
+            "kind": "watched",
+            "number": 7,
+            "reply": {"kind": "refused", "error": "stopped"},
+        },
+        {"kind": "ended", "number": 7, "why": "the host service closed the watch"},
     ]
+
+
+def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
+    page: Path,
+) -> None:
+    host = StandIn(
+        {"list": [Listed(launches=[])], "inbox-list": [Items(items=[])]}, lasting=True
+    )
+    with client(host, page).websocket_connect(SOCKET, headers=bearing()) as socket:
+        socket.send_json(watched(1, ListLaunches()))
+        first = socket.receive_json()
+        socket.send_json({"kind": "unwatch", "number": 1})
+        socket.send_json(watched(2, ListInbox()))
+        second = socket.receive_json()
+    assert first == {
+        "kind": "watched",
+        "number": 1,
+        "reply": {"kind": "listed", "launches": [], "sessions": {}, "talkers": {}},
+    }
+    # Watch 1, stopped, sends nothing more: not even its end.
+    assert second == {
+        "kind": "watched",
+        "number": 2,
+        "reply": {"kind": "inbox-items", "items": []},
+    }
+    assert host.asked == [ListLaunches(), ListInbox()]
+
+
+def test_a_host_out_of_reach_ends_the_watch_saying_why(page: Path) -> None:
+    host = StandIn({}, reachable=False)
+    with client(host, page).websocket_connect(SOCKET, headers=bearing()) as socket:
+        socket.send_json(watched(3, ListInbox()))
+        ended = socket.receive_json()
+    assert ended == {
+        "kind": "ended",
+        "number": 3,
+        "why": "no host service answers on watch.sock",
+    }
+
+
+def closed(served: TestClient, headers: dict[str, str]) -> int:
+    """Open the socket with `headers` and return the code it's closed with."""
+    with served.websocket_connect(SOCKET, headers=headers) as socket:
+        return socket.receive()["code"]
+
+
+def test_the_socket_needs_the_token_and_a_page_of_its_own_origin(page: Path) -> None:
+    host = StandIn({"list": [Listed(launches=[])]}, lasting=True)
+    served = client(host, page)
+    without = closed(served, {})
+    wrong = closed(served, {"Authorization": "Bearer no"})
+    elsewhere = closed(served, {**bearing(), "Origin": "http://evil.example"})
+    served.post("/api/session", headers=bearing())
+    with served.websocket_connect(
+        SOCKET, headers={"Origin": "http://127.0.0.1:8766"}
+    ) as socket:
+        socket.send_json(watched(1, ListLaunches()))
+        by_cookie = socket.receive_json()
+    assert [without, wrong, elsewhere] == [4401, 4401, 4403]
+    assert by_cookie["kind"] == "watched"
+    assert host.asked == [ListLaunches()]
 
 
 def test_a_request_the_page_may_not_send_is_refused_before_the_host(page: Path) -> None:
