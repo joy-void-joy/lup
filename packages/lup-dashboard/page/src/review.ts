@@ -161,7 +161,7 @@ export function steps(context: Context): Said[] {
             return;
         }
         const who: Kind = entry.by === "operator" ? "you" : "agent";
-        shown.push(...spoken(who, entry.text, false).map((row) => ({ kind: who, text: row.text })));
+        shown.push(...spoken(who === "you" ? who : null, entry.text, false).map((row) => ({ kind: who, text: row.text })));
     });
     ran();
     return shown;

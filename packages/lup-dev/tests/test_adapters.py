@@ -102,7 +102,7 @@ def test_claude_denies_a_held_write_the_operator_declined(
     assert not (repo / "src/pkg/new.py").exists()
 
 
-def test_claude_allows_an_edit_with_a_finding_and_counts_it_running(
+def test_claude_allows_an_edit_with_a_finding_telling_it_and_counts_it_running(
     on_claude: Bench, repo: Path, kit: Kit
 ) -> None:
     raw = pre_tool_use(
@@ -116,6 +116,8 @@ def test_claude_allows_an_edit_with_a_finding_and_counts_it_running(
     )
     output = json.loads(claude.hook(raw, on_claude))["hookSpecificOutput"]
     assert output["permissionDecision"] == "allow"
+    assert output["additionalContext"].startswith("lup's findings on the lines changed")
+    assert " - regex: " in output["additionalContext"]
     assert running(kit, repo) != []
 
 

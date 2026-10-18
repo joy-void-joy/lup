@@ -62,7 +62,7 @@ def test_an_allowed_edit_is_remembered_until_its_call_finishes(
     ] == [("e1", CORE, False)]
 
 
-def test_an_edit_with_a_finding_is_allowed_and_remembered_for_its_checkpoint(
+def test_an_edit_with_a_finding_is_allowed_its_finding_told_with_the_call(
     kit: Kit, repo: Path
 ) -> None:
     decision = before(
@@ -70,6 +70,9 @@ def test_an_edit_with_a_finding_is_allowed_and_remembered_for_its_checkpoint(
     )
     assert decision.outcome == "allow"
     assert decision.reason == ""
+    assert decision.told.startswith("lup's findings on the lines changed")
+    assert f"  {repo}/src/pkg/core.py:" in decision.told
+    assert " - regex: " in decision.told
     session = read_model(kit.layout.store(repo).session("s1"), Session)
     assert session is not None
     assert [pending.path for pending in session.pending] == [CORE]
@@ -105,6 +108,9 @@ def test_a_write_that_asks_is_held_for_the_operator_and_let_through_on_a_yes(
     session = read_model(kit.layout.store(repo).session("s1"), Session)
     assert session is not None
     assert [(each.path, each.asked) for each in session.pending] == [(CORE, True)]
+    assert session.approved == [CORE]
+    *_, logged = VerdictLog(path=kit.layout.verdicts(repo / ".git")).read()
+    assert (logged.outcome, logged.answer) == ("hold", "approved")
 
 
 def test_a_flagged_write_lands_unasked_unless_the_operator_holds_its_agents(

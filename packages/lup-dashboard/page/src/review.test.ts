@@ -195,7 +195,7 @@ describe("what folds under an item", () => {
         expect(steps(CONTEXT)).toEqual([
             { kind: "you", text: "you: Build the reader." },
             { kind: "you", text: "     Ask me first." },
-            { kind: "agent", text: "agent: Reading the records." },
+            { kind: "agent", text: "Reading the records." },
             { kind: "calls", text: "· called Bash ×2, Read" },
             { kind: "anchor", text: "→ called mcp__lup__ask · this item" },
             { kind: "calls", text: "· called Grep" },
@@ -213,7 +213,7 @@ describe("what folds under an item", () => {
                 "no context: item 54 was made by no agent's call\n\n" +
                 "━━ s1 ━━\n── #51 ──\nWhich parser?\n1. Use lark\n   lean: yes\n2. Keep the cache\n   lean: no\n" +
                 "context · 7 steps, from your words 9m before this item\n" +
-                "you: Build the reader.\n     Ask me first.\nagent: Reading the records.\n" +
+                "you: Build the reader.\n     Ask me first.\nReading the records.\n" +
                 "· called Bash ×2, Read\n→ called mcp__lup__ask · this item\n· called Grep\n\n",
         );
         const [approval, question] = out.regions;
@@ -242,7 +242,7 @@ describe("what folds under an item", () => {
             "context · 7 steps, from your words 9m before this item",
         );
         expect(shown(context!.from, context!.to)).toBe(
-            "\nyou: Build the reader.\n     Ask me first.\nagent: Reading the records.\n" +
+            "\nyou: Build the reader.\n     Ask me first.\nReading the records.\n" +
                 "· called Bash ×2, Read\n→ called mcp__lup__ask · this item\n· called Grep",
         );
         expect(question!.asides.find((each) => each.kind === "anchor")).toMatchObject({

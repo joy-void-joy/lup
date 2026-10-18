@@ -67,6 +67,8 @@ For `Edit` and `Write` the content after the call is known before anything is wr
 
 The judgement compares with the accepted content, not the disk, so a command's write not yet judged is judged with the edit: an edit to a file a command just created asks as a new file. A write allowed or asked is remembered with its call (`Pending`); when the call finishes, the checkpoint accepts that content as judged, and an asked call that ran was approved (`confirm`, `policy/checkpoint.py`). The engine checks content that isn't on disk yet as pyright's language server checks an unsaved buffer.
 
+**Told with the call.** A write let through carries what its judgement found, told beside the call as a checkpoint would report it (`Decision.told`, `told`): Claude Code's room runs no checkpoint after a call, so its findings, type errors and ruff's findings reach the agent before its next line. A held write approved is logged approved, and covers its path for the rest of the session, as the operator answers, not at a call's finish no hook may report.
+
 **After a refusal,** the change comes back through the file tools, where the operator is asked: a file written whole again with `Write`, where the prompt shows it whole.
 
 ### After a call: the checkpoint
@@ -147,7 +149,7 @@ The session's own turn's end (`TurnEnded`; `end_turn`, `policy/checkpoint.py`) r
 
 ### Findings
 
-lup's findings on the lines a change touched (`touched_lines`; every line of a new file), and what's wrong with its directives, are told right after the call, beside its result, each with its steer, as a type error is: the change has landed, and the agent clears each finding or keeps it with an `ignore`, which asks the operator. Those on lines no change touched are told apart. They hold the session's turn's end, as type errors do (*The turn's end*), and fail the gate.
+lup's findings on the lines a change touched (`touched_lines`; every line of a new file), and what's wrong with its directives, are told with the call that made it: a file tool's write beside the call itself, where it's judged before it lands (*Before an edit lands*), anything else right after the call, beside its result, each with its steer, as a type error is: the change has landed, and the agent clears each finding or keeps it with an `ignore`, which asks the operator. Those on lines no change touched are told apart. They hold the session's turn's end, as type errors do (*The turn's end*), and fail the gate.
 
 The report, in pyright's shape:
 
@@ -228,7 +230,7 @@ The engine's build compiles the table into its bundle. A check reports where and
 
 ### The verdict log
 
-Every judgement is logged, so how often lup asks, refuses and allows can be measured and tuned instead of guessed (`policy/verdicts.py`). One JSON line per verdict (`Verdict`): the time, the session (none for a move of `HEAD`), the runtime, the tool (or `checkpoint`, or `move`), the worktree, the path and its role, the outcome (allow, ask, refuse, hold) with its reasons (the names of what it holds; for an allow, the names of what it flags, else the rules of the findings told, else the role, `rules-pass` for production), and the operator's answer. An answer comes later, so it's appended as the same verdict again under the same key, and a reader takes the last line for each key; an ask logged only once answered would be lost when a hook dies. It's kept per repository, so one place measures a repository's worktrees. `lup-dev verdicts --days 7` summarises it by outcome and reason, with how asks and holds were answered.
+Every judgement is logged, so how often lup asks, refuses and allows can be measured and tuned instead of guessed (`policy/verdicts.py`). One JSON line per verdict (`Verdict`): the time, the session (none for a move of `HEAD`), the runtime, the tool (or `checkpoint`, or `move`), the worktree, the path and its role, the outcome (allow, ask, refuse, hold) with its reasons (the names of what it holds; for an allow, the names of what it flags, else the rules of the findings told, else the role, `rules-pass` for production), and the operator's answer. An answer comes later, so it's appended as the same verdict again under the same key, and a reader takes the last line for each key; an ask logged only once answered would be lost when a hook dies. It's kept per repository, so one place measures a repository's worktrees. `lup-dev verdicts --days 7` summarises it by outcome and reason, with how asks and holds were answered. A launched session, whose room mounts neither the log nor the holds, reads its own verdicts, or every session's, and the repository's holds through lup's `judged` tool (`docs/host-tools.md`, *lup's tools*).
 
 ### The two runtimes
 
@@ -246,7 +248,7 @@ What each adapter relies on from its runtime is in its module's docstring (`adap
 ### Installing it here
 
 The judge's whole set is its hooks on `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` and `SubagentStop`, with `PostToolUseFailure` on Claude Code, every tool matched. lup's repository commits no `.claude/` and no `.codex/`, so lup's own sessions run only through `lup-dev launch` (`docs/launch.md`): each hook pipes its payload to the host service, which answers with the copy of `lup-dev` the operator approved for the repository (`docs/launch.md`, *The one hook and the host service*).
-- **Claude Code** runs `SessionStart`, `PreToolUse` on every call, `Stop` and `SubagentStop`. The judge reads `SessionStart` and the file tools' writes (`WRITING`, `adapters/claude.py`), and runs no checkpoint: a write it lets through stays counted as running, which holds nothing back, and what the shell writes meets the rules at the gate.
+- **Claude Code** runs `SessionStart`, `PreToolUse` on every call, `Stop` and `SubagentStop`. The judge reads `SessionStart` and the file tools' writes (`WRITING`, `adapters/claude.py`), and runs no checkpoint: a write it lets through stays counted as running, which holds nothing back, its findings told with the call; what the shell writes meets the rules at the gate.
 - **Codex** runs the whole set, each hook read by the judge: the checkpoint after each call, the only place its hooks see a patch, and each turn's end.
 - **`lup_project.py`** declares `asks="protected"`, the test roots `packages/*/tests`, `runtime-mention` added back, the library's front door exempt from it and the catalog from `constant-home`, and `LupDevelopment`, which builds the engine before the gate's first step and protects `lup_dev/catalog/**`.
 - **The judge's own source** beyond the catalog isn't asked about at each edit: the judge that runs is the installed copy, so an edit in a worktree can't change what judges it, nor a broken judge in a worktree refuse its own fix. The operator reads what changed in it once, through trust on launch, before it runs (`docs/launch.md`, *Trust on launch*).
@@ -281,8 +283,9 @@ In `packages/lup-dev/src/lup_dev/`, whose subsystems import downwards (`adapters
 | `policy/store.py` | The store: snapshot, compare, set aside what was committed elsewhere or merged from it, restore, save |
 | `policy/worktrees.py` | The session's repository, a path's worktree, the worktrees a session holds |
 | `policy/importers.py` | The background pass re-checking the files importing what changed |
-| `policy/holds.py` | Holds: waiting for an answer, and answering |
+| `policy/holds.py` | Holds: waiting for an answer, and answering; a repository's holds, by its verdict log |
 | `policy/verdicts.py` | The verdict log and its summary |
+| `policy/tools.py` | `judged`, the judge's tool in a launched session: the verdicts and holds, for the session to read (`docs/host-tools.md`) |
 | `policy/report.py` | What the agent and the operator are told, in pyright's shape |
 | `policy/runtime.py` | `Runtime`: what the core needs to know of a runtime |
 | `codescan/contract.py` | The engine's contract: findings, reports, surfaces, rules, and `Checker`, which tests fake |
