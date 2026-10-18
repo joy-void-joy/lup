@@ -6,9 +6,12 @@
 // of insert mode on the line; `v` and a motion, then `c` or `s`, on the
 // selection. Ctrl+Enter in a comment ends it, back on what it's about; elsewhere
 // it sends. `u` and Ctrl+R undo and redo any change to the draft. Space `d` marks
-// an item read, Space `z` leaves it for later, Space `e` opens an approval's
-// diff, Space `a` or `x` answers it; `J` and `K` go to the next and previous
-// item (`docs/dashboard.md`, *The review*).
+// an item read, Space `z` leaves it for later, Space `a` or `x` answers an
+// approval; `J` and `K` go to the next and previous item. Under each item, its
+// context and an approval's whole diff fold, folded until opened: `za` opens or
+// closes the one under the cursor, `zo` and `zc` open and close it, `zR` and `zM`
+// open and close them all (`docs/dashboard.md`, *The review*).
+import { codeFolding, foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
 import { Annotation, EditorState, Prec, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, EditorView, drawSelection, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { Vim, getCM, vim, type CodeMirror, type CodeMirrorV } from "@replit/codemirror-vim";
@@ -16,6 +19,8 @@ import { useEffect, useMemo, useRef } from "react";
 
 import {
     blockAt,
+    foldAt,
+    foldKey,
     laid,
     onBanner,
     opened,
@@ -24,9 +29,12 @@ import {
     regionAt,
     shownAt,
     toggled,
+    type Around,
+    type Aside,
     type Block,
     type Comment,
     type Draft,
+    type Fold,
     type Item,
     type Laid,
     type Span,
@@ -38,8 +46,8 @@ interface Props {
     change: (draft: Draft) => void;
     /** Name the group an item is in: the agent that sent it, and where. */
     banner: (item: Item) => string;
-    diffs: Map<number, string>;
-    open: (number: number) => void;
+    /** What the host has answered of each item beyond its own text: its context, and an approval's whole diff. */
+    around: Around;
     send: () => void;
     approve: (number: number, approved: boolean) => void;
     /** Whether the confirmation has the keyboard: once it's gone, the review takes it back. */
@@ -59,7 +67,9 @@ interface Actions {
     toggle: (list: "done" | "parked") => void;
     move: (forward: boolean) => void;
     approve: (approved: boolean) => void;
-    expand: () => void;
+    fold: (how: "toggle" | "open" | "close") => void;
+    foldAll: (closing: boolean) => void;
+    folded: (state: EditorState) => void;
     undo: (back: boolean) => void;
     send: () => void;
     blocks: () => Block[];
@@ -101,7 +111,12 @@ function mapKeys(): void {
     action("lupPrevious", () => current?.move(false));
     action("lupApprove", () => current?.approve(true));
     action("lupDecline", () => current?.approve(false));
-    action("lupExpand", () => current?.expand());
+    // Vim's own fold keys, which its CodeMirror mode leaves unmapped, on CodeMirror's folds.
+    action("lupFoldToggle", () => current?.fold("toggle"));
+    action("lupFoldOpen", () => current?.fold("open"));
+    action("lupFoldClose", () => current?.fold("close"));
+    action("lupFoldOpenAll", () => current?.foldAll(false));
+    action("lupFoldCloseAll", () => current?.foldAll(true));
     action("lupUndo", () => current?.undo(true));
     action("lupRedo", () => current?.undo(false));
     const map = (keys: string, name: string, context: string) =>
@@ -113,7 +128,11 @@ function mapKeys(): void {
     map("<Space>z", "lupLater", "normal");
     map("<Space>a", "lupApprove", "normal");
     map("<Space>x", "lupDecline", "normal");
-    map("<Space>e", "lupExpand", "normal");
+    map("za", "lupFoldToggle", "normal");
+    map("zo", "lupFoldOpen", "normal");
+    map("zc", "lupFoldClose", "normal");
+    map("zR", "lupFoldOpenAll", "normal");
+    map("zM", "lupFoldCloseAll", "normal");
     map("u", "lupUndo", "normal");
     map("<C-r>", "lupRedo", "normal");
     map("J", "lupNext", "normal");
@@ -254,7 +273,14 @@ function diffLine(line: string): string | null {
     return null;
 }
 
-/** Draw the review: groups' banners, items' headers, done and parked items, diffs' lines, each comment's lines, and the passage each comment is on. */
+/** Return the classes a line under an item is drawn with: what it shows, a diff's line as git colours it, and whether it folds under a summary. */
+function asideClasses(laidOut: Laid, aside: Aside): string {
+    const diff = aside.kind === "diff" ? diffLine(laidOut.text.slice(aside.from, aside.to)) : null;
+    const under = aside.kind === "summary" || aside.kind === "refused" ? null : "aside-under";
+    return [`aside-${aside.kind}`, under, diff].filter((each) => each !== null).join(" ");
+}
+
+/** Draw the review: groups' banners, items' headers, done and parked items, the lines under each item, each comment's lines, and the passage each comment is on. */
 function decorations(laidOut: Laid, draft: Draft): DecorationSet {
     const marks: { from: number; to: number; value: Decoration }[] = [];
     const comments = draft.comments ?? [];
@@ -273,13 +299,8 @@ function decorations(laidOut: Laid, draft: Draft): DecorationSet {
             (draft.parked ?? []).includes(number) ? "is-parked" : "",
         ].join(" ");
         marks.push({ from: region.header.from, to: region.header.from, value: Decoration.line({ class: states }) });
-        if (region.item.reason.reason === "approval") {
-            for (const line of region.lines) {
-                const kind = diffLine(laidOut.text.slice(line.from, line.to));
-                if (kind !== null) {
-                    marks.push({ from: line.from, to: line.from, value: Decoration.line({ class: kind }) });
-                }
-            }
+        for (const aside of region.asides) {
+            marks.push({ from: aside.from, to: aside.from, value: Decoration.line({ class: asideClasses(laidOut, aside) }) });
         }
         for (const block of region.blocks) {
             let at = block.from;
@@ -303,6 +324,26 @@ function decorations(laidOut: Laid, draft: Draft): DecorationSet {
         builder.add(each.from, each.to, each.value);
     }
     return builder.finish();
+}
+
+/** Return whether CodeMirror holds `fold` folded. */
+function isFolded(state: EditorState, fold: Fold): boolean {
+    let found = false;
+    foldedRanges(state).between(fold.from, fold.from, (from, to) => {
+        found ||= from === fold.from && to === fold.to;
+    });
+    return found;
+}
+
+/** Return the effect that folds or unfolds `fold`. */
+function folding(fold: Fold, closing: boolean): StateEffect<Span> {
+    const range = { from: fold.from, to: fold.to };
+    return closing ? foldEffect.of(range) : unfoldEffect.of(range);
+}
+
+/** Return where the cursor goes once a fold closes over it: on its summary line where it was in what the fold hides, else where it was. */
+function uncovered(closed: Fold[], head: number): number {
+    return closed.find((each) => head > each.summary.to && head <= each.to)?.summary.from ?? head;
 }
 
 function when(made: string): string {
@@ -331,11 +372,13 @@ function followed(before: Laid | null, after: Laid, head: number, landing: Landi
     return Math.max(Math.min(now.header.from + (head - was.header.from), after.text.length), 0);
 }
 
-export function Review({ items, draft, change, banner, diffs, open, send, approve, confirming, inserting, epoch }: Props) {
+export function Review({ items, draft, change, banner, around, send, approve, confirming, inserting, epoch }: Props) {
     const parent = useRef<HTMLDivElement>(null);
     const view = useRef<EditorView | null>(null);
     const shown = useRef<Laid | null>(null);
     const landing = useRef<Landing>(null);
+    // The folds the operator opened, by `foldKey`: each laying out folds every other one.
+    const unfolded = useRef(new Set<string>());
     const latest = useRef(draft);
     latest.current = draft;
     const telling = useRef(inserting);
@@ -355,9 +398,9 @@ export function Review({ items, draft, change, banner, diffs, open, send, approv
                     return `── #${item.number} ${what} · ${when(item.made)}${later ? " · later" : ""} ──`;
                 },
                 draft,
-                diffs,
+                around,
             ),
-        [items, banner, draft, diffs],
+        [items, banner, draft, around],
     );
 
     useEffect(() => {
@@ -376,11 +419,17 @@ export function Review({ items, draft, change, banner, diffs, open, send, approv
                     onlyComments,
                     withinComment,
                     EditorView.lineWrapping,
+                    codeFolding({ placeholderText: "…" }),
                     drawing,
                     EditorView.updateListener.of((update) => {
                         const replaced = update.transactions.some((each) => each.annotation(rebuilt) === true);
                         if (update.docChanged && !replaced) {
                             current?.edited(update);
+                        }
+                        // A fold opened or closed however it was, by its keys, a click, or the cursor going into it,
+                        // is kept for the next laying out; an edit only moves the folds with the text.
+                        if (!update.docChanged && foldedRanges(update.startState) !== foldedRanges(update.state)) {
+                            current?.folded(update.state);
                         }
                         // A click out of the comment being written ends it, as Esc would.
                         const clicked = update.transactions.some((each) => each.isUserEvent("select.pointer"));
@@ -425,10 +474,15 @@ export function Review({ items, draft, change, banner, diffs, open, send, approv
         }
         const arriving = landing.current;
         if (editor.state.doc.toString() !== laidOut.text) {
+            // Replacing the text drops every fold; each the operator hasn't opened is folded again with it.
             const head = followed(shown.current, laidOut, editor.state.selection.main.head, arriving);
+            const closed = laidOut.regions
+                .flatMap((each) => each.folds)
+                .filter((each) => !unfolded.current.has(foldKey(each)));
             editor.dispatch({
                 changes: { from: 0, to: editor.state.doc.length, insert: laidOut.text },
-                selection: { anchor: head },
+                selection: { anchor: uncovered(closed, head) },
+                effects: closed.map((each) => folding(each, true)),
                 scrollIntoView: true,
                 annotations: rebuilt.of(true),
             });
@@ -578,10 +632,48 @@ export function Review({ items, draft, change, banner, diffs, open, send, approv
                 approve(region.item.number, approved);
             }
         },
-        expand: () => {
-            const region = here();
-            if (region?.item.reason.reason === "approval") {
-                open(region.item.number);
+        fold: (how) => {
+            const editor = view.current;
+            const at = head();
+            const fold = foldAt(laidOut, at);
+            if (editor === null || fold === undefined) {
+                return;
+            }
+            const closed = isFolded(editor.state, fold);
+            const closing = how === "toggle" ? !closed : how === "close";
+            if (closing !== closed) {
+                // From what the fold hides, or past its placeholder, the cursor goes to its summary line.
+                const back = at > fold.summary.to ? { anchor: fold.summary.from } : undefined;
+                editor.dispatch({ effects: folding(fold, closing), selection: back, scrollIntoView: true });
+            }
+        },
+        foldAll: (closing) => {
+            const editor = view.current;
+            if (editor === null) {
+                return;
+            }
+            const changing = laidOut.regions
+                .flatMap((each) => each.folds)
+                .filter((each) => isFolded(editor.state, each) !== closing);
+            const at = head();
+            const back = closing ? uncovered(changing, at) : at;
+            editor.dispatch({
+                effects: changing.map((each) => folding(each, closing)),
+                selection: back === at ? undefined : { anchor: back },
+                scrollIntoView: true,
+            });
+        },
+        folded: (state) => {
+            // The folds are where this layout puts them only while the text is still its own.
+            if (state.sliceDoc() !== laidOut.text) {
+                return;
+            }
+            for (const fold of laidOut.regions.flatMap((each) => each.folds)) {
+                if (isFolded(state, fold)) {
+                    unfolded.current.delete(foldKey(fold));
+                } else {
+                    unfolded.current.add(foldKey(fold));
+                }
             }
         },
         undo: (back) => {
