@@ -47,6 +47,8 @@ from lup_dashboard.api import (
 )
 from lup_dashboard.host import Host
 from lup_dev.host.protocol import HostError
+from lup_dev.inbox.protocol import AnswerApproval, Settled
+from lup_dev.inbox.store import Approval, Item
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -178,8 +180,17 @@ def application(
 
     @api.post("/ask")
     async def ask(request: Asked) -> Replied:
-        """Send one of the host's requests, and return its reply."""
-        return await host.ask(request)
+        """Send one of the host's requests, and return its reply; an approval of a host zone approved here is acted on, as the operator's terminal acts on it (`Host.settle`)."""
+        replied = await host.ask(request)
+        match request, replied:
+            case (
+                AnswerApproval(number=number, approved=True),
+                Settled(item=Item(reason=Approval())),
+            ):
+                await host.settle(number)
+            case _:
+                pass
+        return replied
 
     @app.websocket("/api/socket")
     async def socket(

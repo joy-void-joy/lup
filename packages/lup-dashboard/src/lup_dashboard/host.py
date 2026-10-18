@@ -3,13 +3,21 @@
 `docs/dashboard.md`, *The API*. `Host` is the seam the server talks through, so
 its tests give their own; `Sockets` reaches the running service on its control
 and watch sockets (`lup_dev/host/client.py`, which holds how each is spoken).
+
+An approval of a host zone the operator approves on the page is acted on as
+their terminal acts on it (`settle`): the copy installed and the host service
+restarted on it, by `lup-dev inbox answer <n> --approve` in a process of its
+own, which outlives the service it restarts, and this dashboard with it.
 """
 
+import sys
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 from pydantic import TypeAdapter
 
+from lup.programs import detached
 from lup.types import Model
 from lup_dashboard.api import Asked, Replied
 from lup_dev.host.client import answer, replies
@@ -38,6 +46,10 @@ class Host(ABC):
         watch, as a service stopping does.
         """
 
+    @abstractmethod
+    async def settle(self, number: int) -> None:
+        """Act on approval `number`, approved on the page, as the operator's terminal does: install the copy it approves, and restart the host service on it where it's lup's own, in a process that outlives this one."""
+
 
 class Sockets(Model, Host):
     """The host service on its own sockets, as `layout` places them."""
@@ -55,6 +67,13 @@ class Sockets(Model, Host):
             yield replied
             if isinstance(replied, Refused):
                 return
+
+    @override
+    async def settle(self, number: int) -> None:
+        # The `lup-dev` installed with this dashboard, in the same environment.
+        command = Path(sys.executable).parent / "lup-dev"
+        arguments = ["inbox", "answer", str(number), "--approve"]
+        detached(command, *arguments, log=self.layout.log)
 
 
 def read(written: bytes) -> Replied:
