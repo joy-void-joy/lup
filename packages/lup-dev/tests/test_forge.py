@@ -31,7 +31,7 @@ from lup_dev.codescan.directives import HostIssues, IssueRef
 from lup_dev.declaration.resolve import resolve
 from lup_dev.forge.github import GitHubError, named
 from lup_dev.host.client import RoomClient, asked
-from lup_dev.host.courier import Conversation, Courier, Heard, Telling
+from lup_dev.host.courier import Conversation, Courier, Heard, Printed, Telling
 from lup_dev.host.protocol import (
     Action,
     Done,
@@ -717,8 +717,10 @@ class Deaf(Courier):
     def heard(self, runtime: str, payload: str) -> Heard:
         return Heard(event="call-started", session="s1", judged=False, fits=10_000)
 
-    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
-        return answer
+    def told(
+        self, runtime: str, payload: str, answer: str, telling: Telling
+    ) -> Printed:
+        return Printed(text=answer)
 
     def woken(self, runtime: str, session: str, text: str) -> str | None:
         return None

@@ -758,7 +758,15 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             self.returned(posted)
             return Spoken(answer=answer)
-        return Spoken(answer=told, posted=posted)
+        concluding = (
+            heard.event == "turn-ended"
+            and heard.agent is None
+            and told.ends
+            and bool(heard.said and heard.said.strip())
+        )
+        if concluding and self.post is not None and heard.said is not None:
+            await self.post.concluded(request, conversation, heard.said)
+        return Spoken(answer=told.text, posted=posted)
 
     async def judgement(self, request: Register, payload: str) -> str:
         """Return the judge's answer to one hook, or where it can't answer, the runtime's word that it couldn't.

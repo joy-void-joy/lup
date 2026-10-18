@@ -1894,6 +1894,44 @@ def test_a_conversation_is_read_from_its_record_from_where_the_asker_left_it(
     assert str(missing.value) == "the record of claude session s9 isn't on this machine"
 
 
+def test_a_sessions_last_message_of_a_turn_is_a_note_in_the_operators_inbox(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        inbox("send", "one", "One more thing.")
+        held = send(
+            hook,
+            claude(
+                "Stop", stop_hook_active=False, last_assistant_message="Done, I think."
+            ),
+        )
+        ended = send(
+            hook,
+            claude("Stop", stop_hook_active=True, last_assistant_message="Done now."),
+        )
+        send(
+            hook,
+            claude(
+                "SubagentStop",
+                agent_id="sub",
+                stop_hook_active=False,
+                last_assistant_message="A subagent's, for its parent.",
+            ),
+        )
+        send(hook, claude("Stop", stop_hook_active=False, last_assistant_message="  "))
+        notes = [
+            (each.reason, each.sender.agent, each.worktree)
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.sender, Conversation)
+        ]
+    assert json.loads(held)["decision"] == "block"
+    assert ended == ""
+    assert notes == [(Message(kind="note", text="Done now."), None, tmp_path)]
+
+
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:

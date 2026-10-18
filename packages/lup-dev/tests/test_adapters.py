@@ -1177,7 +1177,9 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
         ),
     ]
     stop = codex.heard((CAPTURED / "9-stop.json").read_text())
-    assert stop == Heard(fits=10_000, event="turn-ended", session=session, judged=True)
+    assert stop == Heard(
+        fits=10_000, event="turn-ended", session=session, judged=True, said="done"
+    )
     subagent = codex.heard(
         json.dumps(
             {

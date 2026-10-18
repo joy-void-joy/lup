@@ -25,7 +25,7 @@ import pytest
 from lup.rooms.container import Mask, Mount
 from lup.types import Model
 from lup_dev.host.client import HostClient, RoomClient, Starter, asked
-from lup_dev.host.courier import Courier, Heard, Telling
+from lup_dev.host.courier import Courier, Heard, Printed, Telling
 from lup_dev.host.protocol import Done, HostError, Limits, Register, Reply, Stop
 from lup_dev.host.service import Answerer, Asked, HostService, Judged
 from lup_dev.launch.room import RoomError, RoomGit, programs, refreshed, room_git
@@ -84,8 +84,10 @@ class Deaf(Courier):
         message = "no hook reaches the service in these tests"
         raise AssertionError(message)
 
-    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
-        return answer
+    def told(
+        self, runtime: str, payload: str, answer: str, telling: Telling
+    ) -> Printed:
+        return Printed(text=answer)
 
     def woken(self, runtime: str, session: str, text: str) -> str | None:
         return None
