@@ -843,7 +843,9 @@ def test_what_is_held_and_flagged_is_named_once_and_checked_as_it_loads() -> Non
     assert (held.held, held.flagged) == (["protected", "regex"], ["new-file"])
     with pytest.raises(ValidationError, match="name nothing held or flagged"):
         Project(held=["Protected Paths"])
-    with pytest.raises(ValidationError, match=r"\['new-file'\] are both held and flagged"):
+    with pytest.raises(
+        ValidationError, match=r"\['new-file'\] are both held and flagged"
+    ):
         Project(held=["new-file"])
 
 

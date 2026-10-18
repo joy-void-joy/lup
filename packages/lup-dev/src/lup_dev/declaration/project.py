@@ -12,7 +12,6 @@ from pydantic import field_validator, model_validator
 from lup.types import Model
 from lup_dev.declaration.module import Modules
 
-
 type Asking = Literal[
     "protected", "operator", "new-file", "whole-file", "public-api", "ignore"
 ]

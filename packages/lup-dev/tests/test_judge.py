@@ -472,7 +472,9 @@ def test_a_rule_named_held_holds_its_finding_and_still_tells_it(
     )
     assert judgement.outcome == "ask"
     assert [ask.name() for ask in judgement.asks] == ["regex"]
-    assert judgement.asks[0].reason.startswith(f"{judge.root}/src/pkg/core.py:11 - regex")
+    assert judgement.asks[0].reason.startswith(
+        f"{judge.root}/src/pkg/core.py:11 - regex"
+    )
     assert [finding.rule for finding in judgement.findings] == ["regex"]
     assert judgement.reasons() == ["regex"]
 

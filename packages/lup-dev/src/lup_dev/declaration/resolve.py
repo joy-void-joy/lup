@@ -30,7 +30,7 @@ that can't.
 """
 
 from pathlib import Path
-from typing import Literal, Self
+from typing import Self
 
 from pydantic import model_validator
 

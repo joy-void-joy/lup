@@ -934,7 +934,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         if not found:
             message = (
                 f"no conversation of launch `{request.launch}` is session "
-                f"{request.session}" + ("" if request.agent is None else f"'s {request.agent}")
+                f"{request.session}"
+                + ("" if request.agent is None else f"'s {request.agent}")
             )
             raise HostError(message)
         [conversation] = found
