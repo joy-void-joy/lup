@@ -13,6 +13,7 @@ import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, override
 
 import pytest
@@ -28,22 +29,26 @@ from lup.rooms import Podman
 from lup.rooms.engine import Exited, Process
 from lup.tools.speaking import Problem, Remark
 from lup_dev import Modules, Project, cli
+from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted
 from lup_dev.host.protocol import HostError, Limits, Register, Stop
+from lup_dev.host.records import Called, Recorded, Said
 from lup_dev.host.service import Asked, HostService, Judged, Naming
 from lup_dev.host.watch import Changes
 from lup_dev.inbox.delivery import Delivery, opening
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.protocol import (
+    Context,
     Drafted,
     Items,
     KeepDraft,
     ListInbox,
     Reviewed,
     SendDraft,
+    ShowContext,
     ShowDraft,
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
@@ -264,9 +269,13 @@ def said() -> list[str]:
 
 @contextmanager
 def inboxed(
-    machine: Layout, clock: FakeClock, notices: Raised, said: list[str]
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    recorded: dict[str, Recorded] | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox, its delivery yielded, until the context ends."""
+    """A host service with lup's inbox, its delivery yielded, until the context ends; an item's moment read from `recorded`."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     changes = Changes()
@@ -284,7 +293,7 @@ def inboxed(
         courier=couriers,
         spawns=cli.SpawnRecords(adapters=known),
         post=delivery,
-        routes=inbox_routes(delivery),
+        routes=inbox_routes(delivery, recorded or {}),
         tools=cli.room_tools(delivery),
         judge=Quiet(),
         say=said.append,
@@ -1742,3 +1751,80 @@ def test_lup_dev_inbox_send_reaches_a_subagent_by_its_path(
         told == "lup's inbox, item 1: a note from the operator:\nLook at the tests too."
     )
     assert main == ""
+
+
+def test_an_items_moment_is_read_from_its_senders_record_around_its_call(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    home = tmp_path / "claude"
+    folder = home / "projects" / "-w"
+    folder.mkdir(parents=True)
+
+    def line(**fields: object) -> str:
+        return json.dumps({"timestamp": "2026-10-17T12:00:00.000Z", **fields})
+
+    def human(text: str) -> str:
+        return line(
+            type="user",
+            origin={"kind": "human"},
+            message={"role": "user", "content": text},
+        )
+
+    def agent(*blocks: dict[str, object]) -> str:
+        return line(
+            type="assistant", message={"role": "assistant", "content": list(blocks)}
+        )
+
+    (folder / "s1.jsonl").write_text(
+        "\n".join(
+            [
+                human("Build it."),
+                agent({"type": "text", "text": "Reading."}),
+                agent({"type": "tool_use", "id": "b1", "name": "Bash", "input": {}}),
+                agent(
+                    {
+                        "type": "tool_use",
+                        "id": "n1",
+                        "name": "mcp__lup__note",
+                        "input": {},
+                    }
+                ),
+                agent({"type": "text", "text": "Carrying on."}),
+                human("Next."),
+            ]
+        )
+        + "\n"
+    )
+    recorded = {
+        "claude": Recorded(
+            records=ClaudeRecords(directory=home), reader=ClaudeTranscripts()
+        )
+    }
+    with inboxed(machine, clock, notices, said, recorded) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        stamped = json.loads(send(hook, lup_call("note", {"remark": "UTF-8."}, "n1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        call(machine.host.launch("one").mcp, "note", stamped)
+        inbox("send", "one", "Mine.")
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        found = host.ask(ShowContext(number=1), Context)
+        with pytest.raises(HostError) as unanchored:
+            host.ask(ShowContext(number=2), Context)
+        shown = runner.invoke(cli.app, ["inbox", "show", "1", "--context"])
+        item = delivery.inbox.item(1)
+    assert item.call == "n1"
+    when = datetime(2026, 10, 17, 12, tzinfo=UTC)
+    assert found.entries == [
+        Said(by="operator", text="Build it.", at=when),
+        Said(by="agent", text="Reading.", at=when),
+        Called(tool="Bash", id="b1", at=when),
+        Called(tool="mcp__lup__note", id="n1", at=when),
+        Said(by="agent", text="Carrying on.", at=when),
+    ]
+    assert found.anchor == 3
+    assert str(unanchored.value) == "item 2 was made by no agent's call"
+    assert shown.exit_code == 0, shown.output
+    assert "· called Bash\n\n→ called mcp__lup__note: this item\n\n" in shown.output

@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from itertools import groupby
 
 from lup.errors import LupError
-from lup_dev.host.records import Called, Said, Transcript
+from lup_dev.host.records import Called, Entry, Said, Transcript
 
 
 class TranscriptError(LupError):
@@ -99,14 +99,18 @@ def whole(session: Transcript) -> str:
         f"{called(session)}, from {when(session.started())}, in "
         f"{session.directory or '?'}"
     )
-    runs = groupby(session.entries, key=lambda each: isinstance(each, Called))
-    parts = [
+    return "\n\n".join([heading, *stepped(session.entries)]) + "\n"
+
+
+def stepped(entries: list[Entry]) -> list[str]:
+    """Say each step of `entries` in order: each thing said, and each run of tool calls folded to a line naming them."""
+    runs = groupby(entries, key=lambda each: isinstance(each, Called))
+    return [
         folded([each.tool for each in run if isinstance(each, Called)])
         if calling
         else "\n\n".join(spoken(each) for each in run if isinstance(each, Said))
         for calling, run in runs
     ]
-    return "\n\n".join([heading, *parts]) + "\n"
 
 
 def spoken(said: Said) -> str:

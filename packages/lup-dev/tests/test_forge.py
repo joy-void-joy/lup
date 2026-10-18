@@ -67,6 +67,9 @@ class Nothing(Records):
     def kept(self, under: list[Path]) -> list[Record]:
         return []
 
+    def conversation(self, session: str, agent: str | None) -> Path | None:
+        return None
+
 
 STAND_IN = """#!{python}
 import json, os, sys

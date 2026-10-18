@@ -97,6 +97,9 @@ class Held(Records):
         self.record = record
         self.asked: list[list[Path]] = []
 
+    def conversation(self, session: str, agent: str | None) -> Path | None:
+        return None
+
     def kept(self, under: list[Path]) -> list[Record]:
         self.asked.append(under)
         return [self.record]

@@ -326,7 +326,12 @@ class ModuleTools(Model, RoomTools, arbitrary_types_allowed=True):
 
     @override
     async def call(
-        self, name: str, arguments: JsonValue, launch: Register, caller: Conversation
+        self,
+        name: str,
+        arguments: JsonValue,
+        launch: Register,
+        caller: Conversation,
+        call: str | None,
     ) -> Answer:
         """Pass the call to the launch's modules, and return what their tool answered.
 
@@ -1039,7 +1044,12 @@ class Naming(Model, RoomTools, arbitrary_types_allowed=True):
 
     @override
     async def call(
-        self, name: str, arguments: JsonValue, launch: Register, caller: Conversation
+        self,
+        name: str,
+        arguments: JsonValue,
+        launch: Register,
+        caller: Conversation,
+        call: str | None,
     ) -> Answer:
         """Rename `caller`, a conversation of `launch`, as it asks; arguments that don't validate are refused, saying why."""
         namer = Namer(launches=self.launches, launch=launch.launch, caller=caller.id)

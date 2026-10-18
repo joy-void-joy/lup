@@ -17,13 +17,15 @@ launching terminal, or `lup-dev inbox answer` at any other, answers it
 whole diff (`ShowDiff`).
 """
 
+import asyncio
 from pathlib import Path
 from typing import Literal, override
 
 from lup.types import Model
 from lup_dev.host.protocol import LaunchId, Reply, Request
-from lup_dev.host.records import Entry
+from lup_dev.host.records import Entry, Recorded
 from lup_dev.host.service import Handler, Route
+from lup_dev.inbox import context
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.store import Approval, Draft, Item, Operator, Ruling, Waiting
 
@@ -318,6 +320,24 @@ class ApprovalAnswering(Model, Handler[AnswerApproval], arbitrary_types_allowed=
         return Settled(item=after, here=isinstance(before.state, Waiting))
 
 
+class ContextShowing(Model, Handler[ShowContext], arbitrary_types_allowed=True):
+    """Answers `ShowContext`: an item's moment, read from its sender's record as it stands (`inbox/context.py`)."""
+
+    delivery: Delivery
+    recorded: dict[str, Recorded]
+    """Each runtime's records on this machine, and how they're read, by its name."""
+
+    @override
+    def request(self) -> type[ShowContext]:
+        return ShowContext
+
+    @override
+    async def answer(self, request: ShowContext) -> Reply:
+        item = self.delivery.inbox.item(request.number)
+        found = await asyncio.to_thread(context.read, item, self.recorded)
+        return Context(number=item.number, entries=found.entries, anchor=found.anchor)
+
+
 class DiffShowing(Model, Handler[ShowDiff], arbitrary_types_allowed=True):
     """Answers `ShowDiff`: the approval's whole diff."""
 
@@ -375,8 +395,8 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
         return Reviewed(items=await self.delivery.reviewed())
 
 
-def routes(delivery: Delivery) -> list[Route]:
-    """Route each of the inbox's kinds to its handler, over one delivery."""
+def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
+    """Route each of the inbox's kinds to its handler, over one delivery; an item's moment read from the records `recorded`."""
     return [
         Route.to(Listing(delivery=delivery)),
         Route.to(Showing(delivery=delivery)),
@@ -387,6 +407,7 @@ def routes(delivery: Delivery) -> list[Route]:
         Route.to(ApprovalAwaiting(delivery=delivery)),
         Route.to(ApprovalAnswering(delivery=delivery)),
         Route.to(DiffShowing(delivery=delivery)),
+        Route.to(ContextShowing(delivery=delivery, recorded=recorded)),
         Route.to(DraftShowing(delivery=delivery)),
         Route.to(DraftKeeping(delivery=delivery)),
         Route.to(DraftSending(delivery=delivery)),

@@ -105,11 +105,13 @@ class Speaker(Model, arbitrary_types_allowed=True):
     delivery: Delivery
     launch: Register
     party: Conversation
+    call: str | None = None
+    """The runtime's id for the call speaking, which each item it makes keeps."""
 
     async def said(self, reason: Message | Question) -> int:
         """Put `reason` in the operator's inbox, from this conversation, and return its number."""
         item = await self.delivery.posted(
-            reason, self.party, Operator(), self.launch.worktree
+            reason, self.party, Operator(), self.launch.worktree, call=self.call
         )
         return item.number
 
@@ -243,12 +245,18 @@ class InboxTools(Model, RoomTools, arbitrary_types_allowed=True):
 
     @override
     async def call(
-        self, name: str, arguments: JsonValue, launch: Register, caller: Caller
+        self,
+        name: str,
+        arguments: JsonValue,
+        launch: Register,
+        caller: Caller,
+        call: str | None,
     ) -> Answer:
         """Run the tool `name` for `caller`, a conversation of `launch`: its arguments validated, its answer in words.
 
         Arguments that don't validate are refused, saying why, as the library's
-        tools refuse them.
+        tools refuse them. An item the call makes keeps `call`, its moment in
+        the conversation's record.
         """
         party = Conversation(
             repository=launch.repository,
@@ -256,7 +264,7 @@ class InboxTools(Model, RoomTools, arbitrary_types_allowed=True):
             session=caller.session,
             agent=caller.agent,
         )
-        speaker = Speaker(delivery=self.delivery, launch=launch, party=party)
+        speaker = Speaker(delivery=self.delivery, launch=launch, party=party, call=call)
         [tool] = [tool for tool in speaker.tools() if tool.spec().name == name]
         match await tool.call(arguments):
             case Accepted(answer=answer):

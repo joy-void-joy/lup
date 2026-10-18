@@ -10,9 +10,10 @@ from typer.testing import CliRunner
 from lup.transcripts import views
 from lup.transcripts.module import Transcripts
 from lup_dev import cli
-from lup_dev.adapters.claude import ClaudeTranscripts
-from lup_dev.adapters.codex import CodexTranscripts
-from lup_dev.host.records import Called, Said, Transcript
+from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts
+from lup_dev.adapters.codex import CodexRecords, CodexTranscripts
+from lup_dev.host.records import Called, Entry, Said, Transcript
+from lup_dev.inbox.context import moment
 from lup_dev.layout import Layout
 from lup_dev.settings import LupDevSettings
 
@@ -396,14 +397,96 @@ def test_codexs_rollouts_read_in_either_history_mode_a_subagents_left_out(
     assert str(legacy.directory) == "/w"
     assert legacy.entries == [
         Said(by="operator", text="fix it", at=when),
-        Called(tool="exec_command", at=when),
-        Called(tool="mcp__lup__ask", at=when),
-        Called(tool="shell", at=when),
+        Called(tool="exec_command", id="c1", at=when),
+        Called(tool="mcp__lup__ask", id="c2", at=when),
+        Called(tool="shell", id="c3", at=when),
         Said(by="agent", text="Fixed.", at=when),
     ]
     assert paginated.title is None
     assert paginated.entries == [
         Said(by="operator", text="hello", at=when),
-        Called(tool="apply_patch", at=when),
+        Called(tool="apply_patch", id="c4", at=when),
         Said(by="agent", text="Hi.", at=when),
     ]
+
+
+def test_claude_finds_one_conversations_record_and_reads_a_subagents_own_steps(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "claude"
+    folder = home / "projects" / "-w-lup-git-tree-dev"
+    (folder / "s1" / "subagents").mkdir(parents=True)
+    (folder / "s1.jsonl").write_text(
+        "\n".join(
+            [
+                human("Go."),
+                agent(
+                    {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {}}
+                ),
+            ]
+        )
+        + "\n"
+    )
+    subagent = folder / "s1" / "subagents" / "agent-a1.jsonl"
+    looking: dict[str, object] = {
+        "role": "assistant",
+        "content": [
+            {"type": "text", "text": "Looking."},
+            {"type": "tool_use", "id": "toolu_2", "name": "Grep", "input": {}},
+        ],
+    }
+    subagent.write_text(
+        line(type="assistant", isSidechain=True, message=looking) + "\n"
+    )
+    records = ClaudeRecords(directory=home)
+    reader = ClaudeTranscripts()
+    assert records.conversation("s1", None) == folder / "s1.jsonl"
+    assert records.conversation("s1", "a1") == subagent
+    assert records.conversation("s9", None) is None
+    when = datetime(2026, 10, 17, 12, tzinfo=UTC)
+    assert reader.read(folder / "s1.jsonl").entries[1] == Called(
+        tool="Bash", id="toolu_1", at=when
+    )
+    assert reader.read(subagent).entries == [
+        Said(by="agent", text="Looking.", at=when),
+        Called(tool="Grep", id="toolu_2", at=when),
+    ]
+
+
+def test_codex_finds_a_threads_rollout_a_subagents_by_its_own_thread(
+    tmp_path: Path,
+) -> None:
+    day = tmp_path / "codex" / "sessions" / "2026" / "10" / "17"
+    day.mkdir(parents=True)
+    own = day / "rollout-2026-10-17T12-00-00-th-1.jsonl"
+    own.write_text(meta("th-1", "legacy") + "\n")
+    spawned = day / "rollout-2026-10-17T12-01-00-th-3.jsonl"
+    spawned.write_text(meta("th-3", "legacy", parent="th-1") + "\n")
+    records = CodexRecords(home=tmp_path / "codex")
+    assert records.conversation("th-1", None) == own
+    assert records.conversation("th-1", "th-3") == spawned
+    assert records.conversation("th-9", None) is None
+
+
+def test_a_calls_moment_runs_from_the_operators_last_words_to_their_next() -> None:
+    when = datetime(2026, 10, 17, 12, tzinfo=UTC)
+    steps: list[Entry] = [
+        Said(by="operator", text="First.", at=when),
+        Called(tool="Bash", id="b1", at=when),
+        Said(by="operator", text="Build it.", at=when),
+        Said(by="agent", text="Reading.", at=when),
+        Called(tool="mcp__lup__note", id="n1", at=when),
+        Said(by="agent", text="Carrying on.", at=when),
+        Said(by="operator", text="Next.", at=when),
+    ]
+    session = Transcript(runtime="claude", session="s1", entries=steps)
+    found = moment(session, "n1")
+    assert found is not None
+    assert found.entries == steps[2:6]
+    assert found.anchor == 2
+    from_start = moment(
+        Transcript(runtime="claude", session="s1", entries=steps[3:6]), "n1"
+    )
+    assert from_start is not None
+    assert from_start.anchor == 1
+    assert moment(session, "missing") is None

@@ -648,15 +648,20 @@ class Recording(RoomTools):
 
     def __init__(self, names: list[str] | None = None) -> None:
         self.names = names or ["echo"]
-        self.calls: list[tuple[str, JsonValue, str, Conversation]] = []
+        self.calls: list[tuple[str, JsonValue, str, Conversation, str | None]] = []
 
     def specs(self) -> list[ToolSpec]:
         return [ECHO.model_copy(update={"name": name}) for name in self.names]
 
     async def call(
-        self, name: str, arguments: JsonValue, launch: Register, caller: Conversation
+        self,
+        name: str,
+        arguments: JsonValue,
+        launch: Register,
+        caller: Conversation,
+        call: str | None,
     ) -> Answer:
-        self.calls.append((name, arguments, launch.launch, caller))
+        self.calls.append((name, arguments, launch.launch, caller, call))
         return Answer(text=f"{launch.launch} heard {caller.id}")
 
 
@@ -783,7 +788,7 @@ def test_a_call_on_a_launchs_mcp_socket_reaches_its_tools_with_its_conversation(
         elsewhere = call(layout.launch("two").mcp, "echo", arguments)
     assert heard == (f"one heard {stamp}", False)
     assert tools.calls == [
-        ("echo", {"text": "hi"}, "one", Conversation(id=stamp, session="s1"))
+        ("echo", {"text": "hi"}, "one", Conversation(id=stamp, session="s1"), "t1")
     ]
     assert elsewhere == (
         (
@@ -865,7 +870,7 @@ def test_a_call_without_its_caller_is_the_main_conversations(
         ),
         True,
     )
-    [(_, _, _, main)] = tools.calls
+    [(_, _, _, main, _)] = tools.calls
     assert after == (f"one heard {main.id}", False)
     assert main == Conversation(id=main.id, session="s1")
     assert (
