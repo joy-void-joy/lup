@@ -108,6 +108,9 @@ class Message(Model):
     of: int | None = None
     """The item it replies to, where it's the operator's reply to one of a
     conversation's messages (`lup-dev inbox answer`)."""
+    ending: bool = False
+    """Whether it's a session's last words of a turn, made a note by lup rather
+    than sent by the agent: the conversation already shows them as its words."""
 
 
 class Question(Model):

@@ -19,6 +19,7 @@ from lup_dev.inbox.protocol import (
     Items,
     ListInbox,
     ListItems,
+    Reviewed,
     SendItem,
     Settled,
 )
@@ -306,7 +307,14 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
     )
     names = [each["name"] for each in listed.json()["launches"]]
     assert names == ["lup-impl", "guidance-voice", "main", "nori-search"]
-    assert [each["number"] for each in items.json()["items"]] == [51, 52, 53, 54, 55]
+    assert [each["number"] for each in items.json()["items"]] == [
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+    ]
     assert other.json() == {
         "kind": "refused",
         "error": "the demo doesn't answer `inbox-show`",
@@ -361,7 +369,13 @@ def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) ->
     sent = served.post("/api/ask", json={"kind": "inbox-send-draft"}, headers=bearing())
     left = served.post("/api/ask", json={"kind": "inbox-draft"}, headers=bearing())
     assert kept.json()["draft"]["comments"][1]["quote"]["text"] == "Fold"
-    assert sent.json() == {"kind": "inbox-reviewed", "items": []}
+    assert sent.json() == {
+        "kind": "inbox-reviewed",
+        "items": [],
+        "approved": [],
+        "noted": [],
+        "kept": [],
+    }
     assert left.json()["draft"] == {
         "comments": [{"item": 53, "quote": None, "text": "Later."}],
         "done": [],
@@ -418,3 +432,18 @@ def test_about_says_the_pages_build_as_it_stands_on_disk(page: Path) -> None:
         == hashlib.sha256(b"<!doctype html><title>lup</title>").hexdigest()
     )
     assert second["build"] != first["build"]
+
+
+def test_a_host_zone_the_sent_draft_approved_is_acted_on_as_the_terminal_would(
+    page: Path,
+) -> None:
+    zone = settling(approved=True, reason=ZONE).item
+    note = settling(
+        approved=True, reason=Message(kind="note", text="Fine.")
+    ).item.model_copy(update={"number": 8})
+    host = StandIn({"inbox-send-draft": [Reviewed(items=[], approved=[zone, note])]})
+    response = client(host, page).post(
+        "/api/ask", json={"kind": "inbox-send-draft"}, headers=bearing()
+    )
+    assert response.json()["approved"][0]["number"] == 7
+    assert host.settled == [7]

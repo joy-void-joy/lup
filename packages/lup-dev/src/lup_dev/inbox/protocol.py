@@ -265,10 +265,19 @@ class Talked(Reply):
 
 
 class Reviewed(Reply):
-    """The reviews a draft was sent as, one to each conversation it covers."""
+    """What sending a draft did: the reviews it was sent as, one to each conversation it covers, and what it did with the approvals and held changes it covers (`Delivery.reviewed`)."""
 
     kind: Literal["inbox-reviewed"] = "inbox-reviewed"
     items: list[Item]
+    approved: list[Item] = []
+    """The approvals and held changes it approved: an approval of a host zone
+    among them is acted on as the operator's terminal acts on it."""
+    noted: list[Item] = []
+    """The notes it left with each session whose push asked an approval the
+    operator commented on, which stays unanswered."""
+    kept: list[int] = []
+    """The approvals commented on that no known session's push asked: their
+    comments stay drafted."""
 
 
 class Whole(Reply):
@@ -649,7 +658,13 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: SendDraft) -> Reply:
-        return Reviewed(items=await self.delivery.reviewed())
+        dispatched = await self.delivery.reviewed()
+        return Reviewed(
+            items=dispatched.reviews,
+            approved=dispatched.approved,
+            noted=dispatched.noted,
+            kept=dispatched.kept,
+        )
 
 
 def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:

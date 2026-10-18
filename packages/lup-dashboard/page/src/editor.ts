@@ -2,9 +2,11 @@
 // vim, the operator's comments written into it, each under the line it's on, as
 // the only text they can change. Insert mode is writing a comment: a key that
 // enters it opens one where the cursor is, or edits the one it's in, and the
-// cursor stays in it until it ends. `c` opens one on the whole (an item, a
-// conversation); `o`, `C` and vim's other keys of insert mode on the line; `v`
-// and a motion, then `c` or `s`, on the selection. Ctrl+Enter in a comment ends
+// cursor stays in it until it ends. Space `c` opens one on the whole (an item,
+// a conversation); vim's change, `c` and a motion, on the passage it covers
+// (`ct.`, `ciw`, `cip`, `cc` a line's); `o`, `C` and vim's other keys of insert
+// mode on the line; `v` and a motion, then `c` or `s`, on the selection. `]]` and
+// `[[` go to the next and previous item or turn. Ctrl+Enter in a comment ends
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
 // any change to the draft. What folds is folded until opened: `za` opens or
 // closes the fold under the cursor, `zo` and `zc` open and close it, `zR` and
@@ -58,6 +60,8 @@ interface Keyed {
     visual: boolean;
     /** The passage it tried to change outside every comment, as `v` then `R` would: what such a comment quotes. */
     passage: Span | null;
+    /** Whether it's part of vim's change, `c` and a motion, begun in normal mode: a comment it opens is on the passage the motion covers. */
+    changing: boolean;
     /** Whether vim is in insert mode, that is, whether a comment is being written. */
     inserting: boolean;
 }
@@ -71,7 +75,7 @@ interface Bound {
 /** Each editor's own, read by the keys, the filters and vim's actions, which vim's keymap shares between editors. */
 const binding = Facet.define<Bound, Bound | null>({ combine: (values) => values[0] ?? null });
 
-const NONE: Keyed = { from: 0, visual: false, passage: null, inserting: false };
+const NONE: Keyed = { from: 0, visual: false, passage: null, changing: false, inserting: false };
 
 function boundOf(state: EditorState): Bound {
     return state.facet(binding) ?? { actions: null, keyed: NONE };
@@ -97,6 +101,7 @@ function mapKeys(): void {
             }
         });
     action("lupCommentLine", (actions, cm) => actions.comment(cm, "line"));
+    action("lupCommentWhole", (actions, cm) => actions.comment(cm, "whole"));
     action("lupCommentSelection", (actions, cm) => actions.comment(cm, "selection"));
     action("lupDone", (actions) => actions.toggle("done"));
     action("lupLater", (actions) => actions.toggle("parked"));
@@ -119,6 +124,7 @@ function mapKeys(): void {
     map("o", "lupCommentLine", "normal");
     map("c", "lupCommentSelection", "visual");
     map("s", "lupCommentSelection", "visual");
+    map("<Space>c", "lupCommentWhole", "normal");
     map("<Space>d", "lupDone", "normal");
     map("<Space>z", "lupLater", "normal");
     map("<Space>a", "lupApprove", "normal");
@@ -133,8 +139,8 @@ function mapKeys(): void {
     map("zM", "lupFoldCloseAll", "normal");
     map("u", "lupUndo", "normal");
     map("<C-r>", "lupRedo", "normal");
-    map("J", "lupNext", "normal");
-    map("K", "lupPrevious", "normal");
+    map("]]", "lupNext", "normal");
+    map("[[", "lupPrevious", "normal");
 }
 
 /** Return the editor's vim, once it's started. */
@@ -164,16 +170,34 @@ function commentAt(bound: Bound, position: number): Block | undefined {
 
 /**
  * The keys that vim's keymap can't say, read ahead of vim, which takes every key it's given before a keymap would:
- * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere; and `c` and `C` alone outside every comment, a
- * comment on the whole and on the line, which in a comment stay vim's change. Every key is noted first, for what vim
- * makes of it (`Keyed`).
+ * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere; and `C` alone outside every comment, a comment
+ * on the line, which in a comment stays vim's change. Every key is noted first, for what vim makes of it (`Keyed`):
+ * one with no key of vim's pending begins what it notes, `c` in normal mode beginning vim's change.
+ *
+ * A dead key, as `` ` `` on a layout where it waits for the next key, gives no key of its own: the browser composes it
+ * with the next, `` ` `` then Space making a `` ` ``. Outside insert mode, vim gets what's composed, as typed, and
+ * neither key that composed it, the Space among them, which would begin a chord; in a comment, the browser composes
+ * into the text as usual.
  */
 const keys = Prec.highest(
     EditorView.domEventHandlers({
+        compositionend: (event, view) => {
+            const cm = vimOf(view);
+            if (cm === null || cm.state.vim.insertMode || event.data === "") {
+                return false;
+            }
+            for (const typed of event.data) {
+                Vim.handleKey(cm, typed, "user");
+            }
+            return true;
+        },
         keydown: (event, view) => {
             const cm = vimOf(view);
             if (cm === null) {
                 return false;
+            }
+            if ((event.key === "Dead" || event.isComposing) && !cm.state.vim.insertMode) {
+                return true;
             }
             const bound = boundOf(view.state);
             const { keyed } = bound;
@@ -182,6 +206,9 @@ const keys = Prec.highest(
             keyed.visual = cm.state.vim.visualMode;
             keyed.passage = null;
             const modified = event.ctrlKey || event.metaKey || event.altKey;
+            if (idle(cm)) {
+                keyed.changing = event.key === "c" && !modified && !keyed.visual;
+            }
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 if (cm.state.vim.insertMode) {
                     bound.actions?.finish(cm);
@@ -191,8 +218,8 @@ const keys = Prec.highest(
                 event.preventDefault();
                 return true;
             }
-            if ((event.key === "c" || event.key === "C") && !modified && idle(cm) && commentAt(bound, head) === undefined) {
-                bound.actions?.comment(cm, event.key === "c" ? "whole" : "line");
+            if (event.key === "C" && !modified && idle(cm) && commentAt(bound, head) === undefined) {
+                bound.actions?.comment(cm, "line");
                 event.preventDefault();
                 return true;
             }
@@ -327,6 +354,12 @@ export function refold(view: EditorView, folds: Folding[], unfolded: Set<string>
             effects.push(unfoldEffect.of({ from: fold.from, to: fold.to }));
         }
     }
+    // A range folded where nothing folds any more, as an item's text once it's no longer marked read, opens.
+    foldedRanges(view.state).between(0, view.state.doc.length, (from, to) => {
+        if (!folds.some((each) => each.from === from)) {
+            effects.push(unfoldEffect.of({ from, to }));
+        }
+    });
     if (effects.length > 0) {
         view.dispatch({ effects });
     }
@@ -571,7 +604,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 if (blockAt(head()) !== undefined) {
                     return;
                 }
-                const passage = keyed.visual ? keyed.passage : null;
+                const passage = keyed.visual || keyed.changing ? keyed.passage : null;
                 const comment = passage === null ? own.opened(keyed.from) : own.quoted(passage.from, passage.to);
                 if (comment === undefined) {
                     Vim.exitInsertMode(cm, true);

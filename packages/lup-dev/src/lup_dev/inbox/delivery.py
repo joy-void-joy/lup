@@ -59,6 +59,7 @@ no call running, and wakes.
 """
 
 import asyncio
+import textwrap
 from collections.abc import Callable, Generator
 from datetime import datetime
 from typing import TYPE_CHECKING, override
@@ -77,6 +78,7 @@ from lup_dev.inbox.store import (
     Conversation,
     Decided,
     Done,
+    Draft,
     HeldChange,
     How,
     Inbox,
@@ -126,6 +128,8 @@ def who(party: Party) -> str:
 def what(item: Item) -> str:
     """Say what an item is, in a few words."""
     match item.reason:
+        case Message(ending=True):
+            return "the end of a turn"
         case Message(kind="question"):
             return "a question, as a message"
         case Message(kind=kind):
@@ -265,6 +269,38 @@ def commented(item: Item, comment: str) -> str:
         f"The operator {answer} item {item.number}, the approval your push asked "
         f'("{opening(item)}"), and commented:\n{comment}'
     )
+
+
+def unanswered(item: Item, comments: str) -> str:
+    """Say the operator's comments on an approval a push asked, which they haven't answered, for the session that pushed.
+
+    >>> from datetime import UTC, datetime
+    >>> from pathlib import Path
+    >>> asked = Approval(text="Approve the host zone at abc?", summary="",
+    ...     repository=Path("/r.git"), fingerprint="f")
+    >>> item = Item(number=7, reason=asked, sender=Operator(), recipient=Operator(),
+    ...     made=datetime(2026, 1, 1, tzinfo=UTC))
+    >>> print(unanswered(item, "  Split the reader out first."))
+    The operator commented on item 7, the approval your push asked ("Approve the host zone at abc?"), and hasn't answered it:
+      Split the reader out first.
+    """
+    return (
+        f"The operator commented on item {item.number}, the approval your push "
+        f'asked ("{opening(item)}"), and hasn\'t answered it:\n{comments}'
+    )
+
+
+class Dispatched(Model):
+    """What sending the operator's draft did: the reviews it was sent as, what it approved, and what it did with comments on approvals it left unanswered."""
+
+    reviews: list[Item] = []
+    """One to each conversation with a comment on its messages or questions, or a question among them."""
+    approved: list[Item] = []
+    """The approvals and held changes it approved: each marked read alone, and each held change commented on, with the comments."""
+    noted: list[Item] = []
+    """The notes it left with each session whose push asked an approval the operator commented on, which stays unanswered."""
+    kept: list[int] = []
+    """The approvals commented on whose push no known session made: their comments stay drafted."""
 
 
 def settled(item: Item, review: Item, at: datetime) -> Answered | Done:
@@ -418,7 +454,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             agent=conversation.agent,
         )
         await self.posted(
-            Message(kind="note", text=said), party, Operator(), launch.worktree
+            Message(kind="note", text=said, ending=True),
+            party,
+            Operator(),
+            launch.worktree,
         )
 
     @override
@@ -533,8 +572,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         context = [heading, *others] if others else []
         return "\n\n".join([*own, *context])
 
-    async def reviewed(self) -> list[Item]:
-        """Send the operator's draft as one reply: to each conversation with a comment on its items, or a question among them, the whole of it; its items answered or done, and the draft left with what's parked.
+    async def reviewed(self) -> Dispatched:
+        """Send the operator's draft as one reply: to each conversation with a comment on its messages or questions, or a question among them, the whole of it; its items answered or done; each approval and held change it covers answered by its own rule; and the draft left with what's parked.
 
         Each conversation is told its own items first, with the comments on
         them or read with nothing to add, then what was said on the others'
@@ -543,8 +582,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         something unrelated. A question is answered by the reply its asker
         gets, which lets a held `ask` go. A message only marked read tells its
         sender nothing, nor wakes it: it's taken off the list, and told as read
-        only to a conversation the reply reaches anyway. Refused where the
-        draft covers no item, or covers one no conversation sent.
+        only to a conversation the reply reaches anyway.
+
+        An approval or a held change marked read alone is approved. A held
+        change commented on is approved with the comments, which its agent
+        reads with the answer: "yes, but…" rather than a refusal. An approval
+        commented on stays unanswered, the comments going as a note to the
+        session whose push asked it, whose next push supersedes it; where no
+        known session pushed, they stay drafted (`Dispatched`). Refused where
+        the draft covers no item, or covers a message or question no
+        conversation sent.
         """
         draft = self.inbox.draft()
         covered = [self.inbox.item(each) for each in draft.covered()]
@@ -553,8 +600,28 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 "the draft answers no item: comment on one, or take one off the list"
             )
             raise InboxError(message)
-        for item in covered:
+        asked = [
+            item for item in covered if isinstance(item.reason, Approval | HeldChange)
+        ]
+        messages = [item for item in covered if item not in asked]
+        for item in messages:
             reviewable(item)
+        dispatched = Dispatched(reviews=self.reviews(draft, messages))
+        for item in asked:
+            dispatched = await self.answered_in(draft, item, dispatched)
+        left = draft.kept()
+        staying = [each for each in draft.comments if each.item in dispatched.kept]
+        self.inbox.drafted(
+            left.model_copy(update={"comments": [*left.comments, *staying]})
+        )
+        for each in dispatched.reviews:
+            await self.delivered(each)
+        return dispatched
+
+    def reviews(self, draft: Draft, covered: list[Item]) -> list[Item]:
+        """Make the reviews `draft` is sent as for the messages and questions it covers, `covered`, one to each conversation it reaches, and settle each item; delivering them is the caller's."""
+        if not covered:
+            return []
         at = self.clock.now()
         numbers = [item.number for item in covered]
         review = Review(
@@ -580,10 +647,46 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             )
             settling = Done(at=at) if answer is None else settled(item, answer, at)
             self.inbox.kept(item.model_copy(update={"state": settling}))
-        self.inbox.drafted(draft.kept())
-        for each in sent:
-            await self.delivered(each)
         return sent
+
+    async def answered_in(
+        self, draft: Draft, item: Item, dispatched: Dispatched
+    ) -> Dispatched:
+        """Answer the approval or held change `item` as `draft` has it, and return what the send did with it added (`reviewed`)."""
+        comments = textwrap.dedent(
+            "\n".join(
+                remark(each)
+                for each in draft.comments
+                if each.item == item.number and each.text.strip()
+            )
+        )
+        match item.reason:
+            case HeldChange():
+                approved = await self.decided(
+                    item.number, approved=True, comment=comments
+                )
+                return dispatched.model_copy(
+                    update={"approved": [*dispatched.approved, approved]}
+                )
+            case Approval() if not comments:
+                approved = await self.decided(item.number, approved=True)
+                return dispatched.model_copy(
+                    update={"approved": [*dispatched.approved, approved]}
+                )
+            case Approval(pushed_by=Conversation() as pusher):
+                note = await self.posted(
+                    Message(kind="note", text=unanswered(item, comments)),
+                    Operator(),
+                    pusher,
+                    None,
+                )
+                return dispatched.model_copy(
+                    update={"noted": [*dispatched.noted, note]}
+                )
+            case _:
+                return dispatched.model_copy(
+                    update={"kept": [*dispatched.kept, item.number]}
+                )
 
     def answered(self, answer: Answer) -> str:
         """Say the operator's answer, each decision beside its question's text and the lean it was asked with."""

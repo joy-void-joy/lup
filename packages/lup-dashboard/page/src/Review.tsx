@@ -1,9 +1,9 @@
 // The review: everything waiting for the operator in one buffer moved through
 // with vim (`editor.ts`), in groups, one per agent, their comments written into
-// it, each under the line it's on: `c` opens one on the item whole. Ctrl+Enter
+// it, each under the line it's on: Space `c` opens one on the item whole. Ctrl+Enter
 // elsewhere than in a comment sends. Space `d` marks an item read, Space `z`
 // leaves it for later, Space `a` or `x` answers an approval or a held change;
-// `J` and `K` go to the next and previous item. Under an approval or a held
+// `]]` and `[[` go to the next and previous item. Under an approval or a held
 // change, each file it changes, whole, its lines numbered, marked and
 // highlighted as they come into view; under each item, its context. The
 // context and each run of unchanged lines fold, folded until opened
@@ -128,6 +128,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
         const states = [
             "review-header",
             fresh(region.item, reviewed) ? "is-new" : "",
+            ending(region.item) ? "is-ending" : "",
             (draft.done ?? []).includes(number) ? "is-done" : "",
             (draft.parked ?? []).includes(number) ? "is-parked" : "",
         ].join(" ");
@@ -164,6 +165,11 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
         builder.add(each.from, each.to, each.value);
     }
     return builder.finish();
+}
+
+/** Whether an item is a turn's last words, which lup made a note: read and marked done, rather than answered. */
+function ending(item: Item): boolean {
+    return item.reason.reason === "message" && item.reason.ending === true;
 }
 
 function when(made: string): string {
@@ -212,7 +218,9 @@ export function Review({
                 (item, later) => {
                     const what =
                         item.reason.reason === "message"
-                            ? item.reason.kind
+                            ? item.reason.ending === true
+                                ? "turn ended"
+                                : item.reason.kind
                             : item.reason.reason === "held"
                               ? "held change"
                               : item.reason.reason;
@@ -280,6 +288,9 @@ export function Review({
             if (arriving === null && kept !== undefined) {
                 current.dispatch({ effects: kept });
             }
+        } else {
+            // What folds can change with the text the same, as an item marked read folds.
+            refold(current, laidFor.folds, unfolded.current);
         }
         before.current = laidOut;
         landing.current = null;

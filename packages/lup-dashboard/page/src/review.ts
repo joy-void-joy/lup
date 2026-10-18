@@ -56,10 +56,10 @@ export interface Coded extends Span {
     row: Row | null;
 }
 
-/** What folds under an item, folded by default: its context, or a run of a file's unchanged lines. It hides `from` to `to`, from the end of its summary line to the end of its last. */
+/** What folds under an item, folded by default: its context, a run of a file's unchanged lines, or, where it's marked read, all of it under its header. It hides `from` to `to`, from the end of its summary line to the end of its last. */
 export interface Fold extends Span {
     item: number;
-    kind: "context" | "code";
+    kind: "context" | "code" | "read";
     /** What names it among its item's folds of its kind: a run of code by its file and its first row. */
     name: string;
     summary: Span;
@@ -255,6 +255,7 @@ export function laid(
     around: Around,
 ): Laid {
     const parked = draft.parked ?? [];
+    const done = draft.done ?? [];
     const comments = draft.comments ?? [];
     const now = grouped(items.filter((each) => !parked.includes(each.number)), (item) => banner(item, false));
     const later = grouped(items.filter((each) => parked.includes(each.number)), (item) => banner(item, true));
@@ -350,6 +351,11 @@ export function laid(
                 const shown = { from: summary.from, to: summary.to };
                 folds.push({ item: item.number, kind: "context", name: "", summary: shown, from: summary.to, to: last.to });
             }
+        }
+        if (done.includes(item.number)) {
+            // Marked read, it folds whole under its header, what folds within it inside.
+            const header = { from: headFrom, to: headFrom + head.length };
+            folds.push({ item: item.number, kind: "read", name: "", summary: header, from: header.to, to: text.length - 1 });
         }
         text += "\n";
         regions.push({
