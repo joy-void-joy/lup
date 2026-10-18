@@ -172,6 +172,7 @@ from lup_dev.policy.holds import InboxAnnouncing, Response, answer
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
+from lup_dev.policy.tools import JudgeTools
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.remote.config import Gating
 from lup_dev.remote.protocol import Remotes
@@ -427,7 +428,7 @@ def host_serve(context: typer.Context) -> None:
             *inbox_routes(delivery, recorded()),
             Route.to(dashboard_shown(dashboard)),
         ],
-        tools=room_tools(delivery),
+        tools=room_tools(delivery, layout),
         room_routes=[
             *remote_routes(
                 Remotes(say=typer.echo, landed=partial(proposed_after, delivery))
@@ -483,21 +484,22 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
         )
 
 
-def room_tools(delivery: Delivery) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's."""
-    return [InboxTools(delivery=delivery)]
+def room_tools(delivery: Delivery, layout: Layout) -> list[RoomTools]:
+    """List the core's tools the host service serves each launched session: the inbox's, and the judge's, reading lup's state at `layout`."""
+    return [InboxTools(delivery=delivery), JudgeTools(layout=layout)]
 
 
 def served_tools(resolved: Resolved) -> list[ToolSpec]:
     """List what a launched session is told of each of lup's tools, which its guidance lists: the core's, then its modules'.
 
     The core's are read from the tools the service is handed, made over a
-    delivery without its fields: what a tool is doesn't depend on whom it
-    delivers to. The modules' are read from their classes, with no instance.
+    delivery and a layout without their fields: what a tool is doesn't depend
+    on whom it delivers to or where lup's state is. The modules' are read from
+    their classes, with no instance.
     """
     core = [
         spec
-        for tools in room_tools(Delivery.model_construct())
+        for tools in room_tools(Delivery.model_construct(), Layout.model_construct())
         for spec in tools.specs()
     ]
     naming = Naming.model_construct().specs()

@@ -1,4 +1,4 @@
-"""lup's inbox: items told once, at a call, a turn's end, a held call, a session's start and an idle session's wake; the tools; `lup-dev inbox`.
+"""lup's inbox: items told once, at a call, a turn's end, a held call, a session's start and an idle session's wake; the tools, and the judge's `judged` beside them; `lup-dev inbox`.
 
 The host service serves in a thread of its own, on sockets under the test's
 directory, with a stub judge and each runtime's own adapter as its courier. No
@@ -95,12 +95,14 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.tools import specs
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import InboxLayout, Layout
-from lup_dev.policy.holds import HeldFile, Hold, Holds, InboxAnnouncing
+from lup_dev.policy.before import Overwrite, Replacement, before
+from lup_dev.policy.holds import HeldFile, Hold, Holds, InboxAnnouncing, Response
+from lup_dev.policy.tools import JudgeTools, stands
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator
 
-    from conftest import FakeClock
+    from conftest import FakeClock, Kit
     from mcp.client._transport import TransportStreams
     from pydantic import JsonValue
 
@@ -297,8 +299,10 @@ def inboxed(
     notices: Raised,
     said: list[str],
     recorded: dict[str, Recorded] | None = None,
+    *,
+    judging: Layout | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox, its delivery yielded, until the context ends; an item's moment read from `recorded`."""
+    """A host service with lup's inbox, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     changes = Changes()
@@ -317,7 +321,7 @@ def inboxed(
         spawns=cli.SpawnRecords(adapters=known),
         post=delivery,
         routes=inbox_routes(delivery, recorded or {}),
-        tools=cli.room_tools(delivery),
+        tools=cli.room_tools(delivery, judging or machine),
         judge=Quiet(),
         say=said.append,
         changes=changes,
@@ -327,9 +331,15 @@ def inboxed(
 
 
 def launched(
-    machine: Layout, clock: FakeClock, tmp_path: Path, name: str, runtime: str
+    machine: Layout,
+    clock: FakeClock,
+    tmp_path: Path,
+    name: str,
+    runtime: str,
+    *,
+    repository: Path | None = None,
 ) -> Register:
-    """Register a launch of `runtime` in `tmp_path` with the running service."""
+    """Register a launch of `runtime` in `tmp_path` with the running service, its repository `tmp_path`'s `.git` unless `repository` names another."""
     judge = tmp_path / "judges" / "bin" / "lup-dev"
     judge.parent.mkdir(parents=True, exist_ok=True)
     judge.touch()
@@ -337,7 +347,7 @@ def launched(
         launch=name,
         runtime=runtime,
         worktree=tmp_path,
-        repository=tmp_path / ".git",
+        repository=repository or tmp_path / ".git",
         judge=judge,
         container=f"lup-{name}",
         limits=Limits(actions=["fetch"], protected=[]),
@@ -1567,11 +1577,16 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
     ]
     assert "inbox as a problem" in served[0].description
     github = GitHubTools.specs()
+    judging = JudgeTools.model_construct().specs()
+    assert [(spec.name, spec.summary) for spec in judging] == [
+        ("judged", "Read the judge's verdicts and holds.")
+    ]
     naming = Naming.model_construct().specs()
     assert [spec.name for spec in naming] == ["rename"]
-    assert cli.served_tools(resolve(Project())) == [*served, *naming, *github]
+    core = [*served, *judging, *naming]
+    assert cli.served_tools(resolve(Project())) == [*core, *github]
     dropped = Project(modules=Modules.default().drop("github"))
-    assert cli.served_tools(resolve(dropped)) == [*served, *naming]
+    assert cli.served_tools(resolve(dropped)) == core
 
 
 class Silent(Notices):
@@ -2328,6 +2343,217 @@ def test_an_agent_withdraws_its_own_waiting_item_and_nothing_else(
     assert [line.split()[0] for line in listed.splitlines()] == ["3"]
     assert "withdrawn at 2026-10-01 12:00 by its sender: It's green now." in shown
     assert "item 1, a note, was withdrawn by its sender" in said
+
+
+def test_judged_reads_a_sessions_verdicts_and_its_repositorys_holds_changing_nothing(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    kit: Kit,
+    *,
+    repo: Path,
+    linked: Path,
+    bare: Path,
+) -> None:
+    core = Path("src/pkg/core.py")
+    main = bare / "tree" / "main"
+    original = (repo / core).read_text()
+    store = Holds(layout=kit.layout.store(repo))
+    # The judge's verdicts and holds carry the runtime the bench names.
+    kit.runtime.called = "claude"
+    with inboxed(machine, clock, notices, said, judging=kit.layout):
+        launched(machine, clock, repo, "one", "claude")
+        launched(machine, clock, main, "two", "codex", repository=bare)
+        hook = machine.host.launch("one").hook
+        mcp = machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(machine.host.launch("two").hook, codex("SessionStart", source="startup"))
+
+        def judged(on: Path = mcp, **arguments: JsonValue) -> str:
+            text, error = call(on, "judged", arguments)
+            assert not error, text
+            return text
+
+        before(
+            kit.bench,
+            Replacement(
+                call="e1",
+                tool="Edit",
+                path=repo / core,
+                old="return x\n",
+                new="return x  # BAD regex\n",
+            ),
+            "s1",
+            repo,
+        )
+        kit.clock.sleep(60)
+        kit.announced.answering = None
+        waiting: list[str] = []
+
+        def answered_later() -> None:
+            [hold] = store.all()
+            waiting.append(judged())
+            kit.clock.sleep(23 * 60)
+            answer = Response(approved=True, comment="Fine, as a whole.")
+            store.answer(hold.key, answer, kit.clock)
+
+        kit.clock.on_sleep.append(answered_later)
+        whole = Overwrite(
+            call="w1", tool="Write", path=repo / core, text=original + "\n"
+        )
+        before(kit.bench, whole, "s1", repo, agent="a1")
+        kit.announced.answering = Response(
+            approved=False, comment="Not the git directory."
+        )
+        described = Overwrite(
+            call="w2", tool="Write", path=repo / ".git" / "description", text="Work.\n"
+        )
+        before(kit.bench, described, "s1", repo)
+        kit.clock.sleep(60)
+        before(
+            kit.bench,
+            Replacement(
+                call="e2", tool="Edit", path=linked / core, old="x\n", new="x + 1\n"
+            ),
+            "s2",
+            linked,
+        )
+        kit.runtime.called = "codex"
+        kit.announced.answering = Response(approved=True)
+        elsewhere = Overwrite(
+            call="w3", tool="Write", path=main / core, text=original + "\n"
+        )
+        before(kit.bench, elsewhere, "t1", main)
+        state = kit.layout.state
+        kept = {each: each.read_bytes() for each in state.rglob("*") if each.is_file()}
+        own = judged()
+        every = judged(every=True)
+        relative = judged(every=True, path="src/pkg/core.py")
+        absolute = judged(path=str(linked / core))
+        stamped = json.loads(send(hook, lup_call("judged", {}, "j1", agent_id="a1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        subagent = judged(**stamped)
+        other = judged(machine.host.launch("two").mcp)
+        unread = call(mcp, "judged", {"every": "lots"})
+        after = {each: each.read_bytes() for each in state.rglob("*") if each.is_file()}
+    rewritten, declined = store.all()
+    [theirs] = Holds(layout=kit.layout.store(main)).all()
+    at = "2026-10-01"
+    edited = f"{at} 12:00  {repo / core}  Edit  allow (regex)"
+    held = f"{at} 12:01  {repo / core}  Write  hold (whole-file)"
+    git = f"{at} 12:24  {repo}/.git/description  Write  hold (protected), declined"
+    rewrite = [
+        (
+            f"{rewritten.key}  {at} 12:01  a change by your session's subagent a1, "
+            f"approved at {at} 12:24"
+        ),
+        f"  {repo / core}: whole-file",
+        "  The operator's comment: Fine, as a whole.",
+    ]
+    assert waiting == [
+        "\n".join(
+            [
+                "Your session's verdicts in this repository, oldest first:",
+                edited,
+                f"{held}, no answer yet",
+                "",
+                "This repository's holds still open, oldest first:",
+                (
+                    f"{rewritten.key}  {at} 12:01  a change by your session's "
+                    "subagent a1, waiting for the operator, its call waiting on "
+                    "their answer"
+                ),
+                f"  {repo / core}: whole-file",
+            ]
+        )
+    ]
+    holds = [
+        "This repository's holds answered, oldest first:",
+        *rewrite,
+        f"{declined.key}  {at} 12:24  a change by you, declined at {at} 12:24",
+        f"  {repo}/.git/description: protected",
+        "  The operator's comment: Not the git directory.",
+    ]
+    assert own.splitlines() == [
+        "Your session's verdicts in this repository, oldest first:",
+        edited,
+        f"{held}, approved",
+        git,
+        "",
+        *holds,
+    ]
+    assert every.splitlines() == [
+        "Every session's verdicts in this repository, oldest first:",
+        f"{edited}, by your session",
+        f"{held}, approved, by your session",
+        f"{git}, by your session",
+        f"{at} 12:25  {linked / core}  Edit  allow (rules-pass), by claude session s2",
+        "",
+        *holds,
+    ]
+    assert relative.splitlines() == [
+        "Every session's verdicts in this repository on src/pkg/core.py, oldest first:",
+        f"{edited}, by your session",
+        f"{held}, approved, by your session",
+        f"{at} 12:25  {linked / core}  Edit  allow (rules-pass), by claude session s2",
+        "",
+        "This repository's holds answered on src/pkg/core.py, oldest first:",
+        *rewrite,
+    ]
+    assert absolute == (
+        f"Your session has no verdict in this repository on {linked / core}.\n\n"
+        f"This repository has no hold on {linked / core}."
+    )
+    assert subagent.splitlines()[-6:] == [
+        f"{rewritten.key}  {at} 12:01  a change by you, approved at {at} 12:24",
+        f"  {repo / core}: whole-file",
+        "  The operator's comment: Fine, as a whole.",
+        (
+            f"{declined.key}  {at} 12:24  a change by your session's own "
+            f"conversation, declined at {at} 12:24"
+        ),
+        f"  {repo}/.git/description: protected",
+        "  The operator's comment: Not the git directory.",
+    ]
+    assert other.splitlines() == [
+        "Your session's verdicts in this repository, oldest first:",
+        f"{at} 12:25  {main / core}  Write  hold (whole-file), approved",
+        "",
+        "This repository's holds answered, oldest first:",
+        f"{theirs.key}  {at} 12:25  a change by you, approved at {at} 12:25",
+        f"  {main / core}: whole-file",
+    ]
+    text, error = unread
+    assert error
+    assert text.startswith("Refused: 1 validation error for Scope\nevery\n")
+    assert after == kept
+
+
+def test_judged_says_where_an_open_hold_stands_and_what_waits_with_it(
+    clock: FakeClock,
+) -> None:
+    hold = Hold(
+        key="k1",
+        worktree=Path("/w"),
+        session="s1",
+        created=clock.now(),
+        files=[],
+        diff="",
+    )
+    assert [
+        stands(hold),
+        stands(hold.model_copy(update={"abandoned": True})),
+        stands(hold.model_copy(update={"commit": "c0ffee"})),
+    ] == [
+        "waiting for the operator, its call waiting on their answer",
+        (
+            "waiting for the operator: nobody answered in time, so the change was "
+            "put back and its version saved"
+        ),
+        "waiting for the operator, no call waiting on it",
+    ]
 
 
 def test_the_operators_list_says_when_they_last_settled_an_item(
