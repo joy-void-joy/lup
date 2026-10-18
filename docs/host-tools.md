@@ -151,13 +151,15 @@ An agent can always end its turn, and nothing re-launches it for what it's alrea
 lup-dev inbox                         what's waiting for you, oldest first; an approval's
                                       line says how to read its summary and diff
 lup-dev inbox show <number>           one item whole
-lup-dev inbox answer <number>         a question: each decision in turn, then a comment
+lup-dev inbox answer <number>         a question: each decision in turn, then a comment;
+                                      a conversation's message: your reply
 lup-dev inbox done <number>           a message read, off the list
 lup-dev inbox send <launch> <text>    a message to the session a launch runs, by its name, id or worktree
 ```
 
 - **The command-line counterpart `DESIGN.md` asks for** (*The dashboard*: "`lup inbox` for the inbox"); its final name is the command-line piece's (`docs/declaration.md`, *The command line*), a command of `Core`'s.
 - **Answering:** at a terminal, `answer` takes each numbered decision in turn, "leaning", "undecided" or "leave open", typed: an empty line asks again, so going with the agent's lean is said, never assumed; each with an optional comment, then a comment on the whole; a plain question takes a text. `--leaning 1 3`, `--undecided 2`, `--leave-open 4` and `--comment` answer without prompts **(leaning)**. The answer becomes an item for the conversation that asked.
+- **Replying:** `answer` on a conversation's message (a note, a problem, a disagreement, a question sent as a message) takes your reply in words: a note for that conversation, told with the item it replies to and its first line (`Message.of`), and the message off your list. A message can be replied to again; one of the operator's own, an answer or an approval can't.
 - **`send`** names a launch by its id or its worktree, and reaches the session's main conversation.
 - **Each is a request on the control socket,** the inbox's own kinds, starting the service where none runs, as a launch does. Each refuses inside an agent's session (`Runtime.inside`), as `trust` does; the room can't reach the control socket at all, and the store isn't mounted.
 - **A desktop notice** when an item for the operator arrives, through `notify-send`: the repository's worktree, the kind, and the item's first line. `Notices` and `NotifySend` are the inbox's (`inbox/notices.py`). `notify-send` is an optional requirement of the host, said once where it's missing.

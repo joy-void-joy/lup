@@ -893,6 +893,40 @@ def test_items_survive_a_restart_and_reach_a_session_resumed_in_a_launch_of_its_
     assert [place.launch for place in where.values()] == ["two"]
 
 
+def test_the_operator_replies_to_a_note_the_reply_saying_what_it_answers(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        call(machine.host.launch("one").mcp, "note", {"remark": "A doubt.\nAt length."})
+        wordless = refused("answer", "1", "--comment", " ")
+        ruled = refused("answer", "1", "--leaning", "1", "--comment", "Yes.")
+        replied = inbox("answer", "1", "--comment", "Noted, go on.")
+        listed = inbox()
+        told = send(hook, bash("b1"))
+        own = refused("answer", "2", "--comment", "Again.")
+        again = inbox("answer", "1", "--comment", "One more thing.")
+    assert wordless == "item 1 is a note: give your reply in words"
+    assert ruled == "item 1 is a note, which takes a reply in words, not verdicts"
+    assert replied == (
+        "Replied to item 1: your reply, item 2, is for claude session s1.\n"
+    )
+    assert listed == "Nothing waits for you.\n"
+    assert context(told) == (
+        "lup's inbox, item 2: a note from the operator, replying to item 1, a note "
+        'you sent ("A doubt."):\nNoted, go on.'
+    )
+    assert own == (
+        "item 2 is a note from the operator: neither a question waiting for an "
+        "answer nor a conversation's message to reply to"
+    )
+    assert again == (
+        "Replied to item 1: your reply, item 3, is for claude session s1.\n"
+    )
+
+
 def test_report_note_and_send_reach_the_operator_with_a_desktop_notice(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
@@ -964,7 +998,7 @@ def test_numbered_decisions_are_each_answered_once_and_a_message_is_done(
         wordless = refused("answer", "3", "--comment", "  ")
         not_done = refused("done", "1")
         done = inbox("done", "2")
-        not_a_question = refused("answer", "2", "--comment", "x")
+        replied = inbox("answer", "2", "--comment", "x")
         nothing = refused("show", "9")
         listed = inbox()
     assert missing == (
@@ -975,7 +1009,9 @@ def test_numbered_decisions_are_each_answered_once_and_a_message_is_done(
     assert wordless == "item 3 is a question answered in words: give them"
     assert not_done == "item 1 is a question: answer it, `lup-dev inbox answer 1`"
     assert done == "Item 2 is done.\n"
-    assert not_a_question == "item 2 isn't a question waiting for an answer"
+    assert (
+        replied == "Replied to item 2: your reply, item 4, is for claude session s1.\n"
+    )
     assert nothing == "the inbox holds no item 9"
     assert [line.split()[0] for line in listed.splitlines()] == ["1", "3"]
 
