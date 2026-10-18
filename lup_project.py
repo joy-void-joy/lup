@@ -31,7 +31,7 @@ from lup_dev import (
 
 
 class LupDevelopment(Module):
-    """What only lup's repository needs: building lup's engine, guarding its policy, its guidance.
+    """What only lup's repository needs: building lup's engine and its dashboard's page, guarding its policy, its guidance.
 
     - The engine is built before the gate's first step, and again only when its
       bundle is older than one of its sources, since tests that ask a stale engine
@@ -40,6 +40,10 @@ class LupDevelopment(Module):
       step the same way to build the copy the operator approves
       (`lup_dev/launch/trust.py`). npm, which installs its bundler, joins the
       room's image as Arch's `npm`.
+    - The dashboard's page is built the same way, after the engine: its types
+      generated from the API's description, type-checked, tested and bundled
+      (`packages/lup-dashboard/build.py`), again only when one of its sources,
+      the host's models the API describes among them, is newer than the page.
     - The data that sets lup's policy (`lup_dev.catalog`) is protected, so the
       operator reviews every change to it before it lands.
     - Working on lup is `AGENTS.md`, the project's own section of the guidance,
@@ -75,6 +79,26 @@ class LupDevelopment(Module):
                 "packages/lup-dev/checker/package-lock.json",
                 "packages/lup-dev/checker/tsconfig.json",
                 "packages/lup-dev/src/lup_dev/catalog/rules.ts",
+                "uv.lock",
+            ],
+        ),
+        Step(
+            name="dashboard",
+            command=["python", "packages/lup-dashboard/build.py"],
+            builds="packages/lup-dashboard/src/lup_dashboard/page/index.html",
+            sources=[
+                "packages/lup-dashboard/page/src/**/*",
+                "packages/lup-dashboard/page/index.html",
+                "packages/lup-dashboard/page/package.json",
+                "packages/lup-dashboard/page/package-lock.json",
+                "packages/lup-dashboard/page/tsconfig.json",
+                "packages/lup-dashboard/page/vite.config.ts",
+                "packages/lup-dashboard/build.py",
+                "packages/lup-dashboard/src/lup_dashboard/api.py",
+                "packages/lup-dashboard/src/lup_dashboard/server.py",
+                "packages/lup-dev/src/lup_dev/host/protocol.py",
+                "packages/lup-dev/src/lup_dev/inbox/protocol.py",
+                "packages/lup-dev/src/lup_dev/inbox/store.py",
                 "uv.lock",
             ],
         ),

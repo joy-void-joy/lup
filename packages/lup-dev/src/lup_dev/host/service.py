@@ -908,6 +908,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             parent = None if each.parent is None else conversations.calling(each.parent)
             return Talker(
                 path=conversations.path(each, launch),
+                own=conversations.own(each, launch),
                 session=each.session,
                 agent=each.agent,
                 kind=each.kind,
@@ -1133,6 +1134,18 @@ class Stopping(Model, Handler[Stop], arbitrary_types_allowed=True):
         return Done()
 
 
+class Companion(ABC):
+    """A program the service runs beside it: begun once the service listens, ended as it stops."""
+
+    @abstractmethod
+    async def begin(self) -> None:
+        """Start the program; raise `HostError` where it can't, saying why, and the service goes on without it."""
+
+    @abstractmethod
+    async def end(self) -> None:
+        """Stop the program, where it runs."""
+
+
 class Serving(Model, arbitrary_types_allowed=True):
     """A service while it serves: it stops once `stopped` is set."""
 
@@ -1180,6 +1193,10 @@ class HostService(Model, arbitrary_types_allowed=True):
     the inbox's store, given the same (`cli.py`)."""
     clock: Clock = Field(default_factory=SystemClock)
     """When each conversation's activity began; a test gives its own."""
+    companions: list[Companion] = []
+    """The programs it runs beside it, the dashboard's server among them
+    (`host/dashboard.py`): each begun once it listens, a failure said, and ended
+    as it stops."""
 
     @model_validator(mode="after")
     def distinct(self) -> Self:
@@ -1204,6 +1221,16 @@ class HostService(Model, arbitrary_types_allowed=True):
             message = f"more than one module serves {', '.join(sorted(twice))}"
             raise ValueError(message)
         return self
+
+    async def begun(self) -> None:
+        """Begin each companion, saying one that can't, which the service goes on without."""
+        for companion in self.companions:
+            try:
+                await companion.begin()
+            except HostError as failed:
+                self.say(
+                    f"The host service goes on without a program beside it: {failed}"
+                )
 
     async def serve(self) -> None:
         """Serve until a `Stop` request, or until cancelled."""
@@ -1267,8 +1294,11 @@ class HostService(Model, arbitrary_types_allowed=True):
             )
             self.say(f"The host service listens on {self.layout.control}.")
             try:
+                await self.begun()
                 yield Serving(stopped=stopped)
             finally:
+                for companion in self.companions:
+                    await companion.end()
                 await closed(watches)
                 await closed(server)
         finally:

@@ -13,3 +13,9 @@ __pycache__/
 packages/lup-dev/checker/pyright
 packages/lup-dev/checker/node_modules/
 packages/lup-dev/src/lup_dev/codescan/bundle/
+# The dashboard page's build: its packages, the API's description and the types
+# generated from it, and the built page its server serves.
+packages/lup-dashboard/page/node_modules/
+packages/lup-dashboard/page/openapi.json
+packages/lup-dashboard/page/src/generated/
+packages/lup-dashboard/src/lup_dashboard/page/

@@ -106,14 +106,23 @@ async def requested[R: Reply](path: Path, request: Request, reply: type[R]) -> R
     A refusal raises `HostError` with the service's reason, as does finding no
     service to ask on `path`, or a connection closed without a reply.
     """
+    return read_reply(await answer(path, request), reply)
+
+
+async def answer(path: Path, request: Request) -> bytes:
+    """Send one request on the host service's socket at `path` from an event loop, and return its reply's JSON as the service wrote it, a refusal's too.
+
+    Finding no service to ask on `path` raises `HostError`, as does a
+    connection closed without a reply.
+    """
     async with opened(path) as connected:
         connected.writer.write(request.model_dump_json().encode())
         connected.writer.write_eof()
-        answer = await connected.reader.read()
-    if not answer:
+        written = await connected.reader.read()
+    if not written:
         message = "the host service closed the connection without answering"
         raise HostError(message)
-    return read_reply(answer, reply)
+    return written
 
 
 async def watching[R: Reply](
@@ -121,16 +130,26 @@ async def watching[R: Reply](
 ) -> AsyncGenerator[R]:
     """Watch `request` on the host service's watch socket at `path`: its reply as `reply` at once, then again each time it changes, until the generator is closed.
 
+    A refusal raises `HostError` with the service's reason, as does finding no
+    service to ask on `path`, or the service closing the watch, as a service
+    stopping does.
+    """
+    async for line in replies(path, request):
+        yield read_reply(line, reply)
+
+
+async def replies(path: Path, request: Request) -> AsyncGenerator[bytes]:
+    """Watch `request` on the host service's watch socket at `path`: each reply's JSON line as the service wrote it, a refusal's the last, until the generator is closed.
+
     The connection stays open both ways while it watches, so the service hears
-    it close. A refusal raises `HostError` with the service's reason, as does
-    finding no service to ask on `path`, or the service closing the watch, as a
-    service stopping does.
+    it close. Finding no service to ask on `path` raises `HostError`, as does
+    the service closing the watch, as a service stopping does.
     """
     async with opened(path) as connected:
         connected.writer.write(f"{request.model_dump_json()}\n".encode())
         await connected.writer.drain()
         async for line in connected.reader:
-            yield read_reply(line, reply)
+            yield line
     message = "the host service closed the watch"
     raise HostError(message)
 

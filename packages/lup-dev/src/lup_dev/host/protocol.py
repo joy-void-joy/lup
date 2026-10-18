@@ -290,6 +290,9 @@ class Talker(Model):
     path: str
     """Its launch's name, then each subagent's down to it (`dev/explore-auth`);
     an unnamed subagent by its kind and id."""
+    own: str
+    """Its own part of `path`: its launch's name for the session's own
+    conversation, a subagent's name, or its kind and id."""
     session: str
     agent: str | None = None
     """The runtime's id for the subagent; none for the session's own conversation."""

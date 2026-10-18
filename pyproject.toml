@@ -74,6 +74,7 @@ ignore = [
     "C901", "PLR0912", "PLR0913", "PLR0915", "PLR1702",  # thresholds on size, not mistakes: review, until #33
     # Imports
     "PLC0415",  # flags an import inside a function, which is how an adapter imports its runtime's SDK when an ask first runs: review
+    "INP001",   # flags a file outside a package, which here is a test pytest finds by path or a build script run on its own: review
     # No convention decides it
     "CPY001",  # no copyright header has been chosen: the operator's call
 ]
@@ -94,13 +95,19 @@ runtime-evaluated-base-classes = [
     "lup_dev.host.protocol.Request",
     "lup_dev.host.protocol.Reply",
 ]
+# FastAPI reads a route's parameter and return types at runtime: a stream's
+# items, its body's union. Moved under `TYPE_CHECKING`, a stream is read as a
+# plain object and described as none.
+runtime-evaluated-decorators = [
+    "fastapi.APIRouter.get",
+    "fastapi.APIRouter.post",
+    "fastapi.FastAPI.get",
+    "fastapi.FastAPI.post",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests are exempt from lup's rules; ruff keeps these test-only exemptions.
-"packages/*/tests/**" = ["S101", "D", "ARG", "INP001"]
-# The engine's build script runs on its own (`uv run`), beside the TypeScript it
-# builds, rather than as a module of a package.
-"packages/lup-dev/checker/build.py" = ["INP001"]
+"packages/*/tests/**" = ["S101", "D", "ARG"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
