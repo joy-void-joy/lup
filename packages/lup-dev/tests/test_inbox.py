@@ -60,7 +60,6 @@ from lup_dev.inbox.store import (
     Operator,
     Quote,
     Review,
-    Ruled,
     Told,
     Waiting,
 )
@@ -1606,7 +1605,7 @@ def sending(machine: Layout, clock: FakeClock) -> list[Item]:
     return host.ask(SendDraft(), Reviewed).items
 
 
-def test_a_draft_sent_is_one_review_to_each_sender_answering_their_items_parked_ones_kept(
+def test_a_draft_sent_gives_each_agent_its_own_items_with_their_comments_alone(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     question: dict[str, JsonValue] = {
@@ -1620,14 +1619,15 @@ def test_a_draft_sent_is_one_review_to_each_sender_answering_their_items_parked_
     draft = Draft(
         comments=[
             Comment(
-                item=1, quote=Quote(text="lark", start=11, end=15), text="Lark, sure."
+                item=1,
+                quote=Quote(text="1. Parse with lark", start=14, end=32),
+                text="Yes.",
             ),
             Comment(item=2, text="Fine by me."),
-            Comment(item=3, text="Later."),
-            Comment(text="Overall: go."),
+            Comment(item=4, text="Later."),
         ],
-        verdicts=[Ruled(item=1, decision=1, verdict="leaning")],
-        parked=[3],
+        done=[3],
+        parked=[4],
     )
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "one", "one", "claude")
@@ -1638,16 +1638,14 @@ def test_a_draft_sent_is_one_review_to_each_sender_answering_their_items_parked_
         with ThreadPoolExecutor(max_workers=1) as pool:
             asking = pool.submit(call, machine.host.launch("one").mcp, "ask", question)
             assert notices.arrived.wait(timeout=60)
-            noted = json.loads(
-                send(
-                    two,
-                    lup_call(
-                        "note", {"remark": "I assumed UTF-8."}, "n1", session_id="s2"
-                    ),
-                )
-            )["hookSpecificOutput"]["updatedInput"]
-            call(machine.host.launch("two").mcp, "note", noted)
-            call(machine.host.launch("two").mcp, "note", {"remark": "Another thing."})
+            for remark in ["I assumed UTF-8.", "Done reading.", "Another thing."]:
+                stamped = json.loads(
+                    send(
+                        two,
+                        lup_call("note", {"remark": remark}, "n1", session_id="s2"),
+                    )
+                )["hookSpecificOutput"]["updatedInput"]
+                call(machine.host.launch("two").mcp, "note", stamped)
             kept = drafting(machine, clock, draft)
             shown = HostClient(
                 layout=machine.host, clock=clock, starter=Unstarted()
@@ -1655,40 +1653,25 @@ def test_a_draft_sent_is_one_review_to_each_sender_answering_their_items_parked_
             reviews = sending(machine, clock)
             returned = asking.result(timeout=60)
         told = send(two, bash("b1", session_id="s2"))
-        states = [delivery.inbox.item(each).state for each in [1, 2, 3]]
+        states = [delivery.inbox.item(each).state for each in [1, 2, 3, 4]]
         left = delivery.inbox.draft()
     assert shown.draft == kept == draft
-    assert [each.number for each in reviews] == [4, 5]
-    assert [each.recipient for each in reviews] == [
-        Conversation(
-            repository=tmp_path / "one" / ".git", runtime="claude", session="s1"
-        ),
-        Conversation(
-            repository=tmp_path / "two" / ".git", runtime="claude", session="s2"
-        ),
+    assert [(each.number, each.reason) for each in reviews] == [
+        (5, Review(covers=[1], comments=[draft.comments[0]])),
+        (6, Review(covers=[2], comments=[draft.comments[1]])),
     ]
-    assert all(isinstance(each.reason, Review) for each in reviews)
     assert isinstance(states[0], Answered)
-    assert states[0].answer == 4
-    assert isinstance(states[1], Done)
-    assert isinstance(states[2], Waiting)
-    assert left == Draft(comments=[Comment(item=3, text="Later.")], parked=[3])
+    assert states[0].answer == 5
+    assert [type(each) for each in states[1:]] == [Done, Done, Waiting]
+    assert left == Draft(comments=[draft.comments[2]], parked=[4])
     assert returned[0] == (
-        "lup's inbox, item 4: a review from the operator, of items 1, 2:\n"
+        "lup's inbox, item 5: a review from the operator, of item 1:\n"
         'On item 1, a question yours ("Which parser?"):\n'
-        "  1. Parse with lark (lean: yes, it's typed): leaning: they go with the lean.\n"
-        "  2. Keep the cache (lean: no): not answered.\n"
-        "  On this passage:\n    > lark\n    Lark, sure.\n\n"
-        'On item 2, a note from claude session s2 ("I assumed UTF-8."):\n'
-        "  Fine by me.\n\n"
-        "Their reply on the whole:\nOverall: go."
+        "  On this passage:\n    > 1. Parse with lark\n    Yes."
     )
-    assert context(told).startswith(
-        "lup's inbox, item 5: a review from the operator, of items 1, 2:\n"
-        'On item 1, a question from claude session s1 ("Which parser?"):'
-    )
-    assert 'On item 2, a note yours ("I assumed UTF-8."):\n  Fine by me.' in context(
-        told
+    assert context(told) == (
+        "lup's inbox, item 6: a review from the operator, of item 2:\n"
+        'On item 2, a note yours ("I assumed UTF-8."):\n  Fine by me.'
     )
 
 
@@ -1700,18 +1683,11 @@ def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         call(machine.host.launch("one").mcp, "ask", {"question": "In words?"})
         inbox("send", "one", "Mine.")
-        empty = refused_draft(machine, clock, Draft(comments=[Comment(text="Hi.")]))
-        beyond = refused_draft(
-            machine,
-            clock,
-            Draft(verdicts=[Ruled(item=1, decision=1, verdict="leaning")]),
-        )
+        empty = refused_draft(machine, clock, Draft())
         own = refused_draft(machine, clock, Draft(done=[2]))
     assert empty == (
-        "the draft answers no item: comment on one, give a verdict, or take one off "
-        "the list"
+        "the draft answers no item: comment on one, or take one off the list"
     )
-    assert beyond == "item 1 asks 0 decisions; the draft gives a verdict on [1]"
     assert own == "item 2 is a note from the operator, which a review doesn't answer"
 
 

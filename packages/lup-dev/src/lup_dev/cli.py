@@ -595,14 +595,9 @@ def shown(item: Item) -> str:
                 text,
                 f"The whole diff: `lup-dev inbox show {item.number} --diff`.",
             ]
-        case Review(covers=covers, comments=comments, verdicts=verdicts):
-            ruled = [
-                f"Item {each.item}, decision {each.decision}: {each.verdict}."
-                for each in verdicts
-            ]
+        case Review(covers=covers, comments=comments):
             body = [
                 f"Of items {', '.join(str(each) for each in covers)}.",
-                *ruled,
                 *(commented(each) for each in comments),
             ]
     return "\n".join([heading(item), *body])
@@ -610,8 +605,6 @@ def shown(item: Item) -> str:
 
 def commented(comment: Comment) -> str:
     """Say one comment of a review, for the operator: where it's on, then what it says."""
-    if comment.item is None:
-        return f"On the whole: {comment.text}"
     if comment.quote is None:
         return f"On item {comment.item}: {comment.text}"
     return f'On item {comment.item}, "{comment.quote.text}": {comment.text}'

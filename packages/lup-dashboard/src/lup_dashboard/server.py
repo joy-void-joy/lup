@@ -61,8 +61,16 @@ class Access(Model):
         return [f"http://{host}:{self.port}" for host in self.hosts]
 
 
-def application(host: Host, access: Access, page: Path | None) -> FastAPI:
-    """Build the dashboard's server: its API relaying to `host`, open to `access`, and the built page in `page`; none serves the API alone, for its description."""
+class About(Model):
+    """What the page is served by: the dashboard, or its demo over stand-in data."""
+
+    demo: bool
+
+
+def application(
+    host: Host, access: Access, page: Path | None, *, demo: bool = False
+) -> FastAPI:
+    """Build the dashboard's server: its API relaying to `host`, open to `access`, and the built page in `page`; none serves the API alone, for its description. A demo says so (`GET /api/about`)."""
     app = FastAPI(
         title="lup's dashboard",
         openapi_url="/api/openapi.json",
@@ -95,6 +103,11 @@ def application(host: Host, access: Access, page: Path | None) -> FastAPI:
         response.set_cookie(
             access.cookie, access.token, httponly=True, samesite="strict", path="/"
         )
+
+    @api.get("/about")
+    def about() -> About:
+        """Say what the page is served by: the dashboard, or its demo."""
+        return About(demo=demo)
 
     @api.post("/ask")
     async def ask(request: Asked) -> Replied:

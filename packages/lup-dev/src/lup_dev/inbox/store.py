@@ -167,37 +167,26 @@ class Quote(Model):
 
 
 class Comment(Model):
-    """A comment of the operator's: on a passage of an item, on an item whole, or on everything they reply to."""
+    """A comment of the operator's on an item: on a passage of it, one of its decisions among them, or on it whole."""
 
-    item: int | None = None
-    """The item it's on; none for a comment on the whole reply."""
+    item: int
     quote: Quote | None = None
     """The passage it's on; none for a comment on the item whole."""
     text: str
 
 
-class Ruled(Model):
-    """The operator's verdict on one numbered decision of a question, in a reply covering several items."""
-
-    item: int
-    decision: int
-    """The decision's number, from 1."""
-    verdict: Verdict
-
-
 class Review(Model):
-    """The operator's reply to several items at once, as they wrote it while reading them: sent whole to each conversation whose items it covers.
+    """The operator's reply to a conversation's items, as they wrote it while reading them: their comments on each.
 
-    Each recipient is told all of it, the comments on its own items marked as
-    its own, since the operator writes point by point across items and
-    cross-references them (`docs/dashboard.md`, *The review*).
+    A conversation's review holds its own items and the comments on them
+    alone, though the operator wrote it beside other conversations' (`docs/dashboard.md`,
+    *The review*).
     """
 
     reason: Literal["review"] = "review"
     covers: list[int]
     """The items it answers, in order."""
     comments: list[Comment] = []
-    verdicts: list[Ruled] = []
 
 
 type Reason = Annotated[
@@ -313,10 +302,9 @@ def read[M: Model](path: Path, model: type[M]) -> M:
 
 
 class Draft(Model):
-    """The operator's reply as they build it while reading: their comments, their verdicts, the items they took off their list and the ones they parked; kept until it's sent."""
+    """The operator's reply as they build it while reading: their comments, the items they took off their list and the ones they parked; kept until it's sent."""
 
     comments: list[Comment] = []
-    verdicts: list[Ruled] = []
     done: list[int] = []
     """Items read and taken off the list when the draft is sent, with no
     comment of their own."""
@@ -325,12 +313,8 @@ class Draft(Model):
     the rest is sent."""
 
     def covered(self) -> list[int]:
-        """Return the items the draft answers, in order: each with a comment, a verdict or marked done, but for the parked ones."""
-        mentioned = [
-            *(each.item for each in self.comments if each.item is not None),
-            *(each.item for each in self.verdicts),
-            *self.done,
-        ]
+        """Return the items the draft answers, in order: each with a comment or marked done, but for the parked ones."""
+        mentioned = [*(each.item for each in self.comments), *self.done]
         wanted = [each for each in mentioned if each not in self.parked]
         return sorted(dict.fromkeys(wanted))
 
@@ -338,7 +322,6 @@ class Draft(Model):
         """Return what stays drafted once the draft is sent: what's on the parked items."""
         return Draft(
             comments=[each for each in self.comments if each.item in self.parked],
-            verdicts=[each for each in self.verdicts if each.item in self.parked],
             parked=self.parked,
         )
 

@@ -69,7 +69,6 @@ from lup_dev.inbox.store import (
     Comment,
     Conversation,
     Decided,
-    Decision,
     Done,
     How,
     Inbox,
@@ -81,7 +80,6 @@ from lup_dev.inbox.store import (
     Question,
     Reason,
     Review,
-    Ruled,
     Ruling,
     Superseded,
     Told,
@@ -143,6 +141,19 @@ def opening(item: Item) -> str:
         case Review(comments=comments):
             said = next((each.text for each in comments), "")
     return next(iter(said.splitlines()), "")
+
+
+def reviewable(item: Item) -> None:
+    """Refuse an item a review can't answer: one no conversation sent, an answer or an approval."""
+    match item:
+        case Item(sender=Conversation(), reason=Message() | Question()):
+            return
+        case _:
+            message = (
+                f"item {item.number} is {what(item)} from {who(item.sender)}, which "
+                "a review doesn't answer"
+            )
+            raise InboxError(message)
 
 
 def remark(comment: Comment) -> str:
@@ -346,120 +357,74 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
             case Review() as review:
                 numbers = ", ".join(str(each) for each in review.covers)
+                items = "item" if len(review.covers) == 1 else "items"
                 return (
-                    f"{head}{passed}, of items {numbers}:\n"
+                    f"{head}{passed}, of {items} {numbers}:\n"
                     f"{self.reviewing(review, item.recipient)}"
                 )
 
     def reviewing(self, review: Review, recipient: Party) -> str:
-        """Say a review to one of the conversations it covers: each item it covers, the recipient's marked as its own, with the operator's verdicts and comments on it; then their comments on the whole."""
+        """Say a review to the conversation it's for: each of its items it covers, with the operator's comments on it."""
 
         def part(number: int) -> str:
             item = self.inbox.item(number)
             whose = "yours" if item.sender == recipient else f"from {who(item.sender)}"
             head = f'On item {number}, {what(item)} {whose} ("{opening(item)}"):'
-            lines = [
-                *self.verdicts(item, review),
-                *(remark(each) for each in review.comments if each.item == number),
-            ]
-            return "\n".join([head, *lines])
+            said = [remark(each) for each in review.comments if each.item == number]
+            return "\n".join([head, *(said or ["  (read, with nothing to add)"])])
 
-        general = [each.text for each in review.comments if each.item is None]
-        whole = (
-            ["Their reply on the whole:\n" + "\n\n".join(general)] if general else []
-        )
-        return "\n\n".join([*(part(each) for each in review.covers), *whole])
-
-    def verdicts(self, item: Item, review: Review) -> list[str]:
-        """Say the operator's verdict on each decision of a question a review covers, beside its text and lean; none for an item that isn't a question with decisions."""
-        match item.reason:
-            case Question(decisions=decisions):
-                pass
-            case _:
-                return []
-        given = [each for each in review.verdicts if each.item == item.number]
-
-        def decided(number: int, decision: Decision) -> str:
-            verdict: Verdict | None = next(
-                (each.verdict for each in given if each.decision == number), None
-            )
-            said = "not answered" if verdict is None else ruled(verdict)
-            return f"  {number}. {decision.text} (lean: {decision.lean}): {said}."
-
-        return [
-            decided(number, decision)
-            for number, decision in enumerate(decisions, start=1)
-        ]
+        return "\n\n".join(part(each) for each in review.covers)
 
     async def reviewed(self) -> list[Item]:
-        """Send the operator's draft: a review to each conversation whose items it covers, those items answered or done, and the draft left with what's parked.
+        """Send the operator's draft: to each conversation whose items it covers, a review of those items with the comments on them alone; those items answered or done, and the draft left with what's parked.
 
-        Each recipient gets the whole review. Refused where it covers no item,
-        or covers one no conversation sent, or a verdict names a decision its
-        question doesn't ask.
+        A message only marked done, with nothing to say on it, is taken off the
+        list and its sender told nothing; a question is answered all the same,
+        since its asker may be holding for the answer. Refused where the draft
+        covers no item, or covers one no conversation sent.
         """
         draft = self.inbox.draft()
         covered = [self.inbox.item(each) for each in draft.covered()]
         if not covered:
             message = (
-                "the draft answers no item: comment on one, give a verdict, or "
-                "take one off the list"
+                "the draft answers no item: comment on one, or take one off the list"
             )
             raise InboxError(message)
         for item in covered:
-            self.reviewable(item, draft.verdicts)
-        senders = [item.sender for item in covered]
+            reviewable(item)
+        at = self.clock.now()
+        commented = [each.item for each in draft.comments]
+        read = [
+            item
+            for item in covered
+            if item.number not in commented and isinstance(item.reason, Message)
+        ]
+        for item in read:
+            self.inbox.kept(item.model_copy(update={"state": Done(at=at)}))
+        answering = [item for item in covered if item not in read]
+        senders = [item.sender for item in answering]
         recipients = [
             each for at, each in enumerate(senders) if each not in senders[:at]
         ]
-        review = Review(
-            covers=[item.number for item in covered],
-            comments=[
-                each
-                for each in draft.comments
-                if each.item is None or each.item in draft.covered()
-            ],
-            verdicts=[each for each in draft.verdicts if each.item in draft.covered()],
-        )
-        at = self.clock.now()
-        made = [
-            self.inbox.made(review, Operator(), recipient, None, at)
-            for recipient in recipients
-        ]
-        for sent in made:
-            for item in covered:
-                if item.sender == sent.recipient or item.addressed == sent.recipient:
-                    self.inbox.kept(
-                        item.model_copy(update={"state": settled(item, sent, at)})
-                    )
+
+        def sent_to(recipient: Party) -> Item:
+            own = [item for item in answering if item.sender == recipient]
+            numbers = [item.number for item in own]
+            review = Review(
+                covers=numbers,
+                comments=[each for each in draft.comments if each.item in numbers],
+            )
+            sent = self.inbox.made(review, Operator(), recipient, None, at)
+            for item in own:
+                settling = settled(item, sent, at)
+                self.inbox.kept(item.model_copy(update={"state": settling}))
+            return sent
+
+        made = [sent_to(each) for each in recipients]
         self.inbox.drafted(draft.kept())
         for sent in made:
             await self.delivered(sent)
         return made
-
-    def reviewable(self, item: Item, verdicts: list[Ruled]) -> None:
-        """Refuse an item a review can't answer: one no conversation sent, an answer or an approval, or one given verdicts on decisions it doesn't ask."""
-        match item:
-            case Item(sender=Conversation(), reason=Message() | Question()):
-                pass
-            case _:
-                message = (
-                    f"item {item.number} is {what(item)} from {who(item.sender)}, "
-                    "which a review doesn't answer"
-                )
-                raise InboxError(message)
-        asked = len(item.reason.decisions) if isinstance(item.reason, Question) else 0
-        wrong = [
-            each.decision
-            for each in verdicts
-            if each.item == item.number and not 1 <= each.decision <= asked
-        ]
-        if wrong:
-            message = (
-                f"item {item.number} asks {asked} decisions; the draft gives a "
-                f"verdict on {wrong}"
-            )
-            raise InboxError(message)
 
     def answered(self, answer: Answer) -> str:
         """Say the operator's answer, each decision beside its question's text and the lean it was asked with."""

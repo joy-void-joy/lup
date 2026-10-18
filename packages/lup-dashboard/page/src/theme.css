@@ -11,6 +11,7 @@
     --focus: #f38518;
     --sel-bg: #f3f518;
     --sel-fg: #000000;
+    --selection: rgb(38, 79, 120);
     --fg: #ffffff;
     --muted: #b3b3b3;
     --link: #2facff;
@@ -66,6 +67,10 @@ textarea {
     color: var(--sel-fg);
 }
 
+.review-buffer .cm-content ::selection {
+    color: inherit;
+}
+
 /* Every control shows where the keyboard is. */
 :focus-visible,
 [data-focus-visible] {
@@ -86,7 +91,7 @@ kbd {
 
 .layout {
     display: grid;
-    grid-template-columns: minmax(32ch, 44ch) minmax(0, 1fr) minmax(30ch, 44ch);
+    grid-template-columns: minmax(24ch, 34ch) minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     height: 100vh;
 }
@@ -393,7 +398,7 @@ kbd {
 .review-buffer .cm-selectionBackground,
 .review-buffer .cm-editor.cm-focused .cm-selectionBackground,
 .review-buffer .cm-selectionLayer .cm-selectionBackground {
-    background: var(--sel-bg) !important;
+    background: var(--selection) !important;
 }
 
 .review-buffer .cm-panels {
@@ -423,8 +428,30 @@ kbd {
 
 .remark {
     color: var(--warn);
-    padding-left: 4ch;
-    white-space: pre-wrap;
+    background: var(--float-bg);
+    border-left: 2px solid var(--warn);
+}
+
+.remark::before {
+    content: "» ";
+    color: var(--muted);
+}
+
+.bar .demo {
+    color: var(--bg);
+    background: var(--warn);
+    padding: 0 1ch;
+    font-weight: 700;
+}
+
+.status {
+    border-top: 1px solid var(--border);
+    padding: 0 1ch;
+}
+
+.status kbd {
+    border: 0;
+    padding: 0;
 }
 
 .ruling-leaning {

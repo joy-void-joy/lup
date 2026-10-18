@@ -1,17 +1,17 @@
 // The page: every agent the host serves on the left; everything waiting for the
-// operator in the middle, as one review; their draft reply on the right.
-// Selecting an agent narrows the review to what it and its subagents sent.
+// operator beside it, as one review, their reply written into it, and a line
+// saying what the reply covers and who it reaches. Selecting an agent narrows the
+// review to what it and its subagents sent.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { everyone, launches, type Agent, type Launch } from "./agents";
 import { AgentTree } from "./AgentTree";
 import { ask } from "./api";
 import { Details } from "./Details";
-import { DraftPanel, reached } from "./DraftPanel";
 import { useNow, useWatched } from "./hooks";
 import { Palette } from "./Palette";
 import { Review } from "./Review";
-import { covered, EMPTY, type Draft, type Item } from "./review";
+import { covered, EMPTY, pruned, type Draft, type Item } from "./review";
 
 const SAID = {
     connecting: "connecting",
@@ -29,6 +29,7 @@ export function App() {
     const [diffs, setDiffs] = useState<Map<number, string>>(new Map());
     const [confirming, setConfirming] = useState(false);
     const [said, setSaid] = useState<string | null>(null);
+    const [demo, setDemo] = useState(false);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
     const served = reply?.kind === "listed" ? launches(reply) : [];
     const agents = everyone(served);
@@ -49,7 +50,7 @@ export function App() {
         [talkers],
     );
 
-    const waiting = inbox.reply?.kind === "inbox-items" ? inbox.reply.items : [];
+    const waiting = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.items : []), [inbox.reply]);
     const items = useMemo(
         () =>
             selected === null
@@ -67,16 +68,41 @@ export function App() {
                 setDraft(answer.draft);
             }
         });
+        void fetch("/api/about").then(async (response) => {
+            if (response.ok) {
+                setDemo(((await response.json()) as { demo: boolean }).demo);
+            }
+        });
     }, []);
+
+    const pending = useRef<Draft | null>(null);
 
     const change = useCallback((next: Draft) => {
         setDraft(next);
+        pending.current = next;
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
         }
         keeping.current = setTimeout(() => {
+            pending.current = null;
             void ask({ kind: "inbox-keep-draft", draft: next });
         }, 300);
+    }, []);
+
+    useEffect(() => {
+        // A comment written just before the page closes is kept all the same.
+        const flush = () => {
+            if (pending.current !== null) {
+                void fetch("/api/ask", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ kind: "inbox-keep-draft", draft: pending.current }),
+                    keepalive: true,
+                });
+            }
+        };
+        window.addEventListener("pagehide", flush);
+        return () => window.removeEventListener("pagehide", flush);
     }, []);
 
     const open = useCallback((number: number) => {
@@ -98,14 +124,14 @@ export function App() {
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
         }
-        await ask({ kind: "inbox-keep-draft", draft });
+        await ask({ kind: "inbox-keep-draft", draft: pruned(draft) });
         const answer = await ask({ kind: "inbox-send-draft" });
         if (answer.kind === "refused") {
             setSaid(answer.error);
             return;
         }
         if (answer.kind === "inbox-reviewed") {
-            setSaid(`Sent: ${answer.items.map((each) => `#${each.number}`).join(", ") || "the draft"}.`);
+            setSaid(`Sent: ${answer.items.map((each) => `#${each.number} to ${named(each)}`).join(", ") || "nothing new"}.`);
         }
         const after = await ask({ kind: "inbox-draft" });
         if (after.kind === "inbox-drafted") {
@@ -113,11 +139,17 @@ export function App() {
         }
     }
 
-    const to = reached(draft, waiting, named);
+    const numbers = covered(draft);
+    const commented = numbers.filter((number) => (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== ""));
+    const reached = [
+        ...new Set(waiting.filter((each) => commented.includes(each.number) || (each.reason.reason === "question" && numbers.includes(each.number))).map(named)),
+    ];
+    const read = numbers.filter((number) => !commented.includes(number));
     return (
         <div className="layout">
             <header className="bar">
                 <span className="name">lup</span>
+                {demo ? <span className="demo">demo · stand-in data, nothing reaches an agent</span> : null}
                 <span className="connection" data-state={connection}>
                     {SAID[connection]}
                 </span>
@@ -150,23 +182,39 @@ export function App() {
                         </button>
                     )}
                 </div>
-                <Review
-                    items={items}
-                    draft={draft}
-                    change={change}
-                    name={named}
-                    diffs={diffs}
-                    open={open}
-                    send={() => setConfirming(covered(draft).length > 0)}
-                    approve={approve}
-                />
-            </main>
-            <aside className="win" aria-label="Your reply">
-                <div className="wb">your reply</div>
-                <div className="buf">
-                    <DraftPanel draft={draft} change={change} items={waiting} name={named} />
+                <div className="review">
+                    <Review
+                        items={items}
+                        draft={draft}
+                        change={change}
+                        name={named}
+                        diffs={diffs}
+                        open={open}
+                        send={() => setConfirming(numbers.length > 0)}
+                        approve={approve}
+                    />
+                    <div className="status">
+                        {numbers.length === 0 ? (
+                            <span className="muted">No reply drafted.</span>
+                        ) : (
+                            <span>
+                                Your reply: {commented.length === 0 ? "" : `comments on ${commented.map((each) => `#${each}`).join(", ")}`}
+                                {read.length === 0 ? "" : `${commented.length === 0 ? "" : "; "}read ${read.map((each) => `#${each}`).join(", ")}`}
+                                {reached.length === 0 ? "" : `, to ${reached.join(", ")}`}. <kbd>Ctrl</kbd> <kbd>Enter</kbd> sends.
+                            </span>
+                        )}
+                        {(draft.parked ?? []).length === 0 ? null : (
+                            <span className="muted"> Later: {(draft.parked ?? []).map((each) => `#${each}`).join(", ")}.</span>
+                        )}
+                    </div>
+                    <div className="keys muted">
+                        <kbd>o</kbd> comment on this line (the header: the item) · <kbd>v</kbd>…<kbd>c</kbd> on the
+                        selection · <kbd>␣</kbd> <kbd>d</kbd> done · <kbd>␣</kbd> <kbd>z</kbd> later · <kbd>␣</kbd>{" "}
+                        <kbd>e</kbd> diff · <kbd>␣</kbd> <kbd>a</kbd>/<kbd>x</kbd> approve/decline · <kbd>J</kbd>/
+                        <kbd>K</kbd> items
+                    </div>
                 </div>
-            </aside>
+            </main>
             {confirming ? (
                 <div
                     className="confirm"
@@ -185,10 +233,12 @@ export function App() {
                     }}
                 >
                     <p>
-                        Send your reply on {covered(draft).map((each) => `#${each}`).join(", ")} to {to.join(", ")}?
+                        {reached.length === 0
+                            ? `Take ${read.map((each) => `#${each}`).join(", ")} off your list, telling no one?`
+                            : `Send your comments to ${reached.join(", ")}?`}
                     </p>
                     <p className="muted">
-                        Each gets all of it, its own items marked. <kbd>Enter</kbd> sends · <kbd>Esc</kbd> goes back.
+                        Each gets only what's on its own items. <kbd>Enter</kbd> sends · <kbd>Esc</kbd> goes back.
                     </p>
                 </div>
             ) : null}

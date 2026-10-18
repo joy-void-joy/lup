@@ -209,10 +209,14 @@ def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) ->
     draft = {
         "comments": [
             {"item": 51, "text": "Yes."},
+            {
+                "item": 51,
+                "quote": {"text": "Fold", "start": 0, "end": 4},
+                "text": "Keep the name.",
+            },
             {"item": 53, "text": "Later."},
-            {"text": "Overall: go."},
         ],
-        "verdicts": [{"item": 51, "decision": 1, "verdict": "leaning"}],
+        "done": [52],
         "parked": [53],
     }
     kept = served.post(
@@ -220,11 +224,10 @@ def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) ->
     )
     sent = served.post("/api/ask", json={"kind": "inbox-send-draft"}, headers=bearing())
     left = served.post("/api/ask", json={"kind": "inbox-draft"}, headers=bearing())
-    assert kept.json()["draft"]["verdicts"] == draft["verdicts"]
+    assert kept.json()["draft"]["comments"][1]["quote"]["text"] == "Fold"
     assert sent.json() == {"kind": "inbox-reviewed", "items": []}
     assert left.json()["draft"] == {
         "comments": [{"item": 53, "quote": None, "text": "Later."}],
-        "verdicts": [],
         "done": [],
         "parked": [53],
     }
