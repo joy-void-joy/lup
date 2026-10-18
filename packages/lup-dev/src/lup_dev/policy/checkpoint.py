@@ -61,6 +61,7 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.git import Git
 from lup_dev.inbox import ends
+from lup_dev.inbox.store import ChangedFile
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, Layout
 from lup_dev.policy.holds import Announcing, HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
@@ -749,6 +750,18 @@ def held_diff(store: Store, accepted: str, files: list[HeldFile]) -> str:
     return "".join(one(held) for held in files)
 
 
+def held_files(store: Store, accepted: str, files: list[HeldFile]) -> list[ChangedFile]:
+    """Return each held file whole: its content in the accepted tree, and the held content, none where the change deletes it."""
+    return [
+        ChangedFile.of(
+            held.path,
+            store.content(accepted, held.path),
+            store.object(held.blob) if held.blob else None,
+        )
+        for held in files
+    ]
+
+
 class Fates(Model):
     """A checkpoint's judgements, by what happens to each file."""
 
@@ -934,7 +947,10 @@ def act(
     )
     if hold is not None:
         bench.services.announcing.announced(
-            hold, bench.runtime.name(), worktree.repository
+            hold,
+            bench.runtime.name(),
+            worktree.repository,
+            held_files(store, tree, held),
         )
     if tree != snapshot.accepted:
         store.accept(tree)
@@ -1008,7 +1024,12 @@ def brought(
                 verdicts=[each for each in logged if each.path in asked_paths],
             )
         )
-        services.announcing.announced(hold, bench.runtime.name(), worktree.repository)
+        services.announcing.announced(
+            hold,
+            bench.runtime.name(),
+            worktree.repository,
+            held_files(store, snapshot.accepted, files),
+        )
     worktree.verdicts(services.layout).append(logged)
     report = Moved(
         worktree=root,

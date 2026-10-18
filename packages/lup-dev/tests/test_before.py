@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from lup_dev.inbox.store import ChangedFile, Text
 from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import Session, SessionStarted
 from lup_dev.policy.holds import Holds, Response
@@ -78,11 +79,13 @@ def test_an_edit_with_a_finding_is_allowed_and_remembered_for_its_checkpoint(
 def test_a_write_that_asks_is_held_for_the_operator_and_let_through_on_a_yes(
     kit: Kit, repo: Path
 ) -> None:
-    write = Overwrite(
-        call="w1", tool="Write", path=repo / CORE, text=(repo / CORE).read_text() + "\n"
-    )
+    was = (repo / CORE).read_text()
+    write = Overwrite(call="w1", tool="Write", path=repo / CORE, text=was + "\n")
     decision = before(kit.bench, write, "s1", repo)
     [hold] = kit.announced.holds
+    assert kit.announced.files == [
+        [ChangedFile(path=CORE, before=Text(text=was), after=Text(text=was + "\n"))]
+    ]
     assert decision == Decision(outcome="allow")
     assert [each.asks for each in hold.files] == [
         [f"the write replaces the whole of {repo}/src/pkg/core.py"]

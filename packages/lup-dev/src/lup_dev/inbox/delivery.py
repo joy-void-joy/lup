@@ -48,7 +48,10 @@ The operator hears of each item that reaches them through the desktop's notices.
 conversation: a launch puts it in their inbox and waits on it (`settled`), and
 every launch asking about the same zone while it waits joins it (`asked`); one asked about a newer zone of the same repository supersedes it. It's
 answered once, by whichever terminal answers first (`decided`), which wakes every
-launch waiting on it; an answer after that changes nothing.
+launch waiting on it; an answer after that changes nothing. The operator's
+comment on one a push asked is told to the session that pushed, as a note
+saying which approval and the answer (`commented`); one a launch asked at its
+terminal has no session to tell.
 
 What the service knows of a conversation while it serves (whether a call of
 its runs, the calls it holds) is in memory: a service started again knows of
@@ -69,6 +72,7 @@ from lup_dev.inbox.store import (
     Answer,
     Answered,
     Approval,
+    ChangedFile,
     Comment,
     Conversation,
     Decided,
@@ -209,6 +213,31 @@ def remark(comment: Comment) -> str:
         return f"  {comment.text}"
     quoted = "\n".join(f"    > {line}" for line in comment.quote.text.splitlines())
     return f"  On this passage:\n{quoted}\n    {comment.text}"
+
+
+def commented(item: Item, comment: str) -> str:
+    """Say the operator's answer to an approval a push asked, with their comment, for the session that pushed.
+
+    >>> from datetime import UTC, datetime
+    >>> from pathlib import Path
+    >>> asked = Approval(text="Approve the host zone at abc?", summary="",
+    ...     repository=Path("/r.git"), fingerprint="f")
+    >>> item = Item(number=7, reason=asked, sender=Operator(), recipient=Operator(),
+    ...     made=datetime(2026, 1, 1, tzinfo=UTC),
+    ...     state=Decided(at=datetime(2026, 1, 1, tzinfo=UTC), approved=False))
+    >>> print(commented(item, "Split the reader out first."))
+    The operator declined item 7, the approval your push asked ("Approve the host zone at abc?"), and commented:
+    Split the reader out first.
+    """
+    answer = (
+        "approved"
+        if isinstance(item.state, Decided) and item.state.approved
+        else "declined"
+    )
+    return (
+        f"The operator {answer} item {item.number}, the approval your push asked "
+        f'("{opening(item)}"), and commented:\n{comment}'
+    )
 
 
 def settled(item: Item, review: Item, at: datetime) -> Answered | Done:
@@ -690,20 +719,27 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         numbers = ", ".join(str(item.number) for item in waiting)
         self.say(f"{place.launch}: woke {who(party)} for items {numbers}")
 
-    def main_of(self, launch: str) -> Conversation:
-        """Return the main conversation of the session `launch` runs, the latest heard there."""
+    def running(self, launch: str) -> Conversation | None:
+        """Return the main conversation of the session `launch` runs, the latest heard there; none where no session of it has reached lup."""
         found = [
             place
             for place in self.inbox.whereabouts.values()
             if place.launch == launch and place.conversation.agent is None
         ]
         if not found:
+            return None
+        return max(found, key=lambda place: place.since).conversation
+
+    def main_of(self, launch: str) -> Conversation:
+        """Return the main conversation of the session `launch` runs, the latest heard there, or say there's none."""
+        found = self.running(launch)
+        if found is None:
             message = (
                 f"no session of launch `{launch}` has reached lup yet, so nothing "
                 "there can be told"
             )
             raise InboxError(message)
-        return max(found, key=lambda place: place.since).conversation
+        return found
 
     async def answer(self, number: int, rulings: list[Ruling], comment: str) -> Item:
         """Answer the question item `number`, or reply to the message: the answer an item for the conversation that sent it.
@@ -824,22 +860,33 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             Message(kind="note", text=text), Operator(), conversation, None
         )
 
-    async def asked(self, approval: Approval, diff: str, worktree: Path) -> Item:
-        """Put an approval in the operator's inbox, its whole diff kept beside it, and raise its notice.
+    async def asked(
+        self, approval: Approval, diff: str, files: list[ChangedFile], worktree: Path
+    ) -> Item:
+        """Put an approval in the operator's inbox, its whole diff and each file it changes kept beside it, and raise its notice.
 
         Where one waits already about the same zone, a launch asking the same
         question meanwhile, that one is returned instead, for this launch to
-        wait on too. Each one waiting about another zone of the same repository
-        is superseded by it, off the operator's list, and every launch waiting on
-        one is woken to ask about the zone at the tip instead.
+        wait on too, a push joining it taking the comment on its answer where no
+        push asked it before. Each one waiting about another zone of the same
+        repository is superseded by it, off the operator's list, and every
+        launch waiting on one is woken to ask about the zone at the tip instead.
         """
         joined = self.inbox.asking(approval.repository, approval.fingerprint)
-        if joined is not None:
-            return joined
+        match joined:
+            case Item(reason=Approval(pushed_by=None) as waiting) if (
+                approval.pushed_by is not None
+            ):
+                pushed = waiting.model_copy(update={"pushed_by": approval.pushed_by})
+                return self.inbox.kept(joined.model_copy(update={"reason": pushed}))
+            case Item():
+                return joined
+            case None:
+                pass
         item = self.inbox.made(
             approval, Operator(), Operator(), worktree, self.clock.now()
         )
-        self.inbox.attached(item.number, diff)
+        self.inbox.attached(item.number, diff, files)
         replaced = [
             each
             for each in self.inbox.waiting(Operator())
@@ -883,11 +930,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             await self.settling[number].wait()
         return self.inbox.item(number)
 
-    def decided(self, number: int, *, approved: bool, comment: str = "") -> Item:
+    async def decided(self, number: int, *, approved: bool, comment: str = "") -> Item:
         """Answer approval or held change `number`, yes or no, with the operator's comment; wake every launch waiting on an approval, and write a hold's answer for its hook.
 
-        One answered already keeps its answer, whichever came first, and is
-        returned as it stands.
+        A comment on an approval a push asked is told to the session that
+        pushed (`commented`); a held change's reaches its agent with the hold's
+        answer. One answered already keeps its answer, whichever came first,
+        and is returned as it stands.
         """
         item = self.approval(number)
         if not isinstance(item.state, Waiting):
@@ -904,6 +953,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.settle(number)
         said = "approved" if approved else "declined"
         self.say(f"item {number}, {what(item)}, was {said}")
+        match item.reason:
+            case Approval(pushed_by=Conversation() as pusher) if comment.strip():
+                await self.posted(
+                    Message(kind="note", text=commented(answered, comment)),
+                    Operator(),
+                    pusher,
+                    None,
+                )
+            case _:
+                pass
         return answered
 
     async def held_change(
@@ -911,13 +970,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         change: HeldChange,
         sender: Conversation,
         diff: str,
+        files: list[ChangedFile],
         *,
         call: str | None = None,
     ) -> Item:
-        """Put a held change in the operator's inbox from the conversation that made it, its diff kept beside it, anchored to `call`, and raise its notice."""
+        """Put a held change in the operator's inbox from the conversation that made it, its diff and each file held kept beside it, anchored to `call`, and raise its notice."""
         item = self.inbox.made(
             change, sender, Operator(), change.worktree, self.clock.now(), call=call
         )
-        self.inbox.attached(item.number, diff)
+        self.inbox.attached(item.number, diff, files)
         await self.noticed(item)
         return item

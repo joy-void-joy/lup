@@ -42,22 +42,31 @@ from lup_dev.host.watch import Changes
 from lup_dev.inbox.delivery import Delivery, opening
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.protocol import (
+    AnswerApproval,
+    AskApproval,
     Context,
     Conversed,
     Drafted,
+    Files,
     Items,
     KeepDraft,
     ListInbox,
     Reviewed,
     SendDraft,
+    Settled,
     ShowContext,
     ShowConversation,
     ShowDraft,
+    ShowFiles,
+    Shown,
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import (
     Answer,
     Answered,
+    Approval,
+    Binary,
+    ChangedFile,
     Comment,
     Conversation,
     Decided,
@@ -71,6 +80,7 @@ from lup_dev.inbox.store import (
     Operator,
     Quote,
     Review,
+    Text,
     Told,
     Waiting,
 )
@@ -1795,6 +1805,7 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
             diff="+new\n",
         )
     )
+    whole = ChangedFile(path=Path("src/new.py"), before=None, after=Text(text="new\n"))
     with inboxed(machine, clock, notices, said) as delivery:
         delivery.settle_hold = lambda change, approved, comment: cli.hold_answered(
             machine, change, approved=approved, comment=comment
@@ -1803,10 +1814,13 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
             hold.model_copy(update={"call": "t7", "agent": "sub"}),
             "claude",
             tmp_path / ".git",
+            [whole],
         )
         [item] = delivery.inbox.waiting(Operator())
         shown = inbox("show", str(item.number))
         diff = inbox("show", str(item.number), "--diff")
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        files = host.ask(ShowFiles(number=item.number), Files)
         declined = inbox(
             "answer", str(item.number), "--decline", "--comment", "not this one"
         )
@@ -1827,6 +1841,7 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
     )
     assert "Let the change to src/new.py land?" in shown
     assert "+new" in diff
+    assert files == Files(number=item.number, files=[whole])
     assert "you declined it; the agent waiting on it goes on" in declined
     assert "was answered already, elsewhere" in again
     assert answered is not None
@@ -1837,6 +1852,116 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
     )
     assert isinstance(state, Decided)
     assert state.comment == "not this one"
+
+
+def asking_approval(
+    tmp_path: Path,
+    fingerprint: str,
+    pushed_by: Conversation | None = None,
+    files: list[ChangedFile] | None = None,
+) -> AskApproval:
+    """An approval of the repository at `tmp_path`, its zone at `fingerprint`, asked by `pushed_by`'s push, or by a launch."""
+    return AskApproval(
+        question="Approve the host zone at abc?",
+        summary="A summary.",
+        diff="+the diff\n",
+        files=files or [],
+        repository=tmp_path / ".git",
+        fingerprint=fingerprint,
+        worktree=tmp_path,
+        pushed_by=pushed_by,
+    )
+
+
+def test_an_approval_keeps_each_file_it_changes_whole_and_shows_them_on_request(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    changed = [
+        ChangedFile(
+            path=Path("src/a.py"),
+            before=Text(text="a = 1\n"),
+            after=Text(text="a = 2\n"),
+        ),
+        ChangedFile(path=Path("icon.png"), before=None, after=Binary(size=1150)),
+        ChangedFile(path=Path("src/gone.py"), before=Text(text="gone\n"), after=None),
+    ]
+    with inboxed(machine, clock, notices, said):
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        asked = host.ask(asking_approval(tmp_path, "zone", files=changed), Shown).item
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        call(machine.host.launch("one").mcp, "note", {"remark": "A doubt."})
+        shown = host.ask(ShowFiles(number=asked.number), Files)
+        with pytest.raises(HostError) as unasked:
+            host.ask(ShowFiles(number=asked.number + 1), Files)
+    assert shown == Files(number=asked.number, files=changed)
+    assert str(unasked.value) == (
+        f"item {asked.number + 1} isn't an approval or a held change, but a note"
+    )
+
+
+def test_a_comment_on_an_approval_a_push_asked_reaches_the_session_that_pushed(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        pusher = delivery.running("one")
+        assert pusher is not None
+        assert pusher == Conversation(
+            repository=tmp_path / ".git", runtime="claude", session="s1"
+        )
+        assert delivery.running("two") is None
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        asked = host.ask(asking_approval(tmp_path, "zone", pusher), Shown).item
+        settled = host.ask(
+            AnswerApproval(
+                number=asked.number,
+                approved=False,
+                comment="Split the reader out first.",
+            ),
+            Settled,
+        )
+        told = send(hook, bash("b1"))
+        quiet = host.ask(asking_approval(tmp_path, "quiet", pusher), Shown).item
+        inbox("answer", str(quiet.number), "--decline")
+        launch = host.ask(asking_approval(tmp_path, "launch's"), Shown).item
+        inbox("answer", str(launch.number), "--decline", "--comment", "Not yet.")
+        nothing = send(hook, bash("b2"))
+        typed = host.ask(asking_approval(tmp_path, "typed", pusher), Shown).item
+        inbox("answer", str(typed.number), "--decline", "--comment", "Not yet.")
+        later = send(hook, bash("b3"))
+        waiting = delivery.inbox.waiting(pusher)
+    assert settled.here
+    assert context(told) == (
+        "lup's inbox, item 2: a note from the operator:\n"
+        f"The operator declined item {asked.number}, the approval your push asked "
+        '("Approve the host zone at abc?"), and commented:\n'
+        "Split the reader out first."
+    )
+    assert nothing == ""
+    assert context(later) == (
+        f"lup's inbox, item {typed.number + 1}: a note from the operator:\n"
+        f"The operator declined item {typed.number}, the approval your push asked "
+        '("Approve the host zone at abc?"), and commented:\nNot yet.'
+    )
+    assert waiting == []
+
+
+def test_a_push_joining_an_approval_a_launch_asked_takes_the_comment_on_its_answer(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    pusher = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said) as delivery:
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        launched_first = host.ask(asking_approval(tmp_path, "zone"), Shown).item
+        joined = host.ask(asking_approval(tmp_path, "zone", pusher), Shown).item
+        again = host.ask(asking_approval(tmp_path, "zone"), Shown).item
+        kept = delivery.inbox.item(launched_first.number)
+    assert joined.number == again.number == launched_first.number
+    assert isinstance(kept.reason, Approval)
+    assert kept.reason.pushed_by == pusher
 
 
 def test_a_conversation_is_read_from_its_record_from_where_the_asker_left_it(

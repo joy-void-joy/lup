@@ -103,7 +103,7 @@ from lup_dev.inbox.protocol import (
     Settled,
     Shown,
 )
-from lup_dev.inbox.store import Decided, Item, Superseded
+from lup_dev.inbox.store import ChangedFile, Conversation, Decided, Item, Superseded
 from lup_dev.layout import CheckoutLayout, JudgeLayout, Layout
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
@@ -411,6 +411,9 @@ class Change(Model):
     local: Diffed = Diffed()
     """The person's own layer, from the copy approved before to the worktree's;
     empty where it's the same."""
+    files: list[ChangedFile]
+    """Each file the diff shows, whole on each side, in its order: what the
+    dashboard shows (`docs/dashboard.md`, *The review*)."""
     tool: list[str]
     """How the `lup-dev` release changed, line by line; none for the workspace's
     own source, whose change is in the diff."""
@@ -595,8 +598,8 @@ class Approvals(ABC):
         """Wait on approval `number` while the context is open, for an answer given elsewhere."""
 
     @abstractmethod
-    def answer(self, number: int, *, approved: bool) -> Given:
-        """Answer approval `number` here; return the answer that holds, which another terminal may have given first."""
+    def answer(self, number: int, *, approved: bool, comment: str = "") -> Given:
+        """Answer approval `number` here, with the operator's `comment`; return the answer that holds, which another terminal may have given first."""
 
 
 class Asker(ABC):
@@ -800,9 +803,9 @@ class InboxApprovals(Model, Approvals, arbitrary_types_allowed=True):
             awaited.outstanding.close()
 
     @override
-    def answer(self, number: int, *, approved: bool) -> Given:
+    def answer(self, number: int, *, approved: bool, comment: str = "") -> Given:
         settled = self.host.ask(
-            AnswerApproval(number=number, approved=approved), Settled
+            AnswerApproval(number=number, approved=approved, comment=comment), Settled
         )
         return Given(approved=decision(settled.item), here=settled.here)
 
@@ -1344,6 +1347,62 @@ def compared(approved: str | None, current: str | None) -> Diffed:
     )
 
 
+def files_between(
+    git: Git, start: str, end: str, paths: list[Path]
+) -> list[ChangedFile]:
+    """Return each file under `paths` whose content differs from `start` to `end`, whole on each side, by path.
+
+    A file created or deleted has none on the side it's missing from. A
+    submodule is left out, as a commit's export leaves it: its files aren't the
+    commit's. The contents are read by one `git cat-file`.
+    """
+    if not paths:
+        return []
+
+    def listed(tree: str) -> dict[Path, str]:
+        return {
+            Path(each.path): each.object
+            for each in git.tracked(tree)
+            if each.kind == "blob"
+            and any(Path(each.path).is_relative_to(path) for path in paths)
+        }
+
+    before = listed(start)
+    after = listed(end)
+    changed = sorted(
+        path for path in {*before, *after} if before.get(path) != after.get(path)
+    )
+    wanted = [
+        blob
+        for path in changed
+        for blob in (before.get(path), after.get(path))
+        if blob is not None
+    ]
+    read = dict(zip(wanted, git.contents(wanted), strict=True))
+    return [
+        ChangedFile.of(
+            path,
+            read.get(before.get(path, "")),
+            read.get(after.get(path, "")),
+        )
+        for path in changed
+    ]
+
+
+def layer_changed(approved: str | None, current: str | None) -> list[ChangedFile]:
+    """Return the person's own layer, whole on each side, where it changed from the copy `approved` to the `current` one; none where they're the same."""
+    if approved == current:
+        return []
+    name = CheckoutLayout(root=Path()).local_declaration
+    return [
+        ChangedFile.of(
+            name,
+            None if approved is None else approved.encode(),
+            None if current is None else current.encode(),
+        )
+    ]
+
+
 class Trust(Model, arbitrary_types_allowed=True):
     """The check, and the question, a launch makes about what the host runs for a repository."""
 
@@ -1496,7 +1555,8 @@ class Trust(Model, arbitrary_types_allowed=True):
         The paths the approval held, since its commit; the paths it didn't, whole.
         The first time, or where the repository doesn't hold the approved commit,
         every path whole. The person's own layer, from the copy approved to the
-        worktree's, where they differ (`compared`).
+        worktree's, where they differ (`compared`). Each file the diff shows is
+        read whole on each side too (`files_between`, `layer_changed`).
         """
         git = Git(cwd=self.root)
         zone = standing.zone
@@ -1504,7 +1564,9 @@ class Trust(Model, arbitrary_types_allowed=True):
         empty = git.run("hash-object", "-t", "tree", "--stdin", stdin=b"")
         nothing = empty.output.decode().strip()
         tool = zone.tool.said(approval.tool if approval is not None else None)
-        local = compared(approval.local if approval is not None else None, zone.local)
+        before = approval.local if approval is not None else None
+        local = compared(before, zone.local)
+        layer = layer_changed(before, zone.local)
         held = approval is not None and (
             git.run(
                 "cat-file", "-e", f"{approval.commit}^{{commit}}", ok=[0, 1, 128]
@@ -1519,6 +1581,10 @@ class Trust(Model, arbitrary_types_allowed=True):
                 changed=diffed(git, nothing, zone.commit, zone.paths),
                 joined=Diffed(),
                 local=local,
+                files=[
+                    *files_between(git, nothing, zone.commit, zone.paths),
+                    *layer,
+                ],
                 tool=tool,
                 unread=zone.unread,
             )
@@ -1531,6 +1597,11 @@ class Trust(Model, arbitrary_types_allowed=True):
             changed=diffed(git, approval.commit, zone.commit, kept),
             joined=diffed(git, nothing, zone.commit, joined),
             local=local,
+            files=[
+                *files_between(git, approval.commit, zone.commit, kept),
+                *files_between(git, nothing, zone.commit, joined),
+                *layer,
+            ],
             tool=tool,
             unread=zone.unread,
         )
@@ -1584,6 +1655,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                     question=question,
                     summary=summary,
                     diff=diff,
+                    files=change.files,
                     repository=repository,
                     fingerprint=standing.fingerprint,
                     worktree=self.root,
@@ -1608,13 +1680,15 @@ class Trust(Model, arbitrary_types_allowed=True):
         with lock:
             return self.answered(repository, standing, given)
 
-    def proposed(self) -> int | None:
+    def proposed(self, pushed_by: Conversation | None = None) -> int | None:
         """Put the approval of the tip's host zone in the operator's inbox where it isn't the one approved, asking nothing here, and return its number; none where it's approved.
 
         What a push that moves the integration branch starts, on the host
         (`cli.py`): nobody waits on the approval, and the terminal answering it
-        acts on the answer (`settle`). An approval waiting about the same zone is
-        joined, as a launch joins it.
+        acts on the answer (`settle`). `pushed_by` is the main conversation of
+        the session that pushed, which the operator's comment on their answer
+        is told to; none where no session's is known. An approval waiting about
+        the same zone is joined, as a launch joins it.
         """
         repository = self.repository()
         kept = self.layout.approved(repository)
@@ -1629,9 +1703,11 @@ class Trust(Model, arbitrary_types_allowed=True):
                     question=change.question(),
                     summary=change.summary(),
                     diff=change.diff(),
+                    files=change.files,
                     repository=repository,
                     fingerprint=standing.fingerprint,
                     worktree=self.root,
+                    pushed_by=pushed_by,
                 )
             )
 

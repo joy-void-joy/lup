@@ -16,6 +16,7 @@ from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
 from lup_dev.declaration.resolve import Declaration, Selected
 from lup_dev.declaration.runner import Plain, Prefixed
+from lup_dev.inbox.store import ChangedFile, Text
 from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     CallFinished,
@@ -314,6 +315,15 @@ def test_a_module_committed_through_the_shell_stays_and_asks_the_operator_after(
     [hold] = waiting(kit.layout)
     assert told.endswith(f"in their inbox (hold {hold.key}).")
     assert kit.announced.holds == [hold]
+    assert kit.announced.files == [
+        [
+            ChangedFile(
+                path=Path("src/pkg/new.py"),
+                before=None,
+                after=Text(text='"""New."""\n'),
+            )
+        ]
+    ]
     assert hold.commit == shell.git(repo, "rev-parse", "HEAD")
     assert new.read_text() == '"""New."""\n'
     call(kit, repo, "c2")
@@ -898,6 +908,15 @@ def test_an_ask_is_held_until_the_operator_approves(
     assert answers == ["approved"]
     [hold] = holding_kit.announced.holds
     assert (hold.call, hold.agent) == ("p1", None)
+    assert holding_kit.announced.files == [
+        [
+            ChangedFile(
+                path=Path("src/pkg/new.py"),
+                before=None,
+                after=Text(text='"""New."""\n'),
+            )
+        ]
+    ]
 
 
 def test_a_declined_hold_is_put_back_with_the_comment(
