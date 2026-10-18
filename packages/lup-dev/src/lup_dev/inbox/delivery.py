@@ -128,6 +128,8 @@ def who(party: Party) -> str:
 def what(item: Item) -> str:
     """Say what an item is, in a few words."""
     match item.reason:
+        case Message(ending=True):
+            return "the end of a turn"
         case Message(kind="question"):
             return "a question, as a message"
         case Message(kind=kind):
@@ -452,7 +454,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             agent=conversation.agent,
         )
         await self.posted(
-            Message(kind="note", text=said), party, Operator(), launch.worktree
+            Message(kind="note", text=said, ending=True),
+            party,
+            Operator(),
+            launch.worktree,
         )
 
     @override
