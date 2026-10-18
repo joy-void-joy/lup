@@ -25,6 +25,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
+from filelock import FileLock, Timeout
 from pydantic import TypeAdapter
 
 from lup.programs import detached
@@ -364,7 +365,13 @@ class HostClient(Model, arbitrary_types_allowed=True):
         self.ask(Unregister(launch=launch), Done)
 
     def stop(self) -> bool:
-        """Stop the service, and wait until its socket is gone; say whether one ran."""
+        """Stop the service, and wait until it has exited; say whether one ran.
+
+        Its socket goes first; it holds its lock until it has closed every
+        launch and stopped what runs beside it, so a service started before the
+        lock is free refuses, as one does while another runs: a restart starts
+        the next once the lock is free (`exited`).
+        """
         if not self.answers():
             return False
         self.ask(Stop(), Done)
@@ -373,4 +380,18 @@ class HostClient(Model, arbitrary_types_allowed=True):
             f"the host service said it stops, but still answers on "
             f"{self.layout.control} after {self.patience}",
         )
+        self.exited()
         return True
+
+    def exited(self) -> None:
+        """Wait until no service holds the lock one holds for its whole life, up to `patience`; raise `HostError` past it."""
+        life = FileLock(self.layout.lock, timeout=self.patience.total_seconds())
+        try:
+            with life:
+                pass
+        except Timeout as held:
+            message = (
+                f"the host service stopped answering on {self.layout.control}, but "
+                f"still holds {self.layout.lock} after {self.patience}"
+            )
+            raise HostError(message) from held
