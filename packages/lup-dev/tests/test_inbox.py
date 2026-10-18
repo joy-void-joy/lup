@@ -1250,7 +1250,8 @@ def test_a_subagent_spawned_without_a_name_is_asked_and_its_parent_told_once(
     assert first_spawn == (
         "lup: that subagent goes without a name, so you and the operator can't call "
         "it by one: give each subagent you spawn a name after its task (`name` on "
-        "`Agent`). It's asked to name itself meanwhile."
+        "`Agent`, which it takes though its schema doesn't list it). It's asked to "
+        "name itself meanwhile."
     )
     assert second_spawn == ""
     assert asked.startswith(

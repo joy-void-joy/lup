@@ -442,7 +442,7 @@ class PreToolUse(Payload):
             spawning=(
                 Spawning(
                     name=AgentCall.model_validate(self.tool_input).name,
-                    naming="`name` on `Agent`",
+                    naming="`name` on `Agent`, which it takes though its schema doesn't list it",
                 )
                 if self.tool_name in SPAWNING and not self.agent_id
                 else None
