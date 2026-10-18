@@ -27,7 +27,16 @@ from lup_dev.host.records import Entry, Recorded
 from lup_dev.host.service import Handler, Route
 from lup_dev.inbox import context
 from lup_dev.inbox.delivery import Delivery
-from lup_dev.inbox.store import Approval, Draft, Item, Operator, Ruling, Waiting
+from lup_dev.inbox.store import (
+    Approval,
+    Conversation,
+    Draft,
+    Held,
+    Item,
+    Operator,
+    Ruling,
+    Waiting,
+)
 
 
 class ListInbox(Request):
@@ -123,11 +132,21 @@ class AwaitApproval(Request):
 
 
 class AnswerApproval(Request):
-    """Answer an approval, yes or no."""
+    """Answer an approval or a held change, yes or no, with what the operator adds."""
 
     kind: Literal["inbox-answer-approval"] = "inbox-answer-approval"
     number: int
     approved: bool
+    comment: str = ""
+
+
+class AskHold(Request):
+    """Put a held change in the operator's inbox: what's held and why, its diff, and the session that made it."""
+
+    kind: Literal["inbox-ask-hold"] = "inbox-ask-hold"
+    held: Held
+    sender: Conversation
+    diff: str
 
 
 class ShowDiff(Request):
@@ -316,8 +335,25 @@ class ApprovalAnswering(Model, Handler[AnswerApproval], arbitrary_types_allowed=
     @override
     async def answer(self, request: AnswerApproval) -> Reply:
         before = self.delivery.approval(request.number)
-        after = self.delivery.decided(request.number, approved=request.approved)
+        after = self.delivery.decided(
+            request.number, approved=request.approved, comment=request.comment
+        )
         return Settled(item=after, here=isinstance(before.state, Waiting))
+
+
+class HoldAsking(Model, Handler[AskHold], arbitrary_types_allowed=True):
+    """Answers `AskHold`: the held change in the operator's inbox."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[AskHold]:
+        return AskHold
+
+    @override
+    async def answer(self, request: AskHold) -> Reply:
+        item = await self.delivery.held(request.held, request.sender, request.diff)
+        return Shown(item=item)
 
 
 class ContextShowing(Model, Handler[ShowContext], arbitrary_types_allowed=True):
@@ -406,6 +442,7 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.to(ApprovalAsking(delivery=delivery)),
         Route.to(ApprovalAwaiting(delivery=delivery)),
         Route.to(ApprovalAnswering(delivery=delivery)),
+        Route.to(HoldAsking(delivery=delivery)),
         Route.to(DiffShowing(delivery=delivery)),
         Route.to(ContextShowing(delivery=delivery, recorded=recorded)),
         Route.to(DraftShowing(delivery=delivery)),

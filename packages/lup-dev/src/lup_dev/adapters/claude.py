@@ -211,10 +211,6 @@ class Claude(Runtime):
         return "claude"
 
     @override
-    def asks_before(self) -> bool:
-        return True
-
-    @override
     def inside(self) -> bool:
         return bool(Variables().claude_code_child_session)
 
@@ -501,7 +497,7 @@ class PreToolUse(Payload):
 
     @override
     def answer(self, bench: Bench) -> Output | None:
-        """Judge a file tool's write before it lands, and count the call as running."""
+        """Judge a file tool's write before it lands, and count the call as running; a write held and declined never runs, so it isn't counted."""
         proposed = self.proposal()
         decision = (
             Decision(outcome=None)
@@ -512,10 +508,16 @@ class PreToolUse(Payload):
             case None:
                 self.started().apply(bench)
                 return None
-            case "allow" | "ask" as outcome:
+            case "deny":
+                answer = PreToolUseAnswer(
+                    permission_decision="deny",
+                    permission_decision_reason=decision.reason,
+                )
+                return Specific(hook_specific_output=answer)
+            case "allow":
                 self.started().apply(bench)
                 answer = PreToolUseAnswer(
-                    permission_decision=outcome,
+                    permission_decision="allow",
                     permission_decision_reason=decision.reason or None,
                 )
                 return Specific(hook_specific_output=answer)

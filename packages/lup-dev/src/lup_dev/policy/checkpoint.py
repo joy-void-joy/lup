@@ -97,6 +97,8 @@ class Services(Model, arbitrary_types_allowed=True):
     integration: str
     """The branch whose tip holds the declaration every worktree is judged by,
     until the operator approves a commit (`lup_dev.approval`)."""
+    announcing: Announcing
+    """Where each hold is put before the operator, whose answer comes back to it."""
 
 
 class Bench(Model, arbitrary_types_allowed=True):
@@ -750,31 +752,24 @@ def held_diff(store: Store, accepted: str, files: list[HeldFile]) -> str:
 class Fates(Model):
     """A checkpoint's judgements, by what happens to each file."""
 
-    refused: list[Judgement] = []
     held: list[Judgement] = []
     accepted: list[Judgement] = []
 
 
-def fates(bench: Bench, judgements: list[Judgement], deciding: list[Path]) -> Fates:
-    """Sort a checkpoint's judgements by what happens to each file.
+def fates(judgements: list[Judgement], deciding: list[Path]) -> Fates:
+    """Sort a checkpoint's judgements by what happens to each file: an ask this checkpoint decides is held, on every runtime, its agent waiting inside the hook."""
 
-    An ask made through the shell is refused, with a pointer back to the file
-    tools, on a runtime that asks before a call; it's held on one that can't.
-    """
-    asks_before = bench.runtime.asks_before()
-
-    def fate(judgement: Judgement) -> Literal["refused", "held", "accepted"]:
+    def fate(judgement: Judgement) -> Literal["held", "accepted"]:
         if judgement.path not in deciding:
             return "accepted"
         match judgement.outcome:
             case "ask":
-                return "refused" if asks_before else "held"
+                return "held"
             case "allow":
                 return "accepted"
 
     each = {judgement.path: fate(judgement) for judgement in judgements}
     return Fates(
-        refused=[j for j in judgements if each[j.path] == "refused"],
         held=[j for j in judgements if each[j.path] == "held"],
         accepted=[j for j in judgements if each[j.path] == "accepted"],
     )
@@ -867,7 +862,6 @@ class Snapshot(Model):
 class Acted(Model):
     """What a checkpoint did to the files it judged."""
 
-    refused: list[Refused] = []
     hold: Hold | None = None
     landed: list[Judgement] = []
     """The files accepted, judged at this checkpoint or before they landed."""
@@ -886,19 +880,17 @@ class Decided(Model):
 def act(
     bench: Bench, worktree: Worktree, snapshot: Snapshot, decided: Decided
 ) -> Acted:
-    """Put back what's refused, hold what waits, and accept the rest; hold the lock.
+    """Hold what waits, put before the operator, and accept the rest; hold the lock.
 
-    A refused or held file goes back to its accepted content, or to `HEAD`'s
-    where a move changed it, since the move is accepted.
+    A held file keeps its accepted content in the store, or `HEAD`'s where a
+    move changed it, since the move is accepted, until the operator answers.
     """
     store = worktree.store
     root = worktree.root
     judged = decided.fates
     state = store.state()
-    number = state.saved + 1
-    refused_paths = [judgement.path for judgement in judged.refused]
     held_paths = [judgement.path for judgement in judged.held]
-    kept_out = [*refused_paths, *held_paths, *(each.path for each in state.holding)]
+    kept_out = [*held_paths, *(each.path for each in state.holding)]
     bases = [plan.base for plan in decided.plans if plan.base and plan.path in kept_out]
     based = [base.path for base in bases]
     tree = (
@@ -908,22 +900,6 @@ def act(
         if kept_out
         else snapshot.taken
     )
-
-    def put_back(judgement: Judgement) -> Refused:
-        content = store.content(snapshot.taken, judgement.path)
-        saved = (
-            root / judgement.path
-            if content is None
-            else store.save(number, judgement.path, content)
-        )
-        return Refused(
-            path=root / judgement.path,
-            saved=saved,
-            new=store.content(tree, judgement.path) is None,
-            bypassed=judgement.asks,
-        )
-
-    refused = [put_back(judgement) for judgement in judged.refused]
     held = [
         HeldFile(
             path=judgement.path,
@@ -949,11 +925,13 @@ def act(
         if held and decided.hold
         else None
     )
-    store.restore(tree, refused_paths)
+    if hold is not None:
+        bench.services.announcing.announced(
+            hold, bench.runtime.name(), worktree.repository
+        )
     if tree != snapshot.accepted:
         store.accept(tree)
     state.tips = store.tips(snapshot.head)
-    state.saved = number if refused else state.saved
     new_holding = [
         Held(hold=hold.key, path=each.path, blob=each.blob)
         for each in held
@@ -961,7 +939,7 @@ def act(
     ]
     state.holding = [*state.holding, *new_holding]
     store.remember(state)
-    return Acted(refused=refused, hold=hold, landed=judged.accepted)
+    return Acted(hold=hold, landed=judged.accepted)
 
 
 class Brought(Model):
@@ -1011,7 +989,7 @@ def brought(
         for judgement in asking
     ]
     if key is not None:
-        worktree.holds().put(
+        hold = worktree.holds().put(
             Hold(
                 key=key,
                 worktree=root,
@@ -1023,6 +1001,7 @@ def brought(
                 verdicts=[each for each in logged if each.path in asked_paths],
             )
         )
+        services.announcing.announced(hold, bench.runtime.name(), worktree.repository)
     worktree.verdicts(services.layout).append(logged)
     report = Moved(
         worktree=root,
@@ -1108,7 +1087,7 @@ def checkpoint(bench: Bench, worktree: Worktree, key: str, agent: str) -> Checke
             worktree.judge(services, session.approved).judge(changes) if changes else []
         )
         deciding = [plan.path for plan in plans if plan.change and plan.decide]
-        fated = fates(bench, judgements, deciding)
+        fated = fates(judgements, deciding)
         held = [judgement.path for judgement in fated.held]
         hold = worktree.holds().unused() if held else None
         to = Attributed(worktree=root, session=key, tool="checkpoint")
@@ -1218,7 +1197,6 @@ def remember(
     landed = acted.landed
     importing = watch(worktree, session, worktree.importers().collect())
     checked = Checked(
-        refused=acted.refused,
         findings=placed(root, [found for j in landed for found in j.findings]),
         information=placed(root, [found for j in landed for found in j.information]),
         untouched=placed(root, [found for j in landed for found in j.untouched]),

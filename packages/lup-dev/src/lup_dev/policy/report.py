@@ -92,7 +92,7 @@ def refusal(refused: list[Refused]) -> str:
             [f"  The operator declined it{comment}"] if one.declined is not None else []
         )
         unanswered = (
-            ["  Nobody answered in time; the hold stays open (`lup-dev holds`)."]
+            ["  Nobody answered in time; the hold stays open in the operator's inbox."]
             if one.unanswered
             else []
         )
@@ -236,8 +236,8 @@ def moved(moves: list[Moved]) -> str:
         asked = (
             [
                 (
-                    "The operator is asked about the rest after the fact "
-                    f"(hold {move.hold}, `lup-dev holds`)."
+                    "The operator is asked about the rest after the fact, in their "
+                    f"inbox (hold {move.hold})."
                 )
             ]
             if move.hold

@@ -16,15 +16,6 @@ class Runtime(ABC):
         """Return the runtime's name, as the verdict log and the store record it."""
 
     @abstractmethod
-    def asks_before(self) -> bool:
-        """Say whether the runtime can ask the operator before a call runs.
-
-        One that can is asked in its own prompt, and a change that bypassed an ask
-        through the shell is refused with a pointer back to its file tools. One that
-        can't holds the change at the checkpoint until the operator answers.
-        """
-
-    @abstractmethod
     def inside(self) -> bool:
         """Say whether this process runs inside one of the runtime's sessions.
 
