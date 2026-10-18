@@ -674,14 +674,48 @@ def test_an_idle_session_is_woken_once_through_its_messaging_socket(
     assert [json.loads(frame) for frame in frames] == [
         {
             "type": "user",
-            "message": {"role": "user", "content": first_note("Wake up.")},
+            "message": {"role": "user", "content": bell(1)},
             "session_id": "s1",
         }
     ]
     assert frames[0].endswith("\n")
-    assert woken.state == Told(at=clock.now(), how="wake")
-    assert context(told) == "lup's inbox, item 2: a note from the operator:\nAnd this."
-    assert "one: woke claude session s1, telling items 1" in said
+    # The doorbell carries no item: they stay waiting, and the next call tells both.
+    assert woken.state == Told(at=clock.now(), how="call")
+    assert context(told) == (
+        f"{first_note('Wake up.')}\n\n"
+        "lup's inbox, item 2: a note from the operator:\nAnd this."
+    )
+    assert "one: woke claude session s1 for items 1" in said
+
+
+def bell(number: int) -> str:
+    """The doorbell a wake rings for one note from the operator, item `number`."""
+    return (
+        f"lup's inbox: item {number}, a note from the operator. Call `wait_inbox` to "
+        "read it: what's in your inbox comes through lup's own tools, never in a "
+        "message like this one."
+    )
+
+
+def test_after_the_doorbell_wait_inbox_returns_what_waits_whole(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Read me through lup.")
+        stamped = json.loads(send(hook, lup_call("wait_inbox", {}, "w1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        returned = call(machine.host.launch("one").mcp, "wait_inbox", stamped)
+        item = delivery.inbox.item(1)
+        frames = messages.close()
+    assert frames_of(frames) == [bell(1)]
+    assert returned == (first_note("Read me through lup."), False)
+    assert item.state == Told(at=clock.now(), how="held call")
 
 
 def frames_of(written: list[str]) -> list[str]:
@@ -699,7 +733,7 @@ def test_a_session_that_just_started_is_woken(
         send(hook, claude("SessionStart", source="startup"))
         inbox("send", "one", "Before your first turn.")
         frames = messages.close()
-    assert frames_of(frames) == [first_note("Before your first turn.")]
+    assert frames_of(frames) == [bell(1)]
 
 
 def test_a_session_with_a_call_running_is_told_when_it_finishes_not_woken(
@@ -725,9 +759,7 @@ def test_a_session_with_a_call_running_is_told_when_it_finishes_not_woken(
         inbox("send", "one", "Between calls.")
         frames = messages.close()
     assert context(finished) == first_note("While you run.")
-    assert frames_of(frames) == [
-        "lup's inbox, item 2: a note from the operator:\nBetween calls."
-    ]
+    assert frames_of(frames) == [bell(2)]
 
 
 def test_a_service_started_again_wakes_a_session_it_hasn_t_heard_since(
@@ -740,7 +772,7 @@ def test_a_service_started_again_wakes_a_session_it_hasn_t_heard_since(
         messages = Socket(machine.host.launch("one").messages)
         inbox("send", "one", "After a restart.")
         frames = messages.close()
-    assert frames_of(frames) == [first_note("After a restart.")]
+    assert frames_of(frames) == [bell(1)]
 
 
 def test_two_launches_in_one_worktree_each_wake_through_their_own_socket(
@@ -758,10 +790,8 @@ def test_two_launches_in_one_worktree_each_wake_through_their_own_socket(
         to_first = first.close()
         to_second = second.close()
     assert machine.host.launch("one").messages != machine.host.launch("two").messages
-    assert frames_of(to_first) == [first_note("For one.")]
-    assert frames_of(to_second) == [
-        "lup's inbox, item 2: a note from the operator:\nFor two."
-    ]
+    assert frames_of(to_first) == [bell(1)]
+    assert frames_of(to_second) == [bell(2)]
     assert [json.loads(each)["session_id"] for each in [*to_first, *to_second]] == [
         "s1",
         "s2",
