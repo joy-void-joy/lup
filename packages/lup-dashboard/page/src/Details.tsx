@@ -13,8 +13,7 @@ export function Details({ launch, agent, now }: Props) {
     if (agent === null) {
         return (
             <section className="details" aria-label="Details">
-                <h1 className="mono">{registered.name ?? registered.launch}</h1>
-                <p className="hint">Its session hasn't reached lup yet.</p>
+                <p className="muted">Its session hasn't reached lup yet.</p>
                 <LaunchFacts launch={launch} />
             </section>
         );
@@ -22,17 +21,16 @@ export function Details({ launch, agent, now }: Props) {
     const { talker } = agent;
     return (
         <section className="details" aria-label="Details">
-            <h1 className="mono">{talker.path}</h1>
             <p>{doing(talker.activity, now)}</p>
             <dl>
                 <dt>Kind</dt>
                 <dd>{talker.agent == null ? "the session's own conversation" : (talker.kind ?? "a subagent")}</dd>
                 <dt>Session</dt>
-                <dd className="mono">{talker.session}</dd>
+                <dd>{talker.session}</dd>
                 {talker.agent == null ? null : (
                     <>
                         <dt>Subagent</dt>
-                        <dd className="mono">{talker.agent}</dd>
+                        <dd>{talker.agent}</dd>
                     </>
                 )}
                 <dt>Subagents</dt>
@@ -48,13 +46,13 @@ function LaunchFacts({ launch }: { launch: Launch }) {
     return (
         <dl>
             <dt>Launch</dt>
-            <dd className="mono">{registered.name ?? registered.launch}</dd>
+            <dd>{registered.name ?? registered.launch}</dd>
             <dt>Runtime</dt>
             <dd>{registered.runtime}</dd>
             <dt>Worktree</dt>
-            <dd className="mono">{registered.worktree}</dd>
+            <dd>{registered.worktree}</dd>
             <dt>Id</dt>
-            <dd className="mono">{registered.launch}</dd>
+            <dd>{registered.launch}</dd>
         </dl>
     );
 }

@@ -1,13 +1,16 @@
 """The dashboard's server, on a stand-in host: its API relaying requests and streaming their replies, and who may call it."""
 
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, override
 
 import pytest
 from fastapi.testclient import TestClient
 
+from lup_dashboard.demo import Demo
 from lup_dashboard.host import Host
 from lup_dashboard.server import Access, application
+from lup_dev.clock import Clock
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
 from lup_dev.inbox.protocol import Items, ListInbox
 
@@ -169,3 +172,33 @@ def test_everything_else_is_the_page(page: Path) -> None:
     assert served.get("/").text == "<!doctype html><title>lup</title>"
     navigated = served.get("/agents/one", headers={"Accept": "text/html"})
     assert navigated.text == "<!doctype html><title>lup</title>"
+
+
+class Fixed(Clock):
+    """A clock at one moment."""
+
+    @override
+    def now(self) -> datetime:
+        return datetime(2026, 10, 1, 12, tzinfo=UTC)
+
+    @override
+    def sleep(self, seconds: float) -> None:
+        del seconds
+
+
+def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) -> None:
+    served = client(Demo(clock=Fixed()), page)
+    listed = served.post(
+        "/api/ask", json=ListLaunches().model_dump(), headers=bearing()
+    )
+    items = served.post("/api/ask", json=ListInbox().model_dump(), headers=bearing())
+    other = served.post(
+        "/api/ask", json={"kind": "inbox-show", "number": 51}, headers=bearing()
+    )
+    names = [each["name"] for each in listed.json()["launches"]]
+    assert names == ["lup-impl", "guidance-voice", "main", "nori-search"]
+    assert [each["number"] for each in items.json()["items"]] == [51, 52]
+    assert other.json() == {
+        "kind": "refused",
+        "error": "the demo doesn't answer `inbox-show`",
+    }

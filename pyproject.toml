@@ -106,8 +106,10 @@ runtime-evaluated-decorators = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests are exempt from lup's rules; ruff keeps these test-only exemptions.
-"packages/*/tests/**" = ["S101", "D", "ARG"]
+# Tests are exempt from lup's rules; ruff keeps these test-only exemptions: a
+# test's stand-in token reads as a hardcoded password (`S105`, `S106`), and a
+# stand-in's flag needn't be keyword-only (`FBT001`, `FBT002`).
+"packages/*/tests/**" = ["S101", "D", "ARG", "S105", "S106", "FBT001", "FBT002"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

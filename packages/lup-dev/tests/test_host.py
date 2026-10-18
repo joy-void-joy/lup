@@ -1358,6 +1358,19 @@ def test_a_hook_reaches_a_watch_each_conversation_saying_what_its_doing(
     ]
 
 
+def test_what_a_conversation_is_doing_outlasts_a_restart_of_the_service(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    with served(service(layout, Judge(), said, courier=Reads(), clock=clock)):
+        own.register(launch(tmp_path, "one", "first"))
+        send(layout.launch("one").hook, hook("call-started", call="c1", tool="Bash"))
+    with served(service(layout, Judge(), said, courier=Reads(), clock=clock)):
+        listed = own.listed()
+    [talker] = listed.talkers["one"]
+    assert talker.activity == Activity(state="calling", since=clock.now(), tool="Bash")
+
+
 def test_a_watch_of_what_cant_be_answered_is_refused_and_ends(
     layout: HostLayout, said: list[str]
 ) -> None:

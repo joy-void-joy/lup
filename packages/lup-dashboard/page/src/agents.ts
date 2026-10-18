@@ -19,6 +19,33 @@ export interface Launch {
     session: Agent | null;
 }
 
+/** The launches of one repository. */
+export interface Repository {
+    path: string;
+    name: string;
+    launches: Launch[];
+}
+
+/** Group launches by their repository, in the order each is first met. */
+export function repositories(served: Launch[]): Repository[] {
+    const paths = [...new Set(served.map((each) => each.launch.repository))];
+    return paths.map((path) => ({
+        path,
+        name: repositoryName(path),
+        launches: served.filter((each) => each.launch.repository === path),
+    }));
+}
+
+/** Name a repository by its git directory: a bare one's own name (`lup.git` is `lup`), a clone's by the directory holding its `.git`. */
+export function repositoryName(path: string): string {
+    const parts = path.split("/").filter((part) => part !== "");
+    const last = parts.at(-1) ?? path;
+    if (last === ".git") {
+        return parts.at(-2) ?? path;
+    }
+    return last.endsWith(".git") ? last.slice(0, -".git".length) : last;
+}
+
 /** Arrange what the host listed into its launches, each conversation under its parent. */
 export function launches(listed: Listed): Launch[] {
     return listed.launches.map((launch) => {
@@ -46,7 +73,7 @@ export function everyone(served: Launch[]): Agent[] {
 /** Say what a conversation is doing, and for how long. */
 export function doing(activity: Activity | null | undefined, now: Date): string {
     if (activity == null) {
-        return "not heard since the host started";
+        return "not heard yet";
     }
     const lasted = since(new Date(activity.since), now);
     switch (activity.state) {

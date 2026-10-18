@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 
 from lup.sessions.terminal import Event
 from lup.types import Model, MutableModel
+from lup_dev.host.protocol import Activity
 
 if TYPE_CHECKING:
     from lup_dev.host.protocol import Register
@@ -207,6 +208,9 @@ class Conversations(MutableModel):
     session: str | None = None
     """The session the latest hook named: its own conversation is the launch's
     main one."""
+    activities: dict[str, Activity] = {}
+    """By lup's id for each conversation, what its latest hook said it's doing,
+    and since when: kept with the rest, so a service started again knows it."""
 
     def named(self, session: str, agent: str | None) -> Conversation:
         """Return the conversation `session` and `agent` name, minting its id the first time."""

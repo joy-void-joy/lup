@@ -454,9 +454,6 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     served: dict[str, Served] = {}
     pending: list[asyncio.Task[None]] = []
     """What the launches' modules' hooks are running that nothing waits on."""
-    activities: dict[str, Activity] = {}
-    """By lup's id for each conversation, what its latest hook said it's doing,
-    in memory."""
 
     async def open(self, registering: Register) -> Register:
         """Serve a launch: its name, its directory, its sockets inside, its record; and return it as it stands, named.
@@ -712,9 +709,12 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             return Spoken(answer=await self.judgement(request, payload))
         conversation = conversations.named(heard.session, heard.agent)
+        conversations.activities = {
+            **conversations.activities,
+            conversation.id: self.activity(heard),
+        }
         noted = self.spawning(request, conversations, conversation, heard, payload)
         conversation, said = noted.conversation, noted.said
-        self.activities = {**self.activities, conversation.id: self.activity(heard)}
         if heard.event in self.served[request.launch].offered.occasions:
             happening = Happening(
                 occasion=heard.event,
@@ -914,7 +914,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 kind=each.kind,
                 parent=None if parent is None else conversations.path(parent, launch),
                 depth=depth,
-                activity=self.activities.get(each.id),
+                activity=conversations.activities.get(each.id),
             )
 
         def under(parent: str, depth: int) -> list[Talker]:
