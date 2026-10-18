@@ -10,7 +10,10 @@ import {
     foldAt,
     foldKey,
     fresh,
+    groupAt,
+    isLetter,
     laid,
+    messages,
     opened,
     plain,
     pruned,
@@ -21,17 +24,23 @@ import {
     steps,
     toggled,
     waited,
+    whose,
+    withWritten,
+    written,
     type Around,
     type ChangedFile,
     type Comment,
     type Context,
+    type Conversation,
     type Draft,
+    type Head,
     type Item,
+    type Written,
 } from "./review";
 
 const AT = "2026-10-17T12:00:00Z";
 
-function from(session: string, agent: string | null = null): Item["sender"] {
+function from(session: string, agent: string | null = null): Conversation {
     return { party: "conversation", repository: "/r/.git", runtime: "claude", session, agent };
 }
 
@@ -93,11 +102,19 @@ const CONTEXT: Context = {
 const NOTHING: Around = { contexts: new Map(), files: new Map() };
 
 const header = (item: Item, parked: boolean) => `── #${item.number}${parked ? " · later" : ""} ──`;
-const banner = (item: Item, parked: boolean) => `━━ ${item.sender.party === "conversation" ? item.sender.session : "lup"}${parked ? " · later" : ""} ━━`;
+const banner = (head: Head, parked: boolean) => {
+    const party = "item" in head ? head.item.sender : head.conversation;
+    return `━━ ${party.party === "conversation" ? party.session : "lup"}${parked ? " · later" : ""} ━━`;
+};
+
+/** What's written at a line, as a comment on an item: none where it's a message to an agent. */
+function onItem(written: Written | undefined): Comment | undefined {
+    return written === undefined || isLetter(written) ? undefined : written;
+}
 
 describe("laid", () => {
     it("folds an item marked read whole under its header, and nothing else", () => {
-        const out = laid([QUESTION, NOTE], banner, header, { ...EMPTY, done: [52] }, NOTHING);
+        const out = laid([QUESTION, NOTE], [], banner, header, { ...EMPTY, done: [52] }, NOTHING);
         const question = out.regions.find((each) => each.item.number === 51);
         const note = out.regions.find((each) => each.item.number === 52);
         expect(question!.folds.filter((each) => each.kind === "read")).toEqual([]);
@@ -108,7 +125,7 @@ describe("laid", () => {
 
     it("puts the group with the newest item first, each group's items in their order", () => {
         const later: Item = { ...QUESTION, number: 53, reason: { ...NOTE.reason } };
-        const out = laid([QUESTION, NOTE, later], banner, header, EMPTY, NOTHING);
+        const out = laid([QUESTION, NOTE, later], [], banner, header, EMPTY, NOTHING);
         expect(out.text.split("\n").filter((line) => line.startsWith("━━") || line.startsWith("──"))).toEqual([
             "━━ s1 ━━",
             "── #51 ──",
@@ -116,7 +133,7 @@ describe("laid", () => {
             "━━ s2 ━━",
             "── #52 ──",
         ]);
-        const two = laid([QUESTION, NOTE], banner, header, EMPTY, NOTHING);
+        const two = laid([QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
         expect(two.text.startsWith("━━ s2 ━━")).toBe(true);
     });
 
@@ -127,10 +144,11 @@ describe("laid", () => {
                 { item: 51, quote: null, text: "On the whole: fine." },
                 { item: 52, quote: null, text: "Noted." },
             ],
+            letters: [],
             done: [],
             parked: [52],
         };
-        const out = laid([QUESTION, NOTE], banner, header, draft, NOTHING);
+        const out = laid([QUESTION, NOTE], [], banner, header, draft, NOTHING);
         expect(out.text).toBe(
             "━━ s1 ━━\n── #51 ──\nOn the whole: fine.\nWhich parser?\n1. Use lark\nYes.\n   lean: yes\n2. Keep the cache\n   lean: no\n\n" +
                 "━━ s2 · later ━━\n── #52 · later ──\nNoted.\nI assumed UTF-8.\n\n",
@@ -145,20 +163,20 @@ describe("laid", () => {
         expect(shownAt(question!, 17)).toBe(lark);
     });
 
-    it("opens a comment on the line under the cursor, or on the item from its header", () => {
-        const out = laid([QUESTION, NOTE], banner, header, EMPTY, NOTHING);
+    it("opens a comment on the line under the cursor, on the item from its header, or a message to its agent from its banner", () => {
+        const out = laid([QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
         expect(opened(out, out.text.indexOf("Keep the cache"))).toEqual({
             item: 51,
             quote: { text: "2. Keep the cache", start: "Which parser?\n1. Use lark\n   lean: yes\n".length, end: "Which parser?\n1. Use lark\n   lean: yes\n2. Keep the cache".length },
             text: "",
         });
         expect(opened(out, out.text.indexOf("── #51"))).toEqual({ item: 51, quote: null, text: "" });
-        expect(opened(out, 2)).toBeUndefined();
+        expect(opened(out, 2)).toEqual({ to: from("s2"), text: "" });
     });
 
     it("quotes a passage within one item's own lines, and not across items", () => {
-        const draft: Draft = { comments: [{ item: 51, quote: null, text: "x" }], done: [], parked: [] };
-        const out = laid([QUESTION, NOTE], banner, header, draft, NOTHING);
+        const draft: Draft = { ...EMPTY, comments: [{ item: 51, quote: null, text: "x" }] };
+        const out = laid([QUESTION, NOTE], [], banner, header, draft, NOTHING);
         const lark = out.text.indexOf("lark");
         expect(quoted(out, lark, lark + 4)).toEqual({
             item: 51,
@@ -167,7 +185,7 @@ describe("laid", () => {
         });
         expect(quoted(out, lark, out.text.indexOf("UTF-8"))).toBeUndefined();
         expect(blockAt(out, out.text.indexOf("x\n"))?.comment).toBe(0);
-        expect(regionAt(out.regions, out.text.indexOf("UTF-8"))?.item.number).toBe(52);
+        expect(regionAt(out, out.text.indexOf("UTF-8"))?.item.number).toBe(52);
     });
 
     it("shows an approval's diff without git's colours", () => {
@@ -204,7 +222,7 @@ describe("what folds under an item", () => {
     });
 
     it("lays an approval's files, then the item's context, under its own text, a file's unchanged runs and the context folding", () => {
-        const out = laid([QUESTION, APPROVAL], banner, header, EMPTY, around);
+        const out = laid([QUESTION, APPROVAL], [], banner, header, EMPTY, around);
         expect(out.text).toBe(
             "━━ lup ━━\n── #54 ──\nApprove?\n a.py | 2 +-\n" +
                 "a.py · changed · +1 −1\n" +
@@ -279,7 +297,7 @@ describe("what folds under an item", () => {
                 ],
             ]),
         };
-        const out = laid([APPROVAL, NOTE], banner, header, EMPTY, read);
+        const out = laid([APPROVAL, NOTE], [], banner, header, EMPTY, read);
         const [approval, note] = out.regions;
         const shown = (from: number, to: number) => out.text.slice(from, to);
         const [file] = approval!.folds.filter((each) => each.kind === "file");
@@ -296,6 +314,7 @@ describe("what folds under an item", () => {
         });
         const commented = laid(
             [APPROVAL],
+            [],
             banner,
             header,
             { ...EMPTY, comments: [{ item: 54, quote: { text: "t.py", start: 15, end: 49 }, text: "Why?" }] },
@@ -306,7 +325,7 @@ describe("what folds under an item", () => {
         expect(commented.text.slice(kept!.from, kept!.to)).toBe("\na\nb\nB");
         expect(arrival(approval!)).toBe(approval!.stops[0]);
         expect(arrival(note!)).toBe(note!.header.from);
-        const done = laid([APPROVAL], banner, header, { ...EMPTY, done: [54] }, read);
+        const done = laid([APPROVAL], [], banner, header, { ...EMPTY, done: [54] }, read);
         expect(arrival(done.regions[0]!)).toBe(done.regions[0]!.header.from);
         expect(stepped([10, 20, 30], 20, true)).toBe(30);
         expect(stepped([10, 20, 30], 20, false)).toBe(10);
@@ -315,7 +334,7 @@ describe("what folds under an item", () => {
     });
 
     it("finds the fold the cursor is on, from its summary line to its last, and opens no comment on a line that isn't the item's own", () => {
-        const out = laid([QUESTION, APPROVAL], banner, header, EMPTY, around);
+        const out = laid([QUESTION, APPROVAL], [], banner, header, EMPTY, around);
         expect(foldAt(out, out.text.indexOf("context ·"))?.kind).toBe("context");
         expect(foldAt(out, out.text.indexOf("Ask me first"))?.kind).toBe("context");
         expect(foldAt(out, out.text.indexOf("l2\n"))?.kind).toBe("code");
@@ -325,7 +344,7 @@ describe("what folds under an item", () => {
         for (const line of ["context ·", "→ called", "3 unchanged", "no context"]) {
             expect(opened(out, out.text.indexOf(line))).toBeUndefined();
         }
-        expect(opened(out, out.text.indexOf("lean: no"))?.item).toBe(51);
+        expect(onItem(opened(out, out.text.indexOf("lean: no")))?.item).toBe(51);
     });
 
     it("says where a context starts by its first step, and how long before the item", () => {
@@ -339,7 +358,7 @@ describe("what folds under an item", () => {
         };
         const untimed: Context = { ...agents, entries: [{ kind: "called", tool: "report", id: "call-51" }], anchor: 0 };
         const summary = (context: Context) => {
-            const out = laid([QUESTION], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map() });
+            const out = laid([QUESTION], [], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map() });
             const [fold] = out.regions[0]!.folds;
             return out.text.slice(fold!.summary.from, fold!.summary.to);
         };
@@ -359,18 +378,18 @@ describe("comments on a changed file's lines", () => {
     };
     const CREATED: ChangedFile = { path: "b.md", before: null, after: { kind: "text", text: "# B\n\nNew.\n" } };
     const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]) };
-    const out = laid([HELD], banner, header, EMPTY, around);
+    const out = laid([HELD], [], banner, header, EMPTY, around);
     const at = (line: string) => out.text.indexOf(`\n${line}\n`) + 1;
 
     it("quotes a line under its file's path and number, marked as a diff marks it, and shows the comment under it", () => {
-        const added = opened(out, at("L7"));
+        const added = onItem(opened(out, at("L7")));
         expect(added?.quote?.text).toBe("a.py:7\n+L7");
-        expect(opened(out, at("l7"))?.quote?.text).toBe("a.py:7, as it was before the change\n-l7");
-        expect(opened(out, at("l8"))?.quote?.text).toBe("a.py:8\n l8");
-        expect(opened(out, at("a.py · changed · +1 −1"))?.quote?.text).toBe("a.py");
-        expect(opened(out, at("b.md · created · 3 lines"))?.quote?.text).toBe("b.md");
+        expect(onItem(opened(out, at("l7")))?.quote?.text).toBe("a.py:7, as it was before the change\n-l7");
+        expect(onItem(opened(out, at("l8")))?.quote?.text).toBe("a.py:8\n l8");
+        expect(onItem(opened(out, at("a.py · changed · +1 −1")))?.quote?.text).toBe("a.py");
+        expect(onItem(opened(out, at("b.md · created · 3 lines")))?.quote?.text).toBe("b.md");
 
-        const commented = laid([HELD], banner, header, { ...EMPTY, comments: [{ ...added!, text: "Why capitals?" }] }, around);
+        const commented = laid([HELD], [], banner, header, { ...EMPTY, comments: [{ ...added!, text: "Why capitals?" }] }, around);
         expect(commented.text).toContain("\nL7\nWhy capitals?\nl8\n");
         const [region] = commented.regions;
         expect(commented.text.slice(shownAt(region!, added!.quote!.start), shownAt(region!, added!.quote!.end))).toBe("L7");
@@ -378,13 +397,13 @@ describe("comments on a changed file's lines", () => {
 
     it("opens a comment on an empty line of a file, not on the item whole", () => {
         const empty = out.text.indexOf("# B\n\n") + "# B\n".length;
-        expect(opened(out, empty)?.quote?.text).toBe("b.md:2\n+");
+        expect(onItem(opened(out, empty))?.quote?.text).toBe("b.md:2\n+");
     });
 
     it("quotes a passage across a file's lines, and across files, each under its path and the span of its lines", () => {
         const from = at("l6");
-        expect(quoted(out, from, at("l8") - 1)?.quote?.text).toBe("a.py:6-7\n l6\n-l7\n+L7");
-        expect(quoted(out, at("l12") + 1, at("New.") + 3)?.quote?.text).toBe("a.py:12\n 12\nb.md:1-3\n+# B\n+\n+New");
+        expect(onItem(quoted(out, from, at("l8") - 1))?.quote?.text).toBe("a.py:6-7\n l6\n-l7\n+L7");
+        expect(onItem(quoted(out, at("l12") + 1, at("New.") + 3))?.quote?.text).toBe("a.py:12\n 12\nb.md:1-3\n+# B\n+\n+New");
     });
 
     it("says an item's comments as one answer, each under what it quotes", () => {
@@ -394,6 +413,87 @@ describe("comments on a changed file's lines", () => {
             { item: 55, quote: { text: "a.py", start: 20, end: 24 }, text: " " },
         ];
         expect(answer(comments)).toBe("> a.py:7\n> +L7\n\nWhy capitals?\n\nOtherwise fine.");
+    });
+});
+
+describe("every agent's group, and the messages under its banner", () => {
+    const S3 = from("s3");
+    const S4 = from("s4");
+
+    it("gives each agent running a group, empty after those with items in the agents' order, and the parked ones last", () => {
+        const out = laid([QUESTION, NOTE], [S3, from("s2"), S4, from("s1", "a1")], banner, header, { ...EMPTY, parked: [52] }, NOTHING);
+        expect(out.text).toBe(
+            "━━ s1 ━━\n── #51 ──\nWhich parser?\n1. Use lark\n   lean: yes\n2. Keep the cache\n   lean: no\n\n" +
+                "━━ s3 ━━\n━━ s2 ━━\n━━ s4 ━━\n" +
+                "━━ s2 · later ━━\n── #52 · later ──\nI assumed UTF-8.\n\n",
+        );
+        expect(out.groups.map((each) => [each.conversation?.session ?? null, each.later])).toEqual([
+            ["s1", false],
+            ["s3", false],
+            ["s2", false],
+            ["s4", false],
+            ["s2", true],
+        ]);
+        const approvals = laid([APPROVAL], [], banner, header, EMPTY, NOTHING);
+        expect(approvals.groups.map((each) => each.conversation)).toEqual([null]);
+    });
+
+    it("writes each message under its agent's banner, after the comments in what's written, an empty group's set off by a blank line", () => {
+        const S9 = from("s9");
+        const draft: Draft = {
+            ...EMPTY,
+            comments: [{ item: 52, quote: null, text: "Noted." }],
+            letters: [
+                { to: S3, text: "Look at the cache too." },
+                { to: from("s2"), text: "And rename it." },
+                { to: S9, text: "Still there?" },
+            ],
+        };
+        const out = laid([NOTE], [S3, S4], banner, header, draft, NOTHING);
+        expect(out.text).toBe(
+            "━━ s2 ━━\nAnd rename it.\n── #52 ──\nNoted.\nI assumed UTF-8.\n\n" +
+                "━━ s3 ━━\nLook at the cache too.\n\n━━ s4 ━━\n━━ s9 ━━\nStill there?\n\n",
+        );
+        const shown = (block: { from: number; to: number }) => out.text.slice(block.from, block.to);
+        expect(out.groups.map((each) => each.blocks.map((block) => [block.comment, shown(block)]))).toEqual([
+            [[2, "And rename it."]],
+            [[1, "Look at the cache too."]],
+            [],
+            [[3, "Still there?"]],
+        ]);
+        expect(blockAt(out, out.text.indexOf("Still there?"))?.comment).toBe(3);
+        expect(written(draft).map((each) => each.text)).toEqual(["Noted.", "Look at the cache too.", "And rename it.", "Still there?"]);
+    });
+
+    it("opens a message to a group's agent on its banner, a parked group's among them, but none to lup's approvals", () => {
+        const draft: Draft = { ...EMPTY, parked: [51], letters: [{ to: S3, text: "Hi." }] };
+        const out = laid([QUESTION, APPROVAL], [S3], banner, header, draft, NOTHING);
+        const at = (line: string) => out.text.indexOf(line);
+        expect(opened(out, at("━━ s3"))).toEqual({ to: S3, text: "" });
+        expect(opened(out, at("Hi."))).toEqual({ to: S3, text: "" });
+        expect(opened(out, at("━━ s1 · later"))).toEqual({ to: from("s1", "a1"), text: "" });
+        expect(opened(out, at("━━ lup"))).toBeUndefined();
+        expect(quoted(out, at("━━ s3"), at("━━ s3") + 4)).toEqual({ to: S3, text: "" });
+        expect(quoted(out, at("━━ s1 · later"), at("Which parser?") + 5)).toBeUndefined();
+        expect(regionAt(out, at("━━ s3"))).toBeUndefined();
+        expect(regionAt(out, at("── #51"))?.item.number).toBe(51);
+        expect(regionAt(out, at("Approve?"))?.item.number).toBe(54);
+        expect(groupAt(out, at("Hi."))?.conversation).toEqual(S3);
+        expect(groupAt(out, at("Approve?"))).toBeUndefined();
+    });
+
+    it("keeps what the editor holds in the draft's two lists, and sends only the messages that say something", () => {
+        const letter = { to: S3, text: "Hi." };
+        const comment = { item: 51, quote: null, text: "Yes." };
+        const draft = withWritten(EMPTY, [letter, comment, { to: S4, text: " " }]);
+        expect(draft.comments).toEqual([comment]);
+        expect(draft.letters).toEqual([letter, { to: S4, text: " " }]);
+        expect(written(draft).indexOf(letter)).toBe(1);
+        expect(messages(draft)).toEqual([letter]);
+        expect(pruned(draft).letters).toEqual([letter]);
+        expect(isLetter(letter)).toBe(true);
+        expect(isLetter(comment)).toBe(false);
+        expect(whose(from("s1", "a1"))).not.toBe(whose(from("s1")));
     });
 });
 

@@ -1,7 +1,9 @@
 // The review: everything waiting for the operator in one buffer moved through
-// with vim (`editor.ts`), in groups, one per agent, their comments written into
-// it, each under the line it's on: Space `c` opens one on the item whole. Ctrl+Enter
-// elsewhere than in a comment sends. Space `d` marks an item read, Space `z`
+// with vim (`editor.ts`), in groups, one per agent, every agent running having
+// one, empty or not; their comments written into it, each under the line it's
+// on: Space `c` opens one on the item whole; `o` or Space `c` on a banner, a
+// message to its agent, under the banner. Ctrl+Enter elsewhere than in a comment
+// or a message sends. Space `d` marks an item read, Space `z`
 // leaves it for later, Space `a` or `x` answers an approval or a held change;
 // `]]` and `[[` go to the next and previous item, landing on its first line that
 // matters, `]c` and `[c` to the next and previous such line. Under an approval or
@@ -16,15 +18,17 @@ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef } from "react";
 
 import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./code";
-import { changes, moved } from "./comments";
+import { changes, moved, type Block } from "./comments";
 import { folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import {
     arrival,
+    blocksOf,
     codeFrom,
     foldKey,
     fresh,
+    groupAt,
+    isLetter,
     laid,
-    onBanner,
     opened,
     quoted,
     regionAt,
@@ -32,20 +36,26 @@ import {
     stepped,
     toggled,
     waited,
+    withWritten,
+    written,
     type Around,
     type Aside,
-    type Comment,
+    type Conversation,
     type Draft,
+    type Head,
     type Item,
     type Laid,
+    type Written,
 } from "./review";
 
 interface Props {
     items: Item[];
+    /** The conversations running, in the tree's order: each has a group, empty or not. */
+    agents: Conversation[];
     draft: Draft;
     change: (draft: Draft) => void;
-    /** Name the group an item is in: the agent that sent it, and where. */
-    banner: (item: Item) => string;
+    /** Name a group: the agent that sent its items, or the one it's of, and where. */
+    banner: (head: Head) => string;
     /** What the host has answered of each item beyond its own text: its context, and each file an approval or a held change changes. */
     around: Around;
     send: () => void;
@@ -135,19 +145,27 @@ function painted(laidOut: Laid, from: number, to: number): Range<Decoration>[] {
     return ranges;
 }
 
-/** Draw the review: groups' banners, items' headers, done and parked items, the lines under each item, the changed files' headers, each comment's lines, and the passage each comment is on. */
+/** Mark each line of a comment or a message shown at `block`. */
+function remarks(laidOut: Laid, block: Block): { from: number; to: number; value: Decoration }[] {
+    const marks: { from: number; to: number; value: Decoration }[] = [];
+    let at = block.from;
+    for (const line of laidOut.text.slice(block.from, block.to).split("\n")) {
+        marks.push({ from: at, to: at, value: Decoration.line({ class: "remark" }) });
+        at += line.length + 1;
+    }
+    return marks;
+}
+
+/** Draw the review: groups' banners and the messages under them, items' headers, done and parked items, the lines under each item, the changed files' headers, each comment's lines, and the passage each comment is on. */
 function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): DecorationSet {
     const marks: { from: number; to: number; value: Decoration }[] = [];
-    const comments = draft.comments ?? [];
+    const comments = written(draft);
+    for (const group of laidOut.groups) {
+        marks.push({ from: group.banner.from, to: group.banner.from, value: Decoration.line({ class: "review-banner" }) });
+        marks.push(...group.blocks.flatMap((block) => remarks(laidOut, block)));
+    }
     for (const region of laidOut.regions) {
         const number = region.item.number;
-        if (region.banner !== null) {
-            marks.push({
-                from: region.banner.from,
-                to: region.banner.from,
-                value: Decoration.line({ class: "review-banner" }),
-            });
-        }
         const states = [
             "review-header",
             fresh(region.item, reviewed) ? "is-new" : "",
@@ -174,12 +192,9 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
             }
         }
         for (const block of region.blocks) {
-            let at = block.from;
-            for (const line of laidOut.text.slice(block.from, block.to).split("\n")) {
-                marks.push({ from: at, to: at, value: Decoration.line({ class: "remark" }) });
-                at += line.length + 1;
-            }
-            const quote = comments[block.comment]?.quote;
+            marks.push(...remarks(laidOut, block));
+            const comment = comments[block.comment];
+            const quote = comment === undefined || isLetter(comment) ? null : comment.quote;
             if (quote != null && quote.end > quote.start) {
                 const from = shownAt(region, quote.start);
                 const to = shownAt(region, quote.end);
@@ -211,13 +226,13 @@ function when(made: string): string {
 function followed(before: Laid | null, after: Laid, head: number, landing: Landing): number {
     const clamped = Math.min(head, after.text.length);
     if (landing !== null && "comment" in landing) {
-        const block = after.regions.flatMap((each) => each.blocks).find((each) => each.comment === landing.comment);
+        const block = blocksOf(after).find((each) => each.comment === landing.comment);
         return block?.from ?? clamped;
     }
     if (landing !== null) {
         return after.regions.find((each) => each.item.number === landing.item)?.header.from ?? clamped;
     }
-    const was = before === null ? undefined : regionAt(before.regions, head);
+    const was = before === null ? undefined : regionAt(before, head);
     const now = was === undefined ? undefined : after.regions.find((each) => each.item.number === was.item.number);
     if (was === undefined || now === undefined) {
         return clamped;
@@ -227,6 +242,7 @@ function followed(before: Laid | null, after: Laid, head: number, landing: Landi
 
 export function Review({
     items,
+    agents,
     draft,
     change,
     banner,
@@ -244,7 +260,8 @@ export function Review({
         () =>
             laid(
                 items,
-                (item, later) => `━━ ${banner(item)}${later ? " · later" : ""} ━━`,
+                agents,
+                (head, later) => `━━ ${banner(head)}${later ? " · later" : ""} ━━`,
                 (item, later) => {
                     const what =
                         item.reason.reason === "message"
@@ -269,12 +286,12 @@ export function Review({
                 draft,
                 around,
             ),
-        [items, banner, draft, around, reviewed, now],
+        [items, agents, banner, draft, around, reviewed, now],
     );
     const laidFor = useMemo(
         () => ({
             text: laidOut.text,
-            blocks: laidOut.regions.flatMap((each) => each.blocks),
+            blocks: blocksOf(laidOut),
             // In the text's order, as CodeMirror takes the folds a transaction makes: a fold over others, as an
             // automatic file's or an item's marked read, is laid out after them.
             folds: laidOut.regions
@@ -284,11 +301,11 @@ export function Review({
         }),
         [laidOut],
     );
-    const editor = useEditor<Draft, Comment>({
+    const editor = useEditor<Draft, Written>({
         shown: laidFor,
         draft,
-        comments: (each) => each.comments ?? [],
-        withComments: (each, comments) => ({ ...each, comments }),
+        comments: written,
+        withComments: withWritten,
         change,
         inserting,
         epoch,
@@ -339,7 +356,7 @@ export function Review({
     }, [laidOut, draft, reviewed]);
 
     function here() {
-        return regionAt(laidOut.regions, editor.head());
+        return regionAt(laidOut, editor.head());
     }
 
     /** Open each fold over `target`, as a motion into it would, so the line it's on is in view. */
@@ -354,16 +371,20 @@ export function Review({
 
     editor.bind({
         whole: (position) => {
-            const region = regionAt(laidOut.regions, position);
-            if (region === undefined || onBanner(region, position)) {
-                return undefined;
+            // On a group, a message to its agent; on an item, a comment on it whole.
+            if (groupAt(laidOut, position) !== undefined) {
+                return opened(laidOut, position);
             }
-            return { item: region.item.number, quote: null, text: "" };
+            const region = regionAt(laidOut, position);
+            return region === undefined ? undefined : { item: region.item.number, quote: null, text: "" };
         },
         opened: (position) => opened(laidOut, position),
         quoted: (from, to) => quoted(laidOut, from, to),
         about: (comment, block) => {
-            const region = regionAt(laidOut.regions, block.from);
+            if (isLetter(comment)) {
+                return groupAt(laidOut, block.from)?.banner.from;
+            }
+            const region = regionAt(laidOut, block.from);
             if (region === undefined) {
                 return undefined;
             }

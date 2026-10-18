@@ -7,7 +7,7 @@
 import { useRef, useState, type Key, type KeyboardEvent } from "react";
 import { Button, Tree, TreeItem, TreeItemContent } from "react-aria-components";
 
-import { doing, everyone, repositories, treeKey, type Agent, type Launch, type Leading } from "./agents";
+import { doing, everyone, over, repositories, treeKey, type Agent, type Launch, type Leading } from "./agents";
 
 interface Props {
     served: Launch[];
@@ -187,15 +187,6 @@ function Row({ label, kind, state, said, chevron = null, path, holding = false }
             </span>
         </div>
     );
-}
-
-/**
- * Whether a subagent's conversation is over: it ended, or no hook has been heard from it since the host began
- * keeping what each conversation does, at every hook, so one with nothing kept is from before and long over.
- */
-function over(agent: Agent): boolean {
-    const activity = agent.talker.activity;
-    return activity == null || activity.state === "ended";
 }
 
 /** The key of each conversation with subagents under it, it first: each is unfolded until the operator folds it. */

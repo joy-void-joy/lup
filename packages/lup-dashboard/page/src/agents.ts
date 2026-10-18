@@ -70,6 +70,39 @@ export function everyone(served: Launch[]): Agent[] {
     return served.flatMap((each) => (each.session === null ? [] : within(each.session)));
 }
 
+/**
+ * Whether a subagent's conversation is over: it ended, or no hook has been heard from it since the host began
+ * keeping what each conversation does, at every hook, so one with nothing kept is from before and long over.
+ */
+export function over(agent: Agent): boolean {
+    const activity = agent.talker.activity;
+    return activity == null || activity.state === "ended";
+}
+
+/** A conversation running, with the launch it runs in. */
+export interface Running {
+    launch: Register;
+    talker: Talker;
+}
+
+/**
+ * Every conversation running, in the tree's order: each repository's launches, each session's own conversation,
+ * then its subagents that aren't over, each under its parent, those running before those under one that's over.
+ */
+export function running(served: Launch[]): Running[] {
+    function within(agent: Agent): Talker[] {
+        const live = agent.children.filter((child) => !over(child));
+        const gone = agent.children.filter(over);
+        const own = agent.talker.agent == null || !over(agent) ? [agent.talker] : [];
+        return [...own, ...live.flatMap(within), ...gone.flatMap(within)];
+    }
+    return repositories(served).flatMap((repository) =>
+        repository.launches.flatMap((each) =>
+            each.session === null ? [] : within(each.session).map((talker) => ({ launch: each.launch, talker })),
+        ),
+    );
+}
+
 /** The keys of a chord typed so far in the agents' tree: none, Space, or Space then `w`. */
 export type Leading = "" | "space" | "space-w";
 

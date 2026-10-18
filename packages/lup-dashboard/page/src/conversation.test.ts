@@ -495,3 +495,21 @@ describe("the changes between two texts", () => {
         expect(moved(8, [{ from: 0, to: 2, insert: "" }, { from: 4, to: 4, insert: "x\n" }], 9)).toBe(8);
     });
 });
+
+describe("a review it was sent", () => {
+    it("says what it answers, or that it's the operator's message from the review where it answers nothing", () => {
+        const told = { state: { state: "told" as const, at: at(9), how: "call" as const }, sender: OPERATOR, recipient: SESSION };
+        const written = item(60, { reason: "review", covers: [], comments: [], letters: [{ to: SESSION, text: "Rename it." }] }, 9, told);
+        const reviewed = item(61, { reason: "review", covers: [52], comments: [{ item: 52, quote: null, text: "Fine." }], letters: [] }, 9, told);
+        const beside: Beside = {
+            ...ALONE,
+            exchanged: {
+                sent: [],
+                received: [exchange(written, "The operator's message to you:\nRename it."), exchange(reviewed, "Fine.")],
+            },
+        };
+        const out = laid(CALLED, beside, UNSAID, history(CALLED, []));
+        expect(out.text).toContain("← #60 your message, from the review\n  The operator's message to you:\n  Rename it.");
+        expect(out.text).toContain("← #61 your review of #52\n  Fine.");
+    });
+});
