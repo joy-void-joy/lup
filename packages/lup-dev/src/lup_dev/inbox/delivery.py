@@ -386,15 +386,21 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         commented = [each.item for each in review.comments]
 
         def remarks(item: Item) -> list[str]:
-            return [remark(each) for each in review.comments if each.item == item.number]
+            return [
+                remark(each) for each in review.comments if each.item == item.number
+            ]
 
         def yours(item: Item) -> str:
             head = f'On item {item.number}, {what(item)} yours ("{opening(item)}"):'
-            return "\n".join([head, *(remarks(item) or ["  (read, with nothing to add)"])])
+            return "\n".join(
+                [head, *(remarks(item) or ["  (read, with nothing to add)"])]
+            )
 
         def theirs(item: Item) -> str:
             where = "" if item.worktree is None else f", in {item.worktree}"
-            head = f"On item {item.number}, {what(item)} from {who(item.sender)}{where}:"
+            head = (
+                f"On item {item.number}, {what(item)} from {who(item.sender)}{where}:"
+            )
             text = [f"    | {line}" for line in body(item).splitlines()]
             return "\n".join([head, *text, *remarks(item)])
 
@@ -404,15 +410,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             for item in items
             if item.sender != recipient and item.number in commented
         ]
-        context = (
-            [
-                "For context, what the operator said in the same reply on other "
-                "agents' items: not yours to act on, unless a comment says so.",
-                *others,
-            ]
-            if others
-            else []
+        heading = (
+            "For context, what the operator said in the same reply on other "
+            "agents' items: not yours to act on, unless a comment says so."
         )
+        context = [heading, *others] if others else []
         return "\n\n".join([*own, *context])
 
     async def reviewed(self) -> list[Item]:
@@ -421,7 +423,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         Each conversation is told its own items first, with the comments on
         them or read with nothing to add, then what was said on the others'
         for context (`reviewing`): the operator answers related items together,
-        across agents and repositories, and sends a new reply on moving to
+        across agents and repositories, and sends what's drafted on moving to
         something unrelated. A question is answered by the reply its asker
         gets, which lets a held `ask` go. Refused where the draft covers no
         item, or covers one no conversation sent.

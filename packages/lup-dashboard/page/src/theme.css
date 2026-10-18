@@ -72,6 +72,13 @@ textarea {
     border-left: 2px solid var(--fg);
 }
 
+/* A group's banner: the agent its items are from, and where. */
+.review-buffer .review-banner {
+    color: var(--cyan);
+    font-weight: 700;
+    padding-top: 0.4em;
+}
+
 .keys.inserting {
     color: var(--warn);
 }

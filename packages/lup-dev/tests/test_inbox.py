@@ -1686,6 +1686,7 @@ def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_
         "  On this passage:\n    > 1. Parse with lark\n    Yes."
     )
 
+
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:

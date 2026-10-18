@@ -1,6 +1,7 @@
 // The page: every agent the host serves on the left; everything waiting for the
-// operator beside it, as one review, their reply written into it, and a line
-// saying what the reply covers and who it reaches. Selecting an agent narrows the
+// operator beside it, as one review in groups, one per agent, their reply
+// written into it, and a line saying what the reply covers and who it reaches:
+// every agent it covers, each getting all of it. Selecting an agent narrows the
 // review to what it and its subagents sent.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -32,6 +33,7 @@ export function App() {
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
     const [inserting, setInserting] = useState(false);
+    const [epoch, setEpoch] = useState(0);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
     const served = reply?.kind === "listed" ? launches(reply) : [];
     const agents = everyone(served);
@@ -52,6 +54,21 @@ export function App() {
         [talkers],
     );
 
+    const banner = useCallback(
+        (item: Item) => {
+            const sender = item.sender;
+            const repository =
+                sender.party === "conversation"
+                    ? sender.repository
+                    : item.reason.reason === "approval"
+                      ? item.reason.repository
+                      : null;
+            const where = [repository, item.worktree ?? null].flatMap((each) => (each === null ? [] : [last(each)]));
+            return [...where, sender.party === "operator" ? "lup's approvals" : named(item)].join(" · ");
+        },
+        [named],
+    );
+
     const waiting = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.items : []), [inbox.reply]);
     const items = useMemo(
         () =>
@@ -68,6 +85,7 @@ export function App() {
         void ask({ kind: "inbox-draft" }).then((answer) => {
             if (answer.kind === "inbox-drafted") {
                 setDraft(answer.draft);
+                setEpoch((before) => before + 1);
             }
         });
         void fetch("/api/about").then(async (response) => {
@@ -138,14 +156,13 @@ export function App() {
         const after = await ask({ kind: "inbox-draft" });
         if (after.kind === "inbox-drafted") {
             setDraft(after.draft);
+            setEpoch((before) => before + 1);
         }
     }
 
     const numbers = covered(draft);
     const commented = numbers.filter((number) => (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== ""));
-    const reached = [
-        ...new Set(waiting.filter((each) => commented.includes(each.number) || (each.reason.reason === "question" && numbers.includes(each.number))).map(named)),
-    ];
+    const reached = [...new Set(waiting.filter((each) => numbers.includes(each.number)).map(named))];
     const read = numbers.filter((number) => !commented.includes(number));
     return (
         <div className="layout">
@@ -189,13 +206,14 @@ export function App() {
                         items={items}
                         draft={draft}
                         change={change}
-                        name={named}
+                        banner={banner}
                         diffs={diffs}
                         open={open}
                         send={() => setConfirming(numbers.length > 0)}
                         approve={approve}
                         confirming={confirming}
                         inserting={setInserting}
+                        epoch={epoch}
                     />
                     <div className="status">
                         {numbers.length === 0 ? (
@@ -204,7 +222,8 @@ export function App() {
                             <span>
                                 Your reply: {commented.length === 0 ? "" : `comments on ${commented.map((each) => `#${each}`).join(", ")}`}
                                 {read.length === 0 ? "" : `${commented.length === 0 ? "" : "; "}read ${read.map((each) => `#${each}`).join(", ")}`}
-                                {reached.length === 0 ? "" : `, to ${reached.join(", ")}`}. <kbd>Ctrl</kbd> <kbd>Enter</kbd> sends.
+                                {reached.length === 0 ? "" : ` — to ${reached.join(", ")}${reached.length > 1 ? ", each getting all of it" : ""}`}.{" "}
+                                <kbd>Ctrl</kbd> <kbd>Enter</kbd> sends.
                             </span>
                         )}
                         {(draft.parked ?? []).length === 0 ? null : (
@@ -214,14 +233,14 @@ export function App() {
                     {inserting ? (
                         <div className="keys inserting">
                             -- INSERT -- writing a comment · <kbd>Ctrl</kbd> <kbd>Enter</kbd> ends it, back on what
-                            it's about · <kbd>Esc</kbd> ends it here
+                            it's about · <kbd>Esc</kbd> ends it here · <kbd>Esc</kbd> <kbd>u</kbd> drops it
                         </div>
                     ) : (
                         <div className="keys muted">
-                            <kbd>c</kbd> comment on this item · <kbd>o</kbd> on this line · <kbd>v</kbd>…<kbd>c</kbd>{" "}
-                            on the selection · <kbd>␣</kbd> <kbd>d</kbd> done · <kbd>␣</kbd> <kbd>z</kbd> later ·{" "}
-                            <kbd>␣</kbd> <kbd>e</kbd> diff · <kbd>␣</kbd> <kbd>a</kbd>/<kbd>x</kbd> approve/decline ·{" "}
-                            <kbd>J</kbd>/<kbd>K</kbd> items
+                            comment: <kbd>c</kbd> item · <kbd>o</kbd>/<kbd>C</kbd> line · <kbd>v</kbd>…<kbd>c</kbd>{" "}
+                            selection · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>␣d</kbd> read · <kbd>␣z</kbd> later ·{" "}
+                            <kbd>␣e</kbd> diff · <kbd>␣a</kbd>/<kbd>␣x</kbd> approve/decline · <kbd>J</kbd>/<kbd>K</kbd>{" "}
+                            items
                         </div>
                     )}
                 </div>
@@ -243,19 +262,24 @@ export function App() {
                         }
                     }}
                 >
-                    <p>
-                        {reached.length === 0
-                            ? `Take ${read.map((each) => `#${each}`).join(", ")} off your list, telling no one?`
-                            : `Send your comments to ${reached.join(", ")}?`}
-                    </p>
+                    <p>Send your reply to {reached.join(", ")}?</p>
                     <p className="muted">
-                        Each gets only what's on its own items. <kbd>Enter</kbd> sends · <kbd>Esc</kbd> goes back.
+                        {reached.length === 1
+                            ? ""
+                            : "Each gets all of it: its own items first, the others' for context. "}
+                        <kbd>Enter</kbd> sends · <kbd>Esc</kbd> goes back.
                     </p>
                 </div>
             ) : null}
             <Palette open={palette} setOpen={setPalette} agents={agents} select={setSelected} now={now} />
         </div>
     );
+}
+
+/** Return the last part of a path: a repository's name without its `.git`, a worktree's. */
+function last(path: string): string {
+    const name = path.split("/").filter((each) => each !== "").at(-1) ?? path;
+    return name.endsWith(".git") ? name.slice(0, -".git".length) : name;
 }
 
 /** The launch and conversation `key` names: a conversation's path, or a launch whose session hasn't started. */

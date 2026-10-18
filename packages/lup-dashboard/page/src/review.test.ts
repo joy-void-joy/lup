@@ -48,9 +48,10 @@ const NOTE: Item = {
 };
 
 const header = (item: Item, parked: boolean) => `── #${item.number}${parked ? " · later" : ""} ──`;
+const banner = (item: Item, parked: boolean) => `━━ ${item.sender.party === "conversation" ? item.sender.session : "lup"}${parked ? " · later" : ""} ━━`;
 
 describe("laid", () => {
-    it("lays each item under its header, the parked ones last, each comment under its line", () => {
+    it("lays each item under its header in its sender's group, the parked ones last, each comment under its line", () => {
         const draft: Draft = {
             comments: [
                 { item: 51, quote: { text: "Use lark", start: 17, end: 25 }, text: "Yes." },
@@ -60,10 +61,10 @@ describe("laid", () => {
             done: [],
             parked: [52],
         };
-        const out = laid([QUESTION, NOTE], header, draft, new Map());
+        const out = laid([QUESTION, NOTE], banner, header, draft, new Map());
         expect(out.text).toBe(
-            "── #51 ──\nOn the whole: fine.\nWhich parser?\n1. Use lark\nYes.\n   lean: yes\n2. Keep the cache\n   lean: no\n\n" +
-                "── #52 · later ──\nNoted.\nI assumed UTF-8.\n\n",
+            "━━ s1 ━━\n── #51 ──\nOn the whole: fine.\nWhich parser?\n1. Use lark\nYes.\n   lean: yes\n2. Keep the cache\n   lean: no\n\n" +
+                "━━ s2 · later ━━\n── #52 · later ──\nNoted.\nI assumed UTF-8.\n\n",
         );
         const [question] = out.regions;
         expect(question!.blocks.map((each) => out.text.slice(each.from, each.to))).toEqual([
@@ -76,18 +77,19 @@ describe("laid", () => {
     });
 
     it("opens a comment on the line under the cursor, or on the item from its header", () => {
-        const out = laid([QUESTION, NOTE], header, EMPTY, new Map());
+        const out = laid([QUESTION, NOTE], banner, header, EMPTY, new Map());
         expect(opened(out, out.text.indexOf("Keep the cache"))).toEqual({
             item: 51,
             quote: { text: "2. Keep the cache", start: "Which parser?\n1. Use lark\n   lean: yes\n".length, end: "Which parser?\n1. Use lark\n   lean: yes\n2. Keep the cache".length },
             text: "",
         });
-        expect(opened(out, 2)).toEqual({ item: 51, quote: null, text: "" });
+        expect(opened(out, out.text.indexOf("── #51"))).toEqual({ item: 51, quote: null, text: "" });
+        expect(opened(out, 2)).toBeUndefined();
     });
 
     it("quotes a passage within one item's own lines, and not across items", () => {
         const draft: Draft = { comments: [{ item: 51, quote: null, text: "x" }], done: [], parked: [] };
-        const out = laid([QUESTION, NOTE], header, draft, new Map());
+        const out = laid([QUESTION, NOTE], banner, header, draft, new Map());
         const lark = out.text.indexOf("lark");
         expect(quoted(out, lark, lark + 4)).toEqual({
             item: 51,

@@ -25,9 +25,10 @@ export interface Block extends Span {
     comment: number;
 }
 
-/** One item, where it's shown: its header line, its own lines, and its comments among them. */
+/** One item, where it's shown: the banner of the group it opens, if it's the first of one; its header line, its own lines, and its comments among them. */
 export interface Region {
     item: Item;
+    banner: Span | null;
     header: Span;
     lines: Line[];
     blocks: Block[];
@@ -76,26 +77,49 @@ function lineOf(starts: number[], offset: number): number {
     return Math.max(found, 0);
 }
 
+/** Return `items` in groups, each under its banner, the groups in the banners' order and the items in theirs. */
+function grouped(items: Item[], banner: (item: Item) => string): Item[][] {
+    const groups = new Map<string, Item[]>();
+    for (const item of items) {
+        const key = banner(item);
+        groups.set(key, [...(groups.get(key) ?? []), item]);
+    }
+    return [...groups.keys()].sort().map((key) => groups.get(key) ?? []);
+}
+
 /**
- * Lay `items` out as one text: those to answer now first, then the parked ones, each under a header naming it,
- * each comment of the draft on it under the line it's on: a comment on a passage under the passage's last line,
- * one on the item whole under its header.
+ * Lay `items` out as one text: those to answer now first, then the parked ones, each in the group its banner names
+ * (the agent that sent it), each under a header naming it, each comment of the draft on it under the line it's on:
+ * a comment on a passage under the passage's last line, one on the item whole under its header.
  */
 export function laid(
     items: Item[],
+    banner: (item: Item, parked: boolean) => string,
     header: (item: Item, parked: boolean) => string,
     draft: Draft,
     diffs: Map<number, string>,
 ): Laid {
     const parked = draft.parked ?? [];
     const comments = draft.comments ?? [];
-    const ordered = [
-        ...items.filter((each) => !parked.includes(each.number)),
-        ...items.filter((each) => parked.includes(each.number)),
-    ];
+    const now = grouped(items.filter((each) => !parked.includes(each.number)), (item) => banner(item, false));
+    const later = grouped(items.filter((each) => parked.includes(each.number)), (item) => banner(item, true));
     let text = "";
     const regions: Region[] = [];
-    for (const item of ordered) {
+    for (const group of [...now, ...later]) {
+        group.forEach((item, at) => {
+            const isParked = parked.includes(item.number);
+            let opening: Span | null = null;
+            if (at === 0) {
+                const said = banner(item, isParked);
+                opening = { from: text.length, to: text.length + said.length };
+                text += `${said}\n`;
+            }
+            layItem(item, opening, isParked);
+        });
+    }
+    return { text, regions };
+
+    function layItem(item: Item, opening: Span | null, isParked: boolean): void {
         const own = body(item, diffs.get(item.number)).split("\n");
         const starts = own.map((_, at) => own.slice(0, at).reduce((sum, line) => sum + line.length + 1, 0));
         const mine = comments.flatMap((comment, at) => (comment.item === item.number ? [{ comment, at }] : []));
@@ -112,7 +136,7 @@ export function laid(
                 blocks.push({ comment: at, from, to: from + comment.text.length });
             }
         };
-        const head = header(item, parked.includes(item.number));
+        const head = header(item, isParked);
         const headFrom = text.length;
         text += `${head}\n`;
         writeBlocks(null);
@@ -123,17 +147,26 @@ export function laid(
             writeBlocks(at);
         });
         text += "\n";
-        regions.push({ item, header: { from: headFrom, to: headFrom + head.length }, lines, blocks });
+        regions.push({ item, banner: opening, header: { from: headFrom, to: headFrom + head.length }, lines, blocks });
     }
-    return { text, regions };
 }
 
-/** Return the region `position` is in: its header, its lines, its comments, or the blank line after it. */
+/** Where a region starts: at the banner of the group it opens, else at its header. */
+function start(region: Region): number {
+    return region.banner?.from ?? region.header.from;
+}
+
+/** Return the region `position` is in: the banner of the group it opens, its header, its lines, its comments, or the blank line after it. */
 export function regionAt(regions: Region[], position: number): Region | undefined {
     return regions.find((each, at) => {
         const next = regions[at + 1];
-        return position >= each.header.from && (next === undefined || position < next.header.from);
+        return position >= start(each) && (next === undefined || position < start(next));
     });
+}
+
+/** Return whether `position` is on a group's banner, which no comment is on. */
+export function onBanner(region: Region, position: number): boolean {
+    return region.banner !== null && position >= region.banner.from && position <= region.banner.to;
 }
 
 /** Return the comment shown at `position`, where it's in one; a comment's end counts, so an empty one can be typed in. */
@@ -149,7 +182,7 @@ export function lineAt(region: Region, position: number): Line | undefined {
 /** Return where a comment opened on the line at `position` goes: on that line of its item, or on the item whole from its header or an empty line; none outside every item. */
 export function opened(laidOut: Laid, position: number): Comment | undefined {
     const region = regionAt(laidOut.regions, position);
-    if (region === undefined) {
+    if (region === undefined || onBanner(region, position)) {
         return undefined;
     }
     const line = lineAt(region, position);
