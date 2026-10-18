@@ -1437,11 +1437,15 @@ def test_the_dashboard_starts_with_the_service_its_token_kept_and_ends_with_it(
 ) -> None:
     dashboard, record = stand_in(tmp_path)
     with served(
-        service(layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard])
+        service(
+            layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard]
+        )
     ):
         first = client(layout, clock).ask(ShowDashboard(), DashboardShown)
     with served(
-        service(layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard])
+        service(
+            layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard]
+        )
     ):
         second = client(layout, clock).ask(ShowDashboard(), DashboardShown)
     token = dashboard.token.read_text()
@@ -1458,7 +1462,9 @@ def test_a_dashboard_gone_is_started_again_when_its_address_is_asked(
 ) -> None:
     dashboard, record = stand_in(tmp_path)
     with served(
-        service(layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard])
+        service(
+            layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard]
+        )
     ):
         process = dashboard.process
         assert process is not None
@@ -1477,7 +1483,9 @@ def test_a_dashboard_that_cant_listen_or_isnt_there_is_said_and_the_service_goes
 ) -> None:
     dashboard, _ = stand_in(tmp_path, port=1)
     with served(
-        service(layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard])
+        service(
+            layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard]
+        )
     ):
         listed = client(layout, clock).listed()
     with (

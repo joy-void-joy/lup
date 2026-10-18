@@ -1260,7 +1260,9 @@ LUP_ROOT = Path(__file__).resolve().parents[3]
 """lup's own checkout, whose declaration gives the step building the engine."""
 
 
-def test_the_engine_and_the_dashboards_page_are_built_with_lups_own_gate_steps() -> None:
+def test_the_engine_and_the_dashboards_page_are_built_with_lups_own_gate_steps() -> (
+    None
+):
     resolved = resolve(load(LUP_ROOT).project)
     engine, page = building(resolved)
     assert engine.name == "engine"
