@@ -361,8 +361,8 @@ export interface Beside {
 }
 
 /**
- * Lay a conversation out as one text: each step in order, the operator's words after `you:`, the agent's after
- * `agent:`, each run of calls in one line; each item of lup's inbox it exchanged in a line among them, its text folded
+ * Lay a conversation out as one text: each step in order, the operator's words after `you:`, the agent's as they
+ * are, each run of calls in one line; each item of lup's inbox it exchanged in a line among them, its text folded
  * under it (`merged`); under each line of the agent's words, the comments on it; then the operator's message on the
  * whole, under its line. What came before `earlier` folds under a summary line. Laid out again with more steps, or an
  * item arriving, everything before the last line stays as it was: what arrives is added after it.
@@ -439,7 +439,8 @@ export function laid(entries: Entry[], beside: Beside, talk: Talk, earlier: Earl
             return;
         }
         ran();
-        const who = entry.by === "operator" ? "you" : "agent";
+        // The operator's words after `you:`; the agent's, which are most of it, unlabelled.
+        const who = entry.by === "operator" ? "you" : null;
         const rowsSaid = spoken(who, entry.text, true);
         if (who === "you") {
             rowsSaid.forEach((row, at) => {
