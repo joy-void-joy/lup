@@ -10,6 +10,8 @@ dependencies = [
     "pydantic>=2.12",
     "typer>=0.27.2",
     "uvicorn>=0.54",
+    # Lets uvicorn serve the WebSocket the page's watches are carried over.
+    "websockets>=17.2",
 ]
 
 [project.scripts]
