@@ -594,9 +594,12 @@ def verdict(decision: int) -> Verdict:
 
 
 def prompted(item: Item) -> AnswerItem:
-    """Ask the operator their answer to a question, each decision in turn, then a comment on the whole; a plain question in words."""
+    """Ask the operator their answer to a question, each decision in turn, then a comment on the whole; a plain question, or a reply to a message, in words."""
     typer.echo(shown(item))
     match item.reason:
+        case Message():
+            words = typer.prompt("Your reply")
+            return AnswerItem(number=item.number, comment=words)
         case Question(decisions=[]):
             words = typer.prompt("Your answer")
             return AnswerItem(number=item.number, comment=words)
@@ -615,7 +618,7 @@ def prompted(item: Item) -> AnswerItem:
             )
             return AnswerItem(number=item.number, rulings=rulings, comment=whole)
         case _:
-            message = f"item {item.number} isn't a question"
+            message = f"item {item.number} is {what(item)}: nothing to answer"
             raise InboxError(message)
 
 
@@ -733,7 +736,7 @@ def acted_on(approval: Approval, given: Given) -> str | None:
 
 @inbox.command("answer")
 def inbox_answer(
-    number: Annotated[int, typer.Argument(help="The question's number.")],
+    number: Annotated[int, typer.Argument(help="The item's number.")],
     *,
     approve: Annotated[
         bool | None,
@@ -757,16 +760,19 @@ def inbox_answer(
     ] = None,
     comment: Annotated[
         str | None,
-        typer.Option(help="A comment on the whole, or a plain question's answer."),
+        typer.Option(
+            help="A comment on the whole, a plain question's answer, or a reply."
+        ),
     ] = None,
 ) -> None:
-    """Answer a question, each decision leaning, undecided or leave open, then a comment; or an approval, yes or no.
+    """Answer a question, each decision leaning, undecided or leave open, then a comment; reply to a message; or answer an approval, yes or no.
 
     At a terminal, each numbered decision is asked in turn, with an optional
     comment, then a comment on the whole; a plain question takes its answer in
-    words. `--leaning`, `--undecided` and `--leave-open`, each repeated for
-    several decisions, and `--comment` answer without asking. The answer reaches
-    the conversation that asked.
+    words, as a message takes your reply, which says the item it replies to and
+    takes the message off your list. `--leaning`, `--undecided` and
+    `--leave-open`, each repeated for several decisions, and `--comment` answer
+    without asking. The answer reaches the conversation that sent the item.
 
     An approval shows its summary, asks whether to show the whole diff, then
     whether to approve, as the launch asking it does, and stops where the launch's
@@ -815,8 +821,10 @@ def inbox_answer(
     else:
         request = AnswerItem(number=number, rulings=given, comment=comment or "")
     answer = client.ask(request, Shown).item
+    done = "Replied to" if isinstance(answer.reason, Message) else "Answered"
+    noun = "reply" if isinstance(answer.reason, Message) else "answer"
     typer.echo(
-        f"Answered item {number}: your answer, item {answer.number}, is for "
+        f"{done} item {number}: your {noun}, item {answer.number}, is for "
         f"{who(answer.recipient)}."
     )
 

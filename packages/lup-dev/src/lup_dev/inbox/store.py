@@ -99,11 +99,14 @@ class Decision(Model):
 
 
 class Message(Model):
-    """A message, of its kind."""
+    """A message, of its kind; the operator's reply to a conversation's item says which."""
 
     reason: Literal["message"] = "message"
     kind: Kind
     text: str
+    of: int | None = None
+    """The item it replies to, where it's the operator's reply to one of a
+    conversation's messages (`lup-dev inbox answer`)."""
 
 
 class Question(Model):

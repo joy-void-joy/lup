@@ -308,6 +308,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             else f" (it was for {who(item.addressed)}, whose conversation had ended)"
         )
         match item.reason:
+            case Message(text=text, of=int() as of):
+                original = self.inbox.item(of)
+                return (
+                    f"{head}{passed}, replying to item {of}, {what(original)} you "
+                    f'sent ("{opening(original)}"):\n{text}'
+                )
             case Message(text=text) | Question(text=text) | Approval(text=text):
                 return f"{head}{passed}:\n{text}"
             case Answer() as answer:
@@ -498,13 +504,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return max(found, key=lambda place: place.since).conversation
 
     async def answer(self, number: int, rulings: list[Ruling], comment: str) -> Item:
-        """Answer the question item `number`: the answer an item for the conversation that asked, the question answered.
+        """Answer the question item `number`, or reply to the message: the answer an item for the conversation that sent it.
 
-        Refused where it isn't a question waiting; where its decisions aren't
-        each ruled once, or a plain question has no words for its answer.
+        A question is answered; a message is replied to (`replied`). Refused
+        where it's neither a question waiting nor a conversation's message;
+        where a question's decisions aren't each ruled once, or a plain question
+        has no words for its answer.
         """
         item = self.inbox.item(number)
         match item:
+            case Item(reason=Message(), sender=Conversation() as sender):
+                return await self.replied(item, sender, rulings, comment)
             case Item(
                 reason=Question(decisions=decisions),
                 state=Waiting(),
@@ -512,7 +522,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             ):
                 pass
             case _:
-                message = f"item {number} isn't a question waiting for an answer"
+                message = (
+                    f"item {number} is {what(item)} from {who(item.sender)}: neither "
+                    "a question waiting for an answer nor a conversation's message to "
+                    "reply to"
+                )
                 raise InboxError(message)
         given = sorted(each.decision for each in rulings)
         if given != list(range(1, len(decisions) + 1)):
@@ -536,6 +550,37 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.inbox.kept(item.model_copy(update={"state": answered}))
         await self.delivered(answer)
         return answer
+
+    async def replied(
+        self, item: Item, sender: Conversation, rulings: list[Ruling], comment: str
+    ) -> Item:
+        """Reply to `sender`'s message `item`: the reply a note for it, saying which item it replies to, and the message off the operator's list.
+
+        Refused where verdicts are given, which only a question's decisions take,
+        or where the reply has no words.
+        """
+        if rulings:
+            message = (
+                f"item {item.number} is {what(item)}, which takes a reply in words, "
+                "not verdicts"
+            )
+            raise InboxError(message)
+        if not comment.strip():
+            message = f"item {item.number} is {what(item)}: give your reply in words"
+            raise InboxError(message)
+        reply = self.inbox.made(
+            Message(kind="note", text=comment, of=item.number),
+            Operator(),
+            sender,
+            None,
+            self.clock.now(),
+        )
+        if isinstance(item.state, Waiting):
+            self.inbox.kept(
+                item.model_copy(update={"state": Done(at=self.clock.now())})
+            )
+        await self.delivered(reply)
+        return reply
 
     def done(self, number: int) -> Item:
         """Take the message item `number` off the operator's list.
