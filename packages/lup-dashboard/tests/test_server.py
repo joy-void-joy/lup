@@ -466,7 +466,9 @@ def test_the_demos_approval_is_read_from_its_parse_until_its_types_are_read(
             if each["number"] == 54
         ]
         shown = served.post(
-            "/api/ask", json={"kind": "inbox-show-files", "number": 54}, headers=bearing()
+            "/api/ask",
+            json={"kind": "inbox-show-files", "number": 54},
+            headers=bearing(),
         )
         found = [
             finding["rule"]

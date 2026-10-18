@@ -2225,8 +2225,10 @@ def test_where_an_approvals_types_cant_be_read_its_first_reading_stays_and_it_sa
     assert not unread.typing
     assert unread.summary.splitlines() == [
         "A summary.",
-        "The judge couldn't read the change's types, so the review reads each "
-        "file by its parse alone: the engine is gone",
+        (
+            "The judge couldn't read the change's types, so the review reads each "
+            "file by its parse alone: the engine is gone"
+        ),
     ]
     assert any("EngineError: the engine is gone" in each for each in said)
 

@@ -362,9 +362,7 @@ class EngineParser(Model, Parser):
             )
             for source in sources
         ]
-        output = printed(
-            self.node, self.bundle, "parse", stdin=PARSED.dump_json(given)
-        )
+        output = printed(self.node, self.bundle, "parse", stdin=PARSED.dump_json(given))
         reports = REPORTS.validate_json(output)
         if len(reports) != len(sources):
             message = (
@@ -394,7 +392,9 @@ def built(bundle: Bundle) -> Path:
     return bundle.script
 
 
-def printed(node: str, bundle: Bundle, *arguments: str, stdin: bytes | None = None) -> bytes:
+def printed(
+    node: str, bundle: Bundle, *arguments: str, stdin: bytes | None = None
+) -> bytes:
     """Run the engine's command line with `arguments`, `stdin` on its input, and return what it printed."""
     try:
         return run(node, str(built(bundle)), *arguments, stdin=stdin).output

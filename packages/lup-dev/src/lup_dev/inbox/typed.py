@@ -63,9 +63,9 @@ class TypeReader(MutableModel, Companion, arbitrary_types_allowed=True):
         """Start reading each approval waiting with its first reading that isn't being read."""
         for item in self.delivery.inbox.waiting(Operator()):
             match item:
-                case Item(
-                    number=number, reason=Approval(typing=True) as approval
-                ) if number not in self.running:
+                case Item(number=number, reason=Approval(typing=True) as approval) if (
+                    number not in self.running
+                ):
                     task = asyncio.create_task(
                         self.typed(number, approval, item.worktree)
                     )
