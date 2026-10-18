@@ -37,6 +37,8 @@ from lup.types import Model
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import Adapter, claude, codex
 from lup_dev.approval import approved
+from lup_dev.clipboard.desktop import Desktop
+from lup_dev.clipboard.protocol import routes as clipboard_routes
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan.conditions import loaded
 from lup_dev.codescan.contract import Checker, Due, Finding, Source
@@ -112,6 +114,7 @@ from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
     Lent,
+    RoomClipboard,
     RoomError,
     host_needs,
     lend,
@@ -378,7 +381,10 @@ def host_serve(context: typer.Context) -> None:
         post=delivery,
         routes=[*inbox_routes(delivery), Route.to(dashboard_shown(dashboard))],
         tools=room_tools(delivery),
-        room_routes=remote_routes(Remotes(say=typer.echo, landed=proposed_after)),
+        room_routes=[
+            *remote_routes(Remotes(say=typer.echo, landed=proposed_after)),
+            *clipboard_routes(Desktop.of(settings)),
+        ],
         modules=Workers(layout=layout.host, say=typer.echo),
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
@@ -1103,6 +1109,8 @@ def launched(
                 launcher.say(f"This launch is `{served.name}`.")
                 try:
                     git.write()
+                    clipboard = RoomClipboard(launch=own)
+                    clipboard.write()
                     receives = receiving(launcher.podman, own)
                     walled = room.model_copy(
                         update={
@@ -1113,7 +1121,7 @@ def launched(
                                 Mount(source=sockets, target=ROOM_SOCKETS),
                                 receives,
                             ],
-                            "env": {**room.env, **git.env},
+                            "env": {**room.env, **git.env, **clipboard.env},
                         }
                     )
                     opened = Room(

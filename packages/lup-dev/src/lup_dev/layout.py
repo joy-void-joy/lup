@@ -490,6 +490,16 @@ class LaunchLayout(Model):
         return self.bin / "git-remote-lup"
 
     @property
+    def pasting(self) -> Path:
+        """`wl-paste`, the room's way to read the operator's clipboard through the host (`clipboard/shim.py`)."""
+        return self.bin / "wl-paste"
+
+    @property
+    def copying(self) -> Path:
+        """`wl-copy`, the room's way to write the operator's clipboard through the host, the same program as `pasting`."""
+        return self.bin / "wl-copy"
+
+    @property
     def lent(self) -> Path:
         """Where what the operator lends the room while it runs is mounted, each directory by its name: a shared mount in podman's namespace, which the room mounts at `ROOM_LENT` and receives mounts through; removed when the launch ends."""
         return self.directory.with_name(f"{self.directory.name}.lent")

@@ -77,6 +77,7 @@ from lup.sessions import bridge
 from lup.sessions.terminal import TerminalSettings
 from lup.types import Model
 from lup_dev.catalog.room import Editors, RoomBase
+from lup_dev.clipboard import shim
 from lup_dev.declaration.requirements import Needed, Requirement
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM
@@ -112,8 +113,9 @@ def host_needs() -> list[Needed]:
 
     Podman, rootless; git, which pushes and fetches for each room; and,
     optional, `gh`, without which lup's GitHub tools and the gate's issue states
-    in a room are off, and `notify-send`, without which the inbox raises no
-    desktop notice.
+    in a room are off; `notify-send`, without which the inbox raises no
+    desktop notice; and `wl-paste` or `xclip`, without which rooms reach no
+    clipboard.
     """
     podman = Requirement(
         tool="podman",
@@ -140,11 +142,18 @@ def host_needs() -> list[Needed]:
         why="raises a desktop notice when something reaches your inbox",
         install="your system's `libnotify` package",
     )
+    clipboard = Requirement(
+        any_of=["wl-paste", "xclip"],
+        optional=True,
+        why="reads and writes your clipboard for the rooms' sessions",
+        install="your system's `wl-clipboard` package under Wayland, `xclip` under X",
+    )
     return [
         Needed(module="lup-dev launch", requirement=podman),
         Needed(module="lup-dev launch", requirement=git),
         Needed(module="lup-dev launch", requirement=gh),
         Needed(module="lup-dev inbox", requirement=notices),
+        Needed(module="lup-dev launch", requirement=clipboard),
     ]
 
 
@@ -484,6 +493,28 @@ class RoomGit(Model):
         self.launch.helper.chmod(0o755)
 
 
+class RoomClipboard(Model):
+    """What a room gets for the operator's clipboard: `wl-paste` and `wl-copy` first on its `PATH`, beside git's helper, reaching the host; and a Wayland display named, so its programs reach for them (`docs/host-tools.md`, *The clipboard*)."""
+
+    launch: LaunchLayout
+    display: str = "lup"
+    """The Wayland display the room names: none is there, but a program
+    choosing its clipboard by it reaches for `wl-paste` and `wl-copy`."""
+
+    @property
+    def env(self) -> dict[str, str]:
+        """The room's variable naming its display."""
+        return {"WAYLAND_DISPLAY": self.display}
+
+    def write(self) -> None:
+        """Write both programs into the launch's commands, executable."""
+        self.launch.bin.mkdir(parents=True, exist_ok=True)
+        wanted = programs(self.launch)
+        for path in [self.launch.pasting, self.launch.copying]:
+            path.write_text(wanted[path])
+            path.chmod(0o755)
+
+
 def receiving(podman: Podman, launch: LaunchLayout) -> Mount:
     """Prepare a launch's room to receive what the operator lends it while it runs, and return the room's mount doing so.
 
@@ -542,9 +573,12 @@ def unlent(podman: Podman, launch: LaunchLayout) -> None:
 
 
 def programs(launch: LaunchLayout) -> dict[Path, str]:
-    """Return the programs a launch writes for its room to run, by where they go: git's remote helper, and lup's MCP bridge for its tool servers."""
+    """Return the programs a launch writes for its room to run, by where they go: git's remote helper, the clipboard's `wl-paste` and `wl-copy`, and lup's MCP bridge for its tool servers."""
+    clipboard = inspect.getsource(shim)
     return {
         launch.helper: inspect.getsource(helper),
+        launch.pasting: clipboard,
+        launch.copying: clipboard,
         TerminalSettings(directory=launch.directory).bridge: inspect.getsource(bridge),
     }
 
