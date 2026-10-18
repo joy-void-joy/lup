@@ -27,15 +27,19 @@ from lup_dev.host.protocol import (
     Talker,
 )
 from lup_dev.host.records import Called, Entry, Said
+from lup_dev.inbox.delivery import body
 from lup_dev.inbox.protocol import (
     Context,
     Conversed,
     Drafted,
+    Exchange,
+    Exchanged,
     Files,
     Items,
     KeepDraft,
     KeepTalk,
     ListInbox,
+    ListItems,
     Reviewed,
     SendDraft,
     SendItem,
@@ -46,6 +50,7 @@ from lup_dev.inbox.protocol import (
     Shown,
     ShowTalk,
     Talked,
+    written,
 )
 from lup_dev.inbox.store import (
     Approval,
@@ -53,6 +58,7 @@ from lup_dev.inbox.store import (
     ChangedFile,
     Conversation,
     Decision,
+    Done,
     Draft,
     HeldChange,
     Item,
@@ -61,6 +67,8 @@ from lup_dev.inbox.store import (
     Question,
     Talk,
     Text,
+    Told,
+    Waiting,
 )
 
 if TYPE_CHECKING:
@@ -79,8 +87,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     draft: Draft = Draft()
     talks: dict[str, Talk] = {}
     """What the operator writes on each conversation, by its key, kept in memory."""
-    sent: list[SendItem] = []
-    """The operator's messages sent from the page, kept in memory: they reach no agent."""
+    sent: list[Item] = []
+    """The items the operator's messages sent from the page made, kept in memory:
+    they reach no agent, and are told at once."""
     grown: int = 0
     """How many steps the parser subagent's conversation has taken since the demo began: one more each time it's asked, so a page following it sees it grow."""
     holding: list[SetHolding] = []
@@ -123,27 +132,14 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             case ShowContext(number=number):
                 return self.context(number)
             case SendItem() as sending:
-                self.sent = [*self.sent, sending]
-                first, _ = self.runtimes
-                return Shown(
-                    item=Item(
-                        number=100 + len(self.sent),
-                        reason=Message(kind="note", text=sending.text),
-                        sender=Operator(),
-                        recipient=Conversation(
-                            repository=Path("/home/op/lup.git"),
-                            runtime=first,
-                            session="s1",
-                            agent=sending.agent,
-                        ),
-                        made=self.clock.now(),
-                    )
-                )
+                return self.sending(sending)
             case ShowConversation(session=session, agent=agent, since=since):
                 if (session, agent) == ("s1", "a02"):
                     self.grown += 1
                 steps = self.conversation(session, agent)
                 return Conversed(entries=steps[since:], since=since, total=len(steps))
+            case ListItems(conversation=conversation):
+                return self.exchanged(conversation)
             case _:
                 return Refused(error=f"the demo doesn't answer `{request.kind}`")
 
@@ -272,9 +268,77 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
 
     def items(self) -> Items:
         """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, and a session's write held for them; the operator last settled an item 3 minutes ago, so the three since are new."""
+        return Items(
+            items=[
+                each
+                for each in self.every()
+                if each.recipient == Operator() and isinstance(each.state, Waiting)
+            ],
+            reviewed=self.ago(3),
+        )
+
+    def sending(self, sending: SendItem) -> Shown | Refused:
+        """Keep the operator's message to a conversation of a launch as the item it makes, told at once; refused for a launch whose session hasn't started."""
+        listed = self.listed()
+        launch = next(
+            (each for each in listed.launches if each.launch == sending.launch), None
+        )
+        own = next(
+            (
+                each
+                for each in listed.talkers.get(sending.launch, [])
+                if each.agent is None
+            ),
+            None,
+        )
+        if launch is None or own is None:
+            return Refused(error=f"no session of launch `{sending.launch}` has started")
+        now = self.clock.now()
+        item = Item(
+            number=100 + len(self.sent) + 1,
+            reason=Message(kind="note", text=sending.text),
+            sender=Operator(),
+            recipient=Conversation(
+                repository=launch.repository,
+                runtime=launch.runtime,
+                session=own.session,
+                agent=sending.agent,
+            ),
+            made=now,
+            state=Told(at=now, how="call"),
+        )
+        self.sent = [*self.sent, item]
+        self.changed.set()
+        self.changed = asyncio.Event()
+        return Shown(item=item)
+
+    def exchanged(self, conversation: Conversation) -> Exchanged:
+        """Return the stand-in items `conversation` sent, as it wrote them, and those it was sent, as it's told them."""
+        items = [
+            each
+            for each in self.every()
+            if conversation in (each.sender, each.recipient, each.addressed)
+        ]
+        return Exchanged(
+            sent=[
+                Exchange(item=each, text=written(each))
+                for each in items
+                if each.sender == conversation
+            ],
+            received=[
+                Exchange(item=each, text=body(each))
+                for each in items
+                if each.sender != conversation
+            ],
+        )
+
+    def every(self) -> list[Item]:
+        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to its session; and the messages sent from the page."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         parser = Conversation(repository=lup, runtime=first, session="s1", agent="a02")
+        session = Conversation(repository=lup, runtime=first, session="s1")
+        survey = session.model_copy(update={"agent": "a04"})
         voice = Conversation(repository=lup, runtime=first, session="s2")
         adlib = Conversation(
             repository=Path("/home/op/adlib.git"), runtime=second, session="s3"
@@ -327,51 +391,103 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             (52, note, voice, "guidance-voice", 12),
             (53, problem, adlib, "main", 2),
         ]
-        return Items(
-            items=[
-                *(
-                    Item(
-                        number=number,
-                        reason=reason,
-                        sender=sender,
-                        recipient=Operator(),
-                        worktree=sender.repository / "tree" / worktree,
-                        call=f"call-{number}",
-                        made=self.ago(minutes),
-                    )
-                    for number, reason, sender, worktree, minutes in made
-                ),
-                Item(
-                    number=54,
-                    reason=approval,
-                    sender=Operator(),
-                    recipient=Operator(),
-                    worktree=lup / "tree" / "dev",
-                    made=self.ago(1),
-                ),
-                Item(
-                    number=55,
-                    reason=HeldChange(
-                        text="Let the change to 2 files land?",
-                        summary=(
-                            "AGENTS.md: AGENTS.md is the operator's document, asked "
-                            "about every time\n"
-                            "packages/lup-dashboard/page/package.json: "
-                            "/home/op/lup.git/tree/dev/packages/lup-dashboard/page/"
-                            "package.json is a protected path (package.json)"
-                        ),
-                        worktree=lup / "tree" / "dev",
-                        key="a1b2c3",
+        dev = lup / "tree" / "dev"
+        settled = [
+            Item(
+                number=44,
+                reason=Message(
+                    kind="note",
+                    text=(
+                        "The legacy reader caches each record's offsets. I left the "
+                        "cache out: the records are read whole anyway."
                     ),
-                    sender=Conversation(repository=lup, runtime=first, session="s1"),
-                    recipient=Operator(),
-                    worktree=lup / "tree" / "dev",
-                    call="call-55",
-                    made=self.ago(0.5),
                 ),
-            ],
-            reviewed=self.ago(3),
-        )
+                sender=survey,
+                recipient=Operator(),
+                worktree=dev,
+                made=self.ago(18),
+                state=Done(at=self.ago(16.5)),
+            ),
+            Item(
+                number=46,
+                reason=Message(kind="note", text="Right: leave it out.", of=44),
+                sender=Operator(),
+                recipient=session,
+                addressed=survey,
+                made=self.ago(16.5),
+                state=Told(at=self.ago(16), how="call"),
+            ),
+            Item(
+                number=47,
+                reason=Message(
+                    kind="note",
+                    text=(
+                        "Claude Code's records first, then Codex's rollouts: they "
+                        "keep subagents differently, so one reader each."
+                    ),
+                ),
+                sender=parser,
+                recipient=Operator(),
+                worktree=dev,
+                call="call-47",
+                made=self.ago(26),
+                state=Done(at=self.ago(23)),
+            ),
+            Item(
+                number=48,
+                reason=Message(
+                    kind="note", text="Good: keep the two readers apart.", of=47
+                ),
+                sender=Operator(),
+                recipient=parser,
+                made=self.ago(23),
+                state=Told(at=self.ago(23), how="call"),
+            ),
+        ]
+        return [
+            *settled,
+            *(
+                Item(
+                    number=number,
+                    reason=reason,
+                    sender=sender,
+                    recipient=Operator(),
+                    worktree=sender.repository / "tree" / worktree,
+                    call=f"call-{number}",
+                    made=self.ago(minutes),
+                )
+                for number, reason, sender, worktree, minutes in made
+            ),
+            Item(
+                number=54,
+                reason=approval,
+                sender=Operator(),
+                recipient=Operator(),
+                worktree=dev,
+                made=self.ago(1),
+            ),
+            Item(
+                number=55,
+                reason=HeldChange(
+                    text="Let the change to 2 files land?",
+                    summary=(
+                        "AGENTS.md: AGENTS.md is the operator's document, asked "
+                        "about every time\n"
+                        "packages/lup-dashboard/page/package.json: "
+                        "/home/op/lup.git/tree/dev/packages/lup-dashboard/page/"
+                        "package.json is a protected path (package.json)"
+                    ),
+                    worktree=dev,
+                    key="a1b2c3",
+                ),
+                sender=session,
+                recipient=Operator(),
+                worktree=dev,
+                call="call-55",
+                made=self.ago(0.5),
+            ),
+            *self.sent,
+        ]
 
     def context(self, number: int) -> Context | Refused:
         """Return a stand-in moment for each item an agent's call made: the operator's last words, what the agent said and called after them, the call, and what came after; the approval, which no call made, has none."""
@@ -445,7 +561,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Context(number=number, entries=entries, anchor=anchor)
 
     def conversation(self, session: str, agent: str | None) -> list[Entry]:
-        """Return a stand-in conversation: for the parser subagent, its moment around item 51 with what led to it; for any other, a short exchange."""
+        """Return a stand-in conversation: for the parser subagent, the call that sent item 47, then its moment around item 51 with what led to it; for any other, a short exchange."""
         if (session, agent) == ("s1", "a02"):
             return [
                 Said(
@@ -463,6 +579,14 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ),
                 Called(tool="Bash", at=self.ago(28)),
                 Called(tool="Read", at=self.ago(27)),
+                Called(tool="mcp__lup__note", id="call-47", at=self.ago(26)),
+                Said(
+                    by="agent",
+                    text="Reading Claude Code's records first.",
+                    at=self.ago(25.5),
+                ),
+                Called(tool="Read", at=self.ago(24)),
+                Called(tool="Grep", at=self.ago(22)),
                 *self.moment(51),
                 *self.growing(),
             ]

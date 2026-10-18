@@ -454,7 +454,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.arrive(main)
 
     def said(self, item: Item) -> str:
-        """Say `item`, whole, to the conversation it's told to."""
+        """Say `item`, whole, to the conversation it's told to: its heading, then its words."""
+        return f"{self.heading(item)}:\n{self.words(item)}"
+
+    def heading(self, item: Item) -> str:
+        """Say what `item` is and whom it's from, as it's told: an item passed on from a conversation that had ended saying whose it was, and a reply, an answer or a review what it answers."""
         head = f"lup's inbox, item {item.number}: {what(item)} from {who(item.sender)}"
         passed = (
             ""
@@ -462,31 +466,35 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             else f" (it was for {who(item.addressed)}, whose conversation had ended)"
         )
         match item.reason:
-            case Message(text=text, of=int() as of):
+            case Message(of=int() as of):
                 original = self.inbox.item(of)
                 return (
                     f"{head}{passed}, replying to item {of}, {what(original)} you "
-                    f'sent ("{opening(original)}"):\n{text}'
+                    f'sent ("{opening(original)}")'
                 )
+            case Answer(question=question):
+                return f"{head}{passed}, to the question of item {question}"
+            case Review(covers=covers):
+                numbers = ", ".join(str(each) for each in covers)
+                items = "item" if len(covers) == 1 else "items"
+                return f"{head}{passed}, of {items} {numbers}"
+            case Message() | Question() | Approval() | HeldChange():
+                return f"{head}{passed}"
+
+    def words(self, item: Item) -> str:
+        """Return what `item` tells the conversation it's told to, after its heading: a message's text, an answer said beside its question, a review said to its recipient."""
+        match item.reason:
             case (
                 Message(text=text)
                 | Question(text=text)
                 | Approval(text=text)
                 | HeldChange(text=text)
             ):
-                return f"{head}{passed}:\n{text}"
+                return text
             case Answer() as answer:
-                return (
-                    f"{head}{passed}, to the question of item {answer.question}:\n"
-                    f"{self.answered(answer)}"
-                )
+                return self.answered(answer)
             case Review() as review:
-                numbers = ", ".join(str(each) for each in review.covers)
-                items = "item" if len(review.covers) == 1 else "items"
-                return (
-                    f"{head}{passed}, of {items} {numbers}:\n"
-                    f"{self.reviewing(review, item.recipient)}"
-                )
+                return self.reviewing(review, item.recipient)
 
     def reviewing(self, review: Review, recipient: Party) -> str:
         """Say a review to one conversation it's sent to: its own items first, each with the operator's comments on it, or read with nothing to add; then, for context, the other agents' items they commented on, each whole and whose it is."""

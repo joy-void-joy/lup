@@ -28,12 +28,14 @@ from lup_dev.inbox.protocol import (
     Context,
     Conversed,
     Drafted,
+    Exchanged,
     Files,
     FinishItem,
     Items,
     KeepDraft,
     KeepTalk,
     ListInbox,
+    ListItems,
     Reviewed,
     SendDraft,
     SendItem,
@@ -61,6 +63,7 @@ type Asked = Annotated[
     | ShowFiles
     | ShowContext
     | ShowConversation
+    | ListItems
     | ShowDraft
     | KeepDraft
     | SendDraft
@@ -73,8 +76,9 @@ a launch renamed, the operator's switch for a conversation turned, "hold each
 flagged write", and the operator's inbox, its items read, answered, finished
 and sent, an approval or a held change answered and the files it changes read,
 an item's moment in its sender's conversation read, a whole conversation read
-from where the page left it, the operator's draft reply shown, kept and sent,
-and what they write on a conversation shown and kept."""
+from where the page left it, the items a conversation sent and was sent listed,
+the operator's draft reply shown, kept and sent, and what they write on a
+conversation shown and kept."""
 
 type Replied = Annotated[
     Listed
@@ -86,6 +90,7 @@ type Replied = Annotated[
     | Files
     | Context
     | Conversed
+    | Exchanged
     | Drafted
     | Talked
     | Reviewed

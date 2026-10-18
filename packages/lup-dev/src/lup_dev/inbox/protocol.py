@@ -16,6 +16,10 @@ launching terminal, or `lup-dev inbox answer` at any other, answers it
 (`AnswerApproval`), whichever comes first; `lup-dev inbox show --diff` reads its
 whole diff (`ShowDiff`), and the dashboard each file it changes, whole
 (`ShowFiles`), as of a held change (`AskHold`).
+
+The dashboard reads a conversation whole: its steps, as its runtime records
+them (`ShowConversation`), and the items it sent and was sent, in every state
+(`ListItems`), which its page places among them.
 """
 
 import asyncio
@@ -28,7 +32,7 @@ from lup_dev.host.protocol import LaunchId, Reply, Request
 from lup_dev.host.records import Entry, Recorded
 from lup_dev.host.service import Handler, Route
 from lup_dev.inbox import context
-from lup_dev.inbox.delivery import Delivery
+from lup_dev.inbox.delivery import Delivery, body
 from lup_dev.inbox.store import (
     Approval,
     ChangedFile,
@@ -212,6 +216,13 @@ class ShowContext(Request):
     number: int
 
 
+class ListItems(Request):
+    """List the items one conversation sent and was sent, in every state, oldest first, each with its text whole."""
+
+    kind: Literal["inbox-list-items"] = "inbox-list-items"
+    conversation: Conversation
+
+
 class Items(Reply):
     """Items, oldest first, and when the operator last sent a reply."""
 
@@ -292,6 +303,24 @@ class Context(Reply):
     entries: list[Entry]
     anchor: int
     """Which of `entries` is the call that made the item."""
+
+
+class Exchange(Model):
+    """One item a conversation sent or was sent, with its text whole: as the conversation wrote it, or as it's told it."""
+
+    item: Item
+    text: str
+
+
+class Exchanged(Reply):
+    """The items one conversation sent, and those it was sent, each oldest first, in every state, with its text whole."""
+
+    kind: Literal["inbox-exchanged"] = "inbox-exchanged"
+    sent: list[Exchange]
+    received: list[Exchange]
+    """Those for it, those passed on to it from a subagent of its session that
+    had ended, and, for a subagent, those for it passed on to its session's main
+    conversation once it had."""
 
 
 class Listing(Model, Handler[ListInbox], arbitrary_types_allowed=True):
@@ -457,6 +486,42 @@ class ContextShowing(Model, Handler[ShowContext], arbitrary_types_allowed=True):
         return Context(number=item.number, entries=found.entries, anchor=found.anchor)
 
 
+def written(item: Item) -> str:
+    """Return the text of an item a conversation sent, whole: as it wrote it, a question with its decisions and leans; a change held from it, with what's held and why."""
+    match item.reason:
+        case HeldChange(text=text, summary=summary):
+            return f"{text}\n{summary}"
+        case _:
+            return body(item)
+
+
+class ItemsListing(Model, Handler[ListItems], arbitrary_types_allowed=True):
+    """Answers `ListItems`: the items the conversation sent, as it wrote them, and those it was sent, as it's told them."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[ListItems]:
+        return ListItems
+
+    @override
+    async def answer(self, request: ListItems) -> Reply:
+        party = request.conversation
+        items = self.delivery.inbox.exchanged(party)
+        return Exchanged(
+            sent=[
+                Exchange(item=each, text=written(each))
+                for each in items
+                if each.sender == party
+            ],
+            received=[
+                Exchange(item=each, text=self.delivery.words(each))
+                for each in items
+                if each.sender != party
+            ],
+        )
+
+
 class ConversationShowing(
     Model, Handler[ShowConversation], arbitrary_types_allowed=True
 ):
@@ -603,6 +668,7 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.to(FilesShowing(delivery=delivery)),
         Route.to(ContextShowing(delivery=delivery, recorded=recorded)),
         Route.to(ConversationShowing(recorded=recorded)),
+        Route.to(ItemsListing(delivery=delivery)),
         Route.to(DraftShowing(delivery=delivery)),
         Route.to(DraftKeeping(delivery=delivery)),
         Route.to(DraftSending(delivery=delivery)),
