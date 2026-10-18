@@ -228,7 +228,7 @@ The engine's build compiles the table into its bundle. A check reports where and
 
 ### The verdict log
 
-Every judgement is logged, so how often lup asks, refuses and allows can be measured and tuned instead of guessed (`policy/verdicts.py`). One JSON line per verdict (`Verdict`): the time, the session (none for a move of `HEAD`), the runtime, the tool (or `checkpoint`, or `move`), the worktree, the path and its role, the outcome (allow, ask, refuse, hold) with its reasons (the names of what it holds; for an allow, the names of what it flags, else the rules of the findings told, else the role, `rules-pass` for production), and the operator's answer. An answer comes later, so it's appended as the same verdict again under the same key, and a reader takes the last line for each key; an ask logged only once answered would be lost when a hook dies. It's kept per repository, so one place measures a repository's worktrees. `lup-dev verdicts --days 7` summarises it by outcome and reason, with how asks and holds were answered.
+Every judgement is logged, so how often lup asks, refuses and allows can be measured and tuned instead of guessed (`policy/verdicts.py`). One JSON line per verdict (`Verdict`): the time, the session (none for a move of `HEAD`), the runtime, the tool (or `checkpoint`, or `move`), the worktree, the path and its role, the outcome (allow, ask, refuse, hold) with its reasons (the names of what it holds; for an allow, the names of what it flags, else the rules of the findings told, else the role, `rules-pass` for production), and the operator's answer. An answer comes later, so it's appended as the same verdict again under the same key, and a reader takes the last line for each key; an ask logged only once answered would be lost when a hook dies. It's kept per repository, so one place measures a repository's worktrees. `lup-dev verdicts --days 7` summarises it by outcome and reason, with how asks and holds were answered. A launched session, whose room mounts neither the log nor the holds, reads its own verdicts, or every session's, and the repository's holds through lup's `judged` tool (`docs/host-tools.md`, *lup's tools*).
 
 ### The two runtimes
 
@@ -281,8 +281,9 @@ In `packages/lup-dev/src/lup_dev/`, whose subsystems import downwards (`adapters
 | `policy/store.py` | The store: snapshot, compare, set aside what was committed elsewhere or merged from it, restore, save |
 | `policy/worktrees.py` | The session's repository, a path's worktree, the worktrees a session holds |
 | `policy/importers.py` | The background pass re-checking the files importing what changed |
-| `policy/holds.py` | Holds: waiting for an answer, and answering |
+| `policy/holds.py` | Holds: waiting for an answer, and answering; a repository's holds, by its verdict log |
 | `policy/verdicts.py` | The verdict log and its summary |
+| `policy/tools.py` | `judged`, the judge's tool in a launched session: the verdicts and holds, for the session to read (`docs/host-tools.md`) |
 | `policy/report.py` | What the agent and the operator are told, in pyright's shape |
 | `policy/runtime.py` | `Runtime`: what the core needs to know of a runtime |
 | `codescan/contract.py` | The engine's contract: findings, reports, surfaces, rules, and `Checker`, which tests fake |

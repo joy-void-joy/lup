@@ -312,6 +312,28 @@ def waiting(layout: Layout) -> list[Hold]:
     ]
 
 
+def logged(layout: Layout, verdicts: list[Verdict]) -> list[Hold]:
+    """Return the holds whose verdicts are among `verdicts`, one repository's log as read: that repository's holds, open and answered, the oldest first.
+
+    A hold is kept in the store of the worktree its session works in, which for
+    a write in the repository's git directory isn't the worktree its verdict
+    names, so every store is read. A hold is among them where one of its
+    verdicts is, by its key and its worktree: a hold's key is unique within its
+    own store alone, and its worktree is its repository's.
+    """
+    named = {verdict.key: verdict.worktree for verdict in verdicts}
+    found = [
+        hold
+        for holds in stores(layout)
+        for hold in holds.all()
+        if any(
+            each.key in named and named[each.key] == each.worktree
+            for each in hold.verdicts
+        )
+    ]
+    return sorted(found, key=lambda hold: hold.created)
+
+
 def answer(
     layout: Layout,
     key: str,
