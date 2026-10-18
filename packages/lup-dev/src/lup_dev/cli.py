@@ -596,6 +596,7 @@ def hold_answered(
         Response(approved=approved, comment=comment),
         runtimes(),
         SystemClock(),
+        worktree=change.worktree,
     )
 
 
