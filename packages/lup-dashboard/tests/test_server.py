@@ -9,13 +9,14 @@ from typing import TYPE_CHECKING, override
 import pytest
 from fastapi.testclient import TestClient
 
-from lup_dashboard.demo import Demo
+from lup_dashboard.demo import Demo, files
 from lup_dashboard.host import Host
 from lup_dashboard.server import Access, application
 from lup_dev.clock import Clock
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
 from lup_dev.inbox.protocol import (
     Exchanged,
+    Files,
     Items,
     ListInbox,
     ListItems,
@@ -30,6 +31,7 @@ from lup_dev.inbox.store import (
     Item,
     Message,
     Operator,
+    Text,
 )
 
 if TYPE_CHECKING:
@@ -447,3 +449,17 @@ def test_a_host_zone_the_sent_draft_approved_is_acted_on_as_the_terminal_would(
     )
     assert response.json()["approved"][0]["number"] == 7
     assert host.settled == [7]
+
+
+def test_the_demos_files_carry_readings_each_placed_on_a_line_its_file_has() -> None:
+    for number in [54, 55]:
+        shown = files(number)
+        assert isinstance(shown, Files)
+        for each in shown.files:
+            assert each.reading is not None, each.path
+            after = each.after.text if isinstance(each.after, Text) else ""
+            placed = [
+                *(ask.line for ask in each.reading.asks if ask.line is not None),
+                *(found.start for found in each.reading.findings),
+            ]
+            assert all(1 <= line <= len(after.splitlines()) for line in placed)

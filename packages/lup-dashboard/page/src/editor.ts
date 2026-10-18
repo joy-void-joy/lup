@@ -6,7 +6,8 @@
 // a conversation); vim's change, `c` and a motion, on the passage it covers
 // (`ct.`, `ciw`, `cip`, `cc` a line's); `o`, `C` and vim's other keys of insert
 // mode on the line; `v` and a motion, then `c` or `s`, on the selection. `]]` and
-// `[[` go to the next and previous item or turn. Ctrl+Enter in a comment ends
+// `[[` go to the next and previous item or turn, `]c` and `[c` to the next and
+// previous line that matters, where a view has some. Ctrl+Enter in a comment ends
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
 // any change to the draft. What folds is folded until opened: `za` opens or
 // closes the fold under the cursor, `zo` and `zc` open and close it, `zR` and
@@ -39,6 +40,7 @@ interface Actions {
     finish: (cm: CodeMirrorV) => void;
     toggle: (list: "done" | "parked") => void;
     move: (forward: boolean) => void;
+    matter: (forward: boolean) => void;
     approve: (approved: boolean) => void;
     back: () => void;
     tree: () => void;
@@ -107,6 +109,8 @@ function mapKeys(): void {
     action("lupLater", (actions) => actions.toggle("parked"));
     action("lupNext", (actions) => actions.move(true));
     action("lupPrevious", (actions) => actions.move(false));
+    action("lupNextMatter", (actions) => actions.matter(true));
+    action("lupPreviousMatter", (actions) => actions.matter(false));
     action("lupApprove", (actions) => actions.approve(true));
     action("lupDecline", (actions) => actions.approve(false));
     action("lupBack", (actions) => actions.back());
@@ -141,6 +145,8 @@ function mapKeys(): void {
     map("<C-r>", "lupRedo", "normal");
     map("]]", "lupNext", "normal");
     map("[[", "lupPrevious", "normal");
+    map("]c", "lupNextMatter", "normal");
+    map("[c", "lupPreviousMatter", "normal");
 }
 
 /** Return the editor's vim, once it's started. */
@@ -367,7 +373,7 @@ export function refold(view: EditorView, folds: Folding[], unfolded: Set<string>
 
 /** Return where the cursor goes once a fold closes over it: on its summary line where it was in what the fold hides, else where it was. */
 export function uncovered(closed: Folding[], head: number): number {
-    return closed.find((each) => head > each.summary.to && head <= each.to)?.summary.from ?? head;
+    return closed.find((each) => head > each.from && head <= each.to)?.summary.from ?? head;
 }
 
 /** Where the cursor goes once the text is laid out again: into a comment just opened, onto an item, or nowhere in particular. */
@@ -410,6 +416,8 @@ export interface Own<C> {
     move: (forward: boolean) => void;
     send: () => void;
     toggle?: (list: "done" | "parked") => void;
+    /** Go to the next or previous line that matters, as the review's are by the judge's reading, opening what folds it on the way. */
+    matter?: (forward: boolean) => void;
     approve?: (approved: boolean) => void;
     back?: () => void;
     /** What's painted on the lines from `from` to `to` while they're in view, beyond what `draw` drew: a changed file's lines and their highlighting. */
@@ -638,6 +646,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             },
             toggle: (list) => own.toggle?.(list),
             move: own.move,
+            matter: (forward) => own.matter?.(forward),
             approve: (approved) => own.approve?.(approved),
             back: () => own.back?.(),
             tree: config.tree,
@@ -655,7 +664,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 const closing = how === "toggle" ? !closed : how === "close";
                 if (closing !== closed) {
                     // From what the fold hides, or past its placeholder, the cursor goes to its summary line.
-                    const back = at > fold.summary.to ? { anchor: fold.summary.from } : undefined;
+                    const back = at > fold.from ? { anchor: fold.summary.from } : undefined;
                     editor.dispatch({ effects: folding(fold, closing), selection: back, scrollIntoView: true });
                 }
             },

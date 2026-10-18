@@ -53,6 +53,7 @@ from lup_dev.inbox.protocol import (
     written,
 )
 from lup_dev.inbox.store import (
+    ApiChanged,
     Approval,
     Binary,
     ChangedFile,
@@ -60,16 +61,19 @@ from lup_dev.inbox.store import (
     Decision,
     Done,
     Draft,
+    Found,
     HeldChange,
     Item,
     Message,
     Operator,
     Question,
+    Reading,
     Talk,
     Text,
     Told,
     Waiting,
 )
+from lup_dev.inbox.store import Asked as Ask
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -376,12 +380,14 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         approval = Approval(
             text="Approve the host zone of lup at 4750cf6?",
             summary=(
+                " packages/lup-dashboard/page/README.md (new)             |  5 +++++\n"
                 " packages/lup-dashboard/page/src/agents.ts               |  3 +++\n"
+                " packages/lup-dashboard/page/src/main.tsx                |  4 ++--\n"
                 " packages/lup-dashboard/src/lup_dashboard/icon.png (new) | Bin 0 -> 1150 bytes\n"
                 " packages/lup-dev/pyproject.toml                         |  1 +\n"
-                " packages/lup-dev/src/lup_dev/cli.py                     | 15 +++++++++++----\n"
+                " packages/lup-dev/src/lup_dev/cli.py                     | 16 +++++++++++-----\n"
                 " packages/lup/src/lup/transcripts/views.py (new)         | 25 +++++++++++++++++++++++++\n"
-                " 5 files changed, 40 insertions(+), 4 deletions(-)"
+                " 7 files changed, 52 insertions(+), 6 deletions(-)"
             ),
             repository=lup,
             fingerprint="demo",
@@ -469,13 +475,17 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             Item(
                 number=55,
                 reason=HeldChange(
-                    text="Let the change to 2 files land?",
+                    text="Let the change to 3 files land?",
                     summary=(
                         "AGENTS.md: AGENTS.md is the operator's document, asked "
                         "about every time\n"
                         "packages/lup-dashboard/page/package.json: "
                         "/home/op/lup.git/tree/dev/packages/lup-dashboard/page/"
-                        "package.json is a protected path (package.json)"
+                        "package.json is a protected path (package.json)\n"
+                        "packages/lup/src/lup/transcripts/records.py: adds "
+                        '`# lup: ignore("string-split", why="JSONL is an object a '
+                        'line")` to /home/op/lup.git/tree/dev/packages/lup/src/lup/'
+                        "transcripts/records.py"
                     ),
                     worktree=dev,
                     key="a1b2c3",
@@ -728,6 +738,7 @@ async def proposed_after(
         return
     root = Git.pinned(launch.repository).main_worktree()
     pushed_by = delivery.running(launch.launch)
+    branch = refs[0].split("/")[-1]
     number = await asyncio.to_thread(machine_trust(root, []).proposed, pushed_by)
 '''
 CLI_TAIL = '''    if number is not None:
@@ -863,32 +874,102 @@ PACKAGE_TAIL = """        "@codemirror/language": "6.13.1",
 """
 
 
+README = """# The dashboard's page
+
+Built by `packages/lup-dashboard/build.py` into the package, which serves it.
+Its types are generated from the API's description, so they never drift from
+the host's models.
+"""
+
+MAIN_HEAD = """import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+
+import { App } from "./App";
+
+"""
+MAIN_BEFORE = """createRoot(document.getElementById("root")!).render(
+  <StrictMode><App /></StrictMode>,
+);
+"""
+MAIN_AFTER = """createRoot(document.getElementById("root")!).render(
+    <StrictMode><App /></StrictMode>,
+);
+"""
+
+RECORDS_HEAD = '''"""Reading a runtime's records of its sessions."""
+
+import json
+from pathlib import Path
+
+from lup.transcripts.views import Entry
+
+
+def recorded(path: Path) -> bool:
+    """Say whether a session's record is there to read."""
+    return path.is_file()
+'''
+RECORDS_ADDED = '''
+
+def turns(path: Path) -> list[Entry]:
+    """Read each step of a session's record, an object a line."""
+    # lup: ignore("string-split", why="JSONL is an object a line")
+    lines = path.read_text().split("\\n")
+    return [Entry.model_validate(json.loads(line)) for line in lines if line]
+'''
+
+
 def text(*parts: str) -> Text:
     """Return a stand-in file's text, made of `parts`."""
     return Text(text="".join(parts))
 
 
+def line(content: Text, written: str) -> int:
+    """Return the number, from 1, of the line of a stand-in file's `content` that's `written` whole: where its stand-in reading places what it triggered."""
+    return content.text.splitlines().index(written) + 1
+
+
 def files(number: int) -> Files | Refused:
-    """Return the stand-in files of the approval (54) and the held change (55): Python, TypeScript, TOML, Markdown and JSON, changed, created, and one binary."""
+    """Return the stand-in files of the approval (54) and the held change (55): Python, TypeScript, TOML, Markdown and JSON, changed, created, and one binary; each with a stand-in of the judge's reading of it, two of the approval's automatic, the rest open for what they ask, a production change, or a finding told."""
+    created = Reading(role="production", asks=[Ask(name="new-file", taken="flagged")])
     match number:
         case 54:
+            cli = text(CLI_HEAD, CLI_SHOW_AFTER, CLI_MIDDLE, CLI_PUSH_AFTER, CLI_TAIL)
+            split = line(cli, '    branch = refs[0].split("/")[-1]')
             return Files(
                 number=number,
                 files=[
                     ChangedFile(
+                        path=Path("packages/lup-dashboard/page/README.md"),
+                        before=None,
+                        after=text(README),
+                        reading=Reading(role="docs"),
+                    ),
+                    ChangedFile(
                         path=Path("packages/lup-dashboard/page/src/agents.ts"),
                         before=text(AGENTS_HEAD, AGENTS_BEFORE, AGENTS_TAIL),
                         after=text(AGENTS_HEAD, AGENTS_AFTER, AGENTS_TAIL),
+                        reading=Reading(role="production"),
+                    ),
+                    ChangedFile(
+                        path=Path("packages/lup-dashboard/page/src/main.tsx"),
+                        before=text(MAIN_HEAD, MAIN_BEFORE),
+                        after=text(MAIN_HEAD, MAIN_AFTER),
+                        reading=Reading(role="production"),
                     ),
                     ChangedFile(
                         path=Path("packages/lup-dashboard/src/lup_dashboard/icon.png"),
                         before=None,
                         after=Binary(size=1150),
+                        reading=created,
                     ),
                     ChangedFile(
                         path=Path("packages/lup-dev/pyproject.toml"),
                         before=text(PYPROJECT_HEAD, PYPROJECT_TAIL),
                         after=text(PYPROJECT_HEAD, PYPROJECT_ADDED, PYPROJECT_TAIL),
+                        reading=Reading(
+                            role="protected",
+                            asks=[Ask(name="protected", taken="held")],
+                        ),
                     ),
                     ChangedFile(
                         path=Path("packages/lup-dev/src/lup_dev/cli.py"),
@@ -899,22 +980,56 @@ def files(number: int) -> Files | Refused:
                             CLI_PUSH_BEFORE,
                             CLI_TAIL,
                         ),
-                        after=text(
-                            CLI_HEAD,
-                            CLI_SHOW_AFTER,
-                            CLI_MIDDLE,
-                            CLI_PUSH_AFTER,
-                            CLI_TAIL,
+                        after=cli,
+                        reading=Reading(
+                            role="production",
+                            asks=[
+                                Ask(
+                                    name="public-api",
+                                    taken="flagged",
+                                    line=line(cli, "def inbox_show("),
+                                    api=ApiChanged(
+                                        kind="signature-changed", name="inbox_show"
+                                    ),
+                                ),
+                                Ask(
+                                    name="public-api",
+                                    taken="flagged",
+                                    line=line(cli, "async def proposed_after("),
+                                    api=ApiChanged(
+                                        kind="signature-changed", name="proposed_after"
+                                    ),
+                                ),
+                            ],
+                            findings=[
+                                Found(
+                                    rule="string-split",
+                                    message=(
+                                        "`.split` takes a ref's name apart by hand. "
+                                        "Splitting structured text by hand matches "
+                                        "the inputs it was tried on, and fails "
+                                        "quietly on the rest."
+                                    ),
+                                    start=split,
+                                    end=split,
+                                    taken="told",
+                                )
+                            ],
                         ),
                     ),
                     ChangedFile(
                         path=Path("packages/lup/src/lup/transcripts/views.py"),
                         before=None,
                         after=text(VIEWS),
+                        reading=created,
                     ),
                 ],
             )
         case 55:
+            records = text(RECORDS_HEAD, RECORDS_ADDED)
+            ignored = (
+                '    # lup: ignore("string-split", why="JSONL is an object a line")'
+            )
             return Files(
                 number=number,
                 files=[
@@ -922,11 +1037,33 @@ def files(number: int) -> Files | Refused:
                         path=Path("AGENTS.md"),
                         before=text(AGENTS_MD_HEAD, AGENTS_MD_BEFORE, AGENTS_MD_TAIL),
                         after=text(AGENTS_MD_HEAD, AGENTS_MD_AFTER, AGENTS_MD_TAIL),
+                        reading=Reading(
+                            role="operator", asks=[Ask(name="operator", taken="held")]
+                        ),
                     ),
                     ChangedFile(
                         path=Path("packages/lup-dashboard/page/package.json"),
                         before=text(PACKAGE_HEAD, PACKAGE_TAIL),
                         after=text(PACKAGE_HEAD, PACKAGE_ADDED, PACKAGE_TAIL),
+                        reading=Reading(
+                            role="protected",
+                            asks=[Ask(name="protected", taken="held")],
+                        ),
+                    ),
+                    ChangedFile(
+                        path=Path("packages/lup/src/lup/transcripts/records.py"),
+                        before=text(RECORDS_HEAD),
+                        after=records,
+                        reading=Reading(
+                            role="production",
+                            asks=[
+                                Ask(
+                                    name="ignore",
+                                    taken="held",
+                                    line=line(records, ignored),
+                                )
+                            ],
+                        ),
                     ),
                 ],
             )

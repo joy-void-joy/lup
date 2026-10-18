@@ -3,8 +3,11 @@
 // where they were) or the same, each run of unchanged lines away from the
 // changes folded under a summary, a few lines of context kept around each; and
 // its text highlighted by CodeMirror's own language packages, chosen by its
-// name. Pure: the review lays these rows into its text (`review.ts`), and its
-// editor paints the lines in view with them (`Review.tsx`).
+// name. The judge's reading of the file says why it's open, in its header's last
+// words, and which of its lines matter, each saying what it triggered; a file
+// that asks nothing and changes no production line is automatic, its header
+// alone in view. Pure: the review lays these rows into its text (`review.ts`),
+// and its editor paints the lines in view with them (`Review.tsx`).
 import { javascriptLanguage, jsxLanguage, tsxLanguage, typescriptLanguage } from "@codemirror/lang-javascript";
 import { jsonLanguage } from "@codemirror/lang-json";
 import { markdownLanguage } from "@codemirror/lang-markdown";
@@ -18,6 +21,11 @@ import type { components } from "./generated/api";
 
 export type ChangedFile = components["schemas"]["ChangedFile"];
 type Content = components["schemas"]["Content"];
+export type Reading = components["schemas"]["Reading"];
+type Asked = components["schemas"]["Asked"];
+type ApiChanged = components["schemas"]["ApiChanged"];
+/** How the declaration takes what a line triggered: held for the operator's answer, flagged for their review, or told to the agent alone. */
+export type Taken = components["schemas"]["Found"]["taken"];
 
 /** How many unchanged lines are kept in view on each side of a change. */
 export const CONTEXT = 3;
@@ -47,11 +55,38 @@ export interface Run {
     summary: string;
 }
 
-/** A changed file as the review shows it: its header line, its rows in order, and the runs of them that fold. */
+/** What a line that matters triggered, said at its end, and how the declaration takes it. */
+export interface Note {
+    taken: Taken;
+    said: string;
+}
+
+/** A row that matters, by its index among the file's rows, and what's said at its end: on the first row of what it triggered, none on the rest. */
+export interface Matter {
+    row: number;
+    notes: Note[];
+}
+
+/** One reason a file is open, or that it's automatic: its words in the header, and how a tally of an item's files counts it. */
+export interface Reason {
+    said: string;
+    one: string;
+    many: string;
+}
+
+/**
+ * A changed file as the review shows it: its header line, its rows in order, and the runs of them that fold; why it's
+ * open, from the judge's reading of it, none where it wasn't read; whether it's automatic; whether what it asks is
+ * about it whole, its header then a line that matters; and the rows that matter.
+ */
 export interface Shown {
     header: string;
     rows: Row[];
     runs: Run[];
+    reasons: Reason[];
+    automatic: boolean;
+    whole: boolean;
+    matters: Matter[];
 }
 
 /** One line of a text, and where it starts in it. */
@@ -159,7 +194,179 @@ export function shown(file: ChangedFile, context: number = CONTEXT): Shown {
         i = same(i, j);
         j += 1;
     }
-    return { header: `${file.path} · ${told(file, rows)}`, rows, runs: runs(rows, context) };
+    const reading = file.reading ?? null;
+    const placed = mattering(reading, rows);
+    const reasons = reading === null ? [] : reasoned(reading, rows);
+    const automatic = reasons[0]?.said === "automatic";
+    const header = [`${file.path} · ${told(file, rows)}`, ...reasons.map((each) => each.said)].join(" · ");
+    const kept = new Set(placed.matters.map((each) => each.row));
+    return {
+        header,
+        rows,
+        runs: runs(rows, context, kept),
+        reasons,
+        automatic,
+        whole: placed.whole,
+        matters: placed.matters,
+    };
+}
+
+/** Say what a change to the public API does, as a line that matters says it. */
+function api(change: ApiChanged): string {
+    switch (change.kind) {
+        case "export-added":
+            return `adds \`${change.name}\` to the package's root`;
+        case "export-removed":
+            return `takes \`${change.name}\` out of the package's root`;
+        case "class-added":
+            return `adds the class \`${change.name}\``;
+        case "signature-changed":
+            return `changes the signature of \`${change.name}\``;
+    }
+}
+
+/** Mark a change to the public API in a header's few words: `+` a name added, `−` one taken out, `~` a signature changed. */
+function signed(change: ApiChanged): string {
+    const sign = change.kind === "export-removed" ? "−" : change.kind === "signature-changed" ? "~" : "+";
+    return `${sign}${change.name}`;
+}
+
+/** Say what one ask on a line triggered. */
+function triggered(asked: Asked): string {
+    if (asked.api != null) {
+        return `public API: ${api(asked.api)}`;
+    }
+    return asked.name === "ignore" ? "adds an ignore" : asked.name;
+}
+
+/** The rows that matter, and whether anything the file asks is about it whole, or on no row shown, so its header matters too. */
+interface Placed {
+    matters: Matter[];
+    whole: boolean;
+}
+
+/**
+ * Place what the reading found on the rows it's on: each ask on its line, on the side it's in, and each finding on
+ * every line it spans, what it triggered said on its first. An ask about the file whole, or on a line no row shows,
+ * is the header's.
+ */
+function mattering(reading: Reading | null, rows: Row[]): Placed {
+    if (reading === null) {
+        return { matters: [], whole: false };
+    }
+    const at = (side: Row["side"], number: number) =>
+        rows.findIndex((row) => row.side === side && row.number === number && (side === "after" || row.change === "removed"));
+    const notes = new Map<number, Note[]>();
+    const mark = (row: number, note: Note | null) => {
+        notes.set(row, [...(notes.get(row) ?? []), ...(note === null ? [] : [note])]);
+    };
+    let whole = false;
+    for (const asked of reading.asks ?? []) {
+        const row = asked.line == null ? -1 : at(asked.side ?? "after", asked.line);
+        if (row < 0) {
+            whole = true;
+        } else {
+            mark(row, { taken: asked.taken, said: triggered(asked) });
+        }
+    }
+    for (const found of reading.findings ?? []) {
+        const said = `${found.rule}: ${found.message.replaceAll("\n", " ")}`;
+        for (let line = found.start; line <= found.end; line += 1) {
+            const row = at("after", line);
+            if (row >= 0) {
+                mark(row, line === found.start ? { taken: found.taken, said } : null);
+            }
+        }
+    }
+    const matters = [...notes.entries()].map(([row, said]) => ({ row, notes: said })).sort((a, b) => a.row - b.row);
+    return { matters, whole };
+}
+
+/** Whether a change holds a line that differs in more than its spacing: one that only reindents, adds blank lines or changes line endings has none. */
+function real(rows: Row[]): boolean {
+    const squeezed = (change: Change) =>
+        rows
+            .filter((row) => row.change === change)
+            .map((row) => row.text.replace(/\s+/g, ""))
+            .filter((text) => text !== "");
+    const removed = squeezed("removed");
+    const added = squeezed("added");
+    return removed.length !== added.length || removed.some((text, at) => text !== added[at]);
+}
+
+/** One reason, said the same in a header and in a tally of an item's files. */
+function plainly(said: string, many: string = said): Reason {
+    return { said, one: said, many };
+}
+
+/**
+ * Say why a file is open, from the judge's reading of it: what it asks, held first, each kind once, the changes to
+ * its public API together; the rules of the findings held or flagged; the findings only told; else `production`, for
+ * a production file with a real change; else `automatic`, for one asking nothing (a test, docs, data, scratch, a
+ * production change of spacing alone).
+ */
+function reasoned(reading: Reading, rows: Row[]): Reason[] {
+    const asks = reading.asks ?? [];
+    const findings = reading.findings ?? [];
+    const ignores = asks.filter((each) => each.name === "ignore").length;
+    const changes = asks.flatMap((each) => (each.api == null ? [] : [signed(each.api)]));
+    const reason = (name: string): Reason => {
+        switch (name) {
+            case "protected":
+                return plainly("protected");
+            case "operator":
+                return plainly("operator's document", "operator's documents");
+            case "new-file":
+                return { said: "new file", one: "new file", many: "new files" };
+            case "whole-file":
+                return plainly("written whole");
+            case "ignore":
+                return {
+                    said: ignores === 1 ? "adds an ignore" : `adds ${ignores} ignores`,
+                    one: "with an ignore",
+                    many: "with ignores",
+                };
+            case "public-api":
+                return { said: `public API: ${changes.join(" ")}`, one: "public API", many: "public API" };
+            default: {
+                const found = findings.filter((each) => each.rule === name).length;
+                return { said: found > 1 ? `${name} ×${found}` : name, one: name, many: name };
+            }
+        }
+    };
+    const ordered = (taken: Taken) => [
+        ...asks.filter((each) => each.taken === taken).map((each) => each.name),
+        ...findings.filter((each) => each.taken === taken).map((each) => each.rule),
+    ];
+    const asked = [...new Set([...ordered("held"), ...ordered("flagged")])].map(reason);
+    const told = [...new Set(ordered("told"))];
+    const reasons = [
+        ...asked,
+        ...(told.length === 0
+            ? []
+            : [{ said: `told: ${told.join(", ")}`, one: "with findings told", many: "with findings told" }]),
+    ];
+    if (reasons.length > 0) {
+        return reasons;
+    }
+    return [plainly(reading.role === "production" && real(rows) ? "production" : "automatic")];
+}
+
+/** Count an item's files by the first reason each is open, the most first: `3 automatic · 1 new file · 1 public API`; files the judge didn't read are `unread`; nothing where it read none. */
+export function tally(files: ChangedFile[]): string {
+    if (files.every((each) => each.reading == null)) {
+        return "";
+    }
+    const counts = new Map<string, { reason: Reason; count: number }>();
+    for (const file of files) {
+        const reason = shownOnce(file).reasons[0] ?? plainly("unread");
+        const kept = counts.get(reason.one);
+        counts.set(reason.one, { reason, count: (kept?.count ?? 0) + 1 });
+    }
+    return [...counts.values()]
+        .sort((a, b) => b.count - a.count)
+        .map(({ reason, count }) => `${count} ${count === 1 ? reason.one : reason.many}`)
+        .join(" · ");
 }
 
 /** Each file as shown, once laid out: the review is laid out again at each key typed in a comment, and a file's lines don't change. */
@@ -176,17 +383,18 @@ export function shownOnce(file: ChangedFile): Shown {
     return made;
 }
 
-/** Return the runs of unchanged rows to fold: each run's part `context` rows or more from every change, where it hides `FEWEST` rows or more. */
-function runs(rows: Row[], context: number): Run[] {
+/** Return the runs of unchanged rows to fold: each run's part `context` rows or more from every change and every row that matters (`kept`), where it hides `FEWEST` rows or more. */
+function runs(rows: Row[], context: number, kept: Set<number> = new Set()): Run[] {
     const found: Run[] = [];
+    const folding = (at: number) => rows[at]?.change === "same" && !kept.has(at);
     let start = 0;
     while (start < rows.length) {
-        if (rows[start]?.change !== "same") {
+        if (!folding(start)) {
             start += 1;
             continue;
         }
         let end = start;
-        while (end < rows.length && rows[end]?.change === "same") {
+        while (end < rows.length && folding(end)) {
             end += 1;
         }
         const from = start === 0 ? start : start + context;
