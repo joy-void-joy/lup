@@ -1544,6 +1544,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "send",
         "wait_inbox",
         "inbox",
+        "withdraw",
     ]
     assert served[0].input_schema == Problem.model_json_schema()
     assert served[1].input_schema == Remark.model_json_schema()
@@ -1554,6 +1555,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "Send a message to a party's inbox.",
         "Wait until something reaches your inbox.",
         "Read this repository's inbox, changing nothing.",
+        "Take back an item the operator needn't see.",
     ]
     assert "inbox as a problem" in served[0].description
     github = GitHubTools.specs()
@@ -2269,3 +2271,52 @@ def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
     )
     assert "   4  " not in listed
     assert [line.split()[0] for line in listed.splitlines()] == ["2", "3"]
+
+
+def test_an_agent_withdraws_its_own_waiting_item_and_nothing_else(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        mcp = machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        call(mcp, "note", {"remark": "Is the build red for you too?"})
+        call(mcp, "ask", {"question": "Which parser?"})
+        noting = lup_call("note", {"remark": "I assumed UTF-8."}, "n1", agent_id="a1")
+        call(
+            mcp,
+            "note",
+            json.loads(send(hook, noting))["hookSpecificOutput"]["updatedInput"],
+        )
+        inbox("answer", "2", "--comment", "A model per kind.")
+
+        def withdrawing(number: int) -> str:
+            text, error = call(
+                mcp, "withdraw", {"number": number, "why": "It's green now."}
+            )
+            assert not error, text
+            return text
+
+        taken = withdrawing(1)
+        again = withdrawing(1)
+        answered = withdrawing(2)
+        theirs = withdrawing(3)
+        listed = inbox()
+        shown = inbox("show", "1")
+    assert taken == "Item 1 is withdrawn, off the operator's list."
+    assert again == (
+        "Not withdrawn: item 1 no longer waits for the operator: it's withdrawn at "
+        "2026-10-01 12:00 by its sender: It's green now."
+    )
+    assert answered == (
+        "Not withdrawn: item 2 no longer waits for the operator: it's answered at "
+        "2026-10-01 12:00, item 4"
+    )
+    assert theirs == (
+        "Not withdrawn: item 3 is a note from subagent a1 of claude session s1: "
+        "only its sender withdraws it"
+    )
+    assert [line.split()[0] for line in listed.splitlines()] == ["3"]
+    assert "withdrawn at 2026-10-01 12:00 by its sender: It's green now." in shown
+    assert "item 1, a note, was withdrawn by its sender" in said
