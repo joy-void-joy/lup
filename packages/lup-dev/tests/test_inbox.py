@@ -1742,6 +1742,30 @@ def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_
     )
 
 
+def test_a_message_only_marked_read_tells_its_sender_nothing_nor_wakes_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        send(hook, claude("SessionStart", source="startup"))
+        stamped = json.loads(send(hook, lup_call("note", {"remark": "FYI."}, "n1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        call(machine.host.launch("one").mcp, "note", stamped)
+        send(hook, claude("Stop", stop_hook_active=False))
+        drafting(machine, clock, Draft(done=[1]))
+        reviews = sending(machine, clock)
+        state = delivery.inbox.item(1).state
+        waiting = delivery.inbox.waiting(delivery.inbox.item(1).sender)
+        frames = messages.close()
+    assert reviews == []
+    assert isinstance(state, Done)
+    assert waiting == []
+    assert frames == []
+
+
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
