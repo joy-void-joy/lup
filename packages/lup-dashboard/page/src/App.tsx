@@ -1,13 +1,15 @@
 // The page: every agent the host serves on the left; everything waiting for the
 // operator beside it, as one review in groups, one per agent, their reply
 // written into it, and a line saying what the reply covers and who it reaches:
-// every agent it covers, each getting all of it. Selecting an agent narrows the
-// review to what it and its subagents sent.
+// every agent it covers, each getting all of it. Selecting an agent opens its
+// conversation in the review's place; Space `r` in it, the palette, or the
+// title bar brings the review back as it was left.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { everyone, launches, type Agent, type Launch } from "./agents";
 import { AgentTree } from "./AgentTree";
 import { ask, type Asked, type Replied } from "./api";
+import { Conversation } from "./Conversation";
 import { Details } from "./Details";
 import { useNow, useWatched } from "./hooks";
 import { Palette } from "./Palette";
@@ -74,16 +76,7 @@ export function App() {
     );
 
     const waiting = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.items : []), [inbox.reply]);
-    const items = useMemo(
-        () =>
-            selected === null
-                ? waiting
-                : waiting.filter((each) => {
-                      const path = named(each);
-                      return path === selected || path.startsWith(`${selected}/`);
-                  }),
-        [waiting, selected, named],
-    );
+    const review = useCallback(() => setSelected(null), []);
 
     useEffect(() => {
         void ask({ kind: "inbox-draft" }).then((answer) => {
@@ -232,17 +225,39 @@ export function App() {
                 )}
             </nav>
             <main className="win">
-                <div className="wb">
-                    waiting on you <span className="count">{items.length}</span>
-                    {selected === null ? null : (
-                        <button type="button" className="all" onClick={() => setSelected(null)}>
-                            from {selected} · show all
-                        </button>
-                    )}
-                </div>
-                <div className="review">
+                {selected === null ? (
+                    <div className="wb">
+                        waiting on you <span className="count">{waiting.length}</span>
+                    </div>
+                ) : shown?.agent == null ? (
+                    <>
+                        <div className="wb">
+                            <button type="button" className="crumb" onClick={review} title="Back to the review">
+                                waiting on you <span className="count">{waiting.length}</span>
+                            </button>
+                            <span className="muted">›</span>
+                            <span>{shown === null ? selected : (shown.launch.launch.name ?? shown.launch.launch.launch)}</span>
+                        </div>
+                        <p className="empty">
+                            {shown === null
+                                ? "It's no longer served: its launch has ended."
+                                : "Its session hasn't started: there's no conversation to read yet."}
+                        </p>
+                    </>
+                ) : (
+                    <Conversation
+                        key={selected}
+                        launch={shown.launch}
+                        agent={shown.agent}
+                        beat={reply}
+                        waiting={waiting.length}
+                        back={review}
+                        say={setSaid}
+                    />
+                )}
+                <div className="review" hidden={selected !== null}>
                     <Review
-                        items={items}
+                        items={waiting}
                         draft={draft}
                         change={change}
                         banner={banner}
@@ -252,7 +267,7 @@ export function App() {
                         confirming={confirming}
                         inserting={setInserting}
                         epoch={epoch}
-                        shown
+                        shown={selected === null}
                     />
                     <div className="status">
                         {numbers.length === 0 ? (
@@ -318,7 +333,15 @@ export function App() {
                     </p>
                 </div>
             ) : null}
-            <Palette open={palette} setOpen={setPalette} agents={agents} select={setSelected} now={now} />
+            <Palette
+                open={palette}
+                setOpen={setPalette}
+                agents={agents}
+                select={setSelected}
+                review={review}
+                waiting={waiting.length}
+                now={now}
+            />
         </div>
     );
 }

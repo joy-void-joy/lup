@@ -365,13 +365,23 @@ kbd {
     overflow: auto;
 }
 
-.wb .all {
-    margin-left: auto;
+/* The way back to the review, from a conversation's title bar. */
+.wb .crumb {
     border: 0;
     background: none;
+    padding: 0;
     color: var(--link);
     cursor: pointer;
-    font-weight: 400;
+    font-weight: 700;
+}
+
+/* A pane kept while another is shown in its place: the review, while a conversation is open. */
+[hidden] {
+    display: none !important;
+}
+
+.status .error {
+    color: var(--err);
 }
 
 .bar .said {
@@ -604,6 +614,17 @@ kbd {
 }
 
 .aside-anchor {
+    color: var(--orange);
+    font-weight: 700;
+}
+
+/* A conversation's lines: a message the operator sent it through lup, and the line their message is under. */
+.aside-sent {
+    color: var(--info);
+    border-left: 2px solid var(--info);
+}
+
+.aside-message {
     color: var(--orange);
     font-weight: 700;
 }

@@ -68,6 +68,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     draft: Draft = Draft()
     sent: list[SendItem] = []
     """The operator's messages sent from the page, kept in memory: they reach no agent."""
+    grown: int = 0
+    """How many steps the parser subagent's conversation has taken since the demo began: one more each time it's asked, so a page following it sees it grow."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -106,6 +108,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     )
                 )
             case ShowConversation(session=session, agent=agent, since=since):
+                if (session, agent) == ("s1", "a02"):
+                    self.grown += 1
                 steps = self.conversation(session, agent)
                 return Conversed(entries=steps[since:], since=since, total=len(steps))
             case _:
@@ -395,6 +399,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 Called(tool="Bash", at=self.ago(28)),
                 Called(tool="Read", at=self.ago(27)),
                 *self.moment(51),
+                *self.growing(),
             ]
         return [
             Said(
@@ -407,6 +412,19 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             Called(tool="Read", at=self.ago(17)),
             Called(tool="Read", at=self.ago(17)),
             Said(by="agent", text="Found it. Writing the fix next.", at=self.ago(15)),
+        ]
+
+    def growing(self) -> list[Entry]:
+        """Return the steps the parser subagent took since the demo began: a call, then what it found, in turn."""
+        return [
+            Called(tool="Read", at=self.ago(0))
+            if step % 2 == 0
+            else Said(
+                by="agent",
+                text=f"Read the second runtime's record {step // 2 + 1}: four kinds again.",
+                at=self.ago(0),
+            )
+            for step in range(self.grown)
         ]
 
     def moment(self, number: int) -> list[Entry]:
