@@ -5,8 +5,9 @@
 // its text highlighted by CodeMirror's own language packages, chosen by its
 // name. The judge's reading of the file says why it's open, in its header's last
 // words, and which of its lines matter, each saying what it triggered; a file
-// that asks nothing and changes no production line is automatic, its header
-// alone in view. Pure: the review lays these rows into its text (`review.ts`),
+// that asks nothing, held or flagged, is automatic, its header alone in view,
+// and in one whose asks are each on a line, those lines alone are open, with
+// their context, every other change folded. Pure: the review lays these rows into its text (`review.ts`),
 // and its editor paints the lines in view with them (`Review.tsx`).
 import { javascriptLanguage, jsxLanguage, tsxLanguage, typescriptLanguage } from "@codemirror/lang-javascript";
 import { jsonLanguage } from "@codemirror/lang-json";
@@ -30,8 +31,11 @@ export type Taken = components["schemas"]["Found"]["taken"];
 /** How many unchanged lines are kept in view on each side of a change. */
 export const CONTEXT = 3;
 
-/** The fewest unchanged lines a fold hides: one would take as much room as its summary. */
+/** The fewest lines a fold hides: one would take as much room as its summary. */
 const FEWEST = 2;
+
+/** The most changes to the public API a header names: the rest are on their lines. */
+const NAMED = 4;
 
 /** What a line of a file shows: one the change adds, one it removes, or one it leaves. */
 export type Change = "added" | "removed" | "same";
@@ -196,14 +200,16 @@ export function shown(file: ChangedFile, context: number = CONTEXT): Shown {
     }
     const reading = file.reading ?? null;
     const placed = mattering(reading, rows);
-    const reasons = reading === null ? [] : reasoned(reading, rows);
+    const reasons = reading === null ? [] : reasoned(reading);
     const automatic = reasons[0]?.said === "automatic";
     const header = [`${file.path} · ${told(file, rows)}`, ...reasons.map((each) => each.said)].join(" · ");
     const kept = new Set(placed.matters.map((each) => each.row));
+    // A file whose asks are each on a line shows those lines alone, with their context, its other changes folded.
+    const onLines = !automatic && !placed.whole && placed.matters.length > 0;
     return {
         header,
         rows,
-        runs: runs(rows, context, kept),
+        runs: runs(rows, context, kept, onLines),
         reasons,
         automatic,
         whole: placed.whole,
@@ -282,18 +288,6 @@ function mattering(reading: Reading | null, rows: Row[]): Placed {
     return { matters, whole };
 }
 
-/** Whether a change holds a line that differs in more than its spacing: one that only reindents, adds blank lines or changes line endings has none. */
-function real(rows: Row[]): boolean {
-    const squeezed = (change: Change) =>
-        rows
-            .filter((row) => row.change === change)
-            .map((row) => row.text.replace(/\s+/g, ""))
-            .filter((text) => text !== "");
-    const removed = squeezed("removed");
-    const added = squeezed("added");
-    return removed.length !== added.length || removed.some((text, at) => text !== added[at]);
-}
-
 /** One reason, said the same in a header and in a tally of an item's files. */
 function plainly(said: string, many: string = said): Reason {
     return { said, one: said, many };
@@ -301,11 +295,11 @@ function plainly(said: string, many: string = said): Reason {
 
 /**
  * Say why a file is open, from the judge's reading of it: what it asks, held first, each kind once, the changes to
- * its public API together; the rules of the findings held or flagged; the findings only told; else `production`, for
- * a production file with a real change; else `automatic`, for one asking nothing (a test, docs, data, scratch, a
- * production change of spacing alone).
+ * its public API together (counted, for a new file; named, up to `NAMED`, for any other); the rules of the findings
+ * held or flagged; else `automatic`, for one asking nothing held or flagged, production code among them. The
+ * findings only told come last, which open nothing.
  */
-function reasoned(reading: Reading, rows: Row[]): Reason[] {
+function reasoned(reading: Reading): Reason[] {
     const asks = reading.asks ?? [];
     const findings = reading.findings ?? [];
     const ignores = asks.filter((each) => each.name === "ignore").length;
@@ -326,8 +320,15 @@ function reasoned(reading: Reading, rows: Row[]): Reason[] {
                     one: "with an ignore",
                     many: "with ignores",
                 };
-            case "public-api":
-                return { said: `public API: ${changes.join(" ")}`, one: "public API", many: "public API" };
+            case "public-api": {
+                const named =
+                    changes.length <= NAMED
+                        ? changes.join(" ")
+                        : `${changes.slice(0, NAMED).join(" ")} and ${changes.length - NAMED} more`;
+                const created = asks.some((each) => each.name === "new-file");
+                const said = created ? counted(changes.length, "public name") : `public API: ${named}`;
+                return { said, one: "public API", many: "public API" };
+            }
             default: {
                 const found = findings.filter((each) => each.rule === name).length;
                 return { said: found > 1 ? `${name} ×${found}` : name, one: name, many: name };
@@ -340,16 +341,11 @@ function reasoned(reading: Reading, rows: Row[]): Reason[] {
     ];
     const asked = [...new Set([...ordered("held"), ...ordered("flagged")])].map(reason);
     const told = [...new Set(ordered("told"))];
-    const reasons = [
-        ...asked,
-        ...(told.length === 0
+    const informed =
+        told.length === 0
             ? []
-            : [{ said: `told: ${told.join(", ")}`, one: "with findings told", many: "with findings told" }]),
-    ];
-    if (reasons.length > 0) {
-        return reasons;
-    }
-    return [plainly(reading.role === "production" && real(rows) ? "production" : "automatic")];
+            : [{ said: `told: ${told.join(", ")}`, one: "with findings told", many: "with findings told" }];
+    return [...(asked.length > 0 ? asked : [plainly("automatic")]), ...informed];
 }
 
 /** Count an item's files by the first reason each is open, the most first: `3 automatic · 1 new file · 1 public API`; files the judge didn't read are `unread`; nothing where it read none. */
@@ -383,10 +379,14 @@ export function shownOnce(file: ChangedFile): Shown {
     return made;
 }
 
-/** Return the runs of unchanged rows to fold: each run's part `context` rows or more from every change and every row that matters (`kept`), where it hides `FEWEST` rows or more. */
-function runs(rows: Row[], context: number, kept: Set<number> = new Set()): Run[] {
+/**
+ * Return the runs of rows to fold: each run's part `context` rows or more from every change and every row that
+ * matters (`kept`), where it hides `FEWEST` rows or more. Unchanged rows alone fold, but `onLines`, where the rows
+ * that matter are the only ones kept open, changed rows among the rest folding, each run saying how many it holds.
+ */
+function runs(rows: Row[], context: number, kept: Set<number> = new Set(), onLines: boolean = false): Run[] {
     const found: Run[] = [];
-    const folding = (at: number) => rows[at]?.change === "same" && !kept.has(at);
+    const folding = (at: number) => (onLines || rows[at]?.change === "same") && !kept.has(at);
     let start = 0;
     while (start < rows.length) {
         if (!folding(start)) {
@@ -402,7 +402,10 @@ function runs(rows: Row[], context: number, kept: Set<number> = new Set()): Run[
         if (to - from >= FEWEST) {
             const first = rows[from]?.number ?? 0;
             const last = rows[to - 1]?.number ?? 0;
-            found.push({ from, to, summary: `${counted(to - from, "unchanged line")}, ${first}–${last}` });
+            const changed = rows.slice(from, to).filter((row) => row.change !== "same").length;
+            const said =
+                changed === 0 ? counted(to - from, "unchanged line") : `${counted(to - from, "line")}, ${changed} changed`;
+            found.push({ from, to, summary: `${said}, ${first}–${last}` });
         }
         start = end;
     }
