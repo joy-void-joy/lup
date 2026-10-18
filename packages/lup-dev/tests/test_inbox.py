@@ -736,7 +736,7 @@ def test_a_session_that_just_started_is_woken(
     assert frames_of(frames) == [bell(1)]
 
 
-def test_a_session_with_a_call_running_is_told_when_it_finishes_not_woken(
+def test_a_session_in_its_turn_is_told_at_its_hooks_and_never_woken(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     with inboxed(machine, clock, notices, said):
@@ -757,9 +757,14 @@ def test_a_session_with_a_call_running_is_told_when_it_finishes_not_woken(
             ),
         )
         inbox("send", "one", "Between calls.")
+        ended = send(hook, claude("Stop", stop_hook_active=False))
         frames = messages.close()
     assert context(finished) == first_note("While you run.")
-    assert frames_of(frames) == [bell(2)]
+    assert json.loads(ended) == {
+        "decision": "block",
+        "reason": "lup's inbox, item 2: a note from the operator:\nBetween calls.",
+    }
+    assert frames == []
 
 
 def test_a_service_started_again_wakes_a_session_it_hasn_t_heard_since(
