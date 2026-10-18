@@ -1,13 +1,15 @@
 // The review: everything waiting for the operator laid out as one text to read
 // and move through, their comments in it, each under the line it's on. Under an
 // approval or a held change, each file it changes, whole (`code.ts`), its lines
-// commented on as the item's own are; under each item its context. What's
-// folded by default: the context, and each run of a file's unchanged lines away
-// from its changes. Pure: the editor (`Review.tsx`) draws it, folds it and lets
+// commented on as the item's own are, the lines that matter in it, by the judge's
+// reading, kept in order for the keys to walk; under each item its context.
+// What's folded by default: the context, each run of a file's unchanged lines
+// away from its changes and the lines that matter, and an automatic file whole
+// under its header. Pure: the editor (`Review.tsx`) draws it, folds it and lets
 // the comments be edited, and the host keeps the draft (`docs/dashboard.md`,
 // *The review*). What it shares with a conversation's text is in `comments.ts`.
 import { since } from "./agents";
-import { shownOnce, type ChangedFile, type Row } from "./code";
+import { shownOnce, type ChangedFile, type Matter, type Row } from "./code";
 import {
     calls,
     passage,
@@ -50,17 +52,23 @@ export interface Aside extends Span {
     kind: Kind;
 }
 
-/** A line of a changed file under an item, which comments may be on: the file's header, where `row` is none, or one of its rows. */
+/** A line of a changed file under an item, which comments may be on: the file's header, where `row` is none, or one of its rows, and what it triggered where it's a line that matters. */
 export interface Coded extends Span {
     file: ChangedFile;
     row: Row | null;
+    matter: Matter | null;
 }
 
-/** What folds under an item, folded by default: its context, a run of a file's unchanged lines, or, where it's marked read, all of it under its header. It hides `from` to `to`, from the end of its summary line to the end of its last. */
+/**
+ * What folds under an item, folded by default: its context, a run of a file's unchanged lines, an automatic file under
+ * its header, or, where it's marked read, all of it under its header. It hides `from` to `to`, from the end of its
+ * summary line to the end of its last; an automatic file's from the end of the comments on its header, which stay in
+ * view.
+ */
 export interface Fold extends Span {
     item: number;
-    kind: "context" | "code" | "read";
-    /** What names it among its item's folds of its kind: a run of code by its file and its first row. */
+    kind: "context" | "code" | "file" | "read";
+    /** What names it among its item's folds of its kind: a run of code by its file and its first row, a file by its path. */
     name: string;
     summary: Span;
 }
@@ -80,6 +88,8 @@ export interface Region {
     code: Coded[];
     asides: Aside[];
     folds: Fold[];
+    /** Where its lines that matter start, in order: a file's header where what it asks is about the file whole, then the first row of each thing a line triggered. */
+    stops: number[];
 }
 
 /** The review's text, and where each item is in it. */
@@ -184,16 +194,29 @@ function beneath(item: Item, around: Around): Under | null {
     };
 }
 
-/** One line under an item's own text that comments may be on, of a changed file: its header, or one of its rows, the run of unchanged rows it opens, if any, before it, and whether it ends one. */
+/**
+ * One line under an item's own text that comments may be on, of a changed file: its header, or one of its rows, the
+ * run of unchanged rows it opens, if any, before it, and whether it ends one; what it triggered, where it's a line that
+ * matters, and whether it's a stop, the first line of what triggered; and, for an automatic file, the fold its header
+ * opens and its last row ends.
+ */
 interface Filed {
     file: ChangedFile;
     row: Row | null;
     text: string;
     opens: { summary: string; name: string } | null;
     closes: boolean;
+    matter: Matter | null;
+    stop: boolean;
+    folds: string | null;
+    ends: boolean;
 }
 
-/** Return the lines of each file an approval or a held change changes, as the host answered them: each file's header, then its rows, its runs of unchanged ones folding; none for any other item, or before the host has answered. */
+/**
+ * Return the lines of each file an approval or a held change changes, as the host answered them: each file's header,
+ * then its rows, its runs of unchanged ones folding, and the whole of an automatic one folding under its header; none
+ * for any other item, or before the host has answered.
+ */
 function filed(item: Item, around: Around): Filed[] {
     const files = around.files.get(item.number);
     if ((item.reason.reason !== "approval" && item.reason.reason !== "held") || files === undefined || !("shown" in files)) {
@@ -201,15 +224,32 @@ function filed(item: Item, around: Around): Filed[] {
     }
     return files.shown.flatMap((file) => {
         const laidOut = shownOnce(file);
-        const header: Filed = { file, row: null, text: laidOut.header, opens: null, closes: false };
+        const folding = laidOut.automatic && laidOut.rows.length > 0;
+        const header: Filed = {
+            file,
+            row: null,
+            text: laidOut.header,
+            opens: null,
+            closes: false,
+            matter: null,
+            stop: laidOut.whole,
+            folds: folding ? file.path : null,
+            ends: false,
+        };
+        const matters = new Map(laidOut.matters.map((each) => [each.row, each]));
         const rows = laidOut.rows.map((row, at): Filed => {
             const run = laidOut.runs.find((each) => each.from === at);
+            const matter = matters.get(at) ?? null;
             return {
                 file,
                 row,
                 text: row.text,
                 opens: run === undefined ? null : { summary: run.summary, name: `${file.path}:${at}` },
                 closes: laidOut.runs.some((each) => each.to === at + 1),
+                matter,
+                stop: (matter?.notes.length ?? 0) > 0,
+                folds: null,
+                ends: folding && at === laidOut.rows.length - 1,
             };
         });
         return [header, ...rows];
@@ -323,21 +363,36 @@ export function laid(
             writeLine(line, at);
             writeBlocks(at);
         });
+        const stops: number[] = [];
         let opened: { summary: Aside; name: string } | null = null;
+        let whole: { summary: Span; name: string; from: number } | null = null;
         files.forEach((each, index) => {
             if (each.opens !== null) {
                 opened = { summary: writeAside({ kind: "summary", text: each.opens.summary }), name: each.opens.name };
             }
             const at = ownCount + index;
             const written = writeLine(each.text, at);
-            code.push({ from: written.from, to: written.to, file: each.file, row: each.row });
+            code.push({ from: written.from, to: written.to, file: each.file, row: each.row, matter: each.matter });
+            if (each.stop) {
+                stops.push(written.from);
+            }
             const run: { summary: Aside; name: string } | null = opened;
             if (each.closes && run !== null) {
                 const summary = { from: run.summary.from, to: run.summary.to };
                 folds.push({ item: item.number, kind: "code", name: run.name, summary, from: summary.to, to: written.to });
                 opened = null;
             }
+            const automatic: { summary: Span; name: string; from: number } | null = whole;
+            if (each.ends && automatic !== null) {
+                const { summary, name, from } = automatic;
+                folds.push({ item: item.number, kind: "file", name, summary, from, to: written.to });
+                whole = null;
+            }
             writeBlocks(at);
+            if (each.folds !== null) {
+                // The file folds under its header and the comments on it, which stay in view.
+                whole = { summary: { from: written.from, to: written.to }, name: each.folds, from: text.length - 1 };
+            }
         });
         const refused = around.files.get(item.number);
         if (refused !== undefined && "refused" in refused) {
@@ -367,6 +422,7 @@ export function laid(
             code,
             asides,
             folds,
+            stops,
         });
     }
 }
@@ -374,6 +430,17 @@ export function laid(
 /** Where a region starts: at the banner of the group it opens, else at its header. */
 function start(region: Region): number {
     return region.banner?.from ?? region.header.from;
+}
+
+/** Return where going to an item lands: on its first line that matters, as the judge read its files, unless it's marked read; else on its header. */
+export function arrival(region: Region): number {
+    const read = region.folds.some((each) => each.kind === "read");
+    return (read ? undefined : region.stops[0]) ?? region.header.from;
+}
+
+/** Return the stop after the line starting at `line`, or before it, of `stops`, in the text's order; none past the last, or before the first. */
+export function stepped(stops: number[], line: number, forward: boolean): number | undefined {
+    return forward ? stops.find((each) => each > line) : [...stops].reverse().find((each) => each < line);
 }
 
 /** Return the region `position` is in: the banner of the group it opens, its header, its lines, its comments, or the blank line after it. */

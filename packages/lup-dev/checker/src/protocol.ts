@@ -47,10 +47,20 @@ export interface Signature {
     returns: string;
 }
 
+// Where one name of the surface is written: an export by its entry in `__all__` or
+// its binding, a class by its `class`, a function or method by its `def`, the line
+// its name is on, counted from 1.
+export interface Placed {
+    kind: 'export' | 'class' | 'signature';
+    name: string;
+    line: number;
+}
+
 export interface Surface {
     exported: string[];
     classes: string[];
     signatures: Signature[];
+    places: Placed[];
 }
 
 export interface Ignore {

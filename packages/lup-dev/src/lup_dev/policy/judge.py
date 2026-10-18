@@ -52,8 +52,16 @@ from lup_dev.codescan.directives import (
 from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.project import Asking
 from lup_dev.errors import LupDevError
+from lup_dev.inbox.store import (
+    ApiChanged,
+    Asked,
+    Found,
+    Held,
+    Reading,
+    Taken,
+)
 from lup_dev.policy.roles import Role, Roles
-from lup_dev.policy.surface import api_changes
+from lup_dev.policy.surface import ApiChange, api_changes
 
 type AskKind = Asking | Literal["rule"]
 """What a change asks the operator about: a path's role, a kind of change
@@ -89,6 +97,12 @@ class Ask(Model):
     """What's asked, in one line, naming the path, the name or the rule."""
     rule: str | None = None
     """The rule a finding of asks, for a `rule` ask; none for any other."""
+    line: int | None = None
+    """The line an `ignore` the change adds is on, counted from 1, in the content
+    after it; none for any other ask."""
+    api: ApiChange | None = None
+    """The change to the public API, with the line naming it, for a `public-api`
+    ask; none for any other."""
 
     def name(self) -> str:
         """Return the name the declaration holds or flags it by: its kind, or its rule's.
@@ -137,6 +151,56 @@ class Judgement(Model):
     those ruff fixes safely."""
     removed: list[RemovedNote] = []
     """Comments present when the session started that are gone from the file."""
+
+    def reading(self) -> Reading:
+        """Return the judge's reading of the file, which the review opens it by: its role, what it asks, held or flagged, each where it is in the file, and lup's findings on the lines the change touches.
+
+        A rule the declaration holds or flags asks through its findings, each
+        taken as the declaration takes its rule; one it names neither way is
+        told.
+
+        >>> held = Ask(kind="ignore", reason="adds an ignore", line=3)
+        >>> judged = Judgement(path=Path("a.py"), role="production", outcome="ask")
+        >>> judged.model_copy(update={"asks": [held]}).reading().asks
+        [Asked(name='ignore', taken='held', line=3, side='after', api=None)]
+        """
+        held = [ask.name() for ask in self.asks]
+        flagged = [ask.name() for ask in self.flags]
+
+        def taken(rule: str) -> Taken:
+            if rule in held:
+                return "held"
+            return "flagged" if rule in flagged else "told"
+
+        def asked(ask: Ask, how: Held) -> Asked:
+            if ask.api is None:
+                return Asked(name=ask.name(), taken=how, line=ask.line)
+            return Asked(
+                name=ask.name(),
+                taken=how,
+                line=ask.api.line,
+                side=ask.api.side(),
+                api=ApiChanged(kind=ask.api.kind, name=ask.api.name),
+            )
+
+        return Reading(
+            role=self.role,
+            asks=[
+                *(asked(ask, "held") for ask in self.asks if ask.kind != "rule"),
+                *(asked(ask, "flagged") for ask in self.flags if ask.kind != "rule"),
+            ],
+            findings=[
+                Found(
+                    rule=found.rule,
+                    message=found.message,
+                    steer=found.steer,
+                    start=found.span.start.line,
+                    end=found.span.end.line,
+                    taken=taken(found.rule),
+                )
+                for found in self.findings
+            ],
+        )
 
     def reasons(self) -> list[str]:
         """Say why the outcome, for the verdict log: the kinds of ask; or, for an allow, the rules its findings are of, else the role.
@@ -523,14 +587,16 @@ class Judge(Model, arbitrary_types_allowed=True):
         )
         public = [
             Ask(
-                kind="public-api", reason=f"{self.root / change.path} {each.describe()}"
+                kind="public-api",
+                reason=f"{self.root / change.path} {each.describe()}",
+                api=each,
             )
             for each in api
         ]
         return [*new, *whole, *public]
 
     def suppressions(self, path: Path, versions: Versions) -> list[Ask]:
-        """List an ask for each `# lup: ignore` the change adds."""
+        """List an ask for each `# lup: ignore` the change adds, on its line."""
         if versions.after is None:
             return []
         before = versions.before.directives if versions.before else []
@@ -538,6 +604,7 @@ class Judge(Model, arbitrary_types_allowed=True):
             Ask(
                 kind="ignore",
                 reason=f"adds `# lup: {added.identity().text}` to {self.root / path}",
+                line=added.line,
             )
             for added in added_suppressions(before, versions.after.directives)
         ]

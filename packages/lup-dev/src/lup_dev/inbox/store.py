@@ -268,8 +268,77 @@ def content(data: bytes) -> Content:
         return Binary(size=len(data))
 
 
+type ApiKind = Literal[
+    "export-added", "export-removed", "class-added", "signature-changed"
+]
+"""How a change touches what other code can depend on, as the judge finds it
+(`lup_dev.policy.surface`) and the review says it."""
+
+type Held = Literal["held", "flagged"]
+"""How the declaration takes what a change asks: held for the operator's answer,
+or flagged for their review (`Project.held`, `Project.flagged`)."""
+
+type Taken = Held | Literal["told"]
+"""How the declaration takes a finding of lup's on a line a change touches: held
+or flagged where it names the finding's rule, else told to the agent alone."""
+
+
+class ApiChanged(Model):
+    """One change to a file's public API: its kind, and the name it changes."""
+
+    kind: ApiKind
+    name: str
+    """Dotted inside the module: `Delivery`, `Delivery.withdrawn`."""
+
+
+class Asked(Model):
+    """One thing a file of a change asks the operator, as the judge read it: by the name the declaration holds or flags it by, and where it is in the file."""
+
+    name: str
+    """`protected`, `operator`, `new-file`, `whole-file`, `public-api` or `ignore`."""
+    taken: Held
+    line: int | None = None
+    """The line it's on, counted from 1: an `ignore` added, or the name a
+    public-API change changes; none for what's about the file whole, or a name
+    the engine didn't place."""
+    side: Literal["before", "after"] = "after"
+    """Which version of the file `line` is in: what it becomes, or, for a name
+    the change takes out of a package's root, what it was."""
+    api: ApiChanged | None = None
+    """What it changes of the public API, for `public-api`; none for any other."""
+
+
+class Found(Model):
+    """One of lup's findings on the lines a change touches, as the declaration takes its rule."""
+
+    rule: str
+    message: str
+    """What's wrong there, whole, as the agent is told it."""
+    steer: str = ""
+    start: int
+    """Its first line, counted from 1, in what the file becomes."""
+    end: int
+    """Its last line."""
+    taken: Taken
+
+
+class Reading(Model):
+    """The judge's reading of one file a change touches, which the review opens it by: its role, what it asks the operator, and the lines that matter (`docs/dashboard.md`, *The review*)."""
+
+    role: str
+    """The path's role, as the judge names it (`Roles.role`): `production`,
+    `test`, `docs`…"""
+    asks: list[Asked] = []
+    """What it asks, held or flagged, in the judge's order: about the file whole,
+    each change to the public API, each `ignore` added. A rule the declaration
+    holds or flags asks through its findings (`findings`)."""
+    findings: list[Found] = []
+    """lup's findings on the lines the change touches, each taken as the
+    declaration takes its rule."""
+
+
 class ChangedFile(Model):
-    """One file a change touches, whole on each side: what it was, and what it becomes."""
+    """One file a change touches, whole on each side: what it was, and what it becomes, with the judge's reading of it."""
 
     path: Path
     """From the root of the worktree it's in, or of the repository."""
@@ -277,14 +346,24 @@ class ChangedFile(Model):
     """What it held; none for a file the change creates."""
     after: Content | None
     """What it holds once changed; none for a file the change deletes."""
+    reading: Reading | None = None
+    """The judge's reading of the change to it, which the review opens it by;
+    none where it wasn't judged."""
 
     @classmethod
-    def of(cls, path: Path, before: bytes | None, after: bytes | None) -> ChangedFile:
-        """Return the file at `path` from its bytes on each side, none where it isn't there."""
+    def of(
+        cls,
+        path: Path,
+        before: bytes | None,
+        after: bytes | None,
+        reading: Reading | None = None,
+    ) -> ChangedFile:
+        """Return the file at `path` from its bytes on each side, none where it isn't there, with the judge's `reading` of it where it was judged."""
         return cls(
             path=path,
             before=None if before is None else content(before),
             after=None if after is None else content(after),
+            reading=reading,
         )
 
 

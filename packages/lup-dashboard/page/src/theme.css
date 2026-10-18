@@ -664,6 +664,50 @@ kbd {
     padding-left: calc(6px + 8ch);
 }
 
+/* What the judge's reading marks: a line that matters barred at its start, in
+   orange where what it triggered is held for the operator, yellow where it's
+   flagged, the muted colour where it's only told, and saying what it triggered
+   after its text (`data-said`); a file's header barred where what the file asks
+   is about it whole; and an automatic file's header, muted, folded alone. */
+.buffer .cm-line.code-matters {
+    box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.buffer .cm-line.code-held {
+    box-shadow: inset 3px 0 0 var(--orange);
+}
+
+.buffer .cm-line.code-told {
+    box-shadow: inset 3px 0 0 var(--muted);
+}
+
+.buffer .cm-line.code-matters[data-said]::after {
+    content: "  ◂ " attr(data-said);
+    color: var(--warn);
+    font-style: italic;
+}
+
+.buffer .cm-line.code-held[data-said]::after {
+    color: var(--orange);
+}
+
+.buffer .cm-line.code-told[data-said]::after {
+    color: var(--muted);
+}
+
+.buffer .cm-line.code-file.code-automatic {
+    color: var(--muted);
+    font-weight: 400;
+}
+
+.buffer .cm-line.code-file.code-automatic::before {
+    content: "▾ ";
+}
+
+.buffer .cm-line.code-file.code-automatic:has(.cm-foldPlaceholder)::before {
+    content: "▸ ";
+}
+
 /* Highlighting, by the classes CodeMirror's class highlighter gives each token,
    in the palette's colours. */
 .tok-keyword,

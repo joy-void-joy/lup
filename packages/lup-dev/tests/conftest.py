@@ -32,6 +32,7 @@ from lup_dev.codescan.contract import (
     FileReport,
     Finding,
     Parameter,
+    Placed,
     Position,
     Rule,
     Signature,
@@ -193,6 +194,25 @@ def surface(path: Path, content: str) -> Surface:
         for item in node.body
         if isinstance(item, ast.FunctionDef)
     ]
+    places = [
+        *(
+            Placed(kind="class", name=node.name, line=node.lineno)
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+        ),
+        *(
+            Placed(kind="signature", name=node.name, line=node.lineno)
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+        ),
+        *(
+            Placed(kind="signature", name=f"{node.name}.{item.name}", line=item.lineno)
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+            for item in node.body
+            if isinstance(item, ast.FunctionDef)
+        ),
+    ]
     exported = []
     if path.name == "__init__.py":
         for node in tree.body:
@@ -201,8 +221,17 @@ def surface(path: Path, content: str) -> Surface:
                 for target in node.targets
             ):
                 exported = list(ast.literal_eval(node.value))
+                assert isinstance(node.value, ast.List | ast.Tuple)
+                places.extend(
+                    Placed(kind="export", name=entry.value, line=entry.lineno)
+                    for entry in node.value.elts
+                    if isinstance(entry, ast.Constant) and isinstance(entry.value, str)
+                )
     return Surface(
-        exported=exported, classes=classes, signatures=[*functions, *methods]
+        exported=exported,
+        classes=classes,
+        signatures=[*functions, *methods],
+        places=places,
     )
 
 

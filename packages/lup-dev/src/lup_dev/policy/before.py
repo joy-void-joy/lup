@@ -274,6 +274,7 @@ def held_write(
             blob=store.keep(after.encode()),
             reasons=[ask.kind for ask in judgement.asks],
             asks=[ask.reason for ask in judgement.asks],
+            reading=judgement.reading(),
         )
         hold = holds.put(
             Hold(
@@ -291,7 +292,10 @@ def held_write(
     log = worktree.verdicts(services.layout)
     log.append([logged])
     whole = ChangedFile.of(
-        path, None if earlier is None else earlier.encode(), after.encode()
+        path,
+        None if earlier is None else earlier.encode(),
+        after.encode(),
+        held.reading,
     )
     services.announcing.announced(
         hold, bench.runtime.name(), worktree.repository, [whole]

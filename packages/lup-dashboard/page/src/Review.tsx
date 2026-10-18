@@ -3,19 +3,23 @@
 // it, each under the line it's on: Space `c` opens one on the item whole. Ctrl+Enter
 // elsewhere than in a comment sends. Space `d` marks an item read, Space `z`
 // leaves it for later, Space `a` or `x` answers an approval or a held change;
-// `]]` and `[[` go to the next and previous item. Under an approval or a held
-// change, each file it changes, whole, its lines numbered, marked and
-// highlighted as they come into view; under each item, its context. The
-// context and each run of unchanged lines fold, folded until opened
+// `]]` and `[[` go to the next and previous item, landing on its first line that
+// matters, `]c` and `[c` to the next and previous such line. Under an approval or
+// a held change, each file it changes, whole, its lines numbered, marked and
+// highlighted as they come into view, each line that matters by the judge's
+// reading barred and saying what it triggered; the item's header counts its files
+// by why each is open; under each item, its context. The context, each run of
+// unchanged lines and each automatic file fold, folded until opened
 // (`docs/dashboard.md`, *The review*).
 import { RangeSetBuilder, type Range } from "@codemirror/state";
-import { Decoration, type DecorationSet } from "@codemirror/view";
+import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef } from "react";
 
-import { tokensOf, within } from "./code";
+import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./code";
 import { changes, moved } from "./comments";
-import { rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import { folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import {
+    arrival,
     codeFrom,
     foldKey,
     fresh,
@@ -25,6 +29,7 @@ import {
     quoted,
     regionAt,
     shownAt,
+    stepped,
     toggled,
     waited,
     type Around,
@@ -86,7 +91,24 @@ function marked(classes: string): Decoration {
     return made;
 }
 
-/** Paint the changed files' lines from `from` to `to`: each row numbered and marked added, removed or the same, and its text highlighted in its file's language. */
+/** The order of what a line triggered, the first the strongest: what its bar is drawn as. */
+const WEIGHTS: Taken[] = ["held", "flagged", "told"];
+
+/** Return how a line that matters is drawn: its classes, its bar as the strongest of what it triggered, and what it says at its end, each said after how it's taken. */
+function mattering(matter: Matter | null): { classes: string; said: Record<string, string> } {
+    if (matter === null) {
+        return { classes: "", said: {} };
+    }
+    const strongest = WEIGHTS.find((weight) => matter.notes.some((note) => note.taken === weight));
+    const classes = ` code-matters${strongest === undefined ? "" : ` code-${strongest}`}`;
+    if (matter.notes.length === 0) {
+        return { classes, said: {} };
+    }
+    const said = matter.notes.map((note) => `${note.taken}: ${note.said}`).join(" · ");
+    return { classes, said: { "data-said": said } };
+}
+
+/** Paint the changed files' lines from `from` to `to`: each row numbered and marked added, removed or the same, its text highlighted in its file's language, and each that matters barred, saying what it triggered. */
 function painted(laidOut: Laid, from: number, to: number): Range<Decoration>[] {
     const ranges: Range<Decoration>[] = [];
     for (const region of laidOut.regions) {
@@ -99,9 +121,10 @@ function painted(laidOut: Laid, from: number, to: number): Range<Decoration>[] {
             if (row === null) {
                 continue;
             }
+            const matters = mattering(coded.matter);
             const line = Decoration.line({
-                class: `code-row code-${row.change}`,
-                attributes: { "data-gutter": gutter(row.number, row.change) },
+                class: `code-row code-${row.change}${matters.classes}`,
+                attributes: { "data-gutter": gutter(row.number, row.change), ...matters.said },
             });
             ranges.push(line.range(coded.from));
             for (const token of within(tokensOf(coded.file, row.side), row)) {
@@ -138,9 +161,16 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
             const classes = asideClasses(aside, runs.has(aside.from));
             marks.push({ from: aside.from, to: aside.from, value: Decoration.line({ class: classes }) });
         }
+        const stops = new Set(region.stops);
         for (const coded of region.code) {
             if (coded.row === null) {
-                marks.push({ from: coded.from, to: coded.from, value: Decoration.line({ class: "code-file" }) });
+                const automatic = shownOnce(coded.file).automatic ? " code-automatic" : "";
+                const whole = stops.has(coded.from) ? " code-matters" : "";
+                marks.push({
+                    from: coded.from,
+                    to: coded.from,
+                    value: Decoration.line({ class: `code-file${automatic}${whole}` }),
+                });
             }
         }
         for (const block of region.blocks) {
@@ -224,8 +254,11 @@ export function Review({
                             : item.reason.reason === "held"
                               ? "held change"
                               : item.reason.reason;
+                    const files = around.files.get(item.number);
+                    const counted = files !== undefined && "shown" in files ? tally(files.shown) : "";
                     const told = [
                         `#${item.number} ${what}`,
+                        ...(counted === "" ? [] : [counted]),
                         ...(fresh(item, reviewed) ? ["new"] : []),
                         when(item.made),
                         waited(item.made, now),
@@ -242,7 +275,12 @@ export function Review({
         () => ({
             text: laidOut.text,
             blocks: laidOut.regions.flatMap((each) => each.blocks),
-            folds: laidOut.regions.flatMap((each) => each.folds).map((each) => ({ ...each, key: foldKey(each) })),
+            // In the text's order, as CodeMirror takes the folds a transaction makes: a fold over others, as an
+            // automatic file's or an item's marked read, is laid out after them.
+            folds: laidOut.regions
+                .flatMap((each) => each.folds)
+                .map((each) => ({ ...each, key: foldKey(each) }))
+                .sort((a, b) => a.from - b.from || b.to - a.to),
         }),
         [laidOut],
     );
@@ -304,6 +342,16 @@ export function Review({
         return regionAt(laidOut.regions, editor.head());
     }
 
+    /** Open each fold over `target`, as a motion into it would, so the line it's on is in view. */
+    function opening(current: EditorView, target: number) {
+        const effects = laidFor.folds
+            .filter((fold) => target > fold.from && target <= fold.to && isFolded(current.state, fold))
+            .map((fold) => folding(fold, false));
+        if (effects.length > 0) {
+            current.dispatch({ effects });
+        }
+    }
+
     editor.bind({
         whole: (position) => {
             const region = regionAt(laidOut.regions, position);
@@ -338,13 +386,54 @@ export function Review({
                 return;
             }
             const head = editor.head();
-            const headers = laidOut.regions.map((each) => each.header.from);
+            const landings = laidOut.regions.map((region) => ({ region, at: arrival(region) }));
             const target = forward
-                ? headers.find((each) => each > head)
-                : [...headers].reverse().find((each) => each < head);
-            if (target !== undefined) {
-                current.dispatch({ selection: { anchor: target }, scrollIntoView: true });
+                ? landings.find((each) => each.at > head)
+                : [...landings].reverse().find((each) => each.at < head);
+            if (target === undefined) {
+                return;
             }
+            opening(current, target.at);
+            if (target.at === target.region.header.from) {
+                current.dispatch({ selection: { anchor: target.at }, scrollIntoView: true });
+                return;
+            }
+            // Its header stays in view above the line it lands on, where both fit.
+            const top = current.lineBlockAt(target.region.header.from).top;
+            const fits = current.lineBlockAt(target.at).bottom - top < current.scrollDOM.clientHeight * 0.8;
+            current.dispatch({
+                selection: { anchor: target.at },
+                effects: fits
+                    ? EditorView.scrollIntoView(target.region.header.from, { y: "start" })
+                    : EditorView.scrollIntoView(target.at, { y: "center" }),
+            });
+        },
+        matter: (forward) => {
+            const current = view.current;
+            if (current === null) {
+                return;
+            }
+            const line = current.state.doc.lineAt(editor.head()).from;
+            // An item marked read and folded is done with: its lines aren't walked until it's opened.
+            const walked = laidOut.regions.filter(
+                (region) =>
+                    !laidFor.folds.some(
+                        (fold) => fold.kind === "read" && fold.item === region.item.number && isFolded(current.state, fold),
+                    ),
+            );
+            const target = stepped(
+                walked.flatMap((region) => region.stops),
+                line,
+                forward,
+            );
+            if (target === undefined) {
+                return;
+            }
+            opening(current, target);
+            current.dispatch({
+                selection: { anchor: target },
+                effects: EditorView.scrollIntoView(target, { y: "nearest", yMargin: current.scrollDOM.clientHeight / 3 }),
+            });
         },
         approve: (approved) => {
             const region = here();

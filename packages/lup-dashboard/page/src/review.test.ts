@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
     EMPTY,
     answer,
+    arrival,
     blockAt,
     calls,
     covered,
@@ -16,6 +17,7 @@ import {
     quoted,
     regionAt,
     shownAt,
+    stepped,
     steps,
     toggled,
     waited,
@@ -246,6 +248,70 @@ describe("what folds under an item", () => {
         expect(question!.asides.find((each) => each.kind === "anchor")).toMatchObject({
             from: out.text.indexOf("→ called"),
         });
+    });
+
+    it("folds an automatic file whole under its header, and keeps where each line that matters starts, landing on the first", () => {
+        const read: Around = {
+            contexts: new Map(),
+            files: new Map([
+                [
+                    54,
+                    {
+                        shown: [
+                            {
+                                path: "t.py",
+                                before: { kind: "text", text: "a\nb\n" },
+                                after: { kind: "text", text: "a\nB\n" },
+                                reading: { role: "test", asks: [], findings: [] },
+                            },
+                            {
+                                path: "n.py",
+                                before: null,
+                                after: { kind: "text", text: "x = 1\nimport re\n" },
+                                reading: {
+                                    role: "production",
+                                    asks: [{ name: "new-file", taken: "flagged", side: "after" }],
+                                    findings: [{ rule: "regex", message: "a pattern", steer: "", start: 2, end: 2, taken: "told" }],
+                                },
+                            },
+                        ],
+                    },
+                ],
+            ]),
+        };
+        const out = laid([APPROVAL, NOTE], banner, header, EMPTY, read);
+        const [approval, note] = out.regions;
+        const shown = (from: number, to: number) => out.text.slice(from, to);
+        const [file] = approval!.folds.filter((each) => each.kind === "file");
+        expect(file).toMatchObject({ item: 54, kind: "file", name: "t.py" });
+        expect(shown(file!.summary.from, file!.summary.to)).toBe("t.py · changed · +1 −1 · automatic");
+        expect(shown(file!.from, file!.to)).toBe("\na\nb\nB");
+        expect(approval!.stops.map((each) => shown(each, out.text.indexOf("\n", each)))).toEqual([
+            "n.py · created · 2 lines · new file · told: regex",
+            "import re",
+        ]);
+        expect(approval!.code.find((each) => each.row?.text === "import re")?.matter).toEqual({
+            row: 1,
+            notes: [{ taken: "told", said: "regex: a pattern" }],
+        });
+        const commented = laid(
+            [APPROVAL],
+            banner,
+            header,
+            { ...EMPTY, comments: [{ item: 54, quote: { text: "t.py", start: 15, end: 49 }, text: "Why?" }] },
+            read,
+        );
+        const [kept] = commented.regions[0]!.folds.filter((each) => each.kind === "file");
+        expect(commented.text.slice(kept!.summary.to, kept!.from)).toBe("\nWhy?");
+        expect(commented.text.slice(kept!.from, kept!.to)).toBe("\na\nb\nB");
+        expect(arrival(approval!)).toBe(approval!.stops[0]);
+        expect(arrival(note!)).toBe(note!.header.from);
+        const done = laid([APPROVAL], banner, header, { ...EMPTY, done: [54] }, read);
+        expect(arrival(done.regions[0]!)).toBe(done.regions[0]!.header.from);
+        expect(stepped([10, 20, 30], 20, true)).toBe(30);
+        expect(stepped([10, 20, 30], 20, false)).toBe(10);
+        expect(stepped([10, 20, 30], 30, true)).toBeUndefined();
+        expect(stepped([10, 20, 30], 5, false)).toBeUndefined();
     });
 
     it("finds the fold the cursor is on, from its summary line to its last, and opens no comment on a line that isn't the item's own", () => {

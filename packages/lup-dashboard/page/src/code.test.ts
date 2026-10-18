@@ -1,7 +1,7 @@
 import { pythonLanguage } from "@codemirror/lang-python";
 import { describe, expect, it } from "vitest";
 
-import { highlighted, languageOf, lines, shown, tokensOf, within, type ChangedFile } from "./code";
+import { highlighted, languageOf, lines, shown, tally, tokensOf, within, type ChangedFile, type Reading } from "./code";
 
 function text(value: string): ChangedFile["after"] {
     return { kind: "text", text: value };
@@ -69,7 +69,7 @@ describe("a changed file's lines", () => {
         const same = shown({ path: "s.py", before: text(numbered(5)), after: text(numbered(5)) });
         expect(same.header).toBe("s.py · changed · no line differs");
         expect(same.runs).toEqual([{ from: 0, to: 5, summary: "5 unchanged lines, 1–5" }]);
-        expect(shown({ path: "i.png", before: null, after: { kind: "binary", size: 1150 } })).toEqual({
+        expect(shown({ path: "i.png", before: null, after: { kind: "binary", size: 1150 } })).toMatchObject({
             header: "i.png · created · binary, not shown · 1,150 bytes",
             rows: [],
             runs: [],
@@ -77,6 +77,108 @@ describe("a changed file's lines", () => {
         expect(
             shown({ path: "i.png", before: { kind: "binary", size: 10 }, after: { kind: "binary", size: 12 } }).header,
         ).toBe("i.png · changed · binary, not shown · 10 bytes → 12 bytes");
+    });
+});
+
+/** A reading of a production file that asks nothing and has no findings. */
+const PRODUCTION: Reading = { role: "production", asks: [], findings: [] };
+
+describe("the judge's reading", () => {
+    const changed = (after: string, reading: Reading): ChangedFile => ({
+        path: "core.py",
+        before: text(numbered(8)),
+        after: text(after),
+        reading,
+    });
+
+    it("says why a file is open in its header, and places each line that matters, said on the first row of what it triggered", () => {
+        const reading: Reading = {
+            role: "production",
+            asks: [
+                { name: "ignore", taken: "held", line: 4, side: "after" },
+                { name: "public-api", taken: "flagged", line: 3, side: "after", api: { kind: "class-added", name: "Room" } },
+                {
+                    name: "public-api",
+                    taken: "flagged",
+                    line: 2,
+                    side: "after",
+                    api: { kind: "signature-changed", name: "Client.ask" },
+                },
+            ],
+            findings: [{ rule: "regex", message: "`re` parses\nwith a pattern", steer: "", start: 5, end: 6, taken: "told" }],
+        };
+        const laid = shown(changed(numbered(8, { 2: "two", 3: "three", 4: "four", 5: "five", 6: "six" }), reading));
+        expect(laid.header).toBe("core.py · changed · +5 −5 · adds an ignore · public API: +Room ~Client.ask · told: regex");
+        expect(laid.automatic).toBe(false);
+        expect(laid.whole).toBe(false);
+        expect(laid.matters.map((each) => [laid.rows[each.row]!.text, each.notes])).toEqual([
+            ["two", [{ taken: "flagged", said: "public API: changes the signature of `Client.ask`" }]],
+            ["three", [{ taken: "flagged", said: "public API: adds the class `Room`" }]],
+            ["four", [{ taken: "held", said: "adds an ignore" }]],
+            ["five", [{ taken: "told", said: "regex: `re` parses with a pattern" }]],
+            ["six", []],
+        ]);
+    });
+
+    it("keeps a line that matters out of the unchanged runs folding around it", () => {
+        const reading: Reading = {
+            ...PRODUCTION,
+            asks: [{ name: "public-api", taken: "flagged", line: 20, side: "after", api: { kind: "signature-changed", name: "f" } }],
+        };
+        const laid = shown({ path: "a.py", before: text(numbered(30)), after: text(numbered(30, { 10: "ten" })), reading });
+        expect(laid.runs.map((each) => each.summary)).toEqual([
+            "6 unchanged lines, 1–6",
+            "3 unchanged lines, 14–16",
+            "7 unchanged lines, 24–30",
+        ]);
+    });
+
+    it("places a name taken out of a package's root on the line it was, and what's on no line shown on the header", () => {
+        const removed: Reading = {
+            ...PRODUCTION,
+            asks: [{ name: "public-api", taken: "flagged", line: 2, side: "before", api: { kind: "export-removed", name: "ask" } }],
+        };
+        const laid = shown({ path: "__init__.py", before: text("a\nb\nc\n"), after: text("a\nc\n"), reading: removed });
+        expect(laid.header).toBe("__init__.py · changed · +0 −1 · public API: −ask");
+        expect(laid.matters).toEqual([
+            { row: 1, notes: [{ taken: "flagged", said: "public API: takes `ask` out of the package's root" }] },
+        ]);
+        expect(laid.whole).toBe(false);
+        const created: Reading = { ...PRODUCTION, asks: [{ name: "new-file", taken: "flagged", side: "after" }] };
+        const made = shown({ path: "n.py", before: null, after: text("x = 1\n"), reading: created });
+        expect(made.header).toBe("n.py · created · 1 line · new file");
+        expect([made.whole, made.matters]).toEqual([true, []]);
+    });
+
+    it("opens a production file with a real change, and marks automatic one that asks nothing else", () => {
+        const real = shown(changed(numbered(8, { 3: "three" }), PRODUCTION));
+        expect([real.header, real.automatic]).toEqual(["core.py · changed · +1 −1 · production", false]);
+        const spacing = shown(changed(numbered(8, { 3: "    l3" }), PRODUCTION));
+        expect([spacing.header, spacing.automatic]).toEqual(["core.py · changed · +1 −1 · automatic", true]);
+        const test = shown({ ...changed(numbered(8, { 3: "three" }), { ...PRODUCTION, role: "test" }), path: "test_a.py" });
+        expect([test.header, test.automatic]).toEqual(["test_a.py · changed · +1 −1 · automatic", true]);
+        const unread = shown({ path: "a.py", before: text("a\n"), after: text("b\n") });
+        expect([unread.header, unread.automatic, unread.reasons]).toEqual(["a.py · changed · +1 −1", false, []]);
+    });
+
+    it("counts an item's files by the first reason each is open, the most first, and nothing where none was read", () => {
+        const created: Reading = { ...PRODUCTION, asks: [{ name: "new-file", taken: "flagged", side: "after" }] };
+        const api: Reading = {
+            ...PRODUCTION,
+            asks: [{ name: "public-api", taken: "flagged", line: 1, side: "after", api: { kind: "class-added", name: "A" } }],
+        };
+        const docs: Reading = { role: "docs", asks: [], findings: [] };
+        const file = (path: string, reading?: Reading): ChangedFile => ({
+            path,
+            before: null,
+            after: text("class A:\n    pass\n"),
+            ...(reading === undefined ? {} : { reading }),
+        });
+        expect(
+            tally([file("a.md", docs), file("n.py", created), file("b.md", docs), file("p.py", api), file("c.md", docs)]),
+        ).toBe("3 automatic · 1 new file · 1 public API");
+        expect(tally([file("n.py", created), file("m.py", created), file("x.py")])).toBe("2 new files · 1 unread");
+        expect(tally([file("x.py"), file("y.py")])).toBe("");
     });
 });
 

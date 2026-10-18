@@ -754,12 +754,13 @@ def held_diff(store: Store, accepted: str, files: list[HeldFile]) -> str:
 
 
 def held_files(store: Store, accepted: str, files: list[HeldFile]) -> list[ChangedFile]:
-    """Return each held file whole: its content in the accepted tree, and the held content, none where the change deletes it."""
+    """Return each held file whole: its content in the accepted tree, and the held content, none where the change deletes it; with the judge's reading of it."""
     return [
         ChangedFile.of(
             held.path,
             store.content(accepted, held.path),
             store.object(held.blob) if held.blob else None,
+            held.reading,
         )
         for held in files
     ]
@@ -928,6 +929,7 @@ def act(
             blob=store.blob(snapshot.taken, judgement.path) or "",
             reasons=[ask.kind for ask in judgement.asks],
             asks=[ask.reason for ask in judgement.asks],
+            reading=judgement.reading(),
         )
         for judgement in judged.held
     ]
@@ -1011,6 +1013,7 @@ def brought(
             blob=bases[judgement.path].blob or "",
             reasons=[ask.kind for ask in judgement.asks],
             asks=[ask.reason for ask in judgement.asks],
+            reading=judgement.reading(),
         )
         for judgement in asking
     ]
