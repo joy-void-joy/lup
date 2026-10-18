@@ -582,6 +582,15 @@ class Inbox(MutableModel):
             )
         ]
 
+    def exchanged(self, conversation: Conversation) -> list[Item]:
+        """Return the items `conversation` sent or was sent, oldest first, in every state: those for it passed on to its session's main conversation once it ended among them."""
+        ordered = [self.items[number] for number in sorted(self.items)]
+        return [
+            item
+            for item in ordered
+            if conversation in (item.sender, item.recipient, item.addressed)
+        ]
+
     def reviewed(self) -> datetime | None:
         """Return when the operator last settled an item of theirs, read, answered or decided, from the review or a terminal; none before they first did."""
         return max(

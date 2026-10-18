@@ -47,11 +47,13 @@ from lup_dev.inbox.protocol import (
     Context,
     Conversed,
     Drafted,
+    Exchanged,
     Files,
     Items,
     KeepDraft,
     KeepTalk,
     ListInbox,
+    ListItems,
     Reviewed,
     SendDraft,
     Settled,
@@ -2374,3 +2376,82 @@ def test_what_the_operator_writes_on_a_conversation_is_kept_on_the_host_for_it_a
     assert unwritten.talk == Talk()
     assert kept.talk == again.talk == restarted.talk == talk
     assert theirs.talk == Talk()
+
+
+def test_a_conversations_items_are_listed_in_every_state_as_it_wrote_and_was_told_them(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    session = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    subagent = session.model_copy(update={"agent": "a1"})
+    decisions: list[JsonValue] = [{"decision": "Parse with lark", "lean": "it's typed"}]
+
+    def stamped(started: str) -> dict[str, JsonValue]:
+        found = json.loads(send(machine.host.launch("one").hook, started))
+        return found["hookSpecificOutput"]["updatedInput"]
+
+    def following(
+        lines: Callable[[], bytes], until: Callable[[Exchanged], bool]
+    ) -> Exchanged:
+        while True:
+            found = Exchanged.model_validate_json(lines())
+            if until(found):
+                return found
+
+    with (
+        inboxed(machine, clock, notices, said),
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as watch,
+    ):
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        mcp = machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        asking: dict[str, JsonValue] = {
+            "question": "Which parser?",
+            "decisions": decisions,
+        }
+        call(mcp, "ask", stamped(lup_call("ask", asking, "q1")))
+        noting = lup_call("note", {"remark": "I assumed UTF-8."}, "n1", agent_id="a1")
+        call(mcp, "note", stamped(noting))
+        watch.settimeout(60)
+        watch.connect(str(machine.host.watch))
+        watch.sendall(f"{ListItems(conversation=session).model_dump_json()}\n".encode())
+        with watch.makefile("rb") as replies:
+            asked = Exchanged.model_validate_json(replies.readline())
+            inbox("answer", "1", "--leaning", "1", "--comment", "Go.")
+            answered = following(
+                replies.readline,
+                lambda found: isinstance(found.sent[0].item.state, Answered),
+            )
+        send(hook, claude("SubagentStop", agent_id="a1"))
+        inbox("answer", "2", "--comment", "UTF-8 it is.")
+        send(hook, bash("b1"))
+        host = client(machine.host, clock)
+        mains = host.ask(ListItems(conversation=session), Exchanged)
+        theirs = host.ask(ListItems(conversation=subagent), Exchanged)
+    assert [each.text for each in asked.sent] == [
+        "Which parser?\n1. Parse with lark (lean: it's typed)"
+    ]
+    assert asked.sent[0].item.call == "q1"
+    assert asked.received == []
+    assert answered.sent[0].item.state == Answered(at=clock.now(), answer=3)
+    assert [each.text for each in answered.received] == [
+        (
+            "Asked: Which parser?\n"
+            "1. Parse with lark (lean: it's typed): leaning: they go with the lean.\n"
+            "Their comment on the whole: Go."
+        )
+    ]
+    # The reply to the subagent's note, passed on to the session once it ended,
+    # is in both: told to the session, and for the subagent.
+    assert [each.item.number for each in mains.sent] == [1]
+    assert [each.item.number for each in mains.received] == [3, 4]
+    assert [each.item.state for each in mains.received] == [
+        Told(at=clock.now(), how="call")
+    ] * 2
+    assert mains.received[1].item.addressed == subagent
+    assert mains.received[1].text == "UTF-8 it is."
+    assert [(each.item.number, each.text) for each in theirs.sent] == [
+        (2, "I assumed UTF-8.")
+    ]
+    assert theirs.sent[0].item.state == Done(at=clock.now())
+    assert theirs.received == mains.received[1:]

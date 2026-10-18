@@ -14,8 +14,22 @@ from lup_dashboard.host import Host
 from lup_dashboard.server import Access, application
 from lup_dev.clock import Clock
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
-from lup_dev.inbox.protocol import Items, ListInbox, Settled
-from lup_dev.inbox.store import Approval, Decided, Item, Message, Operator
+from lup_dev.inbox.protocol import (
+    Exchanged,
+    Items,
+    ListInbox,
+    ListItems,
+    SendItem,
+    Settled,
+)
+from lup_dev.inbox.store import (
+    Approval,
+    Conversation,
+    Decided,
+    Item,
+    Message,
+    Operator,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -296,6 +310,33 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
     assert other.json() == {
         "kind": "refused",
         "error": "the demo doesn't answer `inbox-show`",
+    }
+
+
+def test_the_demo_lists_a_conversations_items_a_message_sent_from_the_page_among_them(
+    page: Path,
+) -> None:
+    served = client(Demo(clock=Fixed()), page)
+    parser = Conversation(
+        repository=Path("/home/op/lup.git"), runtime="claude", session="s1", agent="a02"
+    )
+    sending = SendItem(launch="a1f0", text="Go on.", agent="a02")
+    sent = served.post("/api/ask", json=sending.model_dump(), headers=bearing())
+    asked = ListItems(conversation=parser).model_dump(mode="json")
+    listed = served.post("/api/ask", json=asked, headers=bearing())
+    elsewhere = SendItem(launch="d4c3", text="Hello?")
+    unsent = served.post("/api/ask", json=elsewhere.model_dump(), headers=bearing())
+    found = Exchanged.model_validate(listed.json())
+    assert sent.json()["item"]["number"] == 101
+    assert [each.item.number for each in found.sent] == [47, 51]
+    assert found.sent[0].item.call == "call-47"
+    assert [(each.item.number, each.text) for each in found.received] == [
+        (48, "Good: keep the two readers apart."),
+        (101, "Go on."),
+    ]
+    assert unsent.json() == {
+        "kind": "refused",
+        "error": "no session of launch `d4c3` has started",
     }
 
 

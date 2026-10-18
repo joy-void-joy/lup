@@ -1,36 +1,44 @@
 // One agent's conversation, opened from the tree: the whole of it from its start
-// in one buffer moved through with vim (`editor.ts`), what came before the
-// operator's last words folded, growing as the agent works. Their comments are
-// written into it under the agent's lines, `c` writing their message on the
-// whole, and Ctrl+Enter sends them to the conversation as one message, through
-// lup. As it grows, the view follows only a reader on its last line, or writing
-// their message at its end; anyone else keeps their cursor, what they see, their
-// open folds and what they're writing. Space `r` brings the review back
-// (`docs/dashboard.md`, *The conversation*).
+// in one buffer moved through with vim (`editor.ts`), the items of lup's inbox it
+// sent and was sent among its steps, watched so an answer arriving shows, what
+// came before the operator's last words folded, growing as the agent works.
+// Their comments are written into it under the agent's lines, `c` writing their
+// message on the whole, and Ctrl+Enter sends them to the conversation as one
+// message, through lup. As it grows, the view follows only a reader on its last
+// line, or writing their message at its end; anyone else keeps their cursor,
+// what they see, their open folds and what they're writing. Space `r` brings the
+// review back (`docs/dashboard.md`, *The conversation*).
 import { foldedRanges } from "@codemirror/language";
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, type DecorationSet, type EditorView } from "@codemirror/view";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { Agent, Launch } from "./agents";
+import { everyone, type Agent, type Launch } from "./agents";
 import { ask, type Asked, type ReplyOf } from "./api";
 import { changes, moved, saying, shownIn, type Folding, type Span } from "./comments";
 import {
+    UNEXCHANGED,
     UNSAID,
     aboutAt,
+    folds,
     history,
     laid,
     message,
     opened,
     quoted,
     reading,
+    type Beside,
+    type Earlier,
     type Entry,
+    type Exchanged,
     type Laid,
     type Remark,
     type Sent,
     type Talk,
+    type Whose,
 } from "./conversation";
 import { rebuilt, refold, useEditor } from "./editor";
+import { useWatched } from "./hooks";
 
 interface Props {
     launch: Launch;
@@ -60,6 +68,13 @@ interface Kept {
 const kept = new Map<string, Kept>();
 
 type Party = Extract<Asked, { kind: "inbox-talk" }>["conversation"];
+
+/** How a conversation of the launch is called, by its ids. */
+interface Named {
+    session: string;
+    agent: string | null;
+    path: string;
+}
 
 /** Return what the page keeps of a conversation from what the host kept of it. */
 function fromHost(talk: ReplyOf<"inbox-talked">["talk"]): Kept {
@@ -126,7 +141,7 @@ function inSight(view: EditorView, position: number): boolean {
     return at !== null && at.bottom > shown.top && at.top < shown.bottom;
 }
 
-const NOTHING: Laid = { text: "", words: [], asides: [], blocks: [], fold: null, turns: [], last: null, message: null };
+const NOTHING: Laid = { text: "", words: [], asides: [], blocks: [], fold: null, items: [], turns: [], last: null, message: null };
 
 export function Conversation({ launch, agent, beat, waiting, back, tree, say }: Props) {
     const { talker } = agent;
@@ -146,8 +161,31 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
     const pending = useRef<Kept | null>(null);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [entries, setEntries] = useState<Entry[]>([]);
-    // How many turns are folded, once the conversation is first read: before the operator's last words then.
-    const [folded, setFolded] = useState<number | null>(null);
+    // What folds, once the conversation is first read: what came before the operator's last words then.
+    const [folded, setFolded] = useState<Earlier | null>(null);
+    // The items of lup's inbox it sent and was sent, as they stand.
+    const listed = useWatched({ kind: "inbox-list-items", conversation: party });
+    const exchanged = useMemo<Exchanged>(
+        () => (listed.reply?.kind === "inbox-exchanged" ? listed.reply : UNEXCHANGED),
+        [listed.reply],
+    );
+    // How each conversation of the launch is called, as text: a listing at a hook that calls them the same lays nothing out again.
+    const names = useMemo(
+        () =>
+            JSON.stringify(
+                everyone([launch]).map(({ talker: each }) => ({ session: each.session, agent: each.agent ?? null, path: each.path })),
+            ),
+        [launch],
+    );
+    const whose = useMemo<Whose>(() => {
+        const called = JSON.parse(names) as Named[];
+        return {
+            agent: subagent,
+            name: (each) =>
+                called.find((found) => found.session === each.session && found.agent === (each.agent ?? null))?.path ??
+                (each.agent == null ? `session ${each.session}` : `subagent ${each.agent}`),
+        };
+    }, [names, subagent]);
     const [refused, setRefused] = useState<string | null>(null);
     const [inserting, setInserting] = useState(false);
     const [epoch, setEpoch] = useState(0);
@@ -237,7 +275,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
                 });
                 if (answer.kind === "refused") {
                     setRefused(answer.error);
-                    setFolded((before) => before ?? 0);
+                    setFolded((before) => before ?? "nothing");
                     continue;
                 }
                 if (answer.kind !== "inbox-conversation") {
@@ -275,12 +313,14 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         return () => clearInterval(asking);
     }, [refresh]);
 
+    const beside = useMemo<Beside>(() => ({ sent, exchanged, whose }), [sent, exchanged, whose]);
     const laidOut = useMemo(
-        () => (folded === null ? NOTHING : laid(entries, sent, talk, folded)),
-        [entries, sent, talk, folded],
+        () => (folded === null ? NOTHING : laid(entries, beside, talk, folded)),
+        [entries, beside, talk, folded],
     );
+    const folding = useMemo(() => folds(laidOut), [laidOut]);
     const editor = useEditor<Talk, Remark>({
-        shown: { text: laidOut.text, blocks: laidOut.blocks, folds: laidOut.fold === null ? [] : [laidOut.fold] },
+        shown: { text: laidOut.text, blocks: laidOut.blocks, folds: folding },
         draft: talk,
         comments: (each) => each.comments,
         withComments: (_, comments) => ({ comments }),
@@ -326,7 +366,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         } else if (anchor !== undefined) {
             view.dispatch({ selection: { anchor }, scrollIntoView: true });
         }
-        refold(view, laidOut.fold === null ? [] : [laidOut.fold], editor.unfolded.current);
+        refold(view, folding, editor.unfolded.current);
         before.current = laidOut;
         editor.landing.current = null;
         editor.draw(decorations(laidOut, talk));

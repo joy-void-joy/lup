@@ -592,10 +592,20 @@ kbd {
     font-weight: 700;
 }
 
-/* A conversation's lines: a message the operator sent it through lup, and the line their message is under. */
-.aside-sent {
+/* A conversation's lines: an item of lup's inbox it sent the operator, in the
+   orange of the call that made it, and one it was sent, in the blue of the
+   operator's words; each item's text under its line, set off by a bar; and the
+   line their message is under. */
+.aside-item-from {
+    color: var(--orange);
+}
+
+.aside-item-to {
     color: var(--info);
-    border-left: 2px solid var(--info);
+}
+
+.aside-item-text {
+    border-left: 2px solid var(--muted);
 }
 
 .aside-message {
