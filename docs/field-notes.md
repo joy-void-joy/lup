@@ -552,6 +552,24 @@ Read on the operator's machine for the `Transcripts` module (`lup/transcripts/`)
 - **Claude Code** (its directory, `~/.claude` or `CLAUDE_CONFIG_DIR`): `projects/<folder>/<session>.jsonl` per session, the folder one per directory sessions ran in; beside a session's record, `projects/<folder>/<session>/subagents/` and `tool-results/`; and `file-history/<session>/`. A record's lines carry `cwd`, the first ones (`mode`, `permission-mode`, `file-history-snapshot`) without it, so the directory a folder's sessions ran in is read off its first line naming one. A launched room writes into the operator's own directory, mounted read-write at its path.
 - **Codex** (`~/.codex` or `CODEX_HOME`): `sessions/YYYY/MM/DD/rollout-*.jsonl`, whose first line is `{"type": "session_meta", "payload": {"cwd": …}}`.
 
+### A session's record (Claude Code 2.1.302, measured 2026-10-18 on this repository's sessions)
+
+What `lup-dev transcripts` reads of `projects/<folder>/<session>.jsonl` (`adapters/claude.py`, `ClaudeTranscripts`). Counted over 20 sessions: most lines are `assistant` (9,190), `attachment` (7,643) and `user` (5,254), beside bookkeeping lines (`api-request`, `last-prompt`, `mode`, `ai-title`, `permission-mode`, `queue-operation`, `custom-title`, `agent-name`, …).
+- **The operator's typed words** are `user` lines with `origin: {"kind": "human"}` (and `promptSource: "typed"`), their `message.content` a string. Other `user` lines: a tool's result (`content` in parts with a `tool_result`, 4,884 of them), a task's notice (`origin.kind: "task-notification"`), a message from another conversation (`"peer"`), and Claude Code's own (`isMeta`, `isCompactSummary`, `<command-name>`, `<local-command-stdout>`). An older line with no `origin` is the operator's where it's text that isn't such a tag; text in parts with no `origin` is Claude Code's (`[Request interrupted by user]`).
+- **Words sent while the agent works** are `attachment` lines of `type: "queued_command"`, `commandMode: "prompt"`, `origin.kind: "human"`, the words in `prompt`.
+- **The agent's words** are `assistant` lines' `text` parts; its calls their `tool_use` parts, by `name`; `thinking` parts are its own.
+- **The session's name:** the last `custom-title` line's `customTitle` (the operator's `/rename`, or lup's `sessionTitle`), else `agent-name`'s `agentName`, else `ai-title`'s `aiTitle`. Its directory is a `user` line's `cwd`.
+- Reading a 6 MB record this way took 0.03 s.
+
+### A thread's rollout (Codex, read from its source at `rust-v0.163.0`, 2026-10-18; not measured on a live rollout)
+
+What `lup-dev transcripts` reads of `sessions/YYYY/MM/DD/rollout-*.jsonl` (`adapters/codex.py`, `CodexTranscripts`). Each line is `{timestamp, ordinal?, type, payload}` (`history/src/lib.rs`, `RolloutLine`), `timestamp` UTC to the millisecond; `type` one of `session_meta`, `response_item`, `event_msg`, `turn_context`, `compacted`, and others (`history/src/rollout_payload.rs`).
+- **Two history modes:** `session_meta.payload.history_mode`, `legacy` where absent. From 0.163 the TUI and `codex exec` start threads `paginated` (`tui/src/app_server_session.rs`, `exec/src/lib.rs`).
+- **The operator's words and the agent's** are events: `user_message` and `agent_message` in the legacy mode (`protocol.rs`, `UserMessageEvent`), `item_completed` with a `UserMessage` or `AgentMessage` item in the paginated one (`protocol/src/items.rs`). Both modes also write `response_item` messages (`role: "user"` with `input_text`, `role: "assistant"` with `output_text`), which repeat them and carry injected context as `user` messages too (AGENTS.md, `<environment_context>`); so the events are read, and the messages passed over.
+- **Tools called** are `response_item`s: `function_call` and `custom_tool_call` by `name`, after their `namespace` but for `functions` (`protocol/src/tool_name.rs`); `local_shell_call`, with no name.
+- **The thread's name** isn't in a 0.163 rollout: it's appended to `session_index.jsonl` in Codex's home, the last line for an id winning (`rollout/src/session_index.rs`), which lup doesn't copy. Rollouts before 0.163 carry `thread_name_updated` events.
+- **A subagent's thread** has a rollout of its own, its `session_meta` naming `parent_thread_id`; it isn't listed as a session.
+
 ### Subagents' records (Claude Code 2.1.301 and 2.1.302 measured, 2026-10-17; Codex read at `rust-v0.163.0`)
 
 What each runtime records of a subagent's spawn, which lup reads to name it and place it under its parent (`docs/launch.md`, *Names*):

@@ -32,6 +32,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from lup.errors import LupError
 from lup.rooms import ContainerError, Mount, Podman, Room
+from lup.transcripts import views
+from lup.transcripts.module import Transcripts
 from lup.types import Model
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
@@ -165,6 +167,7 @@ if TYPE_CHECKING:
     from lup.tools.tool import ToolSpec
     from lup_dev.declaration.resolve import Resolved
     from lup_dev.declaration.runner import Runner
+    from lup_dev.host.records import Transcript
     from lup_dev.host.rooms import RoomTools
     from lup_dev.policy.runtime import Runtime
 
@@ -173,10 +176,18 @@ rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 holds = typer.Typer(help="Changes waiting for your answer.")
 host = typer.Typer(help="lup's host service, which rooms call.")
 inbox = typer.Typer(help="What your agents tell and ask you, and your answers.")
+transcripts = typer.Typer(
+    no_args_is_help=True,
+    help=(
+        "This repository's past sessions, as lup keeps them: your words first, "
+        "each with what it answered."
+    ),
+)
 app.add_typer(rules, name="rules")
 app.add_typer(holds, name="holds")
 app.add_typer(host, name="host")
 app.add_typer(inbox, name="inbox")
+app.add_typer(transcripts, name="transcripts")
 
 
 def engine() -> Checker:
@@ -626,6 +637,58 @@ def prompted(item: Item) -> AnswerItem:
         case _:
             message = f"item {item.number} is {what(item)}: nothing to answer"
             raise InboxError(message)
+
+
+def kept_sessions(directory: Path) -> list[Transcript]:
+    """Read every session lup keeps of the repository `directory` is in, of every runtime it knows."""
+    repository = Path(
+        Git(cwd=directory).text(
+            "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+    )
+    data = Layout.of(LupDevSettings()).module_data(Transcripts.name, repository)
+    return [
+        each.reader.read(record)
+        for each in adapters()
+        for record in each.reader.sessions(data / each.runtime.name())
+    ]
+
+
+@transcripts.command("list")
+def transcripts_list() -> None:
+    """List this repository's kept sessions, newest first: when each started, its name and id, how often you spoke, where it ran."""
+    lines = views.listed(kept_sessions(Path.cwd()))
+    typer.echo(
+        "\n".join(lines) if lines else "No session of this repository is kept yet."
+    )
+
+
+@transcripts.command("show")
+def transcripts_show(
+    session: Annotated[
+        str,
+        typer.Argument(help="The session: its id, the start of its id, or its name."),
+    ],
+    *,
+    everything: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Everything said, the agent's words too, each run of tool calls a line.",
+        ),
+    ] = False,
+) -> None:
+    """Show what you said in a session, each time after what the agent last said before it; or, with `--all`, the whole conversation."""
+    chosen = views.chosen(kept_sessions(Path.cwd()), session)
+    typer.echo(views.whole(chosen) if everything else views.answered(chosen), nl=False)
+
+
+@transcripts.command("search")
+def transcripts_search(
+    words: Annotated[list[str], typer.Argument(help="Words you said, all of them.")],
+) -> None:
+    """Find each time you said all of `words`, in any kept session: when, your words, and what they answered."""
+    typer.echo(views.found(kept_sessions(Path.cwd()), words), nl=False)
 
 
 @app.command("sessions")

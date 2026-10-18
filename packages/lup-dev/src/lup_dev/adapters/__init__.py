@@ -13,7 +13,7 @@ from lup.sessions.declaration import Declaration
 from lup.sessions.terminal import Hook
 from lup.types import Model
 from lup_dev.host.courier import Heard, Spawned, Telling
-from lup_dev.host.records import Records
+from lup_dev.host.records import Reader, Records
 from lup_dev.launch.clis import Channel
 from lup_dev.policy.checkpoint import Bench
 from lup_dev.policy.runtime import Runtime
@@ -53,3 +53,5 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """The declaration a launched session runs."""
     records: Records
     """Where it keeps each session's record on this machine, which a module copies."""
+    reader: Reader
+    """Reads the copies of its records: which are sessions, and what was said in each."""
