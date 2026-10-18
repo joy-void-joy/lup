@@ -82,7 +82,7 @@ def test_claude_asks_before_a_new_production_file(
     assert running(kit, repo) == ["t1"]
 
 
-def test_claude_refuses_an_edit_with_a_finding_before_it_lands(
+def test_claude_allows_an_edit_with_a_finding_and_counts_it_running(
     on_claude: Bench, repo: Path, kit: Kit
 ) -> None:
     raw = pre_tool_use(
@@ -95,9 +95,8 @@ def test_claude_refuses_an_edit_with_a_finding_before_it_lands(
         },
     )
     output = json.loads(claude.hook(raw, on_claude))["hookSpecificOutput"]
-    assert output["permissionDecision"] == "deny"
-    assert output["permissionDecisionReason"].startswith("lup refused 1 file.")
-    assert running(kit, repo) == []
+    assert output["permissionDecision"] == "allow"
+    assert running(kit, repo) != []
 
 
 def test_claude_allows_a_docs_write_and_relative_paths(
@@ -145,7 +144,7 @@ def test_claude_hears_a_checkpoint_beside_the_result(
     )
     output = json.loads(claude.hook(raw, on_claude))["hookSpecificOutput"]
     assert output["hookEventName"] == event
-    assert output["additionalContext"].startswith("lup refused 1 file.")
+    assert output["additionalContext"].startswith("lup's findings on the lines changed")
 
 
 def test_claude_stop_blocks_while_touched_files_have_type_errors(
@@ -378,7 +377,7 @@ def post(repo: Path, response: object, call: str = "p1") -> str:
     )
 
 
-def test_codex_hears_a_refusal_beside_the_result(on_codex: Bench, repo: Path) -> None:
+def test_codex_hears_a_finding_beside_the_result(on_codex: Bench, repo: Path) -> None:
     codex.hook(
         payload(
             repo,
@@ -399,7 +398,7 @@ def test_codex_hears_a_refusal_beside_the_result(on_codex: Bench, repo: Path) ->
     )
     said = output["hookSpecificOutput"]
     assert said["hookEventName"] == "PostToolUse"
-    assert said["additionalContext"].startswith("lup refused 1 file.")
+    assert said["additionalContext"].startswith("lup's findings on the lines changed")
     assert "decision" not in output
 
 
@@ -701,8 +700,8 @@ def test_claude_judges_a_worktree_its_working_directory_moves_to(
     (linked / CORE).write_text((linked / CORE).read_text() + "y = 2  # BAD regex\n")
     raw = payload(linked, "PostToolUse", tool_name="Bash", tool_use_id="t1")
     output = json.loads(claude.hook(raw, on_claude))["hookSpecificOutput"]
-    assert output["additionalContext"].startswith("lup refused 1 file.")
-    assert "# BAD" not in (linked / CORE).read_text()
+    assert output["additionalContext"].startswith("lup's findings on the lines changed")
+    assert f"{linked / CORE}:" in output["additionalContext"]
 
 
 def test_codex_holds_only_the_worktree_it_started_in(

@@ -104,22 +104,21 @@ def log(kit: Kit, repo: Path) -> VerdictLog:
     return worktree(kit, repo).verdicts(kit.layout)
 
 
-def test_a_write_with_a_finding_is_put_back_and_saved(kit: Kit, repo: Path) -> None:
+def test_a_write_with_a_finding_lands_and_its_finding_is_told(
+    kit: Kit, repo: Path
+) -> None:
     start(kit, repo)
-    original = (repo / CORE).read_text()
-    mine = original + "y = 2  # BAD regex\n"
+    mine = (repo / CORE).read_text() + "y = 2  # BAD regex\n"
     reply = shell_write(kit, repo, "c1", CORE, mine)
-    assert reply.context.startswith(
-        "lup refused 1 file. It is unchanged; your version is saved."
-    )
+    assert reply.context.startswith("lup's findings on the lines changed")
     assert f"{repo}/src/pkg/core.py:11:8 - regex: regex fires here" in reply.context
-    saved = repo / ".lup/saved/1/src/pkg/core.py"
-    assert f"mv {saved} {repo}/src/pkg/core.py" in reply.context
-    assert (repo / CORE).read_text() == original
-    assert (repo / ".lup" / "saved" / "1" / CORE).read_text() == mine
+    assert (repo / CORE).read_text() == mine
+    assert not (repo / ".lup" / "saved").exists()
 
 
-def test_the_put_back_file_isnt_judged_again(kit: Kit, repo: Path) -> None:
+def test_a_finding_told_once_isnt_told_again_at_the_next_call(
+    kit: Kit, repo: Path
+) -> None:
     start(kit, repo)
     shell_write(
         kit, repo, "c1", CORE, (repo / CORE).read_text() + "y = 2  # BAD regex\n"
@@ -144,7 +143,9 @@ def test_no_checkpoint_while_another_call_runs(kit: Kit, repo: Path) -> None:
     (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
     assert finish(kit, repo, "c1").context == ""
     assert "# BAD regex" in (repo / CORE).read_text()
-    assert finish(kit, repo, "c2").context.startswith("lup refused 1 file.")
+    assert finish(kit, repo, "c2").context.startswith(
+        "lup's findings on the lines changed"
+    )
 
 
 def test_parallel_calls_are_judged_together(kit: Kit, repo: Path) -> None:
@@ -155,7 +156,7 @@ def test_parallel_calls_are_judged_together(kit: Kit, repo: Path) -> None:
     (repo / "README.md").write_text("# Changed\n")
     finish(kit, repo, "c2")
     reply = finish(kit, repo, "c1")
-    assert reply.context.startswith("lup refused 1 file.")
+    assert reply.context.startswith("lup's findings on the lines changed")
     assert (repo / "README.md").read_text() == "# Changed\n"
 
 
@@ -166,7 +167,9 @@ def test_a_finish_with_no_start_leaves_the_running_calls_alone(
     call(kit, repo, "c1")
     (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
     assert finish(kit, repo, "ghost").context == ""
-    assert finish(kit, repo, "c1").context.startswith("lup refused 1 file.")
+    assert finish(kit, repo, "c1").context.startswith(
+        "lup's findings on the lines changed"
+    )
 
 
 def test_a_call_that_never_finishes_is_cleared_when_the_turn_ends(
@@ -176,7 +179,8 @@ def test_a_call_that_never_finishes_is_cleared_when_the_turn_ends(
     call(kit, repo, "lost")
     (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
     reply = end(kit, repo)
-    assert reply.block.startswith("lup refused 1 file.")
+    assert reply.block.startswith("lup won't end the turn yet")
+    assert "regex: regex fires here" in reply.block
     call(kit, repo, "c2")
     assert finish(kit, repo, "c2").context == ""
 
@@ -205,8 +209,8 @@ def test_another_sessions_call_doesnt_hold_back_a_checkpoint(
     reply = shell_write(
         kit, repo, "c1", CORE, (repo / CORE).read_text() + "y = 2  # BAD regex\n"
     )
-    assert reply.context.startswith("lup refused 1 file.")
-    assert "# BAD regex" not in (repo / CORE).read_text()
+    assert reply.context.startswith("lup's findings on the lines changed")
+    assert "# BAD regex" in (repo / CORE).read_text()
     assert running(kit, repo) == ["o1"]
 
 
@@ -282,7 +286,8 @@ def test_a_write_committed_in_the_same_call_is_judged_once_as_the_commits(
     assert (repo / CORE).read_text() == "x = 1  # BAD regex\n"
     assert shell.git(repo, "status", "--porcelain") == ""
     [verdict] = log(kit, repo).read()
-    assert (verdict.tool, verdict.session, verdict.outcome) == ("move", None, "refuse")
+    assert (verdict.tool, verdict.session, verdict.outcome) == ("move", None, "allow")
+    assert verdict.reasons == ["regex"]
     call(kit, repo, "c2")
     assert finish(kit, repo, "c2").context == ""
 
@@ -351,12 +356,11 @@ def test_a_file_changed_after_its_commit_is_judged_against_heads_content(
     mine = committed + "y = 2  # BAD regex\n"
     (repo / CORE).write_text(mine)
     told = finish(kit, repo, "c1").context
-    assert told.startswith("lup refused 1 file.")
+    assert told.startswith("lup's findings on the lines changed")
+    assert f"{repo}/src/pkg/core.py:11:8 - regex" in told
     assert "HEAD moved" not in told
-    assert (repo / CORE).read_text() == committed
-    assert (repo / ".lup" / "saved" / "1" / CORE).read_text() == mine
     store = worktree(kit, repo).store
-    assert store.content(store.accepted(), CORE) == committed.encode()
+    assert store.content(store.accepted(), CORE) == mine.encode()
 
 
 def test_a_clean_merge_of_a_file_both_sides_changed_is_set_aside(
@@ -498,7 +502,7 @@ def test_a_subagents_spawn_isnt_a_running_call(kit: Kit, repo: Path) -> None:
     call(kit, repo, "c1", agent="sub")
     (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
     assert finish(kit, repo, "c1", agent="sub").context.startswith(
-        "lup refused 1 file."
+        "lup's findings on the lines changed"
     )
 
 
@@ -511,7 +515,7 @@ def test_a_report_waits_for_the_other_conversations_that_ran_calls(
     (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
     assert finish(kit, repo, "a1", agent="a").context == ""
     told = finish(kit, repo, "b1", agent="b").context
-    assert told.startswith("lup refused 1 file.")
+    assert told.startswith("lup's findings on the lines changed")
     call(kit, repo, "a2", agent="a")
     assert finish(kit, repo, "a2", agent="a").context == told
 
@@ -525,7 +529,7 @@ def protected_module(repo: Path, shell: Shell) -> None:
     shell.commit(repo, "a protected module")
 
 
-def test_a_protected_modules_finding_is_refused_through_the_shell(
+def test_a_protected_modules_change_through_the_shell_comes_back_through_the_tools(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:
     protected_module(repo, shell)
@@ -533,8 +537,7 @@ def test_a_protected_modules_finding_is_refused_through_the_shell(
     original = (repo / HOOK).read_text()
     reply = shell_write(kit, repo, "c1", HOOK, original + "y = 2  # BAD regex\n")
     assert reply.context.startswith("lup refused 1 file.")
-    assert ".claude/hooks/check.py:11:8 - regex: regex fires here" in reply.context
-    assert "Made through the shell" not in reply.context
+    assert "Made through the shell" in reply.context
     assert (repo / HOOK).read_text() == original
 
 
@@ -840,7 +843,7 @@ def test_every_judgement_is_logged(kit: Kit, repo: Path) -> None:
     assert (verdict.tool, verdict.runtime, verdict.outcome, verdict.reasons) == (
         "checkpoint",
         "asking",
-        "refuse",
+        "allow",
         ["regex"],
     )
 
@@ -923,11 +926,15 @@ def test_an_unanswered_hold_is_put_back_and_stays_open(
     assert session(holding_kit, repo).approved == [Path("src/pkg/new.py")]
 
 
-def test_a_refusal_on_a_holding_runtime_isnt_held(holding_kit: Kit, repo: Path) -> None:
+def test_a_finding_on_a_holding_runtime_is_told_not_held(
+    holding_kit: Kit, repo: Path
+) -> None:
     start(holding_kit, repo)
     call(holding_kit, repo, "p1", tool="apply_patch")
     (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
-    assert finish(holding_kit, repo, "p1").context.startswith("lup refused 1 file.")
+    assert finish(holding_kit, repo, "p1").context.startswith(
+        "lup's findings on the lines changed"
+    )
     assert waiting(holding_kit.layout) == []
 
 
@@ -1122,10 +1129,8 @@ def test_a_worktree_the_session_moves_into_is_judged(
     call(kit, linked, "c1")
     bad(linked)
     told = finish(kit, linked, "c1").context
-    assert told.startswith("lup refused 1 file.")
+    assert told.startswith("lup's findings on the lines changed")
     assert f"{linked}/src/pkg/core.py:11:8 - regex" in told
-    assert "# BAD" not in (linked / CORE).read_text()
-    assert (linked / ".lup" / "saved" / "1" / CORE).exists()
 
 
 def test_a_call_counts_in_every_worktree_its_session_holds(
@@ -1138,7 +1143,9 @@ def test_a_call_counts_in_every_worktree_its_session_holds(
     bad(linked)
     call(kit, linked, "c3")
     assert finish(kit, linked, "c3").context == ""
-    assert finish(kit, repo, "c2").context.startswith("lup refused 1 file.")
+    assert finish(kit, repo, "c2").context.startswith(
+        "lup's findings on the lines changed"
+    )
 
 
 def test_a_shell_write_where_the_session_never_went_isnt_judged(
@@ -1160,8 +1167,10 @@ def test_a_worktree_removed_since_is_no_longer_held(
     shell.git(repo, "worktree", "remove", str(linked))
     call(kit, repo, "c2")
     bad(repo)
-    assert finish(kit, repo, "c2").context.startswith("lup refused 1 file.")
-    assert end(kit, repo).block == ""
+    assert finish(kit, repo, "c2").context.startswith(
+        "lup's findings on the lines changed"
+    )
+    assert str(linked) not in end(kit, repo).block
 
 
 def test_the_turns_end_runs_in_every_worktree_the_session_holds(
@@ -1174,9 +1183,9 @@ def test_the_turns_end_runs_in_every_worktree_the_session_holds(
     bad(linked)
     bad(repo)
     block = end(kit, repo).block
-    assert block.startswith("lup refused 2 files.")
-    assert f"{repo}/src/pkg/core.py (saved at" in block
-    assert f"{linked}/src/pkg/core.py (saved at" in block
+    assert block.startswith("lup won't end the turn yet")
+    assert f"{repo}/src/pkg/core.py:11:8 - regex" in block
+    assert f"{linked}/src/pkg/core.py:11:8 - regex" in block
 
 
 def test_every_worktree_is_judged_by_the_integration_branchs_declaration(
@@ -1371,10 +1380,12 @@ def test_a_session_started_in_a_bare_repositorys_directory_is_judged(
         old="return x\n",
         new="return x  # BAD regex\n",
     )
-    assert before(kit.bench, edit, SESSION, bare / "tree").outcome == "refuse"
+    assert before(kit.bench, edit, SESSION, bare / "tree").outcome == "allow"
     call(kit, bare, "c1")
     bad(main)
-    assert finish(kit, bare, "c1").context.startswith("lup refused 1 file.")
+    assert finish(kit, bare, "c1").context.startswith(
+        "lup's findings on the lines changed"
+    )
 
 
 def test_a_session_s_start_tells_what_came_due_and_a_subagent_s_doesn_t(

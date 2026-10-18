@@ -644,6 +644,8 @@ class Checked(Model):
 
     refused: list[Refused] = []
     moves: list[Moved] = []
+    findings: list[Finding] = []
+    """lup's findings on the lines the calls changed."""
     information: list[Finding] = []
     untouched: list[Finding] = []
     importers: list[Finding] = []
@@ -658,7 +660,9 @@ class Checked(Model):
                 refusal(self.refused),
                 moved(self.moves),
                 *self.notices,
-                information(self.information, self.untouched, self.importers),
+                information(
+                    self.findings, self.information, self.untouched, self.importers
+                ),
                 removed_notes(self.removed),
             ]
         )
@@ -668,6 +672,7 @@ class Checked(Model):
         return Checked(
             refused=[*self.refused, *later.refused],
             moves=[*self.moves, *later.moves],
+            findings=[*self.findings, *later.findings],
             information=[*self.information, *later.information],
             untouched=[*self.untouched, *later.untouched],
             importers=[*self.importers, *later.importers],
@@ -762,8 +767,6 @@ def fates(bench: Bench, judgements: list[Judgement], deciding: list[Path]) -> Fa
         if judgement.path not in deciding:
             return "accepted"
         match judgement.outcome:
-            case "refuse":
-                return "refused"
             case "ask":
                 return "refused" if asks_before else "held"
             case "allow":
@@ -917,9 +920,7 @@ def act(
             path=root / judgement.path,
             saved=saved,
             new=store.content(tree, judgement.path) is None,
-            refusing=placed(root, judgement.refusing),
-            untouched=placed(root, judgement.untouched),
-            bypassed=judgement.asks if judgement.outcome == "ask" else [],
+            bypassed=judgement.asks,
         )
 
     refused = [put_back(judgement) for judgement in judged.refused]
@@ -1029,7 +1030,7 @@ def brought(
         files=[
             MovedFile(
                 path=root / judgement.path,
-                findings=placed(root, judgement.refusing),
+                findings=placed(root, judgement.findings),
                 asks=judgement.asks,
                 removed=noted(root, judgement.removed),
             )
@@ -1218,6 +1219,7 @@ def remember(
     importing = watch(worktree, session, worktree.importers().collect())
     checked = Checked(
         refused=acted.refused,
+        findings=placed(root, [found for j in landed for found in j.findings]),
         information=placed(root, [found for j in landed for found in j.information]),
         untouched=placed(root, [found for j in landed for found in j.untouched]),
         importers=placed(root, importing),
@@ -1474,12 +1476,13 @@ def confirm(bench: Bench, worktree: Worktree, key: str, agent: str, call: str) -
 
 
 def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding]:
-    """Return the type errors and ruff's findings left in `paths`.
+    """Return lup's findings, the type errors and ruff's findings left in `paths`.
 
     As the files stand on disk, once `ignore`s apply, each named by its absolute
-    path. A finding ruff fixes safely isn't one: the session landing the work
-    applies the fix. The engine and ruff are asked with the rule selection and
-    the runner of the declaration the worktree is judged by.
+    path. A finding ruff, or `lup-dev rules fix`, clears safely isn't one: the
+    session landing the work applies the fix. The engine and ruff are asked with
+    the rule selection and the runner of the declaration the worktree is judged
+    by.
     """
     services = bench.services
     sources = [
@@ -1501,7 +1504,7 @@ def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding
             report,
             [*report.findings, *(each for each in ruff if each.path == report.path)],
         )
-        if found.owner != "lup" and not found.fixable
+        if not found.fixable
     ]
     return placed(worktree.root, found)
 

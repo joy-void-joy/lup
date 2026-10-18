@@ -94,7 +94,7 @@ def test_tests_scratch_docs_and_data_are_allowed_at_any_size(judge: Judging) -> 
     for path in ["tests/test_a.py", "tmp/a.py", "docs/a.md", "data/a.json"]:
         judgement = judge(edit(path, None, big))
         assert judgement.outcome == "allow", path
-        assert judgement.refusing == []
+        assert judgement.findings == []
 
 
 def test_the_operators_documents_ask(judge: Judging) -> None:
@@ -126,15 +126,15 @@ def test_a_clean_change_to_a_protected_module_is_ruled_and_still_asks(
     assert [finding.owner for finding in judgement.information] == ["pyright"]
 
 
-def test_a_finding_in_a_protected_module_refuses_before_it_asks(
+def test_a_finding_in_a_protected_module_is_told_and_the_change_still_asks(
     judge: Judging,
 ) -> None:
     after = CORE + "y = 2  # BAD regex\n"
     judgement = judge(edit(PROTECTED, CORE, after))
-    assert judgement.outcome == "refuse"
-    assert [finding.rule for finding in judgement.refusing] == ["regex"]
+    assert judgement.outcome == "ask"
+    assert [finding.rule for finding in judgement.findings] == ["regex"]
     assert [ask.kind for ask in judgement.asks] == ["protected"]
-    assert judgement.reasons() == ["regex"]
+    assert judgement.reasons() == ["protected"]
 
 
 def test_a_protected_module_asks_every_time_and_with_its_design_asks(
@@ -158,7 +158,7 @@ def test_an_excluded_module_is_allowed_with_nothing_reported(judge: Judging) -> 
     )
     assert judgement.outcome == "allow"
     assert judgement.reasons() == ["excluded"]
-    assert judgement.refusing == judgement.information == judgement.untouched == []
+    assert judgement.findings == judgement.information == judgement.untouched == []
 
 
 def test_an_excluded_protected_module_asks_without_its_findings(
@@ -170,7 +170,7 @@ def test_an_excluded_protected_module_asks_without_its_findings(
     )
     assert judgement.outcome == "ask"
     assert [ask.kind for ask in judgement.asks] == ["protected"]
-    assert judgement.refusing == []
+    assert judgement.findings == []
 
 
 def test_an_exempt_rule_is_lifted_from_its_paths_alone(judge: Judging) -> None:
@@ -179,9 +179,9 @@ def test_an_exempt_rule_is_lifted_from_its_paths_alone(judge: Judging) -> None:
     project = Project(modules=Modules.default().edit(lifting))
     after = CORE + "y = 2  # BAD regex\nz = 3  # BAD tuple-shape\n"
     judgement = judge(edit("src/pkg/core.py", CORE, after), project=project)
-    assert [found.rule for found in judgement.refusing] == ["tuple-shape"]
+    assert [found.rule for found in judgement.findings] == ["tuple-shape"]
     elsewhere = judge(edit("src/other.py", None, after, baseline=None), project=project)
-    assert sorted(found.rule for found in elsewhere.refusing) == [
+    assert sorted(found.rule for found in elsewhere.findings) == [
         "regex",
         "tuple-shape",
     ]
@@ -190,7 +190,7 @@ def test_an_exempt_rule_is_lifted_from_its_paths_alone(judge: Judging) -> None:
 def test_protected_files_that_arent_python_only_ask(judge: Judging) -> None:
     judgement = judge(edit(".claude/settings.json", "{}\n", "{} # BAD regex\n"))
     assert judgement.outcome == "ask"
-    assert judgement.refusing == []
+    assert judgement.findings == []
 
 
 def test_deleting_a_protected_path_asks_and_deleting_code_is_allowed(
@@ -200,14 +200,15 @@ def test_deleting_a_protected_path_asks_and_deleting_code_is_allowed(
     assert judge(edit("src/pkg/core.py", CORE, None)).outcome == "allow"
 
 
-def test_a_finding_on_a_touched_line_refuses_and_every_finding_is_listed(
+def test_a_finding_on_a_touched_line_is_told_and_the_write_allowed(
     judge: Judging,
 ) -> None:
     before = CORE + "y = 2  # BAD regex\n"
     after = before + "z = 3  # BAD tuple-shape\n"
     judgement = judge(edit("src/pkg/core.py", before, after))
-    assert judgement.outcome == "refuse"
-    assert [finding.rule for finding in judgement.refusing] == ["tuple-shape"]
+    assert judgement.outcome == "allow"
+    assert [finding.rule for finding in judgement.findings] == ["tuple-shape"]
+    assert judgement.reasons() == ["tuple-shape"]
     assert [finding.rule for finding in judgement.untouched] == ["regex"]
 
 
@@ -230,7 +231,7 @@ def test_every_check_carries_the_declarations_rule_selection(
     ] == [["runtime-mention"], ["regex"]]
 
 
-def test_findings_on_untouched_lines_dont_refuse(judge: Judging) -> None:
+def test_findings_on_untouched_lines_are_told_apart(judge: Judging) -> None:
     before = CORE + "y = 2  # BAD regex\n"
     after = before.replace("return x", "return x + 1")
     judgement = judge(edit("src/pkg/core.py", before, after))
@@ -248,7 +249,7 @@ def test_every_line_of_a_new_file_is_touched(judge: Judging) -> None:
     judgement = judge(
         edit("src/pkg/new.py", None, "a = 1\nb = 2  # BAD regex\n", baseline=None)
     )
-    assert judgement.outcome == "refuse"
+    assert [finding.rule for finding in judgement.findings] == ["regex"]
 
 
 def test_writing_a_whole_existing_file_asks(judge: Judging) -> None:
@@ -316,23 +317,26 @@ def test_an_added_ignore_asks_naming_its_rule_and_reason(judge: Judging) -> None
         'adds `# lup: ignore("tuple-shape", why="sh takes tuples")` to '
         f"{judge.root}/src/pkg/core.py"
     )
-    assert judgement.refusing == []
+    assert judgement.findings == []
 
 
-def test_an_ignore_whose_rule_doesnt_fire_is_never_refused(judge: Judging) -> None:
+def test_an_ignore_whose_rule_doesnt_fire_is_never_told(judge: Judging) -> None:
     after = CORE + 'y = 1  # lup: ignore("tuple-shape", why="nothing here")\n'
     judgement = judge(edit("src/pkg/core.py", CORE, after))
     assert judgement.outcome == "ask"
-    assert judgement.refusing == []
+    assert judgement.findings == []
     assert judgement.untouched == []
 
 
-def test_refuse_wins_over_ask(judge: Judging) -> None:
+def test_a_finding_beside_an_ask_is_told_and_the_change_still_asks(
+    judge: Judging,
+) -> None:
     judgement = judge(
         edit("src/pkg/new.py", None, "x = 1  # BAD regex\n", baseline=None)
     )
-    assert judgement.outcome == "refuse"
+    assert judgement.outcome == "ask"
     assert [ask.kind for ask in judgement.asks] == ["new-file"]
+    assert [finding.rule for finding in judgement.findings] == ["regex"]
 
 
 def test_an_approval_covers_the_paths_design_asks_but_not_its_suppressions(
@@ -389,15 +393,15 @@ def test_asking_only_about_protected_paths_still_asks_about_the_operators_docume
         assert [ask.kind for ask in judgement.asks] == ["operator-document"]
 
 
-def test_asking_only_about_protected_paths_still_refuses_a_finding(
+def test_asking_only_about_protected_paths_still_tells_a_finding(
     judge: Judging,
 ) -> None:
     judgement = judge(
         edit("src/pkg/new.py", None, "x = 1  # BAD regex\n", baseline=None),
         project=ONLY_PROTECTED,
     )
-    assert judgement.outcome == "refuse"
-    assert [finding.rule for finding in judgement.refusing] == ["regex"]
+    assert judgement.outcome == "allow"
+    assert [finding.rule for finding in judgement.findings] == ["regex"]
 
 
 def test_type_errors_and_ruffs_findings_are_information(judge: Judging) -> None:
@@ -460,14 +464,14 @@ def test_removing_a_note_added_this_session_isnt_reported(judge: Judging) -> Non
     assert judgement.removed == []
 
 
-def test_a_defer_naming_an_undeclared_condition_refuses(judge: Judging) -> None:
+def test_a_defer_naming_an_undeclared_condition_is_told(judge: Judging) -> None:
     after = CORE + 'x = 1  # lup: defer(when=ready, why="wait")\n'
     assert (
         judge(edit("src/pkg/core.py", CORE, after), conditions=["ready"]).outcome
         == "allow"
     )
     judgement = judge(edit("src/pkg/core.py", CORE, after), conditions=["other"])
-    assert [finding.rule for finding in judgement.refusing] == ["defer-condition"]
+    assert [finding.rule for finding in judgement.findings] == ["defer-condition"]
 
 
 def test_verdict_reasons() -> None:

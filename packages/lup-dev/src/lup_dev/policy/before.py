@@ -1,17 +1,17 @@
 """A file tool's write before it lands: the would-be content, then the judgement.
 
 Where a runtime's file tools say what they'll write before they write it, lup
-judges that content and answers allow, ask or refuse before anything touches the
-file (`docs/judging-writes.md`, *Before an edit lands*). A tool's call is one of
-two proposals, in lup's own words:
+judges that content and answers allow or ask before anything touches the file
+(`docs/judging-writes.md`, *Before an edit lands*). A tool's call is one of two
+proposals, in lup's own words:
 - a replacement: the current file with one string replaced by another, once, or
   everywhere;
 - a whole write: the content it carries.
 
 A replacement whose string isn't there exactly as the tool requires is allowed:
-the tool fails on its own. A refused write never touches the file, and the agent's
-version is saved. A write allowed or asked is remembered until its call finishes,
-so the checkpoint after it accepts that content as already judged.
+the tool fails on its own. A write is remembered until its call finishes, so the
+checkpoint after it accepts that content as already judged, and tells its
+findings.
 
 A write is judged in the worktree of the session's repository its path is in,
 which the session then holds; a write in the repository's own git directory
@@ -34,7 +34,7 @@ from lup_dev.policy.checkpoint import (
     verdict,
 )
 from lup_dev.policy.judge import Ask, Change, Judgement
-from lup_dev.policy.report import Refused, asked, placed, refusal
+from lup_dev.policy.report import asked
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.policy.worktrees import place
 
@@ -107,10 +107,10 @@ class Overwrite(Proposal):
 class Decision(Model):
     """What lup answers before a file tool's call runs."""
 
-    outcome: Literal["allow", "ask", "refuse"] | None
+    outcome: Literal["allow", "ask"] | None
     """None where lup doesn't judge the call, which the runtime then decides."""
     reason: str = ""
-    """What's asked, or the refusal report; empty for an allow."""
+    """What's asked; empty for an allow."""
 
 
 def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decision:
@@ -148,7 +148,6 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
     path = here.path
     store = worktree.store
     with worktree.lock():
-        state = store.state()
         record = worktree.session(session, bench.runtime)
         accepted = store.accepted()
         prior = [each.blob for each in record.judged if each.path == path]
@@ -164,32 +163,18 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
         judgement = judge.judge([change], inform=False)[0]
         to = Attributed(worktree=worktree.root, session=session, tool=proposal.tool)
         logged = verdict(bench, to, judgement)
-        match judgement.outcome:
-            case "refuse":
-                number = state.saved + 1
-                saved = store.save(number, path, after.encode())
-                state.saved = number
-                store.remember(state)
-                refused = Refused(
-                    path=worktree.root / path,
-                    saved=saved,
-                    new=earlier is None,
-                    refusing=placed(worktree.root, judgement.refusing),
-                    untouched=placed(worktree.root, judgement.untouched),
-                )
-                decision = Decision(outcome="refuse", reason=refusal([refused]))
-            case "ask" | "allow" as outcome:
-                pending = Pending(
-                    call=proposal.call,
-                    path=path,
-                    blob=store.keep(after.encode()),
-                    asked=outcome == "ask",
-                    verdict=logged,
-                    removed=judgement.removed,
-                )
-                record.pending = [*record.pending, pending]
-                worktree.keep(record)
-                reason = asked(judgement.asks) if outcome == "ask" else ""
-                decision = Decision(outcome=outcome, reason=reason)
+        outcome = judgement.outcome
+        pending = Pending(
+            call=proposal.call,
+            path=path,
+            blob=store.keep(after.encode()),
+            asked=outcome == "ask",
+            verdict=logged,
+            removed=judgement.removed,
+        )
+        record.pending = [*record.pending, pending]
+        worktree.keep(record)
+        reason = asked(judgement.asks) if outcome == "ask" else ""
+        decision = Decision(outcome=outcome, reason=reason)
     worktree.verdicts(services.layout).append([logged])
     return decision

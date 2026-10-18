@@ -60,38 +60,18 @@ def test_an_allowed_edit_is_remembered_until_its_call_finishes(
     ] == [("e1", CORE, False)]
 
 
-def test_an_edit_with_a_finding_is_refused_before_it_touches_the_file(
+def test_an_edit_with_a_finding_is_allowed_and_remembered_for_its_checkpoint(
     kit: Kit, repo: Path
 ) -> None:
-    original = (repo / CORE).read_text()
     decision = before(
         kit.bench, replace(repo, "return x\n", "return x  # BAD regex\n"), "s1", repo
     )
-    assert decision.outcome == "refuse"
-    saved = repo / ".lup/saved/1/src/pkg/core.py"
-    assert decision.reason.startswith(
-        "lup refused 1 file. It is unchanged; your version is saved.\n\n"
-        f"{repo}/src/pkg/core.py (saved at {saved})\n"
-    )
-    assert (
-        "Fix these lines in the saved copy, then move it into place:\n"
-        f"  mv {saved} {repo}/src/pkg/core.py" in decision.reason
-    )
-    assert (repo / CORE).read_text() == original
-    assert "# BAD regex" in (repo / ".lup" / "saved" / "1" / CORE).read_text()
-
-
-def test_a_refused_new_file_comes_back_through_a_write(kit: Kit, repo: Path) -> None:
-    write = Overwrite(
-        call="w1",
-        tool="Write",
-        path=repo / "src" / "pkg" / "new.py",
-        text="x = 1  # BAD regex\n",
-    )
-    decision = before(kit.bench, write, "s1", repo)
-    assert decision.outcome == "refuse"
-    assert "write the file again with your file tool" in decision.reason
-    assert not (repo / "src" / "pkg" / "new.py").exists()
+    assert decision.outcome == "allow"
+    assert decision.reason == ""
+    session = read_model(kit.layout.store(repo).session("s1"), Session)
+    assert session is not None
+    assert [pending.path for pending in session.pending] == [CORE]
+    assert not (repo / ".lup" / "saved").exists()
 
 
 def test_a_whole_write_over_an_existing_file_asks(kit: Kit, repo: Path) -> None:
@@ -166,5 +146,6 @@ def test_each_edit_is_logged(kit: Kit, repo: Path) -> None:
         kit.bench, replace(repo, "return x\n", "return x  # BAD regex\n"), "s1", repo
     )
     [verdict] = VerdictLog(path=kit.layout.verdicts(repo / ".git")).read()
-    assert (verdict.tool, verdict.outcome, verdict.session) == ("Edit", "refuse", "s1")
+    assert (verdict.tool, verdict.outcome, verdict.session) == ("Edit", "allow", "s1")
+    assert verdict.reasons == ["regex"]
     assert (verdict.worktree, verdict.path) == (repo, CORE)
