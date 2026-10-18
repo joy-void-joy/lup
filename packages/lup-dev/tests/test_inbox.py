@@ -2320,3 +2320,22 @@ def test_an_agent_withdraws_its_own_waiting_item_and_nothing_else(
     assert [line.split()[0] for line in listed.splitlines()] == ["3"]
     assert "withdrawn at 2026-10-01 12:00 by its sender: It's green now." in shown
     assert "item 1, a note, was withdrawn by its sender" in said
+
+
+def test_the_operators_list_says_when_they_last_settled_an_item(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        mcp = machine.host.launch("one").mcp
+        call(mcp, "note", {"remark": "First."})
+        call(mcp, "note", {"remark": "Second."})
+        host = client(machine.host, clock)
+        before = host.ask(ListInbox(), Items)
+        clock.sleep(300)
+        inbox("done", "1")
+        after = host.ask(ListInbox(), Items)
+    assert before.reviewed is None
+    assert [item.number for item in after.items] == [2]
+    assert after.reviewed == clock.now()

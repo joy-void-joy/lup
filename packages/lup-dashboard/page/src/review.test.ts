@@ -8,6 +8,7 @@ import {
     covered,
     foldAt,
     foldKey,
+    fresh,
     laid,
     opened,
     plain,
@@ -17,6 +18,7 @@ import {
     shownAt,
     steps,
     toggled,
+    waited,
     type Around,
     type ChangedFile,
     type Comment,
@@ -92,6 +94,20 @@ const header = (item: Item, parked: boolean) => `── #${item.number}${parked 
 const banner = (item: Item, parked: boolean) => `━━ ${item.sender.party === "conversation" ? item.sender.session : "lup"}${parked ? " · later" : ""} ━━`;
 
 describe("laid", () => {
+    it("puts the group with the newest item first, each group's items in their order", () => {
+        const later: Item = { ...QUESTION, number: 53, reason: { ...NOTE.reason } };
+        const out = laid([QUESTION, NOTE, later], banner, header, EMPTY, NOTHING);
+        expect(out.text.split("\n").filter((line) => line.startsWith("━━") || line.startsWith("──"))).toEqual([
+            "━━ s1 ━━",
+            "── #51 ──",
+            "── #53 ──",
+            "━━ s2 ━━",
+            "── #52 ──",
+        ]);
+        const two = laid([QUESTION, NOTE], banner, header, EMPTY, NOTHING);
+        expect(two.text.startsWith("━━ s2 ━━")).toBe(true);
+    });
+
     it("lays each item under its header in its sender's group, the parked ones last, each comment under its line", () => {
         const draft: Draft = {
             comments: [
@@ -313,5 +329,20 @@ describe("the draft", () => {
         expect(covered(toggled(draft, "parked", 53))).toEqual([52]);
         expect(pruned(draft).comments).toEqual([{ item: 53, text: "x" }]);
         expect(toggled(toggled(EMPTY, "done", 52), "done", 52).done).toEqual([]);
+    });
+});
+
+describe("waited and fresh", () => {
+    it("says how long an item has waited, to the minute", () => {
+        const now = new Date("2026-10-17T14:00:30Z");
+        expect(waited("2026-10-17T14:00:00Z", now)).toBe("just in");
+        expect(waited("2026-10-17T13:55:00Z", now)).toBe("waiting 5m");
+        expect(waited("2026-10-15T14:00:00Z", now)).toBe("waiting 2d");
+    });
+
+    it("marks what came after the operator last settled an item, and nothing before they first did", () => {
+        expect(fresh(QUESTION, "2026-10-17T11:00:00Z")).toBe(true);
+        expect(fresh(QUESTION, "2026-10-17T12:30:00Z")).toBe(false);
+        expect(fresh(QUESTION, null)).toBe(false);
     });
 });

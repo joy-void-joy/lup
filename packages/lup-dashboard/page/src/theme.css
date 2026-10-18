@@ -462,6 +462,11 @@ kbd {
     font-weight: 700;
 }
 
+/* What came after the operator last settled an item: marked at the line's start. */
+.review-header.is-new {
+    box-shadow: inset 3px 0 0 var(--warn);
+}
+
 .review-header.is-done {
     color: var(--muted);
     text-decoration: line-through;

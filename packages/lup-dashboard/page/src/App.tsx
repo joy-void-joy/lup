@@ -38,6 +38,8 @@ export function App() {
     const { reply, connection } = useWatched({ kind: "list" });
     const inbox = useWatched({ kind: "inbox-list" });
     const now = useNow();
+    // The review's ages are told to the minute, so it's laid out again once a minute, not every second.
+    const minute = useNow(60_000);
     const [selected, setSelected] = useState<string | null>(null);
     const [palette, setPalette] = useState(false);
     const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -330,6 +332,8 @@ export function App() {
                         epoch={epoch}
                         shown={selected === null}
                         tree={toTree}
+                        reviewed={inbox.reply?.kind === "inbox-items" ? (inbox.reply.reviewed ?? null) : null}
+                        now={minute}
                     />
                     <div className="status">
                         {numbers.length === 0 ? (

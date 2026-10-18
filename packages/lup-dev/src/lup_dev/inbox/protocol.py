@@ -19,6 +19,7 @@ whole diff (`ShowDiff`), and the dashboard each file it changes, whole
 """
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, override
 
@@ -196,10 +197,13 @@ class ShowContext(Request):
 
 
 class Items(Reply):
-    """Items, oldest first."""
+    """Items, oldest first, and when the operator last sent a reply."""
 
     kind: Literal["inbox-items"] = "inbox-items"
     items: list[Item]
+    reviewed: datetime | None = None
+    """When the operator's last reply was sent, from the review; none before
+    their first: what came after it is new to them."""
 
 
 class Shown(Reply):
@@ -278,7 +282,8 @@ class Listing(Model, Handler[ListInbox], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: ListInbox) -> Reply:
-        return Items(items=self.delivery.inbox.waiting(Operator()))
+        inbox = self.delivery.inbox
+        return Items(items=inbox.waiting(Operator()), reviewed=inbox.reviewed())
 
 
 class Showing(Model, Handler[ShowItem], arbitrary_types_allowed=True):
