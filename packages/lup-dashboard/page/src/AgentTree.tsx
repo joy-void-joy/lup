@@ -139,9 +139,13 @@ function Row({ label, kind, state, said, chevron = null }: RowProps) {
     );
 }
 
-/** Whether a subagent's conversation is over. */
+/**
+ * Whether a subagent's conversation is over: it ended, or no hook has been heard from it since the host began
+ * keeping what each conversation does, at every hook, so one with nothing kept is from before and long over.
+ */
 function over(agent: Agent): boolean {
-    return agent.talker.activity?.state === "ended";
+    const activity = agent.talker.activity;
+    return activity == null || activity.state === "ended";
 }
 
 /** The key of each conversation with subagents under it, it first: each is unfolded until the operator folds it. */
