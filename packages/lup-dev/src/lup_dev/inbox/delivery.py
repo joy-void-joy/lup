@@ -143,6 +143,23 @@ def opening(item: Item) -> str:
     return next(iter(said.splitlines()), "")
 
 
+def body(item: Item) -> str:
+    """Return an item's text whole, as its sender wrote it: a question's with each decision numbered, with its lean."""
+    match item.reason:
+        case Question(text=text, decisions=decisions):
+            numbered = [
+                f"{at}. {each.text} (lean: {each.lean})"
+                for at, each in enumerate(decisions, start=1)
+            ]
+            return "\n".join([text, *numbered])
+        case Message(text=text) | Approval(text=text):
+            return text
+        case Answer(comment=comment):
+            return comment
+        case Review(comments=comments):
+            return "\n".join(each.text for each in comments)
+
+
 def reviewable(item: Item) -> None:
     """Refuse an item a review can't answer: one no conversation sent, an answer or an approval."""
     match item:
@@ -364,24 +381,50 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
 
     def reviewing(self, review: Review, recipient: Party) -> str:
-        """Say a review to the conversation it's for: each of its items it covers, with the operator's comments on it."""
+        """Say a review to one conversation it's sent to: its own items first, each with the operator's comments on it, or read with nothing to add; then, for context, the other agents' items they commented on, each whole and whose it is."""
+        items = [self.inbox.item(each) for each in review.covers]
+        commented = [each.item for each in review.comments]
 
-        def part(number: int) -> str:
-            item = self.inbox.item(number)
-            whose = "yours" if item.sender == recipient else f"from {who(item.sender)}"
-            head = f'On item {number}, {what(item)} {whose} ("{opening(item)}"):'
-            said = [remark(each) for each in review.comments if each.item == number]
-            return "\n".join([head, *(said or ["  (read, with nothing to add)"])])
+        def remarks(item: Item) -> list[str]:
+            return [remark(each) for each in review.comments if each.item == item.number]
 
-        return "\n\n".join(part(each) for each in review.covers)
+        def yours(item: Item) -> str:
+            head = f'On item {item.number}, {what(item)} yours ("{opening(item)}"):'
+            return "\n".join([head, *(remarks(item) or ["  (read, with nothing to add)"])])
+
+        def theirs(item: Item) -> str:
+            where = "" if item.worktree is None else f", in {item.worktree}"
+            head = f"On item {item.number}, {what(item)} from {who(item.sender)}{where}:"
+            text = [f"    | {line}" for line in body(item).splitlines()]
+            return "\n".join([head, *text, *remarks(item)])
+
+        own = [yours(item) for item in items if item.sender == recipient]
+        others = [
+            theirs(item)
+            for item in items
+            if item.sender != recipient and item.number in commented
+        ]
+        context = (
+            [
+                "For context, what the operator said in the same reply on other "
+                "agents' items: not yours to act on, unless a comment says so.",
+                *others,
+            ]
+            if others
+            else []
+        )
+        return "\n\n".join([*own, *context])
 
     async def reviewed(self) -> list[Item]:
-        """Send the operator's draft: to each conversation whose items it covers, a review of those items with the comments on them alone; those items answered or done, and the draft left with what's parked.
+        """Send the operator's draft as one reply: to each conversation that sent an item it covers, the whole of it; its items answered or done, and the draft left with what's parked.
 
-        A message only marked done, with nothing to say on it, is taken off the
-        list and its sender told nothing; a question is answered all the same,
-        since its asker may be holding for the answer. Refused where the draft
-        covers no item, or covers one no conversation sent.
+        Each conversation is told its own items first, with the comments on
+        them or read with nothing to add, then what was said on the others'
+        for context (`reviewing`): the operator answers related items together,
+        across agents and repositories, and sends a new reply on moving to
+        something unrelated. A question is answered by the reply its asker
+        gets, which lets a held `ask` go. Refused where the draft covers no
+        item, or covers one no conversation sent.
         """
         draft = self.inbox.draft()
         covered = [self.inbox.item(each) for each in draft.covered()]
@@ -393,38 +436,27 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         for item in covered:
             reviewable(item)
         at = self.clock.now()
-        commented = [each.item for each in draft.comments]
-        read = [
-            item
-            for item in covered
-            if item.number not in commented and isinstance(item.reason, Message)
-        ]
-        for item in read:
-            self.inbox.kept(item.model_copy(update={"state": Done(at=at)}))
-        answering = [item for item in covered if item not in read]
-        senders = [item.sender for item in answering]
+        numbers = [item.number for item in covered]
+        review = Review(
+            covers=numbers,
+            comments=[each for each in draft.comments if each.item in numbers],
+        )
+        senders = [item.sender for item in covered]
         recipients = [
-            each for at, each in enumerate(senders) if each not in senders[:at]
+            each for index, each in enumerate(senders) if each not in senders[:index]
         ]
-
-        def sent_to(recipient: Party) -> Item:
-            own = [item for item in answering if item.sender == recipient]
-            numbers = [item.number for item in own]
-            review = Review(
-                covers=numbers,
-                comments=[each for each in draft.comments if each.item in numbers],
-            )
-            sent = self.inbox.made(review, Operator(), recipient, None, at)
-            for item in own:
-                settling = settled(item, sent, at)
-                self.inbox.kept(item.model_copy(update={"state": settling}))
-            return sent
-
-        made = [sent_to(each) for each in recipients]
+        sent = [
+            self.inbox.made(review, Operator(), recipient, None, at)
+            for recipient in recipients
+        ]
+        for item in covered:
+            answer = next(each for each in sent if each.recipient == item.sender)
+            settling = settled(item, answer, at)
+            self.inbox.kept(item.model_copy(update={"state": settling}))
         self.inbox.drafted(draft.kept())
-        for sent in made:
-            await self.delivered(sent)
-        return made
+        for each in sent:
+            await self.delivered(each)
+        return sent
 
     def answered(self, answer: Answer) -> str:
         """Say the operator's answer, each decision beside its question's text and the lean it was asked with."""

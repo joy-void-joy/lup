@@ -1605,7 +1605,7 @@ def sending(machine: Layout, clock: FakeClock) -> list[Item]:
     return host.ask(SendDraft(), Reviewed).items
 
 
-def test_a_draft_sent_gives_each_agent_its_own_items_with_their_comments_alone(
+def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_first(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     question: dict[str, JsonValue] = {
@@ -1656,24 +1656,35 @@ def test_a_draft_sent_gives_each_agent_its_own_items_with_their_comments_alone(
         states = [delivery.inbox.item(each).state for each in [1, 2, 3, 4]]
         left = delivery.inbox.draft()
     assert shown.draft == kept == draft
-    assert [(each.number, each.reason) for each in reviews] == [
-        (5, Review(covers=[1], comments=[draft.comments[0]])),
-        (6, Review(covers=[2], comments=[draft.comments[1]])),
-    ]
+    whole = Review(covers=[1, 2, 3], comments=draft.comments[:2])
+    assert [(each.number, each.reason) for each in reviews] == [(5, whole), (6, whole)]
     assert isinstance(states[0], Answered)
     assert states[0].answer == 5
     assert [type(each) for each in states[1:]] == [Done, Done, Waiting]
     assert left == Draft(comments=[draft.comments[2]], parked=[4])
+    context_line = (
+        "For context, what the operator said in the same reply on other agents' "
+        "items: not yours to act on, unless a comment says so."
+    )
     assert returned[0] == (
-        "lup's inbox, item 5: a review from the operator, of item 1:\n"
+        "lup's inbox, item 5: a review from the operator, of items 1, 2, 3:\n"
         'On item 1, a question yours ("Which parser?"):\n'
-        "  On this passage:\n    > 1. Parse with lark\n    Yes."
+        "  On this passage:\n    > 1. Parse with lark\n    Yes.\n\n"
+        f"{context_line}\n\n"
+        f"On item 2, a note from claude session s2, in {tmp_path / 'two'}:\n"
+        "    | I assumed UTF-8.\n  Fine by me."
     )
     assert context(told) == (
-        "lup's inbox, item 6: a review from the operator, of item 2:\n"
-        'On item 2, a note yours ("I assumed UTF-8."):\n  Fine by me.'
+        "lup's inbox, item 6: a review from the operator, of items 1, 2, 3:\n"
+        'On item 2, a note yours ("I assumed UTF-8."):\n  Fine by me.\n\n'
+        'On item 3, a note yours ("Done reading."):\n  (read, with nothing to add)\n\n'
+        f"{context_line}\n\n"
+        f"On item 1, a question from claude session s1, in {tmp_path / 'one'}:\n"
+        "    | Which parser?\n"
+        "    | 1. Parse with lark (lean: yes, it's typed)\n"
+        "    | 2. Keep the cache (lean: no)\n"
+        "  On this passage:\n    > 1. Parse with lark\n    Yes."
     )
-
 
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
