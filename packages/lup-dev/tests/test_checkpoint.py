@@ -896,6 +896,8 @@ def test_an_ask_is_held_until_the_operator_approves(
         if verdict.outcome == "hold"
     ]
     assert answers == ["approved"]
+    [hold] = holding_kit.announced.holds
+    assert (hold.call, hold.agent) == ("p1", None)
 
 
 def test_a_declined_hold_is_put_back_with_the_comment(

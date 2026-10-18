@@ -504,7 +504,9 @@ class PreToolUse(Payload):
         decision = (
             Decision(outcome=None)
             if proposed is None
-            else before(bench, proposed, self.session_id, self.cwd)
+            else before(
+                bench, proposed, self.session_id, self.cwd, self.agent_id or None
+            )
         )
         match decision.outcome:
             case None:

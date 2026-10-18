@@ -147,6 +147,8 @@ class AskHold(Request):
     change: HeldChange
     sender: Conversation
     diff: str
+    call: str | None = None
+    """The runtime's id for the call that made the change, which the item keeps."""
 
 
 class ShowDiff(Request):
@@ -375,7 +377,7 @@ class HoldAsking(Model, Handler[AskHold], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: AskHold) -> Reply:
         item = await self.delivery.held_change(
-            request.change, request.sender, request.diff
+            request.change, request.sender, request.diff, call=request.call
         )
         return Shown(item=item)
 

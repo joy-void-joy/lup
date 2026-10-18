@@ -892,11 +892,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return answered
 
     async def held_change(
-        self, change: HeldChange, sender: Conversation, diff: str
+        self,
+        change: HeldChange,
+        sender: Conversation,
+        diff: str,
+        *,
+        call: str | None = None,
     ) -> Item:
-        """Put a held change in the operator's inbox from the session that made it, its diff kept beside it, and raise its notice."""
+        """Put a held change in the operator's inbox from the conversation that made it, its diff kept beside it, anchored to `call`, and raise its notice."""
         item = self.inbox.made(
-            change, sender, Operator(), change.worktree, self.clock.now()
+            change, sender, Operator(), change.worktree, self.clock.now(), call=call
         )
         self.inbox.attached(item.number, diff)
         await self.noticed(item)

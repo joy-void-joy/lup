@@ -81,6 +81,13 @@ class Hold(Model):
     worktree: Path
     session: str
     """The session that made the change, or for a move's, that found it."""
+    agent: str | None = None
+    """The runtime's id for the subagent whose call made the change; none for
+    the session's own conversation, and for a move's."""
+    call: str | None = None
+    """The runtime's id for the call that made the change, or whose finish found
+    it: its moment in the conversation's record; none where no call did, as at a
+    turn's end or for a move."""
     created: datetime
     files: list[HeldFile]
     diff: str
@@ -139,10 +146,16 @@ class InboxAnnouncing(Model, Announcing, arbitrary_types_allowed=True):
     @override
     def announced(self, hold: Hold, runtime: str, repository: Path) -> None:
         sender = Conversation(
-            repository=repository, runtime=runtime, session=hold.session
+            repository=repository,
+            runtime=runtime,
+            session=hold.session,
+            agent=hold.agent,
         )
         host = HostClient(layout=self.layout, clock=self.clock, starter=Detached())
-        host.ask(AskHold(change=asked(hold), sender=sender, diff=hold.diff), Shown)
+        asking = AskHold(
+            change=asked(hold), sender=sender, diff=hold.diff, call=hold.call
+        )
+        host.ask(asking, Shown)
 
 
 def answered(

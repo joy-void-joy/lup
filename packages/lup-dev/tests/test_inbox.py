@@ -1800,7 +1800,9 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
             machine, change, approved=approved, comment=comment
         )
         InboxAnnouncing(layout=machine.host, clock=clock).announced(
-            hold, "claude", tmp_path / ".git"
+            hold.model_copy(update={"call": "t7", "agent": "sub"}),
+            "claude",
+            tmp_path / ".git",
         )
         [item] = delivery.inbox.waiting(Operator())
         shown = inbox("show", str(item.number))
@@ -1811,6 +1813,12 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
         again = inbox("answer", str(item.number), "--approve", "--comment", "")
         answered = holds.get(hold.key)
         state = delivery.inbox.item(item.number).state
+    assert (item.call, item.sender) == (
+        "t7",
+        Conversation(
+            repository=tmp_path / ".git", runtime="claude", session="s1", agent="sub"
+        ),
+    )
     assert item.reason == HeldChange(
         text="Let the change to src/new.py land?",
         summary="src/new.py: src/new.py is a new production file",
