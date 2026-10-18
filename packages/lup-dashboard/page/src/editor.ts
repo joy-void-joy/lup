@@ -11,7 +11,8 @@
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
 // any change to the draft. What folds is folded until opened: `za` opens or
 // closes the fold under the cursor, `zo` and `zc` open and close it, `zR` and
-// `zM` open and close them all. Space `h`, or Space `w` `h`, goes to the agents'
+// `zM` open and close them all, `zr` and `zm` those hiding a change alone (a file
+// folded whole, a run holding changed lines), unchanged context left as it is. Space `h`, or Space `w` `h`, goes to the agents'
 // tree. Each view says what else its keys do, lays its own text out and draws
 // it, and may paint the lines in view as well, as the review paints a changed
 // file's (`Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`). A fold may be
@@ -46,6 +47,7 @@ interface Actions {
     tree: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
     foldAll: (closing: boolean) => void;
+    foldDiffs: (closing: boolean) => void;
     folded: (state: EditorState) => void;
     undo: (back: boolean) => void;
     send: () => void;
@@ -121,6 +123,8 @@ function mapKeys(): void {
     action("lupFoldClose", (actions) => actions.fold("close"));
     action("lupFoldOpenAll", (actions) => actions.foldAll(false));
     action("lupFoldCloseAll", (actions) => actions.foldAll(true));
+    action("lupFoldOpenDiffs", (actions) => actions.foldDiffs(false));
+    action("lupFoldCloseDiffs", (actions) => actions.foldDiffs(true));
     action("lupUndo", (actions) => actions.undo(true));
     action("lupRedo", (actions) => actions.undo(false));
     const map = (keys: string, name: string, context: string) =>
@@ -141,6 +145,8 @@ function mapKeys(): void {
     map("zc", "lupFoldClose", "normal");
     map("zR", "lupFoldOpenAll", "normal");
     map("zM", "lupFoldCloseAll", "normal");
+    map("zr", "lupFoldOpenDiffs", "normal");
+    map("zm", "lupFoldCloseDiffs", "normal");
     map("u", "lupUndo", "normal");
     map("<C-r>", "lupRedo", "normal");
     map("]]", "lupNext", "normal");
@@ -581,6 +587,22 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
         writing.current = true;
     }
 
+    /** Fold or open each of `folds` not already so, the cursor going to the summary of one it was hidden in. */
+    function foldEvery(folds: Folding[], closing: boolean) {
+        const editor = view.current;
+        if (editor === null) {
+            return;
+        }
+        const changing = folds.filter((each) => isFolded(editor.state, each) !== closing);
+        const at = head();
+        const back = closing ? uncovered(changing, at) : at;
+        editor.dispatch({
+            effects: changing.map((each) => folding(each, closing)),
+            selection: back === at ? undefined : { anchor: back },
+            scrollIntoView: true,
+        });
+    }
+
     function bind(own: Own<C>) {
         bound.current.actions = {
             comment: (cm, on) => {
@@ -669,20 +691,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     editor.dispatch({ effects: folding(fold, closing), selection: back, scrollIntoView: true });
                 }
             },
-            foldAll: (closing) => {
-                const editor = view.current;
-                if (editor === null) {
-                    return;
-                }
-                const changing = shown.folds.filter((each) => isFolded(editor.state, each) !== closing);
-                const at = head();
-                const back = closing ? uncovered(changing, at) : at;
-                editor.dispatch({
-                    effects: changing.map((each) => folding(each, closing)),
-                    selection: back === at ? undefined : { anchor: back },
-                    scrollIntoView: true,
-                });
-            },
+            foldAll: (closing) => foldEvery(shown.folds, closing),
+            foldDiffs: (closing) => foldEvery(shown.folds.filter((each) => each.diff === true), closing),
             folded: (state) => {
                 // The folds are where this layout puts them only while the text is still its own.
                 if (state.sliceDoc() !== shown.text) {

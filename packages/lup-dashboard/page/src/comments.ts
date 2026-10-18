@@ -27,6 +27,8 @@ export interface Block extends Span {
 export interface Folding extends Span {
     key: string;
     summary: Span;
+    /** Whether it hides a change, which `zr` opens and `zm` folds again: a file folded whole, a run holding changed lines. */
+    diff?: boolean;
 }
 
 /** One row of a thing said: its text, where its words start in it, and where they start in the words kept. */
