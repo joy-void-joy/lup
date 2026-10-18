@@ -14,7 +14,8 @@ launch asks it (`AskApproval`, joining the one waiting about the same zone) and
 waits on its answer (`AwaitApproval`, whose reply comes once it's answered); the
 launching terminal, or `lup-dev inbox answer` at any other, answers it
 (`AnswerApproval`), whichever comes first; `lup-dev inbox show --diff` reads its
-whole diff (`ShowDiff`).
+whole diff (`ShowDiff`), and the dashboard each file it changes, whole
+(`ShowFiles`), as of a held change (`AskHold`).
 """
 
 import asyncio
@@ -29,6 +30,7 @@ from lup_dev.inbox import context
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.store import (
     Approval,
+    ChangedFile,
     Conversation,
     Draft,
     HeldChange,
@@ -98,7 +100,7 @@ class SendDraft(Request):
 
 
 class AskApproval(Request):
-    """Ask the operator's approval, its whole diff kept beside it; or join the approval waiting about the same zone."""
+    """Ask the operator's approval, its whole diff and each file it changes kept beside it; or join the approval waiting about the same zone."""
 
     kind: Literal["inbox-ask-approval"] = "inbox-ask-approval"
     question: str
@@ -107,20 +109,26 @@ class AskApproval(Request):
     """What the operator reads first, coloured as git prints it."""
     diff: str
     """The whole diff, coloured, shown on request."""
+    files: list[ChangedFile]
+    """Each file of the zone changed, whole before and after, shown on request."""
     repository: Path
     """The git directory of the repository whose host zone it is."""
     fingerprint: str
     """The zone's fingerprint, which a launch asking about the same zone joins by."""
     worktree: Path
     """The worktree the launch asking it runs in."""
+    pushed_by: Conversation | None = None
+    """The main conversation of the session whose push asked it; none for a
+    launch's."""
 
     def approval(self) -> Approval:
-        """Return the approval as the inbox keeps it, its diff beside it."""
+        """Return the approval as the inbox keeps it, its diff and files beside it."""
         return Approval(
             text=self.question,
             summary=self.summary,
             repository=self.repository,
             fingerprint=self.fingerprint,
+            pushed_by=self.pushed_by,
         )
 
 
@@ -141,12 +149,14 @@ class AnswerApproval(Request):
 
 
 class AskHold(Request):
-    """Put a held change in the operator's inbox: what's held and why, its diff, and the session that made it."""
+    """Put a held change in the operator's inbox: what's held and why, its diff and each file held, and the session that made it."""
 
     kind: Literal["inbox-ask-hold"] = "inbox-ask-hold"
     change: HeldChange
     sender: Conversation
     diff: str
+    files: list[ChangedFile]
+    """Each file held, whole: what it holds, and what the change makes it."""
     call: str | None = None
     """The runtime's id for the call that made the change, which the item keeps."""
 
@@ -155,6 +165,13 @@ class ShowDiff(Request):
     """Read an approval's whole diff."""
 
     kind: Literal["inbox-show-diff"] = "inbox-show-diff"
+    number: int
+
+
+class ShowFiles(Request):
+    """Read each file an approval or a held change touches, whole before and after."""
+
+    kind: Literal["inbox-show-files"] = "inbox-show-files"
     number: int
 
 
@@ -221,6 +238,14 @@ class Whole(Reply):
 
     kind: Literal["inbox-diff"] = "inbox-diff"
     text: str
+
+
+class Files(Reply):
+    """Each file an approval or a held change touches, whole before and after, in the order it was asked with."""
+
+    kind: Literal["inbox-files"] = "inbox-files"
+    number: int
+    files: list[ChangedFile]
 
 
 class Conversed(Reply):
@@ -328,7 +353,7 @@ class ApprovalAsking(Model, Handler[AskApproval], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: AskApproval) -> Reply:
         item = await self.delivery.asked(
-            request.approval(), request.diff, request.worktree
+            request.approval(), request.diff, request.files, request.worktree
         )
         return Shown(item=item)
 
@@ -348,7 +373,7 @@ class ApprovalAwaiting(Model, Handler[AwaitApproval], arbitrary_types_allowed=Tr
 
 
 class ApprovalAnswering(Model, Handler[AnswerApproval], arbitrary_types_allowed=True):
-    """Answers `AnswerApproval`: the approval answered, where nothing answered it first."""
+    """Answers `AnswerApproval`: the approval answered, where nothing answered it first, the operator's comment told to the session whose push asked it."""
 
     delivery: Delivery
 
@@ -359,7 +384,7 @@ class ApprovalAnswering(Model, Handler[AnswerApproval], arbitrary_types_allowed=
     @override
     async def answer(self, request: AnswerApproval) -> Reply:
         before = self.delivery.approval(request.number)
-        after = self.delivery.decided(
+        after = await self.delivery.decided(
             request.number, approved=request.approved, comment=request.comment
         )
         return Settled(item=after, here=isinstance(before.state, Waiting))
@@ -377,7 +402,11 @@ class HoldAsking(Model, Handler[AskHold], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: AskHold) -> Reply:
         item = await self.delivery.held_change(
-            request.change, request.sender, request.diff, call=request.call
+            request.change,
+            request.sender,
+            request.diff,
+            request.files,
+            call=request.call,
         )
         return Shown(item=item)
 
@@ -443,6 +472,22 @@ class DiffShowing(Model, Handler[ShowDiff], arbitrary_types_allowed=True):
         return Whole(text=self.delivery.inbox.diff(request.number))
 
 
+class FilesShowing(Model, Handler[ShowFiles], arbitrary_types_allowed=True):
+    """Answers `ShowFiles`: each file the approval or held change touches, whole, read off the event loop, since they can run to megabytes."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[ShowFiles]:
+        return ShowFiles
+
+    @override
+    async def answer(self, request: ShowFiles) -> Reply:
+        self.delivery.approval(request.number)
+        files = await asyncio.to_thread(self.delivery.inbox.files, request.number)
+        return Files(number=request.number, files=files)
+
+
 class DraftShowing(Model, Handler[ShowDraft], arbitrary_types_allowed=True):
     """Answers `ShowDraft`: the draft as it stands."""
 
@@ -498,6 +543,7 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.to(ApprovalAnswering(delivery=delivery)),
         Route.to(HoldAsking(delivery=delivery)),
         Route.to(DiffShowing(delivery=delivery)),
+        Route.to(FilesShowing(delivery=delivery)),
         Route.to(ContextShowing(delivery=delivery, recorded=recorded)),
         Route.to(ConversationShowing(recorded=recorded)),
         Route.to(DraftShowing(delivery=delivery)),

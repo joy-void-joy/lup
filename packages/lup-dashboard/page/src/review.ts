@@ -1,10 +1,13 @@
 // The review: everything waiting for the operator laid out as one text to read
-// and move through, their comments in it, each under the line it's on, and under
-// each item what folds there: its context, and an approval's whole diff. Pure:
-// the editor (`Review.tsx`) draws it, folds it and lets the comments be edited,
-// and the host keeps the draft (`docs/dashboard.md`, *The review*). What it
-// shares with a conversation's text is in `comments.ts`.
+// and move through, their comments in it, each under the line it's on. Under an
+// approval or a held change, each file it changes, whole (`code.ts`), its lines
+// commented on as the item's own are; under each item its context. What's
+// folded by default: the context, and each run of a file's unchanged lines away
+// from its changes. Pure: the editor (`Review.tsx`) draws it, folds it and lets
+// the comments be edited, and the host keeps the draft (`docs/dashboard.md`,
+// *The review*). What it shares with a conversation's text is in `comments.ts`.
 import { since } from "./agents";
+import { shownOnce, type ChangedFile, type Row } from "./code";
 import {
     calls,
     passage,
@@ -19,7 +22,7 @@ import {
 } from "./comments";
 import type { components } from "./generated/api";
 
-export { calls, type Block, type Line, type Span };
+export { calls, type Block, type ChangedFile, type Line, type Span };
 
 export type Item = components["schemas"]["Item"];
 export type Draft = components["schemas"]["Draft"];
@@ -30,38 +33,51 @@ export type Context = components["schemas"]["Context"];
 /** What the host answered, asked for more of an item than its own text: what it showed, or why it refused. */
 export type Answered<T> = { shown: T } | { refused: string };
 
-/** What the review shows of each item beyond its own text, by the item's number, once the host has answered: its context, and an approval's whole diff. */
+/** What the review shows of each item beyond its own text, by the item's number, once the host has answered: its context, and each file an approval or a held change changes. */
 export interface Around {
     contexts: Map<number, Answered<Context>>;
-    diffs: Map<number, Answered<string>>;
+    files: Map<number, Answered<ChangedFile[]>>;
 }
 
 /**
  * What a line under an item that isn't its own text shows: a fold's summary; a step of its context, the operator's
- * words, the agent's, a run of calls, or the call that made the item; a line of its whole diff; or why the host
- * showed none.
+ * words, the agent's, a run of calls, or the call that made the item; or why the host showed none.
  */
-export type Kind = "summary" | "you" | "agent" | "calls" | "anchor" | "diff" | "refused";
+export type Kind = "summary" | "you" | "agent" | "calls" | "anchor" | "refused";
 
 /** A line under an item that isn't its own text, so no comment is on it. */
 export interface Aside extends Span {
     kind: Kind;
 }
 
-/** What folds under an item, folded by default: its context, or an approval's whole diff. It hides `from` to `to`, from the end of its summary line to the end of its last. */
+/** A line of a changed file under an item, which comments may be on: the file's header, where `row` is none, or one of its rows. */
+export interface Coded extends Span {
+    file: ChangedFile;
+    row: Row | null;
+}
+
+/** What folds under an item, folded by default: its context, or a run of a file's unchanged lines. It hides `from` to `to`, from the end of its summary line to the end of its last. */
 export interface Fold extends Span {
     item: number;
-    kind: "context" | "diff";
+    kind: "context" | "code";
+    /** What names it among its item's folds of its kind: a run of code by its file and its first row. */
+    name: string;
     summary: Span;
 }
 
-/** One item, where it's shown: the banner of the group it opens, if it's the first of one; its header line, its own lines, and its comments among them; then the lines under it, and what of them folds. */
+/**
+ * One item, where it's shown: the banner of the group it opens, if it's the first of one; its header line, the lines
+ * comments may be on (its own, then its files' headers and rows) with its comments among them; then the lines under
+ * it, and what folds.
+ */
 export interface Region {
     item: Item;
     banner: Span | null;
     header: Span;
     lines: Line[];
     blocks: Block[];
+    /** Its lines that are its files', each with its file and row. */
+    code: Coded[];
     asides: Aside[];
     folds: Fold[];
 }
@@ -102,22 +118,21 @@ export function plain(text: string): string {
     return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
-/** One line under an item, and what it shows. */
-export interface Row {
+/** One line under an item that isn't its own text, and what it shows. */
+export interface Said {
     kind: Kind;
     text: string;
 }
 
-/** What shows under an item's own text: an approval's whole diff, then the item's context, each its summary line with the lines that fold under it; or, where the host refused one, a line saying why. */
+/** What shows under an item's files: its context, its summary line with the lines that fold under it; or, where the host refused it, a line saying why. */
 interface Under {
-    kind: Fold["kind"];
-    summary: Row;
-    lines: Row[];
+    summary: Said;
+    lines: Said[];
 }
 
 /** Return an item's context as the lines it's shown in: each thing said after who said it, its own lines kept; each run of calls in one line; and the call that made the item, marked. */
-export function steps(context: Context): Row[] {
-    const shown: Row[] = [];
+export function steps(context: Context): Said[] {
+    const shown: Said[] = [];
     let run: string[] = [];
     const ran = () => {
         if (run.length > 0) {
@@ -154,34 +169,51 @@ function told(item: Item, context: Context): string {
     return `${count}, from${yours ? " your words" : ""}${before}`;
 }
 
-/** Return what shows under an item's own text, of what the host has answered: an approval's whole diff, then the item's context. */
-function beneath(item: Item, around: Around): Under[] {
-    const shown: Under[] = [];
-    const diff = around.diffs.get(item.number);
-    if ((item.reason.reason === "approval" || item.reason.reason === "held") && diff !== undefined) {
-        const whole = "shown" in diff ? plain(diff.shown).replace(/\n+$/, "") : "";
-        const lines = whole === "" ? [] : whole.split("\n");
-        shown.push({
-            kind: "diff",
-            summary:
-                "shown" in diff
-                    ? { kind: "summary", text: `whole diff · ${lines.length} ${lines.length === 1 ? "line" : "lines"}` }
-                    : { kind: "refused", text: `no whole diff: ${diff.refused}` },
-            lines: lines.map((text) => ({ kind: "diff", text })),
-        });
-    }
+/** Return the item's context as it shows under the item, of what the host has answered; none before it has. */
+function beneath(item: Item, around: Around): Under | null {
     const context = around.contexts.get(item.number);
-    if (context !== undefined) {
-        shown.push({
-            kind: "context",
-            summary:
-                "shown" in context
-                    ? { kind: "summary", text: told(item, context.shown) }
-                    : { kind: "refused", text: `no context: ${context.refused}` },
-            lines: "shown" in context ? steps(context.shown) : [],
-        });
+    if (context === undefined) {
+        return null;
     }
-    return shown;
+    return {
+        summary:
+            "shown" in context
+                ? { kind: "summary", text: told(item, context.shown) }
+                : { kind: "refused", text: `no context: ${context.refused}` },
+        lines: "shown" in context ? steps(context.shown) : [],
+    };
+}
+
+/** One line under an item's own text that comments may be on, of a changed file: its header, or one of its rows, the run of unchanged rows it opens, if any, before it, and whether it ends one. */
+interface Filed {
+    file: ChangedFile;
+    row: Row | null;
+    text: string;
+    opens: { summary: string; name: string } | null;
+    closes: boolean;
+}
+
+/** Return the lines of each file an approval or a held change changes, as the host answered them: each file's header, then its rows, its runs of unchanged ones folding; none for any other item, or before the host has answered. */
+function filed(item: Item, around: Around): Filed[] {
+    const files = around.files.get(item.number);
+    if ((item.reason.reason !== "approval" && item.reason.reason !== "held") || files === undefined || !("shown" in files)) {
+        return [];
+    }
+    return files.shown.flatMap((file) => {
+        const laidOut = shownOnce(file);
+        const header: Filed = { file, row: null, text: laidOut.header, opens: null, closes: false };
+        const rows = laidOut.rows.map((row, at): Filed => {
+            const run = laidOut.runs.find((each) => each.from === at);
+            return {
+                file,
+                row,
+                text: row.text,
+                opens: run === undefined ? null : { summary: run.summary, name: `${file.path}:${at}` },
+                closes: laidOut.runs.some((each) => each.to === at + 1),
+            };
+        });
+        return [header, ...rows];
+    });
 }
 
 /** Return `items` in groups, each under its banner, the groups in the banners' order and the items in theirs. */
@@ -198,8 +230,9 @@ function grouped(items: Item[], banner: (item: Item) => string): Item[][] {
  * Lay `items` out as one text: those to answer now first, then the parked ones, each in the group its banner names
  * (the agent that sent it), each under a header naming it, each comment of the draft on it under the line it's on:
  * a comment on a passage under the passage's last line, one on the item whole under its header. Under each item's
- * own text, what the host has answered of it: an approval's whole diff, then the item's context, each a summary line
- * with the lines that fold under it, or a line saying why the host showed none.
+ * own text, what the host has answered of it: each file an approval or a held change changes, its header then its
+ * lines, each run of unchanged ones folding under a summary line; then the item's context, a summary line with the
+ * lines that fold under it. Where the host showed none, a line says why.
  */
 export function laid(
     items: Item[],
@@ -229,43 +262,80 @@ export function laid(
     return { text, regions };
 
     function layItem(item: Item, opening: Span | null, isParked: boolean): void {
-        const own = body(item).split("\n");
+        const files = filed(item, around);
+        // Its own lines, then its files': the text comments are placed in, by where each quote ends.
+        const own = [...body(item).split("\n"), ...files.map((each) => each.text)];
         const starts = startsOf(own);
-        const mine = comments.flatMap((comment, at) => (comment.item === item.number ? [{ comment, at }] : []));
+        const ownCount = own.length - files.length;
+        // Each comment on the item, by the line it's under, once.
+        const placed = new Map<number | null, { comment: Comment; at: number }[]>();
+        comments.forEach((comment, at) => {
+            if (comment.item === item.number) {
+                const line = under(starts, comment.quote);
+                placed.set(line, [...(placed.get(line) ?? []), { comment, at }]);
+            }
+        });
         const blocks: Block[] = [];
         const lines: Line[] = [];
+        const code: Coded[] = [];
+        const asides: Aside[] = [];
+        const folds: Fold[] = [];
         const writeBlocks = (line: number | null) => {
-            for (const { comment, at } of mine.filter(({ comment }) => under(starts, comment.quote) === line)) {
+            for (const { comment, at } of placed.get(line) ?? []) {
                 const from = text.length;
                 text += `${comment.text}\n`;
                 blocks.push({ comment: at, from, to: from + comment.text.length });
             }
         };
+        const writeLine = (line: string, at: number): Line => {
+            const from = text.length;
+            text += `${line}\n`;
+            const written = { from, to: from + line.length, own: starts[at] ?? 0 };
+            lines.push(written);
+            return written;
+        };
+        const writeAside = (said: Said): Aside => {
+            const from = text.length;
+            text += `${said.text}\n`;
+            const aside = { kind: said.kind, from, to: from + said.text.length };
+            asides.push(aside);
+            return aside;
+        };
         const head = header(item, isParked);
         const headFrom = text.length;
         text += `${head}\n`;
         writeBlocks(null);
-        own.forEach((line, at) => {
-            const from = text.length;
-            text += `${line}\n`;
-            lines.push({ from, to: from + line.length, own: starts[at] ?? 0 });
+        own.slice(0, ownCount).forEach((line, at) => {
+            writeLine(line, at);
             writeBlocks(at);
         });
-        const asides: Aside[] = [];
-        const folds: Fold[] = [];
-        const writeAside = (row: Row): Aside => {
-            const from = text.length;
-            text += `${row.text}\n`;
-            const aside = { kind: row.kind, from, to: from + row.text.length };
-            asides.push(aside);
-            return aside;
-        };
-        for (const each of beneath(item, around)) {
-            const summary = writeAside(each.summary);
-            const last = each.lines.map(writeAside).at(-1);
+        let opened: { summary: Aside; name: string } | null = null;
+        files.forEach((each, index) => {
+            if (each.opens !== null) {
+                opened = { summary: writeAside({ kind: "summary", text: each.opens.summary }), name: each.opens.name };
+            }
+            const at = ownCount + index;
+            const written = writeLine(each.text, at);
+            code.push({ from: written.from, to: written.to, file: each.file, row: each.row });
+            const run: { summary: Aside; name: string } | null = opened;
+            if (each.closes && run !== null) {
+                const summary = { from: run.summary.from, to: run.summary.to };
+                folds.push({ item: item.number, kind: "code", name: run.name, summary, from: summary.to, to: written.to });
+                opened = null;
+            }
+            writeBlocks(at);
+        });
+        const refused = around.files.get(item.number);
+        if (refused !== undefined && "refused" in refused) {
+            writeAside({ kind: "refused", text: `no files: ${refused.refused}` });
+        }
+        const context = beneath(item, around);
+        if (context !== null) {
+            const summary = writeAside(context.summary);
+            const last = context.lines.map(writeAside).at(-1);
             if (last !== undefined) {
                 const shown = { from: summary.from, to: summary.to };
-                folds.push({ item: item.number, kind: each.kind, summary: shown, from: summary.to, to: last.to });
+                folds.push({ item: item.number, kind: "context", name: "", summary: shown, from: summary.to, to: last.to });
             }
         }
         text += "\n";
@@ -275,6 +345,7 @@ export function laid(
             header: { from: headFrom, to: headFrom + head.length },
             lines,
             blocks,
+            code,
             asides,
             folds,
         });
@@ -321,12 +392,87 @@ export function foldAt(laidOut: Laid, position: number): Fold | undefined {
         .find((each) => position >= each.summary.from && position <= each.to);
 }
 
-/** Return what names a fold across layouts: its item's number and what it holds. */
+/** Return what names a fold across layouts: its item's number, what it holds, and which of those it is. */
 export function foldKey(fold: Fold): string {
-    return `${fold.item} ${fold.kind}`;
+    return `${fold.item} ${fold.kind} ${fold.name}`;
 }
 
-/** Return where a comment opened on the line at `position` goes: on that line of its item, or on the item whole from its header or an empty line; none outside every item, or on a line that isn't the item's own. */
+/** Return where the first of `code` ending at or after `position` is among them, found by halving: they're in the text's order. */
+export function codeFrom(code: Coded[], position: number): number {
+    let low = 0;
+    let high = code.length;
+    while (low < high) {
+        const middle = (low + high) >> 1;
+        if ((code[middle]?.to ?? 0) < position) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    return low;
+}
+
+/** Return the line of a changed file shown at `position`, where it's on one. */
+export function codeAt(region: Region, position: number): Coded | undefined {
+    const found = region.code[codeFrom(region.code, position)];
+    return found !== undefined && position >= found.from && position <= found.to ? found : undefined;
+}
+
+/** How a line of a changed file is marked where a comment quotes it, as a diff marks it. */
+const SIGNS: Record<Row["change"], string> = { added: "+", removed: "-", same: " " };
+
+/**
+ * Say the passage `from` to `to` selects on `lines` as a comment quotes it, so the agent can find it: the item's own
+ * words as they are; a changed file's lines under the file's path and where they are in it (`path:12-14`, the
+ * numbers what the file becomes, or what it was where they're all removed), each marked as a diff marks it; a file's
+ * header alone, its path.
+ */
+function said(text: string, region: Region, lines: Line[], from: number, to: number): string {
+    const parts = lines.map((line) => ({
+        line,
+        coded: codeAt(region, line.from),
+        text: text.slice(Math.max(line.from, from), Math.min(line.to, Math.max(to, line.from))),
+    }));
+    const groups: (typeof parts)[] = [];
+    for (const part of parts) {
+        const last = groups.at(-1);
+        const same = last?.[0]?.coded?.file === part.coded?.file;
+        if (last !== undefined && same) {
+            last.push(part);
+        } else {
+            groups.push([part]);
+        }
+    }
+    return groups
+        .map((group) => {
+            const file = group[0]?.coded?.file;
+            if (file === undefined) {
+                return group.map((each) => each.text).join("\n");
+            }
+            const rows = group.flatMap((each) => (each.coded?.row == null ? [] : [{ row: each.coded.row, text: each.text }]));
+            const kept = rows.filter((each) => each.row.side === "after");
+            const numbered = (kept.length > 0 ? kept : rows).map((each) => each.row.number);
+            const span = numbered.length === 0 ? "" : `:${spanOf(numbered)}`;
+            const before = kept.length === 0 && rows.length > 0 ? ", as it was before the change" : "";
+            return [`${file.path}${span}${before}`, ...rows.map((each) => `${SIGNS[each.row.change]}${each.text}`)].join(
+                "\n",
+            );
+        })
+        .join("\n");
+}
+
+/** Say a run of line numbers as a span: `12`, or `12-14`. */
+function spanOf(numbers: number[]): string {
+    const first = Math.min(...numbers);
+    const last = Math.max(...numbers);
+    return first === last ? `${first}` : `${first}-${last}`;
+}
+
+/**
+ * Return where a comment opened on the line at `position` goes: on that line of its item, or on the item whole from
+ * its header or an empty line of its own; on a line of a changed file, or its header, empty or not; none outside
+ * every item, or on a line no comment is on.
+ */
 export function opened(laidOut: Laid, position: number): Comment | undefined {
     const region = regionAt(laidOut.regions, position);
     if (region === undefined || onBanner(region, position) || asideAt(region, position) !== undefined) {
@@ -334,17 +480,17 @@ export function opened(laidOut: Laid, position: number): Comment | undefined {
     }
     const line = lineAt(region, position);
     const shown = line === undefined ? "" : laidOut.text.slice(line.from, line.to);
-    if (line === undefined || shown === "") {
+    if (line === undefined || (shown === "" && codeAt(region, line.from) === undefined)) {
         return { item: region.item.number, quote: null, text: "" };
     }
     return {
         item: region.item.number,
-        quote: { text: shown, start: line.own, end: line.own + shown.length },
+        quote: { text: said(laidOut.text, region, [line], line.from, line.to), start: line.own, end: line.own + shown.length },
         text: "",
     };
 }
 
-/** Return a comment on the passage `from` to `to` selects, counted in its item's own text; none where it isn't all inside one item's own lines. */
+/** Return a comment on the passage `from` to `to` selects, counted in its item's text, its own and its files'; none where it isn't all inside one item's lines. */
 export function quoted(laidOut: Laid, from: number, to: number): Comment | undefined {
     const region = regionAt(laidOut.regions, from);
     const first = region === undefined ? undefined : lineAt(region, from);
@@ -353,7 +499,24 @@ export function quoted(laidOut: Laid, from: number, to: number): Comment | undef
         return undefined;
     }
     const own = region.lines.map((each) => laidOut.text.slice(each.from, each.to)).join("\n");
-    return { item: region.item.number, quote: passage(own, first, last, from, to), text: "" };
+    const quote = passage(own, first, last, from, to);
+    const lines = region.lines.slice(region.lines.indexOf(first), region.lines.indexOf(last) + 1);
+    if (lines.every((each) => codeAt(region, each.from) === undefined)) {
+        return { item: region.item.number, quote, text: "" };
+    }
+    return { item: region.item.number, quote: { ...quote, text: said(laidOut.text, region, lines, from, to) }, text: "" };
+}
+
+/** Say an item's comments as one answer, as its agent reads them: each under the passage it quotes, set off as a mail quotes, in the order they were written; those on the whole after. */
+export function answer(comments: Comment[]): string {
+    const saying = comments.filter((each) => each.text.trim() !== "");
+    const quoted = saying.filter((each) => each.quote != null).sort((a, b) => (a.quote?.start ?? 0) - (b.quote?.start ?? 0));
+    const whole = saying.filter((each) => each.quote == null);
+    const parts = quoted.map((each) => {
+        const lines = (each.quote?.text ?? "").split("\n").map((line) => (line === "" ? ">" : `> ${line}`));
+        return `${lines.join("\n")}\n\n${each.text.trim()}`;
+    });
+    return [...parts, ...whole.map((each) => each.text.trim())].join("\n\n");
 }
 
 /** Return where in the text an offset of an item's own text is shown. */

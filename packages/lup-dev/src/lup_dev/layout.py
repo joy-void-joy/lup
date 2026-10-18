@@ -359,6 +359,11 @@ class InboxLayout(Model):
         return self.home / "diffs"
 
     @property
+    def files(self) -> Path:
+        """Each file an approval or a held change touches, whole: all of one item's in a file named by its number."""
+        return self.home / "files"
+
+    @property
     def draft(self) -> Path:
         """The operator's draft reply, kept until they send it (`docs/dashboard.md`, *The review*)."""
         return self.home / "draft.json"
@@ -370,6 +375,10 @@ class InboxLayout(Model):
     def diff(self, number: int) -> Path:
         """Say where approval `number`'s whole diff is kept."""
         return self.diffs / f"{number}.json"
+
+    def changed(self, number: int) -> Path:
+        """Say where the files approval or held change `number` touches are kept."""
+        return self.files / f"{number}.json"
 
     def party(self, key: str) -> Path:
         """Say where the conversation keyed `key` is kept."""

@@ -86,13 +86,28 @@ export function spoken(who: string, text: string, blanks: boolean): Spoken[] {
 
 /** Return the line of a text an offset is on, by where each of its lines starts, counting from 0. */
 export function lineOf(starts: number[], offset: number): number {
-    const found = starts.findLastIndex((each) => each <= offset);
-    return Math.max(found, 0);
+    // The last line starting at or before `offset`, found by halving: the starts are in order.
+    let low = 0;
+    let high = starts.length;
+    while (low < high) {
+        const middle = (low + high) >> 1;
+        if ((starts[middle] ?? 0) <= offset) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    return Math.max(low - 1, 0);
 }
 
 /** Return where each line of `lines` starts in them joined. */
 export function starts(lines: string[]): number[] {
-    return lines.map((_, at) => lines.slice(0, at).reduce((sum, line) => sum + line.length + 1, 0));
+    let at = 0;
+    return lines.map((line) => {
+        const start = at;
+        at += line.length + 1;
+        return start;
+    });
 }
 
 /** Return the line, of those starting at `starts`, a comment's quote is shown under: the one its passage ends on; none for a comment on the whole. */
@@ -129,19 +144,18 @@ export interface Change {
 const MOST = 1000;
 
 /** Lines `from` to `to` of one text, replaced by lines `into` to `until` of the other. */
-type Hunk = [from: number, to: number, into: number, until: number];
+export interface Hunk {
+    from: number;
+    to: number;
+    into: number;
+    until: number;
+}
 
 /**
- * Return the changes that make `before` into `after`, line by line: each line both have kept where it is, what's
- * removed and added between them each a change of its own, in order (Myers' diff, after their common first and last
- * lines). So the comments cleared above a reader and the steps added below them leave the reader's lines untouched.
+ * Return the hunks that make lines `a` into lines `b`, as few lines changed as can be, in order (Myers' diff, after
+ * their common first and last lines); where more than `MOST` lines differ, all between those is one hunk.
  */
-export function changes(before: string, after: string): Change[] {
-    if (before === after) {
-        return [];
-    }
-    const a = before === "" ? [] : before.split("\n");
-    const b = after === "" ? [] : after.split("\n");
+export function hunks(a: string[], b: string[]): Hunk[] {
     let first = 0;
     while (first < a.length && first < b.length && a[first] === b[first]) {
         first += 1;
@@ -150,9 +164,32 @@ export function changes(before: string, after: string): Change[] {
     while (last < a.length - first && last < b.length - first && a[a.length - 1 - last] === b[b.length - 1 - last]) {
         last += 1;
     }
-    const middle = diff(a.slice(first, a.length - last), b.slice(first, b.length - last)) ?? [
-        [0, a.length - first - last, 0, b.length - first - last],
-    ];
+    if (first === a.length && first === b.length) {
+        return [];
+    }
+    const whole = { from: 0, to: a.length - first - last, into: 0, until: b.length - first - last };
+    // Lines only added, or only removed, between the common ones are one hunk, with nothing to search.
+    const searched = whole.to === 0 || whole.until === 0 ? null : diff(a.slice(first, a.length - last), b.slice(first, b.length - last));
+    const middle = searched ?? [whole];
+    return middle.map((each) => ({
+        from: each.from + first,
+        to: each.to + first,
+        into: each.into + first,
+        until: each.until + first,
+    }));
+}
+
+/**
+ * Return the changes that make `before` into `after`, line by line: each line both have kept where it is, what's
+ * removed and added between them each a change of its own, in order (`hunks`). So the comments cleared above a
+ * reader and the steps added below them leave the reader's lines untouched.
+ */
+export function changes(before: string, after: string): Change[] {
+    if (before === after) {
+        return [];
+    }
+    const a = before === "" ? [] : before.split("\n");
+    const b = after === "" ? [] : after.split("\n");
     const starts: number[] = [];
     let at = 0;
     for (const line of a) {
@@ -160,9 +197,7 @@ export function changes(before: string, after: string): Change[] {
         at += line.length + 1;
     }
     starts.push(at);
-    return middle.map(([from, to, into, until]) =>
-        change(before, a.length, starts, from + first, to + first, b.slice(into + first, until + first)),
-    );
+    return hunks(a, b).map((each) => change(before, a.length, starts, each.from, each.to, b.slice(each.into, each.until)));
 }
 
 /** Return the change of `before`, of `count` lines starting at `starts`, that replaces its lines `from` to `to` with `lines`. */
@@ -238,7 +273,7 @@ function diff(a: string[], b: string[]): Hunk[] | null {
         x = fromX;
         y = fromY;
     }
-    const hunks: Hunk[] = [];
+    const made: Hunk[] = [];
     let i = 0;
     let j = 0;
     let open: Hunk | null = null;
@@ -250,18 +285,18 @@ function diff(a: string[], b: string[]): Hunk[] | null {
             continue;
         }
         if (open === null) {
-            open = [i, i, j, j];
-            hunks.push(open);
+            open = { from: i, to: i, into: j, until: j };
+            made.push(open);
         }
         if (step === "removed") {
             i += 1;
-            open[1] = i;
+            open.to = i;
         } else {
             j += 1;
-            open[3] = j;
+            open.until = j;
         }
     }
-    return hunks;
+    return made;
 }
 
 /** Return where the cursor is once `made` are made, as vim's cursor sits on a character: on the same one, moved with the text; at a change's start where what it was on is replaced. Lines added where it is go before it, but at the text's very end. */

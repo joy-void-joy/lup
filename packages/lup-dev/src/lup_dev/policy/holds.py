@@ -33,7 +33,7 @@ from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.host.protocol import Holding, HostError, ShowHolding
 from lup_dev.inbox.protocol import AskHold, Shown
-from lup_dev.inbox.store import Conversation, HeldChange
+from lup_dev.inbox.store import ChangedFile, Conversation, HeldChange
 from lup_dev.layout import HostLayout, Layout, StoreLayout
 from lup_dev.policy.roles import Role
 from lup_dev.policy.verdicts import Verdict, VerdictLog
@@ -113,8 +113,10 @@ class Announcing(ABC):
     """Where a hold is put before the operator: their inbox, whose answer is written back to the hold (`answer`)."""
 
     @abstractmethod
-    def announced(self, hold: Hold, runtime: str, repository: Path) -> None:
-        """Put `hold` before the operator, from the session of `runtime` that made the change, in `repository`."""
+    def announced(
+        self, hold: Hold, runtime: str, repository: Path, files: list[ChangedFile]
+    ) -> None:
+        """Put `hold` before the operator, from the session of `runtime` that made the change, in `repository`, with each file it holds whole (`files`)."""
 
     @abstractmethod
     def holding(self, runtime: str, session: str, agent: str | None) -> bool:
@@ -149,7 +151,9 @@ class InboxAnnouncing(Model, Announcing, arbitrary_types_allowed=True):
     clock: Clock
 
     @override
-    def announced(self, hold: Hold, runtime: str, repository: Path) -> None:
+    def announced(
+        self, hold: Hold, runtime: str, repository: Path, files: list[ChangedFile]
+    ) -> None:
         sender = Conversation(
             repository=repository,
             runtime=runtime,
@@ -158,7 +162,11 @@ class InboxAnnouncing(Model, Announcing, arbitrary_types_allowed=True):
         )
         host = HostClient(layout=self.layout, clock=self.clock, starter=Detached())
         asking = AskHold(
-            change=asked(hold), sender=sender, diff=hold.diff, call=hold.call
+            change=asked(hold),
+            sender=sender,
+            diff=hold.diff,
+            files=files,
+            call=hold.call,
         )
         host.ask(asking, Shown)
 

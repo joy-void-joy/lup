@@ -22,6 +22,7 @@ import sys
 import webbrowser
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, override
 
@@ -427,7 +428,9 @@ def host_serve(context: typer.Context) -> None:
         ],
         tools=room_tools(delivery),
         room_routes=[
-            *remote_routes(Remotes(say=typer.echo, landed=proposed_after)),
+            *remote_routes(
+                Remotes(say=typer.echo, landed=partial(proposed_after, delivery))
+            ),
             *clipboard_routes(Desktop.of(settings)),
         ],
         modules=Workers(layout=layout.host, say=typer.echo),
@@ -439,14 +442,18 @@ def host_serve(context: typer.Context) -> None:
     asyncio.run(service.serve())
 
 
-async def proposed_after(launch: Register, refs: list[str]) -> None:
+async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) -> None:
     """Put the approval of the host zone at the integration branch's tip in the operator's inbox, where a launch's push moved that branch and the zone isn't the one approved.
 
     Trust reads the zone with git and asks the service itself, so it runs off
     the event loop. Its repository is the launch's git directory, found
     through git from its main worktree; one holding a `commondir`, which would
     lead git elsewhere, isn't read (`docs/host-tools.md`, *Running git on the
-    host*). What fails is said in the service's log, and the push stands.
+    host*). The approval names the main conversation of the session the launch
+    runs, as `delivery` last heard it, which the operator's comment on their
+    answer is told to: a push comes from the room's git, not from a call, so
+    which of the session's conversations pushed isn't known. What fails is said
+    in the service's log, and the push stands.
     """
     integration = LupDevSettings().lup_integration_branch
     if f"refs/heads/{integration}" not in refs:
@@ -459,8 +466,9 @@ async def proposed_after(launch: Register, refs: list[str]) -> None:
         )
         return
     root = Git.pinned(launch.repository).main_worktree()
+    pushed_by = delivery.running(launch.launch)
     try:
-        number = await asyncio.to_thread(machine_trust(root, []).proposed)
+        number = await asyncio.to_thread(machine_trust(root, []).proposed, pushed_by)
     except (LupDevError, LupError) as failure:
         typer.echo(
             f"{launch.launch}: the push moved {integration}, but its approval "
@@ -927,7 +935,8 @@ def inbox_answer(
 
     An approval shows its summary, asks whether to show the whole diff, then
     whether to approve, as the launch asking it does, and stops where the launch's
-    terminal answers first; `--approve` or `--decline` answers without asking.
+    terminal answers first; `--approve` or `--decline` answers without asking,
+    and `--comment` beside it is told to the session whose push asked it.
     Every launch waiting on it goes on with the answer; approved, the copy is
     installed here where no launch did it first, the host service restarted on
     it for lup's own repository.
@@ -944,7 +953,7 @@ def inbox_answer(
         held_answer(client, item, approve=approve, comment=comment)
         return
     if approve is not None:
-        given_here = approvals.answer(number, approved=approve)
+        given_here = approvals.answer(number, approved=approve, comment=comment or "")
         typer.echo(approved_here(number, given_here))
         if isinstance(item.reason, Approval):
             acted = acted_on(item.reason, given_here)

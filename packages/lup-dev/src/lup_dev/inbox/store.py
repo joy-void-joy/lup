@@ -18,7 +18,8 @@ operator's inbox and answered at the launching terminal or any other, whichever
 comes first. It's from the operator's own launch to the operator, and its answer
 is its state, since no party's inbox waits for it: the launches waiting on it
 read it there. Its whole diff, which can run to megabytes, is kept beside it in a
-file of its own, read only when asked for, so listing the inbox never carries it.
+file of its own, and each file it changes, whole, in another, as a held change's
+are; each is read only when asked for, so listing the inbox never carries them.
 
 The host service is the only writer, on its event loop, and nothing mounts the
 store into a room: the first lup's sessions approved their own questions by
@@ -142,7 +143,8 @@ class Approval(Model):
     """An approval the operator is asked, yes or no: its question, what they read first, and what it's of.
 
     Trust on launch's (`lup_dev.launch.trust`): a repository's host zone, the
-    whole diff kept beside the item (`Inbox.diff`), shown on request.
+    whole diff and each file changed kept beside the item (`Inbox.diff`,
+    `Inbox.files`), shown on request.
     """
 
     reason: Literal["approval"] = "approval"
@@ -155,10 +157,14 @@ class Approval(Model):
     fingerprint: str
     """The zone's fingerprint: a launch asking about the same zone joins the
     approval waiting for it."""
+    pushed_by: Conversation | None = None
+    """The main conversation of the session whose push to the integration branch
+    asked it, which the operator's comment on their answer is told to; none for
+    one a launch asked at its terminal."""
 
 
 class HeldChange(Model):
-    """A change held for the operator's answer, yes or no: what's held and why, its diff kept beside the item (`Inbox.diff`).
+    """A change held for the operator's answer, yes or no: what's held and why, its diff and each file held kept beside the item (`Inbox.diff`, `Inbox.files`).
 
     The judge's (`lup_dev.policy.holds`): a write that asks waits for the
     answer inside its hook, or, for what a move of `HEAD` brought, is asked
@@ -222,6 +228,67 @@ class Diff(Model):
     """An approval's whole diff, coloured, kept beside its item and read only on request."""
 
     text: str
+
+
+class Text(Model):
+    """A file's content, as text."""
+
+    kind: Literal["text"] = "text"
+    text: str
+
+
+class Binary(Model):
+    """A file's content that isn't text, which isn't shown: its size alone."""
+
+    kind: Literal["binary"] = "binary"
+    size: int
+    """In bytes."""
+
+
+type Content = Annotated[Text | Binary, Field(discriminator="kind")]
+"""What a file holds, as the operator is shown it."""
+
+
+def content(data: bytes) -> Content:
+    r"""Return a file's bytes as they're shown: text where they're UTF-8 with no NUL byte, as git takes a file for text; else binary.
+
+    >>> content(b"a = 1\n")
+    Text(kind='text', text='a = 1\n')
+    >>> content(b"\x89PNG\x00")
+    Binary(kind='binary', size=5)
+    """
+    if b"\0" in data:
+        return Binary(size=len(data))
+    try:
+        return Text(text=data.decode())
+    except UnicodeDecodeError:
+        return Binary(size=len(data))
+
+
+class ChangedFile(Model):
+    """One file a change touches, whole on each side: what it was, and what it becomes."""
+
+    path: Path
+    """From the root of the worktree it's in, or of the repository."""
+    before: Content | None
+    """What it held; none for a file the change creates."""
+    after: Content | None
+    """What it holds once changed; none for a file the change deletes."""
+
+    @classmethod
+    def of(cls, path: Path, before: bytes | None, after: bytes | None) -> ChangedFile:
+        """Return the file at `path` from its bytes on each side, none where it isn't there."""
+        return cls(
+            path=path,
+            before=None if before is None else content(before),
+            after=None if after is None else content(after),
+        )
+
+
+class ChangedFiles(Model):
+    """The files an approval or a held change touches, each whole, kept beside its item and read only on request."""
+
+    files: list[ChangedFile]
 
 
 class Waiting(Model):
@@ -468,13 +535,18 @@ class Inbox(MutableModel):
             None,
         )
 
-    def attached(self, number: int, diff: str) -> None:
-        """Keep approval `number`'s whole diff beside it, in a file of its own."""
+    def attached(self, number: int, diff: str, files: list[ChangedFile]) -> None:
+        """Keep approval or held change `number`'s whole diff and each file it changes beside it, each in a file of its own."""
         write_model(self.layout.diff(number), Diff(text=diff))
+        write_model(self.layout.changed(number), ChangedFiles(files=files))
 
     def diff(self, number: int) -> str:
-        """Return approval `number`'s whole diff, or say it isn't kept."""
+        """Return approval or held change `number`'s whole diff, or say it isn't kept."""
         return read(self.layout.diff(number), Diff).text
+
+    def files(self, number: int) -> list[ChangedFile]:
+        """Return each file approval or held change `number` changes, whole, or say they aren't kept."""
+        return read(self.layout.changed(number), ChangedFiles).files
 
     def placed(self, place: Whereabouts) -> Whereabouts:
         """Write a conversation's whereabouts through to its file, and hold them."""

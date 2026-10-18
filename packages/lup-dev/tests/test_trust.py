@@ -34,7 +34,17 @@ from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.protocol import AskApproval
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import Approval as StoredApproval
-from lup_dev.inbox.store import Decided, Inbox, InboxError, Superseded, Waiting
+from lup_dev.inbox.store import (
+    Binary,
+    ChangedFile,
+    Conversation,
+    Decided,
+    Inbox,
+    InboxError,
+    Superseded,
+    Waiting,
+)
+from lup_dev.inbox.store import Text as TextContent
 from lup_dev.launch.trust import (
     WHOLE,
     WHY,
@@ -327,7 +337,7 @@ class Here(Approvals):
     def waited(self, number: int) -> Generator[Elsewhere]:
         yield Never()
 
-    def answer(self, number: int, *, approved: bool) -> Given:
+    def answer(self, number: int, *, approved: bool, comment: str = "") -> Given:
         self.answers.append(approved)
         return Given(approved=approved, here=True)
 
@@ -693,6 +703,45 @@ def test_a_change_inside_the_zone_shows_its_diff_since_the_approved_commit(
     assert approved(lup, kit, shell) == outcome.approval
 
 
+def test_an_approval_carries_each_file_changed_whole_a_binary_by_its_size(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    written(lup, {"packages/lup-dev/src/environment/__init__.py": '"""Changed."""\n'})
+    (lup / "packages/lup-dev/src/environment/icon.png").write_bytes(b"\x89PNG\x00!")
+    (lup / "packages/lup/src/library/__init__.py").unlink()
+    (lup / "docs/note.md").write_text("# Outside the zone\n")
+    shell.commit(lup, "change")
+    layered(lup, LAYER)
+    trust = trusting(lup, kit, unasked())
+    trust.proposed()
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    assert asking.files == [
+        ChangedFile(
+            path=Path("packages/lup/src/library/__init__.py"),
+            before=TextContent(text='"""The library."""\n'),
+            after=None,
+        ),
+        ChangedFile(
+            path=Path("packages/lup-dev/src/environment/__init__.py"),
+            before=TextContent(text='"""The environment."""\n'),
+            after=TextContent(text='"""Changed."""\n'),
+        ),
+        ChangedFile(
+            path=Path("packages/lup-dev/src/environment/icon.png"),
+            before=None,
+            after=Binary(size=6),
+        ),
+        ChangedFile(
+            path=Path("lup_project.local.py"),
+            before=None,
+            after=TextContent(text=LAYER),
+        ),
+    ]
+
+
 def test_a_branchs_own_change_isnt_the_tips_and_asks_nothing(
     lup: Path, kit: Kit, shell: Shell, tmp_path: Path
 ) -> None:
@@ -752,11 +801,26 @@ def test_a_zone_proposed_puts_its_approval_in_the_inbox_and_asks_nothing_here(
     lup: Path, kit: Kit, shell: Shell
 ) -> None:
     trust = trusting(lup, kit, unasked())
-    number = trust.proposed()
+    pusher = Conversation(repository=lup / ".git", runtime="claude", session="s1")
+    number = trust.proposed(pusher)
     assert number == 1
     assert isinstance(trust.approvals, Here)
     [asking] = trust.approvals.asking
     assert asking.fingerprint == trust.check().fingerprint
+    assert asking.pushed_by == pusher
+    zone = [
+        Path(path)
+        for path in shell.git(lup, "ls-files").splitlines()
+        if any(Path(path).is_relative_to(each) for each in trust.check().zone.paths)
+    ]
+    assert [each.path for each in asking.files] == sorted(zone)
+    assert all(each.before is None for each in asking.files)
+    assert (
+        ChangedFile(
+            path=Path("lup_project.py"), before=None, after=TextContent(text=DECLARED)
+        )
+        in asking.files
+    )
     assert answering(trust).asked == []
     assert recording(trust).installed == []
     assert approved(lup, kit, shell) is None
@@ -1837,6 +1901,7 @@ def test_a_wait_outlives_a_service_restart_and_hears_the_next_ones_answer(
         question="Approve?",
         summary="A summary.",
         diff="A diff.",
+        files=[],
         repository=tmp_path / ".git",
         fingerprint="zone",
         worktree=tmp_path,
@@ -1874,6 +1939,7 @@ def test_lup_dev_inbox_answer_asks_an_approval_as_the_launch_does(
         question="Approve the host zone?",
         summary="\x1b[32mA summary.\x1b[m",
         diff="+the whole diff\n",
+        files=[],
         repository=tmp_path / ".git",
         fingerprint="zone",
         worktree=tmp_path,
@@ -1897,6 +1963,7 @@ def approval_of(tmp_path: Path, fingerprint: str) -> AskApproval:
         question=f"Approve the host zone {fingerprint}?",
         summary="A summary.",
         diff="",
+        files=[],
         repository=tmp_path / ".git",
         fingerprint=fingerprint,
         worktree=tmp_path,
@@ -1936,7 +2003,7 @@ def test_an_approval_of_a_newer_zone_supersedes_the_one_waiting(
 class SupersededOnce(Here):
     """The inbox, standing in: the first answer finds its approval superseded."""
 
-    def answer(self, number: int, *, approved: bool) -> Given:
+    def answer(self, number: int, *, approved: bool, comment: str = "") -> Given:
         if not self.answers:
             self.answers.append(approved)
             message = f"Item {number} was superseded by item 2."

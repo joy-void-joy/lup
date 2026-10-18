@@ -75,6 +75,7 @@ if TYPE_CHECKING:
     from lup_dev.declaration.resolve import Selected
     from lup_dev.declaration.runner import Runner
     from lup_dev.host.protocol import Register, Reply, Request
+    from lup_dev.inbox.store import ChangedFile
 
 
 def marked(
@@ -506,13 +507,17 @@ class Announced(Announcing):
         by default, so a test sees every change that asks held, and turned off
         to see the project's own defaults."""
         self.holds: list[Hold] = []
+        self.files: list[list[ChangedFile]] = []
         self.runtimes: list[str] = []
         self.asked: list[str] = []
         """Each conversation the switch was asked about, as `runtime/session/agent`."""
 
-    def announced(self, hold: Hold, runtime: str, repository: Path) -> None:
+    def announced(
+        self, hold: Hold, runtime: str, repository: Path, files: list[ChangedFile]
+    ) -> None:
         del repository
         self.holds.append(hold)
+        self.files.append(files)
         self.runtimes.append(runtime)
         if self.answering is not None:
             answer(self.layout, hold.key, self.answering, [], self.clock)

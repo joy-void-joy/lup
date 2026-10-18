@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Literal, override
 
 from lup.types import Model
+from lup_dev.inbox.store import ChangedFile
 from lup_dev.policy.checkpoint import (
     Attributed,
     Bench,
@@ -274,7 +275,12 @@ def held_write(
         )
     log = worktree.verdicts(services.layout)
     log.append([logged])
-    services.announcing.announced(hold, bench.runtime.name(), worktree.repository)
+    whole = ChangedFile.of(
+        path, None if earlier is None else earlier.encode(), after.encode()
+    )
+    services.announcing.announced(
+        hold, bench.runtime.name(), worktree.repository, [whole]
+    )
     answer = holds.wait(key, services.clock)
     if answer is not None and answer.approved and outside is not None:
         log.append(answered(hold, "approved"))

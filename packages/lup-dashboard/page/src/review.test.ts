@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
     EMPTY,
+    answer,
     blockAt,
     calls,
     covered,
     foldAt,
+    foldKey,
     laid,
     opened,
     plain,
@@ -16,6 +18,8 @@ import {
     steps,
     toggled,
     type Around,
+    type ChangedFile,
+    type Comment,
     type Context,
     type Draft,
     type Item,
@@ -82,7 +86,7 @@ const CONTEXT: Context = {
     ],
 };
 
-const NOTHING: Around = { contexts: new Map(), diffs: new Map() };
+const NOTHING: Around = { contexts: new Map(), files: new Map() };
 
 const header = (item: Item, parked: boolean) => `── #${item.number}${parked ? " · later" : ""} ──`;
 const banner = (item: Item, parked: boolean) => `━━ ${item.sender.party === "conversation" ? item.sender.session : "lup"}${parked ? " · later" : ""} ━━`;
@@ -143,13 +147,20 @@ describe("laid", () => {
     });
 });
 
+/** Twelve lines, `l1` to `l12`, the seventh `seventh` in place of `l7`. */
+function twelve(seventh = "l7"): string {
+    return Array.from({ length: 12 }, (_, at) => (at === 6 ? seventh : `l${at + 1}`)).join("\n") + "\n";
+}
+
+const CHANGED: ChangedFile = { path: "a.py", before: { kind: "text", text: twelve() }, after: { kind: "text", text: twelve("L7") } };
+
 describe("what folds under an item", () => {
     const around: Around = {
         contexts: new Map([
             [51, { shown: CONTEXT }],
             [54, { refused: "item 54 was made by no agent's call" }],
         ]),
-        diffs: new Map([[54, { shown: "\u001b[1mdiff --git a/a.py b/a.py\u001b[m\n-old\n+new\n" }]]),
+        files: new Map([[54, { shown: [CHANGED] }]]),
     };
 
     it("says each step of a context in a line, its words' own lines kept, a run of calls in one, the call that made the item marked", () => {
@@ -164,11 +175,13 @@ describe("what folds under an item", () => {
         expect(calls(["Read", "Read", "Bash", "Read"])).toBe("· called Read ×2, Bash, Read");
     });
 
-    it("lays an approval's diff, then the item's context, under its own text, each folding under its summary line", () => {
+    it("lays an approval's files, then the item's context, under its own text, a file's unchanged runs and the context folding", () => {
         const out = laid([QUESTION, APPROVAL], banner, header, EMPTY, around);
         expect(out.text).toBe(
             "━━ lup ━━\n── #54 ──\nApprove?\n a.py | 2 +-\n" +
-                "whole diff · 3 lines\ndiff --git a/a.py b/a.py\n-old\n+new\n" +
+                "a.py · changed · +1 −1\n" +
+                "3 unchanged lines, 1–3\nl1\nl2\nl3\nl4\nl5\nl6\nl7\nL7\nl8\nl9\nl10\n" +
+                "2 unchanged lines, 11–12\nl11\nl12\n" +
                 "no context: item 54 was made by no agent's call\n\n" +
                 "━━ s1 ━━\n── #51 ──\nWhich parser?\n1. Use lark\n   lean: yes\n2. Keep the cache\n   lean: no\n" +
                 "context · 7 steps, from your words 9m before this item\n" +
@@ -178,13 +191,22 @@ describe("what folds under an item", () => {
         const [approval, question] = out.regions;
         const shown = (from: number, to: number) => out.text.slice(from, to);
 
-        const [diff] = approval!.folds;
-        expect(approval!.folds).toHaveLength(1);
-        expect(diff!.kind).toBe("diff");
-        expect(shown(diff!.summary.from, diff!.summary.to)).toBe("whole diff · 3 lines");
-        expect(diff!.from).toBe(diff!.summary.to);
-        expect(shown(diff!.from, diff!.to)).toBe("\ndiff --git a/a.py b/a.py\n-old\n+new");
-        expect(approval!.asides.map((each) => each.kind)).toEqual(["summary", "diff", "diff", "diff", "refused"]);
+        const [top, bottom] = approval!.folds;
+        expect(approval!.folds).toHaveLength(2);
+        expect(top).toMatchObject({ item: 54, kind: "code", name: "a.py:0" });
+        expect(shown(top!.summary.from, top!.summary.to)).toBe("3 unchanged lines, 1–3");
+        expect(top!.from).toBe(top!.summary.to);
+        expect(shown(top!.from, top!.to)).toBe("\nl1\nl2\nl3");
+        expect(shown(bottom!.from, bottom!.to)).toBe("\nl11\nl12");
+        expect(foldKey(top!)).not.toBe(foldKey(bottom!));
+        expect(approval!.asides.map((each) => each.kind)).toEqual(["summary", "summary", "refused"]);
+        expect(approval!.code.map((each) => [shown(each.from, each.to), each.row?.change ?? "header"])).toEqual([
+            ["a.py · changed · +1 −1", "header"],
+            ...["l1", "l2", "l3", "l4", "l5", "l6"].map((each) => [each, "same"]),
+            ["l7", "removed"],
+            ["L7", "added"],
+            ...["l8", "l9", "l10", "l11", "l12"].map((each) => [each, "same"]),
+        ]);
 
         const [context] = question!.folds;
         expect(context).toMatchObject({ item: 51, kind: "context" });
@@ -204,10 +226,11 @@ describe("what folds under an item", () => {
         const out = laid([QUESTION, APPROVAL], banner, header, EMPTY, around);
         expect(foldAt(out, out.text.indexOf("context ·"))?.kind).toBe("context");
         expect(foldAt(out, out.text.indexOf("Ask me first"))?.kind).toBe("context");
-        expect(foldAt(out, out.text.indexOf("+new"))?.kind).toBe("diff");
+        expect(foldAt(out, out.text.indexOf("l2\n"))?.kind).toBe("code");
+        expect(foldAt(out, out.text.indexOf("L7"))).toBeUndefined();
         expect(foldAt(out, out.text.indexOf("Keep the cache"))).toBeUndefined();
         expect(foldAt(out, out.text.indexOf("no context"))).toBeUndefined();
-        for (const line of ["context ·", "→ called", "-old", "no context"]) {
+        for (const line of ["context ·", "→ called", "3 unchanged", "no context"]) {
             expect(opened(out, out.text.indexOf(line))).toBeUndefined();
         }
         expect(opened(out, out.text.indexOf("lean: no"))?.item).toBe(51);
@@ -224,12 +247,61 @@ describe("what folds under an item", () => {
         };
         const untimed: Context = { ...agents, entries: [{ kind: "called", tool: "report", id: "call-51" }], anchor: 0 };
         const summary = (context: Context) => {
-            const out = laid([QUESTION], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), diffs: new Map() });
+            const out = laid([QUESTION], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map() });
             const [fold] = out.regions[0]!.folds;
             return out.text.slice(fold!.summary.from, fold!.summary.to);
         };
         expect(summary(agents)).toBe("context · 2 steps, from 2h before this item");
         expect(summary(untimed)).toBe("context · 1 step");
+    });
+});
+
+describe("comments on a changed file's lines", () => {
+    const HELD: Item = {
+        number: 55,
+        reason: { reason: "held", text: "Let the change to 2 files land?", summary: "a.py: asks", worktree: "/w", key: "k" },
+        sender: from("s1"),
+        recipient: { party: "operator" },
+        made: AT,
+        state: { state: "waiting" },
+    };
+    const CREATED: ChangedFile = { path: "b.md", before: null, after: { kind: "text", text: "# B\n\nNew.\n" } };
+    const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]) };
+    const out = laid([HELD], banner, header, EMPTY, around);
+    const at = (line: string) => out.text.indexOf(`\n${line}\n`) + 1;
+
+    it("quotes a line under its file's path and number, marked as a diff marks it, and shows the comment under it", () => {
+        const added = opened(out, at("L7"));
+        expect(added?.quote?.text).toBe("a.py:7\n+L7");
+        expect(opened(out, at("l7"))?.quote?.text).toBe("a.py:7, as it was before the change\n-l7");
+        expect(opened(out, at("l8"))?.quote?.text).toBe("a.py:8\n l8");
+        expect(opened(out, at("a.py · changed · +1 −1"))?.quote?.text).toBe("a.py");
+        expect(opened(out, at("b.md · created · 3 lines"))?.quote?.text).toBe("b.md");
+
+        const commented = laid([HELD], banner, header, { ...EMPTY, comments: [{ ...added!, text: "Why capitals?" }] }, around);
+        expect(commented.text).toContain("\nL7\nWhy capitals?\nl8\n");
+        const [region] = commented.regions;
+        expect(commented.text.slice(shownAt(region!, added!.quote!.start), shownAt(region!, added!.quote!.end))).toBe("L7");
+    });
+
+    it("opens a comment on an empty line of a file, not on the item whole", () => {
+        const empty = out.text.indexOf("# B\n\n") + "# B\n".length;
+        expect(opened(out, empty)?.quote?.text).toBe("b.md:2\n+");
+    });
+
+    it("quotes a passage across a file's lines, and across files, each under its path and the span of its lines", () => {
+        const from = at("l6");
+        expect(quoted(out, from, at("l8") - 1)?.quote?.text).toBe("a.py:6-7\n l6\n-l7\n+L7");
+        expect(quoted(out, at("l12") + 1, at("New.") + 3)?.quote?.text).toBe("a.py:12\n 12\nb.md:1-3\n+# B\n+\n+New");
+    });
+
+    it("says an item's comments as one answer, each under what it quotes", () => {
+        const comments: Comment[] = [
+            { item: 55, quote: null, text: "Otherwise fine." },
+            { item: 55, quote: { text: "a.py:7\n+L7", start: 40, end: 42 }, text: "Why capitals?" },
+            { item: 55, quote: { text: "a.py", start: 20, end: 24 }, text: " " },
+        ];
+        expect(answer(comments)).toBe("> a.py:7\n> +L7\n\nWhy capitals?\n\nOtherwise fine.");
     });
 });
 
