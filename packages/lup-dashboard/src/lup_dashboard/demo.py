@@ -89,6 +89,11 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         yield await self.ask(request)
         await asyncio.Event().wait()
 
+    @override
+    async def settle(self, number: int) -> None:
+        """Install nothing: the demo's approvals are stand-ins."""
+        del number
+
     def ago(self, minutes: float) -> datetime:
         """Return the moment `minutes` before the clock's."""
         return self.clock.now() - timedelta(minutes=minutes)
