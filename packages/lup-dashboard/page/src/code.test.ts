@@ -120,17 +120,16 @@ describe("the judge's reading", () => {
         ]);
     });
 
-    it("keeps a line that matters out of the unchanged runs folding around it", () => {
+    it("shows only the lines that ask in a file whose asks are each on a line, its other changes folded", () => {
         const reading: Reading = {
             ...PRODUCTION,
             asks: [{ name: "public-api", taken: "flagged", line: 20, side: "after", api: { kind: "signature-changed", name: "f" } }],
         };
         const laid = shown({ path: "a.py", before: text(numbered(30)), after: text(numbered(30, { 10: "ten" })), reading });
-        expect(laid.runs.map((each) => each.summary)).toEqual([
-            "6 unchanged lines, 1–6",
-            "3 unchanged lines, 14–16",
-            "7 unchanged lines, 24–30",
-        ]);
+        expect(laid.runs.map((each) => each.summary)).toEqual(["17 lines, 2 changed, 1–16", "7 unchanged lines, 24–30"]);
+        const whole: Reading = { ...reading, asks: [...reading.asks!, { name: "whole-file", taken: "held", side: "after" }] };
+        const written = shown({ path: "a.py", before: text(numbered(30)), after: text(numbered(30, { 10: "ten" })), reading: whole });
+        expect(written.runs.map((each) => each.summary)).toEqual(["6 unchanged lines, 1–6", "3 unchanged lines, 14–16", "7 unchanged lines, 24–30"]);
     });
 
     it("places a name taken out of a package's root on the line it was, and what's on no line shown on the header", () => {
@@ -150,15 +149,36 @@ describe("the judge's reading", () => {
         expect([made.whole, made.matters]).toEqual([true, []]);
     });
 
-    it("opens a production file with a real change, and marks automatic one that asks nothing else", () => {
+    it("marks automatic a file that asks nothing held or flagged, production code among them, its findings told said", () => {
         const real = shown(changed(numbered(8, { 3: "three" }), PRODUCTION));
-        expect([real.header, real.automatic]).toEqual(["core.py · changed · +1 −1 · production", false]);
+        expect([real.header, real.automatic]).toEqual(["core.py · changed · +1 −1 · automatic", true]);
+        const told: Reading = {
+            ...PRODUCTION,
+            findings: [{ rule: "regex", message: "parses with a regular expression", steer: "", start: 3, end: 3, taken: "told" }],
+        };
+        const informed = shown(changed(numbered(8, { 3: "three" }), told));
+        expect([informed.header, informed.automatic]).toEqual(["core.py · changed · +1 −1 · automatic · told: regex", true]);
         const spacing = shown(changed(numbered(8, { 3: "    l3" }), PRODUCTION));
         expect([spacing.header, spacing.automatic]).toEqual(["core.py · changed · +1 −1 · automatic", true]);
         const test = shown({ ...changed(numbered(8, { 3: "three" }), { ...PRODUCTION, role: "test" }), path: "test_a.py" });
         expect([test.header, test.automatic]).toEqual(["test_a.py · changed · +1 −1 · automatic", true]);
         const unread = shown({ path: "a.py", before: text("a\n"), after: text("b\n") });
         expect([unread.header, unread.automatic, unread.reasons]).toEqual(["a.py · changed · +1 −1", false, []]);
+    });
+
+    it("counts a new file's public names, and names four of another's changes at most", () => {
+        const names = ["A", "B", "C", "D", "E", "F"];
+        const api = (kind: "class-added" | "export-added") =>
+            names.map((name, at) => ({ name: "public-api", taken: "flagged" as const, line: at + 1, side: "after" as const, api: { kind, name } }));
+        const source = names.map((name) => `class ${name}: pass`).join("\n") + "\n";
+        const created: Reading = { ...PRODUCTION, asks: [{ name: "new-file", taken: "flagged", side: "after" }, ...api("class-added")] };
+        expect(shown({ path: "n.py", before: null, after: text(source), reading: created }).header).toBe(
+            "n.py · created · 6 lines · new file · 6 public names",
+        );
+        const grown: Reading = { ...PRODUCTION, asks: api("export-added") };
+        expect(shown({ path: "__init__.py", before: text("x\n"), after: text(source), reading: grown }).header).toContain(
+            "public API: +A +B +C +D and 2 more",
+        );
     });
 
     it("counts an item's files by the first reason each is open, the most first, and nothing where none was read", () => {
