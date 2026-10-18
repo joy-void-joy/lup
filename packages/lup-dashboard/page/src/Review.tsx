@@ -20,6 +20,7 @@ import { changes, moved } from "./comments";
 import { folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import {
     arrival,
+    blockAt,
     codeFrom,
     foldKey,
     fresh,
@@ -207,6 +208,16 @@ function when(made: string): string {
     return at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+/** Return where the cursor goes in the comment being written at `head` once the text is laid out again: as far into the same comment as it was, wherever an item arriving moved it; none where it isn't in one. */
+function writtenAt(before: Laid | null, after: Laid, head: number): number | undefined {
+    const was = before === null ? undefined : blockAt(before, head);
+    if (was === undefined) {
+        return undefined;
+    }
+    const now = after.regions.flatMap((each) => each.blocks).find((each) => each.comment === was.comment);
+    return now === undefined ? undefined : Math.min(now.from + (head - was.from), now.to);
+}
+
 /** Return where the cursor goes once the text is laid out again: into the comment or onto the item `landing` names, else on the same item, as far into it as it was; at the same place where its item is gone. */
 function followed(before: Laid | null, after: Laid, head: number, landing: Landing): number {
     const clamped = Math.min(head, after.text.length);
@@ -310,8 +321,11 @@ export function Review({
             // above it: the cursor moves with its text, and the view only follows a landing of their own.
             const head = current.state.selection.main.head;
             const made = changes(doc, laidOut.text);
+            // A comment being written keeps the cursor, though what arrived moved it, as its agent's group comes first.
+            const writing = editor.writing() ? writtenAt(before.current, laidOut, head) : undefined;
             const anchor =
-                arriving === null ? moved(head, made, doc.length) : followed(before.current, laidOut, head, arriving);
+                writing ??
+                (arriving === null ? moved(head, made, doc.length) : followed(before.current, laidOut, head, arriving));
             const closed = laidFor.folds.filter((each) => !unfolded.current.has(each.key));
             // Where the view is, anchored to the text at its top and mapped through the changes.
             const changing = current.state.changes(made);
@@ -325,6 +339,9 @@ export function Review({
             refold(current, laidFor.folds, unfolded.current);
             if (arriving === null && kept !== undefined) {
                 current.dispatch({ effects: kept });
+            }
+            if (writing !== undefined) {
+                current.dispatch({ effects: EditorView.scrollIntoView(writing, { y: "nearest" }) });
             }
         } else {
             // What folds can change with the text the same, as an item marked read folds.
