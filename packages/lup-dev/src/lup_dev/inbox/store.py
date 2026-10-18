@@ -404,6 +404,30 @@ def read[M: Model](path: Path, model: type[M]) -> M:
     return found
 
 
+class TalkComment(Model):
+    """A comment of the operator's on a conversation they read: on a line or a passage of what the agent said at one step, or, at none, their message on the conversation whole."""
+
+    step: int | None
+    quote: Quote | None = None
+    text: str
+
+
+class Sent(Model):
+    """A message the operator sent a conversation from where they read it: the item it made, what it said, how many steps the conversation had then, and when."""
+
+    number: int
+    text: str
+    after: int
+    at: datetime
+
+
+class Talk(Model):
+    """What the operator writes on one conversation they read, until it's sent, and the messages they sent it from there."""
+
+    comments: list[TalkComment] = []
+    sent: list[Sent] = []
+
+
 class Draft(Model):
     """The operator's reply as they build it while reading: their comments, the items they took off their list and the ones they parked; kept until it's sent."""
 
@@ -466,6 +490,15 @@ class Inbox(MutableModel):
         if self.changes is not None:
             self.changes.changed()
         return draft
+
+    def talk(self, conversation: Conversation) -> Talk:
+        """Return what the operator wrote on `conversation` where they read it; nothing where they've written nothing."""
+        return read_model(self.layout.talk(conversation.key()), Talk) or Talk()
+
+    def talked(self, conversation: Conversation, talk: Talk) -> Talk:
+        """Keep what the operator wrote on `conversation`, in place of the last, and return it."""
+        write_model(self.layout.talk(conversation.key()), talk)
+        return talk
 
     def kept(self, item: Item) -> Item:
         """Write `item` through to its file, and hold it."""

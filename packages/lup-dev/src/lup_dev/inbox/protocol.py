@@ -38,6 +38,7 @@ from lup_dev.inbox.store import (
     Item,
     Operator,
     Ruling,
+    Talk,
     Waiting,
 )
 
@@ -92,6 +93,21 @@ class KeepDraft(Request):
 
     kind: Literal["inbox-keep-draft"] = "inbox-keep-draft"
     draft: Draft
+
+
+class ShowTalk(Request):
+    """Show what the operator writes on one conversation they read, and the messages they sent it from there."""
+
+    kind: Literal["inbox-talk"] = "inbox-talk"
+    conversation: Conversation
+
+
+class KeepTalk(Request):
+    """Keep what the operator writes on one conversation as it stands, in place of the last."""
+
+    kind: Literal["inbox-keep-talk"] = "inbox-keep-talk"
+    conversation: Conversation
+    talk: Talk
 
 
 class SendDraft(Request):
@@ -228,6 +244,13 @@ class Drafted(Reply):
 
     kind: Literal["inbox-drafted"] = "inbox-drafted"
     draft: Draft
+
+
+class Talked(Reply):
+    """What the operator writes on one conversation, as it stands."""
+
+    kind: Literal["inbox-talked"] = "inbox-talked"
+    talk: Talk
 
 
 class Reviewed(Reply):
@@ -521,6 +544,35 @@ class DraftKeeping(Model, Handler[KeepDraft], arbitrary_types_allowed=True):
         return Drafted(draft=self.delivery.inbox.drafted(request.draft))
 
 
+class TalkShowing(Model, Handler[ShowTalk], arbitrary_types_allowed=True):
+    """Answers `ShowTalk`: what the operator wrote on the conversation, as it stands."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[ShowTalk]:
+        return ShowTalk
+
+    @override
+    async def answer(self, request: ShowTalk) -> Reply:
+        return Talked(talk=self.delivery.inbox.talk(request.conversation))
+
+
+class TalkKeeping(Model, Handler[KeepTalk], arbitrary_types_allowed=True):
+    """Answers `KeepTalk`: what the operator wrote on the conversation, kept."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[KeepTalk]:
+        return KeepTalk
+
+    @override
+    async def answer(self, request: KeepTalk) -> Reply:
+        talk = self.delivery.inbox.talked(request.conversation, request.talk)
+        return Talked(talk=talk)
+
+
 class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
     """Answers `SendDraft`: the reviews it was sent as."""
 
@@ -554,4 +606,6 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.to(DraftShowing(delivery=delivery)),
         Route.to(DraftKeeping(delivery=delivery)),
         Route.to(DraftSending(delivery=delivery)),
+        Route.to(TalkShowing(delivery=delivery)),
+        Route.to(TalkKeeping(delivery=delivery)),
     ]
