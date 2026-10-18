@@ -68,7 +68,7 @@ describe("a changed file's lines", () => {
         expect(deleted.rows).toEqual([{ change: "removed", side: "before", number: 1, offset: 0, text: "old" }]);
         const same = shown({ path: "s.py", before: text(numbered(5)), after: text(numbered(5)) });
         expect(same.header).toBe("s.py · changed · no line differs");
-        expect(same.runs).toEqual([{ from: 0, to: 5, summary: "5 unchanged lines, 1–5" }]);
+        expect(same.runs).toEqual([{ from: 0, to: 5, summary: "5 unchanged lines, 1–5", changed: 0 }]);
         expect(shown({ path: "i.png", before: null, after: { kind: "binary", size: 1150 } })).toMatchObject({
             header: "i.png · created · binary, not shown · 1,150 bytes",
             rows: [],

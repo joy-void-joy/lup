@@ -75,6 +75,8 @@ export interface Coded extends Span {
 export interface Fold extends Span {
     item: number;
     kind: "context" | "code" | "file" | "read";
+    /** Whether it hides a change: a file folded whole, or a run holding changed lines; unchanged lines, an item's context and an item read hide none. */
+    diff: boolean;
     /** What names it among its item's folds of its kind: a run of code by its file and its first row, a file by its path. */
     name: string;
     summary: Span;
@@ -249,7 +251,7 @@ interface Filed {
     file: ChangedFile;
     row: Row | null;
     text: string;
-    opens: { summary: string; name: string } | null;
+    opens: { summary: string; name: string; diff: boolean } | null;
     closes: boolean;
     matter: Matter | null;
     stop: boolean;
@@ -289,7 +291,8 @@ function filed(item: Item, around: Around): Filed[] {
                 file,
                 row,
                 text: row.text,
-                opens: run === undefined ? null : { summary: run.summary, name: `${file.path}:${at}` },
+                opens:
+                    run === undefined ? null : { summary: run.summary, name: `${file.path}:${at}`, diff: run.changed > 0 },
                 closes: laidOut.runs.some((each) => each.to === at + 1),
                 matter,
                 stop: (matter?.notes.length ?? 0) > 0,
@@ -456,11 +459,15 @@ export function laid(
             writeBlocks(at);
         });
         const stops: number[] = [];
-        let opened: { summary: Aside; name: string } | null = null;
+        let opened: { summary: Aside; name: string; diff: boolean } | null = null;
         let whole: { summary: Span; name: string; from: number } | null = null;
         files.forEach((each, index) => {
             if (each.opens !== null) {
-                opened = { summary: writeAside({ kind: "summary", text: each.opens.summary }), name: each.opens.name };
+                opened = {
+                    summary: writeAside({ kind: "summary", text: each.opens.summary }),
+                    name: each.opens.name,
+                    diff: each.opens.diff,
+                };
             }
             const at = ownCount + index;
             const written = writeLine(each.text, at);
@@ -468,16 +475,16 @@ export function laid(
             if (each.stop) {
                 stops.push(written.from);
             }
-            const run: { summary: Aside; name: string } | null = opened;
+            const run: { summary: Aside; name: string; diff: boolean } | null = opened;
             if (each.closes && run !== null) {
                 const summary = { from: run.summary.from, to: run.summary.to };
-                folds.push({ item: item.number, kind: "code", name: run.name, summary, from: summary.to, to: written.to });
+                folds.push({ item: item.number, kind: "code", name: run.name, diff: run.diff, summary, from: summary.to, to: written.to });
                 opened = null;
             }
             const automatic: { summary: Span; name: string; from: number } | null = whole;
             if (each.ends && automatic !== null) {
                 const { summary, name, from } = automatic;
-                folds.push({ item: item.number, kind: "file", name, summary, from, to: written.to });
+                folds.push({ item: item.number, kind: "file", name, diff: true, summary, from, to: written.to });
                 whole = null;
             }
             writeBlocks(at);
@@ -496,13 +503,13 @@ export function laid(
             const last = context.lines.map(writeAside).at(-1);
             if (last !== undefined) {
                 const shown = { from: summary.from, to: summary.to };
-                folds.push({ item: item.number, kind: "context", name: "", summary: shown, from: summary.to, to: last.to });
+                folds.push({ item: item.number, kind: "context", name: "", diff: false, summary: shown, from: summary.to, to: last.to });
             }
         }
         if (done.includes(item.number)) {
             // Marked read, it folds whole under its header, what folds within it inside.
             const header = { from: headFrom, to: headFrom + head.length };
-            folds.push({ item: item.number, kind: "read", name: "", summary: header, from: header.to, to: text.length - 1 });
+            folds.push({ item: item.number, kind: "read", name: "", diff: false, summary: header, from: header.to, to: text.length - 1 });
         }
         text += "\n";
         regions.push({

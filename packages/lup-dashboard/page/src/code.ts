@@ -57,6 +57,8 @@ export interface Run {
     from: number;
     to: number;
     summary: string;
+    /** How many of its rows are changed: none for a run of unchanged lines. */
+    changed: number;
 }
 
 /** What a line that matters triggered, said at its end, and how the declaration takes it. */
@@ -405,7 +407,7 @@ function runs(rows: Row[], context: number, kept: Set<number> = new Set(), onLin
             const changed = rows.slice(from, to).filter((row) => row.change !== "same").length;
             const said =
                 changed === 0 ? counted(to - from, "unchanged line") : `${counted(to - from, "line")}, ${changed} changed`;
-            found.push({ from, to, summary: `${said}, ${first}–${last}` });
+            found.push({ from, to, summary: `${said}, ${first}–${last}`, changed });
         }
         start = end;
     }
