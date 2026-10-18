@@ -178,7 +178,13 @@ export function App() {
 
     const numbers = covered(draft);
     const commented = numbers.filter((number) => (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== ""));
-    const reached = [...new Set(waiting.filter((each) => numbers.includes(each.number)).map(named))];
+    // Told: the agents with a comment on their items, or a question among them, which
+    // an answer lets go; a message only marked read reaches no one.
+    const told = waiting.filter(
+        (each) =>
+            numbers.includes(each.number) && (commented.includes(each.number) || each.reason.reason === "question"),
+    );
+    const reached = [...new Set(told.map(named))];
     const read = numbers.filter((number) => !commented.includes(number));
     return (
         <div className="layout">
@@ -237,7 +243,10 @@ export function App() {
                             <span>
                                 Your reply: {commented.length === 0 ? "" : `comments on ${commented.map((each) => `#${each}`).join(", ")}`}
                                 {read.length === 0 ? "" : `${commented.length === 0 ? "" : "; "}read ${read.map((each) => `#${each}`).join(", ")}`}
-                                {reached.length === 0 ? "" : ` — to ${reached.join(", ")}${reached.length > 1 ? ", each getting all of it" : ""}`}.{" "}
+                                {reached.length === 0
+                                    ? ", telling no one"
+                                    : ` — to ${reached.join(", ")}${reached.length > 1 ? ", each getting all of it" : ""}`}
+                                .{" "}
                                 <kbd>Ctrl</kbd> <kbd>Enter</kbd> sends.
                             </span>
                         )}
@@ -277,11 +286,16 @@ export function App() {
                         }
                     }}
                 >
-                    <p>Send your reply to {reached.join(", ")}?</p>
+                    <p>
+                        {reached.length === 0
+                            ? `Take ${read.map((each) => `#${each}`).join(", ")} off your list, telling no one?`
+                            : `Send your reply to ${reached.join(", ")}?`}
+                    </p>
                     <p className="muted">
-                        {reached.length === 1
-                            ? ""
-                            : "Each gets all of it: its own items first, the others' for context. "}
+                        {reached.length > 1 ? "Each gets all of it: its own items first, the others' for context. " : ""}
+                        {reached.length > 0 && read.length > 0
+                            ? "Messages only marked read tell no one, unless their agent gets this reply anyway. "
+                            : ""}
                         <kbd>Enter</kbd> sends · <kbd>Esc</kbd> goes back.
                     </p>
                 </div>

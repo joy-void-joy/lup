@@ -439,15 +439,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return "\n\n".join([*own, *context])
 
     async def reviewed(self) -> list[Item]:
-        """Send the operator's draft as one reply: to each conversation that sent an item it covers, the whole of it; its items answered or done, and the draft left with what's parked.
+        """Send the operator's draft as one reply: to each conversation with a comment on its items, or a question among them, the whole of it; its items answered or done, and the draft left with what's parked.
 
         Each conversation is told its own items first, with the comments on
         them or read with nothing to add, then what was said on the others'
         for context (`reviewing`): the operator answers related items together,
         across agents and repositories, and sends what's drafted on moving to
         something unrelated. A question is answered by the reply its asker
-        gets, which lets a held `ask` go. Refused where the draft covers no
-        item, or covers one no conversation sent.
+        gets, which lets a held `ask` go. A message only marked read tells its
+        sender nothing, nor wakes it: it's taken off the list, and told as read
+        only to a conversation the reply reaches anyway. Refused where the
+        draft covers no item, or covers one no conversation sent.
         """
         draft = self.inbox.draft()
         covered = [self.inbox.item(each) for each in draft.covered()]
@@ -464,7 +466,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             covers=numbers,
             comments=[each for each in draft.comments if each.item in numbers],
         )
-        senders = [item.sender for item in covered]
+        commented = [each.item for each in draft.comments]
+        senders = [
+            item.sender
+            for item in covered
+            if item.number in commented or isinstance(item.reason, Question)
+        ]
         recipients = [
             each for index, each in enumerate(senders) if each not in senders[:index]
         ]
@@ -473,8 +480,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             for recipient in recipients
         ]
         for item in covered:
-            answer = next(each for each in sent if each.recipient == item.sender)
-            settling = settled(item, answer, at)
+            answer = next(
+                (each for each in sent if each.recipient == item.sender), None
+            )
+            settling = Done(at=at) if answer is None else settled(item, answer, at)
             self.inbox.kept(item.model_copy(update={"state": settling}))
         self.inbox.drafted(draft.kept())
         for each in sent:
