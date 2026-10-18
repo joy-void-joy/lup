@@ -38,8 +38,6 @@ interface Props {
     around: Around;
     send: () => void;
     approve: (number: number, approved: boolean) => void;
-    /** Whether the confirmation has the keyboard: once it's gone, the review takes it back. */
-    confirming: boolean;
     /** Told each time vim enters or leaves insert mode, so the page can say what the keys do in it. */
     inserting: (yes: boolean) => void;
     /** Changed each time the draft is replaced from outside, as when it's sent: what was done before can't be undone. */
@@ -141,7 +139,7 @@ function followed(before: Laid | null, after: Laid, head: number, landing: Landi
     return Math.max(Math.min(now.header.from + (head - was.header.from), after.text.length), 0);
 }
 
-export function Review({ items, draft, change, banner, around, send, approve, confirming, inserting, epoch, shown }: Props) {
+export function Review({ items, draft, change, banner, around, send, approve, inserting, epoch, shown }: Props) {
     const laidOut = useMemo(
         () =>
             laid(
@@ -177,7 +175,6 @@ export function Review({ items, draft, change, banner, around, send, approve, co
         change,
         inserting,
         epoch,
-        confirming,
         shownNow: shown,
     });
     const { view, landing, unfolded } = editor;

@@ -530,53 +530,6 @@ kbd {
     color: var(--fg);
 }
 
-/* The draft reply. */
-.draft {
-    padding: 0 1ch;
-}
-
-.draft .comments {
-    list-style: none;
-    padding: 0;
-    margin: 1lh 0;
-}
-
-.draft .comments li {
-    border-left: 2px solid var(--warn);
-    padding-left: 1ch;
-    margin-bottom: 1lh;
-}
-
-.draft .on {
-    color: var(--info);
-}
-
-.draft .said {
-    white-space: pre-wrap;
-}
-
-.draft .drop {
-    border: 1px solid var(--border);
-    background: none;
-    color: var(--muted);
-    cursor: pointer;
-}
-
-.draft .verdicts {
-    padding-left: 2ch;
-}
-
-.confirm {
-    position: fixed;
-    inset: 30vh auto auto 50%;
-    transform: translateX(-50%);
-    width: min(80ch, 92vw);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    outline: 2px solid var(--focus);
-    padding: 0 2ch;
-}
-
 /* What's under an item that isn't its own text: its context and an approval's
    whole diff, each folded under its summary line, which reads ▸ while folded
    and ▾ while open; the lines it holds set in under it. */
