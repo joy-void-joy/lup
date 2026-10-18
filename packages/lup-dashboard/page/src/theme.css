@@ -1,240 +1,330 @@
-/* The operator's Claude Code theme, `dark-daltonized`, its colours as Claude Code
-   2.1.302 defines them (`docs/dashboard.md`, *Look*): blue in place of green, so
-   red and blue tell good from bad, and white text at a moderate contrast. */
+/* The first lup's dark palette, which the operator works in: Claude Code's
+   `dark-daltonized` colours beside VS Code's high-contrast dark theme, each
+   text colour at 7:1 or more on the black it sits on (the first lup's
+   `palette.ts`). Blue says good where other themes use green, red says bad.
+   One row is one line, structure comes from borders, and emphasis is drawn
+   with outlines and bars rather than fills. */
 :root {
-    --text: rgb(255, 255, 255);
-    --inactive: rgb(153, 153, 153);
-    --subtle: rgb(80, 80, 80);
-    --border: rgb(136, 136, 136);
-    --success: rgb(51, 153, 255);
-    --error: rgb(255, 102, 102);
-    --warning: rgb(255, 204, 0);
-    --accent: rgb(255, 153, 51);
-    --suggestion: rgb(153, 204, 255);
-    --selection: rgb(38, 79, 120);
-    --surface: rgb(38, 38, 38);
-    --raised: rgb(55, 55, 55);
-    --hover: rgb(70, 70, 70);
-    --background: rgb(18, 18, 18);
-    --diff-added: rgb(0, 68, 102);
-    --diff-added-word: rgb(0, 119, 179);
-    --diff-removed: rgb(102, 0, 0);
-    --diff-removed-word: rgb(179, 0, 0);
+    --bg: #000000;
+    --float-bg: #0c141f;
+    --border: #6fc3df;
+    --focus: #f38518;
+    --sel-bg: #f3f518;
+    --sel-fg: #000000;
+    --fg: #ffffff;
+    --muted: #b3b3b3;
+    --link: #2facff;
+    --ok: #53a9ff;
+    --err: #ff7c7c;
+    --warn: #ffcc00;
+    --info: #99ccff;
+    --purple: #b691ff;
+    --cyan: #66cccc;
+    --orange: #ff9933;
+    --add-bg: #001b29;
+    --del-bg: #3d0100;
+
+    --mono: "JetBrains Mono", "Iosevka Term", "Iosevka", "Fira Code", "Cascadia Mono",
+        "Source Code Pro", "DejaVu Sans Mono", ui-monospace, monospace;
+    --fs: 13px;
+    --lh: 18px;
 
     color-scheme: dark;
-    color: var(--text);
-    background: var(--background);
-    font-family: ui-sans-serif, system-ui, sans-serif;
-    font-size: 14px;
-    line-height: 1.45;
 }
 
 * {
     box-sizing: border-box;
 }
 
-body {
+html,
+body,
+#root {
+    height: 100%;
     margin: 0;
 }
 
-code,
-.mono {
-    font-family: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: var(--fs);
+    line-height: var(--lh);
+    font-variant-ligatures: none;
+    overflow: hidden;
+}
+
+button,
+input,
+textarea {
+    font: inherit;
+    color: inherit;
+    line-height: inherit;
+}
+
+::selection {
+    background: var(--sel-bg);
+    color: var(--sel-fg);
 }
 
 /* Every control shows where the keyboard is. */
 :focus-visible,
 [data-focus-visible] {
-    outline: 2px solid var(--suggestion);
-    outline-offset: 1px;
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
 }
 
 kbd {
-    font-family: ui-monospace, monospace;
-    font-size: 11px;
-    color: var(--inactive);
-    border: 1px solid var(--subtle);
-    border-radius: 4px;
-    padding: 0 4px;
+    font: inherit;
+    border: 1px solid var(--border);
+    padding: 0 0.5ch;
+    white-space: nowrap;
+}
+
+.muted {
+    color: var(--muted);
 }
 
 .layout {
     display: grid;
-    grid-template-columns: minmax(260px, 340px) 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(36ch, 52ch) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     height: 100vh;
 }
 
+/* The tabline. */
 .bar {
     grid-column: 1 / -1;
     display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--subtle);
-    background: var(--surface);
+    align-items: stretch;
+    gap: 0 2ch;
+    padding: 0 1ch;
+    border-bottom: 1px solid var(--border);
 }
 
 .bar .name {
-    color: var(--accent);
-    font-weight: 600;
+    color: var(--orange);
+    font-weight: 700;
 }
 
 .bar .spacer {
     flex: 1;
 }
 
+.bar .error {
+    color: var(--err);
+}
+
+.bar button {
+    border: 0;
+    background: none;
+    padding: 0;
+    cursor: pointer;
+    color: var(--muted);
+}
+
 .connection[data-state="live"] {
-    color: var(--success);
+    color: var(--ok);
 }
 
 .connection[data-state="connecting"],
 .connection[data-state="retrying"] {
-    color: var(--warning);
+    color: var(--warn);
 }
 
-.agents {
+/* The windows: a title bar over a buffer, framed. */
+.win {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    border-right: 1px solid var(--border);
+}
+
+.win:focus-within {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+}
+
+.wb {
+    display: flex;
+    gap: 0 1ch;
+    padding: 0 1ch;
+    border-bottom: 1px solid var(--border);
+    font-weight: 700;
+}
+
+.wb .count {
+    font-weight: 400;
+    color: var(--muted);
+}
+
+.buf {
+    flex: 1;
+    min-height: 0;
     overflow: auto;
-    border-right: 1px solid var(--subtle);
-    background: var(--surface);
-    padding: 8px 0;
 }
 
-.agents .empty {
-    color: var(--inactive);
-    padding: 8px 16px;
+.buf:focus {
+    outline: none;
 }
 
+.empty {
+    color: var(--muted);
+    padding: 0 1ch;
+    margin: 0;
+}
+
+/* The agents tree: one row a line. */
 .agent-row {
     display: flex;
     align-items: baseline;
-    gap: 8px;
-    padding: 4px 12px;
-    padding-left: calc(12px + var(--tree-item-level, 1) * 14px - 14px);
+    gap: 1ch;
+    padding: 0 1ch 0 calc(1ch + (var(--tree-item-level, 1) - 1) * 2ch);
     cursor: default;
-    border-left: 3px solid transparent;
+    border-left: 2px solid transparent;
 }
 
-.agent-row[data-hovered] {
-    background: var(--hover);
+[data-hovered] .agent-row {
+    background: var(--float-bg);
 }
 
-.agent-row[data-selected] {
-    background: var(--selection);
-    border-left-color: var(--suggestion);
+[data-selected] .agent-row {
+    border-left-color: var(--focus);
+    font-weight: 700;
 }
 
 .agent-row .chevron {
-    width: 12px;
-    color: var(--inactive);
+    width: 1ch;
+    border: 0;
     background: none;
-    border: none;
     padding: 0;
+    color: var(--muted);
+    cursor: pointer;
 }
 
 .agent-row .label {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.state {
-    font-size: 12px;
+.agent-row .label.repository {
+    color: var(--orange);
+    font-weight: 700;
+}
+
+.agent-row .label.session {
+    color: var(--fg);
+}
+
+.agent-row .label.subagent {
+    color: var(--cyan);
+}
+
+.agent-row .label.ended {
+    color: var(--muted);
+}
+
+.agent-row .state {
+    margin-left: auto;
+    white-space: nowrap;
+    font-weight: 400;
 }
 
 .state[data-state="calling"] {
-    color: var(--success);
+    color: var(--ok);
 }
 
 .state[data-state="asking"] {
-    color: var(--warning);
+    color: var(--warn);
 }
 
-.state[data-state="idle"],
+.state[data-state="idle"] {
+    color: var(--info);
+}
+
+.state[data-state="ended"],
+.state[data-state="repository"],
 .state[data-state="unheard"] {
-    color: var(--inactive);
+    color: var(--muted);
 }
 
-.state[data-state="ended"] {
-    color: var(--subtle);
-}
-
+/* The details. */
 .details {
-    overflow: auto;
-    padding: 16px 24px;
+    padding: 0 1ch;
 }
 
 .details h1 {
-    font-size: 18px;
-    margin: 0 0 4px;
+    font-size: inherit;
+    font-weight: 700;
+    margin: 0;
 }
 
 .details dl {
     display: grid;
     grid-template-columns: max-content 1fr;
-    gap: 4px 16px;
+    gap: 0 2ch;
+    margin: 1lh 0 0;
 }
 
 .details dt {
-    color: var(--inactive);
+    color: var(--muted);
 }
 
 .details dd {
     margin: 0;
+    overflow-wrap: anywhere;
 }
 
-.details .hint {
-    color: var(--inactive);
-}
-
+/* The palette. */
 .palette-overlay {
     position: fixed;
     inset: 0;
-    background: rgb(0 0 0 / 0.5);
+    background: rgb(0 0 0 / 0.6);
     display: flex;
     justify-content: center;
     padding-top: 12vh;
 }
 
 .palette {
-    width: min(560px, 92vw);
-    background: var(--surface);
+    width: min(80ch, 92vw);
+    background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
 }
 
 .palette [cmdk-input] {
     width: 100%;
-    padding: 12px 14px;
-    font: inherit;
-    color: var(--text);
-    background: var(--raised);
+    padding: 0 1ch;
+    background: var(--bg);
     border: none;
-    border-bottom: 1px solid var(--subtle);
+    border-bottom: 1px solid var(--border);
     outline: none;
 }
 
 .palette [cmdk-list] {
     max-height: 50vh;
     overflow: auto;
-    padding: 4px;
+}
+
+.palette [cmdk-group-heading] {
+    color: var(--muted);
+    padding: 0 1ch;
 }
 
 .palette [cmdk-item] {
     display: flex;
     justify-content: space-between;
-    gap: 12px;
-    padding: 6px 10px;
-    border-radius: 4px;
+    gap: 2ch;
+    padding: 0 1ch;
+    border-left: 2px solid transparent;
 }
 
 .palette [cmdk-item][data-selected="true"] {
-    background: var(--selection);
+    border-left-color: var(--focus);
+    background: var(--float-bg);
 }
 
 .palette [cmdk-empty] {
-    color: var(--inactive);
-    padding: 10px;
+    color: var(--muted);
+    padding: 0 1ch;
 }

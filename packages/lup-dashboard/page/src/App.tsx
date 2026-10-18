@@ -30,21 +30,27 @@ export function App() {
                 </span>
                 {reply?.kind === "refused" ? <span className="error">{reply.error}</span> : null}
                 <span className="spacer" />
-                <button type="button" className="hint" onClick={() => setPalette(true)}>
+                <button type="button" onClick={() => setPalette(true)}>
                     Go to <kbd>Ctrl</kbd> <kbd>K</kbd>
                 </button>
             </header>
-            <nav className="agents" aria-label="Agents">
-                <AgentTree served={served} selected={selected} select={setSelected} now={now} />
+            <nav className="win" aria-label="Agents">
+                <div className="wb">
+                    agents <span className="count">{agents.length}</span>
+                </div>
+                <div className="buf">
+                    <AgentTree served={served} selected={selected} select={setSelected} now={now} />
+                </div>
             </nav>
-            <main>
-                {shown === null ? (
-                    <section className="details">
-                        <p className="hint">Select an agent, or press Ctrl K to go to one.</p>
-                    </section>
-                ) : (
-                    <Details launch={shown.launch} agent={shown.agent} now={now} />
-                )}
+            <main className="win">
+                <div className="wb">{shown === null ? "details" : (shown.agent?.talker.path ?? name(shown.launch))}</div>
+                <div className="buf">
+                    {shown === null ? (
+                        <p className="empty">Select an agent, or press Ctrl K to go to one.</p>
+                    ) : (
+                        <Details launch={shown.launch} agent={shown.agent} now={now} />
+                    )}
+                </div>
             </main>
             <Palette open={palette} setOpen={setPalette} agents={agents} select={setSelected} now={now} />
         </div>
@@ -71,4 +77,8 @@ function found(
 
 function within(root: Agent, agent: Agent): boolean {
     return root === agent || root.children.some((child) => within(child, agent));
+}
+
+function name(launch: Launch): string {
+    return launch.launch.name ?? launch.launch.launch;
 }

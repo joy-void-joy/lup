@@ -33,10 +33,11 @@ Rooms share the host's network, so being on localhost keeps out only other machi
 ## The page
 
 - **Built** from `packages/lup-dashboard/page/`: TypeScript, React, React Aria Components for controls the keyboard reaches, cmdk for the command palette, and Vite, which writes the page into the package (`lup_dashboard/page/`, ignored by git). `packages/lup-dashboard/build.py` installs its packages from their lock, writes the API's description and generates the types from it, type-checks, runs its tests (Vitest), and builds. It's `LupDevelopment`'s `dashboard` step in lup's gate, run where one of its sources, the host's models among them, is newer than the page; trust runs it too when it builds the copy the operator approves. Its packages are pinned exactly, nothing published in the last three days resolving (`min-release-age`).
-- **The agents tree:** each launch with its session's conversation, each subagent under the conversation that spawned it, and what each is doing and for how long (`Talker.activity`): calling a tool, asking lup, between calls, ended. Arrows move through it, Enter selects, Left and Right fold.
+- **The agents tree:** each repository, its launches under it, each launch's session's conversation, each subagent under the conversation that spawned it, its ended subagents folded under a count; and what each is doing and for how long (`Talker.activity`): calling a tool, asking lup, between calls, ended. What each is doing is kept with the launch's conversations (`Conversations.activities`), so a host service started again still shows it. Arrows move through it, Enter selects, Left and Right fold.
 - **The details** of the conversation selected: its kind, its session and subagent ids, its subagents, and its launch's runtime, worktree and id.
 - **The command palette,** Ctrl+K: every agent, to go to.
-- **The look:** the operator's Claude Code theme, `dark-daltonized`, its colours as Claude Code 2.1.302 defines them: blue for good where other themes use green, red for bad, white text at a moderate contrast.
+- **The look:** the first lup's dark palette (its `palette.ts`): Claude Code's `dark-daltonized` colours beside VS Code's high-contrast dark theme, each text colour at 7:1 or more on black; monospace throughout, one row a line, structure from borders, emphasis by outlines and bars rather than fills.
+- **The demo:** `lup-dashboard demo` serves the real page over stand-in data (`lup_dashboard/demo.py`): launches over three repositories, subagents working, asking and ended, a question and a note. A session looks at a view with it while building it, driving the room's Chromium headless, and the operator can open it to try one.
 
 ## Tests
 

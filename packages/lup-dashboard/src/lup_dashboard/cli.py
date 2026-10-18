@@ -6,12 +6,14 @@ this command is the host service's to run (`lup_dev/host/dashboard.py`).
 
 import asyncio
 import json
+import secrets
 import socket
 import sys
 
 import typer
 import uvicorn
 
+from lup_dashboard.demo import Demo
 from lup_dashboard.host import Sockets
 from lup_dashboard.layout import DashboardLayout
 from lup_dashboard.server import Access, application
@@ -51,6 +53,25 @@ async def until_closed(server: uvicorn.Server, listening: socket.socket) -> None
     await asyncio.wait([serving, closed], return_when=asyncio.FIRST_COMPLETED)
     server.should_exit = True
     await serving
+
+
+@app.command()
+def demo(port: int = 8767, address: str = "127.0.0.1") -> None:
+    """Serve the dashboard over stand-in data on `address` and `port`, until stopped, printing where to open it.
+
+    The real page, every view populated, with no host service or session behind
+    it (`lup_dashboard/demo.py`): for looking at a view while it's built, and
+    trying one before it lands.
+    """
+    token = secrets.token_urlsafe(16)
+    listening = socket.create_server((address, port))
+    bound = listening.getsockname()[1]
+    served = application(
+        Demo(), Access(token=token, port=bound), DashboardLayout().page
+    )
+    typer.echo(f"http://{address}:{bound}/#token={token}")
+    server = uvicorn.Server(uvicorn.Config(served, log_level="warning"))
+    asyncio.run(server.serve(sockets=[listening]))
 
 
 @app.command()

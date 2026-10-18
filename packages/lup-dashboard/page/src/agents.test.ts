@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { doing, everyone, launches, since, type Register, type Talker } from "./agents";
+import { doing, everyone, launches, repositories, repositoryName, since, type Register, type Talker } from "./agents";
 
 const AT = "2026-10-01T12:00:00Z";
 
@@ -67,7 +67,7 @@ describe("doing", () => {
         );
         expect(doing({ state: "idle", since: AT, lups: false }, now)).toBe("between calls · 5m");
         expect(doing({ state: "ended", since: AT, lups: false }, now)).toBe("ended · 5m ago");
-        expect(doing(null, now)).toBe("not heard since the host started");
+        expect(doing(null, now)).toBe("not heard yet");
     });
 });
 
@@ -80,6 +80,25 @@ describe("since", () => {
             "2m",
             "3h",
             "3d",
+        ]);
+    });
+});
+
+describe("repositories", () => {
+    it("names a bare repository and a clone by what the operator calls them", () => {
+        expect(repositoryName("/home/op/lup.git")).toBe("lup");
+        expect(repositoryName("/home/op/adlib/.git")).toBe("adlib");
+        expect(repositoryName("/home/op/plain")).toBe("plain");
+    });
+
+    it("groups launches by their repository, in the order met", () => {
+        const one = { launch: { ...registered("one", "w"), repository: "/r/lup.git" }, session: null };
+        const two = { launch: { ...registered("two", "x"), repository: "/r/adlib/.git" }, session: null };
+        const three = { launch: { ...registered("three", "y"), repository: "/r/lup.git" }, session: null };
+        const grouped = repositories([one, two, three]);
+        expect(grouped.map((each) => [each.name, each.launches.length])).toEqual([
+            ["lup", 2],
+            ["adlib", 1],
         ]);
     });
 });

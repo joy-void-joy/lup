@@ -303,8 +303,7 @@ class Talker(Model):
     """How many spawns below its session's own conversation it is: 0 for that
     conversation, 1 for a subagent it spawned."""
     activity: Activity | None = None
-    """None until the service hears one of its hooks; a service started again
-    knows it from its next."""
+    """None until one of its hooks is heard."""
 
 
 class Listed(Reply):
