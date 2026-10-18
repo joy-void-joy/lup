@@ -4,13 +4,15 @@
 dashboard exactly what the operator's commands ask it: each request here is one
 of the host's control requests, sent on as it is, its reply returned as it is,
 a refusal among them. A watched request is answered again each time its reply
-changes (`lup_dev/host/watch.py`).
+changes (`lup_dev/host/watch.py`): the page's watches are carried on one socket,
+each numbered by the page (`Watch`, `Unwatch`; `Watched`, `Ended`).
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field
 
+from lup.types import Model
 from lup_dev.host.protocol import (
     Listed,
     ListLaunches,
@@ -62,3 +64,38 @@ type Replied = Annotated[
     Field(discriminator="kind"),
 ]
 """The host's reply to one: what each request returns, or why it was refused."""
+
+
+class Watch(Model):
+    """The page's frame on its socket starting a watch: the number it gives it, and the request watched."""
+
+    kind: Literal["watch"] = "watch"
+    number: int
+    request: Asked
+
+
+class Unwatch(Model):
+    """The page's frame on its socket stopping the watch it numbered `number`."""
+
+    kind: Literal["unwatch"] = "unwatch"
+    number: int
+
+
+type Framed = Annotated[Watch | Unwatch, Field(discriminator="kind")]
+"""What the page sends on its socket."""
+
+
+class Watched(Model):
+    """The server's frame on the page's socket: a reply to the watch numbered `number`, at once, then each time it changes."""
+
+    kind: Literal["watched"] = "watched"
+    number: int
+    reply: Replied
+
+
+class Ended(Model):
+    """The server's frame on the page's socket: the watch numbered `number` ended, the host service out of reach or closing it, and why; the page watches it again later."""
+
+    kind: Literal["ended"] = "ended"
+    number: int
+    why: str

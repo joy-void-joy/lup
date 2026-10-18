@@ -1,9 +1,11 @@
 """The dashboard's server: the page, and its API relaying the host service's requests, on localhost alone.
 
 `docs/dashboard.md`, *The server* and *Access*. `POST /api/ask` sends one of the
-host's requests the page may send (`api.Asked`) and returns its reply;
-`POST /api/watch` streams its replies as server-sent events, at once and again
-each time they change. Everything else is the built page.
+host's requests the page may send (`api.Asked`) and returns its reply. The
+page's watches are carried on one socket, `/api/socket`, each started and
+stopped by its frames and its replies sent at once and again each time they
+change (`Relay`): one connection however many it holds, where a browser keeps
+six to a host. Everything else is the built page.
 
 Rooms share the host's network, so being on localhost keeps nothing out but
 other machines: every call to the API carries the dashboard's token, in its
@@ -12,32 +14,42 @@ handed the token in its address's fragment, which no request carries, and trades
 it for the cookie (`POST /api/session`).
 """
 
+import asyncio
 import secrets
-from collections.abc import AsyncIterable
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import (
     APIRouter,
+    Cookie,
     Depends,
     FastAPI,
     Header,
     HTTPException,
     Request,
     Response,
+    WebSocket,
 )
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
-from fastapi.sse import EventSourceResponse
+from fastapi.security.utils import get_authorization_scheme_param
+from pydantic import Field, TypeAdapter
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from lup.types import Model
-from lup_dashboard.api import Asked, Replied
+from lup.types import Model, MutableModel
+from lup_dashboard.api import (
+    Asked,
+    Ended,
+    Framed,
+    Replied,
+    Unwatch,
+    Watch,
+    Watched,
+)
+from lup_dashboard.host import Host
 from lup_dev.host.protocol import HostError
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from lup_dashboard.host import Host
 
 
 class Access(Model):
@@ -71,6 +83,55 @@ class About(Model):
     """What the page is served by: the dashboard, or its demo over stand-in data."""
 
     demo: bool
+
+
+class Relay(MutableModel, arbitrary_types_allowed=True):
+    """The page's watches on its one socket: each a task sending the host's replies, numbered as the page numbered the watch, until it's stopped or the socket closes."""
+
+    host: Host
+    websocket: WebSocket
+    watching: dict[int, asyncio.Task[None]] = {}
+    sending: asyncio.Lock = Field(default_factory=asyncio.Lock)
+    """Held while a frame is sent, so two watches' frames never interleave."""
+
+    async def run(self) -> None:
+        """Read the page's frames until it goes, starting and stopping its watches; then stop every one left."""
+        try:
+            async for text in self.websocket.iter_text():
+                match TypeAdapter[Framed](Framed).validate_json(text):
+                    case Watch(number=number, request=request):
+                        self.stop(number)
+                        relaying = asyncio.create_task(self.relayed(number, request))
+                        self.watching = {**self.watching, number: relaying}
+                    case Unwatch(number=number):
+                        self.stop(number)
+        finally:
+            for number in list(self.watching):
+                self.stop(number)
+
+    async def relayed(self, number: int, request: Asked) -> None:
+        """Send the host's replies to `request` as watch `number`'s, until the watch ends; then say why it ended, for the page to watch it again later."""
+        try:
+            async for replied in self.host.watch(request):
+                await self.sent(Watched(number=number, reply=replied))
+        except HostError as failure:
+            await self.sent(Ended(number=number, why=str(failure)))
+            return
+        await self.sent(Ended(number=number, why="the host service closed the watch"))
+
+    async def sent(self, frame: Watched | Ended) -> None:
+        """Send one frame to the page."""
+        async with self.sending:
+            await self.websocket.send_text(frame.model_dump_json())
+
+    def stop(self, number: int) -> None:
+        """Stop watch `number`, where it runs."""
+        relaying = self.watching.get(number)
+        if relaying is not None:
+            relaying.cancel()
+        self.watching = {
+            each: task for each, task in self.watching.items() if each != number
+        }
 
 
 def application(
@@ -120,11 +181,24 @@ def application(
         """Send one of the host's requests, and return its reply."""
         return await host.ask(request)
 
-    @api.post("/watch", response_class=EventSourceResponse)
-    async def watch(request: Asked) -> AsyncIterable[Replied]:
-        """Stream the host's replies to one of its requests: at once, then again each time they change."""
-        async for replied in host.watch(request):
-            yield replied
+    @app.websocket("/api/socket")
+    async def socket(
+        websocket: WebSocket,
+        held: Annotated[str | None, Cookie(alias=access.cookie())] = None,
+        authorization: Annotated[str | None, Header()] = None,
+        origin: Annotated[str | None, Header()] = None,
+    ) -> None:
+        """Carry the page's watches on one socket (`Relay`); closed at once for a page of another origin (4403) or without the token (4401), which the page tells from the dashboard being out of reach."""
+        await websocket.accept()
+        if origin is not None and origin not in access.origins():
+            await websocket.close(code=4403, reason=f"not from {origin}")
+            return
+        _, given = get_authorization_scheme_param(authorization)
+        token = held or given or ""
+        if not secrets.compare_digest(token.encode(), access.token.encode()):
+            await websocket.close(code=4401, reason="the dashboard's token is needed")
+            return
+        await Relay(host=host, websocket=websocket).run()
 
     @app.exception_handler(HostError)
     def unreachable(request: Request, failure: HostError) -> JSONResponse:
