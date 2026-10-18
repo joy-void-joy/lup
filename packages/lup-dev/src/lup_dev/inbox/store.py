@@ -164,6 +164,11 @@ class Approval(Model):
     """The main conversation of the session whose push to the integration branch
     asked it, which the operator's comment on their answer is told to; none for
     one a launch asked at its terminal."""
+    typing: bool = False
+    """Whether the judge is reading the change's types in the background, its
+    files carrying the reading of their parse alone until it's done
+    (`docs/launch.md`, *Trust on launch*); once it is, their whole reading
+    replaces it, or the summary's last line says why it couldn't."""
 
 
 class HeldChange(Model):
@@ -717,6 +722,10 @@ class Inbox(MutableModel):
     def attached(self, number: int, diff: str, files: list[ChangedFile]) -> None:
         """Keep approval or held change `number`'s whole diff and each file it changes beside it, each in a file of its own."""
         write_model(self.layout.diff(number), Diff(text=diff))
+        self.filed(number, files)
+
+    def filed(self, number: int, files: list[ChangedFile]) -> None:
+        """Keep each file approval or held change `number` changes beside it, whole, in place of those kept before: an approval's files once their types are read."""
         write_model(self.layout.changed(number), ChangedFiles(files=files))
 
     def diff(self, number: int) -> str:

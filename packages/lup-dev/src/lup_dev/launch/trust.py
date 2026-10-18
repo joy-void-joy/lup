@@ -33,9 +33,13 @@ approved before and the tip, and git's own count of each file changed since
 (`git diff --stat --compact-summary`), coloured, as git prints it; each file
 changed is kept whole with the judge's reading of it, the change judged as a move
 of `HEAD` is, by the declaration approved last, never the tip's own, which
-importing would run (`Trust.read`), for the dashboard's review; a first approval
-trusts the zone as it is, its files read by their roles alone, asking nothing
-(`trusted_whole`). Then they're
+importing would run (`Trust.read`), for the dashboard's review. That reading
+comes in two passes, so a type check doesn't hold the question up: the first,
+before it's asked, from each file's parse alone (what it asks by its path, its
+content, its public names and its directives); the second, the whole judgement,
+types and lup's rules included, read by the host service once the approval is
+in the inbox (`Trust.typed`). A first approval trusts the zone as it is, its
+files read by their roles alone, asking nothing (`trusted_whole`). Then they're
 asked whether to show the whole diff, no by default, a yes showing it through the
 terminal's pager; then whether to approve, no by default (`Asker`). The question
 is an item in the operator's inbox from the start (`Approvals`, the host service
@@ -89,8 +93,8 @@ from lup.types import Model, MutableModel
 from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool, approved
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan import conditions
-from lup_dev.codescan.contract import Checker
-from lup_dev.codescan.engine import EngineChecker
+from lup_dev.codescan.contract import Checker, Parser
+from lup_dev.codescan.engine import EngineChecker, EngineParser
 from lup_dev.codescan.ruff import Linter, Ruff
 from lup_dev.declaration.load import (
     Pyproject,
@@ -439,6 +443,10 @@ class Change(Model):
     """Each file the diff shows, whole on each side, in its order, with the
     judge's reading of it: what the dashboard shows (`docs/dashboard.md`, *The
     review*)."""
+    typing: bool = False
+    """Whether that reading is of each file's parse alone, for the host service
+    to read the change's types once it's asked (`Trust.typed`); not for a first
+    approval's, read by roles, or where the judge couldn't read the change."""
     tool: list[str]
     """How the `lup-dev` release changed, line by line; none for the workspace's
     own source, whose change is in the diff."""
@@ -1475,6 +1483,9 @@ class Trust(Model, arbitrary_types_allowed=True):
     checker: Checker
     """The engine the zone's change is judged with, for the review's reading of
     each file."""
+    parser: Parser
+    """The engine's reading of a file's parse alone, which the first reading of
+    the zone's change is made of."""
     linter: Linter
     """ruff, which judging runs beside the engine."""
     inside: list[str]
@@ -1615,8 +1626,9 @@ class Trust(Model, arbitrary_types_allowed=True):
         every path whole. The person's own layer, from the copy approved to the
         worktree's, where they differ (`compared`). Each file the diff shows is
         read whole on each side too (`files_between`, `layer_changed`), with the
-        judge's reading of it (`read`); where the judge fails, the files go
-        unread and the summary says why.
+        judge's first reading of it, from its parse alone (`read`), which the
+        host service follows with the whole judgement once it's asked (`typed`);
+        where the judge fails, the files go unread and the summary says why.
         """
         git = Git(cwd=self.root)
         zone = standing.zone
@@ -1668,10 +1680,10 @@ class Trust(Model, arbitrary_types_allowed=True):
         if approval is None:
             return change.model_copy(update={"files": self.trusted_whole(files)})
         try:
-            read = self.read(self.repository(), approval, files)
+            read = self.read(self.repository(), approval, files, typed=False)
         except LupDevError as failure:
             return change.model_copy(update={"unjudged": str(failure)})
-        return change.model_copy(update={"files": read})
+        return change.model_copy(update={"files": read, "typing": True})
 
     def trusted_whole(self, files: list[ChangedFile]) -> list[ChangedFile]:
         """Return a first approval's files, each read by its path's role alone, by lup's defaults with the tip's declaration protected, asking nothing: trusted as they are, they're folded for the review, and the engine doesn't run."""
@@ -1682,15 +1694,22 @@ class Trust(Model, arbitrary_types_allowed=True):
         ]
 
     def read(
-        self, repository: Path, approval: Approval | None, files: list[ChangedFile]
+        self,
+        repository: Path,
+        approval: Approval | None,
+        files: list[ChangedFile],
+        *,
+        typed: bool,
     ) -> list[ChangedFile]:
         """Return `files` with the judge's reading of each, which the review opens them by.
 
         The zone's change is judged as a move of `HEAD` is, each file against
         what it was, by the declaration the host runs for the repository: the one
-        approved last (`judge`). A side that isn't text is judged as an empty
-        one: no rule reads it, and only whether it's there decides what it asks.
-        Raise what the judge raises.
+        approved last (`judge`). `typed`, wholly, the engine checking each file
+        with lup's rules; otherwise from each file's parse alone (`Judge.parsed`),
+        which costs a parse where the check costs seconds. A side that isn't
+        text is judged as an empty one: no rule reads it, and only whether it's
+        there decides what it asks. Raise what the judge raises.
         """
         judge = self.judge(repository, approval, files)
         changes = [
@@ -1702,11 +1721,26 @@ class Trust(Model, arbitrary_types_allowed=True):
             )
             for each in files
         ]
-        judgements = judge.judge(changes, inform=False)
+        judgements = (
+            judge.judge(changes, inform=False)
+            if typed
+            else judge.parsed(changes, self.parser)
+        )
         return [
             each.model_copy(update={"reading": judgement.reading()})
             for each, judgement in zip(files, judgements, strict=True)
         ]
+
+    def typed(self, repository: Path, files: list[ChangedFile]) -> list[ChangedFile]:
+        """Return an approval's `files` with the judge's whole reading of each, types and lup's rules included, in place of the reading of their parse they were asked with.
+
+        What the host service reads once the approval is in the inbox, off its
+        event loop (`docs/launch.md`, *Trust on launch*), by the declaration
+        approved for `repository` as it stands. Raise what the judge raises.
+        """
+        return self.read(
+            repository, approved(self.layout, repository), files, typed=True
+        )
 
     def judge(
         self, repository: Path, approval: Approval | None, files: list[ChangedFile]
@@ -1800,6 +1834,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                     summary=summary,
                     diff=diff,
                     files=change.files,
+                    typing=change.typing,
                     repository=repository,
                     fingerprint=standing.fingerprint,
                     worktree=self.root,
@@ -1848,6 +1883,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                     summary=change.summary(),
                     diff=change.diff(),
                     files=change.files,
+                    typing=change.typing,
                     repository=repository,
                     fingerprint=standing.fingerprint,
                     worktree=self.root,
@@ -1969,6 +2005,7 @@ def machine_trust(root: Path, inside: list[str]) -> Trust:
         host=host,
         clock=clock,
         checker=EngineChecker.configured(settings),
+        parser=EngineParser(),
         linter=Ruff(),
         inside=inside,
     )

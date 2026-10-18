@@ -284,9 +284,11 @@ export function Review({
                               : item.reason.reason;
                     const files = around.files.get(item.number);
                     const counted = files !== undefined && "shown" in files ? tally(files.shown) : "";
+                    const typing = item.reason.reason === "approval" && item.reason.typing;
                     const told = [
                         `#${item.number} ${what}`,
                         ...(counted === "" ? [] : [counted]),
+                        ...(typing ? ["reading types"] : []),
                         ...(fresh(item, reviewed) ? ["new"] : []),
                         when(item.made),
                         waited(item.made, now),

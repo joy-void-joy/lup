@@ -132,6 +132,9 @@ class AskApproval(Request):
     """The whole diff, coloured, shown on request."""
     files: list[ChangedFile]
     """Each file of the zone changed, whole before and after, shown on request."""
+    typing: bool = False
+    """Whether the files carry the reading of their parse alone, for the service
+    to read their types in the background (`Approval.typing`)."""
     repository: Path
     """The git directory of the repository whose host zone it is."""
     fingerprint: str
@@ -150,6 +153,7 @@ class AskApproval(Request):
             repository=self.repository,
             fingerprint=self.fingerprint,
             pushed_by=self.pushed_by,
+            typing=self.typing,
         )
 
 

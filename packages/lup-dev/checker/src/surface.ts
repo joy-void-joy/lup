@@ -2,9 +2,15 @@
 // package root's names, every class the module defines, and each function's and
 // method's signature, each placed on the line its name is on, which the review
 // marks (`docs/judging-writes.md`, *The public-API ask*).
+//
+// The same walk serves a checked file and one read from its parse alone
+// (`parsed.ts`): what tells them apart is how an annotation is said, the type it
+// declares as pyright prints it or the annotation as written, and which binding
+// the package root's names come from.
 
 import * as AnalyzerNodeInfo from 'pyright/analyzer/analyzerNodeInfo';
 import { DeclarationType } from 'pyright/analyzer/declaration';
+import { printExpression } from 'pyright/analyzer/parseTreeUtils';
 import { TypeEvaluator } from 'pyright/analyzer/typeEvaluatorTypes';
 import {
     ClassNode,
@@ -22,9 +28,23 @@ import { ParseFileResults } from 'pyright/parser/parser';
 import { Parameter, ParameterKind, Placed, Signature, Surface } from './protocol';
 import { positionOf } from './spans';
 
+// How an annotation is said in a signature.
+export type Printer = (annotation: ExpressionNode) => string;
+
+// The type an annotation declares, as pyright prints it: a checked file's.
+export function byType(evaluator: TypeEvaluator): Printer {
+    return (annotation) => evaluator.printType(evaluator.getTypeOfAnnotation(annotation));
+}
+
+// The annotation as written, through pyright's own printer of expressions, so
+// spacing and line breaks inside it don't count: a file read from its parse alone.
+export const asWritten: Printer = (annotation) => printExpression(annotation);
+
+// The file's surface. `reader` holds the file's binding, which a package root's
+// names are read from: the program's, or one made of the parse alone.
 export function surfaceOf(
     parse: ParseFileResults,
-    evaluator: TypeEvaluator,
+    print: Printer,
     reader: AnalyzerNodeInfo.AnalyzerNodeInfoReader,
     isPackageRoot: boolean
 ): Surface {
@@ -44,7 +64,7 @@ export function surfaceOf(
                     visit(statement.d.suite.d.statements, `${prefix}${statement.d.name.d.value}.`);
                     break;
                 case ParseNodeType.Function: {
-                    const signature = signatureOf(statement, prefix, evaluator);
+                    const signature = signatureOf(statement, prefix, print);
                     signatures.push(signature);
                     place('signature', signature.name, statement.d.name);
                     break;
@@ -108,7 +128,7 @@ function exportedBy(module: ModuleNode, reader: AnalyzerNodeInfo.AnalyzerNodeInf
     return bound.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
-function signatureOf(node: FunctionNode, prefix: string, evaluator: TypeEvaluator): Signature {
+function signatureOf(node: FunctionNode, prefix: string, print: Printer): Signature {
     const kinds = parameterKinds(node.d.params);
     return {
         name: prefix + node.d.name.d.value,
@@ -120,12 +140,12 @@ function signatureOf(node: FunctionNode, prefix: string, evaluator: TypeEvaluato
             const written: Parameter = {
                 name: parameter.d.name.d.value,
                 kind,
-                annotation: printed(parameter.d.annotation ?? parameter.d.annotationComment, evaluator),
+                annotation: printed(parameter.d.annotation ?? parameter.d.annotationComment, print),
                 has_default: parameter.d.defaultValue !== undefined,
             };
             return [written];
         }),
-        returns: printed(node.d.returnAnnotation, evaluator),
+        returns: printed(node.d.returnAnnotation, print),
     };
 }
 
@@ -154,7 +174,7 @@ function parameterKinds(parameters: ParameterNode[]): (ParameterKind | undefined
     });
 }
 
-// A declared type as pyright prints it, or nothing where none is declared.
-function printed(annotation: ExpressionNode | undefined, evaluator: TypeEvaluator): string {
-    return annotation ? evaluator.printType(evaluator.getTypeOfAnnotation(annotation)) : '';
+// An annotation as `print` says it, or nothing where none is declared.
+function printed(annotation: ExpressionNode | undefined, print: Printer): string {
+    return annotation ? print(annotation) : '';
 }

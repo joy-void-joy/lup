@@ -77,6 +77,7 @@ const APPROVAL: Item = {
         summary: " a.py | 2 +-",
         repository: "/r/.git",
         fingerprint: "f",
+        typing: false,
     },
     sender: { party: "operator" },
     recipient: { party: "operator" },

@@ -1233,15 +1233,15 @@ class Stopping(Model, Handler[Stop], arbitrary_types_allowed=True):
 
 
 class Companion(ABC):
-    """A program the service runs beside it: begun once the service listens, ended as it stops."""
+    """What the service runs beside it, a program or work of its own: begun once the service listens, ended as it stops."""
 
     @abstractmethod
     async def begin(self) -> None:
-        """Start the program; raise `HostError` where it can't, saying why, and the service goes on without it."""
+        """Start it; raise `HostError` where it can't, saying why, and the service goes on without it."""
 
     @abstractmethod
     async def end(self) -> None:
-        """Stop the program, where it runs."""
+        """Stop it, where it runs."""
 
 
 class Serving(Model, arbitrary_types_allowed=True):

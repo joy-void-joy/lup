@@ -8,6 +8,10 @@
 //       Be that engine, in the foreground.
 //   rules
 //       Print lup's rules (id, mistake, steer, examples) as JSON.
+//   parse
+//       Read files from their parse alone, with no project loaded (`parsed.ts`): a
+//       JSON list of `{path, content}` on its input, and each file's report printed
+//       as JSON, in the same order.
 //
 // I and F are JSON lists of strings, from the project's runner: the command running
 // the worktree's Python, which the engine runs to name its interpreter, and the
@@ -25,7 +29,8 @@ import { initializeDependencies } from 'pyright/common/asyncInitialization';
 
 import { ruleInfos } from './catalog';
 import { Engine } from './engine';
-import { Environment } from './protocol';
+import { parsedReport } from './parsed';
+import { Environment, ParsedSource } from './protocol';
 import { Server, ServeOptions } from './server';
 
 interface Arguments {
@@ -69,17 +74,38 @@ function parse(argv: string[]): Arguments {
         return value;
     };
     const listed = (name: string) => strings(name, need(name));
+    // `rules` and `parse` load no project, so they take nothing.
+    const alone = command === 'rules' || command === 'parse';
     return {
         command,
-        root: command === 'rules' ? '' : path.resolve(need('root')),
-        socket: command === 'rules' ? '' : need('socket'),
-        idleSeconds: command === 'rules' ? 0 : Number(need('idle-seconds')),
-        environment:
-            command === 'rules'
-                ? { interpreter: [], files: [] }
-                : { interpreter: listed('interpreter'), files: listed('environment-files') },
+        root: alone ? '' : path.resolve(need('root')),
+        socket: alone ? '' : need('socket'),
+        idleSeconds: alone ? 0 : Number(need('idle-seconds')),
+        environment: alone
+            ? { interpreter: [], files: [] }
+            : { interpreter: listed('interpreter'), files: listed('environment-files') },
         log: command === 'start' ? need('log') : '',
     };
+}
+
+// The files `parse` reads, as its input gives them.
+function sources(text: string): ParsedSource[] {
+    const refused = () => new Error('`parse` reads a JSON list of `{"path": …, "content": …}` strings on its input');
+    let given: unknown;
+    try {
+        given = JSON.parse(text);
+    } catch {
+        throw refused();
+    }
+    const isSource = (each: unknown): each is ParsedSource =>
+        typeof each === 'object' &&
+        each !== null &&
+        typeof (each as ParsedSource).path === 'string' &&
+        typeof (each as ParsedSource).content === 'string';
+    if (!Array.isArray(given) || !given.every(isSource)) {
+        throw refused();
+    }
+    return given;
 }
 
 function build(): string {
@@ -169,8 +195,11 @@ async function main() {
         case 'rules':
             process.stdout.write(JSON.stringify(ruleInfos()) + '\n');
             return;
+        case 'parse':
+            process.stdout.write(JSON.stringify(sources(fs.readFileSync(0, 'utf8')).map(parsedReport)) + '\n');
+            return;
         default:
-            throw new Error(`no command named ${JSON.stringify(args.command)}: it's start, serve or rules`);
+            throw new Error(`no command named ${JSON.stringify(args.command)}: it's start, serve, rules or parse`);
     }
 }
 

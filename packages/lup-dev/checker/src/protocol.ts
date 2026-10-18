@@ -131,6 +131,14 @@ export interface SourceRequest {
     content: string | null;
 }
 
+// A file the `parse` command reads from its parse alone (`parsed.ts`), with no
+// project loaded: its path, which its report names it by and which tells a package
+// root, and its content (`EngineChecker.parsed` in `lup_dev/codescan/engine.py`).
+export interface ParsedSource {
+    path: string;
+    content: string;
+}
+
 // How the engine finds the worktree's environment, from the project's runner
 // (`EngineEnvironment` in `lup_dev/codescan/engine.py`): the command running the
 // environment's Python, which names the interpreter, and the files, from the root,

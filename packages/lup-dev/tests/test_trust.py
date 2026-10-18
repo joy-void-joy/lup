@@ -23,7 +23,7 @@ from typer.testing import CliRunner
 from lup.types import Model
 from lup_dev import cli
 from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool
-from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
+from lup_dev.codescan.contract import Checker, FileReport, Parser, Rule, Source
 from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import resolve
@@ -434,6 +434,7 @@ def trusting(
         ),
         clock=kit.clock,
         checker=kit.engine,
+        parser=kit.parser,
         linter=kit.linter,
         inside=list(inside or []),
     )
@@ -803,7 +804,25 @@ class added on line 11 and an `ignore` added on line 12."""
 CORE_PATH = "packages/lup-dev/src/environment/core.py"
 
 
-def test_each_file_of_an_approval_carries_the_judges_reading_each_line_placed(
+CORE_ASKS = [
+    Asked(name="ignore", taken="held", line=12),
+    Asked(
+        name="public-api",
+        taken="flagged",
+        line=11,
+        api=ApiChanged(kind="class-added", name="Room"),
+    ),
+    Asked(
+        name="public-api",
+        taken="flagged",
+        line=7,
+        api=ApiChanged(kind="signature-changed", name="Client.ask"),
+    ),
+]
+"""What `CORE_CHANGED` asks, each on its line."""
+
+
+def test_an_approval_is_asked_with_each_files_parse_read_and_its_types_read_after(
     lup: Path, kit: Kit, shell: Shell
 ) -> None:
     changed(lup, {CORE_PATH: CORE}, shell)
@@ -814,24 +833,20 @@ def test_each_file_of_an_approval_carries_the_judges_reading_each_line_placed(
     trust.proposed()
     assert isinstance(trust.approvals, Here)
     [asking] = trust.approvals.asking
+    assert asking.typing
+    assert kit.engine.checked == []
+    assert kit.linter.runners == []
     [core] = asking.files
-    assert core.reading == Reading(
+    assert core.reading == Reading(role="production", asks=CORE_ASKS)
+    [typed] = trust.typed(Path(trust.repository()), asking.files)
+    assert (typed.path, typed.before, typed.after) == (
+        core.path,
+        core.before,
+        core.after,
+    )
+    assert typed.reading == Reading(
         role="production",
-        asks=[
-            Asked(name="ignore", taken="held", line=12),
-            Asked(
-                name="public-api",
-                taken="flagged",
-                line=11,
-                api=ApiChanged(kind="class-added", name="Room"),
-            ),
-            Asked(
-                name="public-api",
-                taken="flagged",
-                line=7,
-                api=ApiChanged(kind="signature-changed", name="Client.ask"),
-            ),
-        ],
+        asks=CORE_ASKS,
         findings=[
             Found(
                 rule="regex",
@@ -867,6 +882,9 @@ def test_a_first_approval_reads_the_zone_by_its_roles_alone_never_the_tips_decla
     )
     assert readings[Path("lup_project.py")] == Reading(role="protected")
     assert not ran.exists()
+    # Trusted as it is: there's nothing to read the types of.
+    assert not asking.typing
+    assert kit.parser.parsed_asked == []
 
 
 def test_once_approved_the_declaration_approved_judges_the_zones_change(
@@ -910,22 +928,46 @@ class Broken(Checker):
         raise EngineError(message)
 
 
+class Unparsed(Parser):
+    """The engine's parse, failing each request."""
+
+    def parsed(self, root: Path, sources: list[Source]) -> list[FileReport]:
+        message = "the engine is gone"
+        raise EngineError(message)
+
+
 def test_where_the_judge_fails_the_files_go_unread_and_the_summary_says_why(
     lup: Path, kit: Kit, shell: Shell
 ) -> None:
     first = trusting(lup, kit, yes()).ensure()
     assert isinstance(first, Trusted)
     changed(lup, {"packages/lup/src/library/extra.py": '"""Extra."""\n'}, shell)
-    trust = trusting(lup, kit, unasked()).model_copy(update={"checker": Broken()})
+    trust = trusting(lup, kit, unasked()).model_copy(update={"parser": Unparsed()})
     trust.proposed()
     assert isinstance(trust.approvals, Here)
     [asking] = trust.approvals.asking
     assert asking.files != []
     assert all(each.reading is None for each in asking.files)
+    assert not asking.typing
     assert asking.summary.splitlines()[-1] == (
         "The judge couldn't read the zone's change, so the review opens every "
         "file: the engine is gone"
     )
+
+
+def test_reading_an_approvals_types_raises_what_the_judge_raises(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    changed(lup, {"packages/lup/src/library/extra.py": '"""Extra."""\n'}, shell)
+    trust = trusting(lup, kit, unasked())
+    trust.proposed()
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    broken = trust.model_copy(update={"checker": Broken()})
+    with pytest.raises(EngineError, match="the engine is gone"):
+        broken.typed(Path(trust.repository()), asking.files)
 
 
 def test_a_branchs_own_change_isnt_the_tips_and_asks_nothing(

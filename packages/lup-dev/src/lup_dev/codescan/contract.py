@@ -107,7 +107,9 @@ class Parameter(Model):
         "variadic-keyword",
     ]
     annotation: str
-    """The declared type as pyright prints it: compared whole, never taken apart."""
+    """The declared type as pyright prints it, or, read from the parse alone
+    (`Checker.parsed`), the annotation as written: compared whole, never taken
+    apart."""
     has_default: bool
 
 
@@ -120,7 +122,7 @@ class Signature(Model):
     name: str
     parameters: list[Parameter]
     returns: str
-    """The declared return type as pyright prints it."""
+    """The declared return type, said as `Parameter.annotation` is."""
 
 
 type Named = Literal["export", "class", "signature"]
@@ -252,4 +254,19 @@ class Checker(ABC):
 
         Types are read in the environment the project's `runner` gives the
         worktree.
+        """
+
+
+class Parser(ABC):
+    """What reads files from their parse alone, with no types: the engine's, for a first reading of a change a type check would hold up."""
+
+    @abstractmethod
+    def parsed(self, root: Path, sources: list[Source]) -> list[FileReport]:
+        """Read the given files of the project at `root` from their parse alone, one report per source, in order.
+
+        No project is loaded and no type is read, so it costs a parse: each
+        report holds the file's directives and its public surface, each
+        annotation as written, and no finding or import. A package root's names
+        are the ones it binds itself, no import being resolved. The same path
+        may come more than once, each time with other content.
         """

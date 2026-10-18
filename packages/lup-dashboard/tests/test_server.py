@@ -2,7 +2,7 @@
 
 import asyncio
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -450,6 +450,37 @@ def test_a_host_zone_the_sent_draft_approved_is_acted_on_as_the_terminal_would(
     )
     assert response.json()["approved"][0]["number"] == 7
     assert host.settled == [7]
+
+
+def test_the_demos_approval_is_read_from_its_parse_until_its_types_are_read(
+    page: Path,
+) -> None:
+    demo = Demo(clock=Fixed(), types_read=timedelta(hours=1))
+    served = client(demo, page)
+
+    def approval() -> tuple[bool, list[str]]:
+        items = served.post("/api/ask", json={"kind": "inbox-list"}, headers=bearing())
+        [typing] = [
+            each["reason"]["typing"]
+            for each in items.json()["items"]
+            if each["number"] == 54
+        ]
+        shown = served.post(
+            "/api/ask",
+            json={"kind": "inbox-show-files", "number": 54},
+            headers=bearing(),
+        )
+        found = [
+            finding["rule"]
+            for each in shown.json()["files"]
+            for finding in each["reading"]["findings"]
+        ]
+        return typing, found
+
+    assert approval() == (True, [])
+    assert demo.reading is not None
+    demo.typed()
+    assert approval() == (False, ["string-split"])
 
 
 def test_the_demos_files_carry_readings_each_placed_on_a_line_its_file_has() -> None:
