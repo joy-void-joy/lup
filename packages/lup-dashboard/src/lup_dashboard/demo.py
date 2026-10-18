@@ -405,7 +405,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 sender=survey,
                 recipient=Operator(),
                 worktree=dev,
-                made=self.ago(18),
+                made=self.ago(17.5),
                 state=Done(at=self.ago(16.5)),
             ),
             Item(
@@ -422,7 +422,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 reason=Message(
                     kind="note",
                     text=(
-                        "Claude Code's records first, then Codex's rollouts: they "
+                        "The first runtime's records first, then the second's: they "
                         "keep subagents differently, so one reader each."
                     ),
                 ),
@@ -582,7 +582,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 Called(tool="mcp__lup__note", id="call-47", at=self.ago(26)),
                 Said(
                     by="agent",
-                    text="Reading Claude Code's records first.",
+                    text="Reading the first runtime's records.",
                     at=self.ago(25.5),
                 ),
                 Called(tool="Read", at=self.ago(24)),

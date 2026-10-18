@@ -11,7 +11,9 @@
 // `zM` open and close them all. Space `h`, or Space `w` `h`, goes to the agents'
 // tree. Each view says what else its keys do, lays its own text out and draws
 // it, and may paint the lines in view as well, as the review paints a changed
-// file's (`Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
+// file's (`Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`). A fold may be
+// inside another, as an item's text is inside what came before the operator's
+// last words: the fold keys act on the innermost the cursor is on.
 import { codeFolding, foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
 import { Annotation, EditorState, Facet, Prec, StateEffect, StateField, type Range } from "@codemirror/state";
 import {
@@ -609,7 +611,10 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             fold: (how) => {
                 const editor = view.current;
                 const at = head();
-                const fold = shown.folds.find((each) => at >= each.summary.from && at <= each.to);
+                // Of folds one inside another, the innermost the cursor is on: the one whose summary line starts last.
+                const fold = shown.folds
+                    .filter((each) => at >= each.summary.from && at <= each.to)
+                    .reduce<Folding | undefined>((inner, each) => (inner === undefined || each.summary.from > inner.summary.from ? each : inner), undefined);
                 if (editor === null || fold === undefined) {
                     return;
                 }

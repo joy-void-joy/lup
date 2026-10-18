@@ -2,18 +2,24 @@ import { describe, expect, it } from "vitest";
 
 import {
     MESSAGE,
+    UNEXCHANGED,
     UNSAID,
     aboutAt,
     blockAt,
+    folds,
     history,
     laid,
     message,
     opened,
     quoted,
     reading,
+    type Beside,
     type Entry,
+    type Exchange,
+    type Item,
     type Sent,
     type Talk,
+    type Whose,
 } from "./conversation";
 import { changes, moved } from "./comments";
 
@@ -30,6 +36,12 @@ const STEPS: Entry[] = [
     { kind: "called", tool: "Grep", at: at(11) },
 ];
 
+/** The session's own conversation, its subagents called by their kind. */
+const WHOSE: Whose = { agent: null, name: (party) => (party.agent == null ? "lup-impl" : `lup-impl/${party.agent}`) };
+
+/** A conversation with nothing exchanged through lup. */
+const ALONE: Beside = { sent: [], exchanged: UNEXCHANGED, whose: WHOSE };
+
 const MORE: Entry[] = [
     { kind: "called", tool: "Grep", at: at(12) },
     { kind: "said", by: "agent", text: "Found the four.", at: at(13) },
@@ -38,8 +50,8 @@ const MORE: Entry[] = [
 describe("a conversation laid out", () => {
     it("says each step in a line, the agent's paragraphs kept, a run of calls in one, what came before the operator's last words folded", () => {
         const folded = history(STEPS, []);
-        expect(folded).toBe(5);
-        const out = laid(STEPS, [], UNSAID, folded);
+        expect(folded).toEqual({ step: 5 });
+        const out = laid(STEPS, ALONE, UNSAID, folded);
         expect(out.text).toBe(
             [
                 "earlier · 5 steps, from 9m before your last words",
@@ -71,14 +83,14 @@ describe("a conversation laid out", () => {
     });
 
     it("folds nothing where the operator's last words are its first step", () => {
-        const out = laid(STEPS.slice(0, 3), [], UNSAID, history(STEPS.slice(0, 3), []));
+        const out = laid(STEPS.slice(0, 3), ALONE, UNSAID, history(STEPS.slice(0, 3), []));
         expect(out.fold).toBeNull();
         expect(out.text.startsWith("you: Look into")).toBe(true);
     });
 });
 
 describe("comments on the agent's words", () => {
-    const out = laid(STEPS, [], UNSAID, history(STEPS, []));
+    const out = laid(STEPS, ALONE, UNSAID, history(STEPS, []));
 
     it("opens one on a line of the agent's words, quoting it, and none on any other line", () => {
         expect(opened(out, out.text.indexOf("subagents"))).toEqual({
@@ -116,7 +128,7 @@ describe("comments on the agent's words", () => {
                 { step: 6, quote: { text: "Four carry what was said.", start: 23, end: 48 }, text: "Which four?" },
             ],
         };
-        const commented = laid(STEPS, [], talk, history(STEPS, []));
+        const commented = laid(STEPS, ALONE, talk, history(STEPS, []));
         expect(commented.text).toBe(
             [
                 "earlier · 5 steps, from 9m before your last words",
@@ -168,8 +180,8 @@ describe("the conversation growing", () => {
     };
 
     it("adds what arrives at the end, before the operator's message, everything before it where it was", () => {
-        const before = laid(STEPS, [], talk, folded);
-        const after = laid([...STEPS, ...MORE], [], talk, folded);
+        const before = laid(STEPS, ALONE, talk, folded);
+        const after = laid([...STEPS, ...MORE], ALONE, talk, folded);
         const made = changes(before.text, after.text);
         // What arrives lands on the last line and after it, before the message, which stays last.
         expect(made.length).toBe(1);
@@ -194,14 +206,239 @@ describe("the conversation growing", () => {
     it("keeps what fold, however the operator's later words, and a message sent from here after the steps it followed", () => {
         const sent: Sent[] = [{ number: 101, text: "> JSONL\n\nEven for codex?", after: STEPS.length, at: at(12) }];
         const later: Entry[] = [...STEPS, { kind: "said", by: "agent", text: "Yes, both.", at: at(14) }, { kind: "said", by: "operator", text: "Good.", at: at(15) }];
-        const out = laid(later, sent, UNSAID, folded);
-        expect(out.fold).toEqual(laid(STEPS, [], UNSAID, folded).fold);
+        const out = laid(later, { ...ALONE, sent }, UNSAID, folded);
+        expect(out.fold).toEqual(laid(STEPS, ALONE, UNSAID, folded).fold);
         expect(out.text.slice(out.text.indexOf("· called Grep"))).toBe(
-            ["· called Grep", "you, through lup · #101:", "     > JSONL", "", "     Even for codex?", "agent: Yes, both.", "you: Good."].join("\n"),
+            ["· called Grep", "← #101 your message, from here", "  > JSONL", "", "  Even for codex?", "agent: Yes, both.", "you: Good."].join("\n"),
         );
+        // Its text folds under its line.
+        const [item] = out.items;
+        expect(item?.fold?.key).toBe("item 101");
+        expect(out.text.slice(item!.fold!.from, item!.fold!.to)).toBe("\n  > JSONL\n\n  Even for codex?");
         // Opened again, it folds up to the operator's last words, a message sent from here among them.
-        expect(history(STEPS, sent)).toBe(STEPS.length);
-        expect(history(later, sent)).toBe(later.length);
+        expect(history(STEPS, sent)).toEqual({ item: 101 });
+        expect(history(later, sent)).toEqual({ step: later.length - 1 });
+    });
+});
+
+const SESSION: Item["recipient"] = { party: "conversation", repository: "/r.git", runtime: "claude", session: "s1", agent: null };
+const SURVEY: Item["recipient"] = { ...SESSION, agent: "a04" };
+const OPERATOR: Item["sender"] = { party: "operator" };
+
+/** An item of the session's, sent to the operator unless `fields` say otherwise. */
+function item(number: number, reason: Item["reason"], minute: number, fields: Partial<Item> = {}): Item {
+    return { number, reason, sender: SESSION, recipient: OPERATOR, made: at(minute), state: { state: "waiting" }, ...fields };
+}
+
+/** An item and its text, as the host lists it. */
+function exchange(each: Item, text: string): Exchange {
+    return { item: each, text };
+}
+
+const CALLED: Entry[] = [
+    { kind: "said", by: "operator", text: "Look into reading transcripts.", at: at(0) },
+    { kind: "said", by: "agent", text: "Each session is a JSONL file.", at: at(1) },
+    { kind: "called", tool: "Bash", id: "b1", at: at(2) },
+    { kind: "called", tool: "mcp__lup__ask", id: "q1", at: at(3) },
+    { kind: "called", tool: "Read", id: "r1", at: at(4) },
+    { kind: "said", by: "agent", text: "Reading the second runtime's.", at: at(6) },
+    { kind: "called", tool: "Grep", id: "g1", at: at(8) },
+];
+
+const ASKED = item(51, { reason: "question", text: "Which parser?", decisions: [{ text: "A model per kind", lean: "yes" }] }, 3, {
+    call: "q1",
+    state: { state: "answered", at: at(4), answer: 53 },
+});
+const NOTED = item(52, { reason: "message", kind: "note", text: "I assumed UTF-8." }, 7, { state: { state: "done", at: at(9) } });
+const ANSWERED = item(53, { reason: "answer", question: 51, rulings: [{ decision: 1, verdict: "leaning", comment: "" }], comment: "" }, 4, {
+    sender: OPERATOR,
+    recipient: SESSION,
+    state: { state: "told", at: at(5), how: "call" },
+});
+const REPLIED = item(54, { reason: "message", kind: "note", text: "Good.", of: 52 }, 9, { sender: OPERATOR, recipient: SESSION });
+
+const EXCHANGED: Beside = {
+    ...ALONE,
+    exchanged: {
+        sent: [exchange(ASKED, "Which parser?\n1. A model per kind (lean: yes)"), exchange(NOTED, "I assumed UTF-8.")],
+        received: [
+            exchange(ANSWERED, "Asked: Which parser?\n1. A model per kind (lean: yes): leaning: they go with the lean."),
+            exchange(REPLIED, "Good."),
+        ],
+    },
+};
+
+describe("the items of lup's inbox in a conversation", () => {
+    it("shows each in a line, its text under it: one it sent just after the call that made it, one it was sent when it was told, any other when it was made", () => {
+        const out = laid(CALLED, EXCHANGED, UNSAID, history(CALLED, []));
+        expect(out.text).toBe(
+            [
+                "you: Look into reading transcripts.",
+                "agent: Each session is a JSONL file.",
+                "· called Bash, mcp__lup__ask",
+                "→ #51 question to you · answered by #53",
+                "  Which parser?",
+                "  1. A model per kind (lean: yes)",
+                "· called Read",
+                "← #53 your answer to #51",
+                "  Asked: Which parser?",
+                "  1. A model per kind (lean: yes): leaning: they go with the lean.",
+                "agent: Reading the second runtime's.",
+                "→ #52 note to you · answered by #54",
+                "  I assumed UTF-8.",
+                "· called Grep",
+                "← #54 your reply to #52 · not told yet",
+                "  Good.",
+            ].join("\n"),
+        );
+        const line = (number: number) => out.items.find((each) => each.number === number)!;
+        const shown = (span: { from: number; to: number }) => out.text.slice(span.from, span.to);
+        // Each item's text folds under its line, read and never commented on.
+        expect(out.items.map((each) => each.number)).toEqual([51, 53, 52, 54]);
+        expect(folds(out).map((each) => each.key)).toEqual(["item 51", "item 53", "item 52", "item 54"]);
+        expect(shown(line(53).fold!)).toBe("\n  Asked: Which parser?\n  1. A model per kind (lean: yes): leaning: they go with the lean.");
+        for (const number of [51, 53]) {
+            expect(opened(out, line(number).line.from)).toBeUndefined();
+            expect(opened(out, line(number).fold!.to - 1)).toBeUndefined();
+        }
+        expect(out.asides.filter((each) => each.kind === "item-from").map(shown)).toEqual([
+            "→ #51 question to you · answered by #53",
+            "→ #52 note to you · answered by #54",
+        ]);
+        // `J` and `K` stop at each, and the reader on the last one follows what arrives.
+        expect(out.turns).toContain(line(52).line.from);
+        expect(out.last).toEqual(line(54).line);
+    });
+
+    it("says where each it sent stands: waiting on you, read, withdrawn, approved or declined with your comment", () => {
+        const held = item(55, { reason: "held", text: "Let the change land?", summary: "AGENTS.md: the operator's", worktree: "/w", key: "k" }, 12, {
+            state: { state: "decided", at: at(13), approved: false, comment: "Not this file." },
+        });
+        const sent = [
+            item(56, { reason: "message", kind: "problem", text: "Stuck." }, 12),
+            item(57, { reason: "message", kind: "note", text: "Done." }, 12, { state: { state: "done", at: at(13) } }),
+            item(58, { reason: "question", text: "Which?", decisions: [] }, 12, { state: { state: "withdrawn", at: at(13), why: "Found it." } }),
+        ];
+        const out = laid(
+            STEPS,
+            { ...ALONE, exchanged: { sent: [exchange(held, "Let the change land?\nAGENTS.md: the operator's"), ...sent.map((each) => exchange(each, "…"))], received: [] } },
+            UNSAID,
+            "nothing",
+        );
+        expect(out.text.slice(out.text.indexOf("→ #55"))).toBe(
+            [
+                "→ #55 held change to you · declined",
+                "  Let the change land?",
+                "  AGENTS.md: the operator's",
+                "",
+                "  your comment: Not this file.",
+                "→ #56 problem to you · waiting on you",
+                "  …",
+                "→ #57 note to you · read",
+                "  …",
+                "→ #58 question to you · withdrawn: Found it.",
+                "  …",
+            ].join("\n"),
+        );
+    });
+
+    it("says one passed on from an ended subagent: in its session's, whose it was; in the subagent's, where it went", () => {
+        const noted = item(44, { reason: "message", kind: "note", text: "No cache." }, 2, { sender: SURVEY, state: { state: "done", at: at(3) } });
+        const reply = item(46, { reason: "message", kind: "note", text: "Right.", of: 44 }, 3, {
+            sender: OPERATOR,
+            recipient: SESSION,
+            addressed: SURVEY,
+            state: { state: "told", at: at(4), how: "call" },
+        });
+        const session = laid(STEPS.slice(0, 3), { ...ALONE, exchanged: { sent: [], received: [exchange(reply, "Right.")] } }, UNSAID, "nothing");
+        const subagent = laid(
+            STEPS.slice(0, 3),
+            { ...ALONE, whose: { ...WHOSE, agent: "a04" }, exchanged: { sent: [exchange(noted, "No cache.")], received: [exchange(reply, "Right.")] } },
+            UNSAID,
+            "nothing",
+        );
+        expect(session.text.split("\n").filter((each) => each.startsWith("←") || each.startsWith("→"))).toEqual([
+            "← #46 your reply to #44, for lup-impl/a04, which had ended",
+        ]);
+        expect(subagent.text.split("\n").filter((each) => each.startsWith("←") || each.startsWith("→"))).toEqual([
+            "→ #44 note to you · answered by #46",
+            "← #46 your reply to #44 · passed on to lup-impl, this one having ended",
+        ]);
+    });
+
+    it("places by time a step with none taking the last time before it, and in a record with no times at the end", () => {
+        const untimed: Entry[] = [
+            { kind: "said", by: "operator", text: "Go." },
+            { kind: "called", tool: "Bash" },
+            { kind: "said", by: "agent", text: "Ran it.", at: at(5) },
+            { kind: "called", tool: "Read" },
+            { kind: "said", by: "agent", text: "Read it." },
+        ];
+        const early = item(60, { reason: "message", kind: "note", text: "Early." }, 4);
+        const late = item(61, { reason: "message", kind: "note", text: "Late." }, 6);
+        const beside: Beside = { ...ALONE, exchanged: { sent: [exchange(late, "Late."), exchange(early, "Early.")], received: [] } };
+        const lines = (entries: Entry[]) =>
+            laid(entries, beside, UNSAID, "nothing")
+                .text.split("\n")
+                .filter((each) => !each.startsWith("  "));
+        expect(lines(untimed)).toEqual([
+            "you: Go.",
+            "· called Bash",
+            "→ #60 note to you · waiting on you",
+            "agent: Ran it.",
+            "· called Read",
+            "agent: Read it.",
+            "→ #61 note to you · waiting on you",
+        ]);
+        expect(lines(untimed.map(({ at: _, ...each }) => each))).toEqual([
+            "you: Go.",
+            "· called Bash",
+            "agent: Ran it.",
+            "· called Read",
+            "agent: Read it.",
+            "→ #60 note to you · waiting on you",
+            "→ #61 note to you · waiting on you",
+        ]);
+    });
+
+    it("shows a message sent from here once, as its item, after the steps the conversation had then, and one not listed yet from what was sent", () => {
+        const sent: Sent[] = [
+            { number: 101, text: "Go on.", after: 3, at: at(20) },
+            { number: 102, text: "And then?", after: STEPS.length, at: at(21) },
+        ];
+        const told = item(101, { reason: "message", kind: "note", text: "Go on." }, 20, {
+            sender: OPERATOR,
+            recipient: SESSION,
+            state: { state: "told", at: at(25), how: "call" },
+        });
+        const out = laid(STEPS, { ...ALONE, sent, exchanged: { sent: [], received: [exchange(told, "Go on.")] } }, UNSAID, "nothing");
+        expect(out.text.split("\n").filter((each) => each.startsWith("←"))).toEqual([
+            "← #101 your message, from here",
+            "← #102 your message, from here",
+        ]);
+        expect(out.text).toContain("· called Bash\n← #101 your message, from here\n  Go on.\n· called Bash, Read");
+        expect(out.text.endsWith("· called Grep\n← #102 your message, from here\n  And then?")).toBe(true);
+    });
+
+    it("folds the items before the operator's last words with what came before, counting them", () => {
+        const before = item(50, { reason: "message", kind: "note", text: "Early." }, 4);
+        const out = laid(STEPS, { ...ALONE, exchanged: { sent: [exchange(before, "Early.")], received: [] } }, UNSAID, history(STEPS, []));
+        expect(out.text.split("\n")[0]).toBe("earlier · 5 steps, 1 item, from 9m before your last words");
+        const fold = out.fold!;
+        const inner = out.items[0]!.fold!;
+        expect(inner.from > fold.from && inner.to <= fold.to).toBe(true);
+        expect(folds(out).map((each) => each.key)).toEqual(["earlier", "item 50"]);
+    });
+
+    it("adds an item arriving, and changes its question's line as its answer arrives, the rest where it was", () => {
+        const asked: Beside = { ...ALONE, exchanged: { sent: [exchange({ ...ASKED, state: { state: "waiting" } }, "Which parser?")], received: [] } };
+        const before = laid(CALLED, asked, UNSAID, history(CALLED, []));
+        const after = laid(CALLED, { ...asked, exchanged: { sent: [exchange(ASKED, "Which parser?")], received: [exchange(ANSWERED, "Asked.")] } }, UNSAID, history(CALLED, []));
+        const made = changes(before.text, after.text);
+        expect(before.text).toContain("→ #51 question to you · waiting on you");
+        expect(after.text).toContain("→ #51 question to you · answered by #53\n  Which parser?\n· called Read\n← #53 your answer to #51\n  Asked.\nagent:");
+        const reader = before.text.indexOf("agent: Reading");
+        expect(after.text.slice(moved(reader, made, before.text.length)).startsWith("agent: Reading")).toBe(true);
     });
 });
 
@@ -228,9 +465,9 @@ describe("the changes between two texts", () => {
     it("keep a reader between two of them where they were, as when a message sent clears comments above and adds below", () => {
         const talk: Talk = { comments: [{ step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" }, { step: null, quote: null, text: "Carry on." }] };
         const folded = history(STEPS, []);
-        const before = laid(STEPS, [], talk, folded);
+        const before = laid(STEPS, ALONE, talk, folded);
         const sent: Sent[] = [{ number: 101, text: message(talk), after: STEPS.length, at: at(12) }];
-        const after = laid([...STEPS, ...MORE], sent, UNSAID, folded);
+        const after = laid([...STEPS, ...MORE], { ...ALONE, sent }, UNSAID, folded);
         const made = changes(before.text, after.text);
         expect(made.length).toBe(2);
         expect(apply(before.text, made)).toBe(after.text);

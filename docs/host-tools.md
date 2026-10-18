@@ -282,7 +282,7 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 | `inbox/delivery.py` | Telling each conversation, once (`Delivery`, the service's `Post`), an idle session's doorbell (`doorbell`), and the operator's notices |
 | `inbox/tools.py` | `report`, `note`, `ask`, `send`, `wait_inbox`, `inbox` and `withdraw` (`InboxTools`, a `RoomTools`; `Speaker`, `specs`) |
 | `inbox/ends.py` | A turn's end held once per thing, across turns (`holding`) |
-| `inbox/protocol.py` | The operator's requests on the control socket and their handlers (`ListInbox`, `ShowItem`, `ShowContext`, `AnswerItem`, `FinishItem`, `SendItem`; the approval's `AskApproval`, `AwaitApproval`, `AnswerApproval`, `ShowDiff`, `ShowFiles`; the held change's `AskHold`; the draft's `ShowDraft`, `KeepDraft`, `SendDraft`; `routes`) |
+| `inbox/protocol.py` | The operator's requests on the control socket and their handlers (`ListInbox`, `ShowItem`, `ShowContext`, `AnswerItem`, `FinishItem`, `SendItem`; the approval's `AskApproval`, `AwaitApproval`, `AnswerApproval`, `ShowDiff`, `ShowFiles`; the held change's `AskHold`; the draft's `ShowDraft`, `KeepDraft`, `SendDraft`; a conversation's items, in every state, each with its text whole, `ListItems`, answered `Exchanged`; `routes`) |
 | `inbox/context.py` | An item's moment in its sender's conversation (`moment`, `Moment`) |
 | `inbox/notices.py` | The desktop's notices: `Notices`, `NotifySend` |
 | `forge/github.py` | GitHub through `gh --json` on one repository (`GitHub`, `GitHub.launched`), each answer a model (`Issue`, `PullRequest`, `CheckRun`, `StatusContext`, `Found`, `Search`); naming the repository from its git directory (`named`); `GitHubError`; `PROGRAM` |
@@ -306,7 +306,7 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 
 No agent and no network in any test. The host service serves on sockets under the test's temporary directory, in a thread of its own; `gh` is a stand-in on the `PATH` answering `gh` 2.102.0's recorded JSON (`tests/payloads/gh-2.102.0/`); git runs for real on scratch repositories laid out as lup's, a bare repository as the forge; the clipboard's desktop programs are stood in.
 - `packages/lup/tests/`: `test_serving.py` (a toolset over a socket pair to `mcp`'s own client), `test_bridge.py` (a stand-in server stopping and starting under the bridge), `test_terminal.py` (each runtime's compile, compared whole).
-- `packages/lup-dev/tests/`: `test_host.py` (the room sockets, `caller`, a hook the judge doesn't read, watches), `test_adapters.py` (each `Courier` on recorded payloads), `test_inbox.py` (each way an item is told, once; the tools; `lup-dev inbox`), `test_remote.py` (the helper run by real git against the service), `test_forge.py`, `test_clipboard.py`, `test_declaration.py` (`Credentials`).
+- `packages/lup-dev/tests/`: `test_host.py` (the room sockets, `caller`, a hook the judge doesn't read, watches), `test_adapters.py` (each `Courier` on recorded payloads), `test_inbox.py` (each way an item is told, once; the tools; `lup-dev inbox`; a conversation's items listed), `test_remote.py` (the helper run by real git against the service), `test_forge.py`, `test_clipboard.py`, `test_declaration.py` (`Credentials`).
 
 ## Where it's going
 
