@@ -125,7 +125,11 @@ def test_the_socket_sends_a_watchs_replies_under_its_number_then_its_end(
         socket.send_json(watched(7, ListInbox()))
         frames = [socket.receive_json() for _ in range(3)]
     assert frames == [
-        {"kind": "watched", "number": 7, "reply": {"kind": "inbox-items", "items": []}},
+        {
+            "kind": "watched",
+            "number": 7,
+            "reply": {"kind": "inbox-items", "items": [], "reviewed": None},
+        },
         {
             "kind": "watched",
             "number": 7,
@@ -156,7 +160,7 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
     assert second == {
         "kind": "watched",
         "number": 2,
-        "reply": {"kind": "inbox-items", "items": []},
+        "reply": {"kind": "inbox-items", "items": [], "reviewed": None},
     }
     assert host.asked == [ListLaunches(), ListInbox()]
 

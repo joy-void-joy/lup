@@ -18,6 +18,7 @@ import { rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import {
     codeFrom,
     foldKey,
+    fresh,
     laid,
     onBanner,
     opened,
@@ -25,6 +26,7 @@ import {
     regionAt,
     shownAt,
     toggled,
+    waited,
     type Around,
     type Aside,
     type Comment,
@@ -51,6 +53,10 @@ interface Props {
     shown: boolean;
     /** Give the keyboard to the agents' tree. */
     tree: () => void;
+    /** When the operator last settled an item of theirs: what came after is new to them. */
+    reviewed: string | null;
+    /** The time, to the minute, which each item's wait is told from. */
+    now: Date;
 }
 
 /** Return the classes a line under an item is drawn with: what it shows, and whether it folds under a summary. */
@@ -107,7 +113,7 @@ function painted(laidOut: Laid, from: number, to: number): Range<Decoration>[] {
 }
 
 /** Draw the review: groups' banners, items' headers, done and parked items, the lines under each item, the changed files' headers, each comment's lines, and the passage each comment is on. */
-function decorations(laidOut: Laid, draft: Draft): DecorationSet {
+function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): DecorationSet {
     const marks: { from: number; to: number; value: Decoration }[] = [];
     const comments = draft.comments ?? [];
     for (const region of laidOut.regions) {
@@ -121,6 +127,7 @@ function decorations(laidOut: Laid, draft: Draft): DecorationSet {
         }
         const states = [
             "review-header",
+            fresh(region.item, reviewed) ? "is-new" : "",
             (draft.done ?? []).includes(number) ? "is-done" : "",
             (draft.parked ?? []).includes(number) ? "is-parked" : "",
         ].join(" ");
@@ -182,7 +189,21 @@ function followed(before: Laid | null, after: Laid, head: number, landing: Landi
     return Math.max(Math.min(now.header.from + (head - was.header.from), after.text.length), 0);
 }
 
-export function Review({ items, draft, change, banner, around, send, approve, inserting, epoch, shown, tree }: Props) {
+export function Review({
+    items,
+    draft,
+    change,
+    banner,
+    around,
+    send,
+    approve,
+    inserting,
+    epoch,
+    shown,
+    tree,
+    reviewed,
+    now,
+}: Props) {
     const laidOut = useMemo(
         () =>
             laid(
@@ -195,12 +216,19 @@ export function Review({ items, draft, change, banner, around, send, approve, in
                             : item.reason.reason === "held"
                               ? "held change"
                               : item.reason.reason;
-                    return `── #${item.number} ${what} · ${when(item.made)}${later ? " · later" : ""} ──`;
+                    const told = [
+                        `#${item.number} ${what}`,
+                        ...(fresh(item, reviewed) ? ["new"] : []),
+                        when(item.made),
+                        waited(item.made, now),
+                        ...(later ? ["later"] : []),
+                    ];
+                    return `── ${told.join(" · ")} ──`;
                 },
                 draft,
                 around,
             ),
-        [items, banner, draft, around],
+        [items, banner, draft, around, reviewed, now],
     );
     const laidFor = useMemo(
         () => ({
@@ -255,11 +283,11 @@ export function Review({ items, draft, change, banner, around, send, approve, in
         }
         before.current = laidOut;
         landing.current = null;
-        editor.draw(decorations(laidOut, draft));
+        editor.draw(decorations(laidOut, draft, reviewed));
         if (arriving !== null && "comment" in arriving) {
             editor.enter();
         }
-    }, [laidOut, draft]);
+    }, [laidOut, draft, reviewed]);
 
     function here() {
         return regionAt(laidOut.regions, editor.head());

@@ -216,14 +216,27 @@ function filed(item: Item, around: Around): Filed[] {
     });
 }
 
-/** Return `items` in groups, each under its banner, the groups in the banners' order and the items in theirs. */
+/** Return `items` in groups, each under its banner: the group with the newest item first, and the items in each in their own order. */
 function grouped(items: Item[], banner: (item: Item) => string): Item[][] {
     const groups = new Map<string, Item[]>();
     for (const item of items) {
         const key = banner(item);
         groups.set(key, [...(groups.get(key) ?? []), item]);
     }
-    return [...groups.keys()].sort().map((key) => groups.get(key) ?? []);
+    const made = (group: Item[]) => Math.max(...group.map((each) => new Date(each.made).getTime()));
+    const numbered = (group: Item[]) => Math.max(...group.map((each) => each.number));
+    return [...groups.values()].sort((a, b) => made(b) - made(a) || numbered(b) - numbered(a));
+}
+
+/** Say how long an item has waited, to the minute: what came in under a minute ago is just in. */
+export function waited(made: string, now: Date): string {
+    const at = new Date(made);
+    return now.getTime() - at.getTime() < 60_000 ? "just in" : `waiting ${since(at, now)}`;
+}
+
+/** Say whether an item is new to the operator: made after they last settled one of theirs, `reviewed`; none before their first. */
+export function fresh(item: Item, reviewed: string | null | undefined): boolean {
+    return reviewed != null && new Date(item.made) > new Date(reviewed);
 }
 
 /**

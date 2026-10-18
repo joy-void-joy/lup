@@ -260,7 +260,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def items(self) -> Items:
-        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, and a session's write held for them."""
+        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, and a session's write held for them; the operator last settled an item 3 minutes ago, so the three since are new."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         parser = Conversation(repository=lup, runtime=first, session="s1", agent="a02")
@@ -358,7 +358,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     call="call-55",
                     made=self.ago(0.5),
                 ),
-            ]
+            ],
+            reviewed=self.ago(3),
         )
 
     def context(self, number: int) -> Context | Refused:

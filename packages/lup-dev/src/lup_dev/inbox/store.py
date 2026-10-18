@@ -549,6 +549,18 @@ class Inbox(MutableModel):
             )
         ]
 
+    def reviewed(self) -> datetime | None:
+        """Return when the operator last settled an item of theirs, read, answered or decided, from the review or a terminal; none before they first did."""
+        return max(
+            (
+                item.state.at
+                for item in self.items.values()
+                if item.recipient == Operator()
+                and isinstance(item.state, Done | Answered | Decided)
+            ),
+            default=None,
+        )
+
     def asking(self, repository: Path, fingerprint: str) -> Item | None:
         """Return the approval waiting for the operator about one zone: the repository's, at `fingerprint`; none where there's none."""
         return next(
