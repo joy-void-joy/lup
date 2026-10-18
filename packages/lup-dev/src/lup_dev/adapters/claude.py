@@ -497,10 +497,7 @@ class PreToolUse(Payload):
 
     @override
     def answer(self, bench: Bench) -> Output | None:
-        """Judge a file tool's write before it lands, and count the call as running.
-
-        A refused call never runs, so it isn't counted.
-        """
+        """Judge a file tool's write before it lands, and count the call as running."""
         proposed = self.proposal()
         decision = (
             Decision(outcome=None)
@@ -508,12 +505,6 @@ class PreToolUse(Payload):
             else before(bench, proposed, self.session_id, self.cwd)
         )
         match decision.outcome:
-            case "refuse":
-                answer = PreToolUseAnswer(
-                    permission_decision="deny",
-                    permission_decision_reason=decision.reason,
-                )
-                return Specific(hook_specific_output=answer)
             case None:
                 self.started().apply(bench)
                 return None

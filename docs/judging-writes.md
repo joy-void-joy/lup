@@ -1,18 +1,18 @@
-# Judging every write: allow, ask or refuse
+# Judging every write: allow or ask, findings told
 
-lup judges every write in the worktrees of an agent's repository, and answers allow, ask the operator, or refuse. A file tool's write (`Edit`, `Write`) is judged before it lands, on the content it would produce. Anything else (a command, a script, a background process, Codex's `apply_patch`) is judged at the next checkpoint, by comparing each worktree with the last state lup accepted for it. The code is `packages/lup-dev/src/lup_dev/policy/` (judging) and `codescan/` (reading code), with the typed engine in `packages/lup-dev/checker/`.
+lup judges every write in the worktrees of an agent's repository, and answers allow or ask the operator, telling the agent lup's findings in it. A file tool's write (`Edit`, `Write`) is judged before it lands, on the content it would produce. Anything else (a command, a script, a background process, Codex's `apply_patch`) is judged at the next checkpoint, by comparing each worktree with the last state lup accepted for it. The code is `packages/lup-dev/src/lup_dev/policy/` (judging) and `codescan/` (reading code), with the typed engine in `packages/lup-dev/checker/`.
 
 The rules themselves are elsewhere: `docs/conventions.md` says what each convention is and why, and `docs/rules.md`, generated from the engine's table, gives each rule with its examples. This doc is how a write gets judged.
 
 ## What we have
 
-### The three outcomes
+### The outcomes
 
 - **allow:** the call goes through with no prompt. On Claude Code the hook answers `allow`: silence would leave the call to the runtime's own permission mode, a prompt per edit in Manual mode. On Codex nothing needs answering, since it doesn't ask before an `apply_patch` inside the workspace.
 - **ask:** the operator decides before the change lands: in Claude Code's own prompt, or where a runtime can't ask, through a hold the agent waits on (*Asking the operator*).
-- **refuse:** the change doesn't land, or is put back, with the agent's version saved and every finding reported at once (*Refusals*).
+- **refused:** what the operator had to see first and didn't is put back, with the agent's version saved (*Refusals*): a change made through the shell that asks, on a runtime that asks before a call; a hold declined, or left unanswered.
 
-Refuse wins over ask, so the operator never reviews a version that would be refused.
+lup's findings never decide the outcome: those on the lines a change touches are told right after it (*Findings*).
 
 ### What each change gets
 
@@ -20,20 +20,19 @@ Refuse wins over ask, so the operator never reviews a version that would be refu
 |---|---|
 | A test, scratch (`tmp/`), docs or data file, at any size | allow |
 | An operator's document (`DESIGN.md`, `AGENTS.md`) | ask, every time |
-| A protected path | ask, every time; a protected Python module gets lup's rules too, so a finding on the lines the change touches refuses it |
+| A protected path | ask, every time; a protected Python module gets lup's rules too, its findings told |
 | A path the declaration excludes | allow, nothing reported; one that's also protected still asks |
-| Production code with a lup finding on the lines the change touches | refuse |
 | A new production file, or a write over the whole of an existing one | ask |
 | A change to the public API (*The public-API ask*) | ask |
 | An added `# lup: ignore` | ask, every time |
 | Removing a `# lup:` note present when the session started | allow, and reported |
 | A deleted file | ask where it's protected or an operator's document; otherwise allow |
-| Any other production change | allow, once the rules pass it |
+| Any other production change | allow, its findings told |
 
 `policy/judge.py` holds this (`Judge`, `Judgement`), shared by the judgement before a write lands and by the checkpoint, so a change gets the same outcome however it was made. There's no line count: a size limit makes agents split their edits to fit it.
 
-- **Approvals.** An approval covers the path's design asks (a new file, a whole write, a public-API change) for the rest of the session, in that worktree alone, so a file approved and then refused for a finding isn't asked again once fixed (`Ask.covered`).
-- **Asking only about protected paths.** A project declaring `Project(asks="protected")` has only a protected path's and an operator's document's asks reach the operator; the other asks are allowed, and the rules still refuse (`Judge.asking`). A protected change takes effect outside the agent's reach before anything lands, so it can't wait for landing; the rest is seen in the conversation and in the merge. lup's own repository declares it (`AGENTS.md`, *How work goes*).
+- **Approvals.** An approval covers the path's design asks (a new file, a whole write, a public-API change) for the rest of the session, in that worktree alone, so a file approved isn't asked again as it's worked on (`Ask.covered`).
+- **Asking only about protected paths.** A project declaring `Project(asks="protected")` has only a protected path's and an operator's document's asks reach the operator; the other asks are allowed, and findings are still told (`Judge.asking`). A protected change takes effect outside the agent's reach before anything lands, so it can't wait for landing; the rest is seen in the conversation and in the merge. lup's own repository declares it (`AGENTS.md`, *How work goes*).
 
 **Path roles.** Each path has one role, the first that matches (`Roles.role`, `policy/roles.py`):
 1. **protected:** the project's declaration, and what its modules protect: by default manifests and lockfiles; the tools' own configuration files, each read before its table in `pyproject.toml`, so one written unasked would override what the gate checks; what runs outside the agent's reach (`.github/`, `.git/`, git hooks, editor, container and runtime settings); what widens a later launch (`sync.json`); secrets (`.env*.local`); `.gitignore`, since what it ignores the checkpoint never sees; and the person's own files git ignores (`AGENTS.local.md`, `lup_project.local.py`), which nothing else would show the operator;
@@ -58,13 +57,13 @@ What the session itself created asks nothing more: the operator sees it when the
 
 ### Before an edit lands
 
-For `Edit` and `Write` the content after the call is known before anything is written, so they're judged before they land (`before`, `policy/before.py`), and a refused one never touches the file. The adapter reads each call as one of two proposals in lup's own words, so the core never names a runtime's tools:
+For `Edit` and `Write` the content after the call is known before anything is written, so they're judged before they land (`before`, `policy/before.py`): allowed, or asked in the runtime's prompt. The adapter reads each call as one of two proposals in lup's own words, so the core never names a runtime's tools:
 - **a whole write** (`Overwrite`): the content it carries;
 - **a replacement** (`Replacement`): the current file with `old_string` replaced by `new_string`, once, or everywhere with `replace_all`; an empty `old_string` on a missing file creates it. Where `old_string` isn't there as the tool requires, lup allows the call and the tool fails on its own.
 
 The judgement compares with the accepted content, not the disk, so a command's write not yet judged is judged with the edit: an edit to a file a command just created asks as a new file. A write allowed or asked is remembered with its call (`Pending`); when the call finishes, the checkpoint accepts that content as judged, and an asked call that ran was approved (`confirm`, `policy/checkpoint.py`). The engine checks content that isn't on disk yet as pyright's language server checks an unsaved buffer.
 
-**After a refusal,** a new file is written again with `Write` once fixed, where the prompt shows it whole. An edit to an existing file is fixed in its saved copy and moved into place: the move is judged at the checkpoint by its diff against the accepted content, not as a whole-file write.
+**After a refusal,** the change comes back through the file tools, where the operator is asked: a file written whole again with `Write`, where the prompt shows it whole.
 
 ### After a call: the checkpoint
 
@@ -80,7 +79,7 @@ The core never sees a runtime: each adapter (`lup_dev/adapters/`) turns its hook
 | `TurnEnded`, the session's own conversation | `Stop` | `Stop` |
 | `ConversationEnded`, a subagent's | `SubagentStop` | `SubagentStop` |
 
-**When it runs.** A call counts as running in every worktree its session holds (`running.json`, under a file lock, since parallel calls' hooks run at once). When one finishes, a checkpoint runs in each of them where none of that session's calls is still running, so parallel calls are judged together; each turn's end runs one too. Another session's calls hold none of its checkpoints back (`Running.idle`): a call no hook ever finishes (a configuration hooking only `PreToolUse`, a crashed session) would otherwise stop judging there for everyone, and lup runs one agent per worktree. The checkpoint comes before the agent's next model request, so a refusal reaches it before it writes its next line.
+**When it runs.** A call counts as running in every worktree its session holds (`running.json`, under a file lock, since parallel calls' hooks run at once). When one finishes, a checkpoint runs in each of them where none of that session's calls is still running, so parallel calls are judged together; each turn's end runs one too. Another session's calls hold none of its checkpoints back (`Running.idle`): a call no hook ever finishes (a configuration hooking only `PreToolUse`, a crashed session) would otherwise stop judging there for everyone, and lup runs one agent per worktree. The checkpoint comes before the agent's next model request, so a finding reaches it before it writes its next line.
 
 **Subagents.** A call that runs a subagent (`Agent` or `Task`, `spawn_agent`) isn't counted; the subagent's own calls are, so its writes are judged as it makes them and told to it. The checkpoint sees files, not authors, so its report also waits as mail for each other conversation whose calls finished since the last one.
 
@@ -92,9 +91,9 @@ The core never sees a runtime: each adapter (`lup_dev/adapters/`) turns its hook
 3. **Set aside what was committed elsewhere** (`Elsewhere`, `policy/store.py`): content in the history of the commits the repository's refs and the worktree's `HEAD` named at its last checkpoint, the other worktrees' `HEAD`s at theirs (`heads.json`), and the remote-tracking refs (`git log --find-object`). That's what a checkout, a pull, a stash or a `git restore` produce, judged where it was written. git's clean merge of two such commits, remade with `git merge-tree --write-tree`, is set aside too, or merging a branch that adds a class to a file both sides changed would be refused as a public-API change; conflicts and resolutions written by hand are judged.
 4. **Judge a move of `HEAD` once, as its commits'.** Where `HEAD` moved (a commit, a merge, a pull, a reset), what it brought that step 3 didn't set aside was first written in a commit since the last checkpoint, such as a shell write committed in the same call; accepted unjudged, a commit through the shell would skip the judge. It's judged once (`brought`), against the accepted content, with no session's approvals, and never put back: that would leave the working tree different from `HEAD`, and the next `git restore` would bring it back. Its verdicts carry no session; it's told naming the commit, its lup findings failing the gate before the branch lands; its asks become a hold no agent waits on (*Asking the operator*). Changes on top of the move are judged against `HEAD`'s content.
 5. **Judge** the rest as a write is judged before it lands; content judged before it landed (a file tool's write, an approved hold) is accepted as it is.
-6. **Refuse** what the table refuses, and what bypassed an ask (`fates`): on a runtime that asks before a call, an ask made through the shell is refused, pointing at the file tools, so it comes back through the prompt (`AGENTS.md`, *How work goes*); on one that can't, it's held.
+6. **Refuse** what bypassed an ask (`fates`): on a runtime that asks before a call, an ask made through the shell is refused, pointing at the file tools, so it comes back through the prompt (`AGENTS.md`, *How work goes*); on one that can't, it's held.
 7. **Act** (`act`): a refused file goes back to its accepted content, or is removed if new, its version saved; the rest becomes the accepted tree.
-8. **Report** once: refusals, what a move brought, notices, then type errors and ruff's findings as information, then the notes removed, then mail (`Checked.text`). The Python files that landed go to the importers pass (*The engine: one typed tree*).
+8. **Report** once: refusals, what a move brought, notices, then lup's findings on the lines changed, type errors and ruff's findings, then the notes removed, then mail (`Checked.text`). The Python files that landed go to the importers pass (*The engine: one typed tree*).
 
 **Where a session's judging starts.** When a session starts, or first reaches a worktree, the worktree as it stands becomes the accepted tree and the session's starting tree there (`begin`), which the public-API ask and removed notes compare with. What changed since a stored accepted tree was made while the session made no call there (the operator's work, a pull, another session's), so it's accepted unjudged rather than blamed on the agent; a file under an open hold keeps its accepted content, and while a call of the session itself is running there (one left running as it resumes), that call's checkpoint judges it. A session that starts again begins again in every worktree it holds.
 
@@ -128,7 +127,7 @@ Judging reads the declaration resolved (`Declaration`, `declaration/resolve.py`)
 
 ### The turn's end
 
-The session's own turn's end (`TurnEnded`; `end_turn`, `policy/checkpoint.py`) runs a checkpoint in each worktree the session holds, waits for the importers pass, and holds the turn while the files its own conversation touched, or files importing them where the pass found errors, have type errors, pyright warnings or ruff findings, re-checked as they stand (`unclean`). A subagent's end (`ConversationEnded`) runs its checkpoint but never holds on those: every worker passes the gate before it hands back, and one waiting on a review has files importing what hasn't landed, errors it can't fix.
+The session's own turn's end (`TurnEnded`; `end_turn`, `policy/checkpoint.py`) runs a checkpoint in each worktree the session holds, waits for the importers pass, and holds the turn while the files its own conversation touched, or files importing them where the pass found errors, have lup's findings, type errors, pyright warnings or ruff findings, re-checked as they stand (`unclean`). A subagent's end (`ConversationEnded`) runs its checkpoint but never holds on those: every worker passes the gate before it hands back, and one waiting on a review has files importing what hasn't landed, errors it can't fix.
 
 - **Whose files.** The files touched and watched are kept per conversation (`Session.touched`, `watched`). A file tool's write is the conversation's that made it; a shell write is every conversation's whose calls finished since the last checkpoint (`writers`), since holding an end on a file it didn't write is the safe side, which the once-per-finding rule lets end. The importers pass carries the conversations that wrote what it re-checks, and what it finds is watched for them.
 - **While a subagent works,** from its first call to the end of its conversation (`Conversations.working`), the session's end doesn't hold on what's left in a file they both touched, which may be the subagent's in progress, and tells the operator instead. A worktree where a subagent's call is running gets no checkpoint at the session's end, so the subagent's write in progress isn't judged as the session's; that call's finish runs it. A session that starts again forgets its subagents at work, until their next call; one whose end the runtime never reports stays at work until then.
@@ -143,34 +142,29 @@ The session's own turn's end (`TurnEnded`; `end_turn`, `policy/checkpoint.py`) r
 - **A move's asks, after the fact.** What a move of `HEAD` asks is already committed and isn't put back, so on both runtimes it's a hold no agent waits on, naming its commit (`Hold.commit`), which `lup-dev holds` lists apart: a hook waiting on it would block a session that may not have made the commit. Its answer is logged when given, and told to the session that found the move at its next checkpoint (`late_answers`); a decline changes no file, and reverting is the operator's call.
 - **Nobody answers their own hold.** Answering refuses to run inside an agent's session, which each adapter recognises by the variable its runtime sets in the commands it runs (`CLAUDE_CODE_CHILD_SESSION`, `CODEX_THREAD_ID`; `Runtime.inside`). That stops a mistake, not a determined agent: on the host, as the operator's user, an agent could write the answer itself. A room doesn't mount the stores the holds are in.
 
-### Refusals
+### Findings
 
-The refused file goes back to its accepted content, or never changes where it was refused before landing, and the agent's version is saved under `.lup/saved/<n>/<path>` in the worktree. The agent fixes the listed lines there and moves the file into place; a new file goes back through `Write`.
+lup's findings on the lines a change touched (`touched_lines`; every line of a new file), and what's wrong with its directives, are told right after the call, beside its result, each with its steer, as a type error is: the change has landed, and the agent clears each finding or keeps it with an `ignore`, which asks the operator. Those on lines no change touched are told apart. They hold the session's turn's end, as type errors do (*The turn's end*), and fail the gate.
 
 The report, in pyright's shape:
 
 ```
-lup refused 1 file. It is unchanged; your version is saved.
-
-/work/lup/src/lup/claude.py (saved at /work/lup/.lup/saved/3/src/lup/claude.py)
+lup's findings on the lines changed (clear each, or keep it with `# lup: ignore("<rule>", why="<reason>")` on its line or the line above, which the operator is asked about; they fail the gate):
   /work/lup/src/lup/claude.py:41:12 - tuple-shape: a fixed-length tuple[str, int] hides what each position means
       steer: name the fields with a pydantic model
   /work/lup/src/lup/claude.py:88:5 - regex: `import re` parses with a regular expression
       steer: use the format's own parser (lup docs rules regex)
-
-Fix these lines in the saved copy, then move it into place:
-  mv /work/lup/.lup/saved/3/src/lup/claude.py /work/lup/src/lup/claude.py
-To keep a finding, add on its line or the line above (the operator is asked):
-  # lup: ignore("<rule>", why="<reason>")
 ```
 
-`refusal` in `policy/report.py` writes it, and `tests/test_report.py` checks that this block is what it writes for these two findings, whose messages are illustrative.
+`information` in `policy/report.py` writes it, and `tests/test_report.py` checks that this block is what it writes for these two findings, whose messages are illustrative.
 
-**Which findings refuse:** lup's findings on the lines the change touched (`touched_lines`; every line of a new file), and what's wrong with its directives. The refusal lists every one of lup's findings in the file at once, those on untouched lines under their own heading without refusing, so one pass fixes them all. pyright's and ruff's findings never refuse.
+### Refusals
+
+A change the operator had to see first, and didn't, goes back to its accepted content, and the agent's version is saved under `.lup/saved/<n>/<path>` in the worktree: one made through the shell that asks, on a runtime that asks before a call, which comes back through the file tools; a hold declined, with the operator's comment, or left unanswered (*Asking the operator*). `refusal` in `policy/report.py` writes the report: each file, where its version is saved, and why.
 
 ### Type errors and ruff's findings
 
-They're information, never a refusal: at each checkpoint, pyright's errors and warnings and ruff's findings in the files changed, tests included, beside the call's result, with lup's findings on untouched lines and the type errors the importers pass found; at the session's turn's end, they hold it (*The turn's end*); at the gate, they fail it (*The gate*). pyright's warnings count as its errors do (`checker/src/report.ts`).
+They're told, never refused: at each checkpoint, pyright's errors and warnings and ruff's findings in the files changed, tests included, beside the call's result, with lup's findings on untouched lines and the type errors the importers pass found; at the session's turn's end, they hold it (*The turn's end*); at the gate, they fail it (*The gate*). pyright's warnings count as its errors do (`checker/src/report.ts`).
 
 ruff runs with `--ignore-noqa` and pyright with `enableTypeIgnoreComments = false`, so `# lup: ignore` is the one suppression (`docs/conventions.md`, *Suppressions and directives*). ruff runs through the project's runner with its command for the judge (`runner.judging(…)`: for `Uv()`, `env -u VIRTUAL_ENV uv run --frozen --quiet ruff check …`), from the worktree's root, so it's the project's own ruff where its environment has one, never relocking (*The engine: one typed tree*); would-be content goes through stdin under the file's name, so the project's configuration applies (`codescan/ruff.py`). It runs with `--exit-zero`, since uv's failures exit 1 as ruff's findings would, and a failure raises `RuffError` with the runner's or ruff's message.
 
@@ -231,7 +225,7 @@ The engine's build compiles the table into its bundle. A check reports where and
 
 ### The verdict log
 
-Every judgement is logged, so how often lup asks, refuses and allows can be measured and tuned instead of guessed (`policy/verdicts.py`). One JSON line per verdict (`Verdict`): the time, the session (none for a move of `HEAD`), the runtime, the tool (or `checkpoint`, or `move`), the worktree, the path and its role, the outcome (allow, ask, refuse, hold) with its reasons (the rules that refused, the kinds of ask, or the role that allowed, `rules-pass` for production), and the operator's answer. An answer comes later, so it's appended as the same verdict again under the same key, and a reader takes the last line for each key; an ask logged only once answered would be lost when a hook dies. It's kept per repository, so one place measures a repository's worktrees. `lup-dev verdicts --days 7` summarises it by outcome and reason, with how asks and holds were answered.
+Every judgement is logged, so how often lup asks, refuses and allows can be measured and tuned instead of guessed (`policy/verdicts.py`). One JSON line per verdict (`Verdict`): the time, the session (none for a move of `HEAD`), the runtime, the tool (or `checkpoint`, or `move`), the worktree, the path and its role, the outcome (allow, ask, refuse, hold) with its reasons (the kinds of ask; for an allow, the rules of the findings told, else the role, `rules-pass` for production), and the operator's answer. An answer comes later, so it's appended as the same verdict again under the same key, and a reader takes the last line for each key; an ask logged only once answered would be lost when a hook dies. It's kept per repository, so one place measures a repository's worktrees. `lup-dev verdicts --days 7` summarises it by outcome and reason, with how asks and holds were answered.
 
 ### The two runtimes
 
@@ -240,11 +234,11 @@ Every judgement is logged, so how often lup asks, refuses and allows can be meas
 | A file tool's write | judged before it lands (`PreToolUse`) | no such tools: `apply_patch` is judged at the checkpoint |
 | Worktrees a session holds | where it started, where its file tools write, where its hooks report its working directory | where it started |
 | ask | `PreToolUse` answers `ask`, and the runtime prompts | held at the checkpoint, answered from a terminal |
-| refuse | `PreToolUse` answers `deny`, or the checkpoint puts it back | the checkpoint puts it back |
+| refused | an ask made through the shell: the checkpoint puts it back | a hold declined or unanswered: the checkpoint puts it back |
 | How the agent hears | `additionalContext` beside the call's result | the same |
 | Its sessions' commands carry | `CLAUDE_CODE_CHILD_SESSION=1` | `CODEX_THREAD_ID` |
 
-On Codex a refused `apply_patch` lands for the moment between the call and the checkpoint; on Claude Code a refused `Edit` never lands. What each adapter relies on from its runtime is in its module's docstring (`adapters/claude.py`, `adapters/codex.py`) and in `docs/field-notes.md`.
+What each adapter relies on from its runtime is in its module's docstring (`adapters/claude.py`, `adapters/codex.py`) and in `docs/field-notes.md`.
 
 ### Installing it here
 
@@ -254,7 +248,7 @@ The judge's whole set is its hooks on `SessionStart`, `PreToolUse`, `PostToolUse
 - **`lup_project.py`** declares `asks="protected"`, the test roots `packages/*/tests`, `runtime-mention` added back, the library's front door exempt from it and the catalog from `constant-home`, and `LupDevelopment`, which builds the engine before the gate's first step and protects `lup_dev/catalog/**`.
 - **The judge's own source** beyond the catalog isn't asked about at each edit: the judge that runs is the installed copy, so an edit in a worktree can't change what judges it, nor a broken judge in a worktree refuse its own fix. The operator reads what changed in it once, through trust on launch, before it runs (`docs/launch.md`, *Trust on launch*).
 
-**Checking it live,** once the operator has approved `dev`'s tip (`uv run lup-dev trust` in the `dev` checkout, from their own terminal): in a launched session, ask the agent to add `import re` to an existing module (refused, its version under `.lup/saved/`), to write a docs file (allowed without a prompt), and to edit `pyproject.toml` (asked in Claude Code's prompt, or held on Codex until `lup-dev holds` answers). `lup-dev verdicts` shows them.
+**Checking it live,** once the operator has approved `dev`'s tip (`uv run lup-dev trust` in the `dev` checkout, from their own terminal): in a launched session, ask the agent to add `import re` to an existing module (allowed, the `regex` finding told after it), to write a docs file (allowed without a prompt), and to edit `pyproject.toml` (asked in Claude Code's prompt, or held on Codex until `lup-dev holds` answers). `lup-dev verdicts` shows them.
 
 ### Where things live
 
@@ -305,7 +299,7 @@ The `lup-dev` command stands in for the `lup` command tree until that's built; t
 ## Where it's going
 
 `DESIGN.md`, *Keeping the operator in the loop*, describes where judging heads:
-- **Reported, not refused.** Design rules are reported right after a write, like a type error, and the agent fixes the code or keeps it with an `ignore`, which goes to the operator. Spelling rules (`elif` chains, loops that fill a list) aren't reported while the agent works: fixed at the gate where a fixer exists, and reported once before landing (`docs/conventions.md`, *Who owns each concern*).
+- **Spelling rules at the gate.** Spelling rules (`elif` chains, loops that fill a list) aren't told while the agent works: fixed at the gate where a fixer exists, and reported once before landing (`docs/conventions.md`, *Who owns each concern*).
 - **Batches.** What the operator should see (new modules, whole-file writes, public-API changes, added `ignore`s, protected paths) gathers into a batch the agent proposes when it's ready, one diff with its explanation, which pauses the agent until the operator answers unless it carries on.
 - **The room as the wall.** Every agent runs in a container, with the store and the holds out of its reach, and a path a room mounts read-only (tests written as a specification, say) is refused by the wall itself.
 - **Imports checked at the edit,** against the import-linter contracts, from the imports the engine already reports.

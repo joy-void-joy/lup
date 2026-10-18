@@ -1,10 +1,12 @@
 """The reports the agent reads, in pyright's shape: `path:line:column - rule: message`.
 
-A refusal lists every finding in each refused file at once, so one pass fixes them
-all, then says where the agent's version is saved and how to bring it back
-(`docs/judging-writes.md`, *Refusals*). Information (type errors, ruff's findings,
-lup's findings on untouched lines) comes in its own sections and never refuses.
-A move of `HEAD` is told as its commits', never put back.
+lup's findings on the lines a call changed are told after it, each with its
+steer, beside the type errors and ruff's findings, and those on lines no change
+touched apart; none refuses (`docs/judging-writes.md`, *Findings*). A refusal is
+a change put back that the operator had to see first: one made through the
+shell where the runtime asks before a call, or a hold declined or unanswered,
+with where the agent's version is saved. A move of `HEAD` is told as its
+commits', never put back.
 
 A session hears about several worktrees, from any working directory, so every
 report names each file by its absolute path, as pyright's command line does.
@@ -33,7 +35,7 @@ def placed(root: Path, findings: list[Finding]) -> list[Finding]:
 
 
 class Refused(Model):
-    """One file a judgement refused: put back, or never written, its version saved."""
+    """One file put back before the operator saw it, its version saved: changed through the shell where they'd be asked, or held and declined or unanswered."""
 
     path: Path
     """The file, by its absolute path."""
@@ -41,8 +43,6 @@ class Refused(Model):
     """Where the agent's version is saved, by its absolute path."""
     new: bool
     """Whether the file didn't exist before the change."""
-    refusing: list[Finding] = []
-    untouched: list[Finding] = []
     bypassed: list[Ask] = []
     """Asks made through the shell, which come back through the file tools."""
     declined: str | None = None
@@ -74,7 +74,7 @@ def sections(parts: list[str]) -> str:
 
 
 def refusal(refused: list[Refused]) -> str:
-    """Report the refused files, every finding in each, and how to bring them back."""
+    """Report the files put back before the operator saw them, and how to bring each back."""
     if not refused:
         return ""
     count = len(refused)
@@ -85,18 +85,6 @@ def refusal(refused: list[Refused]) -> str:
     )
 
     def block(one: Refused) -> str:
-        untouched = (
-            [
-                "  On lines this change didn't touch, which don't refuse:",
-                *(
-                    line
-                    for found in one.untouched
-                    for line in finding_lines(found, "    ")
-                ),
-            ]
-            if one.untouched
-            else []
-        )
         through = "  Made through the shell, so it comes back through your file tools"
         bypassed = [f"{through}: {ask.reason}" for ask in one.bypassed]
         comment = f": {one.declined}" if one.declined else "."
@@ -110,40 +98,13 @@ def refusal(refused: list[Refused]) -> str:
         )
         lines = [
             f"{one.path} (saved at {one.saved})",
-            *(line for found in one.refusing for line in finding_lines(found)),
-            *untouched,
             *bypassed,
             *declined,
             *unanswered,
         ]
         return "\n".join(lines)
 
-    moved = [
-        one for one in refused if one.refusing and not one.new and not one.bypassed
-    ]
-    rewritten = [
-        one for one in refused if one.refusing and one.new and not one.bypassed
-    ]
     through_tools = [one for one in refused if one.bypassed]
-    move = (
-        [
-            "Fix these lines in the saved copy, then move it into place:",
-            *(f"  mv {one.saved} {one.path}" for one in moved),
-        ]
-        if moved
-        else []
-    )
-    rewrite = (
-        [
-            (
-                "Fix the saved copy, then write the file again with your file tool, "
-                "where the operator sees it whole:"
-            ),
-            *(f"  {one.path} (from {one.saved})" for one in rewritten),
-        ]
-        if rewritten
-        else []
-    )
     tools = (
         [
             (
@@ -155,30 +116,33 @@ def refusal(refused: list[Refused]) -> str:
         if through_tools
         else []
     )
-    keep = (
-        [
-            (
-                "To keep a finding, add on its line or the line above "
-                "(the operator is asked):"
-            ),
-            '  # lup: ignore("<rule>", why="<reason>")',
-        ]
-        if any(one.refusing for one in refused)
-        else []
-    )
-    footer = "\n".join([*move, *rewrite, *tools, *keep])
-    return sections([header, *(block(one) for one in refused), footer])
+    return sections([header, *(block(one) for one in refused), "\n".join(tools)])
 
 
 def information(
-    findings: list[Finding], untouched: list[Finding], importers: list[Finding]
+    reported: list[Finding],
+    findings: list[Finding],
+    untouched: list[Finding],
+    importers: list[Finding],
 ) -> str:
-    """Report what's information, not refusal, about the files a checkpoint judged."""
+    """Report what a checkpoint found in the files it judged: lup's findings on the lines changed, type errors and ruff's findings, lup's findings elsewhere, and type errors in the files importing them."""
+    ruled = (
+        [
+            (
+                "lup's findings on the lines changed (clear each, or keep it with "
+                '`# lup: ignore("<rule>", why="<reason>")` on its line or the line '
+                "above, which the operator is asked about; they fail the gate):"
+            ),
+            *(line for found in reported for line in finding_lines(found)),
+        ]
+        if reported
+        else []
+    )
     checked = (
         [
             (
                 "Type errors and ruff's findings in the files changed "
-                "(information; clean them before the turn ends):"
+                "(clean them before the turn ends):"
             ),
             *(line for found in findings for line in finding_lines(found)),
         ]
@@ -187,7 +151,7 @@ def information(
     )
     older = (
         [
-            "lup's findings on lines no change touched (information):",
+            "lup's findings on lines no change touched (they fail the gate too):",
             *(line for found in untouched for line in finding_lines(found)),
         ]
         if untouched
@@ -197,14 +161,14 @@ def information(
         [
             (
                 "Type errors in files that import what changed "
-                "(information; clean them before the turn ends):"
+                "(clean them before the turn ends):"
             ),
             *(line for found in importers for line in finding_lines(found)),
         ]
         if importers
         else []
     )
-    return sections(["\n".join(checked), "\n".join(older), "\n".join(importing)])
+    return sections(["\n".join(part) for part in [ruled, checked, older, importing]])
 
 
 def removed_notes(notes: list[RemovedNote]) -> str:
@@ -297,7 +261,7 @@ def turn_end(findings: list[Finding]) -> str:
         [
             (
                 "lup won't end the turn yet: files this conversation touched have "
-                "type errors or ruff findings."
+                "lup's findings, type errors or ruff findings."
             ),
             *(line for found in findings for line in finding_lines(found)),
             (
@@ -329,7 +293,7 @@ def unheld(findings: list[Finding], why: Literal["working", "repeated"]) -> str:
             header = (
                 "lup held the turn's end once already, and lets it end. Left in "
                 "files this conversation touched (information; they fail the gate "
-                "until fixed, and hold no later turn's end unless they change):"
+                "until cleared, and hold no later turn's end unless they change):"
             )
     return "\n".join(
         [header, *(line for found in findings for line in finding_lines(found))]

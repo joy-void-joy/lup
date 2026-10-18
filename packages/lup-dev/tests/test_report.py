@@ -37,7 +37,7 @@ def found(
 
 
 def documented() -> str:
-    """Read the refusal report `docs/judging-writes.md` shows, so the two agree."""
+    """Read the findings report `docs/judging-writes.md` shows, so the two agree."""
     doc = Path(__file__).parents[3] / "docs" / "judging-writes.md"
     text = doc.read_text()
     shown = text.index("```", text.index("The report, in pyright's shape:")) + len(
@@ -50,53 +50,45 @@ def at(line: int, column: int = 1) -> Position:
     return Position(line=line, column=column)
 
 
-def test_the_refusal_report_has_the_documented_shape() -> None:
-    refused = Refused(
-        path=PATH,
-        saved=ROOT / ".lup/saved/3/src/lup/claude.py",
-        new=False,
-        refusing=[
-            found(
-                at(41, 12),
-                "tuple-shape",
-                "a fixed-length tuple[str, int] hides what each position means",
-                steer="name the fields with a pydantic model",
-            ),
-            found(
-                at(88, 5),
-                "regex",
-                "`import re` parses with a regular expression",
-                steer="use the format's own parser (lup docs rules regex)",
-            ),
-        ],
-    )
-    assert refusal([refused]) == documented()
+def test_the_findings_report_has_the_documented_shape() -> None:
+    reported = [
+        found(
+            at(41, 12),
+            "tuple-shape",
+            "a fixed-length tuple[str, int] hides what each position means",
+            steer="name the fields with a pydantic model",
+        ),
+        found(
+            at(88, 5),
+            "regex",
+            "`import re` parses with a regular expression",
+            steer="use the format's own parser (lup docs rules regex)",
+        ),
+    ]
+    assert information(reported, [], [], []) == documented()
 
 
-def test_several_files_and_untouched_findings() -> None:
+def test_a_refusal_lists_each_file_put_back_with_its_saved_copy() -> None:
     first = Refused(
         path=PATH,
         saved=ROOT / ".lup/saved/4/src/lup/claude.py",
         new=False,
-        refusing=[found(at(1, 1), "regex", "uses re")],
-        untouched=[found(at(9, 1), "tuple-shape", "a tuple")],
+        bypassed=[Ask(kind="public-api", reason="claude.py adds `run`")],
     )
     second = Refused(
         path=ROOT / "src/lup/new.py",
         saved=ROOT / ".lup/saved/4/src/lup/new.py",
         new=True,
-        refusing=[found(at(2, 1), "regex", "uses re")],
+        bypassed=[Ask(kind="new-file", reason="new.py is a production file")],
     )
     report = refusal([first, second])
     assert report.startswith(
         "lup refused 2 files. They are unchanged; your versions are saved."
     )
     assert (
-        "  On lines this change didn't touch, which don't refuse:\n"
-        "    /work/lup/src/lup/claude.py:9:1 - tuple-shape: a tuple" in report
-    )
-    assert (
-        "write the file again with your file tool, where the operator sees it whole:\n"
+        "Make these changes with your file tools, which ask the operator, not "
+        "through the shell:\n"
+        "  /work/lup/src/lup/claude.py (from /work/lup/.lup/saved/4/src/lup/claude.py)\n"
         "  /work/lup/src/lup/new.py (from /work/lup/.lup/saved/4/src/lup/new.py)"
         in report
     )
@@ -116,7 +108,6 @@ def test_an_ask_made_through_the_shell_points_back_at_the_file_tools() -> None:
         "  Made through the shell, so it comes back through your file tools: "
         "src/lup/claude.py is a new production file" in report
     )
-    assert "To keep a finding" not in report
 
 
 def test_a_declined_or_unanswered_hold() -> None:
@@ -134,23 +125,31 @@ def test_a_declined_or_unanswered_hold() -> None:
 
 def test_nothing_refused_is_no_report() -> None:
     assert refusal([]) == ""
-    assert information([], [], []) == ""
+    assert information([], [], [], []) == ""
     assert removed_notes([]) == ""
     assert turn_end([]) == ""
 
 
 def test_information_sections() -> None:
     report = information(
+        [found(at(1, 1), "regex", "uses re", steer="parse it")],
         [found(at(3, 1), "reportCallIssue", "bad call", owner="pyright")],
         [found(at(5, 1), "regex", "uses re")],
         [found(at(7, 1), "reportCallIssue", "caller broke", owner="pyright")],
     )
     assert report.startswith(
+        "lup's findings on the lines changed (clear each, or keep it with "
+        '`# lup: ignore("<rule>", why="<reason>")` on its line or the line above, '
+        "which the operator is asked about; they fail the gate):\n"
+        "  /work/lup/src/lup/claude.py:1:1 - regex: uses re\n"
+        "      steer: parse it\n\n"
         "Type errors and ruff's findings in the files changed "
-        "(information; clean them before the turn ends):\n"
+        "(clean them before the turn ends):\n"
         "  /work/lup/src/lup/claude.py:3:1"
     )
-    assert "lup's findings on lines no change touched (information):" in report
+    assert (
+        "lup's findings on lines no change touched (they fail the gate too):" in report
+    )
     assert "Type errors in files that import what changed" in report
 
 
@@ -173,7 +172,7 @@ def test_what_doesnt_hold_the_turns_end() -> None:
     assert working.endswith(
         "  /work/lup/src/lup/claude.py:2:5 - reportCallIssue: wrong arguments"
     )
-    assert "they fail the gate until fixed" in unheld(left, "repeated")
+    assert "they fail the gate until cleared" in unheld(left, "repeated")
 
 
 def test_what_is_asked() -> None:

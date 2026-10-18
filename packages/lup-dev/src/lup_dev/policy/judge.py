@@ -9,17 +9,18 @@ so a change gets the same outcome whichever way it was made (`docs/judging-write
 | A test, scratch, docs or data file, at any size | allow |
 | An operator's document | ask |
 | A protected path | ask |
-| Production code with a rule finding on the lines the change touches | refuse |
 | A production file being created, or a whole-file write over one | ask |
 | A change to the public API | ask |
 | An added `# lup: ignore` | ask |
-| Any other production change | allow, once the rules pass it |
+| Any other production change | allow |
 
-Refuse wins over ask: the operator never reviews a version that would be refused.
-A project declaring `asks="protected"` has only a protected path's and an operator's
-document's asks reach the operator, and allows the rest. Type errors and ruff's findings are information, never a refusal, and a finding
-ruff fixes safely isn't reported at all. Removing a note present when the session
-started is allowed and reported.
+lup's findings never decide the outcome: those on the lines a change touches are
+told to the agent right after the write, as a type error is, and fail the gate
+until each is cleared or kept with an `ignore`. A project declaring
+`asks="protected"` has only a protected path's and an operator's document's asks
+reach the operator, and allows the rest. A finding ruff fixes safely isn't
+reported at all. Removing a note present when the session started is allowed
+and reported.
 """
 
 from difflib import SequenceMatcher
@@ -53,7 +54,7 @@ type AskKind = Literal[
 ]
 """What a change asks the operator about."""
 
-type Outcome = Literal["allow", "ask", "refuse"]
+type Outcome = Literal["allow", "ask"]
 
 
 class EngineError(LupDevError):
@@ -107,10 +108,11 @@ class Judgement(Model):
     role: Role
     outcome: Outcome
     asks: list[Ask] = []
-    refusing: list[Finding] = []
-    """lup's findings on the lines the change touches, which refuse it."""
+    findings: list[Finding] = []
+    """lup's findings on the lines the change touches: told right after the write,
+    and failing the gate until each is cleared or kept with an `ignore`."""
     untouched: list[Finding] = []
-    """lup's findings on lines the change didn't touch, listed but not refusing."""
+    """lup's findings on lines the change didn't touch, told apart."""
     information: list[Finding] = []
     """pyright's and ruff's findings in the file, once `ignore`s apply, but for
     those ruff fixes safely."""
@@ -118,16 +120,16 @@ class Judgement(Model):
     """Comments present when the session started that are gone from the file."""
 
     def reasons(self) -> list[str]:
-        """Say why the outcome, for the verdict log: rules, kinds of ask, or the role.
+        """Say why the outcome, for the verdict log: the kinds of ask; or, for an allow, the rules its findings are of, else the role.
 
         >>> Judgement(path=Path("a.md"), role="docs", outcome="allow").reasons()
         ['docs']
         """
         match self.outcome:
-            case "refuse":
-                return sorted(dict.fromkeys(finding.rule for finding in self.refusing))
             case "ask":
                 return [ask.kind for ask in self.asks]
+            case "allow" if self.findings:
+                return sorted(dict.fromkeys(finding.rule for finding in self.findings))
             case "allow":
                 return ["rules-pass" if self.role == "production" else self.role]
 
@@ -372,7 +374,7 @@ class Judge(Model, arbitrary_types_allowed=True):
         removed: list[RemovedNote],
         always: list[Ask],
     ) -> Judgement:
-        """Judge a change lup's rules read: rules first, then what it asks.
+        """Judge a change lup's rules read: what it asks, and its findings, which are told.
 
         Production code and protected modules alike; `always` is what the path
         asks whatever the change, which no approval covers.
@@ -388,21 +390,15 @@ class Judge(Model, arbitrary_types_allowed=True):
         )
         lup = self.lup_findings(change.path, versions)
         touched = touched_lines(change.before, after)
-        refusing = [found for found in lup if touches(found, touched)]
+        findings = [found for found in lup if touches(found, touched)]
         untouched = [found for found in lup if not touches(found, touched)]
         information = self.information(versions)
-
-        def outcome() -> Outcome:
-            if refusing:
-                return "refuse"
-            return "ask" if asks else "allow"
-
         return Judgement(
             path=change.path,
             role=self.roles.role(change.path),
-            outcome=outcome(),
+            outcome="ask" if asks else "allow",
             asks=asks,
-            refusing=refusing,
+            findings=findings,
             untouched=untouched,
             information=information,
             removed=removed,
