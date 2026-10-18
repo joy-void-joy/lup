@@ -12,15 +12,18 @@ conversation is told together, oldest first, by whichever comes first:
 - **`wait_inbox`,** or `ask` with `wait`, a call held until something arrives,
   whose result is the items (`held`);
 - **its session's start or resumption,** in the start's answer;
-- **through its session's own messaging socket,** where its runtime's adapter
-  spells a way (the courier's `woken`), for an item the operator's own act
-  made: at once, unless a call of its is running, whose hook comes soon. An
-  idle session starts a turn with it, a busy one takes it at its next
-  boundary, so the service needn't know which: a session just started, one
-  interrupted, and every one after the service starts again are reached. A
-  burst is written once, since the turn it starts tells the rest at its first
-  call. Where a runtime has no way, the item waits for the session's next
-  call, a gap its adapter declares.
+- **its turn started through its session's own messaging socket,** where its
+  runtime's adapter spells a way (the courier's `woken`), for an item the
+  operator's own act made: at once, unless a call of its is running, whose
+  hook comes soon. What's written is a doorbell, what waits and that
+  `wait_inbox` reads it (`doorbell`), never the items: the socket takes any
+  local session's message, and the runtime says so of each, so what's in an
+  agent's inbox comes through lup's own tools alone. An idle session starts a
+  turn with it, a busy one takes it at its next boundary, so the service
+  needn't know which: a session just started, one interrupted, and every one
+  after the service starts again are reached. It rings once until the
+  session's next hook. Where a runtime has no way, the item waits for the
+  session's next call, a gap its adapter declares.
 
 **Told once.** An item is told when it's written into a hook's answer, a held
 call's result or the messaging socket, and never again:
@@ -158,6 +161,25 @@ def body(item: Item) -> str:
             return comment
         case Review(comments=comments):
             return "\n".join(each.text for each in comments)
+
+
+def doorbell(waiting: list[Item]) -> str:
+    """Say what waits in a conversation's inbox, each item by its number, kind and sender, for the agent to read through `wait_inbox`.
+
+    >>> from datetime import UTC, datetime
+    >>> item = Item(number=7, reason=Message(kind="note", text="Hi."),
+    ...     sender=Operator(), recipient=Operator(), made=datetime(2026, 1, 1, tzinfo=UTC))
+    >>> print(doorbell([item]))
+    lup's inbox: item 7, a note from the operator. Call `wait_inbox` to read it: what's in your inbox comes through lup's own tools, never in a message like this one.
+    """
+    heads = "; ".join(
+        f"item {item.number}, {what(item)} from {who(item.sender)}" for item in waiting
+    )
+    them = "it" if len(waiting) == 1 else "them"
+    return (
+        f"lup's inbox: {heads}. Call `wait_inbox` to read {them}: what's in your "
+        "inbox comes through lup's own tools, never in a message like this one."
+    )
 
 
 def reviewable(item: Item) -> None:
@@ -588,7 +610,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.notices.notify(summary, body)
 
     async def wake(self, party: Conversation) -> None:
-        """Write everything waiting for `party`'s session to its messaging socket, unless a call of its is running, where its runtime has a way.
+        """Ring `party`'s session's doorbell through its messaging socket: what waits, for `wait_inbox` to read; unless a call of its is running, where its runtime has a way.
 
         Only a session's main conversation is woken. A call of its running
         (`Presence.calling`) means a hook comes soon and tells it there; a call
@@ -599,9 +621,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         started again or since the operator interrupted it. An idle session
         starts a turn with it, and a busy one takes it at its next boundary, as
         measured on the runtime that has a way (`docs/field-notes.md`, *Waking
-        a session*). What the wake tells is counted told before it's written,
-        so a hook meanwhile doesn't tell it again; where the session's messaging
-        socket can't be reached, that's said, and the items wait again.
+        a session*). The items stay waiting, told once by whichever reaches the
+        agent first: `wait_inbox`, its next call's hook, or its turn's end;
+        where the session's messaging socket can't be reached, that's said.
         """
         presence = self.presence(party)
         place = self.inbox.whereabouts.get(party.key())
@@ -609,13 +631,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         quiet = presence.calling or presence.woken or presence.held
         if party.agent is not None or quiet or place is None or not waiting:
             return
-        text = SEPARATOR.join(self.said(item) for item in waiting)
-        line = self.courier.woken(party.runtime, party.session, text)
+        line = self.courier.woken(party.runtime, party.session, doorbell(waiting))
         if line is None:
             return
-        told = Told(at=self.clock.now(), how="wake")
-        for item in waiting:
-            self.inbox.kept(item.model_copy(update={"state": told}))
         presence.woken = True
         socket = self.layout.launch(place.launch).messages
         try:
@@ -625,14 +643,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             writer.close()
             await writer.wait_closed()
         except OSError as unreached:
-            self.returned(Posted(numbers=[item.number for item in waiting]))
+            presence.woken = False
             self.say(
                 f"{place.launch}: {who(party)} wasn't woken through {socket}, so "
                 f"what waits for it is told at its next call: {unreached}"
             )
             return
         numbers = ", ".join(str(item.number) for item in waiting)
-        self.say(f"{place.launch}: woke {who(party)}, telling items {numbers}")
+        self.say(f"{place.launch}: woke {who(party)} for items {numbers}")
 
     def main_of(self, launch: str) -> Conversation:
         """Return the main conversation of the session `launch` runs, the latest heard there."""
