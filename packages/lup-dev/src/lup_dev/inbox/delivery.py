@@ -94,6 +94,7 @@ from lup_dev.inbox.store import (
     Verdict,
     Waiting,
     Whereabouts,
+    Withdrawn,
 )
 from lup_dev.layout import HostLayout
 
@@ -197,6 +198,8 @@ def standing(item: Item) -> str:
             return f"{'approved' if approved else 'declined'} at {clocked(at)}"
         case Superseded(at=at, by=by):
             return f"superseded at {clocked(at)} by item {by}"
+        case Withdrawn(at=at, why=why):
+            return f"withdrawn at {clocked(at)} by its sender: {why}"
 
 
 def doorbell(waiting: list[Item]) -> str:
@@ -875,6 +878,39 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 raise InboxError(message)
             case _:
                 message = f"item {number} isn't a message waiting in your inbox"
+                raise InboxError(message)
+
+    def withdrawn(self, number: int, party: Conversation, why: str) -> Item:
+        """Take the message or question item `number` back for `party`, who sent it, off the operator's list, with its reason.
+
+        Another's item, one that isn't waiting for the operator, and an approval
+        or a held change, which only the operator answers, are refused.
+        """
+        item = self.inbox.item(number)
+        match item:
+            case Item(
+                reason=Message() | Question(), recipient=Operator(), state=Waiting()
+            ) if item.sender == party:
+                taken = Withdrawn(at=self.clock.now(), why=why)
+                self.say(f"item {number}, {what(item)}, was withdrawn by its sender")
+                return self.inbox.kept(item.model_copy(update={"state": taken}))
+            case Item(sender=sender) if sender != party:
+                message = (
+                    f"item {number} is {what(item)} from {who(sender)}: only its "
+                    "sender withdraws it"
+                )
+                raise InboxError(message)
+            case Item(reason=Approval() | HeldChange()):
+                message = (
+                    f"item {number} is {what(item)}, which the operator answers: it "
+                    "isn't withdrawn"
+                )
+                raise InboxError(message)
+            case _:
+                message = (
+                    f"item {number} no longer waits for the operator: it's "
+                    f"{standing(item)}"
+                )
                 raise InboxError(message)
 
     async def sent(self, launch: str, text: str, agent: str | None = None) -> Item:

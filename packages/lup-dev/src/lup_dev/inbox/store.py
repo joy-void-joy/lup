@@ -342,8 +342,17 @@ class Superseded(Model):
     """The approval replacing it."""
 
 
+class Withdrawn(Model):
+    """A message or a question its sender took back while it waited for the operator, who needn't read or answer it."""
+
+    state: Literal["withdrawn"] = "withdrawn"
+    at: datetime
+    why: str
+    """The sender's reason, in a line."""
+
+
 type State = Annotated[
-    Waiting | Told | Answered | Done | Decided | Superseded,
+    Waiting | Told | Answered | Done | Decided | Superseded | Withdrawn,
     Field(discriminator="state"),
 ]
 """Where an item stands."""

@@ -1,4 +1,4 @@
-"""The inbox's tools in a launched session: `report`, `note`, `ask`, `send`, `wait_inbox` and `inbox`.
+"""The inbox's tools in a launched session: `report`, `note`, `ask`, `send`, `wait_inbox`, `inbox` and `withdraw`.
 
 `docs/host-tools.md`, *lup's tools*. Each is a function of the conversation
 calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
@@ -14,7 +14,9 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
 - `wait_inbox` holds until something reaches the agent's inbox. It isn't called
   `wait`, a name a runtime has for a tool of its own;
 - `inbox` reads the inbox of the agent's repository, changing nothing: each
-  item in a line, and the agent's own read whole.
+  item in a line, and the agent's own read whole;
+- `withdraw` takes back a message or question the agent sent that the
+  operator needn't see, with its reason: the agent's workflow is its own.
 
 A tool's docstring's first line is its summary, 50 characters at most, which the
 guidance lists (`launch/guidance.py`); the rest is its description, which the
@@ -45,6 +47,7 @@ from lup_dev.inbox.store import (
     Answered,
     Conversation,
     Decision,
+    InboxError,
     Item,
     Kind,
     Message,
@@ -128,6 +131,15 @@ class Reading(Model):
             "List every item, those answered, done or told too; left out, those "
             "still waiting alone."
         ),
+    )
+
+
+class Withdrawing(Model):
+    """An item of yours to take back."""
+
+    number: int = Field(description="The item's number, as its tool's answer said it.")
+    why: str = Field(
+        description="Why it no longer needs the operator, in a line: they read it."
     )
 
 
@@ -262,6 +274,22 @@ class Speaker(Model, arbitrary_types_allowed=True):
             )
         return Said(text="\n".join(self.line(item) for item in listed))
 
+    async def withdraw(self, withdrawing: Withdrawing) -> Said:
+        """Take back an item the operator needn't see.
+
+        A message or a question you sent that still waits for them: one that's
+        settled, an answer you found yourself, or a plan that changed. It
+        leaves their review and their list; shown, it says it was withdrawn,
+        and why. What's answered, read or done already stays as it is.
+        """
+        try:
+            self.delivery.withdrawn(withdrawing.number, self.party, withdrawing.why)
+        except InboxError as kept:
+            return Said(text=f"Not withdrawn: {kept}")
+        return Said(
+            text=f"Item {withdrawing.number} is withdrawn, off the operator's list."
+        )
+
     def named(self, party: Party) -> str:
         """Name a party for this conversation: itself as you."""
         return "you" if party == self.party else who(party)
@@ -316,6 +344,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             lup_tool(self.send),
             lup_tool(self.wait_inbox),
             lup_tool(self.inbox),
+            lup_tool(self.withdraw),
         ]
         return [*spoken, *own]
 
