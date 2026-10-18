@@ -139,7 +139,6 @@ export function Conversation({ launch, agent, beat, waiting, back, say }: Props)
     // How many turns are folded, once the conversation is first read: before the operator's last words then.
     const [folded, setFolded] = useState<number | null>(null);
     const [refused, setRefused] = useState<string | null>(null);
-    const [confirming, setConfirming] = useState(false);
     const [inserting, setInserting] = useState(false);
     const [epoch, setEpoch] = useState(0);
     const have = useRef(0);
@@ -228,7 +227,6 @@ export function Conversation({ launch, agent, beat, waiting, back, say }: Props)
         change,
         inserting: setInserting,
         epoch,
-        confirming,
         shownNow: true,
     });
     const before = useRef<Laid | null>(null);
@@ -314,12 +312,15 @@ export function Conversation({ launch, agent, beat, waiting, back, say }: Props)
                 view.dispatch({ selection: { anchor: target }, scrollIntoView: true });
             }
         },
-        send: () => setConfirming(saying(talk.comments).length > 0),
+        send: () => {
+            if (saying(talk.comments).length > 0) {
+                void sendNow();
+            }
+        },
         back,
     });
 
     async function sendNow() {
-        setConfirming(false);
         const text = message(talk);
         // Everything the conversation has said before it's sent, so the message shows after it.
         await refresh();
@@ -398,31 +399,6 @@ export function Conversation({ launch, agent, beat, waiting, back, say }: Props)
                     </div>
                 )}
             </div>
-            {confirming ? (
-                <div
-                    className="confirm"
-                    role="dialog"
-                    aria-label="Send your message"
-                    tabIndex={-1}
-                    ref={(box) => box?.focus()}
-                    onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                            event.preventDefault();
-                            void sendNow();
-                        }
-                        if (event.key === "Escape") {
-                            setConfirming(false);
-                        }
-                    }}
-                >
-                    <p>Send {what.join(" and ")} to {talker.path}?</p>
-                    <p className="muted">
-                        As one message through lup, each comment under what it quotes
-                        {whole === 0 ? "" : ", your message last"}: it reads it at its next call, or is woken.{" "}
-                        <kbd>Enter</kbd> sends · <kbd>Esc</kbd> goes back.
-                    </p>
-                </div>
-            ) : null}
         </>
     );
 }

@@ -308,8 +308,6 @@ interface Config<D, C> {
     inserting: (yes: boolean) => void;
     /** Changed each time the draft is replaced from outside, as when it's sent: what was done before can't be undone. */
     epoch: number;
-    /** Whether a confirmation has the keyboard: once it's gone, the editor takes it back. */
-    confirming: boolean;
     /** Whether the editor is shown: shown again, it takes the keyboard. */
     shownNow: boolean;
 }
@@ -446,14 +444,14 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     }, []);
 
     useEffect(() => {
-        if (!config.shownNow || config.confirming) {
+        if (!config.shownNow) {
             return;
         }
         view.current?.focus();
         // Shown by a click elsewhere, as on the tree, it takes the keyboard once that click is done with it.
         const later = requestAnimationFrame(() => view.current?.focus());
         return () => cancelAnimationFrame(later);
-    }, [config.confirming, config.shownNow]);
+    }, [config.shownNow]);
 
     useEffect(() => {
         past.current = [];

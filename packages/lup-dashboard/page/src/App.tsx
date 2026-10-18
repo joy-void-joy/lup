@@ -35,7 +35,6 @@ export function App() {
     const around = useMemo(() => ({ contexts, diffs }), [contexts, diffs]);
     // The items whose context, and whose whole diff, were asked for, so each is asked once.
     const asked = useRef({ contexts: new Set<number>(), diffs: new Set<number>() });
-    const [confirming, setConfirming] = useState(false);
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
     const [inserting, setInserting] = useState(false);
@@ -166,7 +165,6 @@ export function App() {
     );
 
     async function sent() {
-        setConfirming(false);
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
         }
@@ -262,9 +260,12 @@ export function App() {
                         change={change}
                         banner={banner}
                         around={around}
-                        send={() => setConfirming(numbers.length > 0)}
+                        send={() => {
+                            if (numbers.length > 0) {
+                                void sent();
+                            }
+                        }}
                         approve={approve}
-                        confirming={confirming}
                         inserting={setInserting}
                         epoch={epoch}
                         shown={selected === null}
@@ -302,37 +303,6 @@ export function App() {
                     )}
                 </div>
             </main>
-            {confirming ? (
-                <div
-                    className="confirm"
-                    role="dialog"
-                    aria-label="Send your reply"
-                    tabIndex={-1}
-                    ref={(box) => box?.focus()}
-                    onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                            event.preventDefault();
-                            void sent();
-                        }
-                        if (event.key === "Escape") {
-                            setConfirming(false);
-                        }
-                    }}
-                >
-                    <p>
-                        {reached.length === 0
-                            ? `Take ${read.map((each) => `#${each}`).join(", ")} off your list, telling no one?`
-                            : `Send your reply to ${reached.join(", ")}?`}
-                    </p>
-                    <p className="muted">
-                        {reached.length > 1 ? "Each gets all of it: its own items first, the others' for context. " : ""}
-                        {reached.length > 0 && read.length > 0
-                            ? "Messages only marked read tell no one, unless their agent gets this reply anyway. "
-                            : ""}
-                        <kbd>Enter</kbd> sends · <kbd>Esc</kbd> goes back.
-                    </p>
-                </div>
-            ) : null}
             <Palette
                 open={palette}
                 setOpen={setPalette}
