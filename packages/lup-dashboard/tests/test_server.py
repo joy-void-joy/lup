@@ -1,6 +1,7 @@
 """The dashboard's server, on a stand-in host: its API relaying requests and streaming their replies, and who may call it."""
 
 import asyncio
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -363,3 +364,16 @@ def test_an_approval_approved_on_the_page_is_acted_on_as_the_terminal_does(
         headers=bearing(),
     )
     assert host.settled == acted
+
+
+def test_about_says_the_pages_build_as_it_stands_on_disk(page: Path) -> None:
+    served = client(StandIn({}), page)
+    first = served.get("/api/about", headers=bearing()).json()
+    (page / "index.html").write_text("<!doctype html><title>lup, built again</title>")
+    second = served.get("/api/about", headers=bearing()).json()
+    assert first["demo"] is False
+    assert (
+        first["build"]
+        == hashlib.sha256(b"<!doctype html><title>lup</title>").hexdigest()
+    )
+    assert second["build"] != first["build"]
