@@ -8,11 +8,20 @@
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
 // any change to the draft. What folds is folded until opened: `za` opens or
 // closes the fold under the cursor, `zo` and `zc` open and close it, `zR` and
-// `zM` open and close them all. Each view says what else its keys do and lays
-// its own text out (`Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
+// `zM` open and close them all. Each view says what else its keys do, lays its
+// own text out and draws it, and may paint the lines in view as well, as the
+// review paints a changed file's (`Review.tsx`, `Conversation.tsx`;
+// `docs/dashboard.md`).
 import { codeFolding, foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
-import { Annotation, EditorState, Facet, Prec, StateEffect, StateField } from "@codemirror/state";
-import { Decoration, EditorView, drawSelection, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Annotation, EditorState, Facet, Prec, StateEffect, StateField, type Range } from "@codemirror/state";
+import {
+    Decoration,
+    EditorView,
+    ViewPlugin,
+    drawSelection,
+    type DecorationSet,
+    type ViewUpdate,
+} from "@codemirror/view";
 import { Vim, getCM, vim, type CodeMirror, type CodeMirrorV } from "@replit/codemirror-vim";
 import { useEffect, useRef, type RefObject } from "react";
 
@@ -35,6 +44,7 @@ interface Actions {
     send: () => void;
     blocks: () => Block[];
     edited: (update: ViewUpdate) => void;
+    paint: (from: number, to: number) => Range<Decoration>[];
 }
 
 /** What an editor knows of the last key, read once vim has made of it what it does. */
@@ -199,6 +209,40 @@ const drawing = StateField.define<DecorationSet>({
     provide: (field) => EditorView.decorations.from(field),
 });
 
+/** Return what the view paints on the lines in view, beyond what it drew on the whole text. */
+function painted(view: EditorView): DecorationSet {
+    const actions = boundOf(view.state).actions;
+    if (actions === null) {
+        return Decoration.none;
+    }
+    return Decoration.set(
+        view.visibleRanges.flatMap(({ from, to }) => actions.paint(from, to)),
+        true,
+    );
+}
+
+/**
+ * What a view paints on the lines in view alone, as a changed file's lines and their highlighting: painted again as
+ * the view scrolls, a fold opens, the text changes or the view draws anew, so a long text costs only what's seen.
+ */
+const painting = ViewPlugin.fromClass(
+    class {
+        decorations: DecorationSet;
+
+        constructor(view: EditorView) {
+            this.decorations = painted(view);
+        }
+
+        update(update: ViewUpdate) {
+            const redrawn = update.transactions.some((each) => each.effects.some((effect) => effect.is(drawn)));
+            if (update.docChanged || update.viewportChanged || redrawn) {
+                this.decorations = painted(update.view);
+            }
+        }
+    },
+    { decorations: (plugin) => plugin.decorations },
+);
+
 /**
  * Let the operator change the text only inside a comment: a change from its start to just past its end. A change
  * tried elsewhere is dropped, its passage noted, for the comment vim's insert mode opens next.
@@ -327,6 +371,8 @@ export interface Own<C> {
     toggle?: (list: "done" | "parked") => void;
     approve?: (approved: boolean) => void;
     back?: () => void;
+    /** What's painted on the lines from `from` to `to` while they're in view, beyond what `draw` drew: a changed file's lines and their highlighting. */
+    paint?: (from: number, to: number) => Range<Decoration>[];
 }
 
 /** One editor, as a view uses it. */
@@ -396,6 +442,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     EditorView.lineWrapping,
                     codeFolding({ placeholderText: "…" }),
                     drawing,
+                    painting,
                     EditorView.updateListener.of((update) => {
                         const actions = bound.current.actions;
                         const replaced = update.transactions.some((each) => each.annotation(rebuilt) === true);
@@ -606,6 +653,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 change(restored);
             },
             send: own.send,
+            paint: (from, to) => own.paint?.(from, to) ?? [],
             blocks: () => shown.blocks,
             edited: (update) => {
                 const next = [...comments(latest.current)];

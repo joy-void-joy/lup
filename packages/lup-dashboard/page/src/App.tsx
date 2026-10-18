@@ -14,7 +14,17 @@ import { Details } from "./Details";
 import { useNow, useWatched } from "./hooks";
 import { Palette } from "./Palette";
 import { Review } from "./Review";
-import { covered, EMPTY, pruned, type Answered, type Context, type Draft, type Item } from "./review";
+import {
+    answer,
+    covered,
+    EMPTY,
+    pruned,
+    type Answered,
+    type ChangedFile,
+    type Context,
+    type Draft,
+    type Item,
+} from "./review";
 
 const SAID = {
     connecting: "connecting",
@@ -31,10 +41,10 @@ export function App() {
     const [palette, setPalette] = useState(false);
     const [draft, setDraft] = useState<Draft>(EMPTY);
     const [contexts, setContexts] = useState<Map<number, Answered<Context>>>(new Map());
-    const [diffs, setDiffs] = useState<Map<number, Answered<string>>>(new Map());
-    const around = useMemo(() => ({ contexts, diffs }), [contexts, diffs]);
-    // The items whose context, and whose whole diff, were asked for, so each is asked once.
-    const asked = useRef({ contexts: new Set<number>(), diffs: new Set<number>() });
+    const [files, setFiles] = useState<Map<number, Answered<ChangedFile[]>>>(new Map());
+    const around = useMemo(() => ({ contexts, files }), [contexts, files]);
+    // The items whose context, and whose files, were asked for, so each is asked once.
+    const asked = useRef({ contexts: new Set<number>(), files: new Set<number>() });
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
     const [inserting, setInserting] = useState(false);
@@ -122,8 +132,8 @@ export function App() {
     }, []);
 
     useEffect(() => {
-        // Each item's context, where an agent's call made it, and the whole diff of an approval or a
-        // held change, asked once it's in the inbox.
+        // Each item's context, where an agent's call made it, and each file an approval or a held change
+        // changes, asked once it's in the inbox.
         for (const item of waiting) {
             const number = item.number;
             if (item.call != null && !asked.current.contexts.has(number)) {
@@ -132,12 +142,12 @@ export function App() {
                     answer.kind === "inbox-context" ? answer : null,
                 ).then((context) => setContexts((before) => new Map(before).set(number, context)));
             }
-            const diffed = item.reason.reason === "approval" || item.reason.reason === "held";
-            if (diffed && !asked.current.diffs.has(number)) {
-                asked.current.diffs.add(number);
-                void answered({ kind: "inbox-show-diff", number }, (answer) =>
-                    answer.kind === "inbox-diff" ? answer.text : null,
-                ).then((diff) => setDiffs((before) => new Map(before).set(number, diff)));
+            const changing = item.reason.reason === "approval" || item.reason.reason === "held";
+            if (changing && !asked.current.files.has(number)) {
+                asked.current.files.add(number);
+                void answered({ kind: "inbox-show-files", number }, (answer) =>
+                    answer.kind === "inbox-files" ? answer.files : null,
+                ).then((shown) => setFiles((before) => new Map(before).set(number, shown)));
             }
         }
     }, [waiting]);
@@ -145,13 +155,13 @@ export function App() {
     const drafted = useRef(draft);
     drafted.current = draft;
 
-    // An approval or a held change answered, the comments written under it going with the answer,
-    // and off the draft: a held change's agent reads them with its yes or no.
+    // An approval or a held change answered, the comments written under it going with the answer, each
+    // under what it quotes, and off the draft: a held change's agent reads them with its yes or no, and
+    // the session whose push asked an approval reads them as a note.
     const approve = useCallback(
         (number: number, approved: boolean) => {
             const now = drafted.current;
-            const own = (now.comments ?? []).filter((each) => each.item === number && each.text.trim() !== "");
-            const comment = own.map((each) => each.text.trim()).join("\n\n");
+            const comment = answer((now.comments ?? []).filter((each) => each.item === number));
             void ask({ kind: "inbox-answer-approval", number, approved, comment }).then((answer) => {
                 if (answer.kind === "refused") {
                     setSaid(answer.error);

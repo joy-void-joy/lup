@@ -2,16 +2,21 @@
 // with vim (`editor.ts`), in groups, one per agent, their comments written into
 // it, each under the line it's on: `c` opens one on the item whole. Ctrl+Enter
 // elsewhere than in a comment sends. Space `d` marks an item read, Space `z`
-// leaves it for later, Space `a` or `x` answers an approval; `J` and `K` go to
-// the next and previous item. Under each item, its context and an approval's
-// whole diff fold, folded until opened (`docs/dashboard.md`, *The review*).
-import { RangeSetBuilder } from "@codemirror/state";
+// leaves it for later, Space `a` or `x` answers an approval or a held change;
+// `J` and `K` go to the next and previous item. Under an approval or a held
+// change, each file it changes, whole, its lines numbered, marked and
+// highlighted as they come into view; under each item, its context. The
+// context and each run of unchanged lines fold, folded until opened
+// (`docs/dashboard.md`, *The review*).
+import { RangeSetBuilder, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef } from "react";
 
+import { tokensOf, within } from "./code";
 import { changes, moved } from "./comments";
 import { rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import {
+    codeFrom,
     foldKey,
     laid,
     onBanner,
@@ -34,7 +39,7 @@ interface Props {
     change: (draft: Draft) => void;
     /** Name the group an item is in: the agent that sent it, and where. */
     banner: (item: Item) => string;
-    /** What the host has answered of each item beyond its own text: its context, and an approval's whole diff. */
+    /** What the host has answered of each item beyond its own text: its context, and each file an approval or a held change changes. */
     around: Around;
     send: () => void;
     approve: (number: number, approved: boolean) => void;
@@ -46,31 +51,60 @@ interface Props {
     shown: boolean;
 }
 
-/** Return how a line of a diff is drawn: added, removed, a hunk's header or a file's; none for a line of context or of anything else. */
-function diffLine(line: string): string | null {
-    if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff --git")) {
-        return "diff-file";
-    }
-    if (line.startsWith("@@")) {
-        return "diff-hunk";
-    }
-    if (line.startsWith("+")) {
-        return "diff-added";
-    }
-    if (line.startsWith("-")) {
-        return "diff-removed";
-    }
-    return null;
-}
-
-/** Return the classes a line under an item is drawn with: what it shows, a diff's line as git colours it, and whether it folds under a summary. */
-function asideClasses(laidOut: Laid, aside: Aside): string {
-    const diff = aside.kind === "diff" ? diffLine(laidOut.text.slice(aside.from, aside.to)) : null;
+/** Return the classes a line under an item is drawn with: what it shows, and whether it folds under a summary. */
+function asideClasses(aside: Aside, code: boolean): string {
     const under = aside.kind === "summary" || aside.kind === "refused" ? null : "aside-under";
-    return [`aside-${aside.kind}`, under, diff].filter((each) => each !== null).join(" ");
+    return [`aside-${aside.kind}`, under, code ? "code-run" : null].filter((each) => each !== null).join(" ");
 }
 
-/** Draw the review: groups' banners, items' headers, done and parked items, the lines under each item, each comment's lines, and the passage each comment is on. */
+/** How a changed file's line is marked after its number: added, removed, or neither. */
+const SIGNS = { added: "+", removed: "−", same: " " } as const;
+
+/** Return what a changed file's line shows in its gutter: its number, then its mark, in the gutter's width. */
+function gutter(number: number, change: keyof typeof SIGNS): string {
+    return `${`${number}`.padStart(5)} ${SIGNS[change]} `;
+}
+
+/** Each class of highlighting, as one mark, made once. */
+const MARKS = new Map<string, Decoration>();
+
+function marked(classes: string): Decoration {
+    const found = MARKS.get(classes);
+    if (found !== undefined) {
+        return found;
+    }
+    const made = Decoration.mark({ class: classes });
+    MARKS.set(classes, made);
+    return made;
+}
+
+/** Paint the changed files' lines from `from` to `to`: each row numbered and marked added, removed or the same, and its text highlighted in its file's language. */
+function painted(laidOut: Laid, from: number, to: number): Range<Decoration>[] {
+    const ranges: Range<Decoration>[] = [];
+    for (const region of laidOut.regions) {
+        for (let at = codeFrom(region.code, from); at < region.code.length; at += 1) {
+            const coded = region.code[at];
+            if (coded === undefined || coded.from > to) {
+                break;
+            }
+            const row = coded.row;
+            if (row === null) {
+                continue;
+            }
+            const line = Decoration.line({
+                class: `code-row code-${row.change}`,
+                attributes: { "data-gutter": gutter(row.number, row.change) },
+            });
+            ranges.push(line.range(coded.from));
+            for (const token of within(tokensOf(coded.file, row.side), row)) {
+                ranges.push(marked(token.classes).range(coded.from + token.from, coded.from + token.to));
+            }
+        }
+    }
+    return ranges;
+}
+
+/** Draw the review: groups' banners, items' headers, done and parked items, the lines under each item, the changed files' headers, each comment's lines, and the passage each comment is on. */
 function decorations(laidOut: Laid, draft: Draft): DecorationSet {
     const marks: { from: number; to: number; value: Decoration }[] = [];
     const comments = draft.comments ?? [];
@@ -89,8 +123,15 @@ function decorations(laidOut: Laid, draft: Draft): DecorationSet {
             (draft.parked ?? []).includes(number) ? "is-parked" : "",
         ].join(" ");
         marks.push({ from: region.header.from, to: region.header.from, value: Decoration.line({ class: states }) });
+        const runs = new Set(region.folds.filter((each) => each.kind === "code").map((each) => each.summary.from));
         for (const aside of region.asides) {
-            marks.push({ from: aside.from, to: aside.from, value: Decoration.line({ class: asideClasses(laidOut, aside) }) });
+            const classes = asideClasses(aside, runs.has(aside.from));
+            marks.push({ from: aside.from, to: aside.from, value: Decoration.line({ class: classes }) });
+        }
+        for (const coded of region.code) {
+            if (coded.row === null) {
+                marks.push({ from: coded.from, to: coded.from, value: Decoration.line({ class: "code-file" }) });
+            }
         }
         for (const block of region.blocks) {
             let at = block.from;
@@ -271,6 +312,7 @@ export function Review({ items, draft, change, banner, around, send, approve, in
             }
         },
         send,
+        paint: (from, to) => painted(laidOut, from, to),
     });
 
     return <div className="buffer review-buffer" ref={editor.parent} />;
