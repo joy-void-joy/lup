@@ -40,7 +40,7 @@ from lup_dev.policy.checkpoint import (
 )
 from lup_dev.policy.holds import HeldFile, Hold, answered
 from lup_dev.policy.judge import Ask, Change, Judgement
-from lup_dev.policy.report import Refused, refusal
+from lup_dev.policy.report import Refused, information, placed, refusal
 from lup_dev.policy.worktrees import place
 
 
@@ -117,6 +117,21 @@ class Decision(Model):
     reason: str = ""
     """Why a write is denied, or what the operator added to letting it through;
     empty for a plain allow."""
+    told: str = ""
+    """What the agent is told beside a write let through: lup's findings in it,
+    its type errors and ruff's, as a checkpoint reports them. A runtime whose
+    file tools are judged before they land runs no checkpoint after the call to
+    tell them, so they're told with the call, before the agent's next line."""
+
+
+def told(root: Path, judgement: Judgement) -> str:
+    """Say what a write's judgement found, its files named from `root`, as a checkpoint reports it; nothing where it found nothing."""
+    return information(
+        placed(root, judgement.findings),
+        placed(root, judgement.information),
+        placed(root, judgement.untouched),
+        [],
+    )
 
 
 def before(
@@ -217,7 +232,7 @@ def before(
             agent=agent,
         )
     worktree.verdicts(services.layout).append([logged])
-    return Decision(outcome="allow")
+    return Decision(outcome="allow", told=told(worktree.root, judgement))
 
 
 def held_write(
@@ -282,10 +297,12 @@ def held_write(
         hold, bench.runtime.name(), worktree.repository, [whole]
     )
     answer = holds.wait(key, services.clock)
-    if answer is not None and answer.approved and outside is not None:
+    if answer is not None and answer.approved:
+        # Logged as it's given: no hook may report the call's finish, which would.
         log.append(answered(hold, "approved"))
+    if answer is not None and answer.approved and outside is not None:
         said = f"The operator approved it: {answer.comment}" if answer.comment else ""
-        return Decision(outcome="allow", reason=said)
+        return Decision(outcome="allow", reason=said, told=told(where, judgement))
     if answer is not None and answer.approved:
         with worktree.lock():
             record = worktree.session(session, bench.runtime)
@@ -298,9 +315,11 @@ def held_write(
                 removed=judgement.removed,
             )
             record.pending = [*record.pending, pending]
+            # The approval covers the path from now: no hook may report the call's finish (`confirm`).
+            record.approved = list(dict.fromkeys([*record.approved, path]))
             worktree.keep(record)
         said = f"The operator approved it: {answer.comment}" if answer.comment else ""
-        return Decision(outcome="allow", reason=said)
+        return Decision(outcome="allow", reason=said, told=told(where, judgement))
     with worktree.lock():
         state = store.state()
         number = state.saved + 1
