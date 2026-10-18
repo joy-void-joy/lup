@@ -870,7 +870,7 @@ def test_the_command_refuses_to_lend_what_s_neither_a_directory_nor_a_module(
     assert writable.exit_code == 2
 
 
-def test_transcripts_are_mounted_and_told_only_in_a_launch_lending_them(
+def test_transcripts_are_mounted_and_told_in_every_launch(
     project: Path, tmp_path: Path, clock: FakeClock
 ) -> None:
     common = (
@@ -891,17 +891,18 @@ def test_transcripts_are_mounted_and_told_only_in_a_launch_lending_them(
         lending.adapter, [], project, lending.launcher, modules=["transcripts"]
     )
 
-    data = lending.layout.module_data("transcripts", Path(common))
     assert (plain, lent) == (7, 7)
-    assert not any("modules/transcripts" in each for each in kept.engine.run())
-    assert "# Past sessions" not in (kept.engine.guidance or "")
-    assert f"--mount=type=bind,source={data},destination={data},ro=true" in (
-        lending.engine.run()
-    )
-    assert (
-        f"# Past sessions\n\nEvery session of this repository is kept, whole, at `{data}`"
-        in (lending.engine.guidance or "")
-    )
+    for machine in [kept, lending]:
+        data = machine.layout.module_data("transcripts", Path(common))
+        assert f"--mount=type=bind,source={data},destination={data},ro=true" in (
+            machine.engine.run()
+        )
+        guidance = machine.engine.guidance or ""
+        assert (
+            f"# Past sessions\n\nEvery session of this repository is kept, whole, at "
+            f"`{data}`"
+        ) in guidance
+        assert "lup-dev transcripts search" in guidance
 
 
 def test_the_command_refuses_inside_an_agents_session(

@@ -125,6 +125,7 @@ Its release channel (`ClaudeChannel`) is the one its native installer reads
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, override
 
@@ -138,7 +139,16 @@ from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
 from lup_dev.host.courier import Heard, Spawned, Spawning, Telling
-from lup_dev.host.records import Record, Records, within
+from lup_dev.host.records import (
+    Called,
+    Entry,
+    Reader,
+    Record,
+    Records,
+    Transcript,
+    within,
+)
+from lup_dev.host.records import Said as Spoken
 from lup_dev.host.rooms import SERVER, stamp
 from lup_dev.launch.clis import (
     Channel,
@@ -164,6 +174,7 @@ from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from datetime import timedelta
 
     import httpx
@@ -984,6 +995,221 @@ def ran_in(folder: Path) -> Path | None:
     return None
 
 
+class Origin(Model, extra="ignore"):
+    """Where a message came from, as Claude Code records it: `human` for the operator's own words."""
+
+    kind: str
+
+
+class TextBlock(Model, extra="ignore"):
+    """Text in a message."""
+
+    type: Literal["text"]
+    text: str
+
+
+class ToolUse(Model, extra="ignore"):
+    """A call to a tool, by its name."""
+
+    type: Literal["tool_use"]
+    name: str
+
+
+class OtherBlock(Model, extra="ignore"):
+    """Any other part of a message: a tool's result, thinking, an image."""
+
+    type: str
+
+
+type Block = Annotated[
+    TextBlock | ToolUse | OtherBlock, Field(union_mode="left_to_right")
+]
+
+
+class UserMessage(Model, extra="ignore"):
+    """A user line's message: text, or its parts."""
+
+    content: str | list[Block]
+
+
+class UserLine(Model, extra="ignore", alias_generator=to_camel):
+    """A `user` line: the operator's words, a tool's result, or text Claude Code wrote in their place (a command's output, a notice)."""
+
+    type: Literal["user"]
+    message: UserMessage
+    timestamp: datetime | None = None
+    origin: Origin | None = None
+    is_meta: bool = False
+    is_compact_summary: bool = False
+    is_sidechain: bool = False
+    cwd: Path | None = None
+
+    def operators(self) -> str | None:
+        """Return the operator's words in it; none where it holds none of theirs.
+
+        Measured on 2.1.302 (`docs/field-notes.md`, *A session's record*): the
+        operator's are `origin.kind == "human"`. A line with no `origin` is
+        theirs, as an earlier release wrote them, where it's text that isn't a
+        tag Claude Code wrote (`<command-name>`, `<task-notification>`); one in
+        parts with no `origin` is Claude Code's own (`[Request interrupted by
+        user]`), and one in parts with a tool's result never is.
+        """
+        if self.is_meta or self.is_compact_summary or self.is_sidechain:
+            return None
+        if self.origin is not None and self.origin.kind != "human":
+            return None
+        match self.message.content:
+            case str() as text:
+                written = self.origin is None and text.startswith("<")
+                return None if written else text
+            case blocks:
+                if self.origin is None:
+                    return None
+                texts = [block.text for block in blocks if isinstance(block, TextBlock)]
+                return "\n".join(texts) if texts else None
+
+
+class AssistantMessage(Model, extra="ignore"):
+    """An assistant line's message: its parts."""
+
+    content: list[Block] = []
+
+
+class AssistantLine(Model, extra="ignore", alias_generator=to_camel):
+    """An `assistant` line: the agent's text, and the tools it called."""
+
+    type: Literal["assistant"]
+    message: AssistantMessage
+    timestamp: datetime | None = None
+    is_sidechain: bool = False
+
+
+class Queued(Model, extra="ignore", alias_generator=to_camel):
+    """A message that arrived while the agent worked, given to it at its next step."""
+
+    type: Literal["queued_command"]
+    prompt: str
+    command_mode: str | None = None
+    origin: Origin | None = None
+
+
+class OtherAttachment(Model, extra="ignore"):
+    """Anything else Claude Code attaches: a hook's context, a reminder."""
+
+    type: str
+
+
+class AttachmentLine(Model, extra="ignore"):
+    """An `attachment` line."""
+
+    type: Literal["attachment"]
+    attachment: Annotated[Queued | OtherAttachment, Field(union_mode="left_to_right")]
+    timestamp: datetime | None = None
+
+
+class CustomTitle(Model, extra="ignore", alias_generator=to_camel):
+    """The name the operator gave the session (`/rename`), or lup did (`sessionTitle`)."""
+
+    type: Literal["custom-title"]
+    custom_title: str
+
+
+class AgentName(Model, extra="ignore", alias_generator=to_camel):
+    """The session's agent name."""
+
+    type: Literal["agent-name"]
+    agent_name: str
+
+
+class AiTitle(Model, extra="ignore", alias_generator=to_camel):
+    """The title Claude Code made for the session."""
+
+    type: Literal["ai-title"]
+    ai_title: str
+
+
+type Line = Annotated[
+    UserLine | AssistantLine | AttachmentLine | CustomTitle | AgentName | AiTitle,
+    Field(discriminator="type"),
+]
+"""A line of a session's record lup reads; the others it passes over."""
+
+
+class ClaudeTranscripts(Model, Reader):
+    """Claude Code's records, read: a session's file per session under `projects/<folder>/`, its subagents' in a folder beside it."""
+
+    @override
+    def sessions(self, copies: Path) -> list[Path]:
+        projects = copies / "projects"
+        return sorted(projects.glob("*/*.jsonl")) if projects.is_dir() else []
+
+    @override
+    def read(self, record: Path) -> Transcript:
+        lines = list(parsed(record))
+        ran = [each.cwd for each in lines if isinstance(each, UserLine) and each.cwd]
+        return Transcript(
+            runtime=Claude().name(),
+            session=record.stem,
+            title=named(lines),
+            directory=next(iter(ran), None),
+            entries=[entry for each in lines for entry in entries(each)],
+        )
+
+
+def parsed(record: Path) -> Iterator[Line]:
+    """Yield each line of `record` lup reads, passing over the others and any that isn't JSON."""
+    reading = TypeAdapter[Line](Line)
+    with record.open(encoding="utf-8", errors="replace") as written:
+        for raw in written:
+            try:
+                yield reading.validate_json(raw)
+            except ValidationError:
+                continue
+
+
+def named(lines: list[Line]) -> str | None:
+    """Return a session's name: the last one the operator or lup gave it, else its last agent name, else Claude Code's last title; none where it has none."""
+    custom = [each.custom_title for each in lines if isinstance(each, CustomTitle)]
+    agents = [each.agent_name for each in lines if isinstance(each, AgentName)]
+    titles = [each.ai_title for each in lines if isinstance(each, AiTitle)]
+    return next((names[-1] for names in [custom, agents, titles] if names), None)
+
+
+def entries(line: Line) -> list[Entry]:
+    """Return the steps one line of a record holds: the operator's words, the agent's text, the tools it called."""
+    match line:
+        case UserLine(timestamp=at) as user:
+            words = user.operators()
+            return [] if words is None else [Spoken(by="operator", text=words, at=at)]
+        case AssistantLine(is_sidechain=False, timestamp=at, message=message):
+            return [
+                step
+                for block in message.content
+                for step in [said_by_agent(block, at)]
+                if step is not None
+            ]
+        case AttachmentLine(
+            attachment=Queued(
+                command_mode="prompt", origin=Origin(kind="human")
+            ) as queued,
+            timestamp=at,
+        ):
+            return [Spoken(by="operator", text=queued.prompt, at=at)]
+        case _:
+            return []
+
+
+def said_by_agent(block: Block, at: datetime | None) -> Entry | None:
+    """Return the step a part of the agent's message is: its text, or a tool it called; none for any other part."""
+    match block:
+        case TextBlock(text=text):
+            return Spoken(by="agent", text=text, at=at)
+        case ToolUse(name=name):
+            return Called(tool=name, at=at)
+        case _:
+            return None
+
+
 def adapter() -> Adapter:
     """Return what lup needs of Claude Code: its hooks answered, and its launch."""
     return Adapter(
@@ -998,4 +1224,5 @@ def adapter() -> Adapter:
         channel=ClaudeChannel(),
         agent=agent,
         records=ClaudeRecords(directory=ClaudeLayout.of(ClaudeSettings()).directory),
+        reader=ClaudeTranscripts(),
     )

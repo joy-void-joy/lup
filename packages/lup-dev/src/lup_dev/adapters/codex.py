@@ -158,6 +158,7 @@ unavailable; a launch runs what's kept instead.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, override
 
@@ -171,7 +172,16 @@ from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
 from lup_dev.host.courier import Heard, Spawned, Telling
-from lup_dev.host.records import Record, Records, within
+from lup_dev.host.records import (
+    Called,
+    Entry,
+    Reader,
+    Record,
+    Records,
+    Transcript,
+    within,
+)
+from lup_dev.host.records import Said as Spoken
 from lup_dev.host.rooms import SERVER, stamp
 from lup_dev.launch.clis import (
     Channel,
@@ -194,6 +204,7 @@ from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from datetime import timedelta
 
     import httpx
@@ -892,6 +903,205 @@ def started_in(rollout: Path) -> Path | None:
         return None
 
 
+class ThreadStarted(Model, extra="ignore"):
+    """A rollout's `session_meta`: the thread's id, where it ran, and the thread that spawned it, for a subagent's."""
+
+    id: str
+    cwd: Path | None = None
+    parent_thread_id: str | None = None
+
+
+class MetaRecord(Model, extra="ignore"):
+    """A `session_meta` line."""
+
+    type: Literal["session_meta"]
+    payload: ThreadStarted
+
+
+class Typed(Model, extra="ignore"):
+    """`user_message`: what the operator typed, as a rollout of the legacy history mode records it (`protocol/src/protocol.rs`, `UserMessageEvent`, at `rust-v0.163.0`)."""
+
+    type: Literal["user_message"]
+    message: str
+
+
+class Answered(Model, extra="ignore"):
+    """`agent_message`: what the agent said, as the legacy history mode records it."""
+
+    type: Literal["agent_message"]
+    message: str
+
+
+class Part(Model, extra="ignore"):
+    """A part of an item's content: its text, where it has one."""
+
+    text: str | None = None
+
+
+class Item(Model, extra="ignore"):
+    """An item a turn completed: `UserMessage` is what the operator typed, `AgentMessage` what the agent said (`protocol/src/items.rs`)."""
+
+    type: str
+    content: list[Part] = []
+
+    def text(self) -> str:
+        """Return its parts' text, in order."""
+        return "\n".join(part.text for part in self.content if part.text is not None)
+
+
+class Completed(Model, extra="ignore"):
+    """`item_completed`: a turn's item, as the paginated history mode records it, the default of a session started at 0.163."""
+
+    type: Literal["item_completed"]
+    item: Item
+
+
+class Renamed(Model, extra="ignore"):
+    """`thread_name_updated`: the thread's name, as rollouts before 0.163 recorded it; 0.163 keeps it in `session_index.jsonl` instead."""
+
+    type: Literal["thread_name_updated"]
+    thread_name: str
+
+
+class OtherEvent(Model, extra="ignore"):
+    """Any other event."""
+
+    type: str
+
+
+class EventRecord(Model, extra="ignore"):
+    """An `event_msg` line."""
+
+    type: Literal["event_msg"]
+    timestamp: datetime | None = None
+    payload: Annotated[
+        Typed | Answered | Completed | Renamed | OtherEvent,
+        Field(union_mode="left_to_right"),
+    ]
+
+
+class ToolCalled(Model, extra="ignore"):
+    """A `function_call` or `custom_tool_call`: a tool, by its namespace and name (`protocol/src/models.rs`, `ResponseItem`)."""
+
+    type: Literal["function_call", "custom_tool_call"]
+    name: str
+    namespace: str | None = None
+
+    def tool(self) -> str:
+        """Return the tool's name as Codex shows it: its namespace before its name, but for the default one (`protocol/src/tool_name.rs`)."""
+        if self.namespace is None or self.namespace in ["", "functions"]:
+            return self.name
+        return f"{self.namespace}{self.name}"
+
+
+class ShellCalled(Model, extra="ignore"):
+    """A `local_shell_call`: a command, with no tool's name."""
+
+    type: Literal["local_shell_call"]
+
+
+class OtherItem(Model, extra="ignore"):
+    """Any other response item: a message, which the events say once, reasoning."""
+
+    type: str
+
+
+class ResponseRecord(Model, extra="ignore"):
+    """A `response_item` line."""
+
+    type: Literal["response_item"]
+    timestamp: datetime | None = None
+    payload: Annotated[
+        ToolCalled | ShellCalled | OtherItem, Field(union_mode="left_to_right")
+    ]
+
+
+type Rolled = Annotated[
+    MetaRecord | EventRecord | ResponseRecord, Field(discriminator="type")
+]
+"""A line of a rollout lup reads; the others it passes over."""
+
+
+class CodexTranscripts(Model, Reader):
+    """Codex's records, read: a rollout per thread under `sessions/`, a subagent's among them, which isn't a session of its own.
+
+    Read from Codex's source at `rust-v0.163.0` (`docs/field-notes.md`, *A
+    thread's rollout*): the operator's words and the agent's are the events,
+    which the legacy history mode writes as `user_message` and `agent_message`,
+    and the paginated one, the default from 0.163, as `item_completed`; the
+    `response_item` messages repeat them, and carry injected context too, so
+    they're passed over. Tools called are `response_item`s.
+    """
+
+    @override
+    def sessions(self, copies: Path) -> list[Path]:
+        threads = copies / "sessions"
+        rollouts = sorted(threads.rglob("rollout-*.jsonl")) if threads.is_dir() else []
+        return [each for each in rollouts if spawned_by(each) is None]
+
+    @override
+    def read(self, record: Path) -> Transcript:
+        lines = list(rolled(record))
+        metas = [each.payload for each in lines if isinstance(each, MetaRecord)]
+        names = [
+            each.payload.thread_name
+            for each in lines
+            if isinstance(each, EventRecord) and isinstance(each.payload, Renamed)
+        ]
+        first = next(iter(metas), None)
+        return Transcript(
+            runtime=Codex().name(),
+            session=record.stem if first is None else first.id,
+            title=names[-1] if names else None,
+            directory=None if first is None else first.cwd,
+            entries=[entry for each in lines for entry in stepped(each)],
+        )
+
+
+def rolled(record: Path) -> Iterator[Rolled]:
+    """Yield each line of a rollout lup reads, passing over the others and any that isn't JSON."""
+    reading = TypeAdapter[Rolled](Rolled)
+    with record.open(encoding="utf-8", errors="replace") as written:
+        for raw in written:
+            try:
+                yield reading.validate_json(raw)
+            except ValidationError:
+                continue
+
+
+def spawned_by(rollout: Path) -> str | None:
+    """Return the thread that spawned a rollout's, from its first line; none for a session's own thread."""
+    first = next(rolled(rollout), None)
+    match first:
+        case MetaRecord(payload=ThreadStarted(parent_thread_id=parent)):
+            return parent
+        case _:
+            return None
+
+
+def stepped(line: Rolled) -> list[Entry]:
+    """Return the steps one rollout line holds: the operator's words, the agent's, a tool called."""
+    match line:
+        case EventRecord(payload=Typed(message=text), timestamp=at):
+            return [Spoken(by="operator", text=text, at=at)]
+        case EventRecord(payload=Answered(message=text), timestamp=at):
+            return [Spoken(by="agent", text=text, at=at)]
+        case EventRecord(
+            payload=Completed(item=Item(type="UserMessage") as item), timestamp=at
+        ):
+            return [Spoken(by="operator", text=item.text(), at=at)]
+        case EventRecord(
+            payload=Completed(item=Item(type="AgentMessage") as item), timestamp=at
+        ):
+            return [Spoken(by="agent", text=item.text(), at=at)]
+        case ResponseRecord(payload=ToolCalled() as called, timestamp=at):
+            return [Called(tool=called.tool(), at=at)]
+        case ResponseRecord(payload=ShellCalled(), timestamp=at):
+            return [Called(tool="shell", at=at)]
+        case _:
+            return []
+
+
 def adapter() -> Adapter:
     """Return what lup needs of Codex: its hooks answered, and its launch."""
     return Adapter(
@@ -906,4 +1116,5 @@ def adapter() -> Adapter:
         channel=CodexChannel(),
         agent=agent,
         records=CodexRecords(home=CodexLayout.of(CodexSettings()).operator_home),
+        reader=CodexTranscripts(),
     )
