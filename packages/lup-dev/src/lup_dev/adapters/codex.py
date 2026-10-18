@@ -65,7 +65,7 @@ end is held (`decision: "block"`). From the source at `rust-v0.162.1`:
   `parse_pre_tool_use`, `hooks/src/events/pre_tool_use.rs`). The first lup
   measured on 0.158.0 that the rewrite reached the server so, and that without
   `allow` it "was dropped — the call ran as the model wrote it"; owed live on
-  0.162.1 (`docs/host-tools.md`, *Checks owed*);
+  0.162.1 (`docs/field-notes.md`, *Piece 2, live*);
 - `PreToolUse`'s `additionalContext` is collected for the model unless the
   answer is one it refuses (`pre_tool_use.rs`, `parse_completed`), as are
   `SessionStart`'s and `PostToolUse`'s; `Stop` and `SubagentStop` hold the turn

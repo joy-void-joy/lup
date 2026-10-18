@@ -9,7 +9,7 @@ the inbox's own kinds, registered with the service by `cli.py`; a room can't
 send them, since it can't reach the control socket, and the store isn't
 mounted.
 
-Trust on launch sends the approval's (*Trust on launch: the summary first*): the
+Trust on launch sends the approval's (`docs/launch.md`, *Trust on launch*): the
 launch asks it (`AskApproval`, joining the one waiting about the same zone) and
 waits on its answer (`AwaitApproval`, whose reply comes once it's answered); the
 launching terminal, or `lup-dev inbox answer` at any other, answers it

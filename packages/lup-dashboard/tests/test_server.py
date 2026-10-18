@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import pytest
@@ -12,11 +13,11 @@ from lup_dashboard.host import Host
 from lup_dashboard.server import Access, application
 from lup_dev.clock import Clock
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
-from lup_dev.inbox.protocol import Items, ListInbox
+from lup_dev.inbox.protocol import Items, ListInbox, Settled
+from lup_dev.inbox.store import Approval, Decided, Item, Message, Operator
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-    from pathlib import Path
 
     from pydantic import JsonValue
 
@@ -38,6 +39,7 @@ class StandIn(Host):
         self.lasting = lasting
         """Whether a watch, its replies given, waits for a change that never comes, as the host's do, rather than ending."""
         self.asked: list[Asked] = []
+        self.settled: list[int] = []
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -58,6 +60,10 @@ class StandIn(Host):
             yield replied
         if self.lasting:
             await asyncio.Event().wait()
+
+    @override
+    async def settle(self, number: int) -> None:
+        self.settled.append(number)
 
 
 GIVEN = "stand-in"
@@ -315,3 +321,41 @@ def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) ->
         "done": [],
         "parked": [53],
     }
+
+
+def settling(approved: bool, reason: Approval | Message) -> Settled:
+    """The host's reply to an approval answered: its item, as it stands."""
+    item = Item(
+        number=7,
+        reason=reason,
+        sender=Operator(),
+        recipient=Operator(),
+        made=datetime(2026, 10, 1, 12, tzinfo=UTC),
+        state=Decided(at=datetime(2026, 10, 1, 12, tzinfo=UTC), approved=approved),
+    )
+    return Settled(item=item, here=True)
+
+
+ZONE = Approval(
+    text="Approve the host zone?", summary="", repository=Path("/r"), fingerprint="f"
+)
+
+
+@pytest.mark.parametrize(
+    ("approved", "reason", "acted"),
+    [
+        (True, ZONE, [7]),
+        (False, ZONE, []),
+        (True, Message(kind="note", text="not an approval"), []),
+    ],
+)
+def test_an_approval_approved_on_the_page_is_acted_on_as_the_terminal_does(
+    page: Path, approved: bool, reason: Approval | Message, acted: list[int]
+) -> None:
+    host = StandIn({"inbox-answer-approval": [settling(approved, reason)]})
+    client(host, page).post(
+        "/api/ask",
+        json={"kind": "inbox-answer-approval", "number": 7, "approved": approved},
+        headers=bearing(),
+    )
+    assert host.settled == acted

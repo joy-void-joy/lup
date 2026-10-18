@@ -736,7 +736,7 @@ def test_a_session_that_just_started_is_woken(
     assert frames_of(frames) == [bell(1)]
 
 
-def test_a_session_with_a_call_running_is_told_when_it_finishes_not_woken(
+def test_a_session_in_its_turn_is_told_at_its_hooks_and_never_woken(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     with inboxed(machine, clock, notices, said):
@@ -757,9 +757,14 @@ def test_a_session_with_a_call_running_is_told_when_it_finishes_not_woken(
             ),
         )
         inbox("send", "one", "Between calls.")
+        ended = send(hook, claude("Stop", stop_hook_active=False))
         frames = messages.close()
     assert context(finished) == first_note("While you run.")
-    assert frames_of(frames) == [bell(2)]
+    assert json.loads(ended) == {
+        "decision": "block",
+        "reason": "lup's inbox, item 2: a note from the operator:\nBetween calls.",
+    }
+    assert frames == []
 
 
 def test_a_service_started_again_wakes_a_session_it_hasn_t_heard_since(
@@ -1735,6 +1740,30 @@ def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_
         "    | 2. Keep the cache (lean: no)\n"
         "  On this passage:\n    > 1. Parse with lark\n    Yes."
     )
+
+
+def test_a_message_only_marked_read_tells_its_sender_nothing_nor_wakes_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        send(hook, claude("SessionStart", source="startup"))
+        stamped = json.loads(send(hook, lup_call("note", {"remark": "FYI."}, "n1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        call(machine.host.launch("one").mcp, "note", stamped)
+        send(hook, claude("Stop", stop_hook_active=False))
+        drafting(machine, clock, Draft(done=[1]))
+        reviews = sending(machine, clock)
+        state = delivery.inbox.item(1).state
+        waiting = delivery.inbox.waiting(delivery.inbox.item(1).sender)
+        frames = messages.close()
+    assert reviews == []
+    assert isinstance(state, Done)
+    assert waiting == []
+    assert frames == []
 
 
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(

@@ -14,19 +14,19 @@ conversation is told together, oldest first, by whichever comes first:
 - **its session's start or resumption,** in the start's answer;
 - **its turn started through its session's own messaging socket,** where its
   runtime's adapter spells a way (the courier's `woken`), for an item the
-  operator's own act made: at once, unless a call of its is running, whose
-  hook comes soon. What's written is a doorbell, what waits and that
-  `wait_inbox` reads it (`doorbell`), never the items: the socket takes any
-  local session's message, and the runtime says so of each, so what's in an
-  agent's inbox comes through lup's own tools alone. An idle session starts a
-  turn with it, a busy one takes it at its next boundary, so the service
-  needn't know which: a session just started, one interrupted, and every one
-  after the service starts again are reached. It rings once until the
-  session's next hook. Where a runtime has no way, the item waits for the
-  session's next call, a gap its adapter declares.
+  operator's own act made to an idle session: one whose turn ended, one just
+  started, or one the service hasn't heard since it started. A session in its
+  turn is told at its next call, or its turn's end, instead. What's written is
+  a doorbell, what waits and that `wait_inbox` reads it (`doorbell`), never the
+  items: the socket takes any local session's message, and the runtime says so
+  of each, so what's in an agent's inbox comes through lup's own tools alone.
+  An idle session starts a turn with it; one the service misjudged as idle
+  takes it at its next boundary. It rings once until the session's next hook.
+  Where a runtime has no way, the item waits for the session's next call, a
+  gap its adapter declares.
 
-**Told once.** An item is told when it's written into a hook's answer, a held
-call's result or the messaging socket, and never again:
+**Told once.** An item is told when it's written into a hook's answer or a held
+call's result, and never again:
 - one past what a hook tells the model whole (`Heard.fits`) is announced there
   instead, who sent it and its size, with a line saying `wait_inbox` returns it
   whole; it waits until then, and isn't announced again. Nothing is cut;
@@ -264,9 +264,11 @@ class Held(MutableModel, arbitrary_types_allowed=True):
 class Presence(MutableModel):
     """What the service knows of a conversation while it serves: whether a call of its runs, whether it was woken since its last hook, and the calls it holds."""
 
-    calling: bool = False
-    """Whether a call of its started and hasn't finished: its next hook comes
-    soon, and tells what waits."""
+    turning: bool = False
+    """Whether its turn runs, as its hooks last said: from a call's start until
+    its turn's end is let through, its next call or its turn's end telling what
+    waits. One just started, or that the service hasn't heard since it started,
+    is idle."""
     woken: bool = False
     """Whether it was woken since its last hook: the turn the wake starts tells
     what arrives meanwhile at its first call."""
@@ -322,7 +324,6 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         presence.woken = False
         match heard.event:
             case "turn-ended" | "conversation-ended":
-                presence.calling = False
                 for each in presence.held:
                     each.ended = True
                 fresh = [
@@ -332,20 +333,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     posted = self.told(party, room, heard.fits, "turn's end")
                     if posted.items:
                         return posted
+                presence.turning = False
                 if heard.event == "conversation-ended" and party.agent is not None:
                     self.ended(party)
                 return Posted()
             case "session-started":
-                presence.calling = False
+                presence.turning = False
                 return self.told(party, room, heard.fits, "start")
             case "call-started" if heard.served:
-                presence.calling = True
+                presence.turning = True
                 return Posted()
-            case "call-started":
-                presence.calling = True
-                return self.told(party, room, heard.fits, "call")
-            case "call-finished":
-                presence.calling = False
+            case "call-started" | "call-finished":
+                presence.turning = True
                 return self.told(party, room, heard.fits, "call")
 
     @override
@@ -453,15 +452,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return "\n\n".join([*own, *context])
 
     async def reviewed(self) -> list[Item]:
-        """Send the operator's draft as one reply: to each conversation that sent an item it covers, the whole of it; its items answered or done, and the draft left with what's parked.
+        """Send the operator's draft as one reply: to each conversation with a comment on its items, or a question among them, the whole of it; its items answered or done, and the draft left with what's parked.
 
         Each conversation is told its own items first, with the comments on
         them or read with nothing to add, then what was said on the others'
         for context (`reviewing`): the operator answers related items together,
         across agents and repositories, and sends what's drafted on moving to
         something unrelated. A question is answered by the reply its asker
-        gets, which lets a held `ask` go. Refused where the draft covers no
-        item, or covers one no conversation sent.
+        gets, which lets a held `ask` go. A message only marked read tells its
+        sender nothing, nor wakes it: it's taken off the list, and told as read
+        only to a conversation the reply reaches anyway. Refused where the
+        draft covers no item, or covers one no conversation sent.
         """
         draft = self.inbox.draft()
         covered = [self.inbox.item(each) for each in draft.covered()]
@@ -478,7 +479,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             covers=numbers,
             comments=[each for each in draft.comments if each.item in numbers],
         )
-        senders = [item.sender for item in covered]
+        commented = [each.item for each in draft.comments]
+        senders = [
+            item.sender
+            for item in covered
+            if item.number in commented or isinstance(item.reason, Question)
+        ]
         recipients = [
             each for index, each in enumerate(senders) if each not in senders[:index]
         ]
@@ -487,8 +493,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             for recipient in recipients
         ]
         for item in covered:
-            answer = next(each for each in sent if each.recipient == item.sender)
-            settling = settled(item, answer, at)
+            answer = next(
+                (each for each in sent if each.recipient == item.sender), None
+            )
+            settling = Done(at=at) if answer is None else settled(item, answer, at)
             self.inbox.kept(item.model_copy(update={"state": settling}))
         self.inbox.drafted(draft.kept())
         for each in sent:
@@ -623,25 +631,24 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.notices.notify(summary, body)
 
     async def wake(self, party: Conversation) -> None:
-        """Ring `party`'s session's doorbell through its messaging socket: what waits, for `wait_inbox` to read; unless a call of its is running, where its runtime has a way.
+        """Ring an idle `party`'s session's doorbell through its messaging socket: what waits, for `wait_inbox` to read, where its runtime has a way.
 
-        Only a session's main conversation is woken. A call of its running
-        (`Presence.calling`) means a hook comes soon and tells it there; a call
-        it holds is given it; a wake since its last hook started a turn whose
-        first call tells it; and a runtime with no way waits for its next hook.
-        Otherwise it's written to the socket whatever the service knows of the
-        session: just started, idle, generating, or unknown since the service
-        started again or since the operator interrupted it. An idle session
-        starts a turn with it, and a busy one takes it at its next boundary, as
-        measured on the runtime that has a way (`docs/field-notes.md`, *Waking
-        a session*). The items stay waiting, told once by whichever reaches the
+        Only a session's main conversation is woken, and only while it's idle.
+        One in its turn (`Presence.turning`) is told at its next call, or its
+        turn's end; a call it holds is given it; a wake since its last hook
+        started a turn whose first call tells it; and a runtime with no way
+        waits for its next hook. An idle session starts a turn with it; one the
+        service took for idle, unknown since the service started again or since
+        the operator interrupted it, takes it at its next boundary, as measured
+        on the runtime that has a way (`docs/field-notes.md`, *Waking a
+        session*). The items stay waiting, told once by whichever reaches the
         agent first: `wait_inbox`, its next call's hook, or its turn's end;
         where the session's messaging socket can't be reached, that's said.
         """
         presence = self.presence(party)
         place = self.inbox.whereabouts.get(party.key())
         waiting = self.inbox.waiting(party)
-        quiet = presence.calling or presence.woken or presence.held
+        quiet = presence.turning or presence.woken or presence.held
         if party.agent is not None or quiet or place is None or not waiting:
             return
         line = self.courier.woken(party.runtime, party.session, doorbell(waiting))
