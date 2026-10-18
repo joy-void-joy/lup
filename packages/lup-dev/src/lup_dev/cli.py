@@ -96,6 +96,7 @@ from lup_dev.inbox.store import (
     Answer,
     Answered,
     Approval,
+    Comment,
     Decided,
     Done,
     Inbox,
@@ -104,6 +105,7 @@ from lup_dev.inbox.store import (
     Message,
     Party,
     Question,
+    Review,
     Ruling,
     Superseded,
     Told,
@@ -593,7 +595,26 @@ def shown(item: Item) -> str:
                 text,
                 f"The whole diff: `lup-dev inbox show {item.number} --diff`.",
             ]
+        case Review(covers=covers, comments=comments, verdicts=verdicts):
+            ruled = [
+                f"Item {each.item}, decision {each.decision}: {each.verdict}."
+                for each in verdicts
+            ]
+            body = [
+                f"Of items {', '.join(str(each) for each in covers)}.",
+                *ruled,
+                *(commented(each) for each in comments),
+            ]
     return "\n".join([heading(item), *body])
+
+
+def commented(comment: Comment) -> str:
+    """Say one comment of a review, for the operator: where it's on, then what it says."""
+    if comment.item is None:
+        return f"On the whole: {comment.text}"
+    if comment.quote is None:
+        return f"On item {comment.item}: {comment.text}"
+    return f'On item {comment.item}, "{comment.quote.text}": {comment.text}'
 
 
 def verdict(decision: int) -> Verdict:
@@ -910,15 +931,44 @@ def inbox_done(
 @inbox.command("send")
 def inbox_send(
     to: Annotated[
-        str, typer.Argument(help="The launch, by its name, its id or its worktree.")
+        str,
+        typer.Argument(
+            help=(
+                "The launch, by its name, its id or its worktree; or one of its "
+                "subagents, by its path (`dev/explore-auth`)."
+            )
+        ),
     ],
-    text: Annotated[str, typer.Argument(help="What to tell its session.")],
+    text: Annotated[str, typer.Argument(help="What to tell it.")],
 ) -> None:
-    """Send a message to the session a launch runs, its main conversation."""
+    """Send a message to the session a launch runs, its main conversation; or to one of its subagents, by its path."""
     client = answering()
-    launch = the_launch(client.launches(), to)
+    listed = client.listed()
+    subagents = [
+        Addressed(launch=launch, agent=talker.agent)
+        for launch, talkers in listed.talkers.items()
+        for talker in talkers
+        if talker.path == to and talker.agent is not None
+    ]
+    match subagents:
+        case [Addressed(launch=launch, agent=agent)]:
+            sent = client.ask(SendItem(launch=launch, text=text, agent=agent), Shown)
+            typer.echo(
+                f"Sent item {sent.item.number} to `{to}`, {who(sent.item.recipient)}."
+            )
+            return
+        case _:
+            pass
+    launch = the_launch(listed.launches, to)
     sent = client.ask(SendItem(launch=launch.launch, text=text), Shown).item
     typer.echo(f"Sent item {sent.number} to `{launch.name}`, {who(sent.recipient)}.")
+
+
+class Addressed(Model):
+    """A subagent a message is sent to: the launch its session runs in, and the runtime's id for it."""
+
+    launch: str
+    agent: str
 
 
 def the_launch(launches: list[Register], to: str | None) -> Register:

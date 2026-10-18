@@ -358,6 +358,11 @@ class InboxLayout(Model):
         """Each approval's whole diff, a file named by its item's number."""
         return self.home / "diffs"
 
+    @property
+    def draft(self) -> Path:
+        """The operator's draft reply, kept until they send it (`docs/dashboard.md`, *The review*)."""
+        return self.home / "draft.json"
+
     def item(self, number: int) -> Path:
         """Say where item `number` is kept."""
         return self.items / f"{number}.json"

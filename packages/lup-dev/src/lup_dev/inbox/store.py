@@ -156,8 +156,52 @@ class Approval(Model):
     approval waiting for it."""
 
 
+class Quote(Model):
+    """A passage of an item the operator commented on: the text they selected, and where it is in the item as the page shows it."""
+
+    text: str
+    start: int
+    """Where it starts in the item's text as the page shows it, which the page
+    places the comment by; the host keeps it, and reads only `text`."""
+    end: int
+
+
+class Comment(Model):
+    """A comment of the operator's: on a passage of an item, on an item whole, or on everything they reply to."""
+
+    item: int | None = None
+    """The item it's on; none for a comment on the whole reply."""
+    quote: Quote | None = None
+    """The passage it's on; none for a comment on the item whole."""
+    text: str
+
+
+class Ruled(Model):
+    """The operator's verdict on one numbered decision of a question, in a reply covering several items."""
+
+    item: int
+    decision: int
+    """The decision's number, from 1."""
+    verdict: Verdict
+
+
+class Review(Model):
+    """The operator's reply to several items at once, as they wrote it while reading them: sent whole to each conversation whose items it covers.
+
+    Each recipient is told all of it, the comments on its own items marked as
+    its own, since the operator writes point by point across items and
+    cross-references them (`docs/dashboard.md`, *The review*).
+    """
+
+    reason: Literal["review"] = "review"
+    covers: list[int]
+    """The items it answers, in order."""
+    comments: list[Comment] = []
+    verdicts: list[Ruled] = []
+
+
 type Reason = Annotated[
-    Message | Question | Answer | Approval, Field(discriminator="reason")
+    Message | Question | Answer | Approval | Review, Field(discriminator="reason")
 ]
 """Why an item is there."""
 
@@ -268,6 +312,37 @@ def read[M: Model](path: Path, model: type[M]) -> M:
     return found
 
 
+class Draft(Model):
+    """The operator's reply as they build it while reading: their comments, their verdicts, the items they took off their list and the ones they parked; kept until it's sent."""
+
+    comments: list[Comment] = []
+    verdicts: list[Ruled] = []
+    done: list[int] = []
+    """Items read and taken off the list when the draft is sent, with no
+    comment of their own."""
+    parked: list[int] = []
+    """Items left for a later reply: what's drafted on them stays drafted when
+    the rest is sent."""
+
+    def covered(self) -> list[int]:
+        """Return the items the draft answers, in order: each with a comment, a verdict or marked done, but for the parked ones."""
+        mentioned = [
+            *(each.item for each in self.comments if each.item is not None),
+            *(each.item for each in self.verdicts),
+            *self.done,
+        ]
+        wanted = [each for each in mentioned if each not in self.parked]
+        return sorted(dict.fromkeys(wanted))
+
+    def kept(self) -> Draft:
+        """Return what stays drafted once the draft is sent: what's on the parked items."""
+        return Draft(
+            comments=[each for each in self.comments if each.item in self.parked],
+            verdicts=[each for each in self.verdicts if each.item in self.parked],
+            parked=self.parked,
+        )
+
+
 class Inbox(MutableModel):
     """Every item and every conversation's whereabouts, as the host service holds them, each change written through to its file."""
 
@@ -294,6 +369,17 @@ class Inbox(MutableModel):
             whereabouts={place.conversation.key(): place for place in places},
             changes=changes,
         )
+
+    def draft(self) -> Draft:
+        """Return the operator's draft reply; an empty one where they have none."""
+        return read_model(self.layout.draft, Draft) or Draft()
+
+    def drafted(self, draft: Draft) -> Draft:
+        """Keep the operator's draft reply, and return it."""
+        write_model(self.layout.draft, draft)
+        if self.changes is not None:
+            self.changes.changed()
+        return draft
 
     def kept(self, item: Item) -> Item:
         """Write `item` through to its file, and hold it."""
