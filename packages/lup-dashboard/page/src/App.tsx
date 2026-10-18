@@ -31,6 +31,7 @@ export function App() {
     const [confirming, setConfirming] = useState(false);
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
+    const [inserting, setInserting] = useState(false);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
     const served = reply?.kind === "listed" ? launches(reply) : [];
     const agents = everyone(served);
@@ -193,6 +194,8 @@ export function App() {
                         open={open}
                         send={() => setConfirming(numbers.length > 0)}
                         approve={approve}
+                        confirming={confirming}
+                        inserting={setInserting}
                     />
                     <div className="status">
                         {numbers.length === 0 ? (
@@ -208,12 +211,19 @@ export function App() {
                             <span className="muted"> Later: {(draft.parked ?? []).map((each) => `#${each}`).join(", ")}.</span>
                         )}
                     </div>
-                    <div className="keys muted">
-                        <kbd>o</kbd> comment on this line (the header: the item) · <kbd>v</kbd>…<kbd>c</kbd> on the
-                        selection · <kbd>␣</kbd> <kbd>d</kbd> done · <kbd>␣</kbd> <kbd>z</kbd> later · <kbd>␣</kbd>{" "}
-                        <kbd>e</kbd> diff · <kbd>␣</kbd> <kbd>a</kbd>/<kbd>x</kbd> approve/decline · <kbd>J</kbd>/
-                        <kbd>K</kbd> items
-                    </div>
+                    {inserting ? (
+                        <div className="keys inserting">
+                            -- INSERT -- writing a comment · <kbd>Ctrl</kbd> <kbd>Enter</kbd> ends it, back on what
+                            it's about · <kbd>Esc</kbd> ends it here
+                        </div>
+                    ) : (
+                        <div className="keys muted">
+                            <kbd>c</kbd> comment on this item · <kbd>o</kbd> on this line · <kbd>v</kbd>…<kbd>c</kbd>{" "}
+                            on the selection · <kbd>␣</kbd> <kbd>d</kbd> done · <kbd>␣</kbd> <kbd>z</kbd> later ·{" "}
+                            <kbd>␣</kbd> <kbd>e</kbd> diff · <kbd>␣</kbd> <kbd>a</kbd>/<kbd>x</kbd> approve/decline ·{" "}
+                            <kbd>J</kbd>/<kbd>K</kbd> items
+                        </div>
+                    )}
                 </div>
             </main>
             {confirming ? (

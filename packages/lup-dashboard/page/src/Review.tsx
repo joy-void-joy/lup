@@ -1,14 +1,15 @@
 // The review: everything waiting for the operator in one buffer moved through
 // with vim, their comments written into it, each under the line it's on. `o`
 // opens a comment under the line (on the item whole from its header), `v` and a
-// motion then `c` on the selection; a comment is edited as text, and only
-// comments are. Space `d` takes an item off the list, Space `z` leaves it for
-// later, Space `e` opens an approval's diff, Space `a` or `x` answers it; `J` and
-// `K` go to the next and previous item; Ctrl+Enter sends (`docs/dashboard.md`,
-// *The review*).
+// motion then `c` on the selection, and `c` alone on the item whole; a comment
+// is edited as text, and only comments are. Ctrl+Enter in a comment ends it,
+// back on what it's about; elsewhere it sends. Space `d` takes an item off the
+// list, Space `z` leaves it for later, Space `e` opens an approval's diff, Space
+// `a` or `x` answers it; `J` and `K` go to the next and previous item
+// (`docs/dashboard.md`, *The review*).
 import { Annotation, EditorState, Prec, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
-import { Decoration, EditorView, drawSelection, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
-import { Vim, getCM, vim, type CodeMirrorV } from "@replit/codemirror-vim";
+import { Decoration, EditorView, drawSelection, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Vim, getCM, vim, type CodeMirror, type CodeMirrorV } from "@replit/codemirror-vim";
 import { useEffect, useMemo, useRef } from "react";
 
 import {
@@ -36,11 +37,16 @@ interface Props {
     open: (number: number) => void;
     send: () => void;
     approve: (number: number, approved: boolean) => void;
+    /** Whether the confirmation has the keyboard: once it's gone, the review takes it back. */
+    confirming: boolean;
+    /** Told each time vim enters or leaves insert mode, so the page can say what the keys do in it. */
+    inserting: (yes: boolean) => void;
 }
 
 /** What the vim keys and the editor's own events do, as the review stands: replaced at each render. */
 interface Actions {
-    comment: (cm: CodeMirrorV, on: "line" | "selection") => void;
+    comment: (cm: CodeMirrorV, on: "line" | "selection" | "item") => void;
+    finish: (cm: CodeMirrorV) => void;
     toggle: (list: "done" | "parked") => void;
     move: (forward: boolean) => void;
     approve: (approved: boolean) => void;
@@ -87,6 +93,60 @@ function mapKeys(): void {
     map("J", "lupNext", "normal");
     map("K", "lupPrevious", "normal");
 }
+
+/** Return the editor's vim, once it's started. */
+function vimOf(view: EditorView): CodeMirrorV | null {
+    const cm = getCM(view);
+    return cm !== null && started(cm) ? cm : null;
+}
+
+function started(cm: CodeMirror): cm is CodeMirrorV {
+    return cm.state.vim !== null && cm.state.vim !== undefined;
+}
+
+/** Return whether vim waits for nothing in normal mode: no count, operator or keys of a mapping typed yet. */
+function idle(cm: CodeMirrorV): boolean {
+    const state = cm.state.vim;
+    if (state.insertMode || state.visualMode) {
+        return false;
+    }
+    const input = state.inputState;
+    return input.keyBuffer.length === 0 && input.prefixRepeat.length === 0 && !input.operator && !input.motion;
+}
+
+/**
+ * The review's keys that vim's keymap can't say: Ctrl+Enter, which ends a comment in insert mode and
+ * sends elsewhere, and `c` alone on an item's text, a comment on the item whole, which in a comment
+ * stays vim's change. Vim takes every key it's given before a keymap would, so these are read first.
+ */
+const keys = Prec.highest(
+    EditorView.domEventHandlers({
+        keydown: (event, view) => {
+            const cm = vimOf(view);
+            if (cm === null || event.altKey) {
+                return false;
+            }
+            const modified = event.ctrlKey || event.metaKey;
+            if (event.key === "Enter" && modified) {
+                if (cm.state.vim.insertMode) {
+                    current?.finish(cm);
+                } else {
+                    current?.send();
+                }
+                event.preventDefault();
+                return true;
+            }
+            const head = view.state.selection.main.head;
+            const inComment = (current?.blocks() ?? []).some((each) => head >= each.from && head <= each.to);
+            if (event.key === "c" && !modified && idle(cm) && !inComment) {
+                current?.comment(cm, "item");
+                event.preventDefault();
+                return true;
+            }
+            return false;
+        },
+    }),
+);
 
 /** Marks the review's own replacing of its text, which isn't the operator's edit. */
 const rebuilt = Annotation.define<boolean>();
@@ -204,13 +264,15 @@ function followed(before: Laid | null, after: Laid, head: number, landing: Landi
     return Math.min(now.header.from + (head - was.header.from), after.text.length);
 }
 
-export function Review({ items, draft, change, name, diffs, open, send, approve }: Props) {
+export function Review({ items, draft, change, name, diffs, open, send, approve, confirming, inserting }: Props) {
     const parent = useRef<HTMLDivElement>(null);
     const view = useRef<EditorView | null>(null);
     const shown = useRef<Laid | null>(null);
     const landing = useRef<Landing>(null);
     const latest = useRef(draft);
     latest.current = draft;
+    const telling = useRef(inserting);
+    telling.current = inserting;
     const laidOut = useMemo(
         () =>
             laid(
@@ -247,23 +309,23 @@ export function Review({ items, draft, change, name, diffs, open, send, approve 
                         if (update.docChanged && !replaced) {
                             current?.edited(update);
                         }
+                        // A click out of the comment being written ends it, as Esc would: typing there
+                        // could change nothing, and the thin cursor of insert mode is easily lost.
+                        const clicked = update.transactions.some((each) => each.isUserEvent("select.pointer"));
+                        const cm = vimOf(update.view);
+                        const head = update.state.selection.main.head;
+                        const inComment = (current?.blocks() ?? []).some((each) => head >= each.from && head <= each.to);
+                        if (clicked && cm?.state.vim.insertMode === true && !inComment) {
+                            queueMicrotask(() => Vim.exitInsertMode(cm, true));
+                        }
                     }),
-                    Prec.highest(
-                        keymap.of([
-                            {
-                                key: "Mod-Enter",
-                                run: () => {
-                                    current?.send();
-                                    return true;
-                                },
-                            },
-                        ]),
-                    ),
+                    keys,
                 ],
             }),
         });
         view.current = created;
         getCM(created)?.on("vim-mode-change", (event: { mode: string }) => {
+            telling.current(event.mode === "insert");
             if (event.mode !== "insert") {
                 current?.settled();
             }
@@ -301,6 +363,12 @@ export function Review({ items, draft, change, name, diffs, open, send, approve 
         }
     }, [laidOut, draft]);
 
+    useEffect(() => {
+        if (!confirming) {
+            view.current?.focus();
+        }
+    }, [confirming]);
+
     function head(): number {
         return view.current?.state.selection.main.head ?? 0;
     }
@@ -319,6 +387,13 @@ export function Review({ items, draft, change, name, diffs, open, send, approve 
         comment: (cm, on) => {
             const editor = view.current;
             if (editor === null) {
+                return;
+            }
+            if (on === "item") {
+                const region = here();
+                if (region !== undefined) {
+                    added({ item: region.item.number, quote: null, text: "" });
+                }
                 return;
             }
             if (on === "selection") {
@@ -341,6 +416,18 @@ export function Review({ items, draft, change, name, diffs, open, send, approve 
             if (comment !== undefined) {
                 added(comment);
             }
+        },
+        finish: (cm) => {
+            const editor = view.current;
+            const block = blockAt(laidOut, head());
+            const region = here();
+            const comment = block === undefined ? undefined : latest.current.comments?.[block.comment];
+            Vim.exitInsertMode(cm, true);
+            if (editor === null || region === undefined || comment === undefined) {
+                return;
+            }
+            const back = comment.quote == null ? region.header.from : shownAt(region, comment.quote.start);
+            editor.dispatch({ selection: { anchor: back }, scrollIntoView: true });
         },
         toggle: (list) => {
             const region = here();

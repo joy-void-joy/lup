@@ -67,6 +67,15 @@ textarea {
     color: var(--sel-fg);
 }
 
+/* Insert mode's cursor: a bar in the text's colour, which the dark background would otherwise hide. */
+.review-buffer .cm-cursor {
+    border-left: 2px solid var(--fg);
+}
+
+.keys.inserting {
+    color: var(--warn);
+}
+
 .review-buffer .cm-content ::selection {
     color: inherit;
 }
