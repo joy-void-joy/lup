@@ -94,6 +94,16 @@ const header = (item: Item, parked: boolean) => `── #${item.number}${parked 
 const banner = (item: Item, parked: boolean) => `━━ ${item.sender.party === "conversation" ? item.sender.session : "lup"}${parked ? " · later" : ""} ━━`;
 
 describe("laid", () => {
+    it("folds an item marked read whole under its header, and nothing else", () => {
+        const out = laid([QUESTION, NOTE], banner, header, { ...EMPTY, done: [52] }, NOTHING);
+        const question = out.regions.find((each) => each.item.number === 51);
+        const note = out.regions.find((each) => each.item.number === 52);
+        expect(question!.folds.filter((each) => each.kind === "read")).toEqual([]);
+        const [read] = note!.folds.filter((each) => each.kind === "read");
+        expect(out.text.slice(read!.summary.from, read!.summary.to)).toBe("── #52 ──");
+        expect(out.text.slice(read!.from, read!.to)).toBe("\nI assumed UTF-8.");
+    });
+
     it("puts the group with the newest item first, each group's items in their order", () => {
         const later: Item = { ...QUESTION, number: 53, reason: { ...NOTE.reason } };
         const out = laid([QUESTION, NOTE, later], banner, header, EMPTY, NOTHING);

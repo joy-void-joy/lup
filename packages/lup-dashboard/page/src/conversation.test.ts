@@ -305,7 +305,7 @@ describe("the items of lup's inbox in a conversation", () => {
             "→ #51 question to you · answered by #53",
             "→ #52 note to you · answered by #54",
         ]);
-        // `J` and `K` stop at each, and the reader on the last one follows what arrives.
+        // `]]` and `[[` stop at each, and the reader on the last one follows what arrives.
         expect(out.turns).toContain(line(52).line.from);
         expect(out.last).toEqual(line(54).line);
     });
