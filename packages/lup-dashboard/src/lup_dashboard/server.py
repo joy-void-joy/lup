@@ -48,7 +48,7 @@ from lup_dashboard.api import (
 )
 from lup_dashboard.host import Host
 from lup_dev.host.protocol import HostError
-from lup_dev.inbox.protocol import AnswerApproval, Settled
+from lup_dev.inbox.protocol import AnswerApproval, Reviewed, SendDraft, Settled
 from lup_dev.inbox.store import Approval, Item
 
 if TYPE_CHECKING:
@@ -191,7 +191,7 @@ def application(
 
     @api.post("/ask")
     async def ask(request: Asked) -> Replied:
-        """Send one of the host's requests, and return its reply; an approval of a host zone approved here is acted on, as the operator's terminal acts on it (`Host.settle`)."""
+        """Send one of the host's requests, and return its reply; an approval of a host zone approved here, by its answer or by sending the draft, is acted on, as the operator's terminal acts on it (`Host.settle`)."""
         replied = await host.ask(request)
         match request, replied:
             case (
@@ -199,6 +199,10 @@ def application(
                 Settled(item=Item(reason=Approval())),
             ):
                 await host.settle(number)
+            case SendDraft(), Reviewed(approved=approved):
+                for item in approved:
+                    if isinstance(item.reason, Approval):
+                        await host.settle(item.number)
             case _:
                 pass
         return replied

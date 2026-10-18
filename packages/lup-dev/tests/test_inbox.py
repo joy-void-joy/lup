@@ -2455,3 +2455,90 @@ def test_a_conversations_items_are_listed_in_every_state_as_it_wrote_and_was_tol
     ]
     assert theirs.sent[0].item.state == Done(at=clock.now())
     assert theirs.received == mains.received[1:]
+
+
+def test_a_sent_draft_approves_what_it_marks_read_and_held_changes_commented_on(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    pusher = Conversation(
+        repository=tmp_path / "p" / ".git", runtime="claude", session="s1"
+    )
+    worktree = tmp_path / "w"
+    worktree.mkdir()
+    holds = Holds(layout=machine.store(worktree))
+    hold = holds.put(
+        Hold(
+            key=holds.unused(),
+            worktree=worktree,
+            session="s1",
+            created=clock.now(),
+            files=[
+                HeldFile(
+                    path=Path("AGENTS.md"),
+                    role="operator",
+                    blob="abc",
+                    reasons=["operator"],
+                    asks=["AGENTS.md is one of the operator's documents"],
+                )
+            ],
+            diff="+a line\n",
+        )
+    )
+    with inboxed(machine, clock, notices, said) as delivery:
+        delivery.settle_hold = lambda change, approved, comment: cli.hold_answered(
+            machine, change, approved=approved, comment=comment
+        )
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        read = host.ask(asking_approval(tmp_path / "r", "zone"), Shown).item
+        pushed = host.ask(asking_approval(tmp_path / "p", "zone", pusher), Shown).item
+        nobody = host.ask(asking_approval(tmp_path / "n", "zone"), Shown).item
+        InboxAnnouncing(layout=machine.host, clock=clock).announced(
+            hold, "claude", worktree / ".git", []
+        )
+        [held] = [
+            each
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.reason, HeldChange)
+        ]
+        drafting(
+            machine,
+            clock,
+            Draft(
+                comments=[
+                    Comment(item=pushed.number, text="Split the reader out first."),
+                    Comment(item=nobody.number, text="Why this zone?"),
+                    Comment(item=held.number, text="Yes, but keep it short."),
+                ],
+                done=[read.number],
+            ),
+        )
+        sent = host.ask(SendDraft(), Reviewed)
+        standing = {
+            each: delivery.inbox.item(each).state
+            for each in [read.number, pushed.number, nobody.number, held.number]
+        }
+        answered_hold = holds.get(hold.key)
+        left = delivery.inbox.draft()
+    assert sent.items == []
+    assert sorted(each.number for each in sent.approved) == [read.number, held.number]
+    read_state = standing[read.number]
+    held_state = standing[held.number]
+    assert isinstance(read_state, Decided)
+    assert read_state.approved
+    assert isinstance(held_state, Decided)
+    assert held_state.comment == "Yes, but keep it short."
+    assert answered_hold is not None
+    assert answered_hold.answer is not None
+    assert answered_hold.answer.approved
+    assert isinstance(standing[pushed.number], Waiting)
+    assert isinstance(standing[nobody.number], Waiting)
+    [note] = sent.noted
+    assert note.recipient == pusher
+    assert isinstance(note.reason, Message)
+    assert note.reason.text == (
+        f"The operator commented on item {pushed.number}, the approval your push "
+        'asked ("Approve the host zone at abc?"), and hasn\'t answered it:\n'
+        "Split the reader out first."
+    )
+    assert sent.kept == [nobody.number]
+    assert [each.item for each in left.comments] == [nobody.number]
