@@ -7,12 +7,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { everyone, launches, type Agent, type Launch } from "./agents";
 import { AgentTree } from "./AgentTree";
-import { ask } from "./api";
+import { ask, type Asked, type Replied } from "./api";
 import { Details } from "./Details";
 import { useNow, useWatched } from "./hooks";
 import { Palette } from "./Palette";
 import { Review } from "./Review";
-import { covered, EMPTY, pruned, type Draft, type Item } from "./review";
+import { covered, EMPTY, pruned, type Answered, type Context, type Draft, type Item } from "./review";
 
 const SAID = {
     connecting: "connecting",
@@ -28,7 +28,11 @@ export function App() {
     const [selected, setSelected] = useState<string | null>(null);
     const [palette, setPalette] = useState(false);
     const [draft, setDraft] = useState<Draft>(EMPTY);
-    const [diffs, setDiffs] = useState<Map<number, string>>(new Map());
+    const [contexts, setContexts] = useState<Map<number, Answered<Context>>>(new Map());
+    const [diffs, setDiffs] = useState<Map<number, Answered<string>>>(new Map());
+    const around = useMemo(() => ({ contexts, diffs }), [contexts, diffs]);
+    // The items whose context, and whose whole diff, were asked for, so each is asked once.
+    const asked = useRef({ contexts: new Set<number>(), diffs: new Set<number>() });
     const [confirming, setConfirming] = useState(false);
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
@@ -125,13 +129,24 @@ export function App() {
         return () => window.removeEventListener("pagehide", flush);
     }, []);
 
-    const open = useCallback((number: number) => {
-        void ask({ kind: "inbox-show-diff", number }).then((answer) => {
-            if (answer.kind === "inbox-diff") {
-                setDiffs((before) => new Map(before).set(number, answer.text));
+    useEffect(() => {
+        // Each item's context, and an approval's whole diff, asked once it's in the inbox.
+        for (const item of waiting) {
+            const number = item.number;
+            if (!asked.current.contexts.has(number)) {
+                asked.current.contexts.add(number);
+                void answered({ kind: "inbox-show-context", number }, (answer) =>
+                    answer.kind === "inbox-context" ? answer : null,
+                ).then((context) => setContexts((before) => new Map(before).set(number, context)));
             }
-        });
-    }, []);
+            if (item.reason.reason === "approval" && !asked.current.diffs.has(number)) {
+                asked.current.diffs.add(number);
+                void answered({ kind: "inbox-show-diff", number }, (answer) =>
+                    answer.kind === "inbox-diff" ? answer.text : null,
+                ).then((diff) => setDiffs((before) => new Map(before).set(number, diff)));
+            }
+        }
+    }, [waiting]);
 
     const approve = useCallback((number: number, approved: boolean) => {
         void ask({ kind: "inbox-answer-approval", number, approved }).then((answer) => {
@@ -207,8 +222,7 @@ export function App() {
                         draft={draft}
                         change={change}
                         banner={banner}
-                        diffs={diffs}
-                        open={open}
+                        around={around}
                         send={() => setConfirming(numbers.length > 0)}
                         approve={approve}
                         confirming={confirming}
@@ -239,8 +253,8 @@ export function App() {
                         <div className="keys muted">
                             comment: <kbd>c</kbd> item · <kbd>o</kbd>/<kbd>C</kbd> line · <kbd>v</kbd>…<kbd>c</kbd>{" "}
                             selection · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>␣d</kbd> read · <kbd>␣z</kbd> later ·{" "}
-                            <kbd>␣e</kbd> diff · <kbd>␣a</kbd>/<kbd>␣x</kbd> approve/decline · <kbd>J</kbd>/<kbd>K</kbd>{" "}
-                            items
+                            <kbd>␣a</kbd>/<kbd>␣x</kbd> approve/decline · <kbd>za</kbd> fold · <kbd>zR</kbd>/
+                            <kbd>zM</kbd> unfold/fold all · <kbd>J</kbd>/<kbd>K</kbd> items
                         </div>
                     )}
                 </div>
@@ -274,6 +288,20 @@ export function App() {
             <Palette open={palette} setOpen={setPalette} agents={agents} select={setSelected} now={now} />
         </div>
     );
+}
+
+/** Ask the host for more of an item than its own text: what `shown` takes from its reply, or why it refused, or why it couldn't be asked. */
+async function answered<T>(request: Asked, shown: (answer: Replied) => T | null): Promise<Answered<T>> {
+    try {
+        const answer = await ask(request);
+        const taken = shown(answer);
+        if (taken !== null) {
+            return { shown: taken };
+        }
+        return { refused: answer.kind === "refused" ? answer.error : `the host answered \`${answer.kind}\`` };
+    } catch (error) {
+        return { refused: error instanceof Error ? error.message : String(error) };
+    }
 }
 
 /** Return the last part of a path: a repository's name without its `.git`, a worktree's. */

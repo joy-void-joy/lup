@@ -567,6 +567,47 @@ kbd {
     padding: 0 2ch;
 }
 
+/* What's under an item that isn't its own text: its context and an approval's
+   whole diff, each folded under its summary line, which reads ▸ while folded
+   and ▾ while open; the lines it holds set in under it. */
+.review-buffer .cm-line.aside-summary {
+    color: var(--muted);
+}
+
+.review-buffer .cm-line.aside-summary::before {
+    content: "▾ ";
+}
+
+.review-buffer .cm-line.aside-summary:has(.cm-foldPlaceholder)::before {
+    content: "▸ ";
+}
+
+.review-buffer .cm-editor .cm-foldPlaceholder {
+    background: none;
+    border: 0;
+    margin: 0 0 0 1ch;
+    padding: 0;
+    color: var(--muted);
+}
+
+.review-buffer .cm-line.aside-under {
+    padding-left: calc(6px + 2ch);
+}
+
+.aside-you {
+    color: var(--info);
+}
+
+.aside-calls,
+.aside-refused {
+    color: var(--muted);
+}
+
+.aside-anchor {
+    color: var(--orange);
+    font-weight: 700;
+}
+
 .diff-added {
     background: var(--add-bg);
 }
