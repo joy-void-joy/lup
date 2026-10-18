@@ -2077,7 +2077,9 @@ def test_a_sessions_last_message_of_a_turn_is_a_note_in_the_operators_inbox(
         ]
     assert json.loads(held)["decision"] == "block"
     assert ended == ""
-    assert notes == [(Message(kind="note", text="Done now."), None, tmp_path)]
+    assert notes == [
+        (Message(kind="note", text="Done now.", ending=True), None, tmp_path)
+    ]
 
 
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(

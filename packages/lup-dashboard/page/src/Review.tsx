@@ -128,6 +128,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
         const states = [
             "review-header",
             fresh(region.item, reviewed) ? "is-new" : "",
+            ending(region.item) ? "is-ending" : "",
             (draft.done ?? []).includes(number) ? "is-done" : "",
             (draft.parked ?? []).includes(number) ? "is-parked" : "",
         ].join(" ");
@@ -164,6 +165,11 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
         builder.add(each.from, each.to, each.value);
     }
     return builder.finish();
+}
+
+/** Whether an item is a turn's last words, which lup made a note: read and marked done, rather than answered. */
+function ending(item: Item): boolean {
+    return item.reason.reason === "message" && item.reason.ending === true;
 }
 
 function when(made: string): string {
@@ -212,7 +218,9 @@ export function Review({
                 (item, later) => {
                     const what =
                         item.reason.reason === "message"
-                            ? item.reason.kind
+                            ? item.reason.ending === true
+                                ? "turn ended"
+                                : item.reason.kind
                             : item.reason.reason === "held"
                               ? "held change"
                               : item.reason.reason;

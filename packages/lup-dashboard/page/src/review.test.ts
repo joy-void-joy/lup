@@ -51,7 +51,7 @@ const QUESTION: Item = {
 
 const NOTE: Item = {
     number: 52,
-    reason: { reason: "message", kind: "note", text: "I assumed UTF-8." },
+    reason: { reason: "message", ending: false, kind: "note", text: "I assumed UTF-8." },
     sender: from("s2"),
     recipient: { party: "operator" },
     made: AT,

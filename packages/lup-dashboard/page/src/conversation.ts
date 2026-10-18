@@ -214,11 +214,13 @@ function dotted(first: string, ...parts: (string | null)[]): string {
  * sent, `→`, what it is, whom to and where it stands (answered and by what, read, waiting on you, withdrawn, decided);
  * one it was sent, `←`, what it is, for whom where it was passed on, and whether it's told yet. A message sent from
  * here is one of them, said to be from here and placed after the steps the conversation had then; one its item isn't
- * listed for yet is shown from what was sent.
+ * listed for yet is shown from what was sent. A turn's last words, which lup made a note, aren't: they're the agent's
+ * words already shown.
  */
 function inboxed(exchanged: Exchanged, sent: Sent[], whose: Whose): Inboxed[] {
     const here = new Map(sent.map((each) => [each.number, each]));
-    const its = exchanged.sent.map(({ item, text }): Inboxed => {
+    const spoken = exchanged.sent.filter(({ item }) => !(item.reason.reason === "message" && item.reason.ending === true));
+    const its = spoken.map(({ item, text }): Inboxed => {
         const to = item.recipient.party === "operator" ? "you" : whose.name(item.recipient);
         const state = item.state;
         const comment = state.state === "decided" && state.comment ? ["", ...setIn(`your comment: ${state.comment}`)] : [];

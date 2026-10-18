@@ -307,7 +307,14 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
     )
     names = [each["name"] for each in listed.json()["launches"]]
     assert names == ["lup-impl", "guidance-voice", "main", "nori-search"]
-    assert [each["number"] for each in items.json()["items"]] == [51, 52, 53, 54, 55]
+    assert [each["number"] for each in items.json()["items"]] == [
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+    ]
     assert other.json() == {
         "kind": "refused",
         "error": "the demo doesn't answer `inbox-show`",

@@ -267,7 +267,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def items(self) -> Items:
-        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, and a session's write held for them; the operator last settled an item 3 minutes ago, so the three since are new."""
+        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, and another's last words of a turn; the operator last settled an item 3 minutes ago, so the four since are new."""
         return Items(
             items=[
                 each
@@ -485,6 +485,21 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 worktree=dev,
                 call="call-55",
                 made=self.ago(0.5),
+            ),
+            Item(
+                number=56,
+                reason=Message(
+                    kind="note",
+                    text=(
+                        "The guidance's voice section is rewritten and the gate "
+                        "passes; it's on its branch for you to look at."
+                    ),
+                    ending=True,
+                ),
+                sender=voice,
+                recipient=Operator(),
+                worktree=lup / "tree" / "guidance-voice",
+                made=self.ago(1.5),
             ),
             *self.sent,
         ]
