@@ -272,6 +272,9 @@ class Item(Model):
     ended; none where it wasn't."""
     worktree: Path | None = None
     """The worktree of the launch it was made in; none for the operator's own."""
+    call: str | None = None
+    """The runtime's id for the tool call that made it, its moment in its
+    sender's record; none where no agent's call did (`ShowContext`)."""
     made: datetime
     state: State = Waiting()
 

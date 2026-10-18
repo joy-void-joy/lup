@@ -22,6 +22,7 @@ from typing import Literal, override
 
 from lup.types import Model
 from lup_dev.host.protocol import LaunchId, Reply, Request
+from lup_dev.host.records import Entry
 from lup_dev.host.service import Handler, Route
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.store import Approval, Draft, Item, Operator, Ruling, Waiting
@@ -134,6 +135,13 @@ class ShowDiff(Request):
     number: int
 
 
+class ShowContext(Request):
+    """Read an item's moment in the conversation that sent it: what led to the call that made it, and what came after."""
+
+    kind: Literal["inbox-show-context"] = "inbox-show-context"
+    number: int
+
+
 class Items(Reply):
     """Items, oldest first."""
 
@@ -177,6 +185,16 @@ class Whole(Reply):
 
     kind: Literal["inbox-diff"] = "inbox-diff"
     text: str
+
+
+class Context(Reply):
+    """An item's moment in the conversation that sent it, read from its runtime's record: from the operator's last words before the call that made it, through the call, to their next words or the record's end."""
+
+    kind: Literal["inbox-context"] = "inbox-context"
+    number: int
+    entries: list[Entry]
+    anchor: int
+    """Which of `entries` is the call that made the item."""
 
 
 class Listing(Model, Handler[ListInbox], arbitrary_types_allowed=True):

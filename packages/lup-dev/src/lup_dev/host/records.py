@@ -50,6 +50,9 @@ class Called(Model):
 
     kind: Literal["called"] = "called"
     tool: str
+    id: str | None = None
+    """The runtime's id for the call, where its record keeps one: what an inbox
+    item made by the call is anchored to."""
     at: datetime | None = None
 
 
