@@ -119,11 +119,12 @@ class Question(Model):
 
 
 class Ruling(Model):
-    """The operator's answer to one numbered decision, with what they add."""
+    """The operator's answer to one numbered decision: a verdict, with what they add; or their answer in words alone."""
 
     decision: int
     """The decision's number, from 1."""
-    verdict: Verdict
+    verdict: Verdict | None = None
+    """None where the operator answered in words, the comment."""
     comment: str = ""
 
 

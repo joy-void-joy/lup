@@ -471,11 +471,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         def decided(ruling: Ruling) -> str:
             decision = decisions[ruling.decision - 1]
+            asked = f"{ruling.decision}. {decision.text} (lean: {decision.lean})"
+            if ruling.verdict is None:
+                return f"{asked}: they answer: {ruling.comment}"
             comment = f" They add: {ruling.comment}" if ruling.comment else ""
-            return (
-                f"{ruling.decision}. {decision.text} (lean: {decision.lean}): "
-                f"{ruled(ruling.verdict)}.{comment}"
-            )
+            return f"{asked}: {ruled(ruling.verdict)}.{comment}"
 
         heading = f"Asked: {text}"
         rulings = [decided(ruling) for ruling in answer.rulings]
@@ -646,8 +646,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         A question is answered; a message is replied to (`replied`). Refused
         where it's neither a question waiting nor a conversation's message;
-        where a question's decisions aren't each ruled once, or a plain question
-        has no words for its answer.
+        where a question's decisions aren't each answered once, one with
+        neither a verdict nor words, or a plain question has no words for its
+        answer.
         """
         item = self.inbox.item(number)
         match item:
@@ -670,8 +671,19 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         if given != list(range(1, len(decisions) + 1)):
             message = (
                 f"item {number} asks {len(decisions)} decisions, each taking one "
-                "verdict (`leaning`, `undecided` or `leave open`); these were given "
-                f"for {given or 'none'}"
+                "answer (`leaning`, `undecided`, `leave open`, or words); these were "
+                f"given for {given or 'none'}"
+            )
+            raise InboxError(message)
+        unsaid = [
+            each.decision
+            for each in rulings
+            if each.verdict is None and not each.comment.strip()
+        ]
+        if unsaid:
+            message = (
+                f"item {number}'s decisions {unsaid} have neither a verdict nor "
+                "words: give one"
             )
             raise InboxError(message)
         if not decisions and not comment.strip():
