@@ -549,7 +549,14 @@ class Announced(Announcing):
         self.files.append(files)
         self.runtimes.append(runtime)
         if self.answering is not None:
-            answer(self.layout, hold.key, self.answering, [], self.clock)
+            answer(
+                self.layout,
+                hold.key,
+                self.answering,
+                [],
+                self.clock,
+                worktree=hold.worktree,
+            )
 
     def holding(self, runtime: str, session: str, agent: str | None) -> bool:
         self.asked.append(f"{runtime}/{session}/{agent}")

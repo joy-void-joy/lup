@@ -343,8 +343,15 @@ def answer(
     response: Response,
     runtimes: list[Runtime],
     clock: Clock,
+    *,
+    worktree: Path | None = None,
 ) -> Hold:
-    """Answer hold `key`, wherever it's kept, unless this runs inside a session."""
+    """Answer hold `key`, unless this runs inside a session: in `worktree`'s store, where it's named, else wherever it's kept.
+
+    A key is unique within one store alone, so one kept in more than one store,
+    where no worktree is named, is refused, naming them, rather than answered
+    in either.
+    """
     inside = [runtime.name() for runtime in runtimes if runtime.inside()]
     if inside:
         message = (
@@ -352,9 +359,16 @@ def answer(
             "its own hold: answer from your own terminal"
         )
         raise HoldError(message)
-    holding = [holds for holds in stores(layout) if holds.get(key) is not None]
+    searched = (
+        stores(layout) if worktree is None else [Holds(layout=layout.store(worktree))]
+    )
+    holding = [holds for holds in searched if holds.get(key) is not None]
     if not holding:
         message = f"no hold {key} is waiting"
+        raise HoldError(message)
+    if len(holding) > 1:
+        kept = ", ".join(str(holds.layout.holds) for holds in holding)
+        message = f"hold {key} is kept in more than one worktree's store ({kept}): name its worktree"
         raise HoldError(message)
     hold = holding[0].answer(key, response, clock)
     if not hold.waited():
