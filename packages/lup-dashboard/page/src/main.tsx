@@ -10,7 +10,10 @@ const root = document.getElementById("root");
 if (root === null) {
     throw new Error("the page has no #root to show the dashboard in");
 }
-await session(window.location, window.history);
+// A token refused here is said on the page, once its first watch is refused too.
+await session(window.location, window.history).catch((error: unknown) => {
+    console.warn("lup's dashboard: the token in the address was refused", error);
+});
 createRoot(root).render(
     <StrictMode>
         <App />

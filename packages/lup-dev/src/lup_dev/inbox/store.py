@@ -156,8 +156,41 @@ class Approval(Model):
     approval waiting for it."""
 
 
+class Quote(Model):
+    """A passage of an item the operator commented on: the text they selected, and where it is in the item as the page shows it."""
+
+    text: str
+    start: int
+    """Where it starts in the item's text as the page shows it, which the page
+    places the comment by; the host keeps it, and reads only `text`."""
+    end: int
+
+
+class Comment(Model):
+    """A comment of the operator's on an item: on a passage of it, one of its decisions among them, or on it whole."""
+
+    item: int
+    quote: Quote | None = None
+    """The passage it's on; none for a comment on the item whole."""
+    text: str
+
+
+class Review(Model):
+    """The operator's reply to a conversation's items, as they wrote it while reading them: their comments on each.
+
+    A conversation's review holds its own items and the comments on them
+    alone, though the operator wrote it beside other conversations' (`docs/dashboard.md`,
+    *The review*).
+    """
+
+    reason: Literal["review"] = "review"
+    covers: list[int]
+    """The items it answers, in order."""
+    comments: list[Comment] = []
+
+
 type Reason = Annotated[
-    Message | Question | Answer | Approval, Field(discriminator="reason")
+    Message | Question | Answer | Approval | Review, Field(discriminator="reason")
 ]
 """Why an item is there."""
 
@@ -268,6 +301,31 @@ def read[M: Model](path: Path, model: type[M]) -> M:
     return found
 
 
+class Draft(Model):
+    """The operator's reply as they build it while reading: their comments, the items they took off their list and the ones they parked; kept until it's sent."""
+
+    comments: list[Comment] = []
+    done: list[int] = []
+    """Items read and taken off the list when the draft is sent, with no
+    comment of their own."""
+    parked: list[int] = []
+    """Items left for a later reply: what's drafted on them stays drafted when
+    the rest is sent."""
+
+    def covered(self) -> list[int]:
+        """Return the items the draft answers, in order: each with a comment or marked done, but for the parked ones."""
+        mentioned = [*(each.item for each in self.comments), *self.done]
+        wanted = [each for each in mentioned if each not in self.parked]
+        return sorted(dict.fromkeys(wanted))
+
+    def kept(self) -> Draft:
+        """Return what stays drafted once the draft is sent: what's on the parked items."""
+        return Draft(
+            comments=[each for each in self.comments if each.item in self.parked],
+            parked=self.parked,
+        )
+
+
 class Inbox(MutableModel):
     """Every item and every conversation's whereabouts, as the host service holds them, each change written through to its file."""
 
@@ -294,6 +352,17 @@ class Inbox(MutableModel):
             whereabouts={place.conversation.key(): place for place in places},
             changes=changes,
         )
+
+    def draft(self) -> Draft:
+        """Return the operator's draft reply; an empty one where they have none."""
+        return read_model(self.layout.draft, Draft) or Draft()
+
+    def drafted(self, draft: Draft) -> Draft:
+        """Keep the operator's draft reply, and return it."""
+        write_model(self.layout.draft, draft)
+        if self.changes is not None:
+            self.changes.changed()
+        return draft
 
     def kept(self, item: Item) -> Item:
         """Write `item` through to its file, and hold it."""

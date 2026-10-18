@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
-from lup.types import Model
+from lup.types import MutableModel
 from lup_dashboard.host import Host
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.host.protocol import (
@@ -22,10 +22,22 @@ from lup_dev.host.protocol import (
     Register,
     Talker,
 )
-from lup_dev.inbox.protocol import Items, ListInbox
+from lup_dev.inbox.protocol import (
+    Drafted,
+    Items,
+    KeepDraft,
+    ListInbox,
+    Reviewed,
+    SendDraft,
+    ShowDiff,
+    ShowDraft,
+    Whole,
+)
 from lup_dev.inbox.store import (
+    Approval,
     Conversation,
     Decision,
+    Draft,
     Item,
     Message,
     Operator,
@@ -38,13 +50,14 @@ if TYPE_CHECKING:
     from lup_dashboard.api import Asked, Replied
 
 
-class Demo(Model, Host, arbitrary_types_allowed=True):
-    """A host serving stand-in launches, conversations and items, as of the clock's time; what it can't answer it refuses, saying it's a demo."""
+class Demo(MutableModel, Host, arbitrary_types_allowed=True):
+    """A host serving stand-in launches, conversations and items, as of the clock's time, and keeping the operator's draft in memory; what it can't answer it refuses, saying it's a demo."""
 
     clock: Clock = SystemClock()
     # lup: ignore("runtime-mention", why="stand-in data: the runtimes the demo's launches show, not a feature built for one")
     runtimes: list[str] = ["claude", "codex"]
     """The runtimes the demo's launches run, by name: the first for most, the second for one."""
+    draft: Draft = Draft()
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -53,6 +66,16 @@ class Demo(Model, Host, arbitrary_types_allowed=True):
                 return self.listed()
             case ListInbox():
                 return self.items()
+            case ShowDraft():
+                return Drafted(draft=self.draft)
+            case KeepDraft(draft=draft):
+                self.draft = draft
+                return Drafted(draft=draft)
+            case SendDraft():
+                self.draft = self.draft.kept()
+                return Reviewed(items=[])
+            case ShowDiff():
+                return Whole(text=diff())
             case _:
                 return Refused(error=f"the demo doesn't answer `{request.kind}`")
 
@@ -160,51 +183,96 @@ class Demo(Model, Host, arbitrary_types_allowed=True):
         )
 
     def items(self) -> Items:
-        """Return what waits for the operator: a question of numbered decisions from a subagent, and a note."""
-        first, _ = self.runtimes
-        parser = Conversation(
-            repository=Path("/home/op/lup.git"),
-            runtime=first,
-            session="s1",
-            agent="a02",
-        )
-        voice = Conversation(
-            repository=Path("/home/op/lup.git"), runtime=first, session="s2"
+        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, and an approval of a host zone."""
+        first, second = self.runtimes
+        lup = Path("/home/op/lup.git")
+        parser = Conversation(repository=lup, runtime=first, session="s1", agent="a02")
+        voice = Conversation(repository=lup, runtime=first, session="s2")
+        adlib = Conversation(
+            repository=Path("/home/op/adlib.git"), runtime=second, session="s3"
         )
         question = Question(
-            text="Which parser for the transcript reader?",
+            text=(
+                "Which parser for the transcript reader? A runtime's records hold "
+                "about twenty kinds of line, and only four say anything to you."
+            ),
             decisions=[
                 Decision(
                     text="Read each record with pydantic, one model per line kind",
-                    lean="yes",
+                    lean="yes: unknown kinds pass over, and a renamed field fails loudly",
                 ),
                 Decision(
                     text="Fold every tool call to one line",
-                    lean="yes, its name and status",
+                    lean="yes, its name alone; the result stays in the record",
                 ),
             ],
         )
-        note = Message(kind="note", text="I assumed transcripts are UTF-8 throughout.")
+        note = Message(
+            kind="note",
+            text=(
+                "I assumed transcripts are UTF-8 throughout. A record that isn't is "
+                "read with its bad bytes replaced,\nso a search never fails on one."
+            ),
+        )
+        problem = Message(
+            kind="problem",
+            text=(
+                "The render stalls at frame 412: ffmpeg says `Invalid data found when "
+                "processing input`.\nI can't go on until the source clip is replaced."
+            ),
+        )
+        approval = Approval(
+            text="Approve the host zone of lup at 4750cf6?",
+            summary=(
+                " packages/lup-dev/src/lup_dev/cli.py | 48 +++++++\n"
+                " packages/lup/src/lup/transcripts/views.py | 160 ++++++++++++++\n"
+                " 2 files changed, 208 insertions(+)"
+            ),
+            repository=lup,
+            fingerprint="demo",
+        )
+        made = [
+            (51, question, parser, "dev", 4),
+            (52, note, voice, "guidance-voice", 12),
+            (53, problem, adlib, "main", 2),
+        ]
         return Items(
             items=[
-                Item(
-                    number=51,
-                    reason=question,
-                    sender=parser,
-                    recipient=Operator(),
-                    worktree=Path("/home/op/lup.git/tree/dev"),
-                    made=self.ago(4),
+                *(
+                    Item(
+                        number=number,
+                        reason=reason,
+                        sender=sender,
+                        recipient=Operator(),
+                        worktree=sender.repository / "tree" / worktree,
+                        made=self.ago(minutes),
+                    )
+                    for number, reason, sender, worktree, minutes in made
                 ),
                 Item(
-                    number=52,
-                    reason=note,
-                    sender=voice,
+                    number=54,
+                    reason=approval,
+                    sender=Operator(),
                     recipient=Operator(),
-                    worktree=Path("/home/op/lup.git/tree/guidance-voice"),
-                    made=self.ago(12),
+                    worktree=lup / "tree" / "dev",
+                    made=self.ago(1),
                 ),
             ]
         )
+
+
+def diff() -> str:
+    """Return the stand-in approval's whole diff."""
+    return """diff --git a/packages/lup/src/lup/transcripts/views.py b/packages/lup/src/lup/transcripts/views.py
+new file mode 100644
+--- /dev/null
++++ b/packages/lup/src/lup/transcripts/views.py
+@@ -0,0 +1,12 @@
++def folded(tools: list[str]) -> str:
++    \"\"\"Say a run of tool calls in a line.\"\"\"
++    named = [counted(tool, len(list(run))) for tool, run in groupby(tools)]
++    return f"· called {', '.join(named)}"
+"""
 
 
 def launch(id_: str, name: str, runtime: str, worktree: Path) -> Register:

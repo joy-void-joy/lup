@@ -37,15 +37,29 @@ from lup_dev.host.service import Asked, HostService, Judged, Naming
 from lup_dev.host.watch import Changes
 from lup_dev.inbox.delivery import Delivery, opening
 from lup_dev.inbox.notices import Notices, NotifySend
-from lup_dev.inbox.protocol import Items, ListInbox
+from lup_dev.inbox.protocol import (
+    Drafted,
+    Items,
+    KeepDraft,
+    ListInbox,
+    Reviewed,
+    SendDraft,
+    ShowDraft,
+)
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import (
     Answered,
+    Comment,
     Conversation,
+    Done,
+    Draft,
     Inbox,
     InboxError,
+    Item,
     Message,
     Operator,
+    Quote,
+    Review,
     Told,
     Waiting,
 )
@@ -1577,3 +1591,143 @@ def test_a_failing_desktop_notice_is_said_on_standard_error(
         NotifySend(executable=str(notifier)).notify("A change waits", "the heading")
     )
     assert "the desktop notice failed: no display" in capsys.readouterr().err
+
+
+def drafting(machine: Layout, clock: FakeClock, draft: Draft) -> Draft:
+    """Keep `draft` as the operator's, as the dashboard does, and return it as kept."""
+    host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+    return host.ask(KeepDraft(draft=draft), Drafted).draft
+
+
+def sending(machine: Layout, clock: FakeClock) -> list[Item]:
+    """Send the operator's draft, as the dashboard does, and return the reviews made."""
+    host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+    return host.ask(SendDraft(), Reviewed).items
+
+
+def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_first(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    question: dict[str, JsonValue] = {
+        "question": "Which parser?",
+        "decisions": [
+            {"decision": "Parse with lark", "lean": "yes, it's typed"},
+            {"decision": "Keep the cache", "lean": "no"},
+        ],
+        "wait": True,
+    }
+    draft = Draft(
+        comments=[
+            Comment(
+                item=1,
+                quote=Quote(text="1. Parse with lark", start=14, end=32),
+                text="Yes.",
+            ),
+            Comment(item=2, text="Fine by me."),
+            Comment(item=4, text="Later."),
+        ],
+        done=[3],
+        parked=[4],
+    )
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "one", "one", "claude")
+        launched(machine, clock, tmp_path / "two", "two", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        two = machine.host.launch("two").hook
+        send(two, claude("SessionStart", source="startup", session_id="s2"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            asking = pool.submit(call, machine.host.launch("one").mcp, "ask", question)
+            assert notices.arrived.wait(timeout=60)
+            for remark in ["I assumed UTF-8.", "Done reading.", "Another thing."]:
+                stamped = json.loads(
+                    send(
+                        two,
+                        lup_call("note", {"remark": remark}, "n1", session_id="s2"),
+                    )
+                )["hookSpecificOutput"]["updatedInput"]
+                call(machine.host.launch("two").mcp, "note", stamped)
+            kept = drafting(machine, clock, draft)
+            shown = HostClient(
+                layout=machine.host, clock=clock, starter=Unstarted()
+            ).ask(ShowDraft(), Drafted)
+            reviews = sending(machine, clock)
+            returned = asking.result(timeout=60)
+        told = send(two, bash("b1", session_id="s2"))
+        states = [delivery.inbox.item(each).state for each in [1, 2, 3, 4]]
+        left = delivery.inbox.draft()
+    assert shown.draft == kept == draft
+    whole = Review(covers=[1, 2, 3], comments=draft.comments[:2])
+    assert [(each.number, each.reason) for each in reviews] == [(5, whole), (6, whole)]
+    assert isinstance(states[0], Answered)
+    assert states[0].answer == 5
+    assert [type(each) for each in states[1:]] == [Done, Done, Waiting]
+    assert left == Draft(comments=[draft.comments[2]], parked=[4])
+    context_line = (
+        "For context, what the operator said in the same reply on other agents' "
+        "items: not yours to act on, unless a comment says so."
+    )
+    assert returned[0] == (
+        "lup's inbox, item 5: a review from the operator, of items 1, 2, 3:\n"
+        'On item 1, a question yours ("Which parser?"):\n'
+        "  On this passage:\n    > 1. Parse with lark\n    Yes.\n\n"
+        f"{context_line}\n\n"
+        f"On item 2, a note from claude session s2, in {tmp_path / 'two'}:\n"
+        "    | I assumed UTF-8.\n  Fine by me."
+    )
+    assert context(told) == (
+        "lup's inbox, item 6: a review from the operator, of items 1, 2, 3:\n"
+        'On item 2, a note yours ("I assumed UTF-8."):\n  Fine by me.\n\n'
+        'On item 3, a note yours ("Done reading."):\n  (read, with nothing to add)\n\n'
+        f"{context_line}\n\n"
+        f"On item 1, a question from claude session s1, in {tmp_path / 'one'}:\n"
+        "    | Which parser?\n"
+        "    | 1. Parse with lark (lean: yes, it's typed)\n"
+        "    | 2. Keep the cache (lean: no)\n"
+        "  On this passage:\n    > 1. Parse with lark\n    Yes."
+    )
+
+
+def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        call(machine.host.launch("one").mcp, "ask", {"question": "In words?"})
+        inbox("send", "one", "Mine.")
+        empty = refused_draft(machine, clock, Draft())
+        own = refused_draft(machine, clock, Draft(done=[2]))
+    assert empty == (
+        "the draft answers no item: comment on one, or take one off the list"
+    )
+    assert own == "item 2 is a note from the operator, which a review doesn't answer"
+
+
+def refused_draft(machine: Layout, clock: FakeClock, draft: Draft) -> str:
+    drafting(machine, clock, draft)
+    with pytest.raises(HostError) as refusal:
+        sending(machine, clock)
+    return str(refusal.value)
+
+
+def test_lup_dev_inbox_send_reaches_a_subagent_by_its_path(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="explore-auth"))
+        records.recorded("a1", "Explore", "t1", name="explore-auth")
+        send(hook, records.call("a1", "Explore", "c1"))
+        sent = inbox("send", "w/explore-auth", "Look at the tests too.")
+        told = context(send(hook, records.call("a1", "Explore", "c2")))
+        main = send(hook, bash("b1"))
+    assert (
+        sent == "Sent item 1 to `w/explore-auth`, subagent a1 of claude session s1.\n"
+    )
+    assert (
+        told == "lup's inbox, item 1: a note from the operator:\nLook at the tests too."
+    )
+    assert main == ""

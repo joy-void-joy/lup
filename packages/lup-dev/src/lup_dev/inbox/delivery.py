@@ -66,6 +66,7 @@ from lup_dev.inbox.store import (
     Answer,
     Answered,
     Approval,
+    Comment,
     Conversation,
     Decided,
     Done,
@@ -78,6 +79,7 @@ from lup_dev.inbox.store import (
     Party,
     Question,
     Reason,
+    Review,
     Ruling,
     Superseded,
     Told,
@@ -125,16 +127,65 @@ def what(item: Item) -> str:
             return "an answer"
         case Approval():
             return "an approval"
+        case Review():
+            return "a review"
 
 
 def opening(item: Item) -> str:
-    """Return an item's first line: its text's, or an answer's comment's."""
+    """Return an item's first line: its text's, an answer's comment's, or a review's first comment's."""
     match item.reason:
         case Message(text=text) | Question(text=text) | Approval(text=text):
             said = text
         case Answer(comment=comment):
             said = comment
+        case Review(comments=comments):
+            said = next((each.text for each in comments), "")
     return next(iter(said.splitlines()), "")
+
+
+def body(item: Item) -> str:
+    """Return an item's text whole, as its sender wrote it: a question's with each decision numbered, with its lean."""
+    match item.reason:
+        case Question(text=text, decisions=decisions):
+            numbered = [
+                f"{at}. {each.text} (lean: {each.lean})"
+                for at, each in enumerate(decisions, start=1)
+            ]
+            return "\n".join([text, *numbered])
+        case Message(text=text) | Approval(text=text):
+            return text
+        case Answer(comment=comment):
+            return comment
+        case Review(comments=comments):
+            return "\n".join(each.text for each in comments)
+
+
+def reviewable(item: Item) -> None:
+    """Refuse an item a review can't answer: one no conversation sent, an answer or an approval."""
+    match item:
+        case Item(sender=Conversation(), reason=Message() | Question()):
+            return
+        case _:
+            message = (
+                f"item {item.number} is {what(item)} from {who(item.sender)}, which "
+                "a review doesn't answer"
+            )
+            raise InboxError(message)
+
+
+def remark(comment: Comment) -> str:
+    """Say one of the operator's comments on an item: on its passage, quoted, or on the item whole."""
+    if comment.quote is None:
+        return f"  {comment.text}"
+    quoted = "\n".join(f"    > {line}" for line in comment.quote.text.splitlines())
+    return f"  On this passage:\n{quoted}\n    {comment.text}"
+
+
+def settled(item: Item, review: Item, at: datetime) -> Answered | Done:
+    """Return where an item a review covers stands once it's sent: a question answered by it, a message done."""
+    if isinstance(item.reason, Question):
+        return Answered(at=at, answer=review.number)
+    return Done(at=at)
 
 
 def ruled(verdict: Verdict) -> str:
@@ -321,6 +372,93 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     f"{head}{passed}, to the question of item {answer.question}:\n"
                     f"{self.answered(answer)}"
                 )
+            case Review() as review:
+                numbers = ", ".join(str(each) for each in review.covers)
+                items = "item" if len(review.covers) == 1 else "items"
+                return (
+                    f"{head}{passed}, of {items} {numbers}:\n"
+                    f"{self.reviewing(review, item.recipient)}"
+                )
+
+    def reviewing(self, review: Review, recipient: Party) -> str:
+        """Say a review to one conversation it's sent to: its own items first, each with the operator's comments on it, or read with nothing to add; then, for context, the other agents' items they commented on, each whole and whose it is."""
+        items = [self.inbox.item(each) for each in review.covers]
+        commented = [each.item for each in review.comments]
+
+        def remarks(item: Item) -> list[str]:
+            return [
+                remark(each) for each in review.comments if each.item == item.number
+            ]
+
+        def yours(item: Item) -> str:
+            head = f'On item {item.number}, {what(item)} yours ("{opening(item)}"):'
+            return "\n".join(
+                [head, *(remarks(item) or ["  (read, with nothing to add)"])]
+            )
+
+        def theirs(item: Item) -> str:
+            where = "" if item.worktree is None else f", in {item.worktree}"
+            head = (
+                f"On item {item.number}, {what(item)} from {who(item.sender)}{where}:"
+            )
+            text = [f"    | {line}" for line in body(item).splitlines()]
+            return "\n".join([head, *text, *remarks(item)])
+
+        own = [yours(item) for item in items if item.sender == recipient]
+        others = [
+            theirs(item)
+            for item in items
+            if item.sender != recipient and item.number in commented
+        ]
+        heading = (
+            "For context, what the operator said in the same reply on other "
+            "agents' items: not yours to act on, unless a comment says so."
+        )
+        context = [heading, *others] if others else []
+        return "\n\n".join([*own, *context])
+
+    async def reviewed(self) -> list[Item]:
+        """Send the operator's draft as one reply: to each conversation that sent an item it covers, the whole of it; its items answered or done, and the draft left with what's parked.
+
+        Each conversation is told its own items first, with the comments on
+        them or read with nothing to add, then what was said on the others'
+        for context (`reviewing`): the operator answers related items together,
+        across agents and repositories, and sends what's drafted on moving to
+        something unrelated. A question is answered by the reply its asker
+        gets, which lets a held `ask` go. Refused where the draft covers no
+        item, or covers one no conversation sent.
+        """
+        draft = self.inbox.draft()
+        covered = [self.inbox.item(each) for each in draft.covered()]
+        if not covered:
+            message = (
+                "the draft answers no item: comment on one, or take one off the list"
+            )
+            raise InboxError(message)
+        for item in covered:
+            reviewable(item)
+        at = self.clock.now()
+        numbers = [item.number for item in covered]
+        review = Review(
+            covers=numbers,
+            comments=[each for each in draft.comments if each.item in numbers],
+        )
+        senders = [item.sender for item in covered]
+        recipients = [
+            each for index, each in enumerate(senders) if each not in senders[:index]
+        ]
+        sent = [
+            self.inbox.made(review, Operator(), recipient, None, at)
+            for recipient in recipients
+        ]
+        for item in covered:
+            answer = next(each for each in sent if each.recipient == item.sender)
+            settling = settled(item, answer, at)
+            self.inbox.kept(item.model_copy(update={"state": settling}))
+        self.inbox.drafted(draft.kept())
+        for each in sent:
+            await self.delivered(each)
+        return sent
 
     def answered(self, answer: Answer) -> str:
         """Say the operator's answer, each decision beside its question's text and the lean it was asked with."""
@@ -603,10 +741,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 message = f"item {number} isn't a message waiting in your inbox"
                 raise InboxError(message)
 
-    async def sent(self, launch: str, text: str) -> Item:
-        """Send the operator's message to the main conversation of the session `launch` runs."""
+    async def sent(self, launch: str, text: str, agent: str | None = None) -> Item:
+        """Send the operator's message to a conversation of the session `launch` runs: its main one, or its subagent `agent`."""
+        conversation = self.main_of(launch).model_copy(update={"agent": agent})
         return await self.posted(
-            Message(kind="note", text=text), Operator(), self.main_of(launch), None
+            Message(kind="note", text=text), Operator(), conversation, None
         )
 
     async def asked(self, approval: Approval, diff: str, worktree: Path) -> Item:

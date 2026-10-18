@@ -67,7 +67,7 @@ def demo(port: int = 8767, address: str = "127.0.0.1") -> None:
     listening = socket.create_server((address, port))
     bound = listening.getsockname()[1]
     served = application(
-        Demo(), Access(token=token, port=bound), DashboardLayout().page
+        Demo(), Access(token=token, port=bound), DashboardLayout().page, demo=True
     )
     typer.echo(f"http://{address}:{bound}/#token={token}")
     server = uvicorn.Server(uvicorn.Config(served, log_level="warning"))

@@ -24,7 +24,7 @@ from lup.types import Model
 from lup_dev.host.protocol import LaunchId, Reply, Request
 from lup_dev.host.service import Handler, Route
 from lup_dev.inbox.delivery import Delivery
-from lup_dev.inbox.store import Approval, Item, Operator, Ruling, Waiting
+from lup_dev.inbox.store import Approval, Draft, Item, Operator, Ruling, Waiting
 
 
 class ListInbox(Request):
@@ -57,11 +57,32 @@ class FinishItem(Request):
 
 
 class SendItem(Request):
-    """Send the operator's message to the main conversation of the session a launch runs."""
+    """Send the operator's message to a conversation of the session a launch runs: its main one, or one of its subagents."""
 
     kind: Literal["inbox-send"] = "inbox-send"
     launch: LaunchId
     text: str
+    agent: str | None = None
+    """The runtime's id for the subagent; none for the session's own conversation."""
+
+
+class ShowDraft(Request):
+    """Show the operator's draft reply: what they've written on the items they're reading."""
+
+    kind: Literal["inbox-draft"] = "inbox-draft"
+
+
+class KeepDraft(Request):
+    """Keep the operator's draft reply as it stands, in place of the last."""
+
+    kind: Literal["inbox-keep-draft"] = "inbox-keep-draft"
+    draft: Draft
+
+
+class SendDraft(Request):
+    """Send the operator's draft reply: a review to each conversation whose items it covers."""
+
+    kind: Literal["inbox-send-draft"] = "inbox-send-draft"
 
 
 class AskApproval(Request):
@@ -135,6 +156,20 @@ class Settled(Reply):
     here: bool
     """Whether this answer decided it; else it was answered before, elsewhere,
     and this one changed nothing."""
+
+
+class Drafted(Reply):
+    """The operator's draft reply, as it stands."""
+
+    kind: Literal["inbox-drafted"] = "inbox-drafted"
+    draft: Draft
+
+
+class Reviewed(Reply):
+    """The reviews a draft was sent as, one to each conversation it covers."""
+
+    kind: Literal["inbox-reviewed"] = "inbox-reviewed"
+    items: list[Item]
 
 
 class Whole(Reply):
@@ -214,7 +249,8 @@ class Sending(Model, Handler[SendItem], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: SendItem) -> Reply:
-        return Shown(item=await self.delivery.sent(request.launch, request.text))
+        sent = await self.delivery.sent(request.launch, request.text, request.agent)
+        return Shown(item=sent)
 
 
 class ApprovalAsking(Model, Handler[AskApproval], arbitrary_types_allowed=True):
@@ -279,6 +315,48 @@ class DiffShowing(Model, Handler[ShowDiff], arbitrary_types_allowed=True):
         return Whole(text=self.delivery.inbox.diff(request.number))
 
 
+class DraftShowing(Model, Handler[ShowDraft], arbitrary_types_allowed=True):
+    """Answers `ShowDraft`: the draft as it stands."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[ShowDraft]:
+        return ShowDraft
+
+    @override
+    async def answer(self, request: ShowDraft) -> Reply:
+        return Drafted(draft=self.delivery.inbox.draft())
+
+
+class DraftKeeping(Model, Handler[KeepDraft], arbitrary_types_allowed=True):
+    """Answers `KeepDraft`: the draft kept."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[KeepDraft]:
+        return KeepDraft
+
+    @override
+    async def answer(self, request: KeepDraft) -> Reply:
+        return Drafted(draft=self.delivery.inbox.drafted(request.draft))
+
+
+class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
+    """Answers `SendDraft`: the reviews it was sent as."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[SendDraft]:
+        return SendDraft
+
+    @override
+    async def answer(self, request: SendDraft) -> Reply:
+        return Reviewed(items=await self.delivery.reviewed())
+
+
 def routes(delivery: Delivery) -> list[Route]:
     """Route each of the inbox's kinds to its handler, over one delivery."""
     return [
@@ -291,4 +369,7 @@ def routes(delivery: Delivery) -> list[Route]:
         Route.to(ApprovalAwaiting(delivery=delivery)),
         Route.to(ApprovalAnswering(delivery=delivery)),
         Route.to(DiffShowing(delivery=delivery)),
+        Route.to(DraftShowing(delivery=delivery)),
+        Route.to(DraftKeeping(delivery=delivery)),
+        Route.to(DraftSending(delivery=delivery)),
     ]
