@@ -141,6 +141,26 @@ export function App() {
         });
     }, []);
 
+    // The page's build, as the dashboard served it when the page first went live: once the dashboard serves
+    // another, as after lup is installed again, the page reloads itself, its drafts being on the host.
+    const build = useRef<string | null | undefined>(undefined);
+    useEffect(() => {
+        if (connection !== "live") {
+            return;
+        }
+        void fetch("/api/about").then(async (response) => {
+            if (!response.ok) {
+                return;
+            }
+            const served = ((await response.json()) as { build?: string | null }).build ?? null;
+            if (build.current === undefined) {
+                build.current = served;
+            } else if (served !== null && served !== build.current) {
+                window.location.reload();
+            }
+        });
+    }, [connection]);
+
     const pending = useRef<Draft | null>(null);
 
     const change = useCallback((next: Draft) => {

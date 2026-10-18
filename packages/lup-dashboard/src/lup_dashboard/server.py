@@ -15,6 +15,7 @@ it for the cookie (`POST /api/session`).
 """
 
 import asyncio
+import hashlib
 import secrets
 from typing import TYPE_CHECKING, Annotated
 
@@ -82,9 +83,13 @@ class Access(Model):
 
 
 class About(Model):
-    """What the page is served by: the dashboard, or its demo over stand-in data."""
+    """What the page is served by: the dashboard, or its demo over stand-in data, and which build of the page it serves."""
 
     demo: bool
+    build: str | None = None
+    """The page's build as the dashboard serves it, a digest of its `index.html`, which
+    names each of its assets by their content's hash; none where no page is
+    served. A page served by another build reloads itself on reconnecting."""
 
 
 class Relay(MutableModel, arbitrary_types_allowed=True):
@@ -175,8 +180,14 @@ def application(
 
     @api.get("/about")
     def about() -> About:
-        """Say what the page is served by: the dashboard, or its demo."""
-        return About(demo=demo)
+        """Say what the page is served by: the dashboard, or its demo, and the page's build as it stands on disk, read again each time."""
+        index = None if page is None else page / "index.html"
+        build = (
+            None
+            if index is None or not index.is_file()
+            else hashlib.sha256(index.read_bytes()).hexdigest()
+        )
+        return About(demo=demo, build=build)
 
     @api.post("/ask")
     async def ask(request: Asked) -> Replied:
