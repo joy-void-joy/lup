@@ -32,9 +32,10 @@ Where it changed, or nothing was approved, the operator reads a summary first
 approved before and the tip, and git's own count of each file changed since
 (`git diff --stat --compact-summary`), coloured, as git prints it; each file
 changed is kept whole with the judge's reading of it, the change judged as a move
-of `HEAD` is, by the declaration approved last, or lup's defaults before any,
-never the tip's own, which importing would run (`Trust.read`), for the
-dashboard's review. Then they're
+of `HEAD` is, by the declaration approved last, never the tip's own, which
+importing would run (`Trust.read`), for the dashboard's review; a first approval
+trusts the zone as it is, its files read by their roles alone, asking nothing
+(`trusted_whole`). Then they're
 asked whether to show the whole diff, no by default, a yes showing it through the
 terminal's pager; then whether to approve, no by default (`Asker`). The question
 is an item in the operator's inbox from the start (`Approvals`, the host service
@@ -119,6 +120,7 @@ from lup_dev.inbox.store import (
     Conversation,
     Decided,
     Item,
+    Reading,
     Superseded,
 )
 from lup_dev.layout import CheckoutLayout, JudgeLayout, Layout
@@ -449,7 +451,10 @@ class Change(Model):
     def before(self) -> str:
         """Say which commit was approved before, and whether the zone is shown since it or whole."""
         if self.approved is None:
-            return "Approved before: nothing, so the zone is shown whole."
+            return (
+                "Approved before: nothing. A first approval trusts the zone as it is, "
+                "as you chose it by pulling: what changes from here comes for review."
+            )
         if self.since is None:
             return (
                 f"Approved before: {self.approved}, which the repository no longer "
@@ -507,7 +512,12 @@ class Change(Model):
         return self.changed.diff + self.joined.diff + self.local.diff
 
     def question(self) -> str:
-        """Ask whether to approve the zone, and run its `lup-dev` on the host."""
+        """Ask whether to approve the zone, and run its `lup-dev` on the host: the first time, whether to trust it as it is."""
+        if self.approved is None:
+            return (
+                f"Trust this repository's host zone as it is at {self.commit}, and "
+                "install its `lup-dev` as the one the host runs?"
+            )
         return (
             f"Approve the host zone at {self.commit}, and install its `lup-dev` as "
             "the one the host runs?"
@@ -1655,11 +1665,21 @@ class Trust(Model, arbitrary_types_allowed=True):
                 tool=tool,
                 unread=zone.unread,
             )
+        if approval is None:
+            return change.model_copy(update={"files": self.trusted_whole(files)})
         try:
             read = self.read(self.repository(), approval, files)
         except LupDevError as failure:
             return change.model_copy(update={"unjudged": str(failure)})
         return change.model_copy(update={"files": read})
+
+    def trusted_whole(self, files: list[ChangedFile]) -> list[ChangedFile]:
+        """Return a first approval's files, each read by its path's role alone, by lup's defaults with the tip's declaration protected, asking nothing: trusted as they are, they're folded for the review, and the engine doesn't run."""
+        roles = self.judge(self.repository(), None, files).roles
+        return [
+            each.model_copy(update={"reading": Reading(role=roles.role(each.path))})
+            for each in files
+        ]
 
     def read(
         self, repository: Path, approval: Approval | None, files: list[ChangedFile]

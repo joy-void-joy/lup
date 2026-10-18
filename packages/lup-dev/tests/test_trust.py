@@ -540,7 +540,10 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
     assert lines[:5] == [
         WHY,
         "",
-        "Approved before: nothing, so the zone is shown whole.",
+        (
+            "Approved before: nothing. A first approval trusts the zone as it is, "
+            "as you chose it by pulling: what changes from here comes for review."
+        ),
         f"The tip: {head}.",
         "",
     ]
@@ -566,8 +569,8 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
     assert answering(trust).asked == [
         WHOLE,
         (
-            f"Approve the host zone at {head}, and install its `lup-dev` as the one "
-            "the host runs?"
+            f"Trust this repository's host zone as it is at {head}, and install its "
+            "`lup-dev` as the one the host runs?"
         ),
     ]
     assert answering(trust).shown == []
@@ -842,7 +845,7 @@ def test_each_file_of_an_approval_carries_the_judges_reading_each_line_placed(
     )
 
 
-def test_before_any_approval_lups_defaults_judge_the_zone_never_the_tips_own(
+def test_a_first_approval_reads_the_zone_by_its_roles_alone_never_the_tips_declaration(
     lup: Path, kit: Kit, shell: Shell, tmp_path: Path
 ) -> None:
     ran = tmp_path / "imported"
@@ -860,8 +863,9 @@ def test_before_any_approval_lups_defaults_judge_the_zone_never_the_tips_own(
     [asking] = trust.approvals.asking
     readings = {each.path: each.reading for each in asking.files}
     assert readings[Path("packages/lup/src/library/__init__.py")] == Reading(
-        role="production", asks=[Asked(name="new-file", taken="flagged")]
+        role="production"
     )
+    assert readings[Path("lup_project.py")] == Reading(role="protected")
     assert not ran.exists()
 
 
@@ -907,8 +911,11 @@ class Broken(Checker):
 
 
 def test_where_the_judge_fails_the_files_go_unread_and_the_summary_says_why(
-    lup: Path, kit: Kit
+    lup: Path, kit: Kit, shell: Shell
 ) -> None:
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    changed(lup, {"packages/lup/src/library/extra.py": '"""Extra."""\n'}, shell)
     trust = trusting(lup, kit, unasked()).model_copy(update={"checker": Broken()})
     trust.proposed()
     assert isinstance(trust.approvals, Here)
@@ -999,13 +1006,7 @@ def test_a_zone_proposed_puts_its_approval_in_the_inbox_and_asks_nothing_here(
             path=Path("lup_project.py"),
             before=None,
             after=TextContent(text=DECLARED),
-            reading=Reading(
-                role="protected",
-                asks=[
-                    Asked(name="protected", taken="held"),
-                    Asked(name="new-file", taken="flagged"),
-                ],
-            ),
+            reading=Reading(role="protected"),
         )
         in asking.files
     )
