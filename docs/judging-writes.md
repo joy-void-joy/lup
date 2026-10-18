@@ -67,6 +67,8 @@ For `Edit` and `Write` the content after the call is known before anything is wr
 
 The judgement compares with the accepted content, not the disk, so a command's write not yet judged is judged with the edit: an edit to a file a command just created asks as a new file. A write allowed or asked is remembered with its call (`Pending`); when the call finishes, the checkpoint accepts that content as judged, and an asked call that ran was approved (`confirm`, `policy/checkpoint.py`). The engine checks content that isn't on disk yet as pyright's language server checks an unsaved buffer.
 
+**Told with the call.** A write let through carries what its judgement found, told beside the call as a checkpoint would report it (`Decision.told`, `told`): Claude Code's room runs no checkpoint after a call, so its findings, type errors and ruff's findings reach the agent before its next line. A held write approved is logged approved, and covers its path for the rest of the session, as the operator answers, not at a call's finish no hook may report.
+
 **After a refusal,** the change comes back through the file tools, where the operator is asked: a file written whole again with `Write`, where the prompt shows it whole.
 
 ### After a call: the checkpoint
@@ -147,7 +149,7 @@ The session's own turn's end (`TurnEnded`; `end_turn`, `policy/checkpoint.py`) r
 
 ### Findings
 
-lup's findings on the lines a change touched (`touched_lines`; every line of a new file), and what's wrong with its directives, are told right after the call, beside its result, each with its steer, as a type error is: the change has landed, and the agent clears each finding or keeps it with an `ignore`, which asks the operator. Those on lines no change touched are told apart. They hold the session's turn's end, as type errors do (*The turn's end*), and fail the gate.
+lup's findings on the lines a change touched (`touched_lines`; every line of a new file), and what's wrong with its directives, are told with the call that made it: a file tool's write beside the call itself, where it's judged before it lands (*Before an edit lands*), anything else right after the call, beside its result, each with its steer, as a type error is: the change has landed, and the agent clears each finding or keeps it with an `ignore`, which asks the operator. Those on lines no change touched are told apart. They hold the session's turn's end, as type errors do (*The turn's end*), and fail the gate.
 
 The report, in pyright's shape:
 
@@ -246,7 +248,7 @@ What each adapter relies on from its runtime is in its module's docstring (`adap
 ### Installing it here
 
 The judge's whole set is its hooks on `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` and `SubagentStop`, with `PostToolUseFailure` on Claude Code, every tool matched. lup's repository commits no `.claude/` and no `.codex/`, so lup's own sessions run only through `lup-dev launch` (`docs/launch.md`): each hook pipes its payload to the host service, which answers with the copy of `lup-dev` the operator approved for the repository (`docs/launch.md`, *The one hook and the host service*).
-- **Claude Code** runs `SessionStart`, `PreToolUse` on every call, `Stop` and `SubagentStop`. The judge reads `SessionStart` and the file tools' writes (`WRITING`, `adapters/claude.py`), and runs no checkpoint: a write it lets through stays counted as running, which holds nothing back, and what the shell writes meets the rules at the gate.
+- **Claude Code** runs `SessionStart`, `PreToolUse` on every call, `Stop` and `SubagentStop`. The judge reads `SessionStart` and the file tools' writes (`WRITING`, `adapters/claude.py`), and runs no checkpoint: a write it lets through stays counted as running, which holds nothing back, its findings told with the call; what the shell writes meets the rules at the gate.
 - **Codex** runs the whole set, each hook read by the judge: the checkpoint after each call, the only place its hooks see a patch, and each turn's end.
 - **`lup_project.py`** declares `asks="protected"`, the test roots `packages/*/tests`, `runtime-mention` added back, the library's front door exempt from it and the catalog from `constant-home`, and `LupDevelopment`, which builds the engine before the gate's first step and protects `lup_dev/catalog/**`.
 - **The judge's own source** beyond the catalog isn't asked about at each edit: the judge that runs is the installed copy, so an edit in a worktree can't change what judges it, nor a broken judge in a worktree refuse its own fix. The operator reads what changed in it once, through trust on launch, before it runs (`docs/launch.md`, *Trust on launch*).

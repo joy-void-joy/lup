@@ -523,6 +523,7 @@ class PreToolUse(Payload):
                 answer = PreToolUseAnswer(
                     permission_decision="allow",
                     permission_decision_reason=decision.reason or None,
+                    additional_context=decision.told or None,
                 )
                 return Specific(hook_specific_output=answer)
 
