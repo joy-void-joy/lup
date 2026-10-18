@@ -1314,7 +1314,7 @@ def test_claude_hears_the_sessions_own_agent_call_with_the_name_it_gives() -> No
         )
         return claude.heard(raw).spawning
 
-    naming = "`name` on `Agent`"
+    naming = "`name` on `Agent`, which it takes though its schema doesn't list it"
     assert spawning("Agent", {"prompt": "look", "name": "explore-auth"}) == Spawning(
         name="explore-auth", naming=naming
     )
