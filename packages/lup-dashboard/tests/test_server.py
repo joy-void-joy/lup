@@ -380,6 +380,7 @@ def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) ->
     }
     assert left.json()["draft"] == {
         "comments": [{"item": 53, "quote": None, "text": "Later."}],
+        "letters": [],
         "done": [],
         "parked": [53],
     }

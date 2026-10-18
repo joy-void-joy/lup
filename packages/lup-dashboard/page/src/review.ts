@@ -659,8 +659,8 @@ function spanOf(numbers: number[]): string {
 /**
  * Return where a comment opened on the line at `position` goes: on that line of its item, or on the item whole from
  * its header or an empty line of its own; on a line of a changed file, or its header, empty or not. On a group's
- * banner, a message to its agent, written under the banner of its group of now, the one left for later's among them.
- * None on a line no comment is on, or on the banner of lup's approvals.
+ * banner, a message to its agent, laid out under its group among those to answer now, from the banner of what's left
+ * for later too. None on a line no comment is on, or on the banner of lup's approvals.
  */
 export function opened(laidOut: Laid, position: number): Written | undefined {
     const group = groupAt(laidOut, position);
