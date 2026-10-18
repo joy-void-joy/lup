@@ -51,8 +51,11 @@ export function App() {
     const [contexts, setContexts] = useState<Map<number, Answered<Context>>>(new Map());
     const [files, setFiles] = useState<Map<number, Answered<ChangedFile[]>>>(new Map());
     const around = useMemo(() => ({ contexts, files }), [contexts, files]);
-    // The items whose context, and whose files, were asked for, so each is asked once.
-    const asked = useRef({ contexts: new Set<number>(), files: new Set<number>() });
+    // The items whose context, and whose files, were asked for, so each is asked once: an approval's files once
+    // more when the judge has read their types (`typing`), each asking keyed by its number and whether they were.
+    const asked = useRef({ contexts: new Set<number>(), files: new Set<string>() });
+    // Each item's latest asking for its files, whose answer alone is shown.
+    const latest = useRef(new Map<number, string>());
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
     const [inserting, setInserting] = useState(false);
@@ -228,7 +231,7 @@ export function App() {
 
     useEffect(() => {
         // Each item's context, where an agent's call made it, and each file an approval or a held change
-        // changes, asked once it's in the inbox.
+        // changes, asked once it's in the inbox; an approval's again once the judge has read their types.
         for (const item of waiting) {
             const number = item.number;
             if (item.call != null && !asked.current.contexts.has(number)) {
@@ -238,11 +241,18 @@ export function App() {
                 ).then((context) => setContexts((before) => new Map(before).set(number, context)));
             }
             const changing = item.reason.reason === "approval" || item.reason.reason === "held";
-            if (changing && !asked.current.files.has(number)) {
-                asked.current.files.add(number);
+            const reading = `${number}:${item.reason.reason === "approval" && item.reason.typing}`;
+            if (changing && !asked.current.files.has(reading)) {
+                asked.current.files.add(reading);
+                latest.current.set(number, reading);
                 void answered({ kind: "inbox-show-files", number }, (answer) =>
                     answer.kind === "inbox-files" ? answer.files : null,
-                ).then((shown) => setFiles((before) => new Map(before).set(number, shown)));
+                ).then((shown) => {
+                    // An answer to an earlier asking, arriving after a later one's, is dropped.
+                    if (latest.current.get(number) === reading) {
+                        setFiles((before) => new Map(before).set(number, shown));
+                    }
+                });
             }
         }
     }, [waiting]);

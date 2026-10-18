@@ -100,6 +100,12 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """The operator's switch turned on for each conversation it holds every flagged write of, kept in memory."""
     changed: asyncio.Event = Field(default_factory=asyncio.Event)
     """Set once something the page watches changes, and replaced: each watch answers again."""
+    typing: bool = True
+    """Whether the approval's types are being read, its files carrying the reading of their parse alone, as the host reads them in the background: until `types_read` after the page first asks for them."""
+    types_read: timedelta = timedelta(seconds=4)
+    """How long the approval's types take to read."""
+    reading: asyncio.TimerHandle | None = None
+    """The reading of the approval's types under way, once the page asked for its files."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -132,7 +138,11 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 self.talks = {**self.talks, conversation.key(): talk}
                 return Talked(talk=talk)
             case ShowFiles(number=number):
-                return files(number)
+                if number == 54 and self.typing and self.reading is None:
+                    self.reading = asyncio.get_running_loop().call_later(
+                        self.types_read.total_seconds(), self.typed
+                    )
+                return files(number, typed=not self.typing)
             case ShowContext(number=number):
                 return self.context(number)
             case SendItem() as sending:
@@ -158,6 +168,12 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     async def settle(self, number: int) -> None:
         """Install nothing: the demo's approvals are stand-ins."""
         del number
+
+    def typed(self) -> None:
+        """End the reading of the approval's types: its files carry their whole reading, and each watch answers again."""
+        self.typing = False
+        self.changed.set()
+        self.changed = asyncio.Event()
 
     def ago(self, minutes: float) -> datetime:
         """Return the moment `minutes` before the clock's."""
@@ -391,6 +407,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ),
             repository=lup,
             fingerprint="demo",
+            typing=self.typing,
         )
         made = [
             (51, question, parser, "dev", 4),
@@ -928,13 +945,26 @@ def line(content: Text, written: str) -> int:
     return content.text.splitlines().index(written) + 1
 
 
-def files(number: int) -> Files | Refused:
-    """Return the stand-in files of the approval (54) and the held change (55): Python, TypeScript, TOML, Markdown and JSON, changed, created, and one binary; each with a stand-in of the judge's reading of it, two of the approval's automatic, the rest open for what they ask, a production change, or a finding told."""
+def files(number: int, *, typed: bool = True) -> Files | Refused:
+    """Return the stand-in files of the approval (54) and the held change (55): Python, TypeScript, TOML, Markdown and JSON, changed, created, and one binary; each with a stand-in of the judge's reading of it, two of the approval's automatic, the rest open for what they ask, a production change, or a finding told, which only the approval's reading with types, once `typed`, holds."""
     created = Reading(role="production", asks=[Ask(name="new-file", taken="flagged")])
     match number:
         case 54:
             cli = text(CLI_HEAD, CLI_SHOW_AFTER, CLI_MIDDLE, CLI_PUSH_AFTER, CLI_TAIL)
             split = line(cli, '    branch = refs[0].split("/")[-1]')
+            told = [
+                Found(
+                    rule="string-split",
+                    message=(
+                        "`.split` takes a ref's name apart by hand. Splitting "
+                        "structured text by hand matches the inputs it was tried "
+                        "on, and fails quietly on the rest."
+                    ),
+                    start=split,
+                    end=split,
+                    taken="told",
+                )
+            ]
             return Files(
                 number=number,
                 files=[
@@ -1001,20 +1031,7 @@ def files(number: int) -> Files | Refused:
                                     ),
                                 ),
                             ],
-                            findings=[
-                                Found(
-                                    rule="string-split",
-                                    message=(
-                                        "`.split` takes a ref's name apart by hand. "
-                                        "Splitting structured text by hand matches "
-                                        "the inputs it was tried on, and fails "
-                                        "quietly on the rest."
-                                    ),
-                                    start=split,
-                                    end=split,
-                                    taken="told",
-                                )
-                            ],
+                            findings=told if typed else [],
                         ),
                     ),
                     ChangedFile(
