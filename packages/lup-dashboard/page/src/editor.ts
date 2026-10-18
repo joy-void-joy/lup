@@ -173,13 +173,31 @@ function commentAt(bound: Bound, position: number): Block | undefined {
  * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere; and `C` alone outside every comment, a comment
  * on the line, which in a comment stays vim's change. Every key is noted first, for what vim makes of it (`Keyed`):
  * one with no key of vim's pending begins what it notes, `c` in normal mode beginning vim's change.
+ *
+ * A dead key, as `` ` `` on a layout where it waits for the next key, gives no key of its own: the browser composes it
+ * with the next, `` ` `` then Space making a `` ` ``. Outside insert mode, vim gets what's composed, as typed, and
+ * neither key that composed it, the Space among them, which would begin a chord; in a comment, the browser composes
+ * into the text as usual.
  */
 const keys = Prec.highest(
     EditorView.domEventHandlers({
+        compositionend: (event, view) => {
+            const cm = vimOf(view);
+            if (cm === null || cm.state.vim.insertMode || event.data === "") {
+                return false;
+            }
+            for (const typed of event.data) {
+                Vim.handleKey(cm, typed, "user");
+            }
+            return true;
+        },
         keydown: (event, view) => {
             const cm = vimOf(view);
             if (cm === null) {
                 return false;
+            }
+            if ((event.key === "Dead" || event.isComposing) && !cm.state.vim.insertMode) {
+                return true;
             }
             const bound = boundOf(view.state);
             const { keyed } = bound;
