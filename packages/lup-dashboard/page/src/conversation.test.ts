@@ -56,13 +56,13 @@ describe("a conversation laid out", () => {
             [
                 "earlier · 5 steps, from 9m before your last words",
                 "you: Look into reading transcripts.",
-                "agent: Each session is a JSONL file;",
-                "       subagents get their own.",
+                "Each session is a JSONL file;",
+                "subagents get their own.",
                 "· called Bash ×2, Read",
                 "you: Build the reader.",
-                "agent: Twenty kinds of line.",
+                "Twenty kinds of line.",
                 "",
-                "       Four carry what was said.",
+                "Four carry what was said.",
                 "· called Grep",
             ].join("\n"),
         );
@@ -70,14 +70,14 @@ describe("a conversation laid out", () => {
         expect(out.fold).not.toBeNull();
         expect(shown(out.fold!.summary.from, out.fold!.summary.to)).toBe("earlier · 5 steps, from 9m before your last words");
         expect(shown(out.fold!.from, out.fold!.to)).toBe(
-            "\nyou: Look into reading transcripts.\nagent: Each session is a JSONL file;\n       subagents get their own.\n· called Bash ×2, Read",
+            "\nyou: Look into reading transcripts.\nEach session is a JSONL file;\nsubagents get their own.\n· called Bash ×2, Read",
         );
         expect(out.last).toEqual({ from: out.text.indexOf("· called Grep"), to: out.text.length });
         expect(out.turns.map((each) => shown(each, out.text.indexOf("\n", each)))).toEqual([
             "you: Look into reading transcripts.",
-            "agent: Each session is a JSONL file;",
+            "Each session is a JSONL file;",
             "you: Build the reader.",
-            "agent: Twenty kinds of line.",
+            "Twenty kinds of line.",
         ]);
         expect(out.message).toBeNull();
     });
@@ -99,7 +99,7 @@ describe("comments on the agent's words", () => {
             text: "",
         });
         // From the start of the line, before the agent's words, it's the same line.
-        expect(opened(out, out.text.indexOf("agent: Twenty"))?.quote?.text).toBe("Twenty kinds of line.");
+        expect(opened(out, out.text.indexOf("Twenty"))?.quote?.text).toBe("Twenty kinds of line.");
         for (const line of ["earlier", "you: Build", "· called Grep", "· called Bash"]) {
             expect(opened(out, out.text.indexOf(line))).toBeUndefined();
         }
@@ -114,7 +114,7 @@ describe("comments on the agent's words", () => {
             quote: { text: "JSONL", start: "Each session is a ".length, end: "Each session is a JSONL".length },
             text: "",
         });
-        const line = out.text.indexOf("agent: Each");
+        const line = out.text.indexOf("Each");
         const next = out.text.indexOf("· called Bash");
         expect(quoted(out, line, next)?.quote?.text).toBe("Each session is a JSONL file;\nsubagents get their own.");
         expect(quoted(out, from, out.text.indexOf("Twenty"))).toBeUndefined();
@@ -133,14 +133,14 @@ describe("comments on the agent's words", () => {
             [
                 "earlier · 5 steps, from 9m before your last words",
                 "you: Look into reading transcripts.",
-                "agent: Each session is a JSONL file;",
+                "Each session is a JSONL file;",
                 "Even for codex?",
-                "       subagents get their own.",
+                "subagents get their own.",
                 "· called Bash ×2, Read",
                 "you: Build the reader.",
-                "agent: Twenty kinds of line.",
+                "Twenty kinds of line.",
                 "",
-                "       Four carry what was said.",
+                "Four carry what was said.",
                 "Which four?",
                 "· called Grep",
                 MESSAGE,
@@ -188,9 +188,9 @@ describe("the conversation growing", () => {
         expect(made[0]!.from).toBeGreaterThanOrEqual(before.last!.from);
         expect(after.text.slice(0, before.last!.from)).toBe(before.text.slice(0, before.last!.from));
         expect(after.text.endsWith(`${MESSAGE}\nCarry on.`)).toBe(true);
-        expect(after.text.slice(after.last!.from, after.last!.to)).toBe("agent: Found the four.");
+        expect(after.text.slice(after.last!.from, after.last!.to)).toBe("Found the four.");
         // The run of calls the conversation ended on goes on in its line.
-        expect(after.text).toContain("· called Grep ×2\nagent: Found the four.");
+        expect(after.text).toContain("· called Grep ×2\nFound the four.");
         // The fold, the comments on earlier words, and a cursor reading mid-conversation stay where they were.
         expect(after.fold).toEqual(before.fold);
         expect(after.blocks[0]).toEqual(before.blocks[0]);
@@ -209,7 +209,7 @@ describe("the conversation growing", () => {
         const out = laid(later, { ...ALONE, sent }, UNSAID, folded);
         expect(out.fold).toEqual(laid(STEPS, ALONE, UNSAID, folded).fold);
         expect(out.text.slice(out.text.indexOf("· called Grep"))).toBe(
-            ["· called Grep", "← #101 your message, from here", "  > JSONL", "", "  Even for codex?", "agent: Yes, both.", "you: Good."].join("\n"),
+            ["· called Grep", "← #101 your message, from here", "  > JSONL", "", "  Even for codex?", "Yes, both.", "you: Good."].join("\n"),
         );
         // Its text folds under its line.
         const [item] = out.items;
@@ -274,7 +274,7 @@ describe("the items of lup's inbox in a conversation", () => {
         expect(out.text).toBe(
             [
                 "you: Look into reading transcripts.",
-                "agent: Each session is a JSONL file.",
+                "Each session is a JSONL file.",
                 "· called Bash, mcp__lup__ask",
                 "→ #51 question to you · answered by #53",
                 "  Which parser?",
@@ -283,7 +283,7 @@ describe("the items of lup's inbox in a conversation", () => {
                 "← #53 your answer to #51",
                 "  Asked: Which parser?",
                 "  1. A model per kind (lean: yes): leaning: they go with the lean.",
-                "agent: Reading the second runtime's.",
+                "Reading the second runtime's.",
                 "→ #52 note to you · answered by #54",
                 "  I assumed UTF-8.",
                 "· called Grep",
@@ -396,17 +396,17 @@ describe("the items of lup's inbox in a conversation", () => {
             "you: Go.",
             "· called Bash",
             "→ #60 note to you · waiting on you",
-            "agent: Ran it.",
+            "Ran it.",
             "· called Read",
-            "agent: Read it.",
+            "Read it.",
             "→ #61 note to you · waiting on you",
         ]);
         expect(lines(untimed.map(({ at: _, ...each }) => each))).toEqual([
             "you: Go.",
             "· called Bash",
-            "agent: Ran it.",
+            "Ran it.",
             "· called Read",
-            "agent: Read it.",
+            "Read it.",
             "→ #60 note to you · waiting on you",
             "→ #61 note to you · waiting on you",
         ]);
@@ -447,9 +447,9 @@ describe("the items of lup's inbox in a conversation", () => {
         const after = laid(CALLED, { ...asked, exchanged: { sent: [exchange(ASKED, "Which parser?")], received: [exchange(ANSWERED, "Asked.")] } }, UNSAID, history(CALLED, []));
         const made = changes(before.text, after.text);
         expect(before.text).toContain("→ #51 question to you · waiting on you");
-        expect(after.text).toContain("→ #51 question to you · answered by #53\n  Which parser?\n· called Read\n← #53 your answer to #51\n  Asked.\nagent:");
-        const reader = before.text.indexOf("agent: Reading");
-        expect(after.text.slice(moved(reader, made, before.text.length)).startsWith("agent: Reading")).toBe(true);
+        expect(after.text).toContain("→ #51 question to you · answered by #53\n  Which parser?\n· called Read\n← #53 your answer to #51\n  Asked.\nReading the second runtime");
+        const reader = before.text.indexOf("Reading");
+        expect(after.text.slice(moved(reader, made, before.text.length)).startsWith("Reading")).toBe(true);
     });
 });
 
@@ -460,7 +460,7 @@ describe("the changes between two texts", () => {
     it("are line by line, each line both keep left where it is", () => {
         expect(changes("a\nb\nc", "a\nb\nx\nc")).toEqual([{ from: 4, to: 4, insert: "x\n" }]);
         expect(changes("ab", "ab")).toEqual([]);
-        expect(changes("· called Bash", "· called Bash ×2\nagent: hi")).toEqual([{ from: 0, to: 13, insert: "· called Bash ×2\nagent: hi" }]);
+        expect(changes("· called Bash", "· called Bash ×2\nhi")).toEqual([{ from: 0, to: 13, insert: "· called Bash ×2\nhi" }]);
         for (const [before, after] of [
             ["", "a\nb"],
             ["a\nb", ""],

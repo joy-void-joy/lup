@@ -69,15 +69,16 @@ export function kept(text: string, blanks: boolean): string[] {
 }
 
 /** Say one thing said after who said it: its first line after `who:`, the others set in under it, as `kept` keeps them. */
-export function spoken(who: string, text: string, blanks: boolean): Spoken[] {
+export function spoken(who: string | null, text: string, blanks: boolean): Spoken[] {
     const lines = kept(text, blanks);
+    const label = who === null ? "" : `${who}:`;
     if (lines.length === 0) {
-        return [{ text: `${who}:`, words: who.length + 1, own: 0, blank: true }];
+        return [{ text: label, words: label.length, own: 0, blank: true }];
     }
-    const indent = " ".repeat(who.length + 2);
+    const indent = who === null ? "" : " ".repeat(who.length + 2);
     let own = 0;
     return lines.map((line, at) => {
-        const prefix = at === 0 ? `${who}: ` : indent;
+        const prefix = at === 0 && who !== null ? `${who}: ` : indent;
         const row = { text: line === "" ? "" : `${prefix}${line}`, words: prefix.length, own, blank: line === "" };
         own += line.length + 1;
         return row;
