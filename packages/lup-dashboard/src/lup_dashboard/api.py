@@ -32,6 +32,7 @@ from lup_dev.inbox.protocol import (
     FinishItem,
     Items,
     KeepDraft,
+    KeepTalk,
     ListInbox,
     Reviewed,
     SendDraft,
@@ -43,6 +44,8 @@ from lup_dev.inbox.protocol import (
     ShowFiles,
     ShowItem,
     Shown,
+    ShowTalk,
+    Talked,
 )
 
 type Asked = Annotated[
@@ -60,7 +63,9 @@ type Asked = Annotated[
     | ShowConversation
     | ShowDraft
     | KeepDraft
-    | SendDraft,
+    | SendDraft
+    | ShowTalk
+    | KeepTalk,
     Field(discriminator="kind"),
 ]
 """A request the page may send: the launches served and their conversations,
@@ -68,8 +73,8 @@ a launch renamed, the operator's switch for a conversation turned, "hold each
 flagged write", and the operator's inbox, its items read, answered, finished
 and sent, an approval or a held change answered and the files it changes read,
 an item's moment in its sender's conversation read, a whole conversation read
-from where the page left it, and the operator's draft reply shown, kept and
-sent."""
+from where the page left it, the operator's draft reply shown, kept and sent,
+and what they write on a conversation shown and kept."""
 
 type Replied = Annotated[
     Listed
@@ -82,6 +87,7 @@ type Replied = Annotated[
     | Context
     | Conversed
     | Drafted
+    | Talked
     | Reviewed
     | Refused,
     Field(discriminator="kind"),

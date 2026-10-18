@@ -13,7 +13,7 @@ import { Decoration, type DecorationSet, type EditorView } from "@codemirror/vie
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Agent, Launch } from "./agents";
-import { ask } from "./api";
+import { ask, type Asked, type ReplyOf } from "./api";
 import { changes, moved, saying, shownIn, type Folding, type Span } from "./comments";
 import {
     UNSAID,
@@ -56,37 +56,34 @@ interface Kept {
     sent: Sent[];
 }
 
-/** Each conversation's draft and messages sent, kept in the page as they're written, and in its storage, so a reload keeps them. */
+/** Each conversation's draft and messages sent as the page last had them, by the conversation, so going back to one shows it at once while the host is asked. */
 const kept = new Map<string, Kept>();
 
-function keyOf(runtime: string, session: string, agent: string | null): string {
-    return `lup-dashboard.conversation:${runtime}:${session}:${agent ?? ""}`;
+type Party = Extract<Asked, { kind: "inbox-talk" }>["conversation"];
+
+/** Return what the page keeps of a conversation from what the host kept of it. */
+function fromHost(talk: ReplyOf<"inbox-talked">["talk"]): Kept {
+    const comments = (talk.comments ?? []).map((each) => ({
+        step: each.step ?? null,
+        quote: each.quote ?? null,
+        text: each.text,
+    }));
+    return { talk: { comments }, sent: talk.sent ?? [] };
 }
 
-function load(key: string): Kept {
-    const held = kept.get(key);
-    if (held !== undefined) {
-        return held;
+/** Keep what the operator wrote on `party` on the host, surviving the page's closing. */
+function keepOnHost(party: Party, value: Kept, closing = false): void {
+    const request: Asked = { kind: "inbox-keep-talk", conversation: party, talk: { ...value.talk, sent: value.sent } };
+    if (closing) {
+        void fetch("/api/ask", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(request),
+            keepalive: true,
+        });
+        return;
     }
-    try {
-        const stored = localStorage.getItem(key);
-        if (stored !== null) {
-            const read = JSON.parse(stored) as Partial<Kept>;
-            return { talk: { comments: read.talk?.comments ?? [] }, sent: read.sent ?? [] };
-        }
-    } catch (error) {
-        console.warn("lup's dashboard: a conversation's draft couldn't be read back", error);
-    }
-    return { talk: UNSAID, sent: [] };
-}
-
-function keep(key: string, value: Kept): void {
-    kept.set(key, value);
-    try {
-        localStorage.setItem(key, JSON.stringify(value));
-    } catch (error) {
-        console.warn("lup's dashboard: a conversation's draft couldn't be kept", error);
-    }
+    void ask(request).catch((error: unknown) => console.warn("lup's dashboard: a conversation's draft couldn't be kept", error));
 }
 
 /** Draw the conversation: what each line that isn't the agent's words shows, each comment's lines, and the passage each comment is on. */
@@ -135,8 +132,19 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
     const { talker } = agent;
     const runtime = launch.launch.runtime;
     const subagent = talker.agent ?? null;
-    const key = keyOf(runtime, talker.session, subagent);
-    const [{ talk, sent }, setKept] = useState<Kept>(() => load(key));
+    const party = useMemo<Party>(
+        () => ({ party: "conversation", repository: launch.launch.repository, runtime, session: talker.session, agent: subagent }),
+        [launch.launch.repository, runtime, talker.session, subagent],
+    );
+    const key = JSON.stringify(party);
+    const [{ talk, sent }, setKept] = useState<Kept>(() => kept.get(key) ?? { talk: UNSAID, sent: [] });
+    const current = useRef<Kept>({ talk, sent });
+    current.current = { talk, sent };
+    // Whether the operator wrote since the conversation opened, which what the host kept doesn't replace.
+    const touched = useRef(false);
+    // What's written and not yet kept on the host: kept 300ms after the last change, or as the view closes.
+    const pending = useRef<Kept | null>(null);
+    const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [entries, setEntries] = useState<Entry[]>([]);
     // How many turns are folded, once the conversation is first read: before the operator's last words then.
     const [folded, setFolded] = useState<number | null>(null);
@@ -149,16 +157,66 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
     const sentNow = useRef(sent);
     sentNow.current = sent;
 
+    const store = useCallback(
+        (next: Kept, now: boolean) => {
+            kept.set(key, next);
+            setKept(next);
+            if (keeping.current !== null) {
+                clearTimeout(keeping.current);
+                keeping.current = null;
+            }
+            if (now) {
+                pending.current = null;
+                keepOnHost(party, next);
+                return;
+            }
+            pending.current = next;
+            keeping.current = setTimeout(() => {
+                keeping.current = null;
+                pending.current = null;
+                keepOnHost(party, next);
+            }, 300);
+        },
+        [key, party],
+    );
+
     const change = useCallback(
         (next: Talk) => {
-            setKept((before) => {
-                const after = { ...before, talk: next };
-                keep(key, after);
-                return after;
-            });
+            touched.current = true;
+            store({ ...current.current, talk: next }, false);
         },
-        [key],
+        [store],
     );
+
+    useEffect(() => {
+        // What the host kept of the conversation, where the operator hasn't begun writing since it opened.
+        void ask({ kind: "inbox-talk", conversation: party })
+            .then((answer) => {
+                if (answer.kind === "inbox-talked" && !touched.current) {
+                    const loaded = fromHost(answer.talk);
+                    kept.set(key, loaded);
+                    setKept(loaded);
+                    setEpoch((was) => was + 1);
+                }
+            })
+            .catch((error: unknown) => console.warn("lup's dashboard: a conversation's draft couldn't be read", error));
+        // What's written and not yet kept is kept as the page closes, or as another conversation opens in this one's place.
+        const flush = () => {
+            if (pending.current !== null) {
+                keepOnHost(party, pending.current, true);
+                pending.current = null;
+            }
+        };
+        window.addEventListener("pagehide", flush);
+        return () => {
+            window.removeEventListener("pagehide", flush);
+            if (keeping.current !== null) {
+                clearTimeout(keeping.current);
+                keeping.current = null;
+            }
+            flush();
+        };
+    }, [key, party]);
 
     /** Ask the conversation for the steps it has since those the page has, again while a hook was heard meanwhile. */
     const refresh = useCallback(async () => {
@@ -335,14 +393,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
                 return;
             }
             const number = answer.kind === "inbox-item" ? answer.item.number : 0;
-            setKept((was) => {
-                const next = {
-                    talk: UNSAID,
-                    sent: [...was.sent, { number, text, after, at: new Date().toISOString() }],
-                };
-                keep(key, next);
-                return next;
-            });
+            store({ talk: UNSAID, sent: [...current.current.sent, { number, text, after, at: new Date().toISOString() }] }, true);
             setEpoch((was) => was + 1);
             say(`Sent to ${talker.path} as #${number}, through lup.`);
         } catch (error) {

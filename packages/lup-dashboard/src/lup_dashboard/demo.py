@@ -34,6 +34,7 @@ from lup_dev.inbox.protocol import (
     Files,
     Items,
     KeepDraft,
+    KeepTalk,
     ListInbox,
     Reviewed,
     SendDraft,
@@ -43,6 +44,8 @@ from lup_dev.inbox.protocol import (
     ShowDraft,
     ShowFiles,
     Shown,
+    ShowTalk,
+    Talked,
 )
 from lup_dev.inbox.store import (
     Approval,
@@ -56,6 +59,7 @@ from lup_dev.inbox.store import (
     Message,
     Operator,
     Question,
+    Talk,
     Text,
 )
 
@@ -73,6 +77,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     runtimes: list[str] = ["claude", "codex"]
     """The runtimes the demo's launches run, by name: the first for most, the second for one."""
     draft: Draft = Draft()
+    talks: dict[str, Talk] = {}
+    """What the operator writes on each conversation, by its key, kept in memory."""
     sent: list[SendItem] = []
     """The operator's messages sent from the page, kept in memory: they reach no agent."""
     grown: int = 0
@@ -107,6 +113,11 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             case SendDraft():
                 self.draft = self.draft.kept()
                 return Reviewed(items=[])
+            case ShowTalk(conversation=conversation):
+                return Talked(talk=self.talks.get(conversation.key(), Talk()))
+            case KeepTalk(conversation=conversation, talk=talk):
+                self.talks = {**self.talks, conversation.key(): talk}
+                return Talked(talk=talk)
             case ShowFiles(number=number):
                 return files(number)
             case ShowContext(number=number):

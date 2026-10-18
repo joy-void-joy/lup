@@ -368,6 +368,15 @@ class InboxLayout(Model):
         """The operator's draft reply, kept until they send it (`docs/dashboard.md`, *The review*)."""
         return self.home / "draft.json"
 
+    @property
+    def talks(self) -> Path:
+        """What the operator writes on each conversation they read in the dashboard, a file named by its key (`docs/dashboard.md`, *The conversation*)."""
+        return self.home / "talks"
+
+    def talk(self, key: str) -> Path:
+        """Say where what the operator writes on the conversation keyed `key` is kept."""
+        return self.talks / f"{key}.json"
+
     def item(self, number: int) -> Path:
         """Say where item `number` is kept."""
         return self.items / f"{number}.json"

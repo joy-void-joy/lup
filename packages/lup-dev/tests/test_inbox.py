@@ -50,6 +50,7 @@ from lup_dev.inbox.protocol import (
     Files,
     Items,
     KeepDraft,
+    KeepTalk,
     ListInbox,
     Reviewed,
     SendDraft,
@@ -59,6 +60,8 @@ from lup_dev.inbox.protocol import (
     ShowDraft,
     ShowFiles,
     Shown,
+    ShowTalk,
+    Talked,
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import (
@@ -80,6 +83,9 @@ from lup_dev.inbox.store import (
     Operator,
     Quote,
     Review,
+    Sent,
+    Talk,
+    TalkComment,
     Text,
     Told,
     Waiting,
@@ -2339,3 +2345,32 @@ def test_the_operators_list_says_when_they_last_settled_an_item(
     assert before.reviewed is None
     assert [item.number for item in after.items] == [2]
     assert after.reviewed == clock.now()
+
+
+def test_what_the_operator_writes_on_a_conversation_is_kept_on_the_host_for_it_alone(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    session = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    subagent = session.model_copy(update={"agent": "a1"})
+    talk = Talk(
+        comments=[
+            TalkComment(
+                step=3, quote=Quote(text="Twenty", start=0, end=6), text="Why?"
+            ),
+            TalkComment(step=None, text="Then the second runtime."),
+        ],
+        sent=[Sent(number=7, text="Go on.", after=12, at=clock.now())],
+    )
+    with inboxed(machine, clock, notices, said):
+        host = client(machine.host, clock)
+        unwritten = host.ask(ShowTalk(conversation=session), Talked)
+        kept = host.ask(KeepTalk(conversation=session, talk=talk), Talked)
+        again = host.ask(ShowTalk(conversation=session), Talked)
+        theirs = host.ask(ShowTalk(conversation=subagent), Talked)
+    with inboxed(machine, clock, notices, said):
+        restarted = client(machine.host, clock).ask(
+            ShowTalk(conversation=session), Talked
+        )
+    assert unwritten.talk == Talk()
+    assert kept.talk == again.talk == restarted.talk == talk
+    assert theirs.talk == Talk()
