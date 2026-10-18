@@ -212,4 +212,18 @@ describe("highlighting", () => {
         expect(found.every((each) => each.from >= 0 && each.to <= row!.text.length)).toBe(true);
         expect(tokensOf({ path: "a.bin", before: null, after: text("x") }, "after")).toEqual([]);
     });
+
+    it("leaves out a token with no text in a row, which CodeMirror would refuse as a mark", () => {
+        const row = { side: "after", number: 1, change: "same", text: "    return x", offset: 10 } as const;
+        const tokens = [
+            { from: 10, to: 10, classes: "tok-indent" },
+            { from: 14, to: 20, classes: "tok-keyword" },
+            { from: 22, to: 22, classes: "tok-empty" },
+        ];
+        expect(within(tokens, row)).toEqual([{ from: 4, to: 10, classes: "tok-keyword" }]);
+        const code = "class A:\n    def f(self):\n        if x:\n            return 1\n\n    y = 2\n";
+        const file: ChangedFile = { path: "a.py", before: null, after: text(code) };
+        const marks = shown(file).rows.flatMap((each) => within(tokensOf(file, "after"), each));
+        expect(marks.every((each) => each.to > each.from)).toBe(true);
+    });
 });

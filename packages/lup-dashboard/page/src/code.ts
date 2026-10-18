@@ -466,7 +466,11 @@ export function tokensOf(file: ChangedFile, side: Row["side"]): Token[] {
     return made;
 }
 
-/** Return the tokens of `tokens` within `row`, counted from the row's start. */
+/**
+ * Return the tokens of `tokens` within `row`, counted from the row's start, each with some text: a grammar's tokens
+ * of no width (Python's indentation, say) are left out, since CodeMirror refuses an empty mark, and a view plugin
+ * that throws is dropped, its highlighting gone until the page loads again.
+ */
 export function within(tokens: Token[], row: Row): Token[] {
     const end = row.offset + row.text.length;
     // The first token ending after the row's start, found by halving.
@@ -486,11 +490,11 @@ export function within(tokens: Token[], row: Row): Token[] {
         if (token === undefined || token.from >= end) {
             break;
         }
-        found.push({
-            from: Math.max(token.from, row.offset) - row.offset,
-            to: Math.min(token.to, end) - row.offset,
-            classes: token.classes,
-        });
+        const from = Math.max(token.from, row.offset) - row.offset;
+        const to = Math.min(token.to, end) - row.offset;
+        if (to > from) {
+            found.push({ from, to, classes: token.classes });
+        }
     }
     return found;
 }
