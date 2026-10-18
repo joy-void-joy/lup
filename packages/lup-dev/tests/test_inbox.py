@@ -1543,6 +1543,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "ask",
         "send",
         "wait_inbox",
+        "inbox",
     ]
     assert served[0].input_schema == Problem.model_json_schema()
     assert served[1].input_schema == Remark.model_json_schema()
@@ -1552,6 +1553,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "Ask the operator, with numbered decisions.",
         "Send a message to a party's inbox.",
         "Wait until something reaches your inbox.",
+        "Read this repository's inbox, changing nothing.",
     ]
     assert "inbox as a problem" in served[0].description
     github = GitHubTools.specs()
@@ -2189,3 +2191,81 @@ def test_an_items_moment_is_read_from_its_senders_record_around_its_call(
     assert str(unanchored.value) == "item 2 was made by no agent's call"
     assert shown.exit_code == 0, shown.output
     assert "· called Bash\n\n→ called mcp__lup__note: this item\n\n" in shown.output
+
+
+def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        launched(machine, clock, other, "two", "codex")
+        hook = machine.host.launch("one").hook
+        mcp = machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(machine.host.launch("two").hook, codex("SessionStart", source="startup"))
+        call(mcp, "ask", {"question": "Which parser?\nTwenty kinds of line."})
+        noting = lup_call("note", {"remark": "I assumed UTF-8."}, "n1", agent_id="a1")
+        call(
+            mcp,
+            "note",
+            json.loads(send(hook, noting))["hookSpecificOutput"]["updatedInput"],
+        )
+        call(machine.host.launch("two").mcp, "note", {"remark": "Elsewhere."})
+        inbox("answer", "1", "--comment", "A model per kind.")
+
+        def reading(**arguments: JsonValue) -> str:
+            text, error = call(mcp, "inbox", arguments)
+            assert not error, text
+            return text
+
+        waiting = reading()
+        every = reading(every=True)
+        asked = reading(number=1)
+        answer = reading(number=4)
+        theirs = reading(number=2)
+        elsewhere = reading(number=3)
+        missing = reading(number=9)
+        reads = json.loads(
+            send(hook, lup_call("inbox", {"number": 2}, "r1", agent_id="a1"))
+        )
+        own = call(mcp, "inbox", reads["hookSpecificOutput"]["updatedInput"])
+        listed = inbox()
+    at = "2026-10-01 12:00"
+    sub = "subagent a1 of claude session s1"
+    assert waiting.splitlines() == [
+        f"2  {at}  a note from {sub} to the operator, waiting: I assumed UTF-8.",
+        f"4  {at}  an answer from the operator to you, waiting: A model per kind.",
+    ]
+    assert every.splitlines() == [
+        (
+            f"1  {at}  a question from you to the operator, answered at {at}, "
+            "item 4: Which parser?"
+        ),
+        *waiting.splitlines(),
+    ]
+    assert asked == (
+        f"Item 1, a question you sent to the operator at {at}, answered at {at}, "
+        "item 4:\nWhich parser?\nTwenty kinds of line."
+    )
+    assert answer == (
+        "lup's inbox, item 4: an answer from the operator, to the question of item "
+        "1:\nAsked: Which parser?\nTwenty kinds of line.\nTheir answer: A model per "
+        "kind.\n\nIt's waiting."
+    )
+    assert theirs == (
+        f"Item 2 is a note from {sub} to the operator, which isn't yours: only your "
+        "own items are read whole. Its first line: I assumed UTF-8."
+    )
+    assert elsewhere == missing.replace("9", "3")
+    assert missing == (
+        "Item 9 isn't among this repository's: `inbox` reads this repository's "
+        "items alone."
+    )
+    assert own == (
+        f"Item 2, a note you sent to the operator at {at}, waiting:\nI assumed UTF-8.",
+        False,
+    )
+    assert "   4  " not in listed
+    assert [line.split()[0] for line in listed.splitlines()] == ["2", "3"]

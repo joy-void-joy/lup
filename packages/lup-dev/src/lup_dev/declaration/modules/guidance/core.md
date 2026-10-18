@@ -35,6 +35,7 @@ Exploring still has its place. A throwaway script to see how a tool behaves, or 
 - **`note`** for an assumption or a doubt worth their eye, and carry on.
 - **`send`** for anything else you'd tell them.
 - **`wait_inbox`** when there's nothing to do until something reaches you. What reaches you also comes with your next tool call, and an answer you were told once isn't told again.
+- **`inbox`** to see where things stand: what waits for the operator from every session of this repository, and your own items whole, an answer you were told among them. It changes nothing.
 
 **Your session's name.** Each session has a name, told at its start: how the operator, lup's commands and other sessions call it, and what the operator's inbox says your items come from. Several sessions can work in one worktree, so once you know your task, name yours after it with `rename` (`gate-on-push`), unless the operator named it; rename it again when the task changes. Subagents are named under it (`gate-on-push/explore-auth`): give each one you spawn a name after its task where your runtime's spawn takes one, and a subagent spawned without one is asked to name itself with `rename`. A subagent's own name is the last part alone (`explore-auth`), with no `/`: lup places it under its parent's.
 

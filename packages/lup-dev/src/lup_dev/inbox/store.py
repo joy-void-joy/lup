@@ -522,6 +522,24 @@ class Inbox(MutableModel):
             if item.recipient == recipient and isinstance(item.state, Waiting)
         ]
 
+    def about(self, repository: Path) -> list[Item]:
+        """Return the items about `repository`, oldest first: those a conversation of it sent or was sent, and the approvals of its host zone."""
+
+        def of(party: Party) -> bool:
+            return isinstance(party, Conversation) and party.repository == repository
+
+        ordered = [self.items[number] for number in sorted(self.items)]
+        return [
+            item
+            for item in ordered
+            if of(item.sender)
+            or of(item.recipient)
+            or (
+                isinstance(item.reason, Approval)
+                and item.reason.repository == repository
+            )
+        ]
+
     def asking(self, repository: Path, fingerprint: str) -> Item | None:
         """Return the approval waiting for the operator about one zone: the repository's, at `fingerprint`; none where there's none."""
         return next(
