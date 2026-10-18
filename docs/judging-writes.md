@@ -9,7 +9,7 @@ The rules themselves are elsewhere: `docs/conventions.md` says what each convent
 ### The outcomes
 
 - **allow:** the call goes through with no prompt. On Claude Code the hook answers `allow`: silence would leave the call to the runtime's own permission mode, a prompt per edit in Manual mode. On Codex nothing needs answering, since it doesn't ask before an `apply_patch` inside the workspace.
-- **ask:** the operator decides before the change lands: in Claude Code's own prompt, or where a runtime can't ask, through a hold the agent waits on (*Asking the operator*).
+- **ask:** the change is held for the operator's answer, the agent waiting inside the hook, on every runtime: a file tool's write before it lands, anything else at the checkpoint; the hold is an item in the operator's inbox, answered in the dashboard's review or with `lup-dev inbox answer` (*Asking the operator*).
 - **refused:** what the operator had to see first and didn't is put back, with the agent's version saved (*Refusals*): a change made through the shell that asks, on a runtime that asks before a call; a hold declined, or left unanswered.
 
 lup's findings never decide the outcome: those on the lines a change touches are told right after it (*Findings*).
@@ -136,10 +136,9 @@ The session's own turn's end (`TurnEnded`; `end_turn`, `policy/checkpoint.py`) r
 
 ### Asking the operator
 
-- **On Claude Code, in its own prompt.** `PreToolUse` answers `ask` with what's asked: the new path, the protected path, the public name or signature, or the rule and reason of an added `ignore` (`asked`, `policy/report.py`). A hook's `ask` prompts in auto mode too (`docs/field-notes.md`, *Claude Code 2.1.291*), so there's no hold on Claude Code.
-- **On Codex, through a hold** (`policy/holds.py`). Codex's `PreToolUse` can't ask, so an ask is held at the checkpoint, the agent waiting inside the hook. `lup-dev holds` lists what waits with its diff; `lup-dev holds approve <key>` or `decline <key> --comment …` answers. A decline puts the change back and saves it, the comment in the agent's report. The hook polls every 2 seconds for up to 24 hours; unanswered by then, the change is put back and saved, and the hold stays open: a later answer reaches the agent at its next checkpoint, an approval covering the path so the saved version can go back. A launched room's hooks wait 25 hours for the host service.
+- **Through a hold, on every runtime** (`policy/holds.py`). A change that asks is held, the agent waiting inside the hook: a file tool's write before it lands (`held_write`, `policy/before.py`), its call let through or denied with the answer; anything else at the checkpoint, put back or kept. The hold is put in the operator's inbox as a held change (`HeldChange`, `Announcing`), what's held, what each file asks, and its diff, and answered there: in the dashboard's review (Space `a` or `x`, the comments written under it going with the answer) or with `lup-dev inbox answer <n>`, which writes the answer to the hold. A decline puts the change back, or never lets it land, and saves the agent's version, the comment in the agent's report; an approval covers the path for the rest of the session. The hook polls every 2 seconds for up to 24 hours; unanswered by then, the change is put back and saved, and the hold stays open: a later answer reaches the agent at its next checkpoint, an approval covering the path so the saved version can go back. A launched room's hooks wait 25 hours for the host service. Claude Code's own prompt isn't used: answered in the inbox, a hold is answered the same way on both runtimes, wherever the operator is.
 - **A held file is nobody's** until the operator answers: it keeps its accepted content (`WorktreeState.holding`), and no session's start, checkpoint or turn's end accepts it, judges it or puts it back, so a decline always has something to put back.
-- **A move's asks, after the fact.** What a move of `HEAD` asks is already committed and isn't put back, so on both runtimes it's a hold no agent waits on, naming its commit (`Hold.commit`), which `lup-dev holds` lists apart: a hook waiting on it would block a session that may not have made the commit. Its answer is logged when given, and told to the session that found the move at its next checkpoint (`late_answers`); a decline changes no file, and reverting is the operator's call.
+- **A move's asks, after the fact.** What a move of `HEAD` asks is already committed and isn't put back, so on both runtimes it's a hold no agent waits on, naming its commit (`Hold.commit`), its inbox item asking whether to keep what the commit brought: a hook waiting on it would block a session that may not have made the commit. Its answer is logged when given, and told to the session that found the move at its next checkpoint (`late_answers`); a decline changes no file, and reverting is the operator's call.
 - **Nobody answers their own hold.** Answering refuses to run inside an agent's session, which each adapter recognises by the variable its runtime sets in the commands it runs (`CLAUDE_CODE_CHILD_SESSION`, `CODEX_THREAD_ID`; `Runtime.inside`). That stops a mistake, not a determined agent: on the host, as the operator's user, an agent could write the answer itself. A room doesn't mount the stores the holds are in.
 
 ### Findings
@@ -233,7 +232,7 @@ Every judgement is logged, so how often lup asks, refuses and allows can be meas
 |---|---|---|
 | A file tool's write | judged before it lands (`PreToolUse`) | no such tools: `apply_patch` is judged at the checkpoint |
 | Worktrees a session holds | where it started, where its file tools write, where its hooks report its working directory | where it started |
-| ask | `PreToolUse` answers `ask`, and the runtime prompts | held at the checkpoint, answered from a terminal |
+| ask | held in `PreToolUse` for a file tool's write, at the checkpoint for the rest, answered in the inbox | held at the checkpoint, answered in the inbox |
 | refused | an ask made through the shell: the checkpoint puts it back | a hold declined or unanswered: the checkpoint puts it back |
 | How the agent hears | `additionalContext` beside the call's result | the same |
 | Its sessions' commands carry | `CLAUDE_CODE_CHILD_SESSION=1` | `CODEX_THREAD_ID` |
@@ -248,7 +247,7 @@ The judge's whole set is its hooks on `SessionStart`, `PreToolUse`, `PostToolUse
 - **`lup_project.py`** declares `asks="protected"`, the test roots `packages/*/tests`, `runtime-mention` added back, the library's front door exempt from it and the catalog from `constant-home`, and `LupDevelopment`, which builds the engine before the gate's first step and protects `lup_dev/catalog/**`.
 - **The judge's own source** beyond the catalog isn't asked about at each edit: the judge that runs is the installed copy, so an edit in a worktree can't change what judges it, nor a broken judge in a worktree refuse its own fix. The operator reads what changed in it once, through trust on launch, before it runs (`docs/launch.md`, *Trust on launch*).
 
-**Checking it live,** once the operator has approved `dev`'s tip (`uv run lup-dev trust` in the `dev` checkout, from their own terminal): in a launched session, ask the agent to add `import re` to an existing module (allowed, the `regex` finding told after it), to write a docs file (allowed without a prompt), and to edit `pyproject.toml` (asked in Claude Code's prompt, or held on Codex until `lup-dev holds` answers). `lup-dev verdicts` shows them.
+**Checking it live,** once the operator has approved `dev`'s tip (`uv run lup-dev trust` in the `dev` checkout, from their own terminal): in a launched session, ask the agent to add `import re` to an existing module (allowed, the `regex` finding told after it), to write a docs file (allowed without a prompt), and to edit `pyproject.toml` (held, the agent waiting, until the operator answers its item in the inbox). `lup-dev verdicts` shows them.
 
 ### Where things live
 

@@ -10,8 +10,9 @@
 
 Codex has no file tools that say what they'll write before they write it: its
 `apply_patch` is judged at the checkpoint, like a command. Its `PreToolUse` can't
-ask, so an ask is held at the checkpoint, the agent waiting inside the hook until
-the operator answers from a terminal (`lup-dev holds`). The agent hears a
+ask, so an ask is held at the checkpoint, as on every runtime, the agent waiting
+inside the hook until the operator answers the item it is in their inbox. The
+agent hears a
 checkpoint's report as `additionalContext` beside the call's result, and the result
 reaches it untouched.
 
@@ -235,10 +236,6 @@ class Codex(Runtime):
     @override
     def name(self) -> str:
         return "codex"
-
-    @override
-    def asks_before(self) -> bool:
-        return False
 
     @override
     def inside(self) -> bool:

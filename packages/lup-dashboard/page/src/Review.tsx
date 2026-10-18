@@ -394,7 +394,12 @@ export function Review({ items, draft, change, banner, around, send, approve, co
                 items,
                 (item, later) => `━━ ${banner(item)}${later ? " · later" : ""} ━━`,
                 (item, later) => {
-                    const what = item.reason.reason === "message" ? item.reason.kind : item.reason.reason;
+                    const what =
+                        item.reason.reason === "message"
+                            ? item.reason.kind
+                            : item.reason.reason === "held"
+                              ? "held change"
+                              : item.reason.reason;
                     return `── #${item.number} ${what} · ${when(item.made)}${later ? " · later" : ""} ──`;
                 },
                 draft,
@@ -628,7 +633,8 @@ export function Review({ items, draft, change, banner, around, send, approve, co
         },
         approve: (approved) => {
             const region = here();
-            if (region?.item.reason.reason === "approval") {
+            const reason = region?.item.reason.reason;
+            if (region !== undefined && (reason === "approval" || reason === "held")) {
                 approve(region.item.number, approved);
             }
         },

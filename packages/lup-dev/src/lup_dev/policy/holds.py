@@ -1,11 +1,13 @@
 """Holds: a change waiting inside the hook for the operator's answer.
 
-On a runtime that can't ask before a call, an ask is held at the checkpoint: the
-agent waits inside the hook while the operator answers with `lup-dev holds approve
-<key>` or `lup-dev holds decline <key> --comment …` (`docs/judging-writes.md`,
-*Asking the operator*). A decline puts the change back and saves it, with the
-comment beside it; an approval with a comment passes the comment on. Unanswered
-within the patience, the change is put back and saved, and the hold stays open.
+A change that asks is held: the agent waits inside the hook, a file tool's write
+before it lands and anything else at the checkpoint, while the operator answers
+the item it is in their inbox (`Announcing`), in the dashboard's review or with
+`lup-dev inbox answer`, the answer written back to the hold (`answer`)
+(`docs/judging-writes.md`, *Asking the operator*). A decline puts the change
+back, or never lets it land, and saves it, with the comment beside it; an
+approval with a comment passes the comment on. Unanswered within the patience,
+the change is put back and saved, and the hold stays open.
 
 What a move of `HEAD` asks is already committed, and isn't put back, so on every
 runtime it's kept as a hold no agent waits on, with the commit it came from
@@ -19,14 +21,19 @@ agent; the real separation comes with containers.
 """
 
 import secrets
+from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, override
 
 from lup.types import Model
+from lup_dev.clock import Clock
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git
-from lup_dev.layout import Layout, StoreLayout
+from lup_dev.host.client import Detached, HostClient
+from lup_dev.inbox.protocol import AskHold, Shown
+from lup_dev.inbox.store import Conversation, HeldChange
+from lup_dev.layout import HostLayout, Layout, StoreLayout
 from lup_dev.policy.roles import Role
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.stored import read_model, write_model
@@ -34,7 +41,6 @@ from lup_dev.stored import read_model, write_model
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from lup_dev.clock import Clock
     from lup_dev.policy.runtime import Runtime
 
 
@@ -93,6 +99,50 @@ class Hold(Model):
     def waited(self) -> bool:
         """Say whether an agent waits inside its hook for the answer."""
         return self.commit is None and not self.abandoned
+
+
+class Announcing(ABC):
+    """Where a hold is put before the operator: their inbox, whose answer is written back to the hold (`answer`)."""
+
+    @abstractmethod
+    def announced(self, hold: Hold, runtime: str, repository: Path) -> None:
+        """Put `hold` before the operator, from the session of `runtime` that made the change, in `repository`."""
+
+
+def asked(hold: Hold) -> HeldChange:
+    """Return what a hold asks the operator, as an item of their inbox: let the change land, or keep what a commit brought, and what each file asks."""
+    paths = [str(each.path) for each in hold.files]
+    named = paths[0] if len(paths) == 1 else f"{len(paths)} files"
+    text = (
+        f"Keep what commit {hold.commit} brought to {named}?"
+        if hold.commit is not None
+        else f"Let the change to {named} land?"
+    )
+    summary = "\n".join(
+        f"{each.path}: {ask}" for each in hold.files for ask in each.asks
+    )
+    return HeldChange(
+        text=text,
+        summary=summary,
+        worktree=hold.worktree,
+        key=hold.key,
+        commit=hold.commit,
+    )
+
+
+class InboxAnnouncing(Model, Announcing, arbitrary_types_allowed=True):
+    """Holds put in the operator's inbox through the host service, which writes their answer back."""
+
+    layout: HostLayout
+    clock: Clock
+
+    @override
+    def announced(self, hold: Hold, runtime: str, repository: Path) -> None:
+        sender = Conversation(
+            repository=repository, runtime=runtime, session=hold.session
+        )
+        host = HostClient(layout=self.layout, clock=self.clock, starter=Detached())
+        host.ask(AskHold(change=asked(hold), sender=sender, diff=hold.diff), Shown)
 
 
 def answered(

@@ -8,7 +8,6 @@ from lup_dev.policy.report import (
     Moved,
     MovedFile,
     Refused,
-    asked,
     information,
     moved,
     refusal,
@@ -118,8 +117,9 @@ def test_a_declined_or_unanswered_hold() -> None:
     silent = Refused(path=PATH, saved=Path("s"), new=True, declined="")
     assert "  The operator declined it." in refusal([silent])
     unanswered = Refused(path=PATH, saved=Path("s"), new=True, unanswered=True)
-    assert "Nobody answered in time; the hold stays open (`lup-dev holds`)." in refusal(
-        [unanswered]
+    assert (
+        "Nobody answered in time; the hold stays open in the operator's inbox."
+        in refusal([unanswered])
     )
 
 
@@ -175,14 +175,6 @@ def test_what_doesnt_hold_the_turns_end() -> None:
     assert "they fail the gate until cleared" in unheld(left, "repeated")
 
 
-def test_what_is_asked() -> None:
-    asks = [
-        Ask(kind="new-file", reason="a is new"),
-        Ask(kind="public-api", reason="a adds the class `B`"),
-    ]
-    assert asked(asks) == "lup asks: a is new; a adds the class `B`"
-
-
 def test_a_move_of_head_is_told_as_its_commits() -> None:
     told = moved(
         [
@@ -208,8 +200,8 @@ def test_a_move_of_head_is_told_as_its_commits() -> None:
         "  /work/lup/src/lup/claude.py:3:1 - regex: uses re\n"
         "  asks: /work/lup/src/lup/claude.py is new\n"
         "lup's findings in them fail the gate: fix them in a later commit.\n"
-        "The operator is asked about the rest after the fact "
-        "(hold ab12cd, `lup-dev holds`)."
+        "The operator is asked about the rest after the fact, in their inbox "
+        "(hold ab12cd)."
     )
     quiet = Moved(worktree=ROOT, head="1a2b3c", files=[MovedFile(path=PATH)])
     assert moved([quiet]) == ""

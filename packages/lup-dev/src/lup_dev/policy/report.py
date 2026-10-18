@@ -92,7 +92,7 @@ def refusal(refused: list[Refused]) -> str:
             [f"  The operator declined it{comment}"] if one.declined is not None else []
         )
         unanswered = (
-            ["  Nobody answered in time; the hold stays open (`lup-dev holds`)."]
+            ["  Nobody answered in time; the hold stays open in the operator's inbox."]
             if one.unanswered
             else []
         )
@@ -236,8 +236,8 @@ def moved(moves: list[Moved]) -> str:
         asked = (
             [
                 (
-                    "The operator is asked about the rest after the fact "
-                    f"(hold {move.hold}, `lup-dev holds`)."
+                    "The operator is asked about the rest after the fact, in their "
+                    f"inbox (hold {move.hold})."
                 )
             ]
             if move.hold
@@ -298,15 +298,6 @@ def unheld(findings: list[Finding], why: Literal["working", "repeated"]) -> str:
     return "\n".join(
         [header, *(line for found in findings for line in finding_lines(found))]
     )
-
-
-def asked(asks: list[Ask]) -> str:
-    """Say what a change asks the operator, for the runtime's prompt.
-
-    >>> asked([Ask(kind="new-file", reason="src/a.py is a new production file")])
-    'lup asks: src/a.py is a new production file'
-    """
-    return f"lup asks: {'; '.join(ask.reason for ask in asks)}"
 
 
 def judge_failed(failure: Exception) -> str:

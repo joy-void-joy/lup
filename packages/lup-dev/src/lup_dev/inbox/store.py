@@ -157,6 +157,27 @@ class Approval(Model):
     approval waiting for it."""
 
 
+class HeldChange(Model):
+    """A change held for the operator's answer, yes or no: what's held and why, its diff kept beside the item (`Inbox.diff`).
+
+    The judge's (`lup_dev.policy.holds`): a write that asks waits for the
+    answer inside its hook, or, for what a move of `HEAD` brought, is asked
+    after the fact, no agent waiting.
+    """
+
+    reason: Literal["held"] = "held"
+    text: str
+    """The question, answered yes or no: let the change land?"""
+    summary: str
+    """Each file held, and what it asks."""
+    worktree: Path
+    key: str
+    """The hold's key in the worktree's store, which the answer is written to."""
+    commit: str | None = None
+    """The commit a move of `HEAD` reached, where it's asked after the fact; none
+    where an agent waits on it."""
+
+
 class Quote(Model):
     """A passage of an item the operator commented on: the text they selected, and where it is in the item as the page shows it."""
 
@@ -191,7 +212,8 @@ class Review(Model):
 
 
 type Reason = Annotated[
-    Message | Question | Answer | Approval | Review, Field(discriminator="reason")
+    Message | Question | Answer | Approval | HeldChange | Review,
+    Field(discriminator="reason"),
 ]
 """Why an item is there."""
 
@@ -236,11 +258,12 @@ class Done(Model):
 
 
 class Decided(Model):
-    """An approval the operator answered, wherever they answered it: yes or no."""
+    """An approval or a held change the operator answered, wherever they answered it: yes or no, and what they add."""
 
     state: Literal["decided"] = "decided"
     at: datetime
     approved: bool
+    comment: str = ""
 
 
 class Superseded(Model):

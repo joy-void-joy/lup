@@ -3,8 +3,9 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup_dev.policy.before import Overwrite, Replacement, before
+from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import Session, SessionStarted
+from lup_dev.policy.holds import Holds, Response
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.policy.worktrees import Place, place
 from lup_dev.stored import read_model
@@ -74,16 +75,57 @@ def test_an_edit_with_a_finding_is_allowed_and_remembered_for_its_checkpoint(
     assert not (repo / ".lup" / "saved").exists()
 
 
-def test_a_whole_write_over_an_existing_file_asks(kit: Kit, repo: Path) -> None:
+def test_a_write_that_asks_is_held_for_the_operator_and_let_through_on_a_yes(
+    kit: Kit, repo: Path
+) -> None:
     write = Overwrite(
         call="w1", tool="Write", path=repo / CORE, text=(repo / CORE).read_text() + "\n"
     )
     decision = before(kit.bench, write, "s1", repo)
-    assert decision.outcome == "ask"
-    assert (
-        decision.reason
-        == f"lup asks: the write replaces the whole of {repo}/src/pkg/core.py"
+    [hold] = kit.announced.holds
+    assert decision == Decision(outcome="allow")
+    assert [each.asks for each in hold.files] == [
+        [f"the write replaces the whole of {repo}/src/pkg/core.py"]
+    ]
+    assert hold.diff.startswith("--- a/src/pkg/core.py\n+++ b/src/pkg/core.py\n")
+    assert kit.announced.runtimes == ["asking"]
+    session = read_model(kit.layout.store(repo).session("s1"), Session)
+    assert session is not None
+    assert [(each.path, each.asked) for each in session.pending] == [(CORE, True)]
+
+
+def test_a_held_write_declined_never_lands_its_version_saved_the_comment_told(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.answering = Response(approved=False, comment="use the other module")
+    original = (repo / CORE).read_text()
+    write = Overwrite(call="w1", tool="Write", path=repo / CORE, text=original + "\n")
+    decision = before(kit.bench, write, "s1", repo)
+    saved = repo / ".lup/saved/1/src/pkg/core.py"
+    assert decision.outcome == "deny"
+    assert decision.reason == (
+        "lup refused 1 file. It is unchanged; your version is saved.\n\n"
+        f"{repo}/src/pkg/core.py (saved at {saved})\n"
+        "  The operator declined it: use the other module"
     )
+    assert saved.read_text() == original + "\n"
+    assert (repo / CORE).read_text() == original
+
+
+def test_a_held_write_left_unanswered_is_denied_and_its_hold_stays_open(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.answering = None
+    write = Overwrite(
+        call="w1", tool="Write", path=repo / CORE, text=(repo / CORE).read_text() + "\n"
+    )
+    decision = before(kit.bench, write, "s1", repo)
+    [hold] = kit.announced.holds
+    assert decision.outcome == "deny"
+    assert "Nobody answered in time" in decision.reason
+    kept = Holds(layout=kit.layout.store(repo)).get(hold.key)
+    assert kept is not None
+    assert kept.abandoned
 
 
 def test_writes_outside_the_repository_arent_judged(
@@ -135,10 +177,11 @@ def test_the_edit_is_judged_against_the_accepted_state(kit: Kit, repo: Path) -> 
         '"""Made by a command not yet judged."""\n'
     )
     edit = replace(repo, "Made by", "Written by", path=Path("src/pkg/sneaked.py"))
-    decision = before(kit.bench, edit, "s1", repo)
-    assert decision.reason == (
-        f"lup asks: {repo}/src/pkg/sneaked.py is a new production file"
-    )
+    before(kit.bench, edit, "s1", repo)
+    [hold] = kit.announced.holds
+    assert [each.asks for each in hold.files] == [
+        [f"{repo}/src/pkg/sneaked.py is a new production file"]
+    ]
 
 
 def test_each_edit_is_logged(kit: Kit, repo: Path) -> None:

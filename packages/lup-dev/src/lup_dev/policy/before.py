@@ -1,17 +1,20 @@
 """A file tool's write before it lands: the would-be content, then the judgement.
 
 Where a runtime's file tools say what they'll write before they write it, lup
-judges that content and answers allow or ask before anything touches the file
-(`docs/judging-writes.md`, *Before an edit lands*). A tool's call is one of two
-proposals, in lup's own words:
+judges that content before anything touches the file (`docs/judging-writes.md`,
+*Before an edit lands*): it's allowed, or, where it asks, held, the call waiting
+in its hook for the operator's answer to the item it is in their inbox, and let
+through or denied with it. A tool's call is one of two proposals, in lup's own
+words:
 - a replacement: the current file with one string replaced by another, once, or
   everywhere;
 - a whole write: the content it carries.
 
 A replacement whose string isn't there exactly as the tool requires is allowed:
-the tool fails on its own. A write is remembered until its call finishes, so the
-checkpoint after it accepts that content as already judged, and tells its
-findings.
+the tool fails on its own. A write let through is remembered until its call
+finishes, so the checkpoint after it accepts that content as already judged, and
+tells its findings; one declined, or left unanswered, never lands, and the
+agent's version is saved.
 
 A write is judged in the worktree of the session's repository its path is in,
 which the session then holds; a write in the repository's own git directory
@@ -19,6 +22,7 @@ asks, since what's there runs outside the agent's reach; a write anywhere else
 isn't judged here.
 """
 
+import difflib
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Literal, override
@@ -33,9 +37,9 @@ from lup_dev.policy.checkpoint import (
     holding,
     verdict,
 )
+from lup_dev.policy.holds import HeldFile, Hold, answered
 from lup_dev.policy.judge import Ask, Change, Judgement
-from lup_dev.policy.report import asked
-from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.policy.report import Refused, refusal
 from lup_dev.policy.worktrees import place
 
 
@@ -107,10 +111,11 @@ class Overwrite(Proposal):
 class Decision(Model):
     """What lup answers before a file tool's call runs."""
 
-    outcome: Literal["allow", "ask"] | None
+    outcome: Literal["allow", "deny"] | None
     """None where lup doesn't judge the call, which the runtime then decides."""
     reason: str = ""
-    """What's asked; empty for an allow."""
+    """Why a write is denied, or what the operator added to letting it through;
+    empty for a plain allow."""
 
 
 def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decision:
@@ -129,9 +134,10 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
         return Decision(outcome="allow")
     services = bench.services
     if here.worktree is None:
+        written = here.repository / here.path
         reason = (
-            f"{here.repository / here.path} is in the repository's git directory, "
-            "which runs outside the agent's reach"
+            f"{written} is in the repository's git directory, which runs outside "
+            "the agent's reach"
         )
         judgement = Judgement(
             path=here.path,
@@ -139,11 +145,27 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
             outcome="ask",
             asks=[Ask(kind="protected", reason=reason)],
         )
-        to = Attributed(worktree=here.repository, session=session, tool=proposal.tool)
-        VerdictLog(path=services.layout.verdicts(here.repository)).append(
-            [verdict(bench, to, judgement)]
+        home = place(cwd)
+        if home is None or home.worktree is None:
+            return Decision(
+                outcome="deny",
+                reason=(
+                    f"{reason}: lup holds such a write for the operator in the "
+                    "worktree a session works in, and this one works in none"
+                ),
+            )
+        keeping = Worktree.of(home.worktree, held.repository, services)
+        earlier = disk.read_text() if disk.is_file() else None
+        return held_write(
+            bench,
+            keeping,
+            session=session,
+            proposal=proposal,
+            earlier=earlier,
+            after=after,
+            judgement=judgement,
+            outside=here.repository,
         )
-        return Decision(outcome="ask", reason=asked(judgement.asks))
     worktree = Worktree.of(here.worktree, held.repository, services)
     path = here.path
     store = worktree.store
@@ -162,19 +184,130 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
         judge = worktree.judge(services, record.approved)
         judgement = judge.judge([change], inform=False)[0]
         to = Attributed(worktree=worktree.root, session=session, tool=proposal.tool)
-        logged = verdict(bench, to, judgement)
-        outcome = judgement.outcome
-        pending = Pending(
-            call=proposal.call,
-            path=path,
-            blob=store.keep(after.encode()),
-            asked=outcome == "ask",
-            verdict=logged,
-            removed=judgement.removed,
+        logged = None if judgement.outcome == "ask" else verdict(bench, to, judgement)
+        if logged is not None:
+            pending = Pending(
+                call=proposal.call,
+                path=path,
+                blob=store.keep(after.encode()),
+                asked=False,
+                verdict=logged,
+                removed=judgement.removed,
+            )
+            record.pending = [*record.pending, pending]
+            worktree.keep(record)
+    if logged is None:
+        return held_write(
+            bench,
+            worktree,
+            session=session,
+            proposal=proposal,
+            earlier=change.before,
+            after=after,
+            judgement=judgement,
         )
-        record.pending = [*record.pending, pending]
-        worktree.keep(record)
-        reason = asked(judgement.asks) if outcome == "ask" else ""
-        decision = Decision(outcome=outcome, reason=reason)
     worktree.verdicts(services.layout).append([logged])
-    return decision
+    return Decision(outcome="allow")
+
+
+def held_write(
+    bench: Bench,
+    worktree: Worktree,
+    *,
+    session: str,
+    proposal: Proposal,
+    earlier: str | None,
+    after: str,
+    judgement: Judgement,
+    outside: Path | None = None,
+) -> Decision:
+    """Hold a write that asks before it lands, the call waiting in its hook, and answer as the operator does.
+
+    The hold is kept in `worktree`'s store and put in the operator's inbox
+    (`Announcing`); no lock is held while it waits. A write `outside` the
+    worktree, in its repository's git directory, is kept in the store of the
+    worktree the session works in, its verdict the git directory's, and is no
+    write of that worktree's once let through. Approved, the write is let
+    through, the approval covering the path for the rest of the session as an
+    asked call that ran does (`confirm`), and their comment told; declined, or
+    left unanswered within the patience, it's denied, and the agent's version
+    saved, the hold staying open where nobody answered.
+    """
+    services = bench.services
+    store = worktree.store
+    holds = worktree.holds()
+    path = judgement.path
+    where = worktree.root if outside is None else outside
+    to = Attributed(worktree=where, session=session, tool=proposal.tool)
+    with worktree.lock():
+        key = holds.unused()
+        logged = verdict(bench, to, judgement, key)
+        held = HeldFile(
+            path=path,
+            role=judgement.role,
+            blob=store.keep(after.encode()),
+            reasons=[ask.kind for ask in judgement.asks],
+            asks=[ask.reason for ask in judgement.asks],
+        )
+        hold = holds.put(
+            Hold(
+                key=key,
+                worktree=worktree.root,
+                session=session,
+                created=services.clock.now(),
+                files=[held],
+                diff=unified(path, earlier, after),
+                verdicts=[logged],
+            )
+        )
+    log = worktree.verdicts(services.layout)
+    log.append([logged])
+    services.announcing.announced(hold, bench.runtime.name(), worktree.repository)
+    answer = holds.wait(key, services.clock)
+    if answer is not None and answer.approved and outside is not None:
+        log.append(answered(hold, "approved"))
+        said = f"The operator approved it: {answer.comment}" if answer.comment else ""
+        return Decision(outcome="allow", reason=said)
+    if answer is not None and answer.approved:
+        with worktree.lock():
+            record = worktree.session(session, bench.runtime)
+            pending = Pending(
+                call=proposal.call,
+                path=path,
+                blob=held.blob,
+                asked=True,
+                verdict=logged,
+                removed=judgement.removed,
+            )
+            record.pending = [*record.pending, pending]
+            worktree.keep(record)
+        said = f"The operator approved it: {answer.comment}" if answer.comment else ""
+        return Decision(outcome="allow", reason=said)
+    with worktree.lock():
+        state = store.state()
+        number = state.saved + 1
+        saved = store.save(number, path, after.encode())
+        state.saved = number
+        store.remember(state)
+    if answer is None:
+        holds.mark(key, abandoned=True)
+    log.append(answered(hold, "unanswered" if answer is None else "declined"))
+    refused = Refused(
+        path=where / path,
+        saved=saved,
+        new=earlier is None,
+        declined=None if answer is None else answer.comment,
+        unanswered=answer is None,
+    )
+    return Decision(outcome="deny", reason=refusal([refused]))
+
+
+def unified(path: Path, before: str | None, after: str) -> str:
+    """Show a write as a unified diff of `path`, from what it was to what it would be."""
+    lines = difflib.unified_diff(
+        (before or "").splitlines(keepends=True),
+        after.splitlines(keepends=True),
+        fromfile=f"a/{path}",
+        tofile=f"b/{path}",
+    )
+    return "".join(lines)
