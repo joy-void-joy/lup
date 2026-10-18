@@ -158,6 +158,19 @@ class ShowDiff(Request):
     number: int
 
 
+class ShowConversation(Request):
+    """Read one conversation as its runtime records it, from its step `since` on: the operator's words, the agent's, and the tools it called."""
+
+    kind: Literal["inbox-show-conversation"] = "inbox-show-conversation"
+    runtime: str
+    session: str
+    """The runtime's id for the session."""
+    agent: str | None = None
+    """The runtime's id for the subagent; none for the session's own conversation."""
+    since: int = 0
+    """How many of its steps the asker has already: only those after are sent."""
+
+
 class ShowContext(Request):
     """Read an item's moment in the conversation that sent it: what led to the call that made it, and what came after."""
 
@@ -208,6 +221,15 @@ class Whole(Reply):
 
     kind: Literal["inbox-diff"] = "inbox-diff"
     text: str
+
+
+class Conversed(Reply):
+    """A conversation's steps, from step `since` on, and how many it has in all."""
+
+    kind: Literal["inbox-conversation"] = "inbox-conversation"
+    entries: list[Entry]
+    since: int
+    total: int
 
 
 class Context(Reply):
@@ -378,6 +400,34 @@ class ContextShowing(Model, Handler[ShowContext], arbitrary_types_allowed=True):
         return Context(number=item.number, entries=found.entries, anchor=found.anchor)
 
 
+class ConversationShowing(
+    Model, Handler[ShowConversation], arbitrary_types_allowed=True
+):
+    """Answers `ShowConversation`: the steps of one conversation's record after those the asker has, each record read again only once it changed."""
+
+    recorded: dict[str, Recorded]
+    """Each runtime's records on this machine, and how they're read, by its name."""
+    recording: context.Recording = context.Recording()
+
+    @override
+    def request(self) -> type[ShowConversation]:
+        return ShowConversation
+
+    @override
+    async def answer(self, request: ShowConversation) -> Reply:
+        read = await asyncio.to_thread(
+            self.recording.read,
+            self.recorded,
+            request.runtime,
+            request.session,
+            request.agent,
+        )
+        steps = read.transcript.entries
+        return Conversed(
+            entries=steps[request.since :], since=request.since, total=len(steps)
+        )
+
+
 class DiffShowing(Model, Handler[ShowDiff], arbitrary_types_allowed=True):
     """Answers `ShowDiff`: the approval's whole diff."""
 
@@ -449,6 +499,7 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.to(HoldAsking(delivery=delivery)),
         Route.to(DiffShowing(delivery=delivery)),
         Route.to(ContextShowing(delivery=delivery, recorded=recorded)),
+        Route.to(ConversationShowing(recorded=recorded)),
         Route.to(DraftShowing(delivery=delivery)),
         Route.to(DraftKeeping(delivery=delivery)),
         Route.to(DraftSending(delivery=delivery)),

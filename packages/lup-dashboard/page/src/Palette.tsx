@@ -1,5 +1,6 @@
 // The command palette: every place the page can go and everything it can do,
-// typed for. Ctrl+K opens it, Escape closes it.
+// typed for: the review, and each agent's conversation. Ctrl+K opens it, Escape
+// closes it.
 import { Command } from "cmdk";
 import { useEffect } from "react";
 
@@ -10,10 +11,13 @@ interface Props {
     setOpen: (open: boolean) => void;
     agents: Agent[];
     select: (key: string) => void;
+    /** Bring the review back, and how many items wait in it. */
+    review: () => void;
+    waiting: number;
     now: Date;
 }
 
-export function Palette({ open, setOpen, agents, select, now }: Props) {
+export function Palette({ open, setOpen, agents, select, review, waiting, now }: Props) {
     useEffect(() => {
         function pressed(event: KeyboardEvent) {
             if (event.key === "k" && (event.ctrlKey || event.metaKey)) {
@@ -35,6 +39,18 @@ export function Palette({ open, setOpen, agents, select, now }: Props) {
             <Command.Input placeholder="Go to an agent…" />
             <Command.List>
                 <Command.Empty>Nothing matches.</Command.Empty>
+                <Command.Group heading="Go to">
+                    <Command.Item
+                        value="review waiting on you"
+                        onSelect={() => {
+                            review();
+                            setOpen(false);
+                        }}
+                    >
+                        <span className="mono">the review</span>
+                        <span className="state">{waiting} waiting on you</span>
+                    </Command.Item>
+                </Command.Group>
                 <Command.Group heading="Agents">
                     {agents.map((agent) => (
                         <Command.Item

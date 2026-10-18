@@ -43,6 +43,7 @@ from lup_dev.inbox.delivery import Delivery, opening
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.protocol import (
     Context,
+    Conversed,
     Drafted,
     Items,
     KeepDraft,
@@ -50,6 +51,7 @@ from lup_dev.inbox.protocol import (
     Reviewed,
     SendDraft,
     ShowContext,
+    ShowConversation,
     ShowDraft,
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
@@ -1835,6 +1837,61 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
     )
     assert isinstance(state, Decided)
     assert state.comment == "not this one"
+
+
+def test_a_conversation_is_read_from_its_record_from_where_the_asker_left_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    home = tmp_path / "claude"
+    folder = home / "projects" / "-w"
+    (folder / "s1" / "subagents").mkdir(parents=True)
+
+    def line(**fields: object) -> str:
+        return json.dumps({"timestamp": "2026-10-17T12:00:00.000Z", **fields})
+
+    def human(text: str) -> str:
+        return line(
+            type="user",
+            origin={"kind": "human"},
+            message={"role": "user", "content": text},
+        )
+
+    def agent(*blocks: dict[str, object]) -> str:
+        return line(
+            type="assistant", message={"role": "assistant", "content": list(blocks)}
+        )
+
+    record = folder / "s1.jsonl"
+    record.write_text(
+        "\n".join([human("Go."), agent({"type": "text", "text": "Going."})]) + "\n"
+    )
+    recorded = {
+        "claude": Recorded(
+            records=ClaudeRecords(directory=home), reader=ClaudeTranscripts()
+        )
+    }
+    with inboxed(machine, clock, notices, said, recorded):
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        first = host.ask(ShowConversation(runtime="claude", session="s1"), Conversed)
+        with record.open("a") as grown:
+            grown.write(
+                agent({"type": "tool_use", "id": "b1", "name": "Bash", "input": {}})
+                + "\n"
+            )
+        after = host.ask(
+            ShowConversation(runtime="claude", session="s1", since=first.total),
+            Conversed,
+        )
+        with pytest.raises(HostError) as missing:
+            host.ask(ShowConversation(runtime="claude", session="s9"), Conversed)
+    when = datetime(2026, 10, 17, 12, tzinfo=UTC)
+    assert first.entries == [
+        Said(by="operator", text="Go.", at=when),
+        Said(by="agent", text="Going.", at=when),
+    ]
+    assert (after.since, after.total) == (2, 3)
+    assert after.entries == [Called(tool="Bash", id="b1", at=when)]
+    assert str(missing.value) == "the record of claude session s9 isn't on this machine"
 
 
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(

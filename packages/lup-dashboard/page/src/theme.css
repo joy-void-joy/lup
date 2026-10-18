@@ -68,12 +68,12 @@ textarea {
 }
 
 /* Insert mode's cursor: a bar in the text's colour, which the dark background would otherwise hide. */
-.review-buffer .cm-cursor {
+.buffer .cm-cursor {
     border-left: 2px solid var(--fg);
 }
 
 /* A group's banner: the agent its items are from, and where. */
-.review-buffer .review-banner {
+.buffer .review-banner {
     color: var(--cyan);
     font-weight: 700;
     padding-top: 0.4em;
@@ -83,7 +83,7 @@ textarea {
     color: var(--warn);
 }
 
-.review-buffer .cm-content ::selection {
+.buffer .cm-content ::selection {
     color: inherit;
 }
 
@@ -365,13 +365,23 @@ kbd {
     overflow: auto;
 }
 
-.wb .all {
-    margin-left: auto;
+/* The way back to the review, from a conversation's title bar. */
+.wb .crumb {
     border: 0;
     background: none;
+    padding: 0;
     color: var(--link);
     cursor: pointer;
-    font-weight: 400;
+    font-weight: 700;
+}
+
+/* A pane kept while another is shown in its place: the review, while a conversation is open. */
+[hidden] {
+    display: none !important;
+}
+
+.status .error {
+    color: var(--err);
 }
 
 .bar .said {
@@ -386,13 +396,13 @@ kbd {
     min-height: 0;
 }
 
-.review-buffer {
+.buffer {
     flex: 1;
     min-height: 0;
     overflow: hidden;
 }
 
-.review-buffer .cm-editor {
+.buffer .cm-editor {
     height: 100%;
     background: var(--bg);
     color: var(--fg);
@@ -400,32 +410,32 @@ kbd {
     font-size: var(--fs);
 }
 
-.review-buffer .cm-editor.cm-focused {
+.buffer .cm-editor.cm-focused {
     outline: none;
 }
 
-.review-buffer .cm-scroller {
+.buffer .cm-scroller {
     font-family: var(--mono);
     line-height: var(--lh);
 }
 
-.review-buffer .cm-content {
+.buffer .cm-content {
     padding: 0 1ch;
     caret-color: var(--focus);
 }
 
-.review-buffer .cm-fat-cursor {
+.buffer .cm-fat-cursor {
     background: var(--focus) !important;
     color: var(--bg) !important;
 }
 
-.review-buffer .cm-selectionBackground,
-.review-buffer .cm-editor.cm-focused .cm-selectionBackground,
-.review-buffer .cm-selectionLayer .cm-selectionBackground {
+.buffer .cm-selectionBackground,
+.buffer .cm-editor.cm-focused .cm-selectionBackground,
+.buffer .cm-selectionLayer .cm-selectionBackground {
     background: var(--selection) !important;
 }
 
-.review-buffer .cm-panels {
+.buffer .cm-panels {
     background: var(--float-bg);
     color: var(--fg);
     border-top: 1px solid var(--border);
@@ -570,19 +580,19 @@ kbd {
 /* What's under an item that isn't its own text: its context and an approval's
    whole diff, each folded under its summary line, which reads ▸ while folded
    and ▾ while open; the lines it holds set in under it. */
-.review-buffer .cm-line.aside-summary {
+.buffer .cm-line.aside-summary {
     color: var(--muted);
 }
 
-.review-buffer .cm-line.aside-summary::before {
+.buffer .cm-line.aside-summary::before {
     content: "▾ ";
 }
 
-.review-buffer .cm-line.aside-summary:has(.cm-foldPlaceholder)::before {
+.buffer .cm-line.aside-summary:has(.cm-foldPlaceholder)::before {
     content: "▸ ";
 }
 
-.review-buffer .cm-editor .cm-foldPlaceholder {
+.buffer .cm-editor .cm-foldPlaceholder {
     background: none;
     border: 0;
     margin: 0 0 0 1ch;
@@ -590,7 +600,7 @@ kbd {
     color: var(--muted);
 }
 
-.review-buffer .cm-line.aside-under {
+.buffer .cm-line.aside-under {
     padding-left: calc(6px + 2ch);
 }
 
@@ -604,6 +614,17 @@ kbd {
 }
 
 .aside-anchor {
+    color: var(--orange);
+    font-weight: 700;
+}
+
+/* A conversation's lines: a message the operator sent it through lup, and the line their message is under. */
+.aside-sent {
+    color: var(--info);
+    border-left: 2px solid var(--info);
+}
+
+.aside-message {
     color: var(--orange);
     font-weight: 700;
 }
