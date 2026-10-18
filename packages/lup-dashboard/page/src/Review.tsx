@@ -9,7 +9,8 @@ import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef } from "react";
 
-import { folding, rebuilt, uncovered, useEditor, type Landing } from "./editor";
+import { changes, moved } from "./comments";
+import { rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import {
     foldKey,
     laid,
@@ -188,17 +189,28 @@ export function Review({ items, draft, change, banner, around, send, approve, co
             return;
         }
         const arriving = landing.current;
-        if (current.state.doc.toString() !== laidOut.text) {
-            // Replacing the text drops every fold; each the operator hasn't opened is folded again with it.
-            const head = followed(before.current, laidOut, current.state.selection.main.head, arriving);
+        const doc = current.state.doc.toString();
+        if (doc !== laidOut.text) {
+            // Changed line by line, so what the operator reads stays where it is as items come and go
+            // above it: the cursor moves with its text, and the view only follows a landing of their own.
+            const head = current.state.selection.main.head;
+            const made = changes(doc, laidOut.text);
+            const anchor =
+                arriving === null ? moved(head, made, doc.length) : followed(before.current, laidOut, head, arriving);
             const closed = laidFor.folds.filter((each) => !unfolded.current.has(each.key));
+            // Where the view is, anchored to the text at its top and mapped through the changes.
+            const changing = current.state.changes(made);
+            const kept = current.scrollSnapshot().map(changing);
             current.dispatch({
-                changes: { from: 0, to: current.state.doc.length, insert: laidOut.text },
-                selection: { anchor: uncovered(closed, head) },
-                effects: closed.map((each) => folding(each, true)),
-                scrollIntoView: true,
+                changes: changing,
+                selection: { anchor: uncovered(closed, anchor) },
+                scrollIntoView: arriving !== null,
                 annotations: rebuilt.of(true),
             });
+            refold(current, laidFor.folds, unfolded.current);
+            if (arriving === null && kept !== undefined) {
+                current.dispatch({ effects: kept });
+            }
         }
         before.current = laidOut;
         landing.current = null;

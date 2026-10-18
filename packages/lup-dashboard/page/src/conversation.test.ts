@@ -5,11 +5,9 @@ import {
     UNSAID,
     aboutAt,
     blockAt,
-    changes,
     history,
     laid,
     message,
-    moved,
     opened,
     quoted,
     reading,
@@ -17,6 +15,7 @@ import {
     type Sent,
     type Talk,
 } from "./conversation";
+import { changes, moved } from "./comments";
 
 const at = (minute: number) => `2026-10-18T10:${String(minute).padStart(2, "0")}:00Z`;
 

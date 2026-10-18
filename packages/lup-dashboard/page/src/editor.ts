@@ -257,6 +257,31 @@ export function folding(fold: Span, closing: boolean): StateEffect<Span> {
     return closing ? foldEffect.of(range) : unfoldEffect.of(range);
 }
 
+/** Fold each of `folds` again as the operator left it, where the text around it changed: folded unless they opened it, its range as laid out. */
+export function refold(view: EditorView, folds: Folding[], unfolded: Set<string>): void {
+    const effects: StateEffect<Span>[] = [];
+    for (const fold of folds) {
+        let exact = false;
+        foldedRanges(view.state).between(fold.from, fold.to, (from, to) => {
+            if (from === fold.from && to === fold.to) {
+                exact = true;
+            } else if (from === fold.from) {
+                effects.push(unfoldEffect.of({ from, to }));
+            }
+        });
+        const closing = !unfolded.has(fold.key);
+        if (closing && !exact) {
+            effects.push(foldEffect.of({ from: fold.from, to: fold.to }));
+        }
+        if (!closing && exact) {
+            effects.push(unfoldEffect.of({ from: fold.from, to: fold.to }));
+        }
+    }
+    if (effects.length > 0) {
+        view.dispatch({ effects });
+    }
+}
+
 /** Return where the cursor goes once a fold closes over it: on its summary line where it was in what the fold hides, else where it was. */
 export function uncovered(closed: Folding[], head: number): number {
     return closed.find((each) => head > each.summary.to && head <= each.to)?.summary.from ?? head;

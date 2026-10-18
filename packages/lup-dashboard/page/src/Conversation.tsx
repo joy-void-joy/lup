@@ -7,22 +7,20 @@
 // their message at its end; anyone else keeps their cursor, what they see, their
 // open folds and what they're writing. Space `r` brings the review back
 // (`docs/dashboard.md`, *The conversation*).
-import { foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
-import { RangeSetBuilder, type StateEffect } from "@codemirror/state";
+import { foldedRanges } from "@codemirror/language";
+import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, type DecorationSet, type EditorView } from "@codemirror/view";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Agent, Launch } from "./agents";
 import { ask } from "./api";
-import { saying, shownIn, type Folding, type Span } from "./comments";
+import { changes, moved, saying, shownIn, type Folding, type Span } from "./comments";
 import {
     UNSAID,
     aboutAt,
-    changes,
     history,
     laid,
     message,
-    moved,
     opened,
     quoted,
     reading,
@@ -32,7 +30,7 @@ import {
     type Sent,
     type Talk,
 } from "./conversation";
-import { rebuilt, useEditor } from "./editor";
+import { rebuilt, refold, useEditor } from "./editor";
 
 interface Props {
     launch: Launch;
@@ -127,32 +125,6 @@ function inSight(view: EditorView, position: number): boolean {
     const shown = view.scrollDOM.getBoundingClientRect();
     const at = view.coordsAtPos(Math.min(position, view.state.doc.length));
     return at !== null && at.bottom > shown.top && at.top < shown.bottom;
-}
-
-/** Fold what folds again as the operator left it, where the text around it changed: folded unless they opened it. */
-function refold(view: EditorView, fold: Folding | null, unfolded: Set<string>): void {
-    if (fold === null) {
-        return;
-    }
-    const effects: StateEffect<Span>[] = [];
-    let exact = false;
-    foldedRanges(view.state).between(fold.from, fold.to, (from, to) => {
-        if (from === fold.from && to === fold.to) {
-            exact = true;
-        } else if (from === fold.from) {
-            effects.push(unfoldEffect.of({ from, to }));
-        }
-    });
-    const closing = !unfolded.has(fold.key);
-    if (closing && !exact) {
-        effects.push(foldEffect.of({ from: fold.from, to: fold.to }));
-    }
-    if (!closing && exact) {
-        effects.push(unfoldEffect.of({ from: fold.from, to: fold.to }));
-    }
-    if (effects.length > 0) {
-        view.dispatch({ effects });
-    }
 }
 
 const NOTHING: Laid = { text: "", words: [], asides: [], blocks: [], fold: null, turns: [], last: null, message: null };
@@ -295,7 +267,7 @@ export function Conversation({ launch, agent, beat, waiting, back, say }: Props)
         } else if (anchor !== undefined) {
             view.dispatch({ selection: { anchor }, scrollIntoView: true });
         }
-        refold(view, laidOut.fold, editor.unfolded.current);
+        refold(view, laidOut.fold === null ? [] : [laidOut.fold], editor.unfolded.current);
         before.current = laidOut;
         editor.landing.current = null;
         editor.draw(decorations(laidOut, talk));
