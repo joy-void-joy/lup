@@ -1,13 +1,14 @@
 // The page: every agent the host serves on the left; everything waiting for the
-// operator beside it, as one review in groups, one per agent, their reply
-// written into it, and a line saying what the reply covers and who it reaches:
-// every agent it covers, each getting all of it. Selecting an agent opens its
+// operator beside it, as one review in groups, one per agent, every agent
+// running having one, their reply written into it, their messages to agents
+// among it, and a line saying what the reply covers and who it reaches: every
+// agent it covers or writes to, each getting all of it. Selecting an agent opens its
 // conversation in the review's place; Space `r` in it, the palette, or the
 // title bar brings the review back as it was left. Space `h` gives the keyboard
 // to the tree, and Space `l` back to the view (`AgentTree.tsx`).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { everyone, launches, type Agent, type Launch } from "./agents";
+import { everyone, launches, running, type Agent, type Launch } from "./agents";
 import { AgentTree } from "./AgentTree";
 import { ask, type Asked, type Replied } from "./api";
 import { Conversation } from "./Conversation";
@@ -19,11 +20,15 @@ import {
     answer,
     covered,
     EMPTY,
+    messages,
     pruned,
+    whose,
     type Answered,
     type ChangedFile,
     type Context,
+    type Conversation as InboxConversation,
     type Draft,
+    type Head,
     type Item,
 } from "./review";
 
@@ -73,8 +78,32 @@ export function App() {
     );
     const named = useCallback((item: Item) => called(item.sender), [called]);
 
+    // The conversations running, in the tree's order, each with its banner: the review gives each a group.
+    const live = useMemo(
+        () =>
+            running(reply?.kind === "listed" ? launches(reply) : []).map(({ launch, talker }) => {
+                const conversation: InboxConversation = {
+                    party: "conversation",
+                    repository: launch.repository,
+                    runtime: launch.runtime,
+                    session: talker.session,
+                    agent: talker.agent ?? null,
+                };
+                return { conversation, banner: [last(launch.repository), last(launch.worktree), talker.path].join(" · ") };
+            }),
+        [reply],
+    );
+    const agentsRunning = useMemo(() => live.map((each) => each.conversation), [live]);
+
     const banner = useCallback(
-        (item: Item) => {
+        (head: Head) => {
+            if ("conversation" in head) {
+                // A conversation that isn't running, written to all the same, by its runtime's ids where it isn't known.
+                const key = whose(head.conversation);
+                const found = live.find((each) => whose(each.conversation) === key);
+                return found?.banner ?? [last(head.conversation.repository), called(head.conversation)].join(" · ");
+            }
+            const item = head.item;
             const sender = item.sender;
             const repository =
                 sender.party === "conversation"
@@ -85,7 +114,7 @@ export function App() {
             const where = [repository, item.worktree ?? null].flatMap((each) => (each === null ? [] : [last(each)]));
             return [...where, sender.party === "operator" ? "lup's approvals" : named(item)].join(" · ");
         },
-        [named],
+        [named, called, live],
     );
 
     const waiting = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.items : []), [inbox.reply]);
@@ -172,7 +201,12 @@ export function App() {
         }
         keeping.current = setTimeout(() => {
             pending.current = null;
-            void ask({ kind: "inbox-keep-draft", draft: next });
+            // Refused, as a message to a conversation the host never heard of, it's said; the page keeps it to mend.
+            void ask({ kind: "inbox-keep-draft", draft: next }).then((answer) => {
+                if (answer.kind === "refused") {
+                    setSaid(answer.error);
+                }
+            });
         }, 300);
     }, []);
 
@@ -239,7 +273,12 @@ export function App() {
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
         }
-        await ask({ kind: "inbox-keep-draft", draft: pruned(draft) });
+        // What's sent is what the host keeps: a draft it refuses to keep isn't sent, lest the last one kept go instead.
+        const kept = await ask({ kind: "inbox-keep-draft", draft: pruned(draft) });
+        if (kept.kind === "refused") {
+            setSaid(kept.error);
+            return;
+        }
         const answer = await ask({ kind: "inbox-send-draft" });
         if (answer.kind === "refused") {
             setSaid(answer.error);
@@ -284,11 +323,16 @@ export function App() {
     const told = coveredItems.filter(
         (each) => !yesOrNo(each) && (commented.includes(each.number) || each.reason.reason === "question"),
     );
-    const reached = [...new Set([...told.map(named), ...pushers])];
+    // Written to: each agent a message under its banner is for, which the reply reaches whatever it covers.
+    const letters = messages(draft);
+    const writtenTo = [...new Set(letters.map((each) => called(each.to)))];
+    const reached = [...new Set([...writtenTo, ...told.map(named), ...pushers])];
     const onMessages = commented.filter((number) => told.some((each) => each.number === number));
     const read = coveredItems.filter((each) => !yesOrNo(each) && !commented.includes(each.number)).map((each) => each.number);
     const hashed = (list: number[]) => list.map((each) => `#${each}`).join(", ");
+    const replying = numbers.length > 0 || letters.length > 0;
     const covering = [
+        ...(writtenTo.length === 0 ? [] : [`${letters.length === 1 ? "a message" : "messages"} to ${writtenTo.join(", ")}`]),
         ...(onMessages.length === 0 ? [] : [`comments on ${hashed(onMessages)}`]),
         ...(read.length === 0 ? [] : [`read ${hashed(read)}`]),
         ...(approving.length === 0 ? [] : [`approving ${hashed(approving.map((each) => each.number))}`]),
@@ -368,12 +412,13 @@ export function App() {
                 <div className="review" hidden={selected !== null}>
                     <Review
                         items={waiting}
+                        agents={agentsRunning}
                         draft={draft}
                         change={change}
                         banner={banner}
                         around={around}
                         send={() => {
-                            if (numbers.length > 0) {
+                            if (replying) {
                                 void sent();
                             }
                         }}
@@ -386,7 +431,7 @@ export function App() {
                         now={minute}
                     />
                     <div className="status">
-                        {numbers.length === 0 ? (
+                        {!replying ? (
                             <span className="muted">No reply drafted.</span>
                         ) : (
                             <span>
@@ -410,7 +455,8 @@ export function App() {
                     ) : (
                         <div className="keys muted">
                             comment: <kbd>␣c</kbd> item · <kbd>c</kbd>+motion passage · <kbd>o</kbd>/<kbd>C</kbd> line ·{" "}
-                            <kbd>v</kbd>…<kbd>c</kbd> selection · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>␣d</kbd> read ·{" "}
+                            <kbd>v</kbd>…<kbd>c</kbd> selection · <kbd>o</kbd> on a banner: message ·{" "}
+                            <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>␣d</kbd> read ·{" "}
                             <kbd>␣z</kbd> later · <kbd>␣a</kbd>/<kbd>␣x</kbd> approve/decline · <kbd>za</kbd> fold ·{" "}
                             <kbd>zR</kbd>/<kbd>zM</kbd> unfold/fold all · <kbd>]]</kbd>/<kbd>[[</kbd> items ·{" "}
                             <kbd>]c</kbd>/<kbd>[c</kbd> lines that matter · <kbd>␣h</kbd> agents

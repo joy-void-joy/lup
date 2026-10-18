@@ -389,7 +389,7 @@ export interface Shown {
 interface Config<D, C> {
     shown: Shown;
     draft: D;
-    /** The draft's comments, in their places, and the draft with others. */
+    /** The draft's comments, in their places, and the draft with others: what's written in it in one list, whatever lists the draft keeps it in. */
     comments: (draft: D) => C[];
     withComments: (draft: D, comments: C[]) => D;
     change: (draft: D) => void;
@@ -573,10 +573,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     }
 
     function added(comment: C) {
-        const present = comments(latest.current);
-        landing.current = { comment: present.length };
+        const next = withComments(latest.current, [...comments(latest.current), comment]);
+        // Its place in the list the draft keeps, which may hold what's written in more lists than one.
+        landing.current = { comment: comments(next).indexOf(comment) };
         opener.current = keyed.from;
-        record(withComments(latest.current, [...present, comment]));
+        record(next);
         writing.current = true;
     }
 

@@ -206,18 +206,27 @@ class Comment(Model):
     text: str
 
 
-class Review(Model):
-    """The operator's reply to a conversation's items, as they wrote it while reading them: their comments on each.
+class Letter(Model):
+    """The operator's message to one conversation, written under its agent's banner in the review and sent with the rest of the reply."""
 
-    A conversation's review holds its own items and the comments on them
-    alone, though the operator wrote it beside other conversations' (`docs/dashboard.md`,
-    *The review*).
+    to: Conversation
+    text: str
+
+
+class Review(Model):
+    """The operator's reply, as they wrote it while reading: their comments on the items it covers, and their messages to agents.
+
+    Every conversation it's sent to gets all of it, reading its own message
+    and items first and the rest as context (`docs/dashboard.md`, *The
+    review*).
     """
 
     reason: Literal["review"] = "review"
     covers: list[int]
-    """The items it answers, in order."""
+    """The items it answers, in order; none where it only carries messages."""
     comments: list[Comment] = []
+    letters: list[Letter] = []
+    """The messages it carries, each to its conversation."""
 
 
 type Reason = Annotated[
@@ -511,15 +520,22 @@ class Talk(Model):
 
 
 class Draft(Model):
-    """The operator's reply as they build it while reading: their comments, the items they took off their list and the ones they parked; kept until it's sent."""
+    """The operator's reply as they build it while reading: their comments, their messages to agents, the items they took off their list and the ones they parked; kept until it's sent."""
 
     comments: list[Comment] = []
+    letters: list[Letter] = []
+    """Messages to agents, each written under its agent's banner, sent with the
+    rest of the reply whatever's parked."""
     done: list[int] = []
     """Items read and taken off the list when the draft is sent, with no
     comment of their own."""
     parked: list[int] = []
     """Items left for a later reply: what's drafted on them stays drafted when
     the rest is sent."""
+
+    def written(self) -> list[Letter]:
+        """Return the messages that say something, in order: those the draft sends."""
+        return [each for each in self.letters if each.text.strip()]
 
     def covered(self) -> list[int]:
         """Return the items the draft answers, in order: each with a comment or marked done, but for the parked ones."""

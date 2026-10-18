@@ -1,13 +1,15 @@
 // The review: everything waiting for the operator laid out as one text to read
-// and move through, their comments in it, each under the line it's on. Under an
-// approval or a held change, each file it changes, whole (`code.ts`), its lines
-// commented on as the item's own are, the lines that matter in it, by the judge's
-// reading, kept in order for the keys to walk; under each item its context.
-// What's folded by default: the context, each run of a file's unchanged lines
-// away from its changes and the lines that matter, and an automatic file whole
-// under its header. Pure: the editor (`Review.tsx`) draws it, folds it and lets
-// the comments be edited, and the host keeps the draft (`docs/dashboard.md`,
-// *The review*). What it shares with a conversation's text is in `comments.ts`.
+// and move through, in groups, one per agent, every agent running having one,
+// empty or not; their comments in it, each under the line it's on, and their
+// messages to each agent under its banner. Under an approval or a held change,
+// each file it changes, whole (`code.ts`), its lines commented on as the item's
+// own are, the lines that matter in it, by the judge's reading, kept in order for
+// the keys to walk; under each item its context. What's folded by default: the
+// context, each run of a file's unchanged lines away from its changes and the
+// lines that matter, and an automatic file whole under its header. Pure: the
+// editor (`Review.tsx`) draws it, folds it and lets the comments and messages be
+// edited, and the host keeps the draft (`docs/dashboard.md`, *The review*). What
+// it shares with a conversation's text is in `comments.ts`.
 import { since } from "./agents";
 import { shownOnce, type ChangedFile, type Matter, type Row } from "./code";
 import {
@@ -29,8 +31,13 @@ export { calls, type Block, type ChangedFile, type Line, type Span };
 export type Item = components["schemas"]["Item"];
 export type Draft = components["schemas"]["Draft"];
 export type Comment = components["schemas"]["Comment"];
+export type Letter = components["schemas"]["Letter"];
+export type Conversation = components["schemas"]["Conversation"];
 export type { Quote } from "./comments";
 export type Context = components["schemas"]["Context"];
+
+/** What the operator writes in the review, as its editor holds it: a comment on an item, or a message to an agent. */
+export type Written = Comment | Letter;
 
 /** What the host answered, asked for more of an item than its own text: what it showed, or why it refused. */
 export type Answered<T> = { shown: T } | { refused: string };
@@ -73,14 +80,27 @@ export interface Fold extends Span {
     summary: Span;
 }
 
+/** What names a group in its banner: its first item, or, for a group with none, the agent's conversation. */
+export type Head = { item: Item } | { conversation: Conversation };
+
 /**
- * One item, where it's shown: the banner of the group it opens, if it's the first of one; its header line, the lines
- * comments may be on (its own, then its files' headers and rows) with its comments among them; then the lines under
- * it, and what folds.
+ * One group, where it's shown: its banner and, unless it's of the items left for later, the messages to its agent
+ * under it, each a comment's block; its items' regions follow it, up to the next group.
+ */
+export interface Group {
+    /** The agent it's of; none for lup's approvals, which no message goes to. */
+    conversation: Conversation | null;
+    later: boolean;
+    banner: Span;
+    blocks: Block[];
+}
+
+/**
+ * One item, where it's shown: its header line, the lines comments may be on (its own, then its files' headers and
+ * rows) with its comments among them; then the lines under it, and what folds.
  */
 export interface Region {
     item: Item;
-    banner: Span | null;
     header: Span;
     lines: Line[];
     blocks: Block[];
@@ -92,13 +112,38 @@ export interface Region {
     stops: number[];
 }
 
-/** The review's text, and where each item is in it. */
+/** The review's text, and where each group and each item is in it. */
 export interface Laid {
     text: string;
+    groups: Group[];
     regions: Region[];
 }
 
-export const EMPTY: Draft = { comments: [], done: [], parked: [] };
+export const EMPTY: Draft = { comments: [], letters: [], done: [], parked: [] };
+
+/** Return what names a conversation among others: its repository, runtime, session and subagent. */
+export function whose(conversation: Conversation): string {
+    return JSON.stringify([conversation.repository, conversation.runtime, conversation.session, conversation.agent ?? null]);
+}
+
+/** Return what the operator wrote in a draft as the editor holds it, in one list: the comments, then the messages. */
+export function written(draft: Draft): Written[] {
+    return [...(draft.comments ?? []), ...(draft.letters ?? [])];
+}
+
+/** Return `draft` with `list`, as the editor holds what's written, for its comments and its messages. */
+export function withWritten(draft: Draft, list: Written[]): Draft {
+    return { ...draft, comments: list.filter(isComment), letters: list.filter(isLetter) };
+}
+
+/** Return whether what's written is a message to an agent, rather than a comment on an item. */
+export function isLetter(each: Written): each is Letter {
+    return "to" in each;
+}
+
+function isComment(each: Written): each is Comment {
+    return !isLetter(each);
+}
 
 /** Return an item's own text as the review shows it: a message's or a question's words with its decisions, an approval's question and summary. */
 export function body(item: Item): string {
@@ -119,7 +164,7 @@ export function body(item: Item): string {
         case "answer":
             return reason.comment;
         case "review":
-            return reason.comments.map((each) => each.text).join("\n");
+            return [...(reason.letters ?? []), ...reason.comments].map((each) => each.text).join("\n");
     }
 }
 
@@ -256,16 +301,40 @@ function filed(item: Item, around: Around): Filed[] {
     });
 }
 
-/** Return `items` in groups, each under its banner: the group with the newest item first, and the items in each in their own order. */
-function grouped(items: Item[], banner: (item: Item) => string): Item[][] {
-    const groups = new Map<string, Item[]>();
+/** A group as it's laid out: what names it among the others, the agent it's of, what its banner names it by, and its items. */
+interface Grouping {
+    key: string;
+    conversation: Conversation | null;
+    head: Head;
+    items: Item[];
+}
+
+/** Return `items` in groups, one per agent, and one per banner of lup's approvals: the group with the newest item first, and the items in each in their own order. */
+function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
+    const groups = new Map<string, Grouping>();
     for (const item of items) {
-        const key = banner(item);
-        groups.set(key, [...(groups.get(key) ?? []), item]);
+        const sender = item.sender;
+        const conversation = sender.party === "conversation" ? sender : null;
+        const key = conversation === null ? `lup ${banner(item)}` : whose(conversation);
+        const group = groups.get(key) ?? { key, conversation, head: { item }, items: [] };
+        groups.set(key, { ...group, items: [...group.items, item] });
     }
-    const made = (group: Item[]) => Math.max(...group.map((each) => new Date(each.made).getTime()));
-    const numbered = (group: Item[]) => Math.max(...group.map((each) => each.number));
+    const made = (group: Grouping) => Math.max(...group.items.map((each) => new Date(each.made).getTime()));
+    const numbered = (group: Grouping) => Math.max(...group.items.map((each) => each.number));
     return [...groups.values()].sort((a, b) => made(b) - made(a) || numbered(b) - numbered(a));
+}
+
+/** Return a group for each of `conversations` with none among `groups`, in their order, once each. */
+function emptyGroups(conversations: Conversation[], groups: Grouping[]): Grouping[] {
+    const keys = new Set(groups.map((each) => each.key));
+    return conversations.flatMap((conversation) => {
+        const key = whose(conversation);
+        if (keys.has(key)) {
+            return [];
+        }
+        keys.add(key);
+        return [{ key, conversation, head: { conversation }, items: [] }];
+    });
 }
 
 /** Say how long an item has waited, to the minute: what came in under a minute ago is just in. */
@@ -280,16 +349,19 @@ export function fresh(item: Item, reviewed: string | null | undefined): boolean 
 }
 
 /**
- * Lay `items` out as one text: those to answer now first, then the parked ones, each in the group its banner names
- * (the agent that sent it), each under a header naming it, each comment of the draft on it under the line it's on:
- * a comment on a passage under the passage's last line, one on the item whole under its header. Under each item's
- * own text, what the host has answered of it: each file an approval or a held change changes, its header then its
- * lines, each run of unchanged ones folding under a summary line; then the item's context, a summary line with the
- * lines that fold under it. Where the host showed none, a line says why.
+ * Lay `items` out as one text, in groups, one per agent, each under its banner: those with items to answer now first,
+ * the newest first; then a group for each agent of `agents` (those running, in the tree's order) with none, and for
+ * each the draft writes to with none; then the parked items' groups. Under each banner but the parked ones', the
+ * draft's messages to its agent; then each item, under a header naming it, each comment of the draft on it under the
+ * line it's on: a comment on a passage under the passage's last line, one on the item whole under its header. Under
+ * each item's own text, what the host has answered of it: each file an approval or a held change changes, its header
+ * then its lines, each run of unchanged ones folding under a summary line; then the item's context, a summary line
+ * with the lines that fold under it. Where the host showed none, a line says why.
  */
 export function laid(
     items: Item[],
-    banner: (item: Item, parked: boolean) => string,
+    agents: Conversation[],
+    banner: (head: Head, parked: boolean) => string,
     header: (item: Item, parked: boolean) => string,
     draft: Draft,
     around: Around,
@@ -297,25 +369,45 @@ export function laid(
     const parked = draft.parked ?? [];
     const done = draft.done ?? [];
     const comments = draft.comments ?? [];
-    const now = grouped(items.filter((each) => !parked.includes(each.number)), (item) => banner(item, false));
-    const later = grouped(items.filter((each) => parked.includes(each.number)), (item) => banner(item, true));
+    const letters = draft.letters ?? [];
+    const now = grouped(items.filter((each) => !parked.includes(each.number)), (item) => banner({ item }, false));
+    const empty = emptyGroups([...agents, ...letters.map((each) => each.to)], now);
+    const later = grouped(items.filter((each) => parked.includes(each.number)), (item) => banner({ item }, true));
     let text = "";
+    const groups: Group[] = [];
     const regions: Region[] = [];
-    for (const group of [...now, ...later]) {
-        group.forEach((item, at) => {
-            const isParked = parked.includes(item.number);
-            let opening: Span | null = null;
-            if (at === 0) {
-                const said = banner(item, isParked);
-                opening = { from: text.length, to: text.length + said.length };
-                text += `${said}\n`;
-            }
-            layItem(item, opening, isParked);
-        });
+    for (const group of [...now, ...empty]) {
+        layGroup(group, false);
     }
-    return { text, regions };
+    for (const group of later) {
+        layGroup(group, true);
+    }
+    return { text, groups, regions };
 
-    function layItem(item: Item, opening: Span | null, isParked: boolean): void {
+    function layGroup(group: Grouping, isParked: boolean): void {
+        const said = banner(group.head, isParked);
+        const opening = { from: text.length, to: text.length + said.length };
+        text += `${said}\n`;
+        const blocks: Block[] = [];
+        if (!isParked) {
+            letters.forEach((letter, at) => {
+                if (whose(letter.to) === group.key) {
+                    const from = text.length;
+                    text += `${letter.text}\n`;
+                    blocks.push({ comment: comments.length + at, from, to: from + letter.text.length });
+                }
+            });
+        }
+        if (group.items.length === 0 && blocks.length > 0) {
+            text += "\n";
+        }
+        groups.push({ conversation: group.conversation, later: isParked, banner: opening, blocks });
+        for (const item of group.items) {
+            layItem(item, isParked);
+        }
+    }
+
+    function layItem(item: Item, isParked: boolean): void {
         const files = filed(item, around);
         // Its own lines, then its files': the text comments are placed in, by where each quote ends.
         const own = [...body(item).split("\n"), ...files.map((each) => each.text)];
@@ -415,7 +507,6 @@ export function laid(
         text += "\n";
         regions.push({
             item,
-            banner: opening,
             header: { from: headFrom, to: headFrom + head.length },
             lines,
             blocks,
@@ -425,11 +516,6 @@ export function laid(
             stops,
         });
     }
-}
-
-/** Where a region starts: at the banner of the group it opens, else at its header. */
-function start(region: Region): number {
-    return region.banner?.from ?? region.header.from;
 }
 
 /** Return where going to an item lands: on its first line that matters, as the judge read its files, unless it's marked read; else on its header. */
@@ -443,22 +529,38 @@ export function stepped(stops: number[], line: number, forward: boolean): number
     return forward ? stops.find((each) => each > line) : [...stops].reverse().find((each) => each < line);
 }
 
-/** Return the region `position` is in: the banner of the group it opens, its header, its lines, its comments, or the blank line after it. */
-export function regionAt(regions: Region[], position: number): Region | undefined {
-    return regions.find((each, at) => {
-        const next = regions[at + 1];
-        return position >= start(each) && (next === undefined || position < start(next));
-    });
+/** Return the last of `spans`, in the text's order, starting at or before `position`. */
+function lastFrom<T>(spans: T[], from: (each: T) => number, position: number): T | undefined {
+    return spans.findLast((each) => from(each) <= position);
 }
 
-/** Return whether `position` is on a group's banner, which no comment is on. */
-export function onBanner(region: Region, position: number): boolean {
-    return region.banner !== null && position >= region.banner.from && position <= region.banner.to;
+/** Return the region `position` is in: its header, its lines, its comments, or the blank line after it; none on a group's banner or the messages under it. */
+export function regionAt(laidOut: Laid, position: number): Region | undefined {
+    const region = lastFrom(laidOut.regions, (each) => each.header.from, position);
+    const group = lastFrom(laidOut.groups, (each) => each.banner.from, position);
+    return region !== undefined && (group === undefined || region.header.from > group.banner.from) ? region : undefined;
 }
 
-/** Return the comment shown at `position`, where it's in one; a comment's end counts, so an empty one can be typed in. */
+/** Return the group `position` is on: on its banner, the messages under it, or the blank line after them; none on an item. */
+export function groupAt(laidOut: Laid, position: number): Group | undefined {
+    const region = lastFrom(laidOut.regions, (each) => each.header.from, position);
+    const group = lastFrom(laidOut.groups, (each) => each.banner.from, position);
+    return group !== undefined && (region === undefined || group.banner.from > region.header.from) ? group : undefined;
+}
+
+/** Return every comment and message shown, as blocks of the editor's list of what's written. */
+export function blocksOf(laidOut: Laid): Block[] {
+    return [...laidOut.groups.flatMap((each) => each.blocks), ...laidOut.regions.flatMap((each) => each.blocks)];
+}
+
+/** Return the comment or message shown at `position`, where it's in one; a comment's end counts, so an empty one can be typed in. */
 export function blockAt(laidOut: Laid, position: number): Block | undefined {
-    return laidOut.regions.flatMap((each) => each.blocks).find((each) => position >= each.from && position <= each.to);
+    return blocksOf(laidOut).find((each) => position >= each.from && position <= each.to);
+}
+
+/** Return a message to the agent `group` is of, as it's opened: empty; none for a group no message goes to. */
+function letterTo(group: Group): Letter | undefined {
+    return group.conversation === null ? undefined : { to: group.conversation, text: "" };
 }
 
 /** Return the item's own line shown at `position`, where it's on one. */
@@ -556,12 +658,17 @@ function spanOf(numbers: number[]): string {
 
 /**
  * Return where a comment opened on the line at `position` goes: on that line of its item, or on the item whole from
- * its header or an empty line of its own; on a line of a changed file, or its header, empty or not; none outside
- * every item, or on a line no comment is on.
+ * its header or an empty line of its own; on a line of a changed file, or its header, empty or not. On a group's
+ * banner, a message to its agent, laid out under its group among those to answer now, from the banner of what's left
+ * for later too. None on a line no comment is on, or on the banner of lup's approvals.
  */
-export function opened(laidOut: Laid, position: number): Comment | undefined {
-    const region = regionAt(laidOut.regions, position);
-    if (region === undefined || onBanner(region, position) || asideAt(region, position) !== undefined) {
+export function opened(laidOut: Laid, position: number): Written | undefined {
+    const group = groupAt(laidOut, position);
+    if (group !== undefined) {
+        return letterTo(group);
+    }
+    const region = regionAt(laidOut, position);
+    if (region === undefined || asideAt(region, position) !== undefined) {
         return undefined;
     }
     const line = lineAt(region, position);
@@ -576,9 +683,17 @@ export function opened(laidOut: Laid, position: number): Comment | undefined {
     };
 }
 
-/** Return a comment on the passage `from` to `to` selects, counted in its item's text, its own and its files'; none where it isn't all inside one item's lines. */
-export function quoted(laidOut: Laid, from: number, to: number): Comment | undefined {
-    const region = regionAt(laidOut.regions, from);
+/**
+ * Return a comment on the passage `from` to `to` selects, counted in its item's text, its own and its files'; a
+ * message to a group's agent where it's on its banner, which no comment quotes; none where it isn't all inside one
+ * item's lines, or one group's.
+ */
+export function quoted(laidOut: Laid, from: number, to: number): Written | undefined {
+    const group = groupAt(laidOut, from);
+    if (group !== undefined) {
+        return group === groupAt(laidOut, Math.max(to - 1, from)) ? letterTo(group) : undefined;
+    }
+    const region = regionAt(laidOut, from);
     const first = region === undefined ? undefined : lineAt(region, from);
     const last = region === undefined ? undefined : lineAt(region, Math.max(to - 1, from));
     if (region === undefined || first === undefined || last === undefined || to <= from) {
@@ -627,7 +742,12 @@ export function covered(draft: Draft): number[] {
     return [...new Set(mentioned)].filter((each) => !parked.includes(each)).sort((a, b) => a - b);
 }
 
-/** Return `draft` without the comments that say nothing. */
+/** Return the messages a draft sends: those that say something. */
+export function messages(draft: Draft): Letter[] {
+    return saying(draft.letters ?? []);
+}
+
+/** Return `draft` without the comments and messages that say nothing. */
 export function pruned(draft: Draft): Draft {
-    return { ...draft, comments: saying(draft.comments ?? []) };
+    return { ...draft, comments: saying(draft.comments ?? []), letters: messages(draft) };
 }

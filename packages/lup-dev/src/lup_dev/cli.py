@@ -628,9 +628,11 @@ def shown(item: Item) -> str:
                 text,
                 f"The whole diff: `lup-dev inbox show {item.number} --diff`.",
             ]
-        case Review(covers=covers, comments=comments):
+        case Review(covers=covers, comments=comments, letters=letters):
+            numbers = ", ".join(str(each) for each in covers)
             body = [
-                f"Of items {', '.join(str(each) for each in covers)}.",
+                *([f"Of items {numbers}."] if covers else []),
+                *(f"To {who(each.to)}: {each.text}" for each in letters),
                 *(commented(each) for each in comments),
             ]
     return "\n".join([heading(item), *body])

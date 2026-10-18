@@ -196,7 +196,9 @@ function came(item: Item, whose: Whose): string {
         case "answer":
             return `your answer to #${reason.question}`;
         case "review":
-            return `your review of ${reason.covers.map((each) => `#${each}`).join(", ")}`;
+            return reason.covers.length === 0
+                ? "your message, from the review"
+                : `your review of ${reason.covers.map((each) => `#${each}`).join(", ")}`;
         case "message":
             return reason.of == null ? "your message" : `your reply to #${reason.of}`;
         default:

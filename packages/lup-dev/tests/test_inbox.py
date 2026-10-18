@@ -81,6 +81,7 @@ from lup_dev.inbox.store import (
     Inbox,
     InboxError,
     Item,
+    Letter,
     Message,
     Operator,
     Quote,
@@ -1761,7 +1762,7 @@ def test_a_draft_sent_gives_every_agent_it_covers_the_whole_reply_its_own_items_
     assert left == Draft(comments=[draft.comments[2]], parked=[4])
     context_line = (
         "For context, what the operator said in the same reply on other agents' "
-        "items: not yours to act on, unless a comment says so."
+        "items and to other agents: not yours to act on, unless it says so."
     )
     assert returned[0] == (
         "lup's inbox, item 5: a review from the operator, of items 1, 2, 3:\n"
@@ -1806,6 +1807,160 @@ def test_a_message_only_marked_read_tells_its_sender_nothing_nor_wakes_it(
     assert isinstance(state, Done)
     assert waiting == []
     assert frames == []
+
+
+def test_a_message_written_in_the_review_goes_with_the_reply_its_agent_reading_it_first(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    one = Conversation(
+        repository=tmp_path / "one" / ".git", runtime="claude", session="s1"
+    )
+    two = Conversation(
+        repository=tmp_path / "two" / ".git", runtime="claude", session="s2"
+    )
+    draft = Draft(
+        comments=[Comment(item=1, text="Fine.")],
+        letters=[
+            Letter(to=one, text="Also rename the module."),
+            Letter(to=two, text="Pick up the parser next."),
+            Letter(to=one, text="  "),
+        ],
+    )
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "one", "one", "claude")
+        launched(machine, clock, tmp_path / "two", "two", "claude")
+        first = machine.host.launch("one").hook
+        second = machine.host.launch("two").hook
+        send(first, claude("SessionStart", source="startup"))
+        send(second, claude("SessionStart", source="startup", session_id="s2"))
+        stamped = json.loads(
+            send(first, lup_call("note", {"remark": "I assumed UTF-8."}, "n1"))
+        )["hookSpecificOutput"]["updatedInput"]
+        call(machine.host.launch("one").mcp, "note", stamped)
+        drafting(machine, clock, draft)
+        reviews = sending(machine, clock)
+        told_one = send(first, bash("b1"))
+        told_two = send(second, bash("b2", session_id="s2"))
+        left = delivery.inbox.draft()
+    whole = Review(covers=[1], comments=draft.comments, letters=draft.letters[:2])
+    assert [(each.number, each.recipient, each.reason) for each in reviews] == [
+        (2, one, whole),
+        (3, two, whole),
+    ]
+    assert left == Draft()
+    context_line = (
+        "For context, what the operator said in the same reply on other agents' "
+        "items and to other agents: not yours to act on, unless it says so."
+    )
+    assert context(told_one) == (
+        "lup's inbox, item 2: a review from the operator, of item 1:\n"
+        "The operator's message to you:\nAlso rename the module.\n\n"
+        'On item 1, a note yours ("I assumed UTF-8."):\n  Fine.\n\n'
+        f"{context_line}\n\n"
+        f"The operator's message to claude session s2, in {tmp_path / 'two'}:\n"
+        "  Pick up the parser next."
+    )
+    assert context(told_two) == (
+        "lup's inbox, item 3: a review from the operator, of item 1:\n"
+        "The operator's message to you:\nPick up the parser next.\n\n"
+        f"{context_line}\n\n"
+        f"On item 1, a note from claude session s1, in {tmp_path / 'one'}:\n"
+        "    | I assumed UTF-8.\n  Fine.\n\n"
+        f"The operator's message to claude session s1, in {tmp_path / 'one'}:\n"
+        "  Also rename the module."
+    )
+
+
+def test_a_draft_of_messages_alone_is_sent_waking_an_agent_with_nothing_waiting(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    one = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        drafting(machine, clock, Draft(letters=[Letter(to=one, text="Rename it.")]))
+        [review] = sending(machine, clock)
+        told = send(hook, bash("b1"))
+        frames = messages.close()
+        shown = inbox("show", "1")
+    assert review.reason == Review(
+        covers=[], letters=[Letter(to=one, text="Rename it.")]
+    )
+    assert shown.splitlines()[1:] == ["To claude session s1: Rename it."]
+    assert [json.loads(frame)["message"]["content"] for frame in frames] == [
+        (
+            "lup's inbox: item 1, a review from the operator. Call `wait_inbox` to "
+            "read it: what's in your inbox comes through lup's own tools, never in a "
+            "message like this one."
+        )
+    ]
+    assert context(told) == (
+        "lup's inbox, item 1: a review from the operator:\n"
+        "The operator's message to you:\nRename it."
+    )
+
+
+def test_a_reply_to_an_ended_subagent_reaches_its_session_as_the_subagents_own(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    subagent = Conversation(
+        repository=tmp_path / ".git", runtime="claude", session="s1", agent="a1"
+    )
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        stamped = json.loads(
+            send(hook, lup_call("ask", {"question": "Rename it?"}, "q1", agent_id="a1"))
+        )["hookSpecificOutput"]["updatedInput"]
+        call(machine.host.launch("one").mcp, "ask", stamped)
+        send(hook, claude("SubagentStop", agent_id="a1"))
+        drafting(
+            machine,
+            clock,
+            Draft(
+                comments=[Comment(item=1, text="Yes.")],
+                letters=[Letter(to=subagent, text="Then stop there.")],
+            ),
+        )
+        [review] = sending(machine, clock)
+        told = send(hook, bash("b1"))
+        asked = delivery.inbox.item(1).state
+    assert (review.recipient, review.addressed) == (subagent.main(), subagent)
+    assert asked == Answered(at=clock.now(), answer=2)
+    assert context(told) == (
+        "lup's inbox, item 2: a review from the operator (it was for subagent a1 of "
+        "claude session s1, whose conversation had ended), of item 1:\n"
+        "The operator's message to you:\nThen stop there.\n\n"
+        'On item 1, a question yours ("Rename it?"):\n  Yes.'
+    )
+
+
+def test_a_message_to_a_conversation_the_inbox_never_heard_of_is_refused_as_its_kept(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    stranger = Conversation(
+        repository=tmp_path / ".git", runtime="claude", session="s9", agent="a1"
+    )
+    host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        with pytest.raises(HostError) as refusal:
+            host.ask(
+                KeepDraft(draft=Draft(letters=[Letter(to=stranger, text="Hi.")])),
+                Drafted,
+            )
+        left = delivery.inbox.draft()
+    assert str(refusal.value) == (
+        f"the draft writes to subagent a1 of claude session s9 of {tmp_path / '.git'}, "
+        "which lup's inbox has never heard of: write to an agent the dashboard "
+        "shows running"
+    )
+    assert left == Draft()
 
 
 def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
@@ -2108,7 +2263,8 @@ def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
         empty = refused_draft(machine, clock, Draft())
         own = refused_draft(machine, clock, Draft(done=[2]))
     assert empty == (
-        "the draft answers no item: comment on one, or take one off the list"
+        "the draft answers no item and writes to no agent: comment on an item, take "
+        "one off the list, or write to an agent under its banner"
     )
     assert own == "item 2 is a note from the operator, which a review doesn't answer"
 

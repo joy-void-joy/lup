@@ -6,6 +6,7 @@ import {
     launches,
     repositories,
     repositoryName,
+    running,
     since,
     treeKey,
     type Leading,
@@ -64,6 +65,34 @@ describe("launches", () => {
             "w/explore",
             "w/explore/grep",
             "w/plan",
+        ]);
+    });
+});
+
+describe("running", () => {
+    it("lists each session and its subagents that aren't over, in the tree's order, with the launch each runs in", () => {
+        const idle = { state: "idle" as const, since: AT, lups: false };
+        const ended = { state: "ended" as const, since: AT, lups: false };
+        const listed = {
+            kind: "listed" as const,
+            launches: [registered("one", "w"), registered("two", "x"), registered("three", "y")],
+            sessions: {},
+            talkers: {
+                one: [
+                    { ...talker("w", null, 0), activity: null },
+                    { ...talker("w/done", "w", 1), activity: ended },
+                    { ...talker("w/done/late", "w/done", 2), activity: idle },
+                    { ...talker("w/old", "w", 1), activity: null },
+                    { ...talker("w/plan", "w", 1), activity: idle },
+                ],
+                two: [{ ...talker("x", null, 0), session: "s2", activity: idle }],
+            },
+        };
+        expect(running(launches(listed)).map((each) => [each.launch.launch, each.talker.path])).toEqual([
+            ["one", "w"],
+            ["one", "w/plan"],
+            ["one", "w/done/late"],
+            ["two", "x"],
         ]);
     });
 });

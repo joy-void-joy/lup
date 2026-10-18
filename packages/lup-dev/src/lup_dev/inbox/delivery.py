@@ -147,7 +147,7 @@ def what(item: Item) -> str:
 
 
 def opening(item: Item) -> str:
-    """Return an item's first line: its text's, an answer's comment's, or a review's first comment's."""
+    """Return an item's first line: its text's, an answer's comment's, or a review's first message's or comment's."""
     match item.reason:
         case (
             Message(text=text)
@@ -158,13 +158,13 @@ def opening(item: Item) -> str:
             said = text
         case Answer(comment=comment):
             said = comment
-        case Review(comments=comments):
-            said = next((each.text for each in comments), "")
+        case Review(letters=letters, comments=comments):
+            said = next((each.text for each in [*letters, *comments]), "")
     return next(iter(said.splitlines()), "")
 
 
 def body(item: Item) -> str:
-    """Return an item's text whole, as its sender wrote it: a question's with each decision numbered, with its lean."""
+    """Return an item's text whole, as its sender wrote it: a question's with each decision numbered, with its lean; a review's messages, then its comments."""
     match item.reason:
         case Question(text=text, decisions=decisions):
             numbered = [
@@ -176,8 +176,8 @@ def body(item: Item) -> str:
             return text
         case Answer(comment=comment):
             return comment
-        case Review(comments=comments):
-            return "\n".join(each.text for each in comments)
+        case Review(letters=letters, comments=comments):
+            return "\n".join(each.text for each in [*letters, *comments])
 
 
 def clocked(at: datetime) -> str:
@@ -294,7 +294,7 @@ class Dispatched(Model):
     """What sending the operator's draft did: the reviews it was sent as, what it approved, and what it did with comments on approvals it left unanswered."""
 
     reviews: list[Item] = []
-    """One to each conversation with a comment on its messages or questions, or a question among them."""
+    """One to each conversation with a comment on its messages or questions, a question among them, or a message to it."""
     approved: list[Item] = []
     """The approvals and held changes it approved: each marked read alone, and each held change commented on, with the comments."""
     noted: list[Item] = []
@@ -513,11 +513,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
             case Answer(question=question):
                 return f"{head}{passed}, to the question of item {question}"
-            case Review(covers=covers):
+            case Review(covers=[_, *_] as covers):
                 numbers = ", ".join(str(each) for each in covers)
                 items = "item" if len(covers) == 1 else "items"
                 return f"{head}{passed}, of {items} {numbers}"
-            case Message() | Question() | Approval() | HeldChange():
+            case Message() | Question() | Approval() | HeldChange() | Review():
                 return f"{head}{passed}"
 
     def words(self, item: Item) -> str:
@@ -533,12 +533,25 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case Answer() as answer:
                 return self.answered(answer)
             case Review() as review:
-                return self.reviewing(review, item.recipient)
+                return self.reviewing(review, item.addressed or item.recipient)
 
     def reviewing(self, review: Review, recipient: Party) -> str:
-        """Say a review to one conversation it's sent to: its own items first, each with the operator's comments on it, or read with nothing to add; then, for context, the other agents' items they commented on, each whole and whose it is."""
+        """Say a review to the conversation it's for: the operator's message to it and its own items first, each item with their comments on it, or read with nothing to add; then, for context, the other agents' items they commented on, each whole and whose it is, and their messages to other agents, each saying whom it was for."""
         items = [self.inbox.item(each) for each in review.covers]
         commented = [each.item for each in review.comments]
+        addressed = list(dict.fromkeys(each.to for each in review.letters))
+
+        def written(to: Conversation) -> str:
+            return "\n\n".join(each.text for each in review.letters if each.to == to)
+
+        def mine(to: Conversation) -> str:
+            return f"The operator's message to you:\n{written(to)}"
+
+        def elsewhere(to: Conversation) -> str:
+            place = self.inbox.whereabouts.get(to.key())
+            where = "" if place is None else f", in {place.worktree}"
+            said = textwrap.indent(written(to), "  ")
+            return f"The operator's message to {who(to)}{where}:\n{said}"
 
         def remarks(item: Item) -> list[str]:
             return [
@@ -559,25 +572,49 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             text = [f"    | {line}" for line in body(item).splitlines()]
             return "\n".join([head, *text, *remarks(item)])
 
-        own = [yours(item) for item in items if item.sender == recipient]
+        own = [
+            *(mine(to) for to in addressed if to == recipient),
+            *(yours(item) for item in items if item.sender == recipient),
+        ]
         others = [
-            theirs(item)
-            for item in items
-            if item.sender != recipient and item.number in commented
+            *(
+                theirs(item)
+                for item in items
+                if item.sender != recipient and item.number in commented
+            ),
+            *(elsewhere(to) for to in addressed if to != recipient),
         ]
         heading = (
             "For context, what the operator said in the same reply on other "
-            "agents' items: not yours to act on, unless a comment says so."
+            "agents' items and to other agents: not yours to act on, unless it "
+            "says so."
         )
         context = [heading, *others] if others else []
         return "\n\n".join([*own, *context])
 
-    async def reviewed(self) -> Dispatched:
-        """Send the operator's draft as one reply: to each conversation with a comment on its messages or questions, or a question among them, the whole of it; its items answered or done; each approval and held change it covers answered by its own rule; and the draft left with what's parked.
+    def drafted(self, draft: Draft) -> Draft:
+        """Keep the operator's draft reply, and return it; refused where a message in it is for a conversation lup's inbox has never heard of (`heard`)."""
+        self.heard(draft)
+        return self.inbox.drafted(draft)
 
-        Each conversation is told its own items first, with the comments on
-        them or read with nothing to add, then what was said on the others'
-        for context (`reviewing`): the operator answers related items together,
+    def heard(self, draft: Draft) -> None:
+        """Refuse a draft with a message for a conversation lup's inbox has never heard of, which no reply could reach: it's known once one of its hooks is heard."""
+        for each in draft.letters:
+            if each.to.key() not in self.inbox.whereabouts:
+                message = (
+                    f"the draft writes to {who(each.to)} of {each.to.repository}, "
+                    "which lup's inbox has never heard of: write to an agent the "
+                    "dashboard shows running"
+                )
+                raise InboxError(message)
+
+    async def reviewed(self) -> Dispatched:
+        """Send the operator's draft as one reply: to each conversation with a comment on its messages or questions, a question among them, or a message to it, the whole of it; its items answered or done; each approval and held change it covers answered by its own rule; and the draft left with what's parked.
+
+        Each conversation is told the operator's message to it and its own
+        items first, with the comments on them or read with nothing to add,
+        then what was said on the others' items and to other agents for
+        context (`reviewing`): the operator answers related items together,
         across agents and repositories, and sends what's drafted on moving to
         something unrelated. A question is answered by the reply its asker
         gets, which lets a held `ask` go. A message only marked read tells its
@@ -590,14 +627,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         commented on stays unanswered, the comments going as a note to the
         session whose push asked it, whose next push supersedes it; where no
         known session pushed, they stay drafted (`Dispatched`). Refused where
-        the draft covers no item, or covers a message or question no
-        conversation sent.
+        the draft covers no item and writes to no agent, covers a message or
+        question no conversation sent, or writes to a conversation lup's inbox
+        has never heard of.
         """
         draft = self.inbox.draft()
+        self.heard(draft)
         covered = [self.inbox.item(each) for each in draft.covered()]
-        if not covered:
+        if not covered and not draft.written():
             message = (
-                "the draft answers no item: comment on one, or take one off the list"
+                "the draft answers no item and writes to no agent: comment on an "
+                "item, take one off the list, or write to an agent under its banner"
             )
             raise InboxError(message)
         asked = [
@@ -619,14 +659,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return dispatched
 
     def reviews(self, draft: Draft, covered: list[Item]) -> list[Item]:
-        """Make the reviews `draft` is sent as for the messages and questions it covers, `covered`, one to each conversation it reaches, and settle each item; delivering them is the caller's."""
-        if not covered:
+        """Make the reviews `draft` is sent as for the messages and questions it covers, `covered`, and its messages to agents, one to each conversation it reaches, and settle each item; delivering them is the caller's."""
+        letters = draft.written()
+        if not covered and not letters:
             return []
         at = self.clock.now()
         numbers = [item.number for item in covered]
         review = Review(
             covers=numbers,
             comments=[each for each in draft.comments if each.item in numbers],
+            letters=letters,
         )
         commented = [each.item for each in draft.comments]
         senders = [
@@ -634,16 +676,19 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             for item in covered
             if item.number in commented or isinstance(item.reason, Question)
         ]
-        recipients = [
-            each for index, each in enumerate(senders) if each not in senders[:index]
-        ]
+        recipients = list(dict.fromkeys([*senders, *(each.to for each in letters)]))
         sent = [
             self.inbox.made(review, Operator(), recipient, None, at)
             for recipient in recipients
         ]
         for item in covered:
             answer = next(
-                (each for each in sent if each.recipient == item.sender), None
+                (
+                    each
+                    for each in sent
+                    if (each.addressed or each.recipient) == item.sender
+                ),
+                None,
             )
             settling = Done(at=at) if answer is None else settled(item, answer, at)
             self.inbox.kept(item.model_copy(update={"state": settling}))
