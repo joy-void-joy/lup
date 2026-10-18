@@ -37,19 +37,31 @@ class WorkspaceTool(Model):
     members: list[Path]
     """The directory of each workspace package it needs, its own first: the copy
     carries their modules."""
+    beside: list[Path] = []
+    """The directory of each workspace package installed beside it in the
+    person's own copy, which the host service runs: the dashboard, where the
+    workspace has it (`docs/dashboard.md`, *Running*)."""
 
     def paths(self) -> list[Path]:
         """List what the copy is built from, from the repository's root.
 
         uv's files, which hold the copy's dependencies to the lock and say where
-        the workspace's packages are; each package's project file and modules; and
-        the engine's source, which the build bundles into the package.
+        the workspace's packages are; each package's project file and modules; the
+        engine's source, which the build bundles into the package; and each
+        package installed beside it, with its page's source and the script
+        building it.
         """
         packages = [PackageLayout(root=member) for member in self.members]
+        besides = [PackageLayout(root=each) for each in self.beside]
         return [
             *(Path(each) for each in Uv().environment()),
             *(place for each in packages for place in [each.pyproject, each.source]),
             PackageLayout(root=self.package).engine,
+            *(
+                place
+                for each in besides
+                for place in [each.pyproject, each.source, each.page, each.build]
+            ),
         ]
 
     def lups_own(self) -> bool:

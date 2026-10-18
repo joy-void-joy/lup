@@ -6,7 +6,7 @@ Its package is `packages/lup-dashboard/` (`lup_dashboard`), which imports `lup-d
 
 ## Running
 
-- **The host service runs it as its child** (`lup_dev/host/dashboard.py`, `DashboardProcess`), a `Companion` begun once the service listens and ended as it stops. The service runs `lup-dashboard serve <port>`, found beside the interpreter running the service; where it isn't installed there, there's no dashboard, and `lup-dev dashboard` says why.
+- **The host service runs it as its child** (`lup_dev/host/dashboard.py`, `DashboardProcess`), a `Companion` begun once the service listens and ended as it stops. The service runs `lup-dashboard serve <port>`, found beside the interpreter running the service: lup's own approval installs the dashboard there, in the person's own copy beside `lup-dev` (`uv tool install --with`, held to the lock like the rest; the repositories' judge copies leave it out), its page built by trust as the gate builds it. Where it isn't installed, there's no dashboard, and `lup-dev dashboard` says why.
 - **Its input:** the service writes the API's token as its first line and keeps the input open; the dashboard ends when it closes, so it goes with the service however the service ends.
 - **Its output:** its first line is the address it listens on, which the service reads; a dashboard that ends before printing it (a port another program holds) is said, and the service goes on without it.
 - **On localhost, on one port** (`LUP_DASHBOARD_PORT`, 8766 by default), the same at each start, and **one token**, kept in the host's state (`HostLayout.dashboard_token`, mode 600), which no room mounts. So a page left open reconnects on its own once the service starts again, after an approval among others.

@@ -245,12 +245,14 @@ class Lock(Model):
             if package not in packages[:at]
         ]
 
-    def tool(self, name: str) -> Tool:
+    def tool(self, name: str, beside: list[str] | None = None) -> Tool:
         """Return the package `name` the host runs, as the lock resolves it.
 
-        Where it's a member of the lock's workspace, the workspace's own source;
-        where it comes from an index, that release. Raise `TrustError` where the
-        lock doesn't pin it, pins it twice, or resolves it from anywhere else.
+        Where it's a member of the lock's workspace, the workspace's own source,
+        with each of the members `beside` names that the workspace has, installed
+        beside it in the person's own copy; where it comes from an index, that
+        release. Raise `TrustError` where the lock doesn't pin it, pins it twice,
+        or resolves it from anywhere else.
         """
         pinned = [package for package in self.package if package.name == name]
         if not pinned:
@@ -275,10 +277,16 @@ class Lock(Model):
                 for each in needed
                 if each.name in self.manifest.members
             ]
+            besides = [
+                each.source.workspace()
+                for each in self.package
+                if each.name in (beside or []) and each.name in self.manifest.members
+            ]
             return WorkspaceTool(
                 name=name,
                 package=home,
                 members=[each for each in members if each is not None],
+                beside=[each for each in besides if each is not None],
             )
         if package.source.registry is not None and package.version is not None:
             return ReleaseTool(
@@ -901,16 +909,17 @@ class UvToolchain(Model, Toolchain):
         """Install the package from `tree` in each of `places`, its dependencies held to its `uv.lock`.
 
         `uv tool install` resolves a tool's dependencies afresh, ignoring the
-        workspace's lock, so the locked versions are exported as constraints. A
-        workspace package it needs is installed from the tree as a copy.
+        workspace's lock, so the locked versions are exported as constraints, the
+        whole workspace's, which hold what's installed beside it too. A workspace
+        package it needs is installed from the tree as a copy; the person's own
+        copy has each package beside it installed with it (`--with`).
         """
         with tempfile.TemporaryDirectory() as scratch:
             constraints = Path(scratch) / "constraints.txt"
             run(
                 self.executable,
                 "export",
-                "--package",
-                tool.name,
+                "--all-packages",
                 "--no-dev",
                 "--no-emit-workspace",
                 "--no-hashes",
@@ -924,6 +933,7 @@ class UvToolchain(Model, Toolchain):
             )
             for place in places:
                 program, *arguments = self.uv(place)
+                withs = [] if place is not None else tool.beside
                 run(
                     program,
                     *arguments,
@@ -932,6 +942,7 @@ class UvToolchain(Model, Toolchain):
                     "--force",
                     "--constraints",
                     str(constraints),
+                    *(part for each in withs for part in ["--with", str(tree / each)]),
                     str(tree / tool.package),
                     cwd=tree,
                     shown=True,
@@ -1354,6 +1365,10 @@ class Trust(Model, arbitrary_types_allowed=True):
     tell: inside one, nothing is asked."""
     name: str = "lup-dev"
     """The package the host runs, as the lock names it."""
+    beside: list[str] = ["lup-dashboard"]
+    """The workspace's packages installed beside it in the person's own copy,
+    where the workspace has them, as the lock names them: the dashboard, which
+    the host service runs."""
 
     def check(self) -> Standing:
         """Read the tip's host zone, and compare it with the one approved last."""
@@ -1431,7 +1446,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                 "isn't pinned"
             )
             raise TrustError(message)
-        return Lock.parse(found.output.decode()).tool(self.name)
+        return Lock.parse(found.output.decode()).tool(self.name, self.beside)
 
     def named(self, commit: str, covered: list[Path], local: str | None) -> Named:
         """Find the files the commit's declaration, and `local` on top of it, run on the host, and the conditions modules they name.

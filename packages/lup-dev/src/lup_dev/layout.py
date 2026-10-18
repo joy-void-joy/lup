@@ -294,6 +294,16 @@ class PackageLayout(Model):
         """
         return self.root / "checker"
 
+    @property
+    def page(self) -> Path:
+        """The dashboard's page's source, which its build bundles into the package (`docs/dashboard.md`, *The page*)."""
+        return self.root / "page"
+
+    @property
+    def build(self) -> Path:
+        """The script building what a package carries beside its modules: the dashboard's page."""
+        return self.root / "build.py"
+
 
 class LaunchSockets(Model):
     """One launch's socket directory, which its room mounts at `/run/lup`.

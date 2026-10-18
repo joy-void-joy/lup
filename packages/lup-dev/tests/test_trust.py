@@ -72,6 +72,7 @@ requires-python = ">=3.14"
 [manifest]
 members = [
     "lup",
+    "lup-dashboard",
     "lup-dev",
 ]
 
@@ -90,6 +91,14 @@ source = { editable = "packages/lup-dev" }
 dependencies = [
     { name = "lup" },
     { name = "pydantic" },
+]
+
+[[package]]
+name = "lup-dashboard"
+version = "0.1.0"
+source = { editable = "packages/lup-dashboard" }
+dependencies = [
+    { name = "lup-dev" },
 ]
 
 [[package]]
@@ -114,9 +123,13 @@ LUP = {
     "packages/lup-dev/src/environment/__init__.py": '"""The environment."""\n',
     "packages/lup-dev/checker/build.py": "print('built')\n",
     "packages/lup-dev/tests/test_environment.py": "def test_it():\n    pass\n",
+    "packages/lup-dashboard/pyproject.toml": "[project]\nname = 'lup-dashboard'\n",
+    "packages/lup-dashboard/src/face/__init__.py": '"""The dashboard."""\n',
+    "packages/lup-dashboard/page/index.html": "<!doctype html>\n",
+    "packages/lup-dashboard/build.py": "print('built')\n",
     "docs/note.md": "# Note\n",
 }
-"""A repository laid out as lup's: two workspace packages and an engine."""
+"""A repository laid out as lup's: three workspace packages, an engine and a dashboard's page."""
 
 RELEASE_LOCK = """\
 version = 1
@@ -462,11 +475,16 @@ def test_lups_zone_is_its_declaration_and_its_workspaces_own_source(
         Path("packages/lup/pyproject.toml"),
         Path("packages/lup/src"),
         Path("packages/lup-dev/checker"),
+        Path("packages/lup-dashboard/pyproject.toml"),
+        Path("packages/lup-dashboard/src"),
+        Path("packages/lup-dashboard/page"),
+        Path("packages/lup-dashboard/build.py"),
     ]
     assert zone.tool == WorkspaceTool(
         name="lup-dev",
         package=Path("packages/lup-dev"),
         members=[Path("packages/lup-dev"), Path("packages/lup")],
+        beside=[Path("packages/lup-dashboard")],
     )
     assert zone.unread == []
 
@@ -514,10 +532,14 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
         "packages/lup-dev/pyproject.toml",
         "packages/lup-dev/src/environment/__init__.py",
         "packages/lup-dev/checker/build.py",
+        "packages/lup-dashboard/pyproject.toml",
+        "packages/lup-dashboard/src/face/__init__.py",
+        "packages/lup-dashboard/page/index.html",
+        "packages/lup-dashboard/build.py",
     ]
     counted = [line.split("|")[0].strip() for line in lines[5:-1]]
     assert sorted(counted) == sorted(f"{path} (new)" for path in carried)
-    assert lines[-1].startswith(" 8 files changed")
+    assert lines[-1].startswith(" 12 files changed")
     assert "docs/note.md" not in said
     assert "tests/test_" not in said
     assert answering(trust).asked == [
@@ -1209,7 +1231,7 @@ def test_an_approved_commit_gone_from_the_repository_shows_everything(
         ),
         f"The tip: {zone.commit}.",
     ]
-    assert lines[-1].startswith(" 8 files changed")
+    assert lines[-1].startswith(" 12 files changed")
 
 
 def test_a_lock_that_doesnt_pin_lup_dev_or_pins_it_from_elsewhere_refuses() -> None:
@@ -1378,6 +1400,7 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
         name="lup-dev",
         package=Path("packages/lup-dev"),
         members=[Path("packages/lup-dev"), Path("packages/lup")],
+        beside=[Path("packages/lup-dashboard")],
     )
     copy = JudgeLayout(home=tmp_path / "judges" / "lup")
     UvToolchain(executable=str(fake)).install(tool, lup, head, copy, users=True)
@@ -1389,15 +1412,18 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
     assert source == '"""The environment."""\n'
     export, own, constraints, users, again = log.read_text().splitlines()
     assert export.startswith(
-        "uv uv export --package lup-dev --no-dev --no-emit-workspace --no-hashes "
+        "uv uv export --all-packages --no-dev --no-emit-workspace --no-hashes "
         "--frozen --format requirements-txt --quiet --output-file "
     )
     assert own.startswith(
         f"{copy.tools} {copy.bin} tool install --force --constraints "
     )
+    assert "--with" not in own
     assert own.endswith(f"{where}/packages/lup-dev")
     assert users.startswith("uv uv tool install --force --constraints ")
-    assert users.endswith(f"{where}/packages/lup-dev")
+    assert users.endswith(
+        f"--with {where}/packages/lup-dashboard {where}/packages/lup-dev"
+    )
     assert constraints == again == "pydantic==2.12.0"
 
 
