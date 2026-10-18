@@ -10,16 +10,20 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
+from pydantic import Field
+
 from lup.types import MutableModel
 from lup_dashboard.host import Host
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.host.protocol import (
     Activity,
+    Holding,
     Limits,
     Listed,
     ListLaunches,
     Refused,
     Register,
+    SetHolding,
     Talker,
 )
 from lup_dev.host.records import Called, Entry, Said
@@ -70,12 +74,26 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """The operator's messages sent from the page, kept in memory: they reach no agent."""
     grown: int = 0
     """How many steps the parser subagent's conversation has taken since the demo began: one more each time it's asked, so a page following it sees it grow."""
+    holding: list[SetHolding] = []
+    """The operator's switch turned on for each conversation it holds every flagged write of, kept in memory."""
+    changed: asyncio.Event = Field(default_factory=asyncio.Event)
+    """Set once something the page watches changes, and replaced: each watch answers again."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
         match request:
             case ListLaunches():
                 return self.listed()
+            case SetHolding(on=on) as switched:
+                others = [
+                    each
+                    for each in self.holding
+                    if each.session != switched.session or each.agent != switched.agent
+                ]
+                self.holding = [*others, switched] if on else others
+                self.changed.set()
+                self.changed = asyncio.Event()
+                return Holding(on=on)
             case ListInbox():
                 return self.items()
             case ShowDraft():
@@ -117,8 +135,10 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
 
     @override
     async def watch(self, request: Asked) -> AsyncGenerator[Replied]:
-        yield await self.ask(request)
-        await asyncio.Event().wait()
+        while True:
+            changed = self.changed
+            yield await self.ask(request)
+            await changed.wait()
 
     @override
     async def settle(self, number: int) -> None:
@@ -220,7 +240,20 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Listed(
             launches=[lup, voice, adlib, waiting],
             sessions={"s1": "lup-impl", "s2": "guidance-voice", "s3": "main"},
-            talkers=talkers,
+            talkers={
+                launch: [
+                    each.model_copy(update={"holding": self.holds(each)})
+                    for each in conversations
+                ]
+                for launch, conversations in talkers.items()
+            },
+        )
+
+    def holds(self, talker: Talker) -> bool:
+        """Say whether the operator holds each flagged write of `talker`."""
+        return any(
+            each.session == talker.session and each.agent == talker.agent
+            for each in self.holding
         )
 
     def items(self) -> Items:

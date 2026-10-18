@@ -28,6 +28,7 @@ from lup_dev import Project, cli
 from lup_dev.clock import Clock
 from lup_dev.codescan.contract import (
     Checker,
+    Examples,
     FileReport,
     Finding,
     Parameter,
@@ -231,7 +232,11 @@ class FakeEngine(Checker):
         )
 
     def rules(self) -> list[Rule]:
-        return []
+        """Two rules, for a declaration to hold or flag by name."""
+        return [
+            Rule(id=rule, mistake="", steer="", examples=Examples(flags=[]))
+            for rule in ["regex", "tuple-shape"]
+        ]
 
     def check(
         self,
@@ -496,8 +501,14 @@ class Announced(Announcing):
         self.layout = layout
         self.clock = clock
         self.answering = answering
+        self.holding_all = True
+        """Whether the operator holds each flagged write, of every conversation: on
+        by default, so a test sees every change that asks held, and turned off
+        to see the project's own defaults."""
         self.holds: list[Hold] = []
         self.runtimes: list[str] = []
+        self.asked: list[str] = []
+        """Each conversation the switch was asked about, as `runtime/session/agent`."""
 
     def announced(self, hold: Hold, runtime: str, repository: Path) -> None:
         del repository
@@ -505,6 +516,10 @@ class Announced(Announcing):
         self.runtimes.append(runtime)
         if self.answering is not None:
             answer(self.layout, hold.key, self.answering, [], self.clock)
+
+    def holding(self, runtime: str, session: str, agent: str | None) -> bool:
+        self.asked.append(f"{runtime}/{session}/{agent}")
+        return self.holding_all
 
 
 class Kit:

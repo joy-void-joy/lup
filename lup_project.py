@@ -108,10 +108,6 @@ class LupDevelopment(Module):
 
 
 project = Project(
-    # While lup is being built, only a protected path's change asks the operator:
-    # the design is reviewed in notes before the code and at landing (`AGENTS.md`,
-    # *How work goes*).
-    asks="protected",
     modules=Modules.default()
     .edit(
         Python(tests=TestRoots.of(Pytest(root=Path("packages/*/tests")))),

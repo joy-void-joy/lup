@@ -41,6 +41,8 @@ interface Props {
     waiting: number;
     /** Bring the review back. */
     back: () => void;
+    /** Give the keyboard to the agents' tree. */
+    tree: () => void;
     /** Say something in the page's top line. */
     say: (text: string) => void;
 }
@@ -129,7 +131,7 @@ function inSight(view: EditorView, position: number): boolean {
 
 const NOTHING: Laid = { text: "", words: [], asides: [], blocks: [], fold: null, turns: [], last: null, message: null };
 
-export function Conversation({ launch, agent, beat, waiting, back, say }: Props) {
+export function Conversation({ launch, agent, beat, waiting, back, tree, say }: Props) {
     const { talker } = agent;
     const runtime = launch.launch.runtime;
     const subagent = talker.agent ?? null;
@@ -228,6 +230,7 @@ export function Conversation({ launch, agent, beat, waiting, back, say }: Props)
         inserting: setInserting,
         epoch,
         shownNow: true,
+        tree,
     });
     const before = useRef<Laid | null>(null);
     // Whether the message being begun was begun from the conversation's last line.
@@ -395,7 +398,7 @@ export function Conversation({ launch, agent, beat, waiting, back, say }: Props)
                     <div className="keys muted">
                         comment: <kbd>o</kbd>/<kbd>C</kbd> line · <kbd>v</kbd>…<kbd>c</kbd> selection · <kbd>c</kbd>{" "}
                         message · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>za</kbd> fold · <kbd>zR</kbd>/
-                        <kbd>zM</kbd> unfold/fold all · <kbd>J</kbd>/<kbd>K</kbd> turns · <kbd>␣r</kbd> review
+                        <kbd>zM</kbd> unfold/fold all · <kbd>J</kbd>/<kbd>K</kbd> turns · <kbd>␣r</kbd> review · <kbd>␣h</kbd> agents
                     </div>
                 )}
             </div>

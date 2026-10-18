@@ -230,6 +230,27 @@ class Rename(Request):
     name: Name
 
 
+class SetHolding(Request):
+    """Turn the operator's switch for one conversation on or off: whether each flagged write of it is held."""
+
+    kind: Literal["set-holding"] = "set-holding"
+    launch: LaunchId
+    session: str
+    """The runtime's id for the session."""
+    agent: str | None = None
+    """The runtime's id for the subagent; none for the session's own conversation."""
+    on: bool
+
+
+class ShowHolding(Request):
+    """Say whether the operator holds each flagged write of one conversation, as the judge asks."""
+
+    kind: Literal["show-holding"] = "show-holding"
+    runtime: str
+    session: str
+    agent: str | None = None
+
+
 class Unregister(Request):
     """End a launch: its sockets closed, its directory and record removed."""
 
@@ -261,6 +282,13 @@ class Registered(Reply):
     kind: Literal["registered"] = "registered"
     directory: Path
     name: Name
+
+
+class Holding(Reply):
+    """Whether the operator holds each flagged write of a conversation."""
+
+    kind: Literal["holding"] = "holding"
+    on: bool
 
 
 class Renamed(Reply):
@@ -304,6 +332,8 @@ class Talker(Model):
     conversation, 1 for a subagent it spawned."""
     activity: Activity | None = None
     """None until one of its hooks is heard."""
+    holding: bool = False
+    """Whether the operator holds each flagged write of it."""
 
 
 class Listed(Reply):

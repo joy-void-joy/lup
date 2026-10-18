@@ -95,6 +95,21 @@ def test_a_write_that_asks_is_held_for_the_operator_and_let_through_on_a_yes(
     assert [(each.path, each.asked) for each in session.pending] == [(CORE, True)]
 
 
+def test_a_flagged_write_lands_unasked_unless_the_operator_holds_its_agents(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    write = Overwrite(
+        call="w1", tool="Write", path=repo / CORE, text=(repo / CORE).read_text() + "\n"
+    )
+    decision = before(kit.bench, write, "s1", repo, agent="a1")
+    assert decision == Decision(outcome="allow")
+    assert kit.announced.holds == []
+    assert kit.announced.asked == ["asking/s1/a1"]
+    [verdict] = VerdictLog(path=kit.layout.verdicts(repo / ".git")).read()
+    assert (verdict.outcome, verdict.reasons) == ("allow", ["whole-file"])
+
+
 def test_a_held_write_declined_never_lands_its_version_saved_the_comment_told(
     kit: Kit, repo: Path
 ) -> None:

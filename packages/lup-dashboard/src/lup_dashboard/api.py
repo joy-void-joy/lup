@@ -14,11 +14,13 @@ from pydantic import Field
 
 from lup.types import Model
 from lup_dev.host.protocol import (
+    Holding,
     Listed,
     ListLaunches,
     Refused,
     Rename,
     Renamed,
+    SetHolding,
 )
 from lup_dev.inbox.protocol import (
     AnswerApproval,
@@ -46,6 +48,7 @@ from lup_dev.inbox.protocol import (
 type Asked = Annotated[
     ListLaunches
     | Rename
+    | SetHolding
     | ListInbox
     | ShowItem
     | AnswerItem
@@ -61,7 +64,8 @@ type Asked = Annotated[
     Field(discriminator="kind"),
 ]
 """A request the page may send: the launches served and their conversations,
-a launch renamed, and the operator's inbox, its items read, answered, finished
+a launch renamed, the operator's switch for a conversation turned, "hold each
+flagged write", and the operator's inbox, its items read, answered, finished
 and sent, an approval answered and its diff read, an item's moment in its
 sender's conversation read, a whole conversation read from where the page left
 it, and the operator's draft reply shown, kept and sent."""
@@ -69,6 +73,7 @@ it, and the operator's draft reply shown, kept and sent."""
 type Replied = Annotated[
     Listed
     | Renamed
+    | Holding
     | Items
     | Shown
     | Settled

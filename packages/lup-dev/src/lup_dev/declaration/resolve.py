@@ -30,7 +30,7 @@ that can't.
 """
 
 from pathlib import Path
-from typing import Literal, Self
+from typing import Self
 
 from pydantic import model_validator
 
@@ -236,7 +236,10 @@ class Resolved(Model):
     """The other repositories the project's sessions may read, from every module
     holding some, merged by name; each path as written. A person names theirs
     in their own layer, `lup_project.local.py`."""
-    asks: Literal["every", "protected"]
+    held: list[str]
+    """What a change waits for the operator's answer on, by name (`Project.held`)."""
+    flagged: list[str]
+    """What a change lands with, flagged, by name (`Project.flagged`)."""
     served: list[Served] = []
     """Each module's classes of tools, each with its module: what a launch serves
     its session."""
@@ -599,7 +602,8 @@ def resolve(project: Project) -> Resolved:
         limits=limited(parts(modules, Credentials)),
         guidance=held(Guidance(), parts(modules, Guidance), "Guidance"),
         repositories=neighbours(modules),
-        asks=project.asks,
+        held=project.held,
+        flagged=project.flagged,
         served=served(modules),
         handled=handled(modules),
         hooked=hooked(modules),
@@ -641,7 +645,10 @@ class Declaration(Model):
     """The project's runner, kept as the commands it puts before a tool and its
     environment's files: the judge runs ruff, and names the engine's interpreter,
     with them."""
-    asks: Literal["every", "protected"]
+    held: list[str] = Project().held
+    """What a change waits for the operator's answer on, by name."""
+    flagged: list[str] = Project().flagged
+    """What a change lands with, flagged, by name."""
 
     @classmethod
     def of(cls, project: Project, source: Path | None = None) -> Declaration:
@@ -662,7 +669,8 @@ class Declaration(Model):
             conditions=resolved.conditions,
             rules=resolved.rules,
             runner=Prefixed.of(resolved.runner),
-            asks=resolved.asks,
+            held=resolved.held,
+            flagged=resolved.flagged,
         )
 
     @classmethod

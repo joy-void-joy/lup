@@ -474,8 +474,10 @@ class Worktree(Model):
         """Store what to remember about a session."""
         write_model(self.store.layout.session(session.key), session)
 
-    def judge(self, services: Services, approved: list[Path]) -> Judge:
-        """Return a judge for this worktree, the operator having approved `approved`."""
+    def judge(
+        self, services: Services, approved: list[Path], *, holding: bool = False
+    ) -> Judge:
+        """Return a judge for this worktree, the operator having approved `approved`, and holding each flagged write where `holding`."""
         return Judge(
             root=self.root,
             roles=self.roles,
@@ -483,6 +485,7 @@ class Worktree(Model):
             linter=services.linter,
             conditions=declared(self.loaded.root, self.declaration.conditions),
             approved=approved,
+            holding=holding,
         )
 
     def verdicts(self, layout: Layout) -> VerdictLog:
@@ -1093,7 +1096,15 @@ def checkpoint(
         wrote = writers(session, plans, agent)
         changes = [plan.change for plan in plans if plan.change is not None]
         judgements = (
-            worktree.judge(services, session.approved).judge(changes) if changes else []
+            worktree.judge(
+                services,
+                session.approved,
+                holding=services.announcing.holding(
+                    bench.runtime.name(), key, agent or None
+                ),
+            ).judge(changes)
+            if changes
+            else []
         )
         deciding = [plan.path for plan in plans if plan.change and plan.decide]
         fated = fates(judgements, deciding)

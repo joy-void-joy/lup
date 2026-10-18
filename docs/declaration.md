@@ -43,7 +43,6 @@ class LupDevelopment(Module):
 
 
 project = Project(
-    asks="protected",
     modules=Modules.default()
     .edit(
         Python(tests=TestRoots.of(Pytest(root=Path("packages/*/tests")))),
@@ -66,7 +65,7 @@ Read from the top:
 - **A collection changes by operations on what's below it.** `Rules().add("runtime-mention")` means `CodeRules`' rules as they stand, plus one. `Exemptions().add(…)` likewise adds an exemption to those already there. So the second `.edit(CodeRules(…))` keeps what the first one did, and no layer restates another (*The verbs on modules*).
 - **`why` is optional** on `.edit`, `.drop` and `.replace`, and is kept with the change for whoever reads the project later. An `Exemption` always carries its own.
 - **`LupDevelopment` is a module written the way lup's own are:** a `Module` subclass whose name and requirements are class attributes and whose docstring is its one sentence. Its parts are fields whose defaults are its own. `before="rules"` puts its step ahead of `Python`'s `rules` step. That works because names are per kind and shared across modules.
-- **`asks` is the one field of `Project` that isn't a module's** (`declaration/project.py`). It says which of the judge's asks reach the operator: `"every"` by default, or `"protected"`. It goes once the judge's asks become proposals.
+- **`held` and `flagged` are the fields of `Project` that aren't a module's** (`declaration/project.py`). They name what a change asks that waits for the operator's answer, and what lands flagged for their review, in one vocabulary: a path's role (`protected`, `operator`), a kind of change (`new-file`, `whole-file`, `public-api`, `ignore`), or one of lup's rules by its id. lup's own declaration takes the defaults, `held=["protected", "operator", "ignore"]` and `flagged=["new-file", "whole-file", "public-api"]`; a project holding a rule's findings adds its name, as `held=["protected", "operator", "ignore", "regex"]`. A name in both lists, or one that's neither a role, a kind nor shaped like a rule's id, fails the load; a rule's id is checked against the engine's table when the judge first reads it (`docs/judging-writes.md`, *What each change gets*).
 
 A project without a `lup_project.py` gets `Project()`, which equals `Project(modules=Modules.default())`.
 
@@ -228,14 +227,14 @@ lup's own `lup_project.py` (*A project is its modules*) uses only the surface an
 - the exemptions, the test roots, and the conditions modules;
 - the runner, and every requirement, the runner's among them;
 - the image's packages, the session settings, the credentials' limits, the guidance sections, and the related repositories;
-- `asks`;
+- what's held and what's flagged;
 - what's served: tools, handlers, hooks, and which modules' data rooms mount.
 
 A few things come from a single module:
 - **The runner** comes from the one module holding a `Runner`, or is `Plain()` where none does. Two runners fail, since a project runs its tools one way.
 - **The session settings and the credentials** come from the one module holding them, `Core`. A second holder fails, naming both: a project's sessions run one way, and a launch has one set of limits.
 
-**What judging reads** is kept apart, as a `Declaration` of plain values: the declaration's file, the path roles, the test roots, the exemptions, the conditions, the rule selections, the runner as `Prefixed`, and `asks`. The test roots are none where they're lup's default, and then pytest's configuration says where tests are (`policy/roles.py`).
+**What judging reads** is kept apart, as a `Declaration` of plain values: the declaration's file, the path roles, the test roots, the exemptions, the conditions, the rule selections, the runner as `Prefixed`, and what's held and flagged. The test roots are none where they're lup's default, and then pytest's configuration says where tests are (`policy/roles.py`).
 
 Plain values matter because a module or a runner may be a class of the project's own, which JSON can't bring back. The judge keeps the last declaration that loaded as JSON, to stand in for one that can't (`docs/judging-writes.md`, *The declaration, from the approved commit*). `ProjectError` is the one error for every way a declaration is wrong, so a reader catches it alone to put the stand-in in place.
 
@@ -360,7 +359,7 @@ In `lup_dev`'s layers, the declaration sits below `codescan` and above `catalog`
 - **More modules:** lup's further modules, such as a ledger, coordination requiring it, a git workflow, and optional ones like budgets and releases, so `Modules.all()` grows past the default. In time, each module becomes a distribution of its own.
 - **Judging decided by modules:** judging a write still decides with its own code rather than its modules'. The aim is that nothing in lup's core reads a default a project can't change (`DESIGN.md`, *Modules*: nothing built in).
 - **References by import:** a module refers to its code by importing it, as `Toolsets` do, and the gate checks that loading the declaration imports nothing heavy. Rooms become named selections of modules on top of the project's own (`DESIGN.md`, *Modules*).
-- **`asks` goes** once the judge's asks become proposals. A change's `why` is where an upstream candidate starts.
+- **A change's `why`** is where an upstream candidate starts.
 
 ### A project's own rules
 

@@ -8,8 +8,9 @@
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
 // any change to the draft. What folds is folded until opened: `za` opens or
 // closes the fold under the cursor, `zo` and `zc` open and close it, `zR` and
-// `zM` open and close them all. Each view says what else its keys do and lays
-// its own text out (`Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
+// `zM` open and close them all. Space `h`, or Space `w` `h`, goes to the agents'
+// tree. Each view says what else its keys do and lays its own text out
+// (`Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
 import { codeFolding, foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
 import { Annotation, EditorState, Facet, Prec, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, EditorView, drawSelection, type DecorationSet, type ViewUpdate } from "@codemirror/view";
@@ -28,6 +29,7 @@ interface Actions {
     move: (forward: boolean) => void;
     approve: (approved: boolean) => void;
     back: () => void;
+    tree: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
     foldAll: (closing: boolean) => void;
     folded: (state: EditorState) => void;
@@ -92,6 +94,7 @@ function mapKeys(): void {
     action("lupApprove", (actions) => actions.approve(true));
     action("lupDecline", (actions) => actions.approve(false));
     action("lupBack", (actions) => actions.back());
+    action("lupTree", (actions) => actions.tree());
     // Vim's own fold keys, which its CodeMirror mode leaves unmapped, on CodeMirror's folds.
     action("lupFoldToggle", (actions) => actions.fold("toggle"));
     action("lupFoldOpen", (actions) => actions.fold("open"));
@@ -110,6 +113,8 @@ function mapKeys(): void {
     map("<Space>a", "lupApprove", "normal");
     map("<Space>x", "lupDecline", "normal");
     map("<Space>r", "lupBack", "normal");
+    map("<Space>h", "lupTree", "normal");
+    map("<Space>wh", "lupTree", "normal");
     map("za", "lupFoldToggle", "normal");
     map("zo", "lupFoldOpen", "normal");
     map("zc", "lupFoldClose", "normal");
@@ -310,6 +315,8 @@ interface Config<D, C> {
     epoch: number;
     /** Whether the editor is shown: shown again, it takes the keyboard. */
     shownNow: boolean;
+    /** Give the keyboard to the agents' tree. */
+    tree: () => void;
 }
 
 /** What a view's keys do with what it laid out. */
@@ -552,6 +559,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             move: own.move,
             approve: (approved) => own.approve?.(approved),
             back: () => own.back?.(),
+            tree: config.tree,
             fold: (how) => {
                 const editor = view.current;
                 const at = head();

@@ -3,7 +3,8 @@
 // written into it, and a line saying what the reply covers and who it reaches:
 // every agent it covers, each getting all of it. Selecting an agent opens its
 // conversation in the review's place; Space `r` in it, the palette, or the
-// title bar brings the review back as it was left.
+// title bar brings the review back as it was left. Space `h` gives the keyboard
+// to the tree, and Space `l` back to the view (`AgentTree.tsx`).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { everyone, launches, type Agent, type Launch } from "./agents";
@@ -76,6 +77,43 @@ export function App() {
 
     const waiting = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.items : []), [inbox.reply]);
     const review = useCallback(() => setSelected(null), []);
+    const nav = useRef<HTMLElement>(null);
+    const main = useRef<HTMLElement>(null);
+
+    // The keyboard to the tree, on the conversation shown, or its first row; and back to the view shown.
+    const toTree = useCallback(() => {
+        const tree = nav.current;
+        const row =
+            tree?.querySelector<HTMLElement>('[role="row"][aria-selected="true"]') ??
+            tree?.querySelector<HTMLElement>('[role="row"]');
+        row?.focus();
+    }, []);
+    const toView = useCallback(() => {
+        const editors = [...(main.current?.querySelectorAll<HTMLElement>(".cm-content") ?? [])];
+        editors.find((each) => each.closest("[hidden]") === null)?.focus();
+    }, []);
+
+    function hold(agent: Agent) {
+        const at = found(served, agents, agent.talker.path);
+        if (at === null) {
+            return;
+        }
+        const on = agent.talker.holding !== true;
+        const { session, agent: subagent, path } = agent.talker;
+        void ask({ kind: "set-holding", launch: at.launch.launch.launch, session, agent: subagent ?? null, on }).then(
+            (answer) => {
+                if (answer.kind === "refused") {
+                    setSaid(answer.error);
+                    return;
+                }
+                setSaid(
+                    on
+                        ? `Each flagged write of ${path} is held for your answer.`
+                        : `${path}'s flagged writes land again, flagged.`,
+                );
+            },
+        );
+    }
 
     useEffect(() => {
         void ask({ kind: "inbox-draft" }).then((answer) => {
@@ -209,12 +247,23 @@ export function App() {
                     Go to <kbd>Ctrl</kbd> <kbd>K</kbd>
                 </button>
             </header>
-            <nav className="win" aria-label="Agents">
+            <nav className="win" aria-label="Agents" ref={nav}>
                 <div className="wb">
                     agents <span className="count">{agents.length}</span>
+                    <span className="spacer" />
+                    <span className="hint">
+                        <kbd>h</kbd> hold · <kbd>␣l</kbd> view
+                    </span>
                 </div>
                 <div className="buf">
-                    <AgentTree served={served} selected={selected} select={setSelected} now={now} />
+                    <AgentTree
+                        served={served}
+                        selected={selected}
+                        select={setSelected}
+                        now={now}
+                        hold={hold}
+                        right={toView}
+                    />
                 </div>
                 {shown === null ? null : (
                     <div className="agent-details">
@@ -222,7 +271,7 @@ export function App() {
                     </div>
                 )}
             </nav>
-            <main className="win">
+            <main className="win" ref={main}>
                 {selected === null ? (
                     <div className="wb">
                         waiting on you <span className="count">{waiting.length}</span>
@@ -250,6 +299,7 @@ export function App() {
                         beat={reply}
                         waiting={waiting.length}
                         back={review}
+                        tree={toTree}
                         say={setSaid}
                     />
                 )}
@@ -269,6 +319,7 @@ export function App() {
                         inserting={setInserting}
                         epoch={epoch}
                         shown={selected === null}
+                        tree={toTree}
                     />
                     <div className="status">
                         {numbers.length === 0 ? (
@@ -298,7 +349,7 @@ export function App() {
                             comment: <kbd>c</kbd> item · <kbd>o</kbd>/<kbd>C</kbd> line · <kbd>v</kbd>…<kbd>c</kbd>{" "}
                             selection · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>␣d</kbd> read · <kbd>␣z</kbd> later ·{" "}
                             <kbd>␣a</kbd>/<kbd>␣x</kbd> approve/decline · <kbd>za</kbd> fold · <kbd>zR</kbd>/
-                            <kbd>zM</kbd> unfold/fold all · <kbd>J</kbd>/<kbd>K</kbd> items
+                            <kbd>zM</kbd> unfold/fold all · <kbd>J</kbd>/<kbd>K</kbd> items · <kbd>␣h</kbd> agents
                         </div>
                     )}
                 </div>

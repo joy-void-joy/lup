@@ -9,6 +9,7 @@ from typing import ClassVar
 
 import pydantic
 import pytest
+from pydantic import ValidationError
 
 import lup_dev
 from lup.rooms.container import Mount
@@ -373,7 +374,10 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
     )
     assert resolved.exempt == []
     assert resolved.conditions == []
-    assert resolved.asks == "every"
+    assert (resolved.held, resolved.flagged) == (
+        ["protected", "operator", "ignore"],
+        ["new-file", "whole-file", "public-api"],
+    )
     assert [(each.module, each.requirement.tool) for each in resolved.requirements] == [
         ("code-rules", "node"),
         ("python", "uv"),
@@ -834,8 +838,15 @@ def test_conditions_are_an_address_any_module_fills() -> None:
     ]
 
 
-def test_asks_keeps_its_meaning() -> None:
-    assert resolve(Project(asks="protected")).asks == "protected"
+def test_what_is_held_and_flagged_is_named_once_and_checked_as_it_loads() -> None:
+    held = resolve(Project(held=["protected", "regex"], flagged=["new-file"]))
+    assert (held.held, held.flagged) == (["protected", "regex"], ["new-file"])
+    with pytest.raises(ValidationError, match="name nothing held or flagged"):
+        Project(held=["Protected Paths"])
+    with pytest.raises(
+        ValidationError, match=r"\['new-file'\] are both held and flagged"
+    ):
+        Project(held=["new-file"])
 
 
 @pytest.mark.parametrize("dropped", ["python", "code-rules"])

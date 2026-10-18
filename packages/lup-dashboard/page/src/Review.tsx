@@ -44,6 +44,8 @@ interface Props {
     epoch: number;
     /** Whether the review is shown, rather than a conversation: shown again, it takes the keyboard. */
     shown: boolean;
+    /** Give the keyboard to the agents' tree. */
+    tree: () => void;
 }
 
 /** Return how a line of a diff is drawn: added, removed, a hunk's header or a file's; none for a line of context or of anything else. */
@@ -139,7 +141,7 @@ function followed(before: Laid | null, after: Laid, head: number, landing: Landi
     return Math.max(Math.min(now.header.from + (head - was.header.from), after.text.length), 0);
 }
 
-export function Review({ items, draft, change, banner, around, send, approve, inserting, epoch, shown }: Props) {
+export function Review({ items, draft, change, banner, around, send, approve, inserting, epoch, shown, tree }: Props) {
     const laidOut = useMemo(
         () =>
             laid(
@@ -176,6 +178,7 @@ export function Review({ items, draft, change, banner, around, send, approve, in
         inserting,
         epoch,
         shownNow: shown,
+        tree,
     });
     const { view, landing, unfolded } = editor;
     const before = useRef<Laid | null>(null);

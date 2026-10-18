@@ -31,6 +31,7 @@ from lup_dev.clock import Clock
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient
+from lup_dev.host.protocol import Holding, HostError, ShowHolding
 from lup_dev.inbox.protocol import AskHold, Shown
 from lup_dev.inbox.store import Conversation, HeldChange
 from lup_dev.layout import HostLayout, Layout, StoreLayout
@@ -115,6 +116,10 @@ class Announcing(ABC):
     def announced(self, hold: Hold, runtime: str, repository: Path) -> None:
         """Put `hold` before the operator, from the session of `runtime` that made the change, in `repository`."""
 
+    @abstractmethod
+    def holding(self, runtime: str, session: str, agent: str | None) -> bool:
+        """Say whether the operator holds each flagged write of a conversation of `runtime`: its session's own, or its subagent `agent`'s."""
+
 
 def asked(hold: Hold) -> HeldChange:
     """Return what a hold asks the operator, as an item of their inbox: let the change land, or keep what a commit brought, and what each file asks."""
@@ -156,6 +161,16 @@ class InboxAnnouncing(Model, Announcing, arbitrary_types_allowed=True):
             change=asked(hold), sender=sender, diff=hold.diff, call=hold.call
         )
         host.ask(asking, Shown)
+
+    @override
+    def holding(self, runtime: str, session: str, agent: str | None) -> bool:
+        """Ask the host service, which keeps the switch; where none runs there's no switch, and nothing is held for it."""
+        host = HostClient(layout=self.layout, clock=self.clock, starter=Detached())
+        asked = ShowHolding(runtime=runtime, session=session, agent=agent)
+        try:
+            return host.ask(asked, Holding).on
+        except HostError:
+            return False
 
 
 def answered(

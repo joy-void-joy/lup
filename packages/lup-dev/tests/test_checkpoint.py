@@ -300,24 +300,25 @@ def test_a_write_committed_in_the_same_call_is_judged_once_as_the_commits(
     assert finish(kit, repo, "c2").context == ""
 
 
-def test_a_module_committed_through_the_shell_stays_and_asks_the_operator_after(
+def test_a_protected_file_committed_through_the_shell_stays_and_asks_the_operator_after(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:
     kit.announced.answering = None
     start(kit, repo)
-    new = repo / "src" / "pkg" / "new.py"
+    new = repo / ".github" / "ci.yml"
+    new.parent.mkdir()
     call(kit, repo, "c1")
-    new.write_text('"""New."""\n')
-    shell.commit(repo, "a module through the shell")
+    new.write_text("on: push\n")
+    shell.commit(repo, "CI through the shell")
     told = finish(kit, repo, "c1").context
-    assert f"asks: {new} is a new production file" in told
+    assert f"asks: {new} is a protected path" in told
     [hold] = waiting(kit.layout)
     assert told.endswith(f"in their inbox (hold {hold.key}).")
     assert kit.announced.holds == [hold]
     assert hold.commit == shell.git(repo, "rev-parse", "HEAD")
-    assert new.read_text() == '"""New."""\n'
+    assert new.read_text() == "on: push\n"
     call(kit, repo, "c2")
-    shell.git(repo, "restore", "src/pkg/new.py")
+    shell.git(repo, "restore", ".github/ci.yml")
     assert finish(kit, repo, "c2").context == ""
     assert [each.key for each in waiting(kit.layout)] == [hold.key]
 
@@ -328,8 +329,9 @@ def test_a_moves_hold_is_answered_after_the_fact(
     kit.announced.answering = None
     start(kit, repo)
     call(kit, repo, "c1")
-    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
-    shell.commit(repo, "a module through the shell")
+    (repo / ".github").mkdir()
+    (repo / ".github" / "ci.yml").write_text("on: push\n")
+    shell.commit(repo, "CI through the shell")
     finish(kit, repo, "c1")
     [hold] = waiting(kit.layout)
     answer(
@@ -349,9 +351,9 @@ def test_a_moves_hold_is_answered_after_the_fact(
     told = finish(kit, repo, "c2").context
     assert told.startswith(
         f"The operator declined what commit {hold.commit} brought to "
-        f"{repo}/src/pkg/new.py: not this module. Nothing was changed"
+        f"{repo}/.github/ci.yml: not this module. Nothing was changed"
     )
-    assert (repo / "src" / "pkg" / "new.py").exists()
+    assert (repo / ".github" / "ci.yml").exists()
     call(kit, repo, "c3")
     assert finish(kit, repo, "c3").context == ""
 
