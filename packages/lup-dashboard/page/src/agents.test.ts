@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { doing, everyone, launches, repositories, repositoryName, since, type Register, type Talker } from "./agents";
+import {
+    doing,
+    everyone,
+    launches,
+    repositories,
+    repositoryName,
+    since,
+    treeKey,
+    type Leading,
+    type Register,
+    type Talker,
+} from "./agents";
 
 const AT = "2026-10-01T12:00:00Z";
 
@@ -23,7 +34,7 @@ function registered(launch: string, name: string): Register {
 function talker(path: string, parent: string | null, depth: number): Talker {
     const own = path.split("/").at(-1) ?? path;
     const agent = parent === null ? null : own;
-    return { path, own, session: "s1", agent, kind: null, parent, depth, activity: null };
+    return { path, own, session: "s1", agent, kind: null, parent, depth, activity: null, holding: false };
 }
 
 describe("launches", () => {
@@ -100,5 +111,39 @@ describe("repositories", () => {
             ["lup", 2],
             ["adlib", 1],
         ]);
+    });
+});
+
+describe("treeKey", () => {
+    function typed(keys: string[]): { acts: (string | null)[]; taken: boolean[] } {
+        let leading: Leading = "";
+        const acts: (string | null)[] = [];
+        const taken: boolean[] = [];
+        for (const key of keys) {
+            const next = treeKey(leading, key);
+            leading = next.leading;
+            acts.push(next.act);
+            taken.push(next.taken);
+        }
+        return { acts, taken };
+    }
+
+    it("turns the switch with h, and leaves arrows, Enter and other letters to the tree", () => {
+        expect(typed(["h", "ArrowDown", "Enter", "j"])).toEqual({
+            acts: ["hold", null, null, null],
+            taken: [true, false, false, false],
+        });
+    });
+
+    it("gives the keyboard to the view with Space l and Space w l", () => {
+        expect(typed([" ", "l", " ", "w", "l"]).acts).toEqual([null, "right", null, null, "right"]);
+    });
+
+    it("ends a chord on any other key, taking it, so a key after Space never turns the switch", () => {
+        expect(typed([" ", "h", "h"])).toEqual({ acts: [null, null, "hold"], taken: [true, true, true] });
+        expect(typed([" ", "w", "h", "ArrowDown"])).toEqual({
+            acts: [null, null, null, null],
+            taken: [true, true, true, false],
+        });
     });
 });

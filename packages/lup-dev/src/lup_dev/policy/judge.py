@@ -2,30 +2,35 @@
 
 Shared by the judgement before an edit lands (`before.py`) and by the checkpoint,
 so a change gets the same outcome whichever way it was made (`docs/judging-writes.md`,
-*What each change gets*):
+*What each change gets*). What a change asks the operator about, each by its name:
 
-| Change | Outcome |
+| Name | What |
 |---|---|
-| A test, scratch, docs or data file, at any size | allow |
-| An operator's document | ask |
-| A protected path | ask |
-| A production file being created, or a whole-file write over one | ask |
-| A change to the public API | ask |
-| An added `# lup: ignore` | ask |
-| Any other production change | allow |
+| `protected` | a protected path |
+| `operator` | one of the operator's documents |
+| `new-file` | a production file being created |
+| `whole-file` | a whole-file write over one |
+| `public-api` | a change to the public API |
+| `ignore` | an added `# lup: ignore` |
+| a rule's name | one of lup's rules, a finding of on the lines a change touches |
 
-lup's findings never decide the outcome: those on the lines a change touches are
-told to the agent right after the write, as a type error is, and fail the gate
-until each is cleared or kept with an `ignore`. A project declaring
-`asks="protected"` has only a protected path's and an operator's document's asks
-reach the operator, and allows the rest. A finding ruff fixes safely isn't
-reported at all. Removing a note present when the session started is allowed
-and reported.
+The declaration says how each is answered (`Project.held`, `Project.flagged`):
+held, the change waiting for the operator's answer (an `ask`); flagged, the
+change landing, for the operator to see in their review of the branch; or
+neither, let through. By default a protected path, an operator's document and
+an added `ignore` are held, the changes of design flagged, and no rule either.
+The operator's switch for an agent, "hold each flagged write", holds what's
+flagged (`Judge.holding`). Tests, scratch, docs and data are allowed at any size.
+
+lup's findings are told to the agent right after the write, as a type error is,
+and fail the gate until each is cleared or kept with an `ignore`, whatever the
+outcome. A finding ruff fixes safely isn't reported at all. Removing a note
+present when the session started is allowed and reported.
 """
 
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from lup.types import Model
 from lup_dev.codescan.contract import (
@@ -45,14 +50,14 @@ from lup_dev.codescan.directives import (
     missing,
 )
 from lup_dev.codescan.ruff import Linter
+from lup_dev.declaration.project import Asking
 from lup_dev.errors import LupDevError
 from lup_dev.policy.roles import Role, Roles
 from lup_dev.policy.surface import api_changes
 
-type AskKind = Literal[
-    "protected", "operator-document", "new-file", "whole-file", "public-api", "ignore"
-]
-"""What a change asks the operator about."""
+type AskKind = Asking | Literal["rule"]
+"""What a change asks the operator about: a path's role, a kind of change
+(`Asking`), or one of lup's rules, a finding of which the project holds or flags."""
 
 type Outcome = Literal["allow", "ask"]
 
@@ -82,6 +87,16 @@ class Ask(Model):
     kind: AskKind
     reason: str
     """What's asked, in one line, naming the path, the name or the rule."""
+    rule: str | None = None
+    """The rule a finding of asks, for a `rule` ask; none for any other."""
+
+    def name(self) -> str:
+        """Return the name the declaration holds or flags it by: its kind, or its rule's.
+
+        >>> Ask(kind="rule", rule="regex", reason="r").name()
+        'regex'
+        """
+        return self.rule if self.kind == "rule" and self.rule else self.kind
 
     def covered(self) -> bool:
         """Say whether an approval of the path earlier in the session covers this ask.
@@ -108,6 +123,10 @@ class Judgement(Model):
     role: Role
     outcome: Outcome
     asks: list[Ask] = []
+    """What's held: the change waits for the operator's answer."""
+    flags: list[Ask] = []
+    """What's flagged: the change lands, and the operator sees it in their review
+    of the branch."""
     findings: list[Finding] = []
     """lup's findings on the lines the change touches: told right after the write,
     and failing the gate until each is cleared or kept with an `ignore`."""
@@ -127,7 +146,9 @@ class Judgement(Model):
         """
         match self.outcome:
             case "ask":
-                return [ask.kind for ask in self.asks]
+                return [ask.name() for ask in self.asks]
+            case "allow" if self.flags:
+                return [ask.name() for ask in self.flags]
             case "allow" if self.findings:
                 return sorted(dict.fromkeys(finding.rule for finding in self.findings))
             case "allow":
@@ -185,6 +206,13 @@ def finding(path: Path, problem: Problem) -> Finding:
     )
 
 
+class Sorted(Model):
+    """A change's asks, sorted: those held for the operator, and those flagged."""
+
+    held: list[Ask] = []
+    flagged: list[Ask] = []
+
+
 class Versions(Model):
     """The engine's reports on the versions of one file a judgement compares."""
 
@@ -205,13 +233,19 @@ class Judge(Model, arbitrary_types_allowed=True):
     """The names the project's conditions module binds; none if it declares none."""
     approved: list[Path] = []
     """Paths the operator approved this session, whose design asks are covered."""
+    holding: bool = False
+    """Whether every flagged ask is held: the operator's switch for the agent
+    writing, "hold each flagged write"."""
 
     def judge(self, changes: list[Change], *, inform: bool = True) -> list[Judgement]:
         """Judge each change, asking the engine about every version at once.
 
         With `inform`, test files are checked too, for their type errors and
-        ruff's findings; without, only what decides an outcome is checked.
+        ruff's findings; without, only what decides an outcome is checked. Raise
+        `EngineError` where the declaration holds or flags a rule the engine's
+        table doesn't hold.
         """
+        self.named_rules()
         rules = [change for change in changes if self.roles.ruled(change.path)]
         informed = [
             change
@@ -254,6 +288,25 @@ class Judge(Model, arbitrary_types_allowed=True):
             for change in changes
         ]
 
+    def named_rules(self) -> None:
+        """Refuse a rule the declaration holds or flags that the engine's table doesn't hold, naming those it does; the engine is asked only where some rule is named."""
+        declaration = self.roles.declaration
+        named = [
+            name
+            for name in [*declaration.held, *declaration.flagged]
+            if name not in get_args(Asking.__value__)
+        ]
+        if not named:
+            return
+        known = [rule.id for rule in self.checker.rules()]
+        unknown = [name for name in named if name not in known]
+        if unknown:
+            message = (
+                f"the declaration holds or flags {unknown}, which lup's rules don't "
+                f"name; its rules are {', '.join(known)}"
+            )
+            raise EngineError(message)
+
     def reports(self, sources: list[Source]) -> dict[Path, FileReport]:
         """Ask the engine about `sources`, and return its reports by path.
 
@@ -294,22 +347,25 @@ class Judge(Model, arbitrary_types_allowed=True):
                 reason = f"{self.root / change.path} is a protected path{why}"
                 ask = Ask(kind="protected", reason=reason)
                 if change.after is None or not self.roles.ruled(change.path):
-                    asks = [ask]
+                    sorted_ = self.sorted([ask])
                     return Judgement(
                         path=change.path,
                         role=role,
-                        outcome="ask",
-                        asks=asks,
+                        outcome="ask" if sorted_.held else "allow",
+                        asks=sorted_.held,
+                        flags=sorted_.flagged,
                         removed=removed,
                     )
                 return self.ruled(change, versions, removed, [ask])
             case "operator":
                 reason = f"{self.root / change.path} is one of the operator's documents"
+                sorted_ = self.sorted([Ask(kind="operator", reason=reason)])
                 return Judgement(
                     path=change.path,
                     role=role,
-                    outcome="ask",
-                    asks=[Ask(kind="operator-document", reason=reason)],
+                    outcome="ask" if sorted_.held else "allow",
+                    asks=sorted_.held,
+                    flags=sorted_.flagged,
                 )
             case "production":
                 if change.after is None:
@@ -325,17 +381,22 @@ class Judge(Model, arbitrary_types_allowed=True):
                     information=self.information(versions),
                 )
 
-    def asking(self, asks: list[Ask]) -> list[Ask]:
-        """Return the asks that reach the operator, as the declaration's `asks` says.
-
-        A project asking only about protected paths has every other ask allowed. An
-        operator's document asks either way, and never comes through here.
-        """
-        match self.roles.declaration.asks:
-            case "every":
-                return asks
-            case "protected":
-                return [ask for ask in asks if ask.kind == "protected"]
+    def sorted(self, asks: list[Ask]) -> Sorted:
+        """Sort a change's asks as the declaration says: each held or flagged by its name (`Project.held`, `Project.flagged`), and the rest let through; every flagged one held where the operator holds each flagged write of the agent (`holding`)."""
+        held = self.roles.declaration.held
+        flagged = self.roles.declaration.flagged
+        return Sorted(
+            held=[
+                ask
+                for ask in asks
+                if ask.name() in held or (self.holding and ask.name() in flagged)
+            ],
+            flagged=[
+                ask
+                for ask in asks
+                if ask.name() in flagged and not self.holding and ask.name() not in held
+            ],
+        )
 
     def kept(self, versions: Versions) -> list[Finding]:
         """Return every owner's findings in the after version, once `ignore`s apply.
@@ -385,19 +446,35 @@ class Judge(Model, arbitrary_types_allowed=True):
             *self.suppressions(change.path, versions),
         ]
         covered = change.path in self.approved
-        asks = self.asking(
-            [*always, *(ask for ask in design if not (covered and ask.covered()))]
-        )
         lup = self.lup_findings(change.path, versions)
         touched = touched_lines(change.before, after)
         findings = [found for found in lup if touches(found, touched)]
         untouched = [found for found in lup if not touches(found, touched)]
         information = self.information(versions)
+        ruled = [
+            Ask(
+                kind="rule",
+                rule=found.rule,
+                reason=(
+                    f"{self.root / change.path}:{found.span.start.line} - "
+                    f"{found.rule}: {found.message}"
+                ),
+            )
+            for found in findings
+        ]
+        sorted_ = self.sorted(
+            [
+                *always,
+                *(ask for ask in design if not (covered and ask.covered())),
+                *ruled,
+            ]
+        )
         return Judgement(
             path=change.path,
             role=self.roles.role(change.path),
-            outcome="ask" if asks else "allow",
-            asks=asks,
+            outcome="ask" if sorted_.held else "allow",
+            asks=sorted_.held,
+            flags=sorted_.flagged,
             findings=findings,
             untouched=untouched,
             information=information,

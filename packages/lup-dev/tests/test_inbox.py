@@ -1805,6 +1805,9 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
             tmp_path / ".git",
         )
         [item] = delivery.inbox.waiting(Operator())
+        unserved = InboxAnnouncing(layout=machine.host, clock=clock).holding(
+            "claude", "s1", "sub"
+        )
         shown = inbox("show", str(item.number))
         diff = inbox("show", str(item.number), "--diff")
         declined = inbox(
@@ -1837,6 +1840,14 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
     )
     assert isinstance(state, Decided)
     assert state.comment == "not this one"
+    assert not unserved
+
+
+def test_with_no_host_service_nothing_is_held_for_the_operators_switch(
+    machine: Layout, clock: FakeClock
+) -> None:
+    announcing = InboxAnnouncing(layout=machine.host, clock=clock)
+    assert not announcing.holding("claude", "s1", None)
 
 
 def test_a_conversation_is_read_from_its_record_from_where_the_asker_left_it(

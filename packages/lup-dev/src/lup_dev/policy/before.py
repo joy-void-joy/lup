@@ -188,7 +188,8 @@ def before(
             baseline=decoded(store.content(store.started(session), path)),
             whole=proposal.whole() and (earlier is not None or disk.is_file()),
         )
-        judge = worktree.judge(services, record.approved)
+        each_held = services.announcing.holding(bench.runtime.name(), session, agent)
+        judge = worktree.judge(services, record.approved, holding=each_held)
         judgement = judge.judge([change], inform=False)[0]
         to = Attributed(worktree=worktree.root, session=session, tool=proposal.tool)
         logged = None if judgement.outcome == "ask" else verdict(bench, to, judgement)

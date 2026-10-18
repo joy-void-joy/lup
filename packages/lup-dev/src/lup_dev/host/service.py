@@ -70,6 +70,7 @@ from lup_dev.host.names import Names, claimed, held, shaped, taken
 from lup_dev.host.protocol import (
     Activity,
     Done,
+    Holding,
     HostError,
     Listed,
     ListLaunches,
@@ -80,6 +81,8 @@ from lup_dev.host.protocol import (
     Renamed,
     Reply,
     Request,
+    SetHolding,
+    ShowHolding,
     Stop,
     Talker,
     Unregister,
@@ -912,6 +915,46 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         self.say(f"{launch}: a subagent named itself `{path}`")
         return path
 
+    def held(self, request: SetHolding) -> bool:
+        """Turn the operator's switch for one conversation of a launch on or off, keep it with the launch's conversations, and return it as it stands.
+
+        Raise `HostError` where no launch is served by that id, or no hook of it
+        has named that conversation.
+        """
+        served = self.served.get(request.launch)
+        if served is None:
+            message = f"no launch served is `{request.launch}`"
+            raise HostError(message)
+        conversations = served.conversations
+        found = [
+            each
+            for each in conversations.known
+            if each.session == request.session and each.agent == request.agent
+        ]
+        if not found:
+            message = (
+                f"no conversation of launch `{request.launch}` is session "
+                f"{request.session}" + ("" if request.agent is None else f"'s {request.agent}")
+            )
+            raise HostError(message)
+        [conversation] = found
+        conversations.kept(conversation.model_copy(update={"holding": request.on}))
+        write_model(self.layout.conversations(request.launch), conversations)
+        said = "holds" if request.on else "no longer holds"
+        path = conversations.path(conversation, self.named(served.launch))
+        self.say(f"{request.launch}: the operator {said} each flagged write of {path}")
+        return request.on
+
+    def holding(self, request: ShowHolding) -> bool:
+        """Say whether the operator holds each flagged write of a conversation of `request`'s runtime, in whichever launch serves it; not where none does."""
+        return any(
+            each.holding
+            for served in self.served.values()
+            if served.launch.runtime == request.runtime
+            for each in served.conversations.known
+            if each.session == request.session and each.agent == request.agent
+        )
+
     def talkers(self, served: Served) -> list[Talker]:
         """Return a launch's conversations as the operator is shown them: its latest session's own, then each of its subagents under its parent, in the order heard; none before any hook named one."""
         conversations = served.conversations
@@ -928,6 +971,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 parent=None if parent is None else conversations.path(parent, launch),
                 depth=depth,
                 activity=conversations.activities.get(each.id),
+                holding=each.holding,
             )
 
         def under(parent: str, depth: int) -> list[Talker]:
@@ -1099,6 +1143,34 @@ class Renaming(Model, Handler[Rename]):
     @override
     async def answer(self, request: Rename) -> Reply:
         return Renamed(launch=self.launches.renamed(request.launch, request.name))
+
+
+class HoldingSetting(Model, Handler[SetHolding]):
+    """Answers `SetHolding`: the operator's switch for a conversation, as it stands."""
+
+    launches: Launches
+
+    @override
+    def request(self) -> type[SetHolding]:
+        return SetHolding
+
+    @override
+    async def answer(self, request: SetHolding) -> Reply:
+        return Holding(on=self.launches.held(request))
+
+
+class HoldingShowing(Model, Handler[ShowHolding]):
+    """Answers `ShowHolding`: whether the operator holds each flagged write of a conversation."""
+
+    launches: Launches
+
+    @override
+    def request(self) -> type[ShowHolding]:
+        return ShowHolding
+
+    @override
+    async def answer(self, request: ShowHolding) -> Reply:
+        return Holding(on=self.launches.holding(request))
 
 
 class Ending(Model, Handler[Unregister]):
@@ -1294,6 +1366,8 @@ class HostService(Model, arbitrary_types_allowed=True):
             Route.to(Ending(launches=launches)),
             Route.to(Listing(launches=launches)),
             Route.to(Renaming(launches=launches)),
+            Route.to(HoldingSetting(launches=launches)),
+            Route.to(HoldingShowing(launches=launches)),
             Route.to(Stopping(stopped=stopped)),
         ]
         control = Dispatcher(

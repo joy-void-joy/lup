@@ -219,6 +219,9 @@ class Conversation(Model):
     """Whether what its runtime recorded of its spawn was read."""
     nudged: bool = False
     """Whether it was told, once, to name the subagents it spawns."""
+    holding: bool = False
+    """Whether the operator holds each flagged write of it: their switch, "hold
+    each flagged write", which the judge asks (`ShowHolding`)."""
 
 
 class Conversations(MutableModel):

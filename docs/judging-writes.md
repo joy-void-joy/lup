@@ -10,29 +10,33 @@ The rules themselves are elsewhere: `docs/conventions.md` says what each convent
 
 - **allow:** the call goes through with no prompt. On Claude Code the hook answers `allow`: silence would leave the call to the runtime's own permission mode, a prompt per edit in Manual mode. On Codex nothing needs answering, since it doesn't ask before an `apply_patch` inside the workspace.
 - **ask:** the change is held for the operator's answer, the agent waiting inside the hook, on every runtime: a file tool's write before it lands, anything else at the checkpoint; the hold is an item in the operator's inbox, answered in the dashboard's review or with `lup-dev inbox answer` (*Asking the operator*).
+- **flagged:** the change lands as an allow would, the agent told nothing of it, and the verdict log records it under the names of what it asks (`Judgement.flags`).
 - **refused:** what the operator had to see first and didn't is put back, with the agent's version saved (*Refusals*): a change made through the shell that asks, on a runtime that asks before a call; a hold declined, or left unanswered.
 
 lup's findings never decide the outcome: those on the lines a change touches are told right after it (*Findings*).
 
 ### What each change gets
 
-| Change | Outcome |
-|---|---|
-| A test, scratch (`tmp/`), docs or data file, at any size | allow |
-| An operator's document (`DESIGN.md`, `AGENTS.md`) | ask, every time |
-| A protected path | ask, every time; a protected Python module gets lup's rules too, its findings told |
-| A path the declaration excludes | allow, nothing reported; one that's also protected still asks |
-| A new production file, or a write over the whole of an existing one | ask |
-| A change to the public API (*The public-API ask*) | ask |
-| An added `# lup: ignore` | ask, every time |
-| Removing a `# lup:` note present when the session started | allow, and reported |
-| A deleted file | ask where it's protected or an operator's document; otherwise allow |
-| Any other production change | allow, its findings told |
+| Change | What it asks | By default |
+|---|---|---|
+| A test, scratch (`tmp/`), docs or data file, at any size | nothing | allow |
+| An operator's document (`DESIGN.md`, `AGENTS.md`) | `operator`, every time | held |
+| A protected path | `protected`, every time; a protected Python module gets lup's rules too, its findings told | held |
+| A path the declaration excludes | nothing, and nothing reported; one that's also protected still asks `protected` | allow |
+| A new production file | `new-file` | flagged |
+| A write over the whole of an existing production file | `whole-file` | flagged |
+| A change to the public API (*The public-API ask*) | `public-api` | flagged |
+| An added `# lup: ignore` | `ignore`, every time | held |
+| A finding of lup's rules on a line the change touches | the rule's name | told; held or flagged only where the declaration names the rule |
+| Removing a `# lup:` note present when the session started | nothing, and it's reported | allow |
+| A deleted file | `protected` or `operator` where it's one; otherwise nothing | held, or allow |
+| Any other production change | nothing | allow, its findings told |
 
 `policy/judge.py` holds this (`Judge`, `Judgement`), shared by the judgement before a write lands and by the checkpoint, so a change gets the same outcome however it was made. There's no line count: a size limit makes agents split their edits to fit it.
 
 - **Approvals.** An approval covers the path's design asks (a new file, a whole write, a public-API change) for the rest of the session, in that worktree alone, so a file approved isn't asked again as it's worked on (`Ask.covered`).
-- **Asking only about protected paths.** A project declaring `Project(asks="protected")` has only a protected path's and an operator's document's asks reach the operator; the other asks are allowed, and findings are still told (`Judge.asking`). A protected change takes effect outside the agent's reach before anything lands, so it can't wait for landing; the rest is seen in the conversation and in the merge. lup's own repository declares it (`AGENTS.md`, *How work goes*).
+- **Held and flagged, by name.** The declaration names what's held and what's flagged, in one vocabulary: the two roles that ask (`protected`, `operator`), the kinds of change (`new-file`, `whole-file`, `public-api`, `ignore`), and lup's rules by their ids (`Project.held`, `Project.flagged`; `docs/declaration.md`). An ask named in neither is let through. By default `protected`, `operator` and `ignore` are held, and `new-file`, `whole-file` and `public-api` flagged: a protected change takes effect outside the agent's reach before anything lands, and an `ignore` takes a check away, while a change of design can be seen once it has landed. A name both lists hold, or neither vocabulary knows, fails the declaration's load; a rule's name is checked against the engine's table at the first judgement (`Judge.named_rules`).
+- **The operator's switch, per conversation.** "Hold each flagged write" holds what the declaration flags for one conversation, a session's own or a subagent's: `h` on its row of the dashboard's tree turns it, and the row says "holding" (`docs/dashboard.md`). The host service keeps it with the launch's conversations (`SetHolding`, `Conversation.holding`), through restarts, and the judge asks it for the conversation writing, before a file tool's write and at each checkpoint (`ShowHolding`, `Announcing.holding`, `Judge.holding`). A move of `HEAD` isn't any conversation's, so it never holds for the switch; with no host service running, nothing does.
 
 **Path roles.** Each path has one role, the first that matches (`Roles.role`, `policy/roles.py`):
 1. **protected:** the project's declaration, and what its modules protect: by default manifests and lockfiles; the tools' own configuration files, each read before its table in `pyproject.toml`, so one written unasked would override what the gate checks; what runs outside the agent's reach (`.github/`, `.git/`, git hooks, editor, container and runtime settings); what widens a later launch (`sync.json`); secrets (`.env*.local`); `.gitignore`, since what it ignores the checkpoint never sees; and the person's own files git ignores (`AGENTS.local.md`, `lup_project.local.py`), which nothing else would show the operator;
@@ -224,7 +228,7 @@ The engine's build compiles the table into its bundle. A check reports where and
 
 ### The verdict log
 
-Every judgement is logged, so how often lup asks, refuses and allows can be measured and tuned instead of guessed (`policy/verdicts.py`). One JSON line per verdict (`Verdict`): the time, the session (none for a move of `HEAD`), the runtime, the tool (or `checkpoint`, or `move`), the worktree, the path and its role, the outcome (allow, ask, refuse, hold) with its reasons (the kinds of ask; for an allow, the rules of the findings told, else the role, `rules-pass` for production), and the operator's answer. An answer comes later, so it's appended as the same verdict again under the same key, and a reader takes the last line for each key; an ask logged only once answered would be lost when a hook dies. It's kept per repository, so one place measures a repository's worktrees. `lup-dev verdicts --days 7` summarises it by outcome and reason, with how asks and holds were answered.
+Every judgement is logged, so how often lup asks, refuses and allows can be measured and tuned instead of guessed (`policy/verdicts.py`). One JSON line per verdict (`Verdict`): the time, the session (none for a move of `HEAD`), the runtime, the tool (or `checkpoint`, or `move`), the worktree, the path and its role, the outcome (allow, ask, refuse, hold) with its reasons (the names of what it holds; for an allow, the names of what it flags, else the rules of the findings told, else the role, `rules-pass` for production), and the operator's answer. An answer comes later, so it's appended as the same verdict again under the same key, and a reader takes the last line for each key; an ask logged only once answered would be lost when a hook dies. It's kept per repository, so one place measures a repository's worktrees. `lup-dev verdicts --days 7` summarises it by outcome and reason, with how asks and holds were answered.
 
 ### The two runtimes
 
@@ -299,6 +303,7 @@ The `lup-dev` command stands in for the `lup` command tree until that's built; t
 
 `DESIGN.md`, *Keeping the operator in the loop*, describes where judging heads:
 - **Spelling rules at the gate.** Spelling rules (`elif` chains, loops that fill a list) aren't told while the agent works: fixed at the gate where a fixer exists, and reported once before landing (`docs/conventions.md`, *Who owns each concern*).
+- **Flagged writes in the review.** What lands flagged gathers per branch in the operator's review as it lands, so a change of design is seen while it's fresh, and merging the branch waits on that review.
 - **Batches.** What the operator should see (new modules, whole-file writes, public-API changes, added `ignore`s, protected paths) gathers into a batch the agent proposes when it's ready, one diff with its explanation, which pauses the agent until the operator answers unless it carries on.
 - **The room as the wall.** Every agent runs in a container, with the store and the holds out of its reach, and a path a room mounts read-only (tests written as a specification, say) is refused by the wall itself.
 - **Imports checked at the edit,** against the import-linter contracts, from the imports the engine already reports.

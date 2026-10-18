@@ -16,7 +16,13 @@ from lup_dev import (
     Rules,
 )
 from lup_dev.declaration.resolve import Declaration
-from lup_dev.policy.judge import Change, Judge, Judgement, touched_lines
+from lup_dev.policy.judge import (
+    Change,
+    EngineError,
+    Judge,
+    Judgement,
+    touched_lines,
+)
 from lup_dev.policy.roles import Roles
 
 if TYPE_CHECKING:
@@ -38,6 +44,13 @@ CORE = (
 )
 
 
+EVERY_HELD = Project(
+    held=["protected", "operator", "new-file", "whole-file", "public-api", "ignore"],
+    flagged=[],
+)
+"""Every kind of change held, so a test reads what each change asks."""
+
+
 class Judging:
     """Judges one change at a time with the kit's fake engine and linter."""
 
@@ -52,16 +65,18 @@ class Judging:
         approved: list[Path] | None = None,
         conditions: list[str] | None = None,
         project: Project | None = None,
+        holding: bool = False,
     ) -> Judgement:
         judging = Judge(
             root=self.root,
             roles=Roles(
-                root=self.root, declaration=Declaration.of(project or Project())
+                root=self.root, declaration=Declaration.of(project or EVERY_HELD)
             ),
             checker=self.kit.engine,
             linter=self.kit.linter,
             conditions=conditions,
             approved=approved or [],
+            holding=holding,
         )
         [judgement] = judging.judge([change])
         return judgement
@@ -100,7 +115,7 @@ def test_tests_scratch_docs_and_data_are_allowed_at_any_size(judge: Judging) -> 
 def test_the_operators_documents_ask(judge: Judging) -> None:
     judgement = judge(edit("DESIGN.md", "a\n", "b\n"))
     assert judgement.outcome == "ask"
-    assert [ask.kind for ask in judgement.asks] == ["operator-document"]
+    assert [ask.kind for ask in judgement.asks] == ["operator"]
 
 
 def test_a_protected_path_asks(judge: Judging) -> None:
@@ -351,7 +366,7 @@ def test_an_approval_covers_the_paths_design_asks_but_not_its_suppressions(
     assert judge(edit(str(path), CORE, ignored), approved=[path]).outcome == "ask"
 
 
-ONLY_PROTECTED = Project(asks="protected")
+ONLY_PROTECTED = Project(held=["protected", "operator"], flagged=[])
 
 
 def test_asking_only_about_protected_paths_allows_every_other_ask(
@@ -390,7 +405,7 @@ def test_asking_only_about_protected_paths_still_asks_about_the_operators_docume
     for path in ["DESIGN.md", "AGENTS.md"]:
         judgement = judge(edit(path, "a\n", "b\n"), project=ONLY_PROTECTED)
         assert judgement.outcome == "ask", path
-        assert [ask.kind for ask in judgement.asks] == ["operator-document"]
+        assert [ask.kind for ask in judgement.asks] == ["operator"]
 
 
 def test_asking_only_about_protected_paths_still_tells_a_finding(
@@ -402,6 +417,93 @@ def test_asking_only_about_protected_paths_still_tells_a_finding(
     )
     assert judgement.outcome == "allow"
     assert [finding.rule for finding in judgement.findings] == ["regex"]
+
+
+DESIGN_CHANGES = [
+    edit("src/pkg/new.py", None, '"""New."""\n', baseline=None),
+    edit("src/pkg/core.py", CORE, CORE + "\n", whole=True),
+    edit("src/pkg/core.py", CORE, CORE + "\n\nclass Room:\n    pass\n"),
+]
+
+
+def test_by_default_a_change_of_design_is_flagged_and_lands(judge: Judging) -> None:
+    for change, kind in zip(
+        DESIGN_CHANGES, ["new-file", "whole-file", "public-api"], strict=True
+    ):
+        judgement = judge(change, project=Project())
+        assert judgement.outcome == "allow", kind
+        assert judgement.asks == []
+        assert [ask.kind for ask in judgement.flags] == [kind]
+        assert judgement.reasons() == [kind]
+
+
+def test_by_default_protected_paths_documents_and_ignores_are_held(
+    judge: Judging,
+) -> None:
+    ignored = (
+        CORE + 'y = (1, 2)  # BAD tuple-shape  # lup: ignore("tuple-shape", why="sh")\n'
+    )
+    changes = {
+        "protected": edit("pyproject.toml", "a\n", "b\n"),
+        "operator": edit("DESIGN.md", "a\n", "b\n"),
+        "ignore": edit("src/pkg/core.py", CORE, ignored),
+    }
+    for kind, change in changes.items():
+        judgement = judge(change, project=Project())
+        assert judgement.outcome == "ask", kind
+        assert [ask.kind for ask in judgement.asks] == [kind]
+        assert judgement.flags == []
+
+
+def test_holding_each_flagged_write_holds_what_is_flagged(judge: Judging) -> None:
+    for change in DESIGN_CHANGES:
+        judgement = judge(change, project=Project(), holding=True)
+        assert judgement.outcome == "ask", change.path
+        assert judgement.flags == []
+        assert len(judgement.asks) == 1
+
+
+def test_a_rule_named_held_holds_its_finding_and_still_tells_it(
+    judge: Judging,
+) -> None:
+    judgement = judge(
+        edit("src/pkg/core.py", CORE, CORE + "x = 1  # BAD regex\n"),
+        project=Project(held=["regex"], flagged=[]),
+    )
+    assert judgement.outcome == "ask"
+    assert [ask.name() for ask in judgement.asks] == ["regex"]
+    assert judgement.asks[0].reason.startswith(f"{judge.root}/src/pkg/core.py:11 - regex")
+    assert [finding.rule for finding in judgement.findings] == ["regex"]
+    assert judgement.reasons() == ["regex"]
+
+
+def test_a_rule_named_flagged_lands_and_is_flagged(judge: Judging) -> None:
+    judgement = judge(
+        edit("src/pkg/core.py", CORE, CORE + "x = 1  # BAD regex\n"),
+        project=Project(held=[], flagged=["regex"]),
+    )
+    assert judgement.outcome == "allow"
+    assert [ask.name() for ask in judgement.flags] == ["regex"]
+
+
+def test_a_rule_named_on_an_untouched_line_neither_holds_nor_flags(
+    judge: Judging,
+) -> None:
+    before = CORE + "x = 1  # BAD regex\n"
+    judgement = judge(
+        edit("src/pkg/core.py", before, before + "y = 2\n"),
+        project=Project(held=["regex"], flagged=[]),
+    )
+    assert judgement.outcome == "allow"
+    assert [finding.rule for finding in judgement.untouched] == ["regex"]
+
+
+def test_a_rule_lups_rules_dont_name_fails_the_judgement(judge: Judging) -> None:
+    with pytest.raises(EngineError, match=r"\['no-such-rule'\].*regex, tuple-shape"):
+        judge(
+            edit("src/pkg/core.py", CORE, CORE + "\n"),
+            project=Project(held=["no-such-rule"]),
+        )
 
 
 def test_type_errors_and_ruffs_findings_are_information(judge: Judging) -> None:

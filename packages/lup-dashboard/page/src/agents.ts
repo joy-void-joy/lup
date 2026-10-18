@@ -70,6 +70,37 @@ export function everyone(served: Launch[]): Agent[] {
     return served.flatMap((each) => (each.session === null ? [] : within(each.session)));
 }
 
+/** The keys of a chord typed so far in the agents' tree: none, Space, or Space then `w`. */
+export type Leading = "" | "space" | "space-w";
+
+/** What a key does in the agents' tree: the chord it leaves begun, what it does, and whether the tree takes it from React Aria's own keys. */
+export interface TreeKey {
+    leading: Leading;
+    act: "right" | "hold" | null;
+    taken: boolean;
+}
+
+/**
+ * What `key` does in the agents' tree, after the keys `leading` of a chord. `h` turns the operator's switch for the
+ * conversation it's on; Space leads a chord, as in the views beside it: `l`, or `w` then `l`, gives the keyboard to the
+ * view, and any other key ends the chord, taken. Every other key is React Aria's: arrows move, Enter selects.
+ */
+export function treeKey(leading: Leading, key: string): TreeKey {
+    if (leading === "space" && key === "w") {
+        return { leading: "space-w", act: null, taken: true };
+    }
+    if (leading !== "") {
+        return { leading: "", act: key === "l" ? "right" : null, taken: true };
+    }
+    if (key === " ") {
+        return { leading: "space", act: null, taken: true };
+    }
+    if (key === "h") {
+        return { leading: "", act: "hold", taken: true };
+    }
+    return { leading: "", act: null, taken: false };
+}
+
 /** Say what a conversation is doing, and for how long. */
 export function doing(activity: Activity | null | undefined, now: Date): string {
     if (activity == null) {

@@ -35,6 +35,8 @@ export function Details({ launch, agent, now }: Props) {
                 )}
                 <dt>Subagents</dt>
                 <dd>{agent.children.length === 0 ? "none" : agent.children.map((each) => each.talker.own).join(", ")}</dd>
+                <dt>Its flagged writes</dt>
+                <dd>{talker.holding === true ? "held for your answer (h in the tree)" : "land, flagged (h in the tree holds them)"}</dd>
             </dl>
             <LaunchFacts launch={launch} />
         </section>

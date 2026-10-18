@@ -58,6 +58,7 @@ from lup_dev.host.dashboard import (
 from lup_dev.host.protocol import (
     Activity,
     Done,
+    Holding,
     HostError,
     Limits,
     Listed,
@@ -67,6 +68,8 @@ from lup_dev.host.protocol import (
     Registered,
     Reply,
     Request,
+    SetHolding,
+    ShowHolding,
     Stop,
 )
 from lup_dev.host.rooms import RoomHandler, RoomRoute, RoomTools
@@ -522,7 +525,7 @@ def test_what_the_service_cant_carry_out_is_refused(
         unknown = Refused.model_validate_json(send(layout.control, '{"kind": "nope"}'))
         assert unknown.error == (
             "no handler for `nope`; the service answers list, register, rename, "
-            "stop, unregister"
+            "set-holding, show-holding, stop, unregister"
         )
         garbled = Refused.model_validate_json(send(layout.control, "hello"))
         assert garbled.error.startswith("a request is a JSON object with its kind")
@@ -1385,6 +1388,53 @@ def test_what_a_conversation_is_doing_outlasts_a_restart_of_the_service(
     assert talker.activity == Activity(state="calling", since=clock.now(), tool="Bash")
 
 
+def test_the_operator_holds_each_flagged_write_of_one_conversation(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    subagent = ShowHolding(runtime="first", session="s1", agent="a1")
+
+    def on(request: Request) -> bool:
+        return own.ask(request, Holding).on
+
+    with served(service(layout, Judge(), said, courier=Reads(), clock=clock)):
+        own.register(launch(tmp_path, "one", "first"))
+        hooks = layout.launch("one").hook
+        send(hooks, hook("session-started"))
+        send(hooks, hook("call-started", agent="a1", call="c1", tool="Bash"))
+        before = on(subagent)
+        turned = on(SetHolding(launch="one", session="s1", agent="a1", on=True))
+        holding = [
+            on(subagent),
+            on(ShowHolding(runtime="first", session="s1")),
+            on(ShowHolding(runtime="second", session="s1", agent="a1")),
+        ]
+        listed = own.listed().talkers["one"]
+    with served(service(layout, Judge(), said, courier=Reads(), clock=clock)):
+        kept = on(subagent)
+        on(SetHolding(launch="one", session="s1", agent="a1", on=False))
+        off = on(subagent)
+    assert (before, turned, holding) == (False, True, [True, False, False])
+    assert [(each.path, each.holding) for each in listed] == [
+        ("one", False),
+        ("one/subagent·a1", True),
+    ]
+    assert (kept, off) == (True, False)
+    assert "one: the operator holds each flagged write of one/subagent·a1" in said
+
+
+def test_the_switch_of_a_conversation_no_hook_named_is_refused(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    with served(service(layout, Judge(), said, courier=Reads(), clock=clock)):
+        own.register(launch(tmp_path, "one", "first"))
+        with pytest.raises(HostError, match="no conversation of launch `one`"):
+            own.ask(SetHolding(launch="one", session="s9", on=True), Holding)
+        with pytest.raises(HostError, match="no launch served is `two`"):
+            own.ask(SetHolding(launch="two", session="s1", on=True), Holding)
+
+
 def test_a_watch_of_what_cant_be_answered_is_refused_and_ends(
     layout: HostLayout, said: list[str]
 ) -> None:
@@ -1396,7 +1446,7 @@ def test_a_watch_of_what_cant_be_answered_is_refused_and_ends(
         after = following()
     assert refused.error == (
         "no handler for `nowhere`; the service answers list, register, rename, "
-        "stop, unregister"
+        "set-holding, show-holding, stop, unregister"
     )
     assert after == ""
 

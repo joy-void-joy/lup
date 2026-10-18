@@ -127,7 +127,8 @@ kbd {
     font-weight: 700;
 }
 
-.bar .spacer {
+.bar .spacer,
+.wb .spacer {
     flex: 1;
 }
 
@@ -178,7 +179,8 @@ kbd {
     font-weight: 700;
 }
 
-.wb .count {
+.wb .count,
+.wb .hint {
     font-weight: 400;
     color: var(--muted);
 }
@@ -247,6 +249,20 @@ kbd {
 
 .agent-row .label.ended {
     color: var(--muted);
+}
+
+/* The tree's keys are read around it, without a box of their own. */
+.tree-keys {
+    display: contents;
+}
+
+/* The operator's switch on for a conversation: each flagged write of it held. */
+.agent-row .holding {
+    color: var(--warn);
+    border: 1px solid currentcolor;
+    padding: 0 0.5ch;
+    font-size: 0.85em;
+    flex-shrink: 0;
 }
 
 .agent-row .state {

@@ -16,7 +16,7 @@ DECLARATION = """
 from lup_dev import CodeRules, Modules, Project, Rules
 
 project = Project(
-    asks="protected",
+    held=["protected"],
     modules=Modules.default().edit(CodeRules(rules=Rules().drop("tuple-shape", why="{why}"))),
 )
 """
@@ -45,7 +45,7 @@ def test_the_declaration_is_read_from_the_root(tmp_path: Path) -> None:
     write(tmp_path / "lup_project.py", DECLARATION.format(why="at the root"))
     declared = load(tmp_path)
     assert declared.source == Path("lup_project.py")
-    assert declared.project.asks == "protected"
+    assert declared.project.held == ["protected"]
     assert why(tmp_path) == "at the root"
     assert "lup_project" not in sys.modules
 
@@ -190,7 +190,7 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
         "transcripts",
         "lup-development",
     ]
-    assert resolved.asks == "protected"
+    assert (resolved.held, resolved.flagged) == (Project().held, Project().flagged)
     assert [each.name for each in resolved.gate][:3] == ["engine", "dashboard", "rules"]
     assert "packages/lup-dev/src/lup_dev/catalog/**" in resolved.paths.protected
     assert resolved.paths.excluded == []
@@ -263,7 +263,7 @@ class Narration(Module):
 
 
 project = Project(
-    asks="protected",
+    held=["protected"],
     modules=Modules.default().edit(Python(runner=Poetry())).add(Narration()),
 )
 '''
@@ -289,7 +289,7 @@ def test_what_judging_reads_is_kept_as_json_whatever_classes_the_project_brings(
     assert declaration.source == Path("lup_project.py")
     assert "episodes/**" in declaration.paths.protected
     assert declaration.conditions == ["audiobook.conditions"]
-    assert declaration.asks == "protected"
+    assert declaration.held == ["protected"]
     assert declaration.tests is None
 
 
@@ -311,7 +311,7 @@ class Ours(Module):
     )
 
 
-project = Project(asks="protected", modules=Modules.default().add(Ours()))
+project = Project(held=["protected"], modules=Modules.default().add(Ours()))
 '''
 
 MINE = '''
@@ -348,7 +348,7 @@ def test_the_person_s_layer_is_layered_on_the_project_s(tmp_path: Path) -> None:
     resolved = resolve(declared.project)
     assert [each.name for each in resolved.repositories] == ["atlas", "beacon"]
     assert [module.name for module in resolved.modules][-2:] == ["ours", "mine"]
-    assert resolved.asks == "protected"
+    assert resolved.held == ["protected"]
     assert not any(name.startswith("lup_project") for name in sys.modules)
     assert not (tmp_path / "__pycache__").exists()
 
@@ -392,14 +392,14 @@ def test_the_person_s_layer_edits_the_project_s_own_module(tmp_path: Path) -> No
         from lup_project import Ours
 
         project = Project(
-            asks="every",
+            held=["protected", "regex"],
             modules=Modules().edit(Ours(repositories=Repositories().drop("atlas"))),
         )
         """,
     )
     resolved = resolve(load(tmp_path).project)
     assert resolved.repositories == []
-    assert resolved.asks == "every"
+    assert resolved.held == ["protected", "regex"]
 
 
 def test_the_person_s_layer_alone_is_layered_on_the_defaults(tmp_path: Path) -> None:
