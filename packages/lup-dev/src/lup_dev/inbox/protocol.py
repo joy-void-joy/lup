@@ -115,7 +115,7 @@ class KeepTalk(Request):
 
 
 class SendDraft(Request):
-    """Send the operator's draft reply: a review to each conversation whose items it covers."""
+    """Send the operator's draft reply: a review to each conversation whose items it covers or it writes to."""
 
     kind: Literal["inbox-send-draft"] = "inbox-send-draft"
 
@@ -615,7 +615,7 @@ class DraftKeeping(Model, Handler[KeepDraft], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: KeepDraft) -> Reply:
-        return Drafted(draft=self.delivery.inbox.drafted(request.draft))
+        return Drafted(draft=self.delivery.drafted(request.draft))
 
 
 class TalkShowing(Model, Handler[ShowTalk], arbitrary_types_allowed=True):
