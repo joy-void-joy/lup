@@ -155,3 +155,25 @@ def test_answering_a_hold_nobody_waits_on_logs_the_answer(kit: Kit, repo: Path) 
     answer(kit.layout, hold.key, Response(approved=True), [], kit.clock)
     [logged] = VerdictLog(path=kit.layout.verdicts(repo / ".git")).read()
     assert (logged.key, logged.answer) == ("k:src/new.py", "approved")
+
+
+def test_a_key_two_stores_keep_is_answered_in_the_worktree_named_and_refused_unnamed(
+    kit: Kit, tmp_path: Path
+) -> None:
+    first = held(kit, tmp_path / "a")
+    second = holds(kit, tmp_path / "b").put(
+        first.model_copy(update={"worktree": tmp_path / "b"})
+    )
+    with pytest.raises(HoldError, match="more than one worktree's store"):
+        answer(kit.layout, first.key, Response(approved=True), [], kit.clock)
+    answered = answer(
+        kit.layout,
+        second.key,
+        Response(approved=False),
+        [],
+        kit.clock,
+        worktree=tmp_path / "b",
+    )
+    assert answered.worktree == tmp_path / "b"
+    assert holds(kit, tmp_path / "a").get(first.key) == first
+    assert [hold.worktree for hold in waiting(kit.layout)] == [tmp_path / "a"]
