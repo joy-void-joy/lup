@@ -1,0 +1,155 @@
+// What each view's keys do, said two ways: in the one line of keys under it,
+// those that apply where the cursor is (`barOf`), and whole in the list `?`
+// opens, in parts (`Keys.tsx`). One table a view, so the two never disagree.
+// Pure (`docs/dashboard.md`, *The review*).
+
+/** One key, or a few doing alike: how it's pressed, what it does, and where the line of keys shows it. */
+export interface Key<P extends string> {
+    /** As it's pressed: `␣` for Space, `^` for Ctrl, `…` for a motion. */
+    keys: string;
+    /** What it does, whole, as the list says it. */
+    does: string;
+    /** What it does, short, as the line of keys says it. */
+    short: string;
+    /** Where the cursor is when the line of keys shows it. */
+    at: readonly P[];
+}
+
+/** One part of the list: its title, and its keys. */
+export interface Part<P extends string> {
+    title: string;
+    keys: Key<P>[];
+}
+
+/**
+ * Where the cursor is in the review, for the line of keys: writing a comment; on one written; on an agent's banner, or
+ * on lup's approvals'; on an item's own lines, an approval's or a held change's as a change; on a changed file's
+ * lines; on a line under an item that isn't its own, as a fold's summary; or on nothing, the review empty.
+ */
+export type ReviewPlace = "insert" | "written" | "banner" | "approvals" | "item" | "change" | "file" | "aside" | "nothing";
+
+/** Where the cursor is in a conversation, for the line of keys: writing a comment, or not. */
+export type ConversationPlace = "insert" | "normal";
+
+/** What the line of keys says where the cursor is, before its keys. */
+export const REVIEW_PLACES: Record<ReviewPlace, string> = {
+    insert: "-- INSERT --",
+    written: "your comment",
+    banner: "banner",
+    approvals: "lup's approvals",
+    item: "item",
+    change: "change",
+    file: "file",
+    aside: "fold",
+    nothing: "nothing waiting",
+};
+
+/** What the line of keys says where the cursor is in a conversation, before its keys. */
+export const CONVERSATION_PLACES: Record<ConversationPlace, string> = {
+    insert: "-- INSERT --",
+    normal: "conversation",
+};
+
+/** Ending a comment being written, the same in each view. */
+const WRITING: Part<"insert">[] = [
+    {
+        title: "Writing a comment",
+        keys: [
+            { keys: "^⏎", does: "end it, back on what it's about", short: "end it", at: ["insert"] },
+            { keys: "Esc", does: "end it where it is", short: "end it here", at: ["insert"] },
+            { keys: "Esc u", does: "end it and drop it", short: "drop it", at: ["insert"] },
+        ],
+    },
+];
+
+/** The keys of this list, which the line of keys says at its end, wherever the cursor is. */
+const LIST: Part<never>[] = [{ title: "This list", keys: [{ keys: "?", does: "open it; Esc, q or ? closes it", short: "all keys", at: [] }] }];
+
+/** The review's keys. */
+export const REVIEW_KEYS: Part<ReviewPlace>[] = [
+    ...WRITING,
+    {
+        title: "Answering",
+        keys: [
+            { keys: "␣a", does: "approve the approval or held change, the comments under it going with it", short: "approve", at: ["change", "file"] },
+            { keys: "␣x", does: "decline it, the comments under it going with it", short: "decline", at: ["change", "file"] },
+            { keys: "␣d", does: "mark the item read, folding it, or unmark it", short: "read", at: ["item", "change"] },
+            { keys: "␣z", does: "leave the item for later, folding it, or bring it back", short: "later", at: ["item"] },
+            { keys: "^⏎", does: "send the reply: every comment, message and item marked read", short: "send", at: [] },
+        ],
+    },
+    {
+        title: "Commenting",
+        keys: [
+            { keys: "o", does: "comment on the line", short: "comment", at: ["item", "change", "file"] },
+            { keys: "c…", does: "comment on the passage a motion covers: ct. ciw cip, cc the line", short: "on a passage", at: ["item", "change", "file"] },
+            { keys: "C", does: "comment from the cursor to the line's end", short: "to its end", at: ["item"] },
+            { keys: "v… c", does: "comment on a selection: v or V and a motion, then c or s", short: "on a selection", at: [] },
+            { keys: "␣c", does: "comment on the item whole", short: "on the item", at: ["item", "change"] },
+            { keys: "o ␣c", does: "on a banner, write a message to its agent", short: "message", at: ["banner"] },
+            { keys: "i a A", does: "in a comment, write in it, with vim's keys of insert mode", short: "write in it", at: ["written"] },
+            { keys: "u ^r", does: "undo and redo a change to the draft, a comment written one step", short: "undo redo", at: ["written"] },
+            { keys: "g- g+", does: "the draft as it was a step earlier or later, what was undone then changed after among them", short: "earlier later", at: [] },
+        ],
+    },
+    {
+        title: "Moving",
+        keys: [
+            { keys: "]] [[", does: "next and previous item, on its first line that matters", short: "items", at: ["banner", "approvals", "item", "aside", "written"] },
+            { keys: "]c [c", does: "next and previous line that matters, in what an approval or held change changes", short: "what matters", at: ["change", "file"] },
+            { keys: "]n [n", does: "next and previous comment or message written, where you last were in it", short: "comments", at: ["written", "banner", "approvals", "item", "change", "file"] },
+            { keys: "␣h", does: "to the agents' tree; Space l there comes back", short: "agents", at: ["banner", "approvals", "nothing"] },
+            { keys: "^k", does: "go to an agent's conversation, or the review", short: "go to", at: [] },
+        ],
+    },
+    {
+        title: "Folds",
+        keys: [
+            { keys: "za", does: "open or close the fold the cursor is on", short: "fold", at: ["file", "aside"] },
+            { keys: "zo zc", does: "open or close it", short: "open close", at: [] },
+            { keys: "zr zm", does: "open or close those hiding a change", short: "changes", at: ["file", "aside"] },
+            { keys: "zR zM", does: "open or close them all", short: "all", at: ["aside"] },
+        ],
+    },
+    ...LIST,
+];
+
+/** A conversation's keys. */
+export const CONVERSATION_KEYS: Part<ConversationPlace>[] = [
+    ...WRITING,
+    {
+        title: "Commenting",
+        keys: [
+            { keys: "o", does: "comment on the agent's line", short: "comment", at: ["normal"] },
+            { keys: "c…", does: "comment on the passage a motion covers", short: "on a passage", at: ["normal"] },
+            { keys: "C", does: "comment from the cursor to the line's end", short: "to its end", at: [] },
+            { keys: "v… c", does: "comment on a selection", short: "on a selection", at: [] },
+            { keys: "␣c", does: "write your message on the whole, at the end", short: "message", at: ["normal"] },
+            { keys: "u ^r", does: "undo and redo a change to what you wrote", short: "undo redo", at: [] },
+            { keys: "g- g+", does: "what you wrote as it was a step earlier or later, what was undone then changed after among them", short: "earlier later", at: [] },
+            { keys: "^⏎", does: "send the comments and the message, as one message", short: "send", at: [] },
+        ],
+    },
+    {
+        title: "Moving",
+        keys: [
+            { keys: "]] [[", does: "next and previous turn", short: "turns", at: ["normal"] },
+            { keys: "]n [n", does: "next and previous comment written, where you last were in it", short: "comments", at: ["normal"] },
+            { keys: "␣r", does: "back to the review", short: "review", at: ["normal"] },
+            { keys: "␣h", does: "to the agents' tree", short: "agents", at: [] },
+        ],
+    },
+    {
+        title: "Folds",
+        keys: [
+            { keys: "za", does: "open or close the fold the cursor is on", short: "fold", at: ["normal"] },
+            { keys: "zR zM", does: "open or close them all", short: "all", at: [] },
+        ],
+    },
+    ...LIST,
+];
+
+/** Return the keys the line of keys shows with the cursor at `place`, in the list's order: those that apply there. */
+export function barOf<P extends string>(parts: Part<P>[], place: P): Key<P>[] {
+    return parts.flatMap((part) => part.keys.filter((key) => key.at.includes(place)));
+}

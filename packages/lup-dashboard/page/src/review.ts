@@ -14,6 +14,7 @@ import { since } from "./agents";
 import { shownOnce, type ChangedFile, type Matter, type Row } from "./code";
 import {
     calls,
+    lastOf,
     passage,
     saying,
     shownIn,
@@ -25,6 +26,7 @@ import {
     type Span,
 } from "./comments";
 import type { components } from "./generated/api";
+import type { ReviewPlace } from "./keys";
 
 export { calls, type Block, type ChangedFile, type Line, type Span };
 
@@ -68,16 +70,16 @@ export interface Coded extends Span {
 
 /**
  * What folds under an item, folded by default: its context, a run of a file's unchanged lines, an automatic file under
- * its header, or, where it's marked read, all of it under its header. It hides `from` to `to`, from the end of its
- * summary line to the end of its last; an automatic file's from the end of the comments on its header, which stay in
- * view.
+ * its header, or, where it's marked read or left for later, all of it under its header (`whole`). It hides `from` to
+ * `to`, from the end of its summary line to the end of its last; an automatic file's from the end of the comments on its
+ * header, which stay in view.
  */
 export interface Fold extends Span {
     item: number;
-    kind: "context" | "code" | "file" | "read";
-    /** Whether it hides a change: a file folded whole, or a run holding changed lines; unchanged lines, an item's context and an item read hide none. */
+    kind: "context" | "code" | "file" | "whole";
+    /** Whether it hides a change: a file folded whole, or a run holding changed lines; unchanged lines, an item's context and an item folded whole hide none. */
     diff: boolean;
-    /** What names it among its item's folds of its kind: a run of code by its file and its first row, a file by its path. */
+    /** What names it among its item's folds of its kind: a run of code by its file and its first row, a file by its path, an item folded whole by why, `read` or `later`. */
     name: string;
     summary: Span;
 }
@@ -93,6 +95,8 @@ export interface Group {
     /** The agent it's of; none for lup's approvals, which no message goes to. */
     conversation: Conversation | null;
     later: boolean;
+    /** What names its place across layouts: whose it is, and whether it's of what's left for later. */
+    place: string;
     banner: Span;
     blocks: Block[];
 }
@@ -378,6 +382,11 @@ function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
     return ranked.sort((a, b) => told(a) - told(b) || made(b) - made(a) || numbered(b) - numbered(a));
 }
 
+/** Return what names a group's place across layouts: `key`, whose it is, and whether it's of what's left for later. */
+function placeOf(key: string, later: boolean): string {
+    return `${later ? "later" : "now"} ${key}`;
+}
+
 /** Return a group for each of `conversations` with none among `groups`, in their order, once each. */
 function emptyGroups(conversations: Conversation[], groups: Grouping[]): Grouping[] {
     const keys = new Set(groups.map((each) => each.key));
@@ -412,6 +421,9 @@ export function fresh(item: Item, reviewed: string | null | undefined): boolean 
  * each item's own text, what the host has answered of it: each file an approval or a held change changes, its header
  * then its lines, each run of unchanged ones folding under a summary line; then the item's context, a summary line
  * with the lines that fold under it. Where the host showed none, a line says why.
+ *
+ * `places` are where the groups were laid out before in this sitting (`Group.place`, in order): each among them keeps
+ * its place, items coming and going, and any other comes after them, in the order above.
  */
 export function laid(
     items: Item[],
@@ -420,6 +432,7 @@ export function laid(
     header: (item: Item, parked: boolean) => string,
     draft: Draft,
     around: Around,
+    places: readonly string[] = [],
 ): Laid {
     const parked = draft.parked ?? [];
     const done = draft.done ?? [];
@@ -431,13 +444,22 @@ export function laid(
     let text = "";
     const groups: Group[] = [];
     const regions: Region[] = [];
-    for (const group of [...now, ...empty]) {
+    for (const group of kept([...now, ...empty], false)) {
         layGroup(group, false);
     }
-    for (const group of later) {
+    for (const group of kept(later, true)) {
         layGroup(group, true);
     }
     return { text, groups, regions };
+
+    /** Return `section` with each group laid out before in its place, any other after them, in its own order. */
+    function kept(section: Grouping[], isParked: boolean): Grouping[] {
+        const rank = (group: Grouping) => {
+            const at = places.indexOf(placeOf(group.key, isParked));
+            return at < 0 ? places.length : at;
+        };
+        return [...section].sort((a, b) => rank(a) - rank(b));
+    }
 
     function layGroup(group: Grouping, isParked: boolean): void {
         const said = banner(group.head, isParked);
@@ -456,7 +478,7 @@ export function laid(
         if (group.items.length === 0 && blocks.length > 0) {
             text += "\n";
         }
-        groups.push({ conversation: group.conversation, later: isParked, banner: opening, blocks });
+        groups.push({ conversation: group.conversation, later: isParked, place: placeOf(group.key, isParked), banner: opening, blocks });
         for (const item of group.items) {
             layItem(item, isParked);
         }
@@ -558,10 +580,11 @@ export function laid(
                 folds.push({ item: item.number, kind: "context", name: "", diff: false, summary: shown, from: summary.to, to: last.to });
             }
         }
-        if (done.includes(item.number)) {
-            // Marked read, it folds whole under its header, what folds within it inside.
+        if (isParked || done.includes(item.number)) {
+            // Marked read, or left for later, it folds whole under its header, what folds within it inside.
             const header = { from: headFrom, to: headFrom + head.length };
-            folds.push({ item: item.number, kind: "read", name: "", diff: false, summary: header, from: header.to, to: text.length - 1 });
+            const name = isParked ? "later" : "read";
+            folds.push({ item: item.number, kind: "whole", name, diff: false, summary: header, from: header.to, to: text.length - 1 });
         }
         text += "\n";
         regions.push({
@@ -577,10 +600,10 @@ export function laid(
     }
 }
 
-/** Return where going to an item lands: on its first line that matters, as the judge read its files, unless it's marked read; else on its header. */
+/** Return where going to an item lands: on its first line that matters, as the judge read its files, unless it's folded whole, marked read or left for later; else on its header. */
 export function arrival(region: Region): number {
-    const read = region.folds.some((each) => each.kind === "read");
-    return (read ? undefined : region.stops[0]) ?? region.header.from;
+    const whole = region.folds.some((each) => each.kind === "whole");
+    return (whole ? undefined : region.stops[0]) ?? region.header.from;
 }
 
 /** Return the stop after the line starting at `line`, or before it, of `stops`, in the text's order; none past the last, or before the first. */
@@ -605,6 +628,61 @@ export function groupAt(laidOut: Laid, position: number): Group | undefined {
     const region = lastFrom(laidOut.regions, (each) => each.header.from, position);
     const group = lastFrom(laidOut.groups, (each) => each.banner.from, position);
     return group !== undefined && (region === undefined || group.banner.from > region.header.from) ? group : undefined;
+}
+
+/** Return whether two of what's written are the same one, whatever it says: a comment on the same passage of the same item, or a message to the same agent. */
+function same(a: Written, b: Written): boolean {
+    if (isLetter(a) || isLetter(b)) {
+        return isLetter(a) && isLetter(b) && whose(a.to) === whose(b.to);
+    }
+    return a.item === b.item && a.quote?.start === b.quote?.start && a.quote?.end === b.quote?.end;
+}
+
+/**
+ * Return where the cursor goes as the review is laid out again, from `before` and what was written in it to `after`
+ * and what's written now, where what it was on at `head` is gone, as a reply sent takes what it covered: from a
+ * comment or a message gone, back on what it was about (`aboutAt`), the last character of its passage, its item's
+ * header, its group's banner; from an item gone, or what it was about gone too, onto its group's banner. None where
+ * what it was on is still there, or its group is gone too, where the text's changes carry it.
+ */
+export function stranded(before: Laid, wrote: Written[], after: Laid, writes: Written[], head: number): number | undefined {
+    const group = lastFrom(before.groups, (each) => each.banner.from, head);
+    const banner = after.groups.find((each) => each.place === group?.place)?.banner.from;
+    const block = blockAt(before, head);
+    const was = block === undefined ? undefined : wrote[block.comment];
+    if (was !== undefined) {
+        if (writes.some((each) => same(each, was))) {
+            return undefined;
+        }
+        const region = isLetter(was) ? undefined : after.regions.find((each) => each.item.number === was.item);
+        return isLetter(was) || region === undefined ? banner : commentedAt(region, was);
+    }
+    const region = regionAt(before, head);
+    const gone = region !== undefined && !after.regions.some((each) => each.item.number === region.item.number);
+    return gone ? banner : undefined;
+}
+
+/** Return where the cursor at `head` is, outside insert mode, for the line of keys: what it's on, by what the keys there do. */
+export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "insert"> {
+    if (laidOut.text === "") {
+        return "nothing";
+    }
+    if (blockAt(laidOut, head) !== undefined) {
+        return "written";
+    }
+    const group = groupAt(laidOut, head);
+    if (group !== undefined) {
+        return group.conversation === null ? "approvals" : "banner";
+    }
+    const region = regionAt(laidOut, head);
+    if (region === undefined || asideAt(region, head) !== undefined) {
+        return "aside";
+    }
+    if (codeAt(region, head) !== undefined) {
+        return "file";
+    }
+    const reason = region.item.reason.reason;
+    return reason === "approval" || reason === "held" ? "change" : "item";
 }
 
 /** Return every comment and message shown, as blocks of the editor's list of what's written. */
@@ -640,7 +718,7 @@ export function foldAt(laidOut: Laid, position: number): Fold | undefined {
 }
 
 /** Return what names a fold across layouts: its item's number, what it holds, and which of those it is. */
-export function foldKey(fold: Fold): string {
+export function foldKey(fold: Pick<Fold, "item" | "kind" | "name">): string {
     return `${fold.item} ${fold.kind} ${fold.name}`;
 }
 
@@ -784,6 +862,24 @@ export function shownAt(region: Region, offset: number): number {
     return shownIn(region.lines, offset, region.header.to);
 }
 
+/**
+ * Return where what's written, shown at `block`, is about, which Ctrl+Enter ending it goes back to: a message's
+ * banner; the last character of the passage a comment quotes, where reading carries on, or its item's header for one
+ * on the item whole.
+ */
+export function aboutAt(laidOut: Laid, written: Written, block: Block): number | undefined {
+    if (isLetter(written)) {
+        return groupAt(laidOut, block.from)?.banner.from;
+    }
+    const region = regionAt(laidOut, block.from);
+    return region === undefined ? undefined : commentedAt(region, written);
+}
+
+/** Return where a comment on `region`'s item is about: the last character of the passage it quotes, or the item's header for one on the item whole. */
+function commentedAt(region: Region, comment: Comment): number {
+    return comment.quote == null ? region.header.from : shownAt(region, lastOf(comment.quote));
+}
+
 /** Return `draft` with `number` in `list` if it wasn't, and out of it if it was. */
 export function toggled(draft: Draft, list: "done" | "parked", number: number): Draft {
     const present = draft[list] ?? [];
@@ -806,7 +902,8 @@ export function messages(draft: Draft): Letter[] {
     return saying(draft.letters ?? []);
 }
 
-/** Return `draft` without the comments and messages that say nothing. */
+/** Return `draft` as it's sent: without the comments and messages that say nothing, each without the trailing space Esc leaves in it. */
 export function pruned(draft: Draft): Draft {
-    return { ...draft, comments: saying(draft.comments ?? []), letters: messages(draft) };
+    const trimmed = <W extends Written>(list: W[]) => saying(list).map((each) => ({ ...each, text: each.text.trimEnd() }));
+    return { ...draft, comments: trimmed(draft.comments ?? []), letters: trimmed(draft.letters ?? []) };
 }

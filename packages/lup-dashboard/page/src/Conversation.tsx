@@ -39,6 +39,8 @@ import {
 } from "./conversation";
 import { rebuilt, refold, useEditor } from "./editor";
 import { useWatched } from "./hooks";
+import { CONVERSATION_KEYS, CONVERSATION_PLACES } from "./keys";
+import { Keys } from "./Keys";
 
 interface Props {
     launch: Launch;
@@ -188,6 +190,8 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
     }, [names, subagent]);
     const [refused, setRefused] = useState<string | null>(null);
     const [inserting, setInserting] = useState(false);
+    // Whether the list of every key is open.
+    const [listing, setListing] = useState(false);
     const [epoch, setEpoch] = useState(0);
     const have = useRef(0);
     const asking = useRef(false);
@@ -329,6 +333,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         epoch,
         shownNow: true,
         tree,
+        list: () => setListing(true),
     });
     const before = useRef<Laid | null>(null);
     // Whether the message being begun was begun from the conversation's last line.
@@ -351,10 +356,12 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         let anchor: number | undefined;
         if (arriving !== null && "comment" in arriving) {
             anchor = laidOut.blocks.find((each) => each.comment === arriving.comment)?.from;
+        } else if (arriving !== null && "at" in arriving) {
+            anchor = moved(arriving.at, made, doc);
         } else if (changing && where === "last" && following) {
             anchor = laidOut.last?.from ?? 0;
         } else if (changing && selection.empty) {
-            anchor = moved(head, made, doc.length);
+            anchor = moved(head, made, doc);
         }
         if (changing) {
             view.dispatch({
@@ -480,19 +487,13 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
                         <span className="muted"> Sent from here: {sent.map((each) => `#${each.number}`).join(", ")}.</span>
                     )}
                 </div>
-                {inserting ? (
-                    <div className="keys inserting">
-                        -- INSERT -- writing a comment · <kbd>Ctrl</kbd> <kbd>Enter</kbd> ends it, back on what it's
-                        about · <kbd>Esc</kbd> ends it here · <kbd>Esc</kbd> <kbd>u</kbd> drops it
-                    </div>
-                ) : (
-                    <div className="keys muted">
-                        comment: <kbd>c</kbd>+motion passage · <kbd>o</kbd>/<kbd>C</kbd> line · <kbd>v</kbd>…<kbd>c</kbd>{" "}
-                        selection · <kbd>␣c</kbd> message · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>za</kbd> fold ·{" "}
-                        <kbd>zR</kbd>/<kbd>zM</kbd> unfold/fold all · <kbd>]]</kbd>/<kbd>[[</kbd> turns · <kbd>␣r</kbd> review ·{" "}
-                        <kbd>␣h</kbd> agents
-                    </div>
-                )}
+                <Keys
+                    parts={CONVERSATION_KEYS}
+                    place={inserting ? "insert" : "normal"}
+                    places={CONVERSATION_PLACES}
+                    open={listing}
+                    setOpen={setListing}
+                />
             </div>
         </>
     );

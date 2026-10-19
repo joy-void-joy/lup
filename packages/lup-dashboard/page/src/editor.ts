@@ -4,16 +4,19 @@
 // enters it opens one where the cursor is, or edits the one it's in, and the
 // cursor stays in it until it ends. Space `c` opens one on the whole (an item,
 // a conversation); vim's change, `c` and a motion, on the passage it covers
-// (`ct.`, `ciw`, `cip`, `cc` a line's); `o`, `C` and vim's other keys of insert
-// mode on the line; `v` and a motion, then `c` or `s`, on the selection. `]]` and
+// (`ct.`, `ciw`, `cip`, `cc` a line's, `C` to the line's end); `o` and vim's other
+// keys of insert mode on the line; `v` and a motion, then `c` or `s`, on the
+// selection; where what's covered isn't one item's or one turn's, on the line. `]]` and
 // `[[` go to the next and previous item or turn, `]c` and `[c` to the next and
-// previous line that matters, where a view has some. Ctrl+Enter in a comment ends
+// previous line that matters, where a view has some, `]n` and `[n` to the next
+// and previous comment, where the cursor last was in it. Ctrl+Enter in a comment ends
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
-// any change to the draft. What folds is folded until opened: `za` opens or
+// any change to the draft, `g-` and `g+` go through its history in the order it
+// was made (`History`). What folds is folded until opened: `za` opens or
 // closes the fold under the cursor, `zo` and `zc` open and close it, `zR` and
 // `zM` open and close them all, `zr` and `zm` those hiding a change alone (a file
 // folded whole, a run holding changed lines), unchanged context left as it is. Space `h`, or Space `w` `h`, goes to the agents'
-// tree. Each view says what else its keys do, lays its own text out and draws
+// tree; `?` opens the list of every key, in place of vim's search backward. Each view says what else its keys do, lays its own text out and draws
 // it, and may paint the lines in view as well, as the review paints a changed
 // file's (`Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`). A fold may be
 // inside another, as an item's text is inside what came before the operator's
@@ -35,21 +38,23 @@ import { saying, type Block, type Folding, type Span } from "./comments";
 
 /** What the vim keys and the editor's own events do, as a view stands: replaced at each render. */
 interface Actions {
-    comment: (cm: CodeMirrorV, on: "line" | "selection" | "whole") => void;
+    comment: (cm: CodeMirrorV, on: "line" | "whole") => void;
     entered: (cm: CodeMirrorV) => void;
     left: () => void;
     finish: (cm: CodeMirrorV) => void;
     toggle: (list: "done" | "parked") => void;
     move: (forward: boolean) => void;
     matter: (forward: boolean) => void;
+    written: (forward: boolean) => void;
     approve: (approved: boolean) => void;
     back: () => void;
     tree: () => void;
+    list: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
     foldAll: (closing: boolean) => void;
     foldDiffs: (closing: boolean) => void;
     folded: (state: EditorState) => void;
-    undo: (back: boolean) => void;
+    undo: (way: "undo" | "redo" | "earlier" | "later") => void;
     send: () => void;
     blocks: () => Block[];
     edited: (update: ViewUpdate) => void;
@@ -68,6 +73,137 @@ interface Keyed {
     changing: boolean;
     /** Whether vim is in insert mode, that is, whether a comment is being written. */
     inserting: boolean;
+    /** Where a dead key pressed outside insert mode is. */
+    dead: Dead;
+}
+
+/**
+ * Where a dead key pressed outside insert mode is: none; pressed, vim waiting for what it types; or given to vim, the
+ * key that completes it, as Space does, still to come.
+ */
+export type Dead = "none" | "pressed" | "given";
+
+/** A key pressed outside insert mode, as a dead key reads it: its name, and whether the browser composes it. */
+export interface Pressed {
+    key: string;
+    composing: boolean;
+}
+
+/**
+ * Return what a key pressed outside insert mode does to a dead key: whether it's kept from vim, and where the dead key
+ * is after it. The dead key itself, and a key the browser composes it with, are kept from vim, which gets what they
+ * type instead (`deadTyped`); so is the Space that completes one whose character vim has, which would begin a chord.
+ * Any other key goes to vim, ending the dead key, as `a` after `` ` `` jumps to mark `a`.
+ */
+export function deadPressed(dead: Dead, pressed: Pressed): { kept: boolean; dead: Dead } {
+    if (pressed.key === "Dead") {
+        return { kept: true, dead: "pressed" };
+    }
+    if (pressed.composing || pressed.key === "Process") {
+        return { kept: true, dead };
+    }
+    return { kept: dead === "given" && pressed.key === " ", dead: "none" };
+}
+
+/**
+ * Return what text the browser types into the page outside insert mode does, which never lands there: whether vim gets
+ * it as keys, and where the dead key is after it. A dead key gives vim the first text it types, as `` ` `` composing
+ * shows `` ` ``, once; anything else typed is dropped, the rest of a composition, a paste, or a dead key's own
+ * character typed again as the key after it commits it.
+ */
+export function deadTyped(dead: Dead): { given: boolean; dead: Dead } {
+    return dead === "pressed" ? { given: true, dead: "given" } : { given: false, dead };
+}
+
+/**
+ * Return where the cursor last was in each comment it left, once it moves from `from` to `to` with the text the same:
+ * where it was in the one it leaves, in place of where it was in it before; none outside every comment of `blocks`.
+ */
+export function visit(visited: readonly number[], blocks: readonly Span[], from: number, to: number): number[] {
+    const inside = (at: number, block: Span) => at >= block.from && at <= block.to;
+    const left = blocks.find((each) => inside(from, each));
+    if (left === undefined || inside(to, left)) {
+        return [...visited];
+    }
+    const others = visited.filter((at) => !inside(at, left) && blocks.some((each) => inside(at, each)));
+    return [...others, from];
+}
+
+/**
+ * Return where `]n` goes from `head`, or `[n` where `forward` isn't: into the next or the previous comment of `blocks`,
+ * past the one the cursor is in, where the cursor last was in it (`visit`), else on its last character, where writing
+ * carries on; none past the last, or before the first.
+ */
+export function nextWritten(blocks: readonly Span[], head: number, forward: boolean, visited: readonly number[]): number | undefined {
+    const sorted = [...blocks].sort((a, b) => a.from - b.from);
+    const here = sorted.find((each) => head >= each.from && head <= each.to);
+    const target = forward
+        ? sorted.find((each) => each.from > (here?.to ?? head))
+        : sorted.findLast((each) => each.to < (here?.from ?? head));
+    if (target === undefined) {
+        return undefined;
+    }
+    // On a character, as vim's cursor is outside insert mode, where writing ended past the last one.
+    const last = Math.max(target.to - 1, target.from);
+    return Math.min(visited.find((at) => at >= target.from && at <= target.to) ?? last, last);
+}
+
+/** One state the draft was in, in its history: what it was, the state it was made from, and the one Ctrl+R goes to. */
+interface State<D> {
+    draft: D;
+    /** The state it was made from, `u`'s; none for the first. */
+    parent: number | null;
+    /** The state made from it last, or last undone back to it, Ctrl+R's. */
+    child: number | null;
+}
+
+/**
+ * The draft's history, as vim's undo tree: each state it was in after a step, numbered in the order they were made,
+ * each but the first made from another; and the state it's in. `u` and Ctrl+R go to the state one was made from and
+ * back; `g-` and `g+` to the state made before and after, whatever it was made from, so a state undone and left by a
+ * change after it is still reached.
+ */
+export interface History<D> {
+    states: State<D>[];
+    at: number;
+}
+
+/** Return a history of `draft` alone. */
+export function begun<D>(draft: D): History<D> {
+    return { states: [{ draft, parent: null, child: null }], at: 0 };
+}
+
+/** Return `history` with the state it's in now holding `draft`: a step still being made, as a comment being written, or a change no step made. */
+export function rewritten<D>(history: History<D>, draft: D): History<D> {
+    return { ...history, states: history.states.map((each, at) => (at === history.at ? { ...each, draft } : each)) };
+}
+
+/** Return `history` with a step made from the state it's in to `draft`, numbered after every other. */
+export function stepped<D>(history: History<D>, draft: D): History<D> {
+    const made = history.states.length;
+    const states = history.states.map((each, at) => (at === history.at ? { ...each, child: made } : each));
+    return { states: [...states, { draft, parent: history.at, child: null }], at: made };
+}
+
+/**
+ * Return `history` gone to another state: `undo` to the one the state it's in was made from, its own Ctrl+R's;
+ * `redo` to the one Ctrl+R goes to; `earlier` and `later` to the one made before or after it. As it was where there's
+ * none.
+ */
+export function went<D>(history: History<D>, way: "undo" | "redo" | "earlier" | "later"): History<D> {
+    const now = history.states[history.at];
+    if (now === undefined) {
+        return history;
+    }
+    const to = { undo: now.parent, redo: now.child, earlier: history.at - 1, later: history.at + 1 }[way];
+    if (to === null || to < 0 || to >= history.states.length) {
+        return history;
+    }
+    if (way !== "undo") {
+        return { ...history, at: to };
+    }
+    const states = history.states.map((each, at) => (at === to ? { ...each, child: history.at } : each));
+    return { states, at: to };
 }
 
 /** One editor's own: what its keys do, and what it knows of the last key. */
@@ -79,7 +215,7 @@ interface Bound {
 /** Each editor's own, read by the keys, the filters and vim's actions, which vim's keymap shares between editors. */
 const binding = Facet.define<Bound, Bound | null>({ combine: (values) => values[0] ?? null });
 
-const NONE: Keyed = { from: 0, visual: false, passage: null, changing: false, inserting: false };
+const NONE: Keyed = { from: 0, visual: false, passage: null, changing: false, inserting: false, dead: "none" };
 
 function boundOf(state: EditorState): Bound {
     return state.facet(binding) ?? { actions: null, keyed: NONE };
@@ -106,17 +242,19 @@ function mapKeys(): void {
         });
     action("lupCommentLine", (actions, cm) => actions.comment(cm, "line"));
     action("lupCommentWhole", (actions, cm) => actions.comment(cm, "whole"));
-    action("lupCommentSelection", (actions, cm) => actions.comment(cm, "selection"));
     action("lupDone", (actions) => actions.toggle("done"));
     action("lupLater", (actions) => actions.toggle("parked"));
     action("lupNext", (actions) => actions.move(true));
     action("lupPrevious", (actions) => actions.move(false));
     action("lupNextMatter", (actions) => actions.matter(true));
     action("lupPreviousMatter", (actions) => actions.matter(false));
+    action("lupNextWritten", (actions) => actions.written(true));
+    action("lupPreviousWritten", (actions) => actions.written(false));
     action("lupApprove", (actions) => actions.approve(true));
     action("lupDecline", (actions) => actions.approve(false));
     action("lupBack", (actions) => actions.back());
     action("lupTree", (actions) => actions.tree());
+    action("lupKeys", (actions) => actions.list());
     // Vim's own fold keys, which its CodeMirror mode leaves unmapped, on CodeMirror's folds.
     action("lupFoldToggle", (actions) => actions.fold("toggle"));
     action("lupFoldOpen", (actions) => actions.fold("open"));
@@ -125,13 +263,13 @@ function mapKeys(): void {
     action("lupFoldCloseAll", (actions) => actions.foldAll(true));
     action("lupFoldOpenDiffs", (actions) => actions.foldDiffs(false));
     action("lupFoldCloseDiffs", (actions) => actions.foldDiffs(true));
-    action("lupUndo", (actions) => actions.undo(true));
-    action("lupRedo", (actions) => actions.undo(false));
+    action("lupUndo", (actions) => actions.undo("undo"));
+    action("lupRedo", (actions) => actions.undo("redo"));
+    action("lupEarlierState", (actions) => actions.undo("earlier"));
+    action("lupLaterState", (actions) => actions.undo("later"));
     const map = (keys: string, name: string, context: string) =>
         Vim.mapCommand(keys, "action", name, {}, { context });
     map("o", "lupCommentLine", "normal");
-    map("c", "lupCommentSelection", "visual");
-    map("s", "lupCommentSelection", "visual");
     map("<Space>c", "lupCommentWhole", "normal");
     map("<Space>d", "lupDone", "normal");
     map("<Space>z", "lupLater", "normal");
@@ -140,6 +278,8 @@ function mapKeys(): void {
     map("<Space>r", "lupBack", "normal");
     map("<Space>h", "lupTree", "normal");
     map("<Space>wh", "lupTree", "normal");
+    // The list of every key, in place of vim's search backward, which `/` then `N` still does.
+    map("?", "lupKeys", "normal");
     map("za", "lupFoldToggle", "normal");
     map("zo", "lupFoldOpen", "normal");
     map("zc", "lupFoldClose", "normal");
@@ -149,10 +289,14 @@ function mapKeys(): void {
     map("zm", "lupFoldCloseDiffs", "normal");
     map("u", "lupUndo", "normal");
     map("<C-r>", "lupRedo", "normal");
+    map("g-", "lupEarlierState", "normal");
+    map("g+", "lupLaterState", "normal");
     map("]]", "lupNext", "normal");
     map("[[", "lupPrevious", "normal");
     map("]c", "lupNextMatter", "normal");
     map("[c", "lupPreviousMatter", "normal");
+    map("]n", "lupNextWritten", "normal");
+    map("[n", "lupPreviousWritten", "normal");
 }
 
 /** Return the editor's vim, once it's started. */
@@ -182,36 +326,53 @@ function commentAt(bound: Bound, position: number): Block | undefined {
 
 /**
  * The keys that vim's keymap can't say, read ahead of vim, which takes every key it's given before a keymap would:
- * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere; and `C` alone outside every comment, a comment
- * on the line, which in a comment stays vim's change. Every key is noted first, for what vim makes of it (`Keyed`):
- * one with no key of vim's pending begins what it notes, `c` in normal mode beginning vim's change.
+ * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere. Every key is noted first, for what vim makes of
+ * it (`Keyed`): one with no key of vim's pending begins what it notes, `c` or `C` in normal mode beginning vim's
+ * change.
  *
  * A dead key, as `` ` `` on a layout where it waits for the next key, gives no key of its own: the browser composes it
- * with the next, `` ` `` then Space making a `` ` ``. Outside insert mode, vim gets what's composed, as typed, and
- * neither key that composed it, the Space among them, which would begin a chord; in a comment, the browser composes
- * into the text as usual.
+ * with the next, `` ` `` then Space making a `` ` ``. Outside insert mode, vim gets the first text it types, once, and
+ * neither key that composed it, nor the Space completing it, which would begin a chord (`deadPressed`, `deadTyped`);
+ * what's typed never lands (`typed`). In a comment, the browser composes into the text as usual.
  */
 const keys = Prec.highest(
     EditorView.domEventHandlers({
-        compositionend: (event, view) => {
+        compositionstart: (_, view) => {
+            // A composition with no dead key pressed before it, as some browsers give, waits as one does.
             const cm = vimOf(view);
-            if (cm === null || cm.state.vim.insertMode || event.data === "") {
+            const { keyed } = boundOf(view.state);
+            if (cm !== null && !cm.state.vim.insertMode && keyed.dead === "none") {
+                keyed.dead = "pressed";
+            }
+            return false;
+        },
+        compositionend: (event, view) => {
+            // What a composition made, where nothing it typed was seen first.
+            const cm = vimOf(view);
+            const { keyed } = boundOf(view.state);
+            if (cm === null || cm.state.vim.insertMode || !(event instanceof CompositionEvent) || event.data === "") {
                 return false;
             }
-            for (const typed of event.data) {
-                Vim.handleKey(cm, typed, "user");
+            const step = deadTyped(keyed.dead);
+            keyed.dead = step.dead;
+            if (step.given) {
+                give(cm, event.data);
             }
-            return true;
+            return false;
         },
         keydown: (event, view) => {
             const cm = vimOf(view);
             if (cm === null) {
                 return false;
             }
-            if ((event.key === "Dead" || event.isComposing) && !cm.state.vim.insertMode) {
-                return true;
-            }
             const bound = boundOf(view.state);
+            if (!cm.state.vim.insertMode) {
+                const step = deadPressed(bound.keyed.dead, { key: event.key, composing: event.isComposing });
+                bound.keyed.dead = step.dead;
+                if (step.kept) {
+                    return true;
+                }
+            }
             const { keyed } = bound;
             const head = view.state.selection.main.head;
             keyed.from = head;
@@ -219,7 +380,7 @@ const keys = Prec.highest(
             keyed.passage = null;
             const modified = event.ctrlKey || event.metaKey || event.altKey;
             if (idle(cm)) {
-                keyed.changing = event.key === "c" && !modified && !keyed.visual;
+                keyed.changing = (event.key === "c" || event.key === "C") && !modified && !keyed.visual;
             }
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 if (cm.state.vim.insertMode) {
@@ -230,13 +391,41 @@ const keys = Prec.highest(
                 event.preventDefault();
                 return true;
             }
-            if (event.key === "C" && !modified && idle(cm) && commentAt(bound, head) === undefined) {
-                bound.actions?.comment(cm, "line");
-                event.preventDefault();
-                return true;
-            }
             return false;
         },
+    }),
+);
+
+/** Give vim each character of `text`, as typed. */
+function give(cm: CodeMirrorV, text: string): void {
+    for (const typed of text) {
+        Vim.handleKey(cm, typed, "user");
+    }
+}
+
+/**
+ * Outside insert mode, what the browser types into the page never lands: vim takes each key before the browser would
+ * type it, so what's typed is a dead key's, or a paste. A dead key's first text reaches vim as keys (`deadTyped`), and
+ * its composition ends there, as CodeMirror is told, so it doesn't wait for one the page took the text of. Read here,
+ * ahead of vim's own reading of typed text, which takes a composition's text as keys each time it's typed, so a mark
+ * or a jump never types into a comment the cursor is on, nor reaches vim twice.
+ */
+const typed = Prec.highest(
+    EditorView.inputHandler.of((view, _from, _to, text) => {
+        const cm = vimOf(view);
+        if (cm === null || cm.state.vim.insertMode) {
+            return false;
+        }
+        const { keyed } = boundOf(view.state);
+        const step = deadTyped(keyed.dead);
+        keyed.dead = step.dead;
+        if (step.given) {
+            give(cm, text);
+            if (view.compositionStarted) {
+                view.contentDOM.dispatchEvent(new CompositionEvent("compositionend"));
+            }
+        }
+        return true;
     }),
 );
 
@@ -382,8 +571,11 @@ export function uncovered(closed: Folding[], head: number): number {
     return closed.find((each) => head > each.from && head <= each.to)?.summary.from ?? head;
 }
 
-/** Where the cursor goes once the text is laid out again: into a comment just opened, onto an item, or nowhere in particular. */
-export type Landing = { comment: number } | { item: number } | null;
+/**
+ * Where the cursor goes once the text is laid out again: into a comment just opened, onto an item, to a place in the
+ * text as it was, carried with the text's changes, or nowhere in particular.
+ */
+export type Landing = { comment: number } | { item: number } | { at: number } | null;
 
 /** What a view lays out for the editor: its text, the comments in it, and what folds. */
 export interface Shown {
@@ -401,12 +593,16 @@ interface Config<D, C> {
     change: (draft: D) => void;
     /** Told each time vim enters or leaves insert mode, so the page can say what the keys do in it. */
     inserting: (yes: boolean) => void;
+    /** Told where the cursor is each time it moves or the text changes, so the page can say what the keys do there. */
+    moved?: (head: number) => void;
     /** Changed each time the draft is replaced from outside, as when it's sent: what was done before can't be undone. */
     epoch: number;
     /** Whether the editor is shown: shown again, it takes the keyboard. */
     shownNow: boolean;
     /** Give the keyboard to the agents' tree. */
     tree: () => void;
+    /** Open the list of every key (`?`). */
+    list: () => void;
 }
 
 /** What a view's keys do with what it laid out. */
@@ -469,13 +665,18 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     latest.current = config.draft;
     const telling = useRef(config.inserting);
     telling.current = config.inserting;
-    // The drafts before each change, for `u`; those undone, for Ctrl+R; and whether the comment being
-    // written has its step already, so it's undone whole.
-    const past = useRef<D[]>([]);
-    const future = useRef<D[]>([]);
+    const following = useRef(config.moved);
+    following.current = config.moved;
+    // The draft's history, for `u`, Ctrl+R, `g-` and `g+`; and whether the comment being written has its step
+    // already, so it's undone whole.
+    const history = useRef<History<D>>(begun(config.draft));
     const writing = useRef(false);
     // Where the key that opened the comment being written was pressed.
     const opener = useRef<number | null>(null);
+    // Whether insert mode is entered into the comment just opened, rather than by a key.
+    const entering = useRef(false);
+    // Where the cursor last was in each comment it left, for `]n` and `[n`, carried with the text's changes.
+    const visited = useRef<number[]>([]);
     const keyed = bound.current.keyed;
 
     useEffect(() => {
@@ -509,15 +710,25 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                         if (!update.docChanged && foldedRanges(update.startState) !== foldedRanges(update.state)) {
                             actions?.folded(update.state);
                         }
+                        const head = update.state.selection.main.head;
+                        if (update.docChanged || update.selectionSet) {
+                            following.current?.(head);
+                        }
+                        if (update.docChanged) {
+                            visited.current = visited.current.map((at) => update.changes.mapPos(at));
+                        } else if (update.selectionSet) {
+                            const from = update.startState.selection.main.head;
+                            visited.current = visit(visited.current, actions?.blocks() ?? [], from, head);
+                        }
                         // A click out of the comment being written ends it, as Esc would.
                         const clicked = update.transactions.some((each) => each.isUserEvent("select.pointer"));
                         const cm = vimOf(update.view);
-                        const head = update.state.selection.main.head;
                         if (clicked && cm !== null && keyed.inserting && commentAt(bound.current, head) === undefined) {
                             queueMicrotask(() => Vim.exitInsertMode(cm, true));
                         }
                     }),
                     keys,
+                    typed,
                 ],
             }),
         });
@@ -556,8 +767,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     }, [config.shownNow]);
 
     useEffect(() => {
-        past.current = [];
-        future.current = [];
+        history.current = begun(latest.current);
     }, [config.epoch]);
 
     function head(): number {
@@ -570,10 +780,9 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
 
     /** Change the draft as one step `u` undoes: the comment being written, from its opening to its end, is one. */
     function record(next: D) {
-        if (!writing.current) {
-            past.current = [...past.current, latest.current];
-            future.current = [];
-        }
+        // What changed the draft since, by no step of its own, as an emptied comment dropped, is the state it was in.
+        const now = rewritten(history.current, latest.current);
+        history.current = writing.current ? rewritten(now, next) : stepped(now, next);
         writing.current = keyed.inserting;
         change(next);
     }
@@ -610,16 +819,6 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 if (editor === null) {
                     return;
                 }
-                if (on === "selection") {
-                    const from = cm.indexFromPos(cm.getCursor("start"));
-                    const to = cm.indexFromPos(cm.getCursor("end"));
-                    Vim.exitVisualMode(cm);
-                    const comment = own.quoted(from, to);
-                    if (comment !== undefined) {
-                        added(comment);
-                    }
-                    return;
-                }
                 if (on === "line" && blockAt(head()) !== undefined) {
                     const end = editor.state.doc.lineAt(head()).to;
                     editor.dispatch({ changes: { from: end, insert: "\n" }, selection: { anchor: end + 1 } });
@@ -632,11 +831,17 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 }
             },
             entered: (cm) => {
-                if (blockAt(head()) !== undefined) {
+                // In the comment just opened, or one the key was pressed in, vim's own keys write. A key pressed
+                // elsewhere opens one, though vim moved the cursor into the comment under the line, as `S` does.
+                const opening = entering.current;
+                entering.current = false;
+                if (opening || blockAt(keyed.from) !== undefined) {
                     return;
                 }
                 const passage = keyed.visual || keyed.changing ? keyed.passage : null;
-                const comment = passage === null ? own.opened(keyed.from) : own.quoted(passage.from, passage.to);
+                // A passage no comment can quote, as `C` on an item's header, opens one on the line, as `o` does.
+                const quoted = passage === null ? undefined : own.quoted(passage.from, passage.to);
+                const comment = quoted ?? own.opened(keyed.from);
                 if (comment === undefined) {
                     Vim.exitInsertMode(cm, true);
                     return;
@@ -644,15 +849,20 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 added(comment);
             },
             left: () => {
-                // The comment's trailing space trimmed, and an emptied one dropped, as part of the step that wrote it.
+                // What's written stays as written, as vim leaves it on Esc, the cursor where it is; an emptied comment
+                // is dropped, as part of the step that wrote it, the cursor going back where the key that opened it
+                // was pressed, or else to what it was about.
                 const present = comments(latest.current);
-                const trimmed = present.map((each) => ({ ...each, text: each.text.replace(/\s+$/, "") }));
-                const kept = saying(trimmed);
-                const same =
-                    kept.length === present.length && trimmed.every((each, at) => each.text === present[at]?.text);
+                const kept = saying(present);
+                const block = blockAt(head());
+                const written = block === undefined ? undefined : present[block.comment];
+                if (block !== undefined && written !== undefined && !kept.includes(written)) {
+                    const back = opener.current ?? own.about(written, block, null);
+                    landing.current = back === undefined ? null : { at: back };
+                }
                 writing.current = false;
                 opener.current = null;
-                if (!same) {
+                if (kept.length !== present.length) {
                     change(withComments(latest.current, kept));
                 }
             },
@@ -665,14 +875,34 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 if (editor === null || back === undefined) {
                     return;
                 }
+                // Ended emptied, the comment is dropped as the text is laid out again, which lands back here too.
+                if (landing.current !== null) {
+                    landing.current = { at: back };
+                }
                 editor.dispatch({ selection: { anchor: back }, scrollIntoView: true });
             },
             toggle: (list) => own.toggle?.(list),
             move: own.move,
             matter: (forward) => own.matter?.(forward),
+            written: (forward) => {
+                const editor = view.current;
+                const target = editor === null ? undefined : nextWritten(shown.blocks, head(), forward, visited.current);
+                if (editor === null || target === undefined) {
+                    return;
+                }
+                // Each fold it's in opens, as a motion into it would.
+                const effects: StateEffect<Span>[] = [];
+                foldedRanges(editor.state).between(target, target, (from, to) => {
+                    if (target > from && target <= to) {
+                        effects.push(unfoldEffect.of({ from, to }));
+                    }
+                });
+                editor.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true });
+            },
             approve: (approved) => own.approve?.(approved),
             back: () => own.back?.(),
             tree: config.tree,
+            list: config.list,
             fold: (how) => {
                 const editor = view.current;
                 const at = head();
@@ -706,16 +936,13 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     }
                 }
             },
-            undo: (back) => {
-                const from = back ? past : future;
-                const to = back ? future : past;
-                const restored = from.current.at(-1);
-                if (restored === undefined) {
-                    return;
+            undo: (way) => {
+                const now = rewritten(history.current, latest.current);
+                const gone = went(now, way);
+                history.current = gone;
+                if (gone.at !== now.at) {
+                    change(gone.states[gone.at]?.draft ?? latest.current);
                 }
-                from.current = from.current.slice(0, -1);
-                to.current = [...to.current, latest.current];
-                change(restored);
             },
             send: own.send,
             paint: (from, to) => own.paint?.(from, to) ?? [],
@@ -750,6 +977,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             const editor = view.current;
             const cm = editor === null ? null : getCM(editor);
             if (cm !== null && !keyed.inserting) {
+                entering.current = true;
                 Vim.handleKey(cm, "i", "mapping");
             }
         },

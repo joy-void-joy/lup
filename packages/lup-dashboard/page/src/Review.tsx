@@ -18,9 +18,11 @@ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef } from "react";
 
 import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./code";
-import { changes, moved, type Block } from "./comments";
+import { changes, moved, type Block, type Change } from "./comments";
 import { folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import type { ReviewPlace } from "./keys";
 import {
+    aboutAt,
     arrival,
     blockAt,
     blocksOf,
@@ -32,10 +34,12 @@ import {
     laid,
     news,
     opened,
+    placeAt,
     quoted,
     regionAt,
     shownAt,
     stepped,
+    stranded,
     toggled,
     waited,
     withWritten,
@@ -70,6 +74,10 @@ interface Props {
     shown: boolean;
     /** Give the keyboard to the agents' tree. */
     tree: () => void;
+    /** Told where the cursor is, outside insert mode, so the line of keys says what applies there. */
+    placed: (place: Exclude<ReviewPlace, "insert">) => void;
+    /** Open the list of every key. */
+    list: () => void;
     /** When the operator last settled an item of theirs: what came after is new to them. */
     reviewed: string | null;
     /** The time, to the minute, which each item's wait is told from. */
@@ -244,9 +252,16 @@ function writtenAt(before: Laid | null, after: Laid, head: number): number | und
     return now === undefined ? undefined : Math.min(now.from + (head - was.from), now.to);
 }
 
-/** Return where the cursor goes once the text is laid out again: into the comment or onto the item `landing` names, else on the same item, as far into it as it was; at the same place where its item is gone. */
-function followed(before: Laid | null, after: Laid, head: number, landing: Landing): number {
+/**
+ * Return where the cursor goes once the text is laid out again: into the comment, onto the item or to the place
+ * `landing` names, the place carried by the changes `made` to the text `doc`; else on the same item, as far into it as
+ * it was; at the same place where its item is gone.
+ */
+function followed(before: Laid | null, after: Laid, head: number, made: Change[], doc: string, landing: Landing): number {
     const clamped = Math.min(head, after.text.length);
+    if (landing !== null && "at" in landing) {
+        return moved(landing.at, made, doc);
+    }
     if (landing !== null && "comment" in landing) {
         const block = blocksOf(after).find((each) => each.comment === landing.comment);
         return block?.from ?? clamped;
@@ -275,9 +290,13 @@ export function Review({
     epoch,
     shown,
     tree,
+    placed,
+    list,
     reviewed,
     now,
 }: Props) {
+    // Where the groups were laid out this sitting, which ends once nothing's left to read: each keeps its place.
+    const places = useRef<string[]>([]);
     const laidOut = useMemo(
         () =>
             laid(
@@ -301,6 +320,7 @@ export function Review({
                 },
                 draft,
                 around,
+                places.current,
             ),
         [items, agents, banner, draft, around, reviewed, now],
     );
@@ -327,9 +347,13 @@ export function Review({
         epoch,
         shownNow: shown,
         tree,
+        moved: (head) => placed(placeAt(laidOut, head)),
+        list,
     });
     const { view, landing, unfolded } = editor;
     const before = useRef<Laid | null>(null);
+    // What was written as it was last laid out.
+    const wrote = useRef<Written[]>([]);
 
     useEffect(() => {
         const current = view.current;
@@ -343,11 +367,19 @@ export function Review({
             // above it: the cursor moves with its text, and the view only follows a landing of their own.
             const head = current.state.selection.main.head;
             const made = changes(doc, laidOut.text);
-            // A comment being written keeps the cursor, though what arrived moved it, as its agent's group comes first.
-            const writing = editor.writing() ? writtenAt(before.current, laidOut, head) : undefined;
+            // A comment being written keeps the cursor, though what arrived moved it, as its agent's group comes first;
+            // one just opened takes it, though vim moved it into another under the same line, as `S` does.
+            const writing = arriving === null && editor.writing() ? writtenAt(before.current, laidOut, head) : undefined;
+            // What it was on gone, as a reply sent takes what it covered, it goes back to what that was about.
+            const away =
+                arriving === null && writing === undefined && before.current !== null
+                    ? stranded(before.current, wrote.current, laidOut, written(draft), head)
+                    : undefined;
             const anchor =
                 writing ??
-                (arriving === null ? moved(head, made, doc.length) : followed(before.current, laidOut, head, arriving));
+                away ??
+                (arriving === null ? moved(head, made, doc) : followed(before.current, laidOut, head, made, doc, arriving));
+            const landed = arriving !== null || away !== undefined;
             const closed = laidFor.folds.filter((each) => !unfolded.current.has(each.key));
             // Where the view is, anchored to the text at its top and mapped through the changes.
             const changing = current.state.changes(made);
@@ -355,11 +387,11 @@ export function Review({
             current.dispatch({
                 changes: changing,
                 selection: { anchor: uncovered(closed, anchor) },
-                scrollIntoView: arriving !== null,
+                scrollIntoView: landed,
                 annotations: rebuilt.of(true),
             });
             refold(current, laidFor.folds, unfolded.current);
-            if (arriving === null && kept !== undefined) {
+            if (!landed && kept !== undefined) {
                 current.dispatch({ effects: kept });
             }
             if (writing !== undefined) {
@@ -370,6 +402,8 @@ export function Review({
             refold(current, laidFor.folds, unfolded.current);
         }
         before.current = laidOut;
+        wrote.current = written(draft);
+        places.current = items.length === 0 ? [] : laidOut.groups.map((each) => each.place);
         landing.current = null;
         editor.draw(decorations(laidOut, draft, reviewed));
         if (arriving !== null && "comment" in arriving) {
@@ -402,16 +436,7 @@ export function Review({
         },
         opened: (position) => opened(laidOut, position),
         quoted: (from, to) => quoted(laidOut, from, to),
-        about: (comment, block) => {
-            if (isLetter(comment)) {
-                return groupAt(laidOut, block.from)?.banner.from;
-            }
-            const region = regionAt(laidOut, block.from);
-            if (region === undefined) {
-                return undefined;
-            }
-            return comment.quote == null ? region.header.from : shownAt(region, comment.quote.start);
-        },
+        about: (comment, block) => aboutAt(laidOut, comment, block),
         toggle: (list) => {
             const region = here();
             if (region === undefined) {
@@ -420,6 +445,10 @@ export function Review({
             if (list === "parked") {
                 const at = laidOut.regions.indexOf(region);
                 landing.current = { item: (laidOut.regions[at + 1] ?? region).item.number };
+            }
+            // Marked again, it folds again, however it was left open before.
+            for (const name of ["read", "later"]) {
+                unfolded.current.delete(foldKey({ item: region.item.number, kind: "whole", name }));
             }
             editor.record(toggled(editor.latest.current, list, region.item.number));
         },
@@ -457,11 +486,11 @@ export function Review({
                 return;
             }
             const line = current.state.doc.lineAt(editor.head()).from;
-            // An item marked read and folded is done with: its lines aren't walked until it's opened.
+            // An item marked read or left for later, and folded, is put by: its lines aren't walked until it's opened.
             const walked = laidOut.regions.filter(
                 (region) =>
                     !laidFor.folds.some(
-                        (fold) => fold.kind === "read" && fold.item === region.item.number && isFolded(current.state, fold),
+                        (fold) => fold.kind === "whole" && fold.item === region.item.number && isFolded(current.state, fold),
                     ),
             );
             const target = stepped(
