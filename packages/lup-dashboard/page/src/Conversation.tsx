@@ -351,10 +351,12 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         let anchor: number | undefined;
         if (arriving !== null && "comment" in arriving) {
             anchor = laidOut.blocks.find((each) => each.comment === arriving.comment)?.from;
+        } else if (arriving !== null && "at" in arriving) {
+            anchor = moved(arriving.at, made, doc);
         } else if (changing && where === "last" && following) {
             anchor = laidOut.last?.from ?? 0;
         } else if (changing && selection.empty) {
-            anchor = moved(head, made, doc.length);
+            anchor = moved(head, made, doc);
         }
         if (changing) {
             view.dispatch({

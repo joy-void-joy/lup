@@ -806,7 +806,8 @@ export function messages(draft: Draft): Letter[] {
     return saying(draft.letters ?? []);
 }
 
-/** Return `draft` without the comments and messages that say nothing. */
+/** Return `draft` as it's sent: without the comments and messages that say nothing, each without the trailing space Esc leaves in it. */
 export function pruned(draft: Draft): Draft {
-    return { ...draft, comments: saying(draft.comments ?? []), letters: messages(draft) };
+    const trimmed = <W extends Written>(list: W[]) => saying(list).map((each) => ({ ...each, text: each.text.trimEnd() }));
+    return { ...draft, comments: trimmed(draft.comments ?? []), letters: trimmed(draft.letters ?? []) };
 }

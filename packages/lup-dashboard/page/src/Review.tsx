@@ -18,7 +18,7 @@ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef } from "react";
 
 import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./code";
-import { changes, moved, type Block } from "./comments";
+import { changes, moved, type Block, type Change } from "./comments";
 import { folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import {
     arrival,
@@ -244,9 +244,16 @@ function writtenAt(before: Laid | null, after: Laid, head: number): number | und
     return now === undefined ? undefined : Math.min(now.from + (head - was.from), now.to);
 }
 
-/** Return where the cursor goes once the text is laid out again: into the comment or onto the item `landing` names, else on the same item, as far into it as it was; at the same place where its item is gone. */
-function followed(before: Laid | null, after: Laid, head: number, landing: Landing): number {
+/**
+ * Return where the cursor goes once the text is laid out again: into the comment, onto the item or to the place
+ * `landing` names, the place carried by the changes `made` to the text `doc`; else on the same item, as far into it as
+ * it was; at the same place where its item is gone.
+ */
+function followed(before: Laid | null, after: Laid, head: number, made: Change[], doc: string, landing: Landing): number {
     const clamped = Math.min(head, after.text.length);
+    if (landing !== null && "at" in landing) {
+        return moved(landing.at, made, doc);
+    }
     if (landing !== null && "comment" in landing) {
         const block = blocksOf(after).find((each) => each.comment === landing.comment);
         return block?.from ?? clamped;
@@ -347,7 +354,7 @@ export function Review({
             const writing = editor.writing() ? writtenAt(before.current, laidOut, head) : undefined;
             const anchor =
                 writing ??
-                (arriving === null ? moved(head, made, doc.length) : followed(before.current, laidOut, head, arriving));
+                (arriving === null ? moved(head, made, doc) : followed(before.current, laidOut, head, made, doc, arriving));
             const closed = laidFor.folds.filter((each) => !unfolded.current.has(each.key));
             // Where the view is, anchored to the text at its top and mapped through the changes.
             const changing = current.state.changes(made);

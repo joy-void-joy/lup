@@ -573,6 +573,7 @@ describe("the draft", () => {
         expect(covered(draft)).toEqual([52, 53]);
         expect(covered(toggled(draft, "parked", 53))).toEqual([52]);
         expect(pruned(draft).comments).toEqual([{ item: 53, text: "x" }]);
+        expect(pruned({ ...draft, comments: [{ item: 53, text: "x \n\n" }] }).comments).toEqual([{ item: 53, text: "x" }]);
         expect(toggled(toggled(EMPTY, "done", 52), "done", 52).done).toEqual([]);
     });
 });

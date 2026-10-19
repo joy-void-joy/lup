@@ -465,8 +465,11 @@ export function uncovered(closed: Folding[], head: number): number {
     return closed.find((each) => head > each.from && head <= each.to)?.summary.from ?? head;
 }
 
-/** Where the cursor goes once the text is laid out again: into a comment just opened, onto an item, or nowhere in particular. */
-export type Landing = { comment: number } | { item: number } | null;
+/**
+ * Where the cursor goes once the text is laid out again: into a comment just opened, onto an item, to a place in the
+ * text as it was, carried with the text's changes, or nowhere in particular.
+ */
+export type Landing = { comment: number } | { item: number } | { at: number } | null;
 
 /** What a view lays out for the editor: its text, the comments in it, and what folds. */
 export interface Shown {
@@ -720,15 +723,20 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 added(comment);
             },
             left: () => {
-                // The comment's trailing space trimmed, and an emptied one dropped, as part of the step that wrote it.
+                // What's written stays as written, as vim leaves it on Esc, the cursor where it is; an emptied comment
+                // is dropped, as part of the step that wrote it, the cursor going back where the key that opened it
+                // was pressed, or else to what it was about.
                 const present = comments(latest.current);
-                const trimmed = present.map((each) => ({ ...each, text: each.text.replace(/\s+$/, "") }));
-                const kept = saying(trimmed);
-                const same =
-                    kept.length === present.length && trimmed.every((each, at) => each.text === present[at]?.text);
+                const kept = saying(present);
+                const block = blockAt(head());
+                const written = block === undefined ? undefined : present[block.comment];
+                if (block !== undefined && written !== undefined && !kept.includes(written)) {
+                    const back = opener.current ?? own.about(written, block, null);
+                    landing.current = back === undefined ? null : { at: back };
+                }
                 writing.current = false;
                 opener.current = null;
-                if (!same) {
+                if (kept.length !== present.length) {
                     change(withComments(latest.current, kept));
                 }
             },
@@ -740,6 +748,10 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 Vim.exitInsertMode(cm, true);
                 if (editor === null || back === undefined) {
                     return;
+                }
+                // Ended emptied, the comment is dropped as the text is laid out again, which lands back here too.
+                if (landing.current !== null) {
+                    landing.current = { at: back };
                 }
                 editor.dispatch({ selection: { anchor: back }, scrollIntoView: true });
             },

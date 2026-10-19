@@ -195,11 +195,11 @@ describe("the conversation growing", () => {
         expect(after.fold).toEqual(before.fold);
         expect(after.blocks[0]).toEqual(before.blocks[0]);
         const reader = before.text.indexOf("you: Build");
-        expect(moved(reader, made, before.text.length)).toBe(reader);
+        expect(moved(reader, made, before.text)).toBe(reader);
         expect(reading(before, reader)).toBe("elsewhere");
         // One writing their message stays in it, moved down with it.
         const writer = before.text.indexOf("Carry on.") + 3;
-        expect(after.text.slice(moved(writer, made, before.text.length))).toBe("ry on.");
+        expect(after.text.slice(moved(writer, made, before.text))).toBe("ry on.");
         expect(reading(before, before.last!.from)).toBe("last");
     });
 
@@ -449,7 +449,7 @@ describe("the items of lup's inbox in a conversation", () => {
         expect(before.text).toContain("→ #51 question to you · waiting on you");
         expect(after.text).toContain("→ #51 question to you · answered by #53\n  Which parser?\n· called Read\n← #53 your answer to #51\n  Asked.\nReading the second runtime");
         const reader = before.text.indexOf("Reading");
-        expect(after.text.slice(moved(reader, made, before.text.length)).startsWith("Reading")).toBe(true);
+        expect(after.text.slice(moved(reader, made, before.text)).startsWith("Reading")).toBe(true);
     });
 });
 
@@ -483,16 +483,29 @@ describe("the changes between two texts", () => {
         expect(made.length).toBe(2);
         expect(apply(before.text, made)).toBe(after.text);
         const reader = before.text.indexOf("you: Build");
-        expect(after.text.slice(moved(reader, made, before.text.length)).startsWith("you: Build")).toBe(true);
+        expect(after.text.slice(moved(reader, made, before.text)).startsWith("you: Build")).toBe(true);
     });
 
-    it("move a cursor with the character it's on, to a change's start where that's replaced, and not at the text's end", () => {
+    it("move a cursor with the character it's on, and not at the text's end", () => {
         const added = [{ from: 4, to: 4, insert: "x\n" }];
-        expect(moved(2, added, 5)).toBe(2);
-        expect(moved(4, added, 5)).toBe(6);
-        expect(moved(5, [{ from: 5, to: 5, insert: "\nd" }], 5)).toBe(5);
-        expect(moved(3, [{ from: 2, to: 4, insert: "zz" }], 5)).toBe(2);
-        expect(moved(8, [{ from: 0, to: 2, insert: "" }, { from: 4, to: 4, insert: "x\n" }], 9)).toBe(8);
+        expect(moved(2, added, "a\nb\nc")).toBe(2);
+        expect(moved(4, added, "a\nb\nc")).toBe(6);
+        expect(moved(5, [{ from: 5, to: 5, insert: "\nd" }], "a\nb\nc")).toBe(5);
+        expect(moved(8, [{ from: 0, to: 2, insert: "" }, { from: 4, to: 4, insert: "x\n" }], "a\nb\nc\nd\ne")).toBe(8);
+    });
+
+    it("keep a cursor on its line and column where the line is replaced, to a change's start where it's removed", () => {
+        // A header's wait said anew, the cursor on its `w`.
+        const before = "── #51 · waiting 9m ──\nx";
+        const after = "── #51 · waiting 10m ──\nx";
+        const made = changes(before, after);
+        expect(after.slice(moved(before.indexOf("waiting"), made, before))).toMatch(/^waiting 10m/);
+        // A comment's line shortened under the cursor: on its last character.
+        expect(moved(5, changes("hello \nx", "hello\nx"), "hello \nx")).toBe(4);
+        // The second of two lines replaced by one: on the one.
+        expect(moved(4, [{ from: 0, to: 5, insert: "zz" }], "ab\ncd\ne")).toBe(1);
+        // Lines removed: at the change's start, the line after them.
+        expect(moved(3, changes("a\nb\nc\nd", "a\nd"), "a\nb\nc\nd")).toBe(2);
     });
 });
 

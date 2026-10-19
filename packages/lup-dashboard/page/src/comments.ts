@@ -302,18 +302,33 @@ function diff(a: string[], b: string[]): Hunk[] | null {
     return made;
 }
 
-/** Return where the cursor is once `made` are made, as vim's cursor sits on a character: on the same one, moved with the text; at a change's start where what it was on is replaced. Lines added where it is go before it, but at the text's very end. */
-export function moved(head: number, made: Change[], length: number): number {
+/**
+ * Return where the cursor is once `made` are made to `before`, as vim's cursor sits on a character: on the same one,
+ * moved with the text; where the lines it was on are replaced, on the same line of what replaces them (their last,
+ * where fewer replace them) at the same column (the line's last character, where it's shorter), as when a header's
+ * wait is said anew; at a change's start where they're removed. Lines added where it is go before it, but at the
+ * text's very end.
+ */
+export function moved(head: number, made: Change[], before: string): number {
     let shift = 0;
     for (const each of made) {
-        if (head < each.from || (head === each.from && each.from === each.to && head >= length)) {
+        if (head < each.from || (head === each.from && each.from === each.to && head >= before.length)) {
             break;
         }
         if (head >= each.to) {
             shift += each.insert.length - (each.to - each.from);
             continue;
         }
-        return each.from + shift;
+        if (each.insert === "") {
+            return each.from + shift;
+        }
+        const was = before.slice(each.from, head).split("\n");
+        const column = (was.at(-1) ?? "").length;
+        const lines = each.insert.split("\n");
+        const row = Math.min(was.length - 1, lines.length - 1);
+        const line = lines[row] ?? "";
+        const start = lines.slice(0, row).reduce((at, text) => at + text.length + 1, 0);
+        return each.from + shift + start + Math.min(column, Math.max(line.length - 1, 0));
     }
     return head + shift;
 }
