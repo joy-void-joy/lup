@@ -95,7 +95,14 @@ def files(entries: list[Tracked]) -> dict[PurePosixPath, Tracked]:
 def in_text(
     held: Withheld, after: str, before: list[bytes | None], within: str
 ) -> list[Spot]:
-    """Find what `after` adds against every version in `before`, a file's text."""
+    """Find what `after` adds against every version in `before`, a file's text.
+
+    The lines added are read with `difflib` only where the file holds a value,
+    which most don't.
+    """
+    holding = found(after, held)
+    if not holding:
+        return []
     against = [
         added_lines(None if was is None else textual(was), after)
         for was in before or [None]
@@ -106,7 +113,7 @@ def in_text(
             held=each.held,
             place=Place(within=within, line=each.line, column=each.column),
         )
-        for each in found(after, held)
+        for each in holding
         if each.line in added
     ]
 
