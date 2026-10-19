@@ -19,6 +19,7 @@ import asyncio
 import secrets
 import shutil
 import sys
+import traceback
 import webbrowser
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
@@ -1287,16 +1288,17 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
                 await self.sweep()
 
     async def sweep(self) -> None:
-        """Sweep once, off the event loop; where it fails, say why, and the next sweep goes on."""
+        """Sweep once, off the event loop; where it fails, say why, with its traceback where it's not podman's or the service's, and the next sweep goes on."""
+        failing = "The sweep of launches whose launcher and container are gone failed"
         try:
             await asyncio.to_thread(
                 swept, self.layout, self.host, self.podman, self.say
             )
         except (HostError, ContainerError, OSError) as failed:
-            self.say(
-                "The sweep of launches whose launcher and container are gone "
-                f"failed: {failed}"
-            )
+            self.say(f"{failing}: {failed}")
+        except Exception as failed:
+            told = "".join(traceback.format_exception(failed))
+            self.say(f"{failing}:\n{told}")
 
 
 def launched(

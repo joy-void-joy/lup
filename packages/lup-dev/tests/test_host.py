@@ -1443,9 +1443,13 @@ def test_a_hook_reaches_a_watch_each_conversation_saying_what_its_doing(
 class Containers:
     """podman, as far as a launch's container goes: those it has, by name, each rename done unless it's `refusing`."""
 
-    def __init__(self, *running: str, refusing: bool = False) -> None:
+    def __init__(
+        self, *running: str, refusing: bool = False, broken: bool = False
+    ) -> None:
         self.running = list(running)
         self.refusing = refusing
+        self.broken = broken
+        """Whether podman fails at every question, as where it's misconfigured."""
         self.asked: list[list[str]] = []
 
     def __call__(self, process: Process) -> Exited:
@@ -1453,6 +1457,8 @@ class Containers:
         assert program == "podman"
         self.asked.append(arguments)
         match arguments:
+            case ["container", "exists", _] if self.broken:
+                return Exited(status=125)
             case ["container", "exists", name]:
                 return Exited(status=0 if name in self.running else 1)
             case ["rename", before, after] if not self.refusing:
@@ -1651,6 +1657,33 @@ def test_the_service_ends_a_launch_whose_launcher_and_container_are_gone(
         ) in said
         assert not machine.launch(each).lock.exists()
     assert ["container", "exists", "lup-held"] not in containers.asked
+
+
+def test_a_sweep_podman_fails_is_said_and_the_service_goes_on(
+    tmp_path_factory: pytest.TempPathFactory,
+    said: list[str],
+    tmp_path: Path,
+    clock: FakeClock,
+) -> None:
+    base = tmp_path_factory.mktemp("swept")
+    machine = Layout(state=base / "state", runtime=base / "run")
+    own = client(machine.host, clock)
+    sweeping = cli.Sweeping(
+        layout=machine,
+        host=own,
+        podman=Podman(execute=Containers(broken=True)),
+        say=said.append,
+        pause=Pauses(),
+    )
+    with served(service(machine.host, Judge(), said)):
+        own.register(launch(tmp_path, "gone", "first"))
+    with served(service(machine.host, Judge(), said, companions=[sweeping])):
+        left = [each.launch for each in own.launches()]
+    assert left == ["gone"]
+    assert (
+        "The sweep of launches whose launcher and container are gone failed: podman "
+        "couldn't say whether the container lup-gone exists (status 125)"
+    ) in said
 
 
 def test_what_a_conversation_is_doing_outlasts_a_restart_of_the_service(
