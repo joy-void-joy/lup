@@ -11,6 +11,7 @@ import { since } from "./agents";
 import {
     calls,
     kept,
+    lastOf,
     passage,
     saying,
     shownIn,
@@ -541,13 +542,13 @@ export function quoted(laidOut: Laid, from: number, to: number): Remark | undefi
     return quote.end > quote.start ? { step: first.words.step, quote, text: "" } : undefined;
 }
 
-/** Return where a comment on the agent's words is about, in the text: the start of what it quotes; none for the message. */
+/** Return where a comment on the agent's words is about, in the text: the last character of what it quotes; none for the message. */
 export function aboutAt(laidOut: Laid, comment: Remark): number | undefined {
     const words = laidOut.words.find((each) => each.step === comment.step);
     if (words === undefined || comment.quote == null) {
         return undefined;
     }
-    return shownIn(words.lines, comment.quote.start, words.lines[0]?.start ?? 0);
+    return shownIn(words.lines, lastOf(comment.quote), words.lines[0]?.start ?? 0);
 }
 
 /**

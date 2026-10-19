@@ -118,6 +118,11 @@ export function under(starts: number[], quote: Quote | null | undefined): number
     return quote == null ? null : lineOf(starts, Math.max(quote.end - 1, quote.start));
 }
 
+/** Return where in its text a passage's last character is, where the cursor goes back to once a comment on it ends, as reading carries on there; its start where it's empty. */
+export function lastOf(quote: Quote): number {
+    return Math.max(quote.end - 1, quote.start);
+}
+
 /** Return the passage `from` to `to` selects, from its first line to its last, counted in the text `own` they're lines of; a start before the first line's words counts from them. */
 export function passage(own: string, first: Line, last: Line, from: number, to: number): Quote {
     const start = first.own + Math.max(from - first.from, 0);

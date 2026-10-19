@@ -14,6 +14,7 @@ import { since } from "./agents";
 import { shownOnce, type ChangedFile, type Matter, type Row } from "./code";
 import {
     calls,
+    lastOf,
     passage,
     saying,
     shownIn,
@@ -68,16 +69,16 @@ export interface Coded extends Span {
 
 /**
  * What folds under an item, folded by default: its context, a run of a file's unchanged lines, an automatic file under
- * its header, or, where it's marked read, all of it under its header. It hides `from` to `to`, from the end of its
- * summary line to the end of its last; an automatic file's from the end of the comments on its header, which stay in
- * view.
+ * its header, or, where it's marked read or left for later, all of it under its header (`whole`). It hides `from` to
+ * `to`, from the end of its summary line to the end of its last; an automatic file's from the end of the comments on its
+ * header, which stay in view.
  */
 export interface Fold extends Span {
     item: number;
-    kind: "context" | "code" | "file" | "read";
-    /** Whether it hides a change: a file folded whole, or a run holding changed lines; unchanged lines, an item's context and an item read hide none. */
+    kind: "context" | "code" | "file" | "whole";
+    /** Whether it hides a change: a file folded whole, or a run holding changed lines; unchanged lines, an item's context and an item folded whole hide none. */
     diff: boolean;
-    /** What names it among its item's folds of its kind: a run of code by its file and its first row, a file by its path. */
+    /** What names it among its item's folds of its kind: a run of code by its file and its first row, a file by its path, an item folded whole by why, `read` or `later`. */
     name: string;
     summary: Span;
 }
@@ -558,10 +559,11 @@ export function laid(
                 folds.push({ item: item.number, kind: "context", name: "", diff: false, summary: shown, from: summary.to, to: last.to });
             }
         }
-        if (done.includes(item.number)) {
-            // Marked read, it folds whole under its header, what folds within it inside.
+        if (isParked || done.includes(item.number)) {
+            // Marked read, or left for later, it folds whole under its header, what folds within it inside.
             const header = { from: headFrom, to: headFrom + head.length };
-            folds.push({ item: item.number, kind: "read", name: "", diff: false, summary: header, from: header.to, to: text.length - 1 });
+            const name = isParked ? "later" : "read";
+            folds.push({ item: item.number, kind: "whole", name, diff: false, summary: header, from: header.to, to: text.length - 1 });
         }
         text += "\n";
         regions.push({
@@ -577,10 +579,10 @@ export function laid(
     }
 }
 
-/** Return where going to an item lands: on its first line that matters, as the judge read its files, unless it's marked read; else on its header. */
+/** Return where going to an item lands: on its first line that matters, as the judge read its files, unless it's folded whole, marked read or left for later; else on its header. */
 export function arrival(region: Region): number {
-    const read = region.folds.some((each) => each.kind === "read");
-    return (read ? undefined : region.stops[0]) ?? region.header.from;
+    const whole = region.folds.some((each) => each.kind === "whole");
+    return (whole ? undefined : region.stops[0]) ?? region.header.from;
 }
 
 /** Return the stop after the line starting at `line`, or before it, of `stops`, in the text's order; none past the last, or before the first. */
@@ -640,7 +642,7 @@ export function foldAt(laidOut: Laid, position: number): Fold | undefined {
 }
 
 /** Return what names a fold across layouts: its item's number, what it holds, and which of those it is. */
-export function foldKey(fold: Fold): string {
+export function foldKey(fold: Pick<Fold, "item" | "kind" | "name">): string {
     return `${fold.item} ${fold.kind} ${fold.name}`;
 }
 
@@ -782,6 +784,22 @@ export function answer(comments: Comment[]): string {
 /** Return where in the text an offset of an item's own text is shown. */
 export function shownAt(region: Region, offset: number): number {
     return shownIn(region.lines, offset, region.header.to);
+}
+
+/**
+ * Return where what's written, shown at `block`, is about, which Ctrl+Enter ending it goes back to: a message's
+ * banner; the last character of the passage a comment quotes, where reading carries on, or its item's header for one
+ * on the item whole.
+ */
+export function aboutAt(laidOut: Laid, written: Written, block: Block): number | undefined {
+    if (isLetter(written)) {
+        return groupAt(laidOut, block.from)?.banner.from;
+    }
+    const region = regionAt(laidOut, block.from);
+    if (region === undefined) {
+        return undefined;
+    }
+    return written.quote == null ? region.header.from : shownAt(region, lastOf(written.quote));
 }
 
 /** Return `draft` with `number` in `list` if it wasn't, and out of it if it was. */

@@ -562,6 +562,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     const writing = useRef(false);
     // Where the key that opened the comment being written was pressed.
     const opener = useRef<number | null>(null);
+    // Whether insert mode is entered into the comment just opened, rather than by a key.
+    const entering = useRef(false);
     const keyed = bound.current.keyed;
 
     useEffect(() => {
@@ -709,7 +711,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 }
             },
             entered: (cm) => {
-                if (blockAt(head()) !== undefined) {
+                // In the comment just opened, or one the key was pressed in, vim's own keys write. A key pressed
+                // elsewhere opens one, though vim moved the cursor into the comment under the line, as `S` does.
+                const opening = entering.current;
+                entering.current = false;
+                if (opening || blockAt(keyed.from) !== undefined) {
                     return;
                 }
                 const passage = keyed.visual || keyed.changing ? keyed.passage : null;
@@ -838,6 +844,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             const editor = view.current;
             const cm = editor === null ? null : getCM(editor);
             if (cm !== null && !keyed.inserting) {
+                entering.current = true;
                 Vim.handleKey(cm, "i", "mapping");
             }
         },

@@ -21,6 +21,7 @@ import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./c
 import { changes, moved, type Block, type Change } from "./comments";
 import { folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import {
+    aboutAt,
     arrival,
     blockAt,
     blocksOf,
@@ -350,8 +351,9 @@ export function Review({
             // above it: the cursor moves with its text, and the view only follows a landing of their own.
             const head = current.state.selection.main.head;
             const made = changes(doc, laidOut.text);
-            // A comment being written keeps the cursor, though what arrived moved it, as its agent's group comes first.
-            const writing = editor.writing() ? writtenAt(before.current, laidOut, head) : undefined;
+            // A comment being written keeps the cursor, though what arrived moved it, as its agent's group comes first;
+            // one just opened takes it, though vim moved it into another under the same line, as `S` does.
+            const writing = arriving === null && editor.writing() ? writtenAt(before.current, laidOut, head) : undefined;
             const anchor =
                 writing ??
                 (arriving === null ? moved(head, made, doc) : followed(before.current, laidOut, head, made, doc, arriving));
@@ -409,16 +411,7 @@ export function Review({
         },
         opened: (position) => opened(laidOut, position),
         quoted: (from, to) => quoted(laidOut, from, to),
-        about: (comment, block) => {
-            if (isLetter(comment)) {
-                return groupAt(laidOut, block.from)?.banner.from;
-            }
-            const region = regionAt(laidOut, block.from);
-            if (region === undefined) {
-                return undefined;
-            }
-            return comment.quote == null ? region.header.from : shownAt(region, comment.quote.start);
-        },
+        about: (comment, block) => aboutAt(laidOut, comment, block),
         toggle: (list) => {
             const region = here();
             if (region === undefined) {
@@ -427,6 +420,10 @@ export function Review({
             if (list === "parked") {
                 const at = laidOut.regions.indexOf(region);
                 landing.current = { item: (laidOut.regions[at + 1] ?? region).item.number };
+            }
+            // Marked again, it folds again, however it was left open before.
+            for (const name of ["read", "later"]) {
+                unfolded.current.delete(foldKey({ item: region.item.number, kind: "whole", name }));
             }
             editor.record(toggled(editor.latest.current, list, region.item.number));
         },
@@ -464,11 +461,11 @@ export function Review({
                 return;
             }
             const line = current.state.doc.lineAt(editor.head()).from;
-            // An item marked read and folded is done with: its lines aren't walked until it's opened.
+            // An item marked read or left for later, and folded, is put by: its lines aren't walked until it's opened.
             const walked = laidOut.regions.filter(
                 (region) =>
                     !laidFor.folds.some(
-                        (fold) => fold.kind === "read" && fold.item === region.item.number && isFolded(current.state, fold),
+                        (fold) => fold.kind === "whole" && fold.item === region.item.number && isFolded(current.state, fold),
                     ),
             );
             const target = stepped(

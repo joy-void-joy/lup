@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
     EMPTY,
+    aboutAt,
     answer,
     arrival,
     blockAt,
+    blocksOf,
     body,
     calls,
     covered,
@@ -120,10 +122,24 @@ describe("laid", () => {
         const out = laid([QUESTION, NOTE], [], banner, header, { ...EMPTY, done: [52] }, NOTHING);
         const question = out.regions.find((each) => each.item.number === 51);
         const note = out.regions.find((each) => each.item.number === 52);
-        expect(question!.folds.filter((each) => each.kind === "read")).toEqual([]);
-        const [read] = note!.folds.filter((each) => each.kind === "read");
+        expect(question!.folds.filter((each) => each.kind === "whole")).toEqual([]);
+        const [read] = note!.folds.filter((each) => each.kind === "whole");
+        expect(read!.name).toBe("read");
         expect(out.text.slice(read!.summary.from, read!.summary.to)).toBe("── #52 ──");
         expect(out.text.slice(read!.from, read!.to)).toBe("\nI assumed UTF-8.");
+    });
+
+    it("folds an item left for later whole under its header, as one marked read, landing on its header", () => {
+        const out = laid([QUESTION, NOTE], [], banner, header, { ...EMPTY, parked: [51] }, NOTHING);
+        const question = out.regions.find((each) => each.item.number === 51)!;
+        const [later] = question.folds.filter((each) => each.kind === "whole");
+        expect(later!.name).toBe("later");
+        expect(foldKey(later!)).not.toBe(foldKey({ ...later!, name: "read" }));
+        expect(out.text.slice(later!.summary.from, later!.summary.to)).toBe("── #51 · later ──");
+        expect(out.text.slice(later!.from, later!.to)).toMatch(/^\nWhich parser\?\n.*lean: no$/s);
+        expect(arrival(question)).toBe(question.header.from);
+        const back = laid([QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
+        expect(back.regions.flatMap((each) => each.folds)).toEqual([]);
     });
 
     it("puts the group with the newest item first, each group's items in their order", () => {
@@ -220,6 +236,23 @@ describe("laid", () => {
         expect(question!.blocks.map((each) => each.comment)).toEqual([1, 0]);
         const lark = out.text.indexOf("Use lark");
         expect(shownAt(question!, 17)).toBe(lark);
+    });
+
+    it("goes back, as Ctrl+Enter ends a comment, to the last character of its passage, its item's header, or a message's banner", () => {
+        const draft: Draft = {
+            ...EMPTY,
+            comments: [
+                { item: 51, quote: { text: "Use lark", start: 17, end: 25 }, text: "Yes." },
+                { item: 51, quote: null, text: "Fine." },
+            ],
+            letters: [{ to: from("s2"), text: "Hi." }],
+        };
+        const out = laid([QUESTION, NOTE], [], banner, header, draft, NOTHING);
+        const block = (comment: number) => blocksOf(out).find((each) => each.comment === comment)!;
+        const [yes, fine, hi] = written(draft);
+        expect(aboutAt(out, yes!, block(0))).toBe(out.text.indexOf("Use lark") + "Use lar".length);
+        expect(aboutAt(out, fine!, block(1))).toBe(out.text.indexOf("── #51"));
+        expect(aboutAt(out, hi!, block(2))).toBe(out.text.indexOf("━━ s2"));
     });
 
     it("opens a comment on the line under the cursor, on the item from its header, or a message to its agent from its banner", () => {

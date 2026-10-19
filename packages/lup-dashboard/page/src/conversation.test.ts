@@ -150,7 +150,8 @@ describe("comments on the agent's words", () => {
         expect(blockAt(commented, commented.text.indexOf("codex"))?.comment).toBe(1);
         expect(blockAt(commented, commented.text.indexOf("Carry on"))?.comment).toBe(0);
         expect(opened(commented, commented.text.indexOf(MESSAGE))).toEqual({ step: null, quote: null, text: "" });
-        expect(aboutAt(commented, talk.comments[1]!)).toBe(commented.text.indexOf("JSONL"));
+        // Ctrl+Enter ending it lands on the last character of what it quotes, where reading carries on.
+        expect(aboutAt(commented, talk.comments[1]!)).toBe(commented.text.indexOf("JSONL") + "JSONL".length - 1);
         expect(reading(commented, commented.text.indexOf("Carry on"))).toBe("message");
     });
 
