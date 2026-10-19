@@ -26,6 +26,7 @@ from mcp.types import TextContent, jsonrpc_message_adapter
 from pydantic import JsonValue, ValidationError
 from typer.testing import CliRunner
 
+from lup.rooms.engine import Exited, Podman, Process
 from lup.tools.hook import lup_hook
 from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec, lup_tool
@@ -262,6 +263,7 @@ def service(
     refresh: Callable[[Register], list[Path]] | None = None,
     clock: Clock | None = None,
     companions: list[Companion] | None = None,
+    podman: Podman | None = None,
 ) -> HostService:
     built = HostService(
         layout=layout,
@@ -275,6 +277,7 @@ def service(
         modules=modules,
         refresh=refresh,
         companions=companions or [],
+        podman=podman,
     )
     return built if clock is None else built.model_copy(update={"clock": clock})
 
@@ -1432,6 +1435,255 @@ def test_a_hook_reaches_a_watch_each_conversation_saying_what_its_doing(
         ("one", bash),
         ("one/subagent·a1", Activity(state="ended", since=at)),
     ]
+
+
+# A launch's container, named after its launch and ended with it.
+
+
+class Containers:
+    """podman, as far as a launch's container goes: those it has, by name, each rename done unless it's `refusing`."""
+
+    def __init__(
+        self, *running: str, refusing: bool = False, broken: bool = False
+    ) -> None:
+        self.running = list(running)
+        self.refusing = refusing
+        self.broken = broken
+        """Whether podman fails at every question, as where it's misconfigured."""
+        self.asked: list[list[str]] = []
+
+    def __call__(self, process: Process) -> Exited:
+        program, *arguments = process.arguments
+        assert program == "podman"
+        self.asked.append(arguments)
+        match arguments:
+            case ["container", "exists", _] if self.broken:
+                return Exited(status=125)
+            case ["container", "exists", name]:
+                return Exited(status=0 if name in self.running else 1)
+            case ["rename", before, after] if not self.refusing:
+                self.running = [
+                    after if each == before else each for each in self.running
+                ]
+                return Exited(status=0)
+            case ["rename", *_]:
+                return Exited(status=125)
+            case _:
+                message = f"podman asked {process.arguments}"
+                raise AssertionError(message)
+
+
+def unnamed(tmp_path: Path, name: str) -> Register:
+    """A launch asking `name`, leaving its container for the service to name, as a launcher does."""
+    return launch(tmp_path, name, "first").model_copy(
+        update={"container": None, "name": name}
+    )
+
+
+def test_a_launch_s_container_is_named_after_it_and_renamed_with_it(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    first = f"lup-{tmp_path.name}-one"
+    second = f"lup-{tmp_path.name}-renamed"
+    containers = Containers(first)
+    with served(service(layout, Judge(), said, podman=Podman(execute=containers))):
+        registered = own.register(unnamed(tmp_path, "one"))
+        renamed = own.rename("one", "renamed")
+        own.stop()
+    with served(service(layout, Judge(), said)):
+        [again] = own.launches()
+        own.unregister("one")
+    assert registered.container == first
+    assert renamed.container == second
+    assert containers.asked == [
+        ["container", "exists", first],
+        ["rename", first, second],
+    ]
+    assert containers.running == [second]
+    assert again.container == second
+    assert f"one: its container {first} is {second}" in said
+
+
+def test_a_container_podman_hasnt_started_or_cant_rename_keeps_its_name(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    first = f"lup-{tmp_path.name}-one"
+    starting = Containers()
+    refusing = Containers(first, refusing=True)
+    with served(service(layout, Judge(), said, podman=Podman(execute=starting))):
+        own.register(unnamed(tmp_path, "one"))
+        before = own.rename("one", "renamed")
+        own.stop()
+    with served(service(layout, Judge(), said, podman=Podman(execute=refusing))):
+        after = own.rename("one", "again")
+        own.unregister("one")
+    assert (before.name, before.container) == ("renamed", first)
+    assert starting.asked == [["container", "exists", first]]
+    assert (after.name, after.container) == ("again", first)
+    assert refusing.asked[-1] == ["rename", first, f"lup-{tmp_path.name}-again"]
+    assert any(
+        each.startswith(f"one: its container keeps its name, {first}: podman couldn't")
+        for each in said
+    )
+
+
+def test_a_name_whose_container_another_launch_holds_is_refused_saying_whose(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    with served(service(layout, Judge(), said)):
+        own.register(unnamed(tmp_path, "one"))
+        own.register(unnamed(tmp_path, "two"))
+        own.rename("one", "x")
+        with pytest.raises(HostError, match="would name its container"):
+            own.rename("two", "one")
+        own.unregister("one")
+        own.unregister("two")
+
+
+class Starting(LaunchModules):
+    """A launch's modules slow to start for launch `one`: its opening waits until the test lets it go."""
+
+    def __init__(self) -> None:
+        self.opening = threading.Event()
+        self.go = threading.Event()
+
+    @override
+    async def open(self, launch: Register) -> Offered:
+        if launch.launch == "one":
+            self.opening.set()
+            await asyncio.to_thread(self.go.wait, 60)
+        return Offered()
+
+    @override
+    async def ask(self, launch: Register, request: Request) -> Reply:
+        message = "nothing is served to ask"
+        raise AssertionError(message)
+
+    @override
+    async def close(self, launch: Register) -> None:
+        return None
+
+
+def test_a_name_is_held_while_its_launch_s_modules_start(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    starting = Starting()
+
+    def dev(launch: str) -> Register:
+        return unnamed(tmp_path, launch).model_copy(update={"name": "dev"})
+
+    with (
+        served(service(layout, Judge(), said, modules=starting)),
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        first = pool.submit(own.register, dev("one"))
+        assert starting.opening.wait(60)
+        second = own.register(dev("two"))
+        starting.go.set()
+        named = first.result(timeout=60)
+    assert (named.name, named.container) == ("dev", f"lup-{tmp_path.name}-dev")
+    assert (second.name, second.container) == ("dev-2", f"lup-{tmp_path.name}-dev-2")
+
+
+class Pauses:
+    """The waits between the service's sweeps: each lasts until the test ends it, and the test then waits until the sweep after it is done."""
+
+    def __init__(self) -> None:
+        self.begun = threading.Semaphore(0)
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.going: asyncio.Event | None = None
+        self.seconds: list[float] = []
+
+    async def __call__(self, seconds: float) -> None:
+        self.seconds.append(seconds)
+        self.loop = asyncio.get_running_loop()
+        self.going = asyncio.Event()
+        self.begun.release()
+        await self.going.wait()
+
+    def next(self) -> None:
+        """End the wait under way, once it's begun, and wait until the sweep after it is done and the next wait begun."""
+        assert self.begun.acquire(timeout=60)
+        assert self.loop is not None
+        assert self.going is not None
+        self.loop.call_soon_threadsafe(self.going.set)
+        assert self.begun.acquire(timeout=60)
+        self.begun.release()
+
+
+def test_the_service_ends_a_launch_whose_launcher_and_container_are_gone(
+    tmp_path_factory: pytest.TempPathFactory,
+    said: list[str],
+    tmp_path: Path,
+    clock: FakeClock,
+) -> None:
+    base = tmp_path_factory.mktemp("swept")
+    machine = Layout(state=base / "state", runtime=base / "run")
+    layout = machine.host
+    own = client(layout, clock)
+    containers = Containers("lup-live", "lup-stopping")
+    pauses = Pauses()
+    sweeping = cli.Sweeping(
+        layout=machine,
+        host=own,
+        podman=Podman(execute=containers),
+        say=said.append,
+        pause=pauses,
+    )
+    with served(service(layout, Judge(), said)):
+        for each in ["gone", "held", "live", "stopping"]:
+            own.register(launch(tmp_path, each, "first"))
+    held = machine.launch("held").lock
+    held.parent.mkdir(parents=True)
+    with (
+        FileLock(held),
+        served(service(layout, Judge(), said, companions=[sweeping])),
+    ):
+        started = [each.launch for each in own.launches()]
+        containers.running.remove("lup-stopping")
+        pauses.next()
+        later = [each.launch for each in own.launches()]
+    assert started == ["held", "live", "stopping"]
+    assert later == ["held", "live"]
+    assert pauses.seconds[0] == 30
+    for each in ["gone", "stopping"]:
+        assert (
+            f"Ended launch {each}, first in {tmp_path}: its launcher and its "
+            f"container, lup-{each}, are gone."
+        ) in said
+        assert not machine.launch(each).lock.exists()
+    assert ["container", "exists", "lup-held"] not in containers.asked
+
+
+def test_a_sweep_podman_fails_is_said_and_the_service_goes_on(
+    tmp_path_factory: pytest.TempPathFactory,
+    said: list[str],
+    tmp_path: Path,
+    clock: FakeClock,
+) -> None:
+    base = tmp_path_factory.mktemp("swept")
+    machine = Layout(state=base / "state", runtime=base / "run")
+    own = client(machine.host, clock)
+    sweeping = cli.Sweeping(
+        layout=machine,
+        host=own,
+        podman=Podman(execute=Containers(broken=True)),
+        say=said.append,
+        pause=Pauses(),
+    )
+    with served(service(machine.host, Judge(), said)):
+        own.register(launch(tmp_path, "gone", "first"))
+    with served(service(machine.host, Judge(), said, companions=[sweeping])):
+        left = [each.launch for each in own.launches()]
+    assert left == ["gone"]
+    assert (
+        "The sweep of launches whose launcher and container are gone failed: podman "
+        "couldn't say whether the container lup-gone exists (status 125)"
+    ) in said
 
 
 def test_what_a_conversation_is_doing_outlasts_a_restart_of_the_service(

@@ -39,7 +39,8 @@ What this relies on, measured with rootless podman 6.1.3 (`docs/field-notes.md`,
 `podman container exists` answers 0 when a container of that name or id exists,
 1 when none does, and 125 when podman itself fails (its man page,
 `podman-container-exists(1)`); a run's `--name` names its container while it
-runs, and `--rm` removes it when it exits.
+runs, and `--rm` removes it when it exits. `podman rename` renames a container in
+any state, running included, freeing its old name (`podman-rename(1)`).
 """
 
 import csv
@@ -359,6 +360,22 @@ class Podman(Model, ContainerEngine):
                     f"(status {status})"
                 )
                 raise ContainerError(message)
+
+    def rename(self, container: str, name: str) -> None:
+        """Rename the container named `container` to `name`, while it runs as well.
+
+        Raise `ContainerError` where podman can't, as where no container is
+        named `container`, or another is named `name`.
+        """
+        renamed = self.execute(
+            Process(arguments=[self.program, "rename", container, name])
+        )
+        if renamed.status != 0:
+            message = (
+                f"podman couldn't rename the container {container} to {name} "
+                f"(status {renamed.status})"
+            )
+            raise ContainerError(message)
 
     def images(self, project: str) -> list[StoredImage]:
         """Return the images built for `project`, as podman lists them."""

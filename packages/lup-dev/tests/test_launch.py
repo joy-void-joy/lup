@@ -34,6 +34,7 @@ from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import resolve
 from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import HostClient, Starter
+from lup_dev.host.names import container_name
 from lup_dev.host.protocol import (
     GitHubRepository,
     HostError,
@@ -165,9 +166,15 @@ class Host(HostClient):
 
     @override
     def register(self, launch: Register) -> Registered:
-        self.events.record(f"register {launch.runtime} {launch.container}")
-        self.served.append(launch)
-        return Registered(directory=self.sockets, name=launch.name or "")
+        """Serve `launch` by the name it asks, its container named as the service names it."""
+        container = launch.container or container_name(
+            launch.repository, launch.name or ""
+        )
+        self.events.record(f"register {launch.runtime} {container}")
+        self.served.append(launch.model_copy(update={"container": container}))
+        return Registered(
+            directory=self.sockets, name=launch.name or "", container=container
+        )
 
     @override
     def unregister(self, launch: str) -> None:
@@ -415,9 +422,12 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
 
     assert status == 7
     said = machine.events.said
-    [registered] = [each for each in said if each.startswith("register ")]
-    container = registered.removeprefix("register claude ")
-    launch = container.removeprefix("lup-")
+    [launch] = [
+        each.launch
+        for each in machine.host.served
+        if each.launch not in ["dead", "live"]
+    ]
+    container = "lup-work-dev"
     assert [each for each in said if not each.startswith("The host zone")] == [
         "trust",
         "found podman",
@@ -741,8 +751,7 @@ def test_the_registration_ends_when_the_cli_fails(
         cli.launched(machine.adapter, [], project, machine.launcher)
 
     said = machine.events.said
-    [registered] = [each for each in said if each.startswith("register ")]
-    launch = registered.removeprefix("register claude lup-")
+    [launch] = [each.launch for each in machine.host.served]
     assert said[-2:] == ["run", f"unregister {launch}"]
     assert not machine.layout.launch(launch).directory.exists()
     assert not machine.layout.launch(launch).lock.exists()

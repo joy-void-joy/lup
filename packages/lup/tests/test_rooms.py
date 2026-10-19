@@ -426,6 +426,19 @@ def test_a_named_container_is_run_by_its_name_and_asked_after() -> None:
     assert not any(each.startswith("--name") for each in engine.command(unnamed))
 
 
+def test_a_container_is_renamed_and_a_rename_podman_refuses_raises() -> None:
+    engine, recorder = podman(Exited(status=0), Exited(status=125))
+
+    engine.rename("lup-1a2b", "lup-atlas-dev")
+    with pytest.raises(ContainerError, match="rename the container lup-1a2b"):
+        engine.rename("lup-1a2b", "lup-atlas-dev")
+
+    assert (
+        recorder.processes
+        == [Process(arguments=["podman", "rename", "lup-1a2b", "lup-atlas-dev"])] * 2
+    )
+
+
 def test_podman_itself_is_refused_in_tests() -> None:
     with pytest.raises(RealCallInTestError, match="podman"):
         Podman().ensure(IMAGE)

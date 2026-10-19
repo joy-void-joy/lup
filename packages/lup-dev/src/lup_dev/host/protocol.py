@@ -200,9 +200,11 @@ class Register(Request):
     """The command of the launch's repository's approved copy of `lup-dev`: each
     of its hooks runs `<judge> hook <runtime>`, so it's judged by the code
     approved for its repository."""
-    container: str
-    """The name of the launch's container, which tells a later launch whether
-    this one is gone."""
+    container: str | None = None
+    """The name of the launch's container, which tells the sweep whether its
+    session still runs: none in a launcher's request, which the service names
+    after the launch's repository and name (`container_name`) and renames with
+    it, where podman has it there to rename."""
     limits: Limits
     """What the host does with the operator's credentials for the launch
     without asking, from the declaration at the commit the operator approved:
@@ -277,11 +279,13 @@ class Reply(Model):
 
 
 class Registered(Reply):
-    """The launch is served: its socket directory, which its room mounts, and the name it took."""
+    """The launch is served: its socket directory, which its room mounts, the name it took, and its container's."""
 
     kind: Literal["registered"] = "registered"
     directory: Path
     name: Name
+    container: str
+    """The name its launcher runs its container by."""
 
 
 class Holding(Reply):

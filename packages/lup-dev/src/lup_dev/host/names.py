@@ -10,17 +10,25 @@ were keys there.
   added until it's free (`claimed`).
 - **A rename** is refused where another launch holds the name, saying which
   (`held`).
+- **A launch's container** is named after its repository and its name
+  (`container_name`), so `podman ps` says which session each runs, and renamed
+  with it. A name whose container another launch's holds is held too: `lup`'s
+  `dashboard-dev` and `lup-dashboard`'s `dev` would name one container.
 - **A session's name** is kept by the runtime's id for it each time its launch
   is named or renamed, in lup's state (`SessionNames`), so a later launch
   resuming it takes the name back where it's free.
 """
 
+import string
 from itertools import count, groupby
 from pathlib import Path
 
 from lup.types import Model
 from lup_dev.host.protocol import HostError, Name, Register, handle
 from lup_dev.stored import read_model, write_model
+
+CONTAINED = string.ascii_letters + string.digits + "_."
+"""The characters a container's name holds beside `-` and its first, as podman allows them."""
 
 
 class SessionNames(Model):
@@ -47,19 +55,47 @@ def shaped(title: str) -> str | None:
         return None
 
 
-def held(name: str, launches: list[Register], asking: str) -> Register | None:
-    """Return the launch other than `asking` that holds `name` among `launches`, or none."""
+def container_name(repository: Path, name: str) -> str:
+    """Return the name of the container of a launch named `name`, of the repository whose git directory is `repository`: `lup-<repository>-<name>`.
+
+    The repository is named by its directory, as the dashboard names it: a
+    bare one by its own (`lup.git` is `lup`), a clone by the one holding its
+    `.git`. Each run of `-` and of characters a container's name can't hold is
+    one `-`.
+
+    >>> container_name(Path("/src/lup.git"), "dev")
+    'lup-lup-dev'
+    >>> container_name(Path("/src/my atlas/.git"), "feat-x")
+    'lup-my-atlas-feat-x'
+    """
+    directory = repository.parent if repository.name == ".git" else repository
+    wanted = f"lup-{directory.name.removesuffix('.git')}-{name}"
+    runs = groupby(wanted, key=lambda each: each in CONTAINED)
+    return "-".join("".join(chars) for kept, chars in runs if kept)
+
+
+def held(name: str, launches: list[Register], asking: Register) -> Register | None:
+    """Return the launch among `launches`, other than `asking`, that holds `name`, or the container `asking` would take by it (`container_name`); none where neither is held."""
+    container = container_name(asking.repository, name)
     return next(
-        (each for each in launches if each.name == name and each.launch != asking),
+        (
+            each
+            for each in launches
+            if each.launch != asking.launch
+            and (each.name == name or each.container == container)
+        ),
         None,
     )
 
 
-def taken(holder: Register) -> str:
-    """Say which launch holds a name, for a refusal."""
+def taken(holder: Register, name: str) -> str:
+    """Say which launch holds `name`, or the container it would give, for a refusal."""
+    whose = f"launch {holder.launch}'s, {holder.runtime} in {holder.worktree}"
+    if holder.name == name:
+        return f"`{name}` is {whose}: pick another name"
     return (
-        f"`{holder.name}` is launch {holder.launch}'s, {holder.runtime} in "
-        f"{holder.worktree}: pick another name"
+        f"`{name}` would name its container `{holder.container}`, which is "
+        f"{whose} (`{holder.name}`): pick another name"
     )
 
 
@@ -70,15 +106,13 @@ def claimed(request: Register, launches: list[Register]) -> str:
     `HostError` where an exact name is held.
     """
     asked = request.name or request.worktree.name
-    holder = held(asked, launches, request.launch)
+    holder = held(asked, launches, request)
     if holder is None:
         return asked
     if request.exact:
-        raise HostError(taken(holder))
+        raise HostError(taken(holder, asked))
     candidates = (f"{asked}-{number}" for number in count(2))
-    return next(
-        each for each in candidates if held(each, launches, request.launch) is None
-    )
+    return next(each for each in candidates if held(each, launches, request) is None)
 
 
 class Names(Model):
