@@ -59,6 +59,7 @@ lup's code rules enforce most of these, at the edit and in the gate (`docs/rules
 
 - **Scope by content, not by how long it feels.** Your sense of duration was learned from human teams; here building is cheap, and what's scarce is the operator's attention and correctness. Build a piece at its real size and let review cut it.
 - **A defect you notice** is fixed here if it's inside your change, fixed on its own branch if not, or filed as a GitHub issue. Say which in your report; "it was already like that" isn't one of them.
+- **What comes up and isn't for now becomes an issue at once:** an idea of the operator's, a defect beside your work, anything they say is for later. Filed with what it's about and why, it's kept without being solved today, and the roadmap issue (#123) orders the work. That leaves room to defer: nothing has to be done now to be remembered, and the conversation stays on what's at hand.
 
 ## Working with the operator
 
