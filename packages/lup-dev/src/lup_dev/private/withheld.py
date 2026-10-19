@@ -218,8 +218,21 @@ class Built(Model):
     notes: list[str] = []
 
 
-def remote_hosts(git: Git) -> list[str]:
-    """Return each host a URL of the repository's remotes names, as its `config` writes it and as git rewrites it."""
+class Hosts(Model):
+    """The hosts the URLs of the repository's remotes name, and whether git could read them."""
+
+    hosts: list[str] = []
+    unread: bool = False
+    """Whether git here has no `url-parse`, which a git older than the room's
+    lacks, so no URL's host was read."""
+
+
+def remote_hosts(git: Git) -> Hosts:
+    """Return each host a URL of the repository's remotes names, as its `config` writes it and as git rewrites it.
+
+    A URL that isn't one, a local path, names none (`git url-parse`'s status
+    128); a git without `url-parse` (status 1) reads none, said.
+    """
     remotes = git.run("remote").output.decode().splitlines()
 
     def urls(remote: str) -> list[str]:
@@ -235,14 +248,20 @@ def remote_hosts(git: Git) -> list[str]:
             for url in git.run(*words, ok=[0, 1, 2]).output.decode().splitlines()
         ]
 
-    def host(url: str) -> str | None:
-        parsed = git.run("url-parse", "-c", "host", "--", url, ok=[0, 128])
-        return parsed.output.decode().strip() or None if parsed.status == 0 else None
-
-    every = [
-        found for remote in remotes for url in urls(remote) if (found := host(url))
+    parsed = [
+        git.run("url-parse", "-c", "host", "--", url, ok=[0, 1, 128, 129])
+        for remote in remotes
+        for url in urls(remote)
     ]
-    return list(dict.fromkeys(every))
+    hosts = [
+        named
+        for ran in parsed
+        if ran.status == 0 and (named := ran.output.decode().strip())
+    ]
+    return Hosts(
+        hosts=list(dict.fromkeys(hosts)),
+        unread=any(ran.status == 1 for ran in parsed),
+    )
 
 
 def tilded(path: Path, home: Path) -> list[str]:
@@ -331,10 +350,10 @@ async def built(
     """
     machine = facts.machine()
     homes = list(dict.fromkeys([machine.home, machine.home.resolve()]))
-    hosts = remote_hosts(Git.pinned(repository)) if "alias" in details else []
+    hosts = remote_hosts(Git.pinned(repository)) if "alias" in details else Hosts()
     aliases = [
         host
-        for host in hosts
+        for host in hosts.hosts
         if (resolved := facts.resolved(host)) is not None
         and resolved.casefold() != host.casefold()
     ]
@@ -383,5 +402,14 @@ async def built(
         each for at, each in enumerate(held) if folded.index(each.text.casefold()) == at
     ]
     longest = sorted(once, key=lambda each: -len(each.text))
-    notes = [each.note for each in read if each.note is not None]
+    unread = [
+        (
+            "git here has no `url-parse`, so no SSH alias in the repository's "
+            "remotes is listed: a git as recent as the room's reads them"
+        )
+    ]
+    notes = [
+        *(unread if hosts.unread else []),
+        *(each.note for each in read if each.note is not None),
+    ]
     return Built(withheld=Withheld(held=longest, seen=seen), notes=notes)

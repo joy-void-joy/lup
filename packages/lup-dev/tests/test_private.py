@@ -6,6 +6,8 @@ stub (`StubFacts`); git runs for real on a scratch repository.
 """
 
 import asyncio
+import os
+import shutil
 import threading
 from contextlib import contextmanager
 from datetime import timedelta
@@ -177,6 +179,40 @@ def test_the_list_holds_the_machine_the_alias_and_the_repository_s_paths(
         key=lambda each: -len(each[1]),
     )
     assert notes == []
+
+
+OLDER_GIT = """#!/bin/sh
+for word in "$@"; do
+  if [ "$word" = url-parse ]; then
+    echo "git: 'url-parse' is not a git command. See 'git --help'." >&2
+    exit 1
+  fi
+done
+exec {git} "$@"
+"""
+"""A git older than the room's, which has no `url-parse`, otherwise the real one."""
+
+
+def test_a_git_without_url_parse_lists_no_alias_and_says_so(
+    demo: Path,
+    stub_facts: type[StubFacts],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    older = tmp_path / "older"
+    older.mkdir()
+    (older / "git").write_text(OLDER_GIT.format(git=shutil.which("git")))
+    (older / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{older}{os.pathsep}{os.environ['PATH']}")
+    facts = stub_facts(home=demo.parents[1], aliases={"forge-op": "github.com"})
+    held, notes, _ = building(facts, demo, details=["alias", "user"])
+    assert held == [("user", "op")]
+    assert notes == [
+        (
+            "git here has no `url-parse`, so no SSH alias in the repository's "
+            "remotes is listed: a git as recent as the room's reads them"
+        )
+    ]
 
 
 def test_a_detail_dropped_isn_t_read(demo: Path, stub_facts: type[StubFacts]) -> None:
