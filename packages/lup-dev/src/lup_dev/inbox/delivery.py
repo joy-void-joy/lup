@@ -79,8 +79,10 @@ from lup_dev.inbox.store import (
     Decided,
     Done,
     Draft,
+    Friction,
     HeldChange,
     How,
+    HowItWent,
     Inbox,
     InboxError,
     Item,
@@ -91,6 +93,7 @@ from lup_dev.inbox.store import (
     Reason,
     Review,
     Ruling,
+    Stop,
     Superseded,
     Told,
     Verdict,
@@ -134,6 +137,12 @@ def what(item: Item) -> str:
             return "a question, as a message"
         case Message(kind=kind):
             return f"a {kind}"
+        case Friction():
+            return "a friction"
+        case HowItWent():
+            return "how the work went"
+        case Stop():
+            return "a stop by choice"
         case Question():
             return "a question"
         case Answer():
@@ -151,6 +160,9 @@ def opening(item: Item) -> str:
     match item.reason:
         case (
             Message(text=text)
+            | Friction(text=text)
+            | HowItWent(text=text)
+            | Stop(text=text)
             | Question(text=text)
             | Approval(text=text)
             | HeldChange(text=text)
@@ -172,7 +184,14 @@ def body(item: Item) -> str:
                 for at, each in enumerate(decisions, start=1)
             ]
             return "\n".join([text, *numbered])
-        case Message(text=text) | Approval(text=text) | HeldChange(text=text):
+        case (
+            Message(text=text)
+            | Friction(text=text)
+            | HowItWent(text=text)
+            | Stop(text=text)
+            | Approval(text=text)
+            | HeldChange(text=text)
+        ):
             return text
         case Answer(comment=comment):
             return comment
@@ -228,7 +247,10 @@ def doorbell(waiting: list[Item]) -> str:
 def reviewable(item: Item) -> None:
     """Refuse an item a review can't answer: one no conversation sent, an answer or an approval."""
     match item:
-        case Item(sender=Conversation(), reason=Message() | Question()):
+        case Item(
+            sender=Conversation(),
+            reason=Message() | Friction() | HowItWent() | Stop() | Question(),
+        ):
             return
         case _:
             message = (
@@ -517,7 +539,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 numbers = ", ".join(str(each) for each in covers)
                 items = "item" if len(covers) == 1 else "items"
                 return f"{head}{passed}, of {items} {numbers}"
-            case Message() | Question() | Approval() | HeldChange() | Review():
+            case (
+                Message()
+                | Friction()
+                | HowItWent()
+                | Stop()
+                | Question()
+                | Approval()
+                | HeldChange()
+                | Review()
+            ):
                 return f"{head}{passed}"
 
     def words(self, item: Item) -> str:
@@ -525,6 +556,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         match item.reason:
             case (
                 Message(text=text)
+                | Friction(text=text)
+                | HowItWent(text=text)
+                | Stop(text=text)
                 | Question(text=text)
                 | Approval(text=text)
                 | HeldChange(text=text)
@@ -935,7 +969,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         """
         item = self.inbox.item(number)
         match item:
-            case Item(reason=Message(), sender=Conversation() as sender):
+            case Item(
+                reason=Message() | Friction() | HowItWent() | Stop(),
+                sender=Conversation() as sender,
+            ):
                 return await self.replied(item, sender, rulings, comment)
             case Item(
                 reason=Question(decisions=decisions),
@@ -1023,7 +1060,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         """
         item = self.inbox.item(number)
         match item:
-            case Item(reason=Message(), recipient=Operator(), state=Waiting()):
+            case Item(
+                reason=Message() | Friction() | HowItWent() | Stop(),
+                recipient=Operator(),
+                state=Waiting(),
+            ):
                 done = Done(at=self.clock.now())
                 return self.inbox.kept(item.model_copy(update={"state": done}))
             case Item(reason=Question() | Approval() | HeldChange(), state=Waiting()):
@@ -1045,7 +1086,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         item = self.inbox.item(number)
         match item:
             case Item(
-                reason=Message() | Question(), recipient=Operator(), state=Waiting()
+                reason=Message() | Friction() | HowItWent() | Stop() | Question(),
+                recipient=Operator(),
+                state=Waiting(),
             ) if item.sender == party:
                 taken = Withdrawn(at=self.clock.now(), why=why)
                 self.say(f"item {number}, {what(item)}, was withdrawn by its sender")

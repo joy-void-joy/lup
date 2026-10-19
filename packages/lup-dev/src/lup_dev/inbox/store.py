@@ -8,9 +8,10 @@ in a launch of its own finds what waited for it there.
 
 An item has a number, one sequence per user, so the operator answers `12`; a
 reason (a message with its kind, a question with its numbered decisions, an
-answer, an approval asked yes or no); a sender and a recipient; when it was
-made; and its state: waiting, told (when, and how), answered, done, or for an
-approval decided. An item for a conversation that has ended goes to its
+answer, an approval asked yes or no; a friction, how a piece of work went, or a
+stop by choice, each as the agent's tool took it); a sender and a recipient;
+when it was made; and its state: waiting, told (when, and how), answered, done,
+or for an approval decided. An item for a conversation that has ended goes to its
 session's main conversation, saying whose it was.
 
 An approval is trust on launch's: the launch's own question, put to the
@@ -36,6 +37,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, ValidationError
 
+from lup.sessions import results
+from lup.tools import speaking
 from lup.types import Model, MutableModel
 from lup_dev.host.protocol import HostError
 from lup_dev.host.watch import Changes
@@ -111,6 +114,57 @@ class Message(Model):
     ending: bool = False
     """Whether it's a session's last words of a turn, made a note by lup rather
     than sent by the agent: the conversation already shows them as its words."""
+
+
+def labelled(opening: str, parts: dict[str, str]) -> str:
+    """Return `opening`, then each of `parts` that says something, after its label, a line each.
+
+    >>> print(labelled("The gate hung.", {"Trying": "check", "Would change": ""}))
+    The gate hung.
+    Trying: check
+    """
+    said = [f"{label}: {text}" for label, text in parts.items() if text.strip()]
+    return "\n".join([opening, *said] if opening.strip() else said)
+
+
+class Friction(results.Friction):
+    """What got in a conversation's way, which it told the operator at the moment it did (`friction`): news to read, never a question."""
+
+    reason: Literal["friction"] = "friction"
+
+    @property
+    def text(self) -> str:
+        """Say it as the operator reads it: what got in the way, then what the agent was trying and would change, where it said."""
+        parts = {"Trying": self.trying, "Would change": self.would_change}
+        return labelled(self.got_in_the_way, parts)
+
+
+class HowItWent(results.HowItWent):
+    """How a piece of work went as a whole, as a conversation told the operator once near its end (`how_it_went`): news to read."""
+
+    reason: Literal["how it went"] = "how it went"
+
+    @property
+    def text(self) -> str:
+        """Say it as the operator reads it: each part the agent filled, after its label; "Nothing notable." where it filled none."""
+        parts = {
+            "Got in the way": self.got_in_the_way,
+            "Smooth": self.smooth,
+            "Would change": self.would_change,
+            "Felt": self.felt,
+        }
+        return labelled("", parts) or "Nothing notable."
+
+
+class Stop(speaking.Stop):
+    """A conversation ending its work by its own choice, saying why (`stop`): news to read, where being blocked is a problem."""
+
+    reason: Literal["stop"] = "stop"
+
+    @property
+    def text(self) -> str:
+        """Say it as the operator reads it: why the agent stopped."""
+        return self.why
 
 
 class Question(Model):
@@ -235,7 +289,15 @@ class Review(Model):
 
 
 type Reason = Annotated[
-    Message | Question | Answer | Approval | HeldChange | Review,
+    Message
+    | Friction
+    | HowItWent
+    | Stop
+    | Question
+    | Answer
+    | Approval
+    | HeldChange
+    | Review,
     Field(discriminator="reason"),
 ]
 """Why an item is there."""

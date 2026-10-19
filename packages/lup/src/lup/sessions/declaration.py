@@ -26,15 +26,16 @@ from lup.observability.trace import Answered, Asked
 from lup.sessions.contract import Adapter, RawTurn, TurnRequest, seam
 from lup.sessions.errors import (
     AgentUnavailableError,
+    BlockedError,
     OutputMissingError,
-    ProblemReportedError,
+    StoppedError,
     TurnTimeoutError,
 )
 from lup.sessions.layers import SessionLayers
 from lup.sessions.results import TurnResult
 from lup.sessions.submission import Toolbox
 from lup.sessions.surface import Agent
-from lup.tools.speaking import note, report
+from lup.tools.speaking import SPEAKING, Problem, Stop
 from lup.tools.submit import Submit
 from lup.types import Model
 
@@ -42,7 +43,6 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable
 
     from lup.sessions.terminal import Terminal, TerminalSettings
-    from lup.tools.tool import AgentTool
 
 
 class Declaration(Model, Agent, ABC):
@@ -128,8 +128,9 @@ class Asking(Model, arbitrary_types_allowed=True):
         """Ask for an answer of `output`'s model, through its tool and guard."""
         submit = Submit(output) if isinstance(output, type) else output
         ran = await self.run(prompt, submit)
-        answer = ran.toolbox.accepted()
-        rejected = ran.toolbox.rejected()
+        toolbox = ran.toolbox
+        answer = toolbox.accepted()
+        rejected = toolbox.rejected()
         if answers(answer, submit.input):
             return TurnResult[T](
                 output=answer,
@@ -137,14 +138,18 @@ class Asking(Model, arbitrary_types_allowed=True):
                 duration=elapsed(began),
                 session_id=ran.raw.session_id,
                 rejected=rejected,
-                notes=ran.toolbox.notes(),
+                notes=toolbox.notes(),
+                frictions=toolbox.frictions(),
+                how_it_went=toolbox.how_it_went(),
             )
-        attempts = len(rejected) + ran.toolbox.refused_endings
+        attempts = len(rejected) + toolbox.refused_endings
         message = f"no answer was accepted after {attempts} attempts"
         raise OutputMissingError(
             message,
             rejected=rejected,
-            notes=ran.toolbox.notes(),
+            notes=toolbox.notes(),
+            frictions=toolbox.frictions(),
+            how_it_went=toolbox.how_it_went(),
             usage=ran.raw.usage,
         )
 
@@ -157,24 +162,27 @@ class Asking(Model, arbitrary_types_allowed=True):
             duration=elapsed(began),
             session_id=ran.raw.session_id,
             notes=ran.toolbox.notes(),
+            frictions=ran.toolbox.frictions(),
+            how_it_went=ran.toolbox.how_it_went(),
         )
 
     async def run[T: BaseModel](self, prompt: str, submit: Submit[T] | None) -> Ran:
         """Run one turn inside the timeout and recovery layers, retrying an unavailable runtime.
 
-        Every turn serves `report` and `note`; a typed one serves `submit`, the
-        output tool, too. A turn that ended with a reported problem raises it.
+        Every turn serves the speaking tools (`lup.tools.speaking`); a typed one
+        serves `submit`, the output tool, too. A turn the agent ended with
+        `blocked` raises `BlockedError`, and one it ended with `stop`
+        `StoppedError`, answered or not.
         """
         layers = self.declaration.layers
         chosen = seam.get()
         adapter = (
             self.runtime_adapter if chosen is None else chosen.adapter(self.declaration)
         )
-        speaking: list[AgentTool] = [report, note]
 
         async def once() -> Ran:
             toolbox = Toolbox(
-                tools=speaking if submit is None else [*speaking, submit],
+                tools=SPEAKING if submit is None else [*SPEAKING, submit],
                 output=None if submit is None else submit.name,
                 attempts=layers.submission.attempts,
             )
@@ -199,12 +207,26 @@ class Asking(Model, arbitrary_types_allowed=True):
         except TimeoutError as passed:
             message = f"the ask didn't finish within {layers.timeout}"
             raise TurnTimeoutError(message) from passed
-        problem = ran.toolbox.reported()
-        if problem is not None:
-            raise ProblemReportedError(
-                problem, notes=ran.toolbox.notes(), usage=ran.raw.usage
-            )
-        return ran
+        toolbox = ran.toolbox
+        match toolbox.ending():
+            case Problem(problem=problem):
+                raise BlockedError(
+                    problem,
+                    notes=toolbox.notes(),
+                    frictions=toolbox.frictions(),
+                    how_it_went=toolbox.how_it_went(),
+                    usage=ran.raw.usage,
+                )
+            case Stop(why=why):
+                raise StoppedError(
+                    why,
+                    notes=toolbox.notes(),
+                    frictions=toolbox.frictions(),
+                    how_it_went=toolbox.how_it_went(),
+                    usage=ran.raw.usage,
+                )
+            case None:
+                return ran
 
 
 def elapsed(began: float) -> timedelta:

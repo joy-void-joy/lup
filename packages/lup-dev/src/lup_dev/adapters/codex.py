@@ -222,7 +222,7 @@ if TYPE_CHECKING:
 
 
 TOOL_PREFIX = f"mcp__{SERVER}__"
-"""What Codex names each of lup's tools by in a hook: `mcp__lup__report`."""
+"""What Codex names each of lup's tools by in a hook: `mcp__lup__blocked`."""
 
 
 class Variables(Settings):

@@ -31,8 +31,11 @@ Exploring still has its place. A throwaway script to see how a tool behaves, or 
 
 **Speaking to the operator: your inbox and theirs.** Everything between you and the operator goes through lup's inbox, which they read with `lup-dev inbox`:
 - **`ask`** for a decision of theirs: number the decisions, each with your lean, so each can be answered "leaning", "undecided" or "leave open". With `wait`, the call holds until they answer; without, the answer reaches you at a later call.
-- **`report`** when the work can't go on, saying what's wrong, then end your turn.
+- **`blocked`** when the work can't go on, saying what's wrong, then end your turn.
+- **`stop`** to end your work by your own choice, saying why: it's done and nothing more is worth doing, or you'd rather not go on with it. Then end your turn.
 - **`note`** for an assumption or a doubt worth their eye, and carry on.
+- **`friction`** the moment something gets in your way (a tool, a command, this guidance, a rule, the room, your brief), with the exact command and message where there is one, and carry on. It's how what gets in the way is found and fixed.
+- **`how_it_went`** once, near the end of a piece of work: what got in the way, what was smooth, what you'd change, how it felt, as openly as you like. "Nothing notable" is a fine answer.
 - **`send`** for anything else you'd tell them.
 - **`wait_inbox`** when there's nothing to do until something reaches you. What reaches you also comes with your next tool call, and an answer you were told once isn't told again.
 - **`inbox`** to see where things stand: what waits for the operator from every session of this repository, and your own items whole, an answer you were told among them. It changes nothing.

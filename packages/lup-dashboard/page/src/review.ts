@@ -147,12 +147,36 @@ function isComment(each: Written): each is Comment {
     return !isLetter(each);
 }
 
-/** Return an item's own text as the review shows it: a message's or a question's words with its decisions, an approval's question and summary. */
+/** Return `opening`, then each of `parts` that says something after its label, a line each. */
+function labelled(opening: string, parts: Record<string, string>): string {
+    const said = Object.entries(parts)
+        .filter(([, text]) => text.trim() !== "")
+        .map(([label, text]) => `${label}: ${text}`);
+    return (opening.trim() === "" ? said : [opening, ...said]).join("\n");
+}
+
+/**
+ * Return an item's own text as the review shows it: a message's or a question's words with its decisions, an
+ * approval's question and summary; a friction's or how the work went's parts, each labelled, as the host says them.
+ */
 export function body(item: Item): string {
     const reason = item.reason;
     switch (reason.reason) {
         case "message":
             return reason.text;
+        case "friction":
+            return labelled(reason.got_in_the_way, { Trying: reason.trying, "Would change": reason.would_change });
+        case "how it went": {
+            const parts = {
+                "Got in the way": reason.got_in_the_way,
+                Smooth: reason.smooth,
+                "Would change": reason.would_change,
+                Felt: reason.felt,
+            };
+            return labelled("", parts) || "Nothing notable.";
+        }
+        case "stop":
+            return reason.why;
         case "question": {
             const decisions = reason.decisions.map(
                 (each, at) => `${at + 1}. ${each.text}\n   lean: ${each.lean}`,
@@ -312,7 +336,29 @@ interface Grouping {
     items: Item[];
 }
 
-/** Return `items` in groups, one per agent, and one per banner of lup's approvals: the group with the newest item first, and the items in each in their own order. */
+/**
+ * Whether an item is news, to read and mark read rather than answer: a turn's last words, which lup made a note, a
+ * friction, how the work went, or a stop by choice.
+ */
+export function news(item: Item): boolean {
+    const reason = item.reason;
+    switch (reason.reason) {
+        case "message":
+            return reason.ending === true;
+        case "friction":
+        case "how it went":
+        case "stop":
+            return true;
+        default:
+            return false;
+    }
+}
+
+/**
+ * Return `items` in groups, one per agent, and one per banner of lup's approvals: those with something to answer
+ * before those with news alone, then the group with the newest item first; in each, what's to answer, then the news,
+ * each in its own order.
+ */
 function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
     const groups = new Map<string, Grouping>();
     for (const item of items) {
@@ -322,9 +368,14 @@ function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
         const group = groups.get(key) ?? { key, conversation, head: { item }, items: [] };
         groups.set(key, { ...group, items: [...group.items, item] });
     }
+    const ranked = [...groups.values()].map((group) => ({
+        ...group,
+        items: [...group.items.filter((each) => !news(each)), ...group.items.filter(news)],
+    }));
+    const told = (group: Grouping) => (group.items.every(news) ? 1 : 0);
     const made = (group: Grouping) => Math.max(...group.items.map((each) => new Date(each.made).getTime()));
     const numbered = (group: Grouping) => Math.max(...group.items.map((each) => each.number));
-    return [...groups.values()].sort((a, b) => made(b) - made(a) || numbered(b) - numbered(a));
+    return ranked.sort((a, b) => told(a) - told(b) || made(b) - made(a) || numbered(b) - numbered(a));
 }
 
 /** Return a group for each of `conversations` with none among `groups`, in their order, once each. */
@@ -352,10 +403,11 @@ export function fresh(item: Item, reviewed: string | null | undefined): boolean 
 }
 
 /**
- * Lay `items` out as one text, in groups, one per agent, each under its banner: those with items to answer now first,
- * the newest first; then a group for each agent of `agents` (those running, in the tree's order) with none, and for
- * each the draft writes to with none; then the parked items' groups. Under each banner but the parked ones', the
- * draft's messages to its agent; then each item, under a header naming it, each comment of the draft on it under the
+ * Lay `items` out as one text, in groups, one per agent, each under its banner: those with items now first, those with
+ * something to answer before those with news alone (`news`), the newest first; then a group for each agent of `agents`
+ * (those running, in the tree's order) with none, and for each the draft writes to with none; then the parked items'
+ * groups. Under each banner but the parked ones', the draft's messages to its agent; then each item, what's to answer
+ * before the news, under a header naming it, each comment of the draft on it under the
  * line it's on: a comment on a passage under the passage's last line, one on the item whole under its header. Under
  * each item's own text, what the host has answered of it: each file an approval or a held change changes, its header
  * then its lines, each run of unchanged ones folding under a summary line; then the item's context, a summary line

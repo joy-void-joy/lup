@@ -1,9 +1,10 @@
 """The fake: it replaces the adapter, not the agent, and answers from a script.
 
 A test's declaration goes through the real `ask`: its layers, the output tool
-and its guard, the record. Only the turn is scripted. A typed answer, a note and
-a report go through the real tools, so validation and `before` hooks run as they
-would on a real turn.
+and its guard, the record. Only the turn is scripted. A typed answer, and what
+the agent says beside it or instead (a note, a friction, how it went, being
+blocked, stopping), go through the real tools, so validation and `before` hooks
+run as they would on a real turn.
 
     fake_agents.answer(Translations, Translations(lines=["Bonjour"]))
     result = await translate(segment)
@@ -15,8 +16,8 @@ from pydantic import BaseModel, JsonValue
 from lup.errors import LupError
 from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest
 from lup.sessions.declaration import Declaration
-from lup.sessions.results import Usage
-from lup.tools.speaking import note, report
+from lup.sessions.results import Friction, HowItWent, Usage
+from lup.tools.speaking import blocked, friction, how_it_went, note, stop
 from lup.types import Model, MutableModel
 
 
@@ -24,26 +25,36 @@ class UnscriptedAskError(LupError):
     """A test asked an agent for something its fake has no script for."""
 
 
-class Submitting(Model):
+class Saying(Model):
+    """What the agent says beside its answer, before giving it, as it would call each tool."""
+
+    notes: list[str] = []
+    frictions: list[Friction] = []
+    how_it_went: HowItWent | None = None
+
+
+class Submitting(Saying):
     """Submit each of these to the output tool in turn, as the agent would."""
 
     submissions: list[JsonValue]
-    notes: list[str] = []
-    """Remarks noted before submitting."""
 
 
-class Texting(Model):
+class Texting(Saying):
     """Answer an untyped ask with this text."""
 
     text: str
-    notes: list[str] = []
 
 
-class Reporting(Model):
-    """Report this problem instead of answering."""
+class Blocking(Saying):
+    """Say the work can't go on, with this problem, instead of answering."""
 
     problem: str
-    notes: list[str] = []
+
+
+class Stopping(Saying):
+    """Stop by choice, saying this, instead of answering."""
+
+    why: str
 
 
 class Failing(Model, arbitrary_types_allowed=True):
@@ -52,7 +63,7 @@ class Failing(Model, arbitrary_types_allowed=True):
     error: Exception
 
 
-type Script = Submitting | Texting | Reporting | Failing
+type Script = Submitting | Texting | Blocking | Stopping | Failing
 
 
 class Queued(Model, arbitrary_types_allowed=True):
@@ -72,23 +83,49 @@ class FakeCall(Model, arbitrary_types_allowed=True):
 
 
 class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
-    """Scripted answers for a test's asks, and every ask made, in order."""
+    """Scripted answers for a test's asks, and every ask made, in order.
+
+    Each script but `fail` takes what the agent says before it: `notes`,
+    `frictions` and `how_it_went`.
+    """
 
     queued: list[Queued] = []
     calls: list[FakeCall] = []
 
     def answer[T: BaseModel](
-        self, output: type[T], value: T, *, notes: list[str] | None = None
+        self,
+        output: type[T],
+        value: T,
+        *,
+        notes: list[str] | None = None,
+        frictions: list[Friction] | None = None,
+        how_it_went: HowItWent | None = None,
     ) -> None:
-        """Queue `value` as the accepted answer to the next ask for `output`, after `notes`."""
+        """Queue `value` as the accepted answer to the next ask for `output`, after what the agent says."""
         submitting = Submitting(
-            submissions=[value.model_dump(mode="json")], notes=notes or []
+            submissions=[value.model_dump(mode="json")],
+            notes=notes or [],
+            frictions=frictions or [],
+            how_it_went=how_it_went,
         )
         self.queue(output, submitting)
 
-    def answer_text(self, text: str, *, notes: list[str] | None = None) -> None:
-        """Queue `text` as the answer to the next untyped ask, after `notes`."""
-        self.queue(None, Texting(text=text, notes=notes or []))
+    def answer_text(
+        self,
+        text: str,
+        *,
+        notes: list[str] | None = None,
+        frictions: list[Friction] | None = None,
+        how_it_went: HowItWent | None = None,
+    ) -> None:
+        """Queue `text` as the answer to the next untyped ask, after what the agent says."""
+        texting = Texting(
+            text=text,
+            notes=notes or [],
+            frictions=frictions or [],
+            how_it_went=how_it_went,
+        )
+        self.queue(None, texting)
 
     def reject_then[T: BaseModel](
         self, output: type[T], invalid: JsonValue, value: T
@@ -101,15 +138,41 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         submissions: list[JsonValue] = [invalid, value.model_dump(mode="json")]
         self.queue(output, Submitting(submissions=submissions))
 
-    def report(
+    def blocked(
         self,
         output: type[BaseModel] | None,
         problem: str,
         *,
         notes: list[str] | None = None,
+        frictions: list[Friction] | None = None,
+        how_it_went: HowItWent | None = None,
     ) -> None:
-        """Queue a reported problem, instead of an answer, for the next ask of `output`."""
-        self.queue(output, Reporting(problem=problem, notes=notes or []))
+        """Queue the agent saying it's blocked, instead of an answer, for the next ask of `output`."""
+        blocking = Blocking(
+            problem=problem,
+            notes=notes or [],
+            frictions=frictions or [],
+            how_it_went=how_it_went,
+        )
+        self.queue(output, blocking)
+
+    def stop(
+        self,
+        output: type[BaseModel] | None,
+        why: str,
+        *,
+        notes: list[str] | None = None,
+        frictions: list[Friction] | None = None,
+        how_it_went: HowItWent | None = None,
+    ) -> None:
+        """Queue the agent stopping by choice, instead of an answer, for the next ask of `output`."""
+        stopping = Stopping(
+            why=why,
+            notes=notes or [],
+            frictions=frictions or [],
+            how_it_went=how_it_went,
+        )
+        self.queue(output, stopping)
 
     def fail(self, output: type[BaseModel] | None, error: Exception) -> None:
         """Make the next ask for `output`, or the next untyped one for none, raise `error`."""
@@ -131,7 +194,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
             message = (
                 f"nothing is scripted for an ask of {name}; the prompt was: {prompt}\n"
                 "Script one with `fake_agents.answer`, `answer_text`, `reject_then`, "
-                "`report` or `fail`."
+                "`blocked`, `stop` or `fail`."
             )
             raise UnscriptedAskError(message)
         [first, *_] = matching
@@ -159,11 +222,18 @@ class FakeAdapter(Model, Adapter, arbitrary_types_allowed=True):
             raise script.error
         for remark in script.notes:
             await toolbox.call(note.name, {"remark": remark})
+        for each in script.frictions:
+            await toolbox.call(friction.name, each.model_dump(mode="json"))
+        if script.how_it_went is not None:
+            went = script.how_it_went.model_dump(mode="json")
+            await toolbox.call(how_it_went.name, went)
         match script:
             case Texting(text=text):
                 return RawTurn(text=text, usage=Usage(), session_id=session)
-            case Reporting(problem=problem):
-                await toolbox.call(report.name, {"problem": problem})
+            case Blocking(problem=problem):
+                await toolbox.call(blocked.name, {"problem": problem})
+            case Stopping(why=why):
+                await toolbox.call(stop.name, {"why": why})
             case Submitting(submissions=submissions):
                 for submission in submissions:
                     await toolbox.call(toolbox.output or "", submission)

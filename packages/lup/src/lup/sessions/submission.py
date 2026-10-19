@@ -4,15 +4,27 @@ The toolbox is a `Toolset` (`lup.tools.serving`): an adapter serves its specs,
 routes each call the model makes to `Toolbox.call`, and asks `Toolbox.end` when
 the model tries to end its turn. The calls recorded are the one source of what
 the turn said: the last accepted call to the output tool is the answer, the
-refused ones are the rejections, and the `report` and `note` calls are the
-problem and the remarks. A typed turn can't end until an answer is accepted or a
-problem reported, which is lup's own guard, the same on every runtime.
+refused ones are the rejections, the last `blocked` or `stop` call is why the
+turn ended without one, and the `note`, `friction` and `how_it_went` calls are
+what the agent said beside it. A typed turn can't end until an answer is
+accepted, or the agent is blocked or stops, which is lup's own guard, the same
+on every runtime.
 """
 
 from typing import TYPE_CHECKING
 
+from lup.sessions.results import Friction, HowItWent
 from lup.tools.serving import Answer, Toolset
-from lup.tools.speaking import Problem, Remark, note, report
+from lup.tools.speaking import (
+    Problem,
+    Remark,
+    Stop,
+    blocked,
+    friction,
+    how_it_went,
+    note,
+    stop,
+)
 from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec
 from lup.types import Model, MutableModel
 
@@ -98,14 +110,16 @@ class Toolbox(MutableModel, Toolset, arbitrary_types_allowed=True):
             if call.tool == self.output and isinstance(call.outcome, Refused)
         ]
 
-    def reported(self) -> str | None:
-        """Return the problem the agent reported instead of answering, if it did."""
-        problems = [
-            taken.problem
-            for taken in self.taken(report.name)
-            if isinstance(taken, Problem)
+    def ending(self) -> Problem | Stop | None:
+        """Return why the agent ended without an answer, its last `blocked` or `stop` call, if it made one."""
+        endings = [
+            call.outcome.value
+            for call in self.calls
+            if call.tool in (blocked.name, stop.name)
+            and isinstance(call.outcome, Accepted)
         ]
-        return problems[-1] if problems else None
+        last = endings[-1] if endings else None
+        return last if isinstance(last, Problem | Stop) else None
 
     def notes(self) -> list[str]:
         """Return the remarks the agent attached to its answer, oldest first."""
@@ -113,15 +127,30 @@ class Toolbox(MutableModel, Toolset, arbitrary_types_allowed=True):
             taken.remark for taken in self.taken(note.name) if isinstance(taken, Remark)
         ]
 
+    def frictions(self) -> list[Friction]:
+        """Return what got in the agent's way, oldest first."""
+        return [
+            taken for taken in self.taken(friction.name) if isinstance(taken, Friction)
+        ]
+
+    def how_it_went(self) -> HowItWent | None:
+        """Return how the agent said the work went, its last if it said twice; none where it didn't."""
+        said = [
+            taken
+            for taken in self.taken(how_it_went.name)
+            if isinstance(taken, HowItWent)
+        ]
+        return said[-1] if said else None
+
     def end(self, prefix: str = "") -> End | KeepGoing | GiveUp:
         """Say whether the turn may end, counting a refused ending against the attempts.
 
-        A turn may end once it's answered, or once the agent reported a problem.
+        A turn may end once it's answered, or once the agent is blocked or stops.
         `prefix` is what the runtime puts before lup's tool names, so the reason
         names each tool exactly as the model sees it.
         """
         answered = self.output is None or self.accepted() is not None
-        if answered or self.reported() is not None:
+        if answered or self.ending() is not None:
             return End()
         used = len(self.rejected()) + self.refused_endings
         if used >= self.attempts:
@@ -129,8 +158,9 @@ class Toolbox(MutableModel, Toolset, arbitrary_types_allowed=True):
         self.refused_endings += 1
         return KeepGoing(
             reason=(
-                f"Call the `{prefix}{self.output}` tool with your final answer, or "
-                f"`{prefix}{report.name}` if it can't be answered: your turn can't end "
-                "until one is accepted."
+                f"Call the `{prefix}{self.output}` tool with your final answer, "
+                f"`{prefix}{blocked.name}` if it can't be answered, or "
+                f"`{prefix}{stop.name}` to stop by your own choice: your turn can't "
+                "end until one is accepted."
             )
         )

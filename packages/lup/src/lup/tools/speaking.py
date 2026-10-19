@@ -1,25 +1,45 @@
-"""The tools every ask serves, so the agent can speak to its caller: `report` and `note`.
+"""The tools every ask serves, so the agent can speak to its caller: `blocked`, `stop`, `note`, `friction` and `how_it_went`.
 
 They act on nothing, so they're served even where an agent has no other tool:
-- `report` stops the turn without an answer and says what's wrong: the question
-  can't be answered, something needed is missing, an instruction seems wrong.
-  The ask raises `ProblemReportedError` with the agent's words, so a caller tells
-  "the agent says this can't be done" from a failure;
+- `blocked` stops the turn without an answer because the work can't go on: the
+  question can't be answered, something needed is missing, an instruction
+  seems wrong. The ask raises `BlockedError` with the agent's words, so a
+  caller tells "the agent says this can't be done" from a failure;
+- `stop` stops the turn without an answer by the agent's own choice, saying
+  why: it's done and nothing more is worth doing, or it would rather not go on.
+  The ask raises `StoppedError`, so a caller tells "the agent chose to end"
+  from "the agent can't";
 - `note` attaches a remark to the answer without ending the turn: an assumption
   the answer rests on, a doubt, a counterargument. The caller reads it in
-  `TurnResult.notes`.
+  `TurnResult.notes`;
+- `friction` says what got in the agent's way, at the moment it does, without
+  ending the turn, read in `TurnResult.frictions`;
+- `how_it_went` says how the work went as a whole, once near its end, read in
+  `TurnResult.how_it_went`.
 """
 
 from pydantic import BaseModel, Field
 
-from lup.tools.tool import Tool
+from lup.sessions.results import Friction, HowItWent
+from lup.tools.tool import AgentTool, Tool
 from lup.types import Model
 
 
 class Problem(Model):
-    """What the agent reports instead of an answer."""
+    """What keeps the agent from answering."""
 
     problem: str = Field(description="What's wrong, and what would make it answerable.")
+
+
+class Stop(Model):
+    """Why the agent stops, by its own choice."""
+
+    why: str = Field(
+        description=(
+            "Why you're stopping: the work is done and nothing more is worth doing, "
+            "or you'd rather not go on with it, and why."
+        )
+    )
 
 
 class Remark(Model):
@@ -31,16 +51,16 @@ class Remark(Model):
 
 
 class Heard(Model):
-    """What the agent reads when its report or note is taken."""
+    """What the agent reads when what it said is taken."""
 
     heard: bool = True
     message: str
 
 
-async def reported(said: BaseModel) -> Heard:
-    """Take a report: the turn ends without an answer."""
+async def ended(said: BaseModel) -> Heard:
+    """Take what ends the turn without an answer: a problem, or a stop."""
     del said
-    return Heard(message="Your report is taken. End your turn.")
+    return Heard(message="Taken. End your turn.")
 
 
 async def noted(said: BaseModel) -> Heard:
@@ -49,17 +69,36 @@ async def noted(said: BaseModel) -> Heard:
     return Heard(message="Your note is attached to your answer. Carry on.")
 
 
-report = Tool[Problem, Heard](
-    name="report",
+async def told(said: BaseModel) -> Heard:
+    """Take a friction or how the work went: it goes beside the answer."""
+    del said
+    return Heard(message="Taken, beside your answer. Carry on.")
+
+
+blocked = Tool[Problem, Heard](
+    name="blocked",
     description=(
-        "Stop without an answer and say what's wrong.\n\n"
+        "Say what keeps you from answering, and stop.\n\n"
         "The question can't be answered, something you need is missing, or an "
-        "instruction seems wrong. Your turn ends."
+        "instruction seems wrong. Your turn ends without an answer."
     ),
     input=Problem,
-    function=reported,
+    function=ended,
 )
-"""Stops the turn without an answer, saying why."""
+"""Stops the turn without an answer, because the work can't go on."""
+
+stop = Tool[Stop, Heard](
+    name="stop",
+    description=(
+        "Stop by your own choice, saying why.\n\n"
+        "The work is done and nothing more is worth doing, or you'd rather not go "
+        "on with it. Your turn ends without an answer. Where you can't answer, "
+        "it's `blocked`."
+    ),
+    input=Stop,
+    function=ended,
+)
+"""Stops the turn without an answer, by the agent's choice."""
 
 note = Tool[Remark, Heard](
     name="note",
@@ -72,3 +111,34 @@ note = Tool[Remark, Heard](
     function=noted,
 )
 """Attaches a remark to the answer."""
+
+friction = Tool[Friction, Heard](
+    name="friction",
+    description=(
+        "Say what got in your way, and carry on.\n\n"
+        "Call it the moment something gets in the way of the work: a tool, an "
+        "instruction, how the task is set up. Give the exact command and message "
+        "where there is one. Your caller reads it beside your answer; your turn "
+        "doesn't end."
+    ),
+    input=Friction,
+    function=told,
+)
+"""Says what got in the agent's way, when it did."""
+
+how_it_went = Tool[HowItWent, Heard](
+    name="how_it_went",
+    description=(
+        "Say how the work went, once, near its end.\n\n"
+        "What got in the way, what was smooth, what you'd change, and how it "
+        "felt, as openly as you like; leave out what has nothing to say, and "
+        '"nothing notable" is a fine answer. Your caller reads it beside your '
+        "answer; your turn doesn't end."
+    ),
+    input=HowItWent,
+    function=told,
+)
+"""Says how the work went as a whole."""
+
+SPEAKING: list[AgentTool] = [blocked, stop, note, friction, how_it_went]
+"""Every speaking tool, in the order an ask serves them."""

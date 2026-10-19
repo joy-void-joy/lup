@@ -24,9 +24,13 @@ import lup
 from lup import (
     AgentUnavailableError,
     AuthMissingError,
+    BlockedError,
+    Friction,
+    HowItWent,
     OutputMissingError,
     Recovery,
     SessionLayers,
+    StoppedError,
     TurnError,
     UsageLimitReachedError,
 )
@@ -37,7 +41,7 @@ from lup.adapters.codex.settings import CodexSettings
 from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest, seam
 from lup.sessions.errors import RealCallInTestError
 from lup.sessions.submission import Toolbox
-from lup.tools.speaking import note, report
+from lup.tools.speaking import SPEAKING
 from lup.tools.submit import Submit
 
 if TYPE_CHECKING:
@@ -139,16 +143,23 @@ class Report:
 type Step = Notification | Ask | Stall | Report
 
 
-def submitting(arguments: JsonValue, call: str = "call-1", turn: str = "turn-1") -> Ask:
+def calling(
+    tool: str, arguments: JsonValue, call: str = "call-1", turn: str = "turn-1"
+) -> Ask:
+    """Codex calls one of lup's tools, as a dynamic tool."""
     params: JsonObject = {
         "threadId": "thread-1",
         "turnId": turn,
         "callId": call,
         "namespace": None,
-        "tool": "submit",
+        "tool": tool,
         "arguments": arguments,
     }
     return Ask("item/tool/call", params)
+
+
+def submitting(arguments: JsonValue, call: str = "call-1", turn: str = "turn-1") -> Ask:
+    return calling("submit", arguments, call, turn)
 
 
 class FakeClient(CodexClient):
@@ -322,7 +333,7 @@ class Rig:
 def toolbox(*, typed: bool = True, attempts: int = 3) -> Toolbox:
     submit = Submit(Forecast)
     return Toolbox(
-        tools=[report, note, submit] if typed else [report, note],
+        tools=[*SPEAKING, submit] if typed else SPEAKING,
         output=submit.name if typed else None,
         attempts=attempts,
     )
@@ -478,8 +489,9 @@ def test_a_turn_ending_unanswered_continues_the_thread_with_the_reason(
     assert once["input"] == "Will it rain?"
     assert again["threadId"] == "thread-1"
     assert again["input"] == (
-        "Call the `submit` tool with your final answer, or `report` if it can't be "
-        "answered: your turn can't end until one is accepted."
+        "Call the `submit` tool with your final answer, `blocked` if it can't be "
+        "answered, or `stop` to stop by your own choice: your turn can't end until "
+        "one is accepted."
     )
     assert len(rig.client.sent["thread/start"]) == 1
     assert tools.accepted() == Forecast(probability=0.4)
@@ -490,6 +502,67 @@ def test_a_turn_ending_unanswered_continues_the_thread_with_the_reason(
 def test_an_answered_turn_ends_at_once(tmp_path: Path) -> None:
     rig = Rig(tmp_path, [ANSWERED])
     run(rig, toolbox())
+    assert len(rig.client.sent["turn/start"]) == 1
+
+
+def test_a_friction_and_how_it_went_reach_the_toolbox_and_end_nothing(
+    tmp_path: Path,
+) -> None:
+    jammed: JsonObject = {"got_in_the_way": "The feed timed out.", "trying": "read it"}
+    turn: list[Step] = [
+        calling("friction", jammed, call="call-1"),
+        calling("how_it_went", {"smooth": "The question."}, call="call-2"),
+        *ANSWERED,
+    ]
+    rig = Rig(tmp_path, [turn])
+    tools = toolbox()
+    run(rig, tools)
+    taken, went, _ = rig.client.answers
+    assert taken["success"] is True
+    assert went["success"] is True
+    assert tools.frictions() == [
+        Friction(got_in_the_way="The feed timed out.", trying="read it")
+    ]
+    assert tools.how_it_went() == HowItWent(smooth="The question.")
+    assert len(rig.client.sent["turn/start"]) == 1
+
+
+def test_a_turn_the_agent_stops_ends_at_once_and_the_ask_raises(
+    tmp_path: Path,
+) -> None:
+    turn: list[Step] = [
+        calling("stop", {"why": "I'd rather not guess."}),
+        message("Stopped."),
+        completed(),
+    ]
+    rig = Rig(tmp_path, [turn])
+    token = seam.set(On(rig.adapter))
+    try:
+        with pytest.raises(StoppedError) as raised:
+            asyncio.run(
+                Codex(model="gpt-6.1-sol", layers=FAST).ask("Will it rain?", Forecast)
+            )
+    finally:
+        seam.reset(token)
+    assert raised.value.why == "I'd rather not guess."
+    assert len(rig.client.sent["turn/start"]) == 1
+
+
+def test_a_blocked_turn_ends_at_once_and_the_ask_raises(tmp_path: Path) -> None:
+    turn: list[Step] = [
+        calling("blocked", {"problem": "No place given."}),
+        message("Blocked."),
+        completed(),
+    ]
+    rig = Rig(tmp_path, [turn])
+    token = seam.set(On(rig.adapter))
+    try:
+        with pytest.raises(BlockedError, match="No place given"):
+            asyncio.run(
+                Codex(model="gpt-6.1-sol", layers=FAST).ask("Will it rain?", Forecast)
+            )
+    finally:
+        seam.reset(token)
     assert len(rig.client.sent["turn/start"]) == 1
 
 
@@ -531,7 +604,7 @@ def test_a_question_for_the_user_is_refused(tmp_path: Path) -> None:
                 "answers": [
                     (
                         "No one can answer here. Carry on with what you have, or call "
-                        "`report` to say what's missing."
+                        "`blocked` to say what's missing."
                     )
                 ]
             }
