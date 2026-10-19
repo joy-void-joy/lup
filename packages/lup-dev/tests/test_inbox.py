@@ -13,7 +13,7 @@ import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -40,7 +40,7 @@ from lup_dev.host.protocol import HostError, Limits, Register, Stop
 from lup_dev.host.records import Called, Recorded, Said
 from lup_dev.host.service import Asked, HostService, Judged, Naming
 from lup_dev.host.watch import Changes
-from lup_dev.inbox.delivery import Delivery, opening
+from lup_dev.inbox.delivery import Delivery, clocked, opening
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.protocol import (
     AnswerApproval,
@@ -101,8 +101,10 @@ from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import InboxLayout, Layout
 from lup_dev.policy.before import Overwrite, Replacement, before
+from lup_dev.policy.holds import Answer as HoldAnswer
 from lup_dev.policy.holds import HeldFile, Hold, Holds, InboxAnnouncing, Response
 from lup_dev.policy.tools import JudgeTools, stands
+from lup_dev.policy.verdicts import Verdict, VerdictLog
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator
@@ -2750,15 +2752,22 @@ def test_judged_reads_a_sessions_verdicts_and_its_repositorys_holds_changing_not
         state = kit.layout.state
         kept = {each: each.read_bytes() for each in state.rglob("*") if each.is_file()}
         own = judged()
-        every = judged(every=True)
-        relative = judged(every=True, path="src/pkg/core.py")
+        every = judged(every=True, answered=True)
+        relative = judged(every=True, path="src/pkg/core.py", answered=True)
         absolute = judged(path=str(linked / core))
+        # The service's clock, which a duration counts back by, at the judge's.
+        clock.time = kit.clock.now()
+        recent = judged(every=True, since="PT2M")
+        between = judged(
+            since="2026-10-01T12:01", until="2026-10-01T12:24:00+00:00", answered=True
+        )
         stamped = json.loads(send(hook, lup_call("judged", {}, "j1", agent_id="a1")))[
             "hookSpecificOutput"
         ]["updatedInput"]
-        subagent = judged(**stamped)
-        other = judged(machine.host.launch("two").mcp)
+        subagent = judged(**stamped, answered=True)
+        other = judged(machine.host.launch("two").mcp, answered=True)
         unread = call(mcp, "judged", {"every": "lots"})
+        loose = call(mcp, "judged", {"since": "2h"})
         after = {each: each.read_bytes() for each in state.rglob("*") if each.is_file()}
     rewritten, declined = store.all()
     [theirs] = Holds(layout=kit.layout.store(main)).all()
@@ -2774,10 +2783,18 @@ def test_judged_reads_a_sessions_verdicts_and_its_repositorys_holds_changing_not
         f"  {repo / core}: whole-file",
         "  The operator's comment: Fine, as a whole.",
     ]
+    allowed = "     1  allow   regex"
+    passed = "     1  allow   rules-pass"
+    protected = "     1  hold    protected  (approved 0, declined 1, unanswered 0)"
+    whole = "     1  hold    whole-file  (approved 1, declined 0, unanswered 0)"
     assert waiting == [
         "\n".join(
             [
-                "Your session's verdicts in this repository, oldest first:",
+                "Your session's 2 verdicts in this repository, by outcome and reason:",
+                allowed,
+                "     1  hold    whole-file  (approved 0, declined 0, unanswered 0)",
+                "",
+                "Each, oldest first:",
                 edited,
                 f"{held}, no answer yet",
                 "",
@@ -2792,6 +2809,8 @@ def test_judged_reads_a_sessions_verdicts_and_its_repositorys_holds_changing_not
         )
     ]
     holds = [
+        "This repository has no hold still open.",
+        "",
         "This repository's holds answered, oldest first:",
         *rewrite,
         f"{declined.key}  {at} 12:24  a change by you, declined at {at} 12:24",
@@ -2799,15 +2818,28 @@ def test_judged_reads_a_sessions_verdicts_and_its_repositorys_holds_changing_not
         "  The operator's comment: Not the git directory.",
     ]
     assert own.splitlines() == [
-        "Your session's verdicts in this repository, oldest first:",
+        "Your session's 3 verdicts in this repository, by outcome and reason:",
+        allowed,
+        protected,
+        whole,
+        "",
+        "Each, oldest first:",
         edited,
         f"{held}, approved",
         git,
         "",
-        *holds,
+        "This repository has no hold still open.",
+        "",
+        "Not listed: 2 holds answered, which `answered` lists.",
     ]
     assert every.splitlines() == [
-        "Every session's verdicts in this repository, oldest first:",
+        "Every session's 4 verdicts in this repository, by outcome and reason:",
+        allowed,
+        passed,
+        protected,
+        whole,
+        "",
+        "Each, oldest first:",
         f"{edited}, by your session",
         f"{held}, approved, by your session",
         f"{git}, by your session",
@@ -2815,19 +2847,54 @@ def test_judged_reads_a_sessions_verdicts_and_its_repositorys_holds_changing_not
         "",
         *holds,
     ]
+    on = "on src/pkg/core.py"
     assert relative.splitlines() == [
-        "Every session's verdicts in this repository on src/pkg/core.py, oldest first:",
+        f"Every session's 3 verdicts in this repository {on}, by outcome and reason:",
+        allowed,
+        passed,
+        whole,
+        "",
+        "Each, oldest first:",
         f"{edited}, by your session",
         f"{held}, approved, by your session",
         f"{at} 12:25  {linked / core}  Edit  allow (rules-pass), by claude session s2",
         "",
-        "This repository's holds answered on src/pkg/core.py, oldest first:",
+        f"This repository has no hold still open {on}.",
+        "",
+        f"This repository's holds answered {on}, oldest first:",
         *rewrite,
     ]
     assert absolute == (
         f"Your session has no verdict in this repository on {linked / core}.\n\n"
         f"This repository has no hold on {linked / core}."
     )
+    since = f"since {clocked(kit.clock.now() - timedelta(minutes=2))}"
+    assert recent.splitlines() == [
+        f"Every session's 2 verdicts in this repository {since}, by outcome and reason:",
+        passed,
+        protected,
+        "",
+        "Each, oldest first:",
+        f"{git}, by your session",
+        f"{at} 12:25  {linked / core}  Edit  allow (rules-pass), by claude session s2",
+        "",
+        f"This repository has no hold still open {since}.",
+        "",
+        f"Not listed: 1 hold answered {since}, which `answered` lists.",
+    ]
+    window = f"between {at} 12:01 and {at} 12:24"
+    assert between.splitlines() == [
+        f"Your session's 1 verdict in this repository {window}, by outcome and reason:",
+        whole,
+        "",
+        "Each, oldest first:",
+        f"{held}, approved",
+        "",
+        f"This repository has no hold still open {window}.",
+        "",
+        f"This repository's holds answered {window}, oldest first:",
+        *rewrite,
+    ]
     assert subagent.splitlines()[-6:] == [
         f"{rewritten.key}  {at} 12:01  a change by you, approved at {at} 12:24",
         f"  {repo / core}: whole-file",
@@ -2840,8 +2907,13 @@ def test_judged_reads_a_sessions_verdicts_and_its_repositorys_holds_changing_not
         "  The operator's comment: Not the git directory.",
     ]
     assert other.splitlines() == [
-        "Your session's verdicts in this repository, oldest first:",
+        "Your session's 1 verdict in this repository, by outcome and reason:",
+        whole,
+        "",
+        "Each, oldest first:",
         f"{at} 12:25  {main / core}  Write  hold (whole-file), approved",
+        "",
+        "This repository has no hold still open.",
         "",
         "This repository's holds answered, oldest first:",
         f"{theirs.key}  {at} 12:25  a change by you, approved at {at} 12:25",
@@ -2850,6 +2922,9 @@ def test_judged_reads_a_sessions_verdicts_and_its_repositorys_holds_changing_not
     text, error = unread
     assert error
     assert text.startswith("Refused: 1 validation error for Scope\nevery\n")
+    text, error = loose
+    assert error
+    assert text.startswith("Refused: 2 validation errors for Scope\nsince.datetime\n")
     assert after == kept
 
 
@@ -2876,6 +2951,139 @@ def test_judged_says_where_an_open_hold_stands_and_what_waits_with_it(
         ),
         "waiting for the operator, no call waiting on it",
     ]
+
+
+def test_judged_answers_a_large_log_in_pages_an_agent_reads_whole(
+    clock: FakeClock, tmp_path: Path
+) -> None:
+    layout = Layout(state=tmp_path / "state")
+    repository = tmp_path / "repo.git"
+    worktree = tmp_path / "w"
+    start = clock.now() - timedelta(minutes=3000)
+
+    def verdict(
+        key: str, minute: int, session: str, outcome: str, reason: str
+    ) -> Verdict:
+        return Verdict.model_validate(
+            {
+                "key": key,
+                "time": start + timedelta(minutes=minute),
+                "session": session,
+                "runtime": "claude",
+                "tool": "Edit",
+                "worktree": worktree,
+                "path": f"src/pkg/m{key}.py",
+                "role": "production",
+                "outcome": outcome,
+                "reasons": [reason],
+            }
+        )
+
+    def kind(minute: int) -> tuple[str, str]:
+        if minute % 97 == 0:
+            return "refuse", "regex"
+        return "allow", "docs" if minute % 7 == 0 else "rules-pass"
+
+    # A minute each, the sessions in turn; three more of s1's at the moment of
+    # its 49th latest, as a checkpoint judges files at once.
+    logged = [
+        verdict(str(minute), minute, "s1" if minute % 2 else "s2", *kind(minute))
+        for minute in range(3000)
+    ]
+    burst = [verdict(f"b{n}", 2903, "s1", "allow", "rules-pass") for n in range(3)]
+    asked = [
+        verdict(f"h{n}", 10 + 100 * n, "s1", "hold", "protected") for n in range(27)
+    ]
+    VerdictLog(path=layout.verdicts(repository)).append([*logged, *burst, *asked])
+    store = Holds(layout=layout.store(worktree))
+    for n, each in enumerate(asked):
+        answer = HoldAnswer(approved=True, time=each.time) if n < 25 else None
+        store.put(
+            Hold(
+                key=f"k{n}",
+                worktree=worktree,
+                session="s1",
+                created=each.time,
+                files=[],
+                diff="",
+                verdicts=[each],
+                answer=answer,
+            )
+        )
+    tools = JudgeTools(layout=layout, clock=clock)
+    launch = Register.model_construct(
+        launch="one", runtime="claude", repository=repository
+    )
+
+    def judged(**arguments: JsonValue) -> str:
+        said = asyncio.run(
+            tools.call("judged", arguments, launch, Caller(id="c", session="s1"), None)
+        )
+        assert not said.error, said.text
+        return said.text
+
+    def page(text: str) -> tuple[list[str], str | None]:
+        """An answer's verdict lines, and the `until` it says reads those before."""
+        listing = text.split("\n\n")[1].splitlines()[1:]
+        if listing[-1].startswith("Not listed: "):
+            return listing[:-1], listing[-1].split('"')[1]
+        return listing, None
+
+    first = judged()
+    pages = [page(first)[0]]
+    until = page(first)[1]
+    while until is not None:
+        lines, until_next = page(judged(until=until))
+        pages.insert(0, lines)
+        until = until_next
+    ours = sorted(
+        (each for each in [*logged, *burst, *asked] if each.session == "s1"),
+        key=lambda each: each.time,
+    )
+    read = [line for lines in pages for line in lines]
+    every = judged(every=True)
+    recent = judged(since="PT2H")
+    between = judged(since="2026-10-01T11:00", until="2026-10-01T11:30:00+00:00")
+    answered = judged(answered=True)
+    summary, listing, still, counted = first.split("\n\n")
+    assert summary.splitlines()[0] == (
+        f"Your session's {len(ours)} verdicts in this repository, by outcome and "
+        "reason:"
+    )
+    assert "    27  hold    protected  (approved 25, declined 0, unanswered 0)" in (
+        summary.splitlines()
+    )
+    # The latest 50 would split the burst's moment: the 48 after it are listed.
+    assert listing.splitlines()[0] == "The latest 48, oldest first:"
+    assert listing.splitlines()[-1] == (
+        f"Not listed: {len(ours) - 48} earlier verdicts, which `until` "
+        f'"{(start + timedelta(minutes=2905)).isoformat()}" reads.'
+    )
+    assert [line.split("  ")[1] for line in read] == [
+        str(worktree / each.path) for each in ours
+    ]
+    assert len(first) < 20_000
+    assert len(every) < 20_000
+    assert every.split("\n\n")[1].splitlines()[0] == "The latest 50, oldest first:"
+    assert still.splitlines()[0] == "This repository's holds still open, oldest first:"
+    assert counted == "Not listed: 25 holds answered, which `answered` lists."
+    assert recent.splitlines()[0] == (
+        "Your session's 63 verdicts in this repository since 2026-10-01 10:00, by "
+        "outcome and reason:"
+    )
+    assert between.splitlines()[0] == (
+        "Your session's 15 verdicts in this repository between 2026-10-01 11:00 "
+        "and 2026-10-01 11:30, by outcome and reason:"
+    )
+    assert "Each, oldest first:" in between.split("\n\n")[1]
+    held = answered.split("\n\n")[-1].splitlines()
+    assert held[0] == "This repository's holds answered, oldest first:"
+    heads = [line.split()[0] for line in held[1:-1] if not line.startswith("  ")]
+    assert heads == [f"k{n}" for n in range(5, 25)]
+    assert held[-1] == (
+        "Not listed: 5 earlier holds answered, which `until` "
+        '"2026-09-29T18:30:00+00:00" reads.'
+    )
 
 
 def test_the_operators_list_says_when_they_last_settled_an_item(
