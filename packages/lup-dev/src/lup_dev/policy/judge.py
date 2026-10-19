@@ -559,10 +559,7 @@ class Judge(Model, arbitrary_types_allowed=True):
             [
                 Ask(
                     kind=PRIVATE,
-                    reason=(
-                        f"{self.root / change.path}:{each.span.start.line} - "
-                        f"{each.message}"
-                    ),
+                    reason=f"{change.path}:{each.span.start.line} - {each.message}",
                     line=each.span.start.line,
                 )
                 for each in on

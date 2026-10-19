@@ -1842,7 +1842,7 @@ def test_a_patch_carrying_a_private_value_lands_its_value_told_after_the_call(
     assert holding_kit.announced.holds == []
     [flagged] = holding_kit.flags.asked
     assert flagged.flagged.summary == (
-        f"docs/notes.md: {repo}/docs/notes.md:3 - one of the operator's private values"
+        "docs/notes.md:3 - one of the operator's private values"
     )
     [verdict] = [
         each

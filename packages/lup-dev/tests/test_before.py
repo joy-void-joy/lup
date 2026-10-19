@@ -511,9 +511,7 @@ def test_an_edit_carrying_a_private_value_lands_its_value_told_with_the_call(
     assert (verdict.outcome, verdict.reasons) == ("allow", ["private"])
     assert kit.announced.holds == []
     [flagged] = kit.flags.asked
-    assert flagged.flagged.summary == (
-        f"src/pkg/core.py: {repo}/src/pkg/core.py:10 - the operator's home path"
-    )
+    assert flagged.flagged.summary == ("src/pkg/core.py:10 - the operator's home path")
 
 
 def test_a_write_to_a_path_git_ignores_is_told_no_private_value(
