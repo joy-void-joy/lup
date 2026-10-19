@@ -41,6 +41,16 @@ SERVER = "lup"
 names its tools after."""
 
 
+def summaries(tools: list[ToolSpec]) -> list[str]:
+    """Return a line for each tool, its name and its summary, as a session is told lup's tools: in its guidance, and a subagent at its first hook.
+
+    >>> from lup.tools.speaking import note
+    >>> summaries([note.spec()])
+    ['- `note`: Attach a remark to your answer, and carry on.']
+    """
+    return [f"- `{tool.name}`: {tool.summary}" for tool in tools]
+
+
 class RoomTools(ABC):
     """A module's tools in a launched session: what it serves, and each call to them."""
 
