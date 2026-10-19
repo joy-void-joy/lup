@@ -68,6 +68,46 @@ interface Keyed {
     changing: boolean;
     /** Whether vim is in insert mode, that is, whether a comment is being written. */
     inserting: boolean;
+    /** Where a dead key pressed outside insert mode is. */
+    dead: Dead;
+}
+
+/**
+ * Where a dead key pressed outside insert mode is: none; pressed, vim waiting for what it types; or given to vim, the
+ * key that completes it, as Space does, still to come.
+ */
+export type Dead = "none" | "pressed" | "given";
+
+/** A key pressed outside insert mode, as a dead key reads it: its name, and whether the browser composes it. */
+export interface Pressed {
+    key: string;
+    composing: boolean;
+}
+
+/**
+ * Return what a key pressed outside insert mode does to a dead key: whether it's kept from vim, and where the dead key
+ * is after it. The dead key itself, and a key the browser composes it with, are kept from vim, which gets what they
+ * type instead (`deadTyped`); so is the Space that completes one whose character vim has, which would begin a chord.
+ * Any other key goes to vim, ending the dead key, as `a` after `` ` `` jumps to mark `a`.
+ */
+export function deadPressed(dead: Dead, pressed: Pressed): { kept: boolean; dead: Dead } {
+    if (pressed.key === "Dead") {
+        return { kept: true, dead: "pressed" };
+    }
+    if (pressed.composing || pressed.key === "Process") {
+        return { kept: true, dead };
+    }
+    return { kept: dead === "given" && pressed.key === " ", dead: "none" };
+}
+
+/**
+ * Return what text the browser types into the page outside insert mode does, which never lands there: whether vim gets
+ * it as keys, and where the dead key is after it. A dead key gives vim the first text it types, as `` ` `` composing
+ * shows `` ` ``, once; anything else typed is dropped, the rest of a composition, a paste, or a dead key's own
+ * character typed again as the key after it commits it.
+ */
+export function deadTyped(dead: Dead): { given: boolean; dead: Dead } {
+    return dead === "pressed" ? { given: true, dead: "given" } : { given: false, dead };
 }
 
 /** One editor's own: what its keys do, and what it knows of the last key. */
@@ -79,7 +119,7 @@ interface Bound {
 /** Each editor's own, read by the keys, the filters and vim's actions, which vim's keymap shares between editors. */
 const binding = Facet.define<Bound, Bound | null>({ combine: (values) => values[0] ?? null });
 
-const NONE: Keyed = { from: 0, visual: false, passage: null, changing: false, inserting: false };
+const NONE: Keyed = { from: 0, visual: false, passage: null, changing: false, inserting: false, dead: "none" };
 
 function boundOf(state: EditorState): Bound {
     return state.facet(binding) ?? { actions: null, keyed: NONE };
@@ -187,31 +227,48 @@ function commentAt(bound: Bound, position: number): Block | undefined {
  * one with no key of vim's pending begins what it notes, `c` in normal mode beginning vim's change.
  *
  * A dead key, as `` ` `` on a layout where it waits for the next key, gives no key of its own: the browser composes it
- * with the next, `` ` `` then Space making a `` ` ``. Outside insert mode, vim gets what's composed, as typed, and
- * neither key that composed it, the Space among them, which would begin a chord; in a comment, the browser composes
- * into the text as usual.
+ * with the next, `` ` `` then Space making a `` ` ``. Outside insert mode, vim gets the first text it types, once, and
+ * neither key that composed it, nor the Space completing it, which would begin a chord (`deadPressed`, `deadTyped`);
+ * what's typed never lands (`typed`). In a comment, the browser composes into the text as usual.
  */
 const keys = Prec.highest(
     EditorView.domEventHandlers({
-        compositionend: (event, view) => {
+        compositionstart: (_, view) => {
+            // A composition with no dead key pressed before it, as some browsers give, waits as one does.
             const cm = vimOf(view);
-            if (cm === null || cm.state.vim.insertMode || event.data === "") {
+            const { keyed } = boundOf(view.state);
+            if (cm !== null && !cm.state.vim.insertMode && keyed.dead === "none") {
+                keyed.dead = "pressed";
+            }
+            return false;
+        },
+        compositionend: (event, view) => {
+            // What a composition made, where nothing it typed was seen first.
+            const cm = vimOf(view);
+            const { keyed } = boundOf(view.state);
+            if (cm === null || cm.state.vim.insertMode || !(event instanceof CompositionEvent) || event.data === "") {
                 return false;
             }
-            for (const typed of event.data) {
-                Vim.handleKey(cm, typed, "user");
+            const step = deadTyped(keyed.dead);
+            keyed.dead = step.dead;
+            if (step.given) {
+                give(cm, event.data);
             }
-            return true;
+            return false;
         },
         keydown: (event, view) => {
             const cm = vimOf(view);
             if (cm === null) {
                 return false;
             }
-            if ((event.key === "Dead" || event.isComposing) && !cm.state.vim.insertMode) {
-                return true;
-            }
             const bound = boundOf(view.state);
+            if (!cm.state.vim.insertMode) {
+                const step = deadPressed(bound.keyed.dead, { key: event.key, composing: event.isComposing });
+                bound.keyed.dead = step.dead;
+                if (step.kept) {
+                    return true;
+                }
+            }
             const { keyed } = bound;
             const head = view.state.selection.main.head;
             keyed.from = head;
@@ -237,6 +294,39 @@ const keys = Prec.highest(
             }
             return false;
         },
+    }),
+);
+
+/** Give vim each character of `text`, as typed. */
+function give(cm: CodeMirrorV, text: string): void {
+    for (const typed of text) {
+        Vim.handleKey(cm, typed, "user");
+    }
+}
+
+/**
+ * Outside insert mode, what the browser types into the page never lands: vim takes each key before the browser would
+ * type it, so what's typed is a dead key's, or a paste. A dead key's first text reaches vim as keys (`deadTyped`), and
+ * its composition ends there, as CodeMirror is told, so it doesn't wait for one the page took the text of. Read here,
+ * ahead of vim's own reading of typed text, which takes a composition's text as keys each time it's typed, so a mark
+ * or a jump never types into a comment the cursor is on, nor reaches vim twice.
+ */
+const typed = Prec.highest(
+    EditorView.inputHandler.of((view, _from, _to, text) => {
+        const cm = vimOf(view);
+        if (cm === null || cm.state.vim.insertMode) {
+            return false;
+        }
+        const { keyed } = boundOf(view.state);
+        const step = deadTyped(keyed.dead);
+        keyed.dead = step.dead;
+        if (step.given) {
+            give(cm, text);
+            if (view.compositionStarted) {
+                view.contentDOM.dispatchEvent(new CompositionEvent("compositionend"));
+            }
+        }
+        return true;
     }),
 );
 
@@ -518,6 +608,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                         }
                     }),
                     keys,
+                    typed,
                 ],
             }),
         });
