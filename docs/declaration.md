@@ -61,11 +61,11 @@ project = Project(
 
 Read from the top:
 - **Every name comes from `lup_dev`,** the front door (`lup_dev/__init__.py`), which binds what a declaration imports, lup's modules among them.
-- **`Modules.default()` is lup's default modules:** `Core`, `Python`, `CodeRules`, `GitHub` and `Transcripts` (*lup's modules*). `.edit` puts a layer on one of them that names only what it changes: `Python(tests=…)` changes `Python`'s test roots and leaves everything else as it was. `.add` brings in a module that isn't there yet, lup's own module here.
+- **`Modules.default()` is lup's default modules:** `Core`, `Python`, `CodeRules`, `GitHub`, `Transcripts` and `Private` (*lup's modules*). `.edit` puts a layer on one of them that names only what it changes: `Python(tests=…)` changes `Python`'s test roots and leaves everything else as it was. `.add` brings in a module that isn't there yet, lup's own module here.
 - **A collection changes by operations on what's below it.** `Rules().add("runtime-mention")` means `CodeRules`' rules as they stand, plus one. `Exemptions().add(…)` likewise adds an exemption to those already there. So the second `.edit(CodeRules(…))` keeps what the first one did, and no layer restates another (*The verbs on modules*).
 - **`why` is optional** on `.edit`, `.drop` and `.replace`, and is kept with the change for whoever reads the project later. An `Exemption` always carries its own.
 - **`LupDevelopment` is a module written the way lup's own are:** a `Module` subclass whose name and requirements are class attributes and whose docstring is its one sentence. Its parts are fields whose defaults are its own. `before="rules"` puts its step ahead of `Python`'s `rules` step. That works because names are per kind and shared across modules.
-- **`held` and `flagged` are the fields of `Project` that aren't a module's** (`declaration/project.py`). They name what a change asks that waits for the operator's answer, and what lands flagged for their review, in one vocabulary: a path's role (`protected`, `operator`), a kind of change (`new-file`, `whole-file`, `public-api`, `ignore`), or one of lup's rules by its id. lup's own declaration takes the defaults, `held=["protected", "operator", "ignore"]` and `flagged=["new-file", "whole-file", "public-api"]`; a project holding a rule's findings adds its name, as `held=["protected", "operator", "ignore", "regex"]`. A name in both lists, or one that's neither a role, a kind nor shaped like a rule's id, fails the load; a rule's id is checked against the engine's table when the judge first reads it (`docs/judging-writes.md`, *What each change gets*).
+- **`held` and `flagged` are the fields of `Project` that aren't a module's** (`declaration/project.py`). They name what a change asks that waits for the operator's answer, and what lands flagged for their review, in one vocabulary: a path's role (`protected`, `operator`), a kind of change (`new-file`, `whole-file`, `public-api`, `ignore`, and `private`, a value never published on a line it touches), or one of lup's rules by its id. lup's own declaration takes the defaults, `held=["protected", "operator", "ignore"]` and `flagged=["new-file", "whole-file", "public-api", "private"]`; a project holding a rule's findings adds its name, as `held=["protected", "operator", "ignore", "regex"]`. A name in both lists, or one that's neither a role, a kind nor shaped like a rule's id, fails the load; a rule's id is checked against the engine's table when the judge first reads it (`docs/judging-writes.md`, *What each change gets*).
 
 A project without a `lup_project.py` gets `Project()`, which equals `Project(modules=Modules.default())`.
 
@@ -152,7 +152,8 @@ The kinds (`declaration/kinds.py`):
 | `Credentials` | a `Layer`: `actions`, an `Actions` of the names `host/protocol.py`'s `Action` lists; `protected` and `gated`, each a `Refs` of patterns over full ref names | `Core.credentials` |
 | `Guidance` | `Section`s, by name: a file from the root, or one a Python package ships | each of lup's modules but `GitHub` |
 | `Repositories` | `Repository`s, by name | none: a person's layer holds them |
-| `Toolsets`, `Handlers`, `Hooks` | `ModuleTools`, `ModuleHandler` and `ModuleHooks` classes, by class name | `GitHub`, `Transcripts` |
+| `Toolsets`, `Handlers`, `Hooks` | `ModuleTools`, `ModuleHandler` and `ModuleHooks` classes, by class name | `GitHub`, `Transcripts`, `Private` |
+| `Details`, `Values` | the details lup reads on the host, by name; the person's own values, each a plain string (`private/module.py`) | `Private` |
 
 `Actions` refuses a name that isn't an action, and `Refs` a pattern that doesn't start with `refs/`, where they're written. Two fields aren't selections. `Mounted` says whether a module's own data is mounted in rooms. Every module has `conditions`: the Python module declaring the conditions a `defer` waits on, by dotted name.
 
@@ -201,11 +202,12 @@ At load, every module a selected module `requires` must be selected too, and no 
 | `CodeRules`, `code-rules` | `declaration/modules/code_rules.py` | `rules`: `Rules.all()` with a `.drop` for each rule `catalog/rules.py` leaves out, with its reason (`runtime-mention` alone today). `exempt`: none. Guidance `code-rules`. Requires Node `>=22.18` for the engine |
 | `GitHub`, `github` | `lup/github/module.py` | `tools`: `GitHubTools`. `handlers`: `Stating`, which tells a room's gate whether an issue is open. `limit`: the most matches `find_issues` asks for |
 | `Transcripts`, `transcripts` | `lup/transcripts/module.py` | `hooks`: `TranscriptsHooks`, copying the runtime's session records when a launch opens and when it stops. `data`: `Mounted(always=True)`. Guidance `transcripts`, naming `lup-dev transcripts` |
+| `Private`, `private` | `lup_dev/private/module.py` | `details`: `Details.all()`, what lup reads on the host never published. `values`: none, the person's own. `hooks`: `PrivateHooks`, refusing at `publishing`. `handlers`: `Scanner`, the gate's step in a room. `gate`: `private`. Guidance `private` (`docs/private.md`) |
 
 - **`Core` is every project's.** It's the part of the core a project can change. `Python` and `CodeRules` stay apart from it so each is one line to drop: dropping `CodeRules` turns off all of lup's code rules.
 - **The `rules` step is `Python`'s.** It runs `lup-dev rules check`, which also runs pyright's and ruff's checks, so neither is a step of its own (`catalog/gate.py`).
 - **`Core`, `Python` and `CodeRules` are data,** read from the catalog: lup's defaults, made of the same entry types a project writes (`catalog/`). Their guidance sections are files `lup_dev` ships (`declaration/modules/guidance/`).
-- **`GitHub` and `Transcripts` live beside their machinery,** in the library's packages. The import contract keeping the library off `lup_dev` lets those two packages import it (`pyproject.toml`, `[tool.importlinter]`).
+- **`GitHub` and `Transcripts` live beside their machinery,** in the library's packages. The import contract keeping the library off `lup_dev` lets those two packages import it (`pyproject.toml`, `[tool.importlinter]`). `Private` lives beside its machinery in `lup_dev`, which the judge reads too; `lup_dev.private` isn't one of the layers the import contract orders.
 
 ### lup declares itself the same way
 
