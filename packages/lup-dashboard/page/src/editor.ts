@@ -8,7 +8,8 @@
 // keys of insert mode on the line; `v` and a motion, then `c` or `s`, on the
 // selection; where what's covered isn't one item's or one turn's, on the line. `]]` and
 // `[[` go to the next and previous item or turn, `]c` and `[c` to the next and
-// previous line that matters, where a view has some. Ctrl+Enter in a comment ends
+// previous line that matters, where a view has some, `]n` and `[n` to the next
+// and previous comment, where the cursor last was in it. Ctrl+Enter in a comment ends
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
 // any change to the draft. What folds is folded until opened: `za` opens or
 // closes the fold under the cursor, `zo` and `zc` open and close it, `zR` and
@@ -43,6 +44,7 @@ interface Actions {
     toggle: (list: "done" | "parked") => void;
     move: (forward: boolean) => void;
     matter: (forward: boolean) => void;
+    written: (forward: boolean) => void;
     approve: (approved: boolean) => void;
     back: () => void;
     tree: () => void;
@@ -111,6 +113,39 @@ export function deadTyped(dead: Dead): { given: boolean; dead: Dead } {
     return dead === "pressed" ? { given: true, dead: "given" } : { given: false, dead };
 }
 
+/**
+ * Return where the cursor last was in each comment it left, once it moves from `from` to `to` with the text the same:
+ * where it was in the one it leaves, in place of where it was in it before; none outside every comment of `blocks`.
+ */
+export function visit(visited: readonly number[], blocks: readonly Span[], from: number, to: number): number[] {
+    const inside = (at: number, block: Span) => at >= block.from && at <= block.to;
+    const left = blocks.find((each) => inside(from, each));
+    if (left === undefined || inside(to, left)) {
+        return [...visited];
+    }
+    const others = visited.filter((at) => !inside(at, left) && blocks.some((each) => inside(at, each)));
+    return [...others, from];
+}
+
+/**
+ * Return where `]n` goes from `head`, or `[n` where `forward` isn't: into the next or the previous comment of `blocks`,
+ * past the one the cursor is in, where the cursor last was in it (`visit`), else on its last character, where writing
+ * carries on; none past the last, or before the first.
+ */
+export function nextWritten(blocks: readonly Span[], head: number, forward: boolean, visited: readonly number[]): number | undefined {
+    const sorted = [...blocks].sort((a, b) => a.from - b.from);
+    const here = sorted.find((each) => head >= each.from && head <= each.to);
+    const target = forward
+        ? sorted.find((each) => each.from > (here?.to ?? head))
+        : sorted.findLast((each) => each.to < (here?.from ?? head));
+    if (target === undefined) {
+        return undefined;
+    }
+    // On a character, as vim's cursor is outside insert mode, where writing ended past the last one.
+    const last = Math.max(target.to - 1, target.from);
+    return Math.min(visited.find((at) => at >= target.from && at <= target.to) ?? last, last);
+}
+
 /** One editor's own: what its keys do, and what it knows of the last key. */
 interface Bound {
     actions: Actions | null;
@@ -153,6 +188,8 @@ function mapKeys(): void {
     action("lupPrevious", (actions) => actions.move(false));
     action("lupNextMatter", (actions) => actions.matter(true));
     action("lupPreviousMatter", (actions) => actions.matter(false));
+    action("lupNextWritten", (actions) => actions.written(true));
+    action("lupPreviousWritten", (actions) => actions.written(false));
     action("lupApprove", (actions) => actions.approve(true));
     action("lupDecline", (actions) => actions.approve(false));
     action("lupBack", (actions) => actions.back());
@@ -191,6 +228,8 @@ function mapKeys(): void {
     map("[[", "lupPrevious", "normal");
     map("]c", "lupNextMatter", "normal");
     map("[c", "lupPreviousMatter", "normal");
+    map("]n", "lupNextWritten", "normal");
+    map("[n", "lupPreviousWritten", "normal");
 }
 
 /** Return the editor's vim, once it's started. */
@@ -564,6 +603,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     const opener = useRef<number | null>(null);
     // Whether insert mode is entered into the comment just opened, rather than by a key.
     const entering = useRef(false);
+    // Where the cursor last was in each comment it left, for `]n` and `[n`, carried with the text's changes.
+    const visited = useRef<number[]>([]);
     const keyed = bound.current.keyed;
 
     useEffect(() => {
@@ -597,10 +638,16 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                         if (!update.docChanged && foldedRanges(update.startState) !== foldedRanges(update.state)) {
                             actions?.folded(update.state);
                         }
+                        const head = update.state.selection.main.head;
+                        if (update.docChanged) {
+                            visited.current = visited.current.map((at) => update.changes.mapPos(at));
+                        } else if (update.selectionSet) {
+                            const from = update.startState.selection.main.head;
+                            visited.current = visit(visited.current, actions?.blocks() ?? [], from, head);
+                        }
                         // A click out of the comment being written ends it, as Esc would.
                         const clicked = update.transactions.some((each) => each.isUserEvent("select.pointer"));
                         const cm = vimOf(update.view);
-                        const head = update.state.selection.main.head;
                         if (clicked && cm !== null && keyed.inserting && commentAt(bound.current, head) === undefined) {
                             queueMicrotask(() => Vim.exitInsertMode(cm, true));
                         }
@@ -764,6 +811,21 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             toggle: (list) => own.toggle?.(list),
             move: own.move,
             matter: (forward) => own.matter?.(forward),
+            written: (forward) => {
+                const editor = view.current;
+                const target = editor === null ? undefined : nextWritten(shown.blocks, head(), forward, visited.current);
+                if (editor === null || target === undefined) {
+                    return;
+                }
+                // Each fold it's in opens, as a motion into it would.
+                const effects: StateEffect<Span>[] = [];
+                foldedRanges(editor.state).between(target, target, (from, to) => {
+                    if (target > from && target <= to) {
+                        effects.push(unfoldEffect.of({ from, to }));
+                    }
+                });
+                editor.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true });
+            },
             approve: (approved) => own.approve?.(approved),
             back: () => own.back?.(),
             tree: config.tree,
