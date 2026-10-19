@@ -26,6 +26,7 @@ from mcp.types import TextContent, jsonrpc_message_adapter
 from pydantic import JsonValue, ValidationError
 from typer.testing import CliRunner
 
+from lup.rooms.engine import Exited, Podman, Process
 from lup.tools.hook import lup_hook
 from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec, lup_tool
@@ -262,6 +263,7 @@ def service(
     refresh: Callable[[Register], list[Path]] | None = None,
     clock: Clock | None = None,
     companions: list[Companion] | None = None,
+    podman: Podman | None = None,
 ) -> HostService:
     built = HostService(
         layout=layout,
@@ -275,6 +277,7 @@ def service(
         modules=modules,
         refresh=refresh,
         companions=companions or [],
+        podman=podman,
     )
     return built if clock is None else built.model_copy(update={"clock": clock})
 
@@ -1432,6 +1435,106 @@ def test_a_hook_reaches_a_watch_each_conversation_saying_what_its_doing(
         ("one", bash),
         ("one/subagent·a1", Activity(state="ended", since=at)),
     ]
+
+
+# A launch's container, named after its launch and ended with it.
+
+
+class Containers:
+    """podman, as far as a launch's container goes: those it has, by name, each rename done unless it's `refusing`."""
+
+    def __init__(self, *running: str, refusing: bool = False) -> None:
+        self.running = list(running)
+        self.refusing = refusing
+        self.asked: list[list[str]] = []
+
+    def __call__(self, process: Process) -> Exited:
+        program, *arguments = process.arguments
+        assert program == "podman"
+        self.asked.append(arguments)
+        match arguments:
+            case ["container", "exists", name]:
+                return Exited(status=0 if name in self.running else 1)
+            case ["rename", before, after] if not self.refusing:
+                self.running = [
+                    after if each == before else each for each in self.running
+                ]
+                return Exited(status=0)
+            case ["rename", *_]:
+                return Exited(status=125)
+            case _:
+                message = f"podman asked {process.arguments}"
+                raise AssertionError(message)
+
+
+def unnamed(tmp_path: Path, name: str) -> Register:
+    """A launch asking `name`, leaving its container for the service to name, as a launcher does."""
+    return launch(tmp_path, name, "first").model_copy(
+        update={"container": None, "name": name}
+    )
+
+
+def test_a_launch_s_container_is_named_after_it_and_renamed_with_it(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    first = f"lup-{tmp_path.name}-one"
+    second = f"lup-{tmp_path.name}-renamed"
+    containers = Containers(first)
+    with served(service(layout, Judge(), said, podman=Podman(execute=containers))):
+        registered = own.register(unnamed(tmp_path, "one"))
+        renamed = own.rename("one", "renamed")
+        own.stop()
+    with served(service(layout, Judge(), said)):
+        [again] = own.launches()
+        own.unregister("one")
+    assert registered.container == first
+    assert renamed.container == second
+    assert containers.asked == [
+        ["container", "exists", first],
+        ["rename", first, second],
+    ]
+    assert containers.running == [second]
+    assert again.container == second
+    assert f"one: its container {first} is {second}" in said
+
+
+def test_a_container_podman_hasnt_started_or_cant_rename_keeps_its_name(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    first = f"lup-{tmp_path.name}-one"
+    starting = Containers()
+    refusing = Containers(first, refusing=True)
+    with served(service(layout, Judge(), said, podman=Podman(execute=starting))):
+        own.register(unnamed(tmp_path, "one"))
+        before = own.rename("one", "renamed")
+        own.stop()
+    with served(service(layout, Judge(), said, podman=Podman(execute=refusing))):
+        after = own.rename("one", "again")
+        own.unregister("one")
+    assert (before.name, before.container) == ("renamed", first)
+    assert starting.asked == [["container", "exists", first]]
+    assert (after.name, after.container) == ("again", first)
+    assert refusing.asked[-1] == ["rename", first, f"lup-{tmp_path.name}-again"]
+    assert any(
+        each.startswith(f"one: its container keeps its name, {first}: podman couldn't")
+        for each in said
+    )
+
+
+def test_a_name_whose_container_another_launch_holds_is_refused_saying_whose(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    with served(service(layout, Judge(), said)):
+        own.register(unnamed(tmp_path, "one"))
+        own.register(unnamed(tmp_path, "two"))
+        own.rename("one", "x")
+        with pytest.raises(HostError, match="would name its container"):
+            own.rename("two", "one")
+        own.unregister("one")
+        own.unregister("two")
 
 
 def test_what_a_conversation_is_doing_outlasts_a_restart_of_the_service(

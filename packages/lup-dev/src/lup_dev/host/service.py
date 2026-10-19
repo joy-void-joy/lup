@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Self, override
 from filelock import FileLock, Timeout
 from pydantic import Field, JsonValue, ValidationError, model_validator
 
+from lup.rooms.engine import ContainerError, Podman
 from lup.tools.serving import Answer, serve
 from lup.tools.tool import Accepted, AgentTool, ToolSpec, lup_tool
 from lup.tools.tool import Refused as Rejected
@@ -66,7 +67,7 @@ from lup_dev.host.courier import (
     Spawns,
     Telling,
 )
-from lup_dev.host.names import Names, claimed, held, shaped, taken
+from lup_dev.host.names import Names, claimed, container_name, held, shaped, taken
 from lup_dev.host.protocol import (
     Activity,
     Done,
@@ -455,6 +456,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's,
     returning those it rewrote; none leaves them as the launch wrote them."""
+    podman: Podman | None = None
+    """Renames a launch's container with it; none leaves each as it was named."""
     changes: Changes
     """Told once each hook is answered, and each room's request."""
     clock: Clock
@@ -466,7 +469,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     async def open(self, registering: Register) -> Register:
         """Serve a launch: its name, its directory, its sockets inside, its record; and return it as it stands, named.
 
-        Its name is the one it asks, made unique among those served (`claimed`).
+        Its name is the one it asks, made unique among those served (`claimed`),
+        and its container is named after it (`container_name`), unless it names
+        its own, as a record served again does.
         A launch served already, running a runtime the answerer doesn't know,
         whose judge isn't there, or asking exactly a name another holds, is
         refused. A directory left by a service before
@@ -478,7 +483,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             message = f"a launch with the id `{registering.launch}` is served already"
             raise HostError(message)
         others = [served.launch for served in self.served.values()]
-        request = registering.model_copy(update={"name": claimed(registering, others)})
+        name = claimed(registering, others)
+        container = registering.container or container_name(
+            registering.repository, name
+        )
+        request = registering.model_copy(update={"name": name, "container": container})
         known = self.answerer.runtimes()
         if request.runtime not in known:
             message = (
@@ -553,31 +562,62 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         )
         return request
 
-    def renamed(self, launch: str, name: str) -> Register:
-        """Rename launch `launch`, its record and its session's kept name with it, and return it as it stands.
+    async def renamed(self, launch: str, name: str) -> Register:
+        """Rename launch `launch`, its record, its session's kept name and its container with it, and return it as it stands.
 
         Raise `HostError` where no launch is served by that id, or another holds
-        the name, saying which.
+        the name or the container it would give, saying which.
         """
         served = self.served.get(launch)
         if served is None:
             message = f"no launch served is `{launch}`"
             raise HostError(message)
         others = [each.launch for each in self.served.values()]
-        holder = held(name, others, launch)
+        holder = held(name, others, served.launch)
         if holder is not None:
-            raise HostError(taken(holder))
+            raise HostError(taken(holder, name))
         before = served.launch.name
-        named = served.launch.model_copy(update={"name": name})
-        self.served[launch] = served.model_copy(update={"launch": named})
-        self.layout.record(launch).write_text(named.model_dump_json(indent=2))
+        self.recorded(served.launch.model_copy(update={"name": name}))
         session = served.conversations.session
         if session is not None:
             self.names.keep(session, name)
         self.say(f"{launch}: renamed from `{before}` to `{name}`")
-        return named
+        await self.moved(served.launch, container_name(served.launch.repository, name))
+        return self.served[launch].launch
 
-    def started(self, launch: str, session: str, title: str | None) -> str:
+    async def moved(self, launch: Register, container: str) -> None:
+        """Rename `launch`'s container to `container` where podman has it, and record its name; otherwise it keeps its own.
+
+        Where podman doesn't have it, the launch's room hasn't started yet, and
+        its launcher runs it by the name recorded, or it's gone. Where podman
+        can't rename it, that's said. The launch is read again once podman is
+        done, since it may have been renamed again, or ended, meanwhile.
+        """
+        podman = self.podman
+        before = launch.container
+        if podman is None or before is None or before == container:
+            return
+        try:
+            if not await asyncio.to_thread(podman.exists, before):
+                return
+            await asyncio.to_thread(podman.rename, before, container)
+        except ContainerError as failed:
+            self.say(
+                f"{launch.launch}: its container keeps its name, {before}: {failed}"
+            )
+            return
+        served = self.served.get(launch.launch)
+        if served is not None:
+            self.recorded(served.launch.model_copy(update={"container": container}))
+        self.say(f"{launch.launch}: its container {before} is {container}")
+
+    def recorded(self, launch: Register) -> None:
+        """Keep `launch` as it stands, served and in its record."""
+        served = self.served[launch.launch]
+        self.served[launch.launch] = served.model_copy(update={"launch": launch})
+        self.layout.record(launch.launch).write_text(launch.model_dump_json(indent=2))
+
+    async def started(self, launch: str, session: str, title: str | None) -> str:
         """Name launch `launch` as its session `session` starts, and return its name.
 
         A name the runtime gives the session (`title`, as the operator renamed it
@@ -592,11 +632,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         wanted = [
             each
             for each in [given, self.names.last(session)]
-            if each is not None and held(each, others, launch) is None
+            if each is not None and held(each, others, current) is None
         ]
         name = next(iter(wanted), current.name or "")
         if name != current.name:
-            self.renamed(launch, name)
+            await self.renamed(launch, name)
         self.names.keep(session, name)
         return name
 
@@ -734,7 +774,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         answer = await self.judgement(request, payload) if heard.judged else ""
         starting = heard.event == "session-started" and heard.agent is None
         name = (
-            self.started(request.launch, heard.session, heard.title)
+            await self.started(request.launch, heard.session, heard.title)
             if starting
             else None
         )
@@ -1083,7 +1123,7 @@ class Namer(Model, arbitrary_types_allowed=True):
                     "your runtime gave you at your spawn, which your parent's own "
                     "tools use, stays as it was."
                 )
-            named = self.launches.renamed(self.launch, wanted)
+            named = await self.launches.renamed(self.launch, wanted)
         except (HostError, ValueError) as refused:
             return f"Not renamed: {refused}"
         return f"This session is `{named.name}`."
@@ -1136,6 +1176,7 @@ class Registering(Model, Handler[Register]):
         return Registered(
             directory=self.launches.layout.launch(served.launch).directory,
             name=served.name or "",
+            container=served.container or "",
         )
 
 
@@ -1150,7 +1191,7 @@ class Renaming(Model, Handler[Rename]):
 
     @override
     async def answer(self, request: Rename) -> Reply:
-        return Renamed(launch=self.launches.renamed(request.launch, request.name))
+        return Renamed(launch=await self.launches.renamed(request.launch, request.name))
 
 
 class HoldingSetting(Model, Handler[SetHolding]):
@@ -1285,6 +1326,9 @@ class HostService(Model, arbitrary_types_allowed=True):
     the service serves it again, returning those it rewrote: git's remote
     helper and lup's MCP bridge (`cli.py`), so a restart on an approved copy
     reaches running rooms. None leaves them as the launch wrote them."""
+    podman: Podman | None = None
+    """Renames each launch's container with it, after its repository and its new
+    name (`container_name`); none leaves each as it was named, as in tests."""
     changes: Changes = Field(default_factory=Changes)
     """Told wherever what the service holds may have changed, so each watch
     answers its request again: the service's own sockets tell it, and so does
@@ -1365,6 +1409,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             names=Names(path=self.layout.names),
             spawns=self.spawns,
             refresh=self.refresh,
+            podman=self.podman,
             changes=self.changes,
             clock=self.clock,
         )

@@ -441,6 +441,7 @@ def host_serve(context: typer.Context) -> None:
         modules=Workers(layout=layout.host, say=typer.echo),
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
+        podman=Podman(),
         changes=changes,
         companions=[types, *([] if dashboard is None else [dashboard])],
     )
@@ -1164,7 +1165,7 @@ def swept(launcher: Launcher) -> None:
         except Held:
             continue
         try:
-            if launcher.podman.exists(each.container):
+            if each.container is None or launcher.podman.exists(each.container):
                 continue
             try:
                 launcher.host.unregister(each.launch)
@@ -1302,7 +1303,6 @@ def launched(
             worktree=worktree,
             repository=repository,
             judge=judge,
-            container=f"lup-{launch}",
             limits=declared.resolved.limits,
             github=github,
             name=name or branch_name(worktree),
@@ -1322,7 +1322,7 @@ def launched(
                     receives = receiving(launcher.podman, own)
                     walled = room.model_copy(
                         update={
-                            "name": registered.container,
+                            "name": served.container,
                             "mounts": [
                                 *room.mounts,
                                 *git.mounts,
