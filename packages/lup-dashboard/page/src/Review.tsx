@@ -25,6 +25,7 @@ import {
     blockAt,
     blocksOf,
     codeFrom,
+    flag,
     foldKey,
     fresh,
     groupAt,
@@ -58,7 +59,7 @@ interface Props {
     change: (draft: Draft) => void;
     /** Name a group: the agent that sent its items, or the one it's of, and where. */
     banner: (head: Head) => string;
-    /** What the host has answered of each item beyond its own text: its context, and each file an approval or a held change changes. */
+    /** What the host has answered of each item beyond its own text: its context, and each file it changes, an approval's, a held change's or a flagged write's. */
     around: Around;
     send: () => void;
     approve: (number: number, approved: boolean) => void;
@@ -172,6 +173,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
             "review-header",
             fresh(region.item, reviewed) ? "is-new" : "",
             news(region.item) ? "is-news" : "",
+            flag(region.item) ? "is-flag" : "",
             (draft.done ?? []).includes(number) ? "is-done" : "",
             (draft.parked ?? []).includes(number) ? "is-parked" : "",
         ].join(" ");
@@ -214,7 +216,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
     return builder.finish();
 }
 
-/** Say what an item is in its header: a message by its kind, or as a turn's end; a held change, a stop by choice, or the reason's own name. */
+/** Say what an item is in its header: a message by its kind, or as a turn's end; a held change, a stop by choice, a write that landed flagged, with how many writes it gathers, or the reason's own name. */
 function what(item: Item): string {
     const reason = item.reason;
     switch (reason.reason) {
@@ -224,6 +226,8 @@ function what(item: Item): string {
             return "held change";
         case "stop":
             return "stopped";
+        case "flagged":
+            return reason.writes > 1 ? `landed, flagged · ${reason.writes} writes` : "landed, flagged";
         default:
             return reason.reason;
     }

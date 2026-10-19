@@ -61,6 +61,7 @@ from lup_dev.inbox.store import (
     Decision,
     Done,
     Draft,
+    Flagged,
     Found,
     Friction,
     HeldChange,
@@ -289,7 +290,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def items(self) -> Items:
-        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, and another's last words of a turn; the operator last settled an item 3 minutes ago, so the four since are new."""
+        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn, a friction and how the work went, and two writes that landed flagged, the subagent's new module gathering three; the operator last settled an item 3 minutes ago, so those since are new."""
         return Items(
             items=[
                 each
@@ -417,6 +418,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             (53, problem, adlib, "main", 2),
         ]
         dev = lup / "tree" / "dev"
+        reader = Path("packages/lup/src/lup/transcripts/reader.py")
+        clock = Path("packages/lup-dev/src/lup_dev/clock.py")
         settled = [
             Item(
                 number=44,
@@ -559,6 +562,41 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 call="call-58",
                 made=self.ago(1.4),
             ),
+            Item(
+                number=59,
+                reason=Flagged(
+                    text=f"{reader} landed, flagged for the operator's review.",
+                    summary=(
+                        f"{reader}: {dev / reader} is a new production file\n"
+                        f"{reader}: {dev / reader} adds the class `Turn`\n"
+                        f"{reader}: {dev / reader} adds the class `Reader`"
+                    ),
+                    worktree=dev,
+                    path=reader,
+                    writes=3,
+                ),
+                sender=parser,
+                recipient=Operator(),
+                worktree=dev,
+                call="call-59",
+                made=self.ago(6),
+            ),
+            Item(
+                number=60,
+                reason=Flagged(
+                    text=f"{clock} landed, flagged for the operator's review.",
+                    summary=(
+                        f"{clock}: {dev / clock} changes the signature of `Clock.sleep`"
+                    ),
+                    worktree=dev,
+                    path=clock,
+                ),
+                sender=session,
+                recipient=Operator(),
+                worktree=dev,
+                call="call-60",
+                made=self.ago(2.5),
+            ),
             *self.sent,
         ]
 
@@ -632,6 +670,24 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 operator("Keep going on the guidance rewrite.", 30),
                 agent("The voice section is done, and the gate passes.", 1.6),
                 called("mcp__lup__how_it_went", 1.4, "call-58"),
+            ],
+            59: [
+                operator(
+                    "Build the transcript reader, both runtimes. Ask me about the "
+                    "shape before you build on it.",
+                    9,
+                ),
+                agent(
+                    "A module of its own for the reader, with a model per turn.", 6.5
+                ),
+                called("Write", 6, "call-59"),
+                called("Edit", 5.5),
+                called("Edit", 5),
+            ],
+            60: [
+                operator("Let the tests say why they wait.", 4),
+                agent("The clock's `sleep` takes the reason.", 2.7),
+                called("Edit", 2.5, "call-60"),
             ],
         }
         entries = moments.get(number)
@@ -977,6 +1033,55 @@ def turns(path: Path) -> list[Entry]:
 '''
 
 
+READER = '''"""Reading a runtime's records of its sessions, a line at a time."""
+
+import json
+from pathlib import Path
+
+from pydantic import BaseModel
+
+
+class Turn(BaseModel):
+    """One step of a session: who spoke, and what they said."""
+
+    by: str
+    text: str
+
+
+class Reader(BaseModel):
+    """Reads one session's record."""
+
+    path: Path
+
+    def turns(self) -> list[Turn]:
+        """Read each step of the record, an object a line."""
+        lines = self.path.read_text().split("\\n")
+        return [Turn.model_validate(json.loads(line)) for line in lines if line]
+'''
+
+CLOCK_HEAD = '''"""Time, through one seam, so tests drive it."""
+
+from abc import ABC, abstractmethod
+from datetime import datetime
+
+
+class Clock(ABC):
+    """The time, and waiting."""
+
+    @abstractmethod
+    def now(self) -> datetime:
+        """Return the time."""
+
+    @abstractmethod
+'''
+CLOCK_BEFORE = '''    def sleep(self, seconds: float) -> None:
+        """Wait `seconds`."""
+'''
+CLOCK_AFTER = '''    def sleep(self, seconds: float, *, why: str = "") -> None:
+        """Wait `seconds`, for `why`, which a test's clock says."""
+'''
+
+
 def text(*parts: str) -> Text:
     """Return a stand-in file's text, made of `parts`."""
     return Text(text="".join(parts))
@@ -988,7 +1093,7 @@ def line(content: Text, written: str) -> int:
 
 
 def files(number: int, *, typed: bool = True) -> Files | Refused:
-    """Return the stand-in files of the approval (54) and the held change (55): Python, TypeScript, TOML, Markdown and JSON, changed, created, and one binary; each with a stand-in of the judge's reading of it, two of the approval's automatic, the rest open for what they ask, a production change, or a finding told, which only the approval's reading with types, once `typed`, holds."""
+    """Return the stand-in files of the approval (54), the held change (55) and the flagged writes (59, 60): Python, TypeScript, TOML, Markdown and JSON, changed, created, and one binary; each with a stand-in of the judge's reading of it, two of the approval's automatic, the rest open for what they ask, a production change, or a finding told, which only the approval's reading with types, once `typed`, holds; a new module's public names and a signature changed, flagged."""
     created = Reading(role="production", asks=[Ask(name="new-file", taken="flagged")])
     match number:
         case 54:
@@ -1124,6 +1229,76 @@ def files(number: int, *, typed: bool = True) -> Files | Refused:
                             ],
                         ),
                     ),
+                ],
+            )
+        case 59:
+            reader = text(READER)
+            split = line(reader, '        lines = self.path.read_text().split("\\n")')
+            return Files(
+                number=number,
+                files=[
+                    ChangedFile(
+                        path=Path("packages/lup/src/lup/transcripts/reader.py"),
+                        before=None,
+                        after=reader,
+                        reading=Reading(
+                            role="production",
+                            asks=[
+                                Ask(name="new-file", taken="flagged"),
+                                *(
+                                    Ask(
+                                        name="public-api",
+                                        taken="flagged",
+                                        line=line(reader, f"class {name}(BaseModel):"),
+                                        api=ApiChanged(kind="class-added", name=name),
+                                    )
+                                    for name in ["Turn", "Reader"]
+                                ),
+                            ],
+                            findings=[
+                                Found(
+                                    rule="string-split",
+                                    message=(
+                                        "`.split` takes a record apart by hand. "
+                                        "Splitting structured text by hand matches "
+                                        "the inputs it was tried on, and fails "
+                                        "quietly on the rest."
+                                    ),
+                                    start=split,
+                                    end=split,
+                                    taken="told",
+                                )
+                            ],
+                        ),
+                    )
+                ],
+            )
+        case 60:
+            clock = text(CLOCK_HEAD, CLOCK_AFTER)
+            return Files(
+                number=number,
+                files=[
+                    ChangedFile(
+                        path=Path("packages/lup-dev/src/lup_dev/clock.py"),
+                        before=text(CLOCK_HEAD, CLOCK_BEFORE),
+                        after=clock,
+                        reading=Reading(
+                            role="production",
+                            asks=[
+                                Ask(
+                                    name="public-api",
+                                    taken="flagged",
+                                    line=line(
+                                        clock,
+                                        '    def sleep(self, seconds: float, *, why: str = "") -> None:',
+                                    ),
+                                    api=ApiChanged(
+                                        kind="signature-changed", name="Clock.sleep"
+                                    ),
+                                )
+                            ],
+                        ),
+                    )
                 ],
             )
         case _:

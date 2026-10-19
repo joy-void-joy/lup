@@ -18,6 +18,7 @@ import { Palette } from "./Palette";
 import { Review } from "./Review";
 import {
     answer,
+    changing,
     covered,
     EMPTY,
     messages,
@@ -52,7 +53,8 @@ export function App() {
     const [files, setFiles] = useState<Map<number, Answered<ChangedFile[]>>>(new Map());
     const around = useMemo(() => ({ contexts, files }), [contexts, files]);
     // The items whose context, and whose files, were asked for, so each is asked once: an approval's files once
-    // more when the judge has read their types (`typing`), each asking keyed by its number and whether they were.
+    // more when the judge has read their types (`typing`), a flagged write's as another joins it (`writes`), each
+    // asking keyed by its number and how far along it was.
     const asked = useRef({ contexts: new Set<number>(), files: new Set<string>() });
     // Each item's latest asking for its files, whose answer alone is shown.
     const latest = useRef(new Map<number, string>());
@@ -230,8 +232,9 @@ export function App() {
     }, []);
 
     useEffect(() => {
-        // Each item's context, where an agent's call made it, and each file an approval or a held change
-        // changes, asked once it's in the inbox; an approval's again once the judge has read their types.
+        // Each item's context, where an agent's call made it, and each file an item changes (`changing`), asked
+        // once it's in the inbox; an approval's again once the judge has read their types, a flagged write's
+        // again as a later one joins it.
         for (const item of waiting) {
             const number = item.number;
             if (item.call != null && !asked.current.contexts.has(number)) {
@@ -240,9 +243,10 @@ export function App() {
                     answer.kind === "inbox-context" ? answer : null,
                 ).then((context) => setContexts((before) => new Map(before).set(number, context)));
             }
-            const changing = item.reason.reason === "approval" || item.reason.reason === "held";
-            const reading = `${number}:${item.reason.reason === "approval" && item.reason.typing}`;
-            if (changing && !asked.current.files.has(reading)) {
+            const reason = item.reason;
+            const stage = reason.reason === "approval" ? reason.typing : reason.reason === "flagged" ? reason.writes : 0;
+            const reading = `${number}:${stage}`;
+            if (changing(item) && !asked.current.files.has(reading)) {
                 asked.current.files.add(reading);
                 latest.current.set(number, reading);
                 void answered({ kind: "inbox-show-files", number }, (answer) =>
