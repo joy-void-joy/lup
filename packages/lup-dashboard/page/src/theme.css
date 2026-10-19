@@ -83,8 +83,10 @@ textarea {
     color: var(--warn);
 }
 
+/* Selected text in a buffer keeps its own colour: a selection's colour is inherited from its parent's selection, the
+   page's black, which hid a comment's text where it was selected. */
 .buffer .cm-content ::selection {
-    color: inherit;
+    color: currentColor;
 }
 
 /* Every control shows where the keyboard is. */
@@ -449,6 +451,14 @@ kbd {
 .buffer .cm-editor.cm-focused .cm-selectionBackground,
 .buffer .cm-selectionLayer .cm-selectionBackground {
     background: var(--selection) !important;
+}
+
+/* The selection is drawn over the lines, lightening what's under it, so it shows on lines with a background of their
+   own, a comment's and a changed file's, which hide what's drawn under them. */
+.buffer .cm-selectionLayer {
+    z-index: 1 !important;
+    mix-blend-mode: lighten;
+    pointer-events: none;
 }
 
 .buffer .cm-panels {

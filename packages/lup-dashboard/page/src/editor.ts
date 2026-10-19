@@ -36,7 +36,7 @@ import { saying, type Block, type Folding, type Span } from "./comments";
 
 /** What the vim keys and the editor's own events do, as a view stands: replaced at each render. */
 interface Actions {
-    comment: (cm: CodeMirrorV, on: "line" | "selection" | "whole") => void;
+    comment: (cm: CodeMirrorV, on: "line" | "whole") => void;
     entered: (cm: CodeMirrorV) => void;
     left: () => void;
     finish: (cm: CodeMirrorV) => void;
@@ -147,7 +147,6 @@ function mapKeys(): void {
         });
     action("lupCommentLine", (actions, cm) => actions.comment(cm, "line"));
     action("lupCommentWhole", (actions, cm) => actions.comment(cm, "whole"));
-    action("lupCommentSelection", (actions, cm) => actions.comment(cm, "selection"));
     action("lupDone", (actions) => actions.toggle("done"));
     action("lupLater", (actions) => actions.toggle("parked"));
     action("lupNext", (actions) => actions.move(true));
@@ -171,8 +170,6 @@ function mapKeys(): void {
     const map = (keys: string, name: string, context: string) =>
         Vim.mapCommand(keys, "action", name, {}, { context });
     map("o", "lupCommentLine", "normal");
-    map("c", "lupCommentSelection", "visual");
-    map("s", "lupCommentSelection", "visual");
     map("<Space>c", "lupCommentWhole", "normal");
     map("<Space>d", "lupDone", "normal");
     map("<Space>z", "lupLater", "normal");
@@ -695,16 +692,6 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             comment: (cm, on) => {
                 const editor = view.current;
                 if (editor === null) {
-                    return;
-                }
-                if (on === "selection") {
-                    const from = cm.indexFromPos(cm.getCursor("start"));
-                    const to = cm.indexFromPos(cm.getCursor("end"));
-                    Vim.exitVisualMode(cm);
-                    const comment = own.quoted(from, to);
-                    if (comment !== undefined) {
-                        added(comment);
-                    }
                     return;
                 }
                 if (on === "line" && blockAt(head()) !== undefined) {
