@@ -316,6 +316,8 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
         54,
         55,
         56,
+        57,
+        58,
     ]
     assert other.json() == {
         "kind": "refused",
@@ -338,7 +340,7 @@ def test_the_demo_lists_a_conversations_items_a_message_sent_from_the_page_among
     unsent = served.post("/api/ask", json=elsewhere.model_dump(), headers=bearing())
     found = Exchanged.model_validate(listed.json())
     assert sent.json()["item"]["number"] == 101
-    assert [each.item.number for each in found.sent] == [47, 51]
+    assert [each.item.number for each in found.sent] == [47, 51, 57]
     assert found.sent[0].item.call == "call-47"
     assert [(each.item.number, each.text) for each in found.received] == [
         (48, "Good: keep the two readers apart."),

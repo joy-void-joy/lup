@@ -5,6 +5,7 @@ import {
     answer,
     arrival,
     blockAt,
+    body,
     calls,
     covered,
     foldAt,
@@ -14,6 +15,7 @@ import {
     isLetter,
     laid,
     messages,
+    news,
     opened,
     plain,
     pruned,
@@ -136,6 +138,62 @@ describe("laid", () => {
         ]);
         const two = laid([QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
         expect(two.text.startsWith("━━ s2 ━━")).toBe(true);
+    });
+
+    it("ranks news below what's to answer: after it in a group, and a group of news alone after the others", () => {
+        const friction: Item = {
+            ...NOTE,
+            number: 60,
+            reason: { reason: "friction", got_in_the_way: "`ls` failed", trying: "", would_change: "" },
+            sender: from("s1", "a1"),
+        };
+        const ended: Item = {
+            ...NOTE,
+            number: 61,
+            reason: { reason: "message", ending: true, kind: "note", text: "Done." },
+            sender: from("s3"),
+        };
+        const out = laid([friction, QUESTION, NOTE, ended], [], banner, header, EMPTY, NOTHING);
+        expect(out.text.split("\n").filter((line) => line.startsWith("━━") || line.startsWith("──"))).toEqual([
+            "━━ s1 ━━",
+            "── #51 ──",
+            "── #60 ──",
+            "━━ s2 ━━",
+            "── #52 ──",
+            "━━ s3 ━━",
+            "── #61 ──",
+        ]);
+        expect(news(friction)).toBe(true);
+        expect(news(ended)).toBe(true);
+        expect([news(QUESTION), news(NOTE), news(APPROVAL)]).toEqual([false, false, false]);
+    });
+
+    it("shows a friction, how the work went and a stop by their parts, each labelled where it says something", () => {
+        const friction: Item = {
+            ...NOTE,
+            number: 62,
+            reason: {
+                reason: "friction",
+                got_in_the_way: "`uv run lup-dev check` printed: engine stale",
+                trying: "run the gate",
+                would_change: "",
+            },
+        };
+        const went: Item = {
+            ...NOTE,
+            number: 63,
+            reason: { reason: "how it went", got_in_the_way: "", smooth: "The brief.", would_change: "", felt: "Good." },
+        };
+        const quiet: Item = {
+            ...NOTE,
+            number: 64,
+            reason: { reason: "how it went", got_in_the_way: "", smooth: "", would_change: "", felt: "" },
+        };
+        const stopped: Item = { ...NOTE, number: 65, reason: { reason: "stop", why: "Nothing more is worth doing." } };
+        expect(body(friction)).toBe("`uv run lup-dev check` printed: engine stale\nTrying: run the gate");
+        expect(body(went)).toBe("Smooth: The brief.\nFelt: Good.");
+        expect(body(quiet)).toBe("Nothing notable.");
+        expect(body(stopped)).toBe("Nothing more is worth doing.");
     });
 
     it("lays each item under its header in its sender's group, the parked ones last, each comment under its line", () => {
@@ -354,10 +412,10 @@ describe("what folds under an item", () => {
             anchor: 1,
             entries: [
                 { kind: "said", by: "agent", text: "Starting.", at: "2026-10-17T10:00:00Z" },
-                { kind: "called", tool: "report", id: "call-51" },
+                { kind: "called", tool: "blocked", id: "call-51" },
             ],
         };
-        const untimed: Context = { ...agents, entries: [{ kind: "called", tool: "report", id: "call-51" }], anchor: 0 };
+        const untimed: Context = { ...agents, entries: [{ kind: "called", tool: "blocked", id: "call-51" }], anchor: 0 };
         const summary = (context: Context) => {
             const out = laid([QUESTION], [], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map() });
             const [fold] = out.regions[0]!.folds;

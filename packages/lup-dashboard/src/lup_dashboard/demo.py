@@ -62,7 +62,9 @@ from lup_dev.inbox.store import (
     Done,
     Draft,
     Found,
+    Friction,
     HeldChange,
+    HowItWent,
     Item,
     Message,
     Operator,
@@ -528,6 +530,35 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 worktree=lup / "tree" / "guidance-voice",
                 made=self.ago(1.5),
             ),
+            Item(
+                number=57,
+                reason=Friction(
+                    got_in_the_way=(
+                        "`uv run lup-dev check` rebuilt the engine for four minutes "
+                        "before the tests ran, printing nothing until then."
+                    ),
+                    trying="run the gate on the reader",
+                    would_change="say the rebuild, and how long it takes, first",
+                ),
+                sender=parser,
+                recipient=Operator(),
+                worktree=dev,
+                call="call-57",
+                made=self.ago(3),
+            ),
+            Item(
+                number=58,
+                reason=HowItWent(
+                    got_in_the_way="The judge repeated the file's findings after each edit.",
+                    smooth="The brief named every file I needed.",
+                    felt="Steady.",
+                ),
+                sender=voice,
+                recipient=Operator(),
+                worktree=lup / "tree" / "guidance-voice",
+                call="call-58",
+                made=self.ago(1.4),
+            ),
             *self.sent,
         ]
 
@@ -579,7 +610,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 called("exec_command", 9),
                 called("exec_command", 3),
                 agent("ffmpeg stops at frame 412, on the source clip.", 2.2),
-                called("report", 2, "call-53"),
+                called("blocked", 2, "call-53"),
             ],
             55: [
                 operator(
@@ -590,6 +621,17 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 agent("Adding the language packages to the page.", 1),
                 called("Bash", 0.8),
                 called("Edit", 0.5, "call-55"),
+            ],
+            57: [
+                agent("Running the gate on the reader.", 7.5),
+                called("Bash", 7.4),
+                called("mcp__lup__friction", 3, "call-57"),
+                agent("The tests pass; on to the second runtime's records.", 2.9),
+            ],
+            58: [
+                operator("Keep going on the guidance rewrite.", 30),
+                agent("The voice section is done, and the gate passes.", 1.6),
+                called("mcp__lup__how_it_went", 1.4, "call-58"),
             ],
         }
         entries = moments.get(number)

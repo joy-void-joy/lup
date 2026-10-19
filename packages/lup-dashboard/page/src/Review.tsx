@@ -30,6 +30,7 @@ import {
     groupAt,
     isLetter,
     laid,
+    news,
     opened,
     quoted,
     regionAt,
@@ -170,7 +171,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
         const states = [
             "review-header",
             fresh(region.item, reviewed) ? "is-new" : "",
-            ending(region.item) ? "is-ending" : "",
+            news(region.item) ? "is-news" : "",
             (draft.done ?? []).includes(number) ? "is-done" : "",
             (draft.parked ?? []).includes(number) ? "is-parked" : "",
         ].join(" ");
@@ -213,9 +214,19 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
     return builder.finish();
 }
 
-/** Whether an item is a turn's last words, which lup made a note: read and marked done, rather than answered. */
-function ending(item: Item): boolean {
-    return item.reason.reason === "message" && item.reason.ending === true;
+/** Say what an item is in its header: a message by its kind, or as a turn's end; a held change, a stop by choice, or the reason's own name. */
+function what(item: Item): string {
+    const reason = item.reason;
+    switch (reason.reason) {
+        case "message":
+            return reason.ending === true ? "turn ended" : reason.kind;
+        case "held":
+            return "held change";
+        case "stop":
+            return "stopped";
+        default:
+            return reason.reason;
+    }
 }
 
 function when(made: string): string {
@@ -274,19 +285,11 @@ export function Review({
                 agents,
                 (head, later) => `━━ ${banner(head)}${later ? " · later" : ""} ━━`,
                 (item, later) => {
-                    const what =
-                        item.reason.reason === "message"
-                            ? item.reason.ending === true
-                                ? "turn ended"
-                                : item.reason.kind
-                            : item.reason.reason === "held"
-                              ? "held change"
-                              : item.reason.reason;
                     const files = around.files.get(item.number);
                     const counted = files !== undefined && "shown" in files ? tally(files.shown) : "";
                     const typing = item.reason.reason === "approval" && item.reason.typing;
                     const told = [
-                        `#${item.number} ${what}`,
+                        `#${item.number} ${what(item)}`,
                         ...(counted === "" ? [] : [counted]),
                         ...(typing ? ["reading types"] : []),
                         ...(fresh(item, reviewed) ? ["new"] : []),

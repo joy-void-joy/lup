@@ -467,8 +467,8 @@ kbd {
     box-shadow: inset 3px 0 0 var(--warn);
 }
 
-/* A turn's last words, made a note: news, not a question, so it doesn't call like one. */
-.review-header.is-ending {
+/* News, not a question, so it doesn't call like one: a turn's last words made a note, a friction, how the work went, a stop by choice. */
+.review-header.is-news {
     color: var(--info);
     font-weight: 400;
 }

@@ -134,7 +134,7 @@ function setIn(text: string): string[] {
     return kept(text, true).map((line) => (line === "" ? "" : `${ITEM_INDENT}${line}`));
 }
 
-/** Say what an item is, in a word or two: a message's kind, a question, an answer, a review, a held change, an approval. */
+/** Say what an item is, in a word or two: a message's kind, a question, an answer, a review, a held change, an approval, a friction, how it went, a stop. */
 function what(item: Item): string {
     const reason = item.reason;
     switch (reason.reason) {
@@ -142,6 +142,8 @@ function what(item: Item): string {
             return reason.kind;
         case "held":
             return "held change";
+        case "stop":
+            return "stopped";
         default:
             return reason.reason;
     }
