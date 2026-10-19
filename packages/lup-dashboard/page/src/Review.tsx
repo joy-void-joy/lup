@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./code";
 import { changes, moved, type Block, type Change } from "./comments";
 import { folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import type { ReviewPlace } from "./keys";
 import {
     aboutAt,
     arrival,
@@ -33,6 +34,7 @@ import {
     laid,
     news,
     opened,
+    placeAt,
     quoted,
     regionAt,
     shownAt,
@@ -72,6 +74,10 @@ interface Props {
     shown: boolean;
     /** Give the keyboard to the agents' tree. */
     tree: () => void;
+    /** Told where the cursor is, outside insert mode, so the line of keys says what applies there. */
+    placed: (place: Exclude<ReviewPlace, "insert">) => void;
+    /** Open the list of every key. */
+    list: () => void;
     /** When the operator last settled an item of theirs: what came after is new to them. */
     reviewed: string | null;
     /** The time, to the minute, which each item's wait is told from. */
@@ -284,6 +290,8 @@ export function Review({
     epoch,
     shown,
     tree,
+    placed,
+    list,
     reviewed,
     now,
 }: Props) {
@@ -339,6 +347,8 @@ export function Review({
         epoch,
         shownNow: shown,
         tree,
+        moved: (head) => placed(placeAt(laidOut, head)),
+        list,
     });
     const { view, landing, unfolded } = editor;
     const before = useRef<Laid | null>(null);

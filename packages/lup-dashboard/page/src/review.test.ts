@@ -19,6 +19,7 @@ import {
     messages,
     news,
     opened,
+    placeAt,
     plain,
     pruned,
     quoted,
@@ -289,6 +290,21 @@ describe("laid", () => {
         const head = out.text.indexOf("── #51");
         expect(quoted(out, head + 3, out.text.indexOf("\n", head))).toBeUndefined();
         expect(opened(out, head + 3)).toEqual({ item: 51, quote: null, text: "" });
+    });
+
+    it("says where the cursor is, for the line of keys", () => {
+        const draft: Draft = { ...EMPTY, comments: [{ item: 51, quote: null, text: "Fine." }] };
+        const files: Around = { contexts: new Map([[51, { shown: CONTEXT }]]), files: new Map([[54, { shown: [CHANGED] }]]) };
+        const out = laid([QUESTION, APPROVAL], [from("s3")], banner, header, draft, files);
+        const at = (text: string) => out.text.indexOf(text);
+        expect(placeAt(out, at("Fine."))).toBe("written");
+        expect(placeAt(out, at("━━ s1"))).toBe("banner");
+        expect(placeAt(out, at("━━ lup"))).toBe("approvals");
+        expect(placeAt(out, at("Keep the cache"))).toBe("item");
+        expect(placeAt(out, at("Approve?"))).toBe("change");
+        expect(placeAt(out, at("a.py · changed"))).toBe("file");
+        expect(placeAt(out, at("context ·"))).toBe("aside");
+        expect(placeAt(laid([], [], banner, header, EMPTY, NOTHING), 0)).toBe("nothing");
     });
 
     it("shows an approval's diff without git's colours", () => {

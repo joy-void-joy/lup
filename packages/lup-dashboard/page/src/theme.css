@@ -556,15 +556,87 @@ kbd {
     resize: vertical;
 }
 
+/* The line of keys: where the cursor is, the keys that apply there, cut at the line's end where they don't fit, and
+   `?` at the end, always shown. One row. */
 .keys {
+    display: flex;
+    gap: 0 2ch;
     border-top: 1px solid var(--border);
     padding: 0 1ch;
+    white-space: nowrap;
+    color: var(--muted);
 }
 
-.keys kbd {
+.keys-shown {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.keys-shown > * + * {
+    margin-left: 2ch;
+}
+
+.keys-place {
+    color: var(--info);
+}
+
+.keys.inserting .keys-place {
+    color: var(--warn);
+    font-weight: 700;
+}
+
+.keys kbd,
+.keys-list kbd {
     border: 0;
     padding: 0;
     color: var(--fg);
+}
+
+/* The list of every key, `?`: in parts, each key beside what it does. */
+.keys-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgb(0 0 0 / 0.6);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 8vh;
+}
+
+.keys-list {
+    width: min(96ch, 94vw);
+    max-height: 84vh;
+    overflow: auto;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 0 2ch 1lh;
+}
+
+.keys-list [role="dialog"] {
+    outline: none;
+}
+
+.keys-list h2 {
+    font-size: inherit;
+    color: var(--info);
+    margin: 1lh 0 0;
+}
+
+.keys-list dl {
+    display: grid;
+    grid-template-columns: 9ch 1fr;
+    gap: 0 2ch;
+    margin: 0;
+}
+
+.keys-list dl > div {
+    display: contents;
+}
+
+.keys-list dd {
+    margin: 0;
 }
 
 /* What's under an item that isn't its own text: its context and an approval's

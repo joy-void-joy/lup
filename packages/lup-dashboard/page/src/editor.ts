@@ -15,7 +15,7 @@
 // closes the fold under the cursor, `zo` and `zc` open and close it, `zR` and
 // `zM` open and close them all, `zr` and `zm` those hiding a change alone (a file
 // folded whole, a run holding changed lines), unchanged context left as it is. Space `h`, or Space `w` `h`, goes to the agents'
-// tree. Each view says what else its keys do, lays its own text out and draws
+// tree; `?` opens the list of every key, in place of vim's search backward. Each view says what else its keys do, lays its own text out and draws
 // it, and may paint the lines in view as well, as the review paints a changed
 // file's (`Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`). A fold may be
 // inside another, as an item's text is inside what came before the operator's
@@ -48,6 +48,7 @@ interface Actions {
     approve: (approved: boolean) => void;
     back: () => void;
     tree: () => void;
+    list: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
     foldAll: (closing: boolean) => void;
     foldDiffs: (closing: boolean) => void;
@@ -194,6 +195,7 @@ function mapKeys(): void {
     action("lupDecline", (actions) => actions.approve(false));
     action("lupBack", (actions) => actions.back());
     action("lupTree", (actions) => actions.tree());
+    action("lupKeys", (actions) => actions.list());
     // Vim's own fold keys, which its CodeMirror mode leaves unmapped, on CodeMirror's folds.
     action("lupFoldToggle", (actions) => actions.fold("toggle"));
     action("lupFoldOpen", (actions) => actions.fold("open"));
@@ -215,6 +217,8 @@ function mapKeys(): void {
     map("<Space>r", "lupBack", "normal");
     map("<Space>h", "lupTree", "normal");
     map("<Space>wh", "lupTree", "normal");
+    // The list of every key, in place of vim's search backward, which `/` then `N` still does.
+    map("?", "lupKeys", "normal");
     map("za", "lupFoldToggle", "normal");
     map("zo", "lupFoldOpen", "normal");
     map("zc", "lupFoldClose", "normal");
@@ -526,12 +530,16 @@ interface Config<D, C> {
     change: (draft: D) => void;
     /** Told each time vim enters or leaves insert mode, so the page can say what the keys do in it. */
     inserting: (yes: boolean) => void;
+    /** Told where the cursor is each time it moves or the text changes, so the page can say what the keys do there. */
+    moved?: (head: number) => void;
     /** Changed each time the draft is replaced from outside, as when it's sent: what was done before can't be undone. */
     epoch: number;
     /** Whether the editor is shown: shown again, it takes the keyboard. */
     shownNow: boolean;
     /** Give the keyboard to the agents' tree. */
     tree: () => void;
+    /** Open the list of every key (`?`). */
+    list: () => void;
 }
 
 /** What a view's keys do with what it laid out. */
@@ -594,6 +602,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     latest.current = config.draft;
     const telling = useRef(config.inserting);
     telling.current = config.inserting;
+    const following = useRef(config.moved);
+    following.current = config.moved;
     // The drafts before each change, for `u`; those undone, for Ctrl+R; and whether the comment being
     // written has its step already, so it's undone whole.
     const past = useRef<D[]>([]);
@@ -639,6 +649,9 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                             actions?.folded(update.state);
                         }
                         const head = update.state.selection.main.head;
+                        if (update.docChanged || update.selectionSet) {
+                            following.current?.(head);
+                        }
                         if (update.docChanged) {
                             visited.current = visited.current.map((at) => update.changes.mapPos(at));
                         } else if (update.selectionSet) {
@@ -829,6 +842,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             approve: (approved) => own.approve?.(approved),
             back: () => own.back?.(),
             tree: config.tree,
+            list: config.list,
             fold: (how) => {
                 const editor = view.current;
                 const at = head();

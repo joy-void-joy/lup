@@ -26,6 +26,7 @@ import {
     type Span,
 } from "./comments";
 import type { components } from "./generated/api";
+import type { ReviewPlace } from "./keys";
 
 export { calls, type Block, type ChangedFile, type Line, type Span };
 
@@ -659,6 +660,29 @@ export function stranded(before: Laid, wrote: Written[], after: Laid, writes: Wr
     const region = regionAt(before, head);
     const gone = region !== undefined && !after.regions.some((each) => each.item.number === region.item.number);
     return gone ? banner : undefined;
+}
+
+/** Return where the cursor at `head` is, outside insert mode, for the line of keys: what it's on, by what the keys there do. */
+export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "insert"> {
+    if (laidOut.text === "") {
+        return "nothing";
+    }
+    if (blockAt(laidOut, head) !== undefined) {
+        return "written";
+    }
+    const group = groupAt(laidOut, head);
+    if (group !== undefined) {
+        return group.conversation === null ? "approvals" : "banner";
+    }
+    const region = regionAt(laidOut, head);
+    if (region === undefined || asideAt(region, head) !== undefined) {
+        return "aside";
+    }
+    if (codeAt(region, head) !== undefined) {
+        return "file";
+    }
+    const reason = region.item.reason.reason;
+    return reason === "approval" || reason === "held" ? "change" : "item";
 }
 
 /** Return every comment and message shown, as blocks of the editor's list of what's written. */

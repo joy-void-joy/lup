@@ -14,6 +14,8 @@ import { ask, type Asked, type Replied } from "./api";
 import { Conversation } from "./Conversation";
 import { Details } from "./Details";
 import { useNow, useWatched } from "./hooks";
+import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
+import { Keys } from "./Keys";
 import { Palette } from "./Palette";
 import { Review } from "./Review";
 import {
@@ -59,6 +61,10 @@ export function App() {
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
     const [inserting, setInserting] = useState(false);
+    // Where the review's cursor is, and whether the list of every key is open: what the line of keys says.
+    const [place, setPlace] = useState<Exclude<ReviewPlace, "insert">>("nothing");
+    const [listing, setListing] = useState(false);
+    const openList = useCallback(() => setListing(true), []);
     const [epoch, setEpoch] = useState(0);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
     const served = reply?.kind === "listed" ? launches(reply) : [];
@@ -437,6 +443,8 @@ export function App() {
                         epoch={epoch}
                         shown={selected === null}
                         tree={toTree}
+                        placed={setPlace}
+                        list={openList}
                         reviewed={inbox.reply?.kind === "inbox-items" ? (inbox.reply.reviewed ?? null) : null}
                         now={minute}
                     />
@@ -457,21 +465,13 @@ export function App() {
                             <span className="muted"> Later: {(draft.parked ?? []).map((each) => `#${each}`).join(", ")}.</span>
                         )}
                     </div>
-                    {inserting ? (
-                        <div className="keys inserting">
-                            -- INSERT -- writing a comment · <kbd>Ctrl</kbd> <kbd>Enter</kbd> ends it, back on what
-                            it's about · <kbd>Esc</kbd> ends it here · <kbd>Esc</kbd> <kbd>u</kbd> drops it
-                        </div>
-                    ) : (
-                        <div className="keys muted">
-                            comment: <kbd>␣c</kbd> item · <kbd>c</kbd>+motion passage · <kbd>o</kbd> line · <kbd>C</kbd> to its end ·{" "}
-                            <kbd>v</kbd>…<kbd>c</kbd> selection · <kbd>o</kbd> on a banner: message ·{" "}
-                            <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>␣d</kbd> read ·{" "}
-                            <kbd>␣z</kbd> later · <kbd>␣a</kbd>/<kbd>␣x</kbd> approve/decline · <kbd>za</kbd> fold ·{" "}
-                            <kbd>zr</kbd>/<kbd>zm</kbd> diffs · <kbd>zR</kbd>/<kbd>zM</kbd> all · <kbd>]]</kbd>/<kbd>[[</kbd> items ·{" "}
-                            <kbd>]c</kbd>/<kbd>[c</kbd> lines that matter · <kbd>␣h</kbd> agents
-                        </div>
-                    )}
+                    <Keys
+                        parts={REVIEW_KEYS}
+                        place={inserting ? "insert" : place}
+                        places={REVIEW_PLACES}
+                        open={listing}
+                        setOpen={setListing}
+                    />
                 </div>
             </main>
             <Palette
