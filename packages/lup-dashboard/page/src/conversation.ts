@@ -135,7 +135,7 @@ function setIn(text: string): string[] {
     return kept(text, true).map((line) => (line === "" ? "" : `${ITEM_INDENT}${line}`));
 }
 
-/** Say what an item is, in a word or two: a message's kind, a question, an answer, a review, a held change, an approval, a friction, how it went, a stop. */
+/** Say what an item is, in a word or two: a message's kind, a question, an answer, a review, a held change, an approval, a friction, how it went, a stop, a flagged write. */
 function what(item: Item): string {
     const reason = item.reason;
     switch (reason.reason) {
@@ -145,6 +145,8 @@ function what(item: Item): string {
             return "held change";
         case "stop":
             return "stopped";
+        case "flagged":
+            return "flagged write";
         default:
             return reason.reason;
     }
@@ -164,7 +166,11 @@ function answering(item: Item, received: Exchange[]): number[] {
     return [...new Set([...answered, ...found])].sort((a, b) => a - b);
 }
 
-/** Say where an item the conversation sent stands: withdrawn, decided, answered and by what, or waiting on whom; nothing once told. */
+/**
+ * Say where an item the conversation sent stands: withdrawn, decided, answered and by what, read, or waiting; nothing
+ * once told. One waiting for the operator is waiting on them where its kind's rank says so (`Item.rank`), as the review
+ * ranks it; news and a flagged write are unread.
+ */
 function standing(item: Item, received: Exchange[]): string | null {
     const state = item.state;
     switch (state.state) {
@@ -181,7 +187,10 @@ function standing(item: Item, received: Exchange[]): string | null {
     }
     switch (state.state) {
         case "waiting":
-            return item.recipient.party === "operator" ? "waiting on you" : "not told yet";
+            if (item.recipient.party !== "operator") {
+                return "not told yet";
+            }
+            return item.rank.name === "waiting on you" ? "waiting on you" : "unread";
         case "done":
             return "read";
         default:
@@ -216,7 +225,7 @@ function dotted(first: string, ...parts: (string | null)[]): string {
 
 /**
  * Return the items the conversation exchanged as it shows them, each in a line and its text folded under it: one it
- * sent, `→`, what it is, whom to and where it stands (answered and by what, read, waiting on you, withdrawn, decided);
+ * sent, `→`, what it is, whom to and where it stands (answered and by what, read, waiting on you, unread, withdrawn, decided);
  * one it was sent, `←`, what it is, for whom where it was passed on, and whether it's told yet. A message sent from
  * here is one of them, said to be from here and placed after the steps the conversation had then; one its item isn't
  * listed for yet is shown from what was sent. A turn's last words, which lup made a note, aren't: they're the agent's
