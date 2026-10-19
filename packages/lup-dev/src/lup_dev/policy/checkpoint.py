@@ -63,7 +63,7 @@ from lup_dev.git import Git
 from lup_dev.inbox import ends
 from lup_dev.inbox.store import ChangedFile
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, Layout
-from lup_dev.policy.flags import Flagging, Landed, flagged
+from lup_dev.policy.flags import Flagging, Landed, Put, flagged
 from lup_dev.policy.holds import Announcing, HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
 from lup_dev.policy.judge import Change, Judge, Judgement, RemovedNote
@@ -209,12 +209,26 @@ class Session(MutableModel):
     participants: list[str] = []
     """Conversations whose calls finished since the last checkpoint."""
     mail: list[Mail] = []
+    flagging: ByConversation[Path] = {}
+    """Files each conversation wrote flagged, whose item in the operator's
+    inbox may still gather its writes to them: a later write to one refreshes
+    that item, whatever it flags, until the inbox says none gathers them
+    (`policy/flags.py`). A write to any other file asks the inbox nothing."""
 
     def files(self, agent: str) -> list[Path]:
         """Return the files conversation `agent` touched, and those it watches."""
         return list(
             dict.fromkeys([*self.touched.get(agent, []), *self.watched.get(agent, [])])
         )
+
+    def flagged(self, agent: str, paths: list[Path]) -> None:
+        """Note that conversation `agent` wrote `paths` flagged, each in an item of the operator's that gathers its writes to it."""
+        self.flagging = kept_by(self.flagging, {path: [agent] for path in paths})
+
+    def unflagged(self, agent: str, paths: list[Path]) -> None:
+        """Forget `paths` of conversation `agent`'s, whose item the inbox says gathers its writes to them no more."""
+        kept = [path for path in self.flagging.get(agent, []) if path not in paths]
+        self.flagging = {**self.flagging, agent: kept}
 
 
 def kept_by(
@@ -1090,7 +1104,9 @@ def checkpoint(
     """Judge what changed since the accepted tree, act on it, and report; `call` is the call whose finish ran it, which a hold it makes is anchored to.
 
     What landed flagged, the conversation's writes and what a move brought, is
-    put before the operator once the store is released (`flagged`). Holds are
+    put before the operator once the store is released (`flagged`), with the
+    conversation's writes to a file an item of its may gather, which refresh
+    that item (`Session.flagging`). Holds are
     waited on then, settled, and the checkpoint runs again for what the
     operator approved.
     """
@@ -1148,6 +1164,7 @@ def checkpoint(
         deciding = [plan.path for plan in plans if plan.change and plan.decide]
         fated = fates(judgements, deciding)
         approved = session.approved
+        gathering = session.flagging.get(agent, [])
         landed = [
             Landed(
                 change=change,
@@ -1159,8 +1176,11 @@ def checkpoint(
             for change, judgement in zip(changes, judgements, strict=True)
             if judgement.path in deciding
             and judgement.outcome == "allow"
-            and judgement.flags
+            and (judgement.flags or judgement.path in gathering)
         ]
+        session.flagged(
+            agent, [each.change.path for each in landed if each.judgement.flags]
+        )
         held = [judgement.path for judgement in fated.held]
         hold = worktree.holds().unused() if held else None
         to = Attributed(worktree=root, session=key, tool="checkpoint")
@@ -1181,30 +1201,30 @@ def checkpoint(
         told = commits.told.then(Checked(notices=[notice] if notice else []))
         checked = remember(worktree, session, agent, acted, told=told, wrote=wrote)
     runtime = bench.runtime.name()
-    unsaid = [
-        *(
-            flagged(
-                services.flagging,
-                worktree.judge(services, approved),
-                runtime,
-                worktree.repository,
-                landed,
-            )
-            if landed
-            else []
-        ),
-        *(
-            flagged(
-                services.flagging,
-                worktree.judge(services, []),
-                runtime,
-                worktree.repository,
-                commits.flagged,
-            )
-            if commits.flagged
-            else []
-        ),
-    ]
+    wrote_flagged = (
+        flagged(
+            services.flagging,
+            worktree.judge(services, approved),
+            runtime,
+            worktree.repository,
+            landed,
+        )
+        if landed
+        else Put()
+    )
+    unflag(bench, worktree, key, agent, wrote_flagged.read)
+    commits_flagged = (
+        flagged(
+            services.flagging,
+            worktree.judge(services, []),
+            runtime,
+            worktree.repository,
+            commits.flagged,
+        )
+        if commits.flagged
+        else Put()
+    )
+    unsaid = [*wrote_flagged.unsaid, *commits_flagged.unsaid]
     checked = checked.then(Checked(notices=unsaid))
     python = list(
         dict.fromkeys(
@@ -1221,6 +1241,18 @@ def checkpoint(
     if acted.hold is None:
         return checked
     return checked.then(settle(bench, worktree, key, agent, acted.hold))
+
+
+def unflag(
+    bench: Bench, worktree: Worktree, key: str, agent: str, paths: list[Path]
+) -> None:
+    """Forget, in session `key`'s record, that an item gathers conversation `agent`'s writes to `paths`, as the inbox said none does: a write to one asks it nothing more."""
+    if not paths:
+        return
+    with worktree.lock():
+        session = worktree.session(key, bench.runtime)
+        session.unflagged(agent, paths)
+        worktree.keep(session)
 
 
 def writers(

@@ -925,6 +925,40 @@ def test_a_write_flagged_at_the_checkpoint_is_put_before_the_operator_holding_no
     ]
 
 
+def test_a_patch_flagging_nothing_refreshes_its_conversations_item_at_the_checkpoint(
+    holding_kit: Kit, repo: Path
+) -> None:
+    holding_kit.announced.holding_all = False
+    new = repo / "src" / "pkg" / "new.py"
+    start(holding_kit, repo)
+    call(holding_kit, repo, "p1", tool="apply_patch", agent="a1")
+    new.write_text('"""New."""\n')
+    finish(holding_kit, repo, "p1", agent="a1")
+    # A patch to a file no item gathers asks the inbox nothing.
+    call(holding_kit, repo, "p2", tool="apply_patch", agent="a1")
+    (repo / CORE).write_text((repo / CORE).read_text() + "\nLIMIT = 3\n")
+    finish(holding_kit, repo, "p2", agent="a1")
+    assert len(holding_kit.flags.shown) == 1
+    # One to the item's file refreshes it, its file as it stands, judged whole.
+    call(holding_kit, repo, "p3", tool="apply_patch", agent="a1")
+    new.write_text('"""New."""\n\nLIMIT = 3\n')
+    finish(holding_kit, repo, "p3", agent="a1")
+    made, refreshed = holding_kit.flags.asked
+    assert (refreshed.joining, refreshed.refreshing, refreshed.call) == (
+        1,
+        True,
+        "p3",
+    )
+    assert refreshed.file.before is None
+    assert refreshed.file.after == Text(text='"""New."""\n\nLIMIT = 3\n')
+    assert refreshed.flagged.summary == made.flagged.summary
+    # Another conversation's patch to the file asks nothing: the item is a1's.
+    call(holding_kit, repo, "p4", tool="apply_patch", agent="a2")
+    new.write_text('"""New."""\n\nLIMIT = 4\n')
+    finish(holding_kit, repo, "p4", agent="a2")
+    assert len(holding_kit.flags.asked) == 2
+
+
 def test_what_a_move_brought_flagged_is_put_before_the_operator_naming_its_commit(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:

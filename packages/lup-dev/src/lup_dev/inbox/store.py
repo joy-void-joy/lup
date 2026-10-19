@@ -251,9 +251,9 @@ class HeldChange(Model):
 class Flagged(Model):
     """A write that landed flagged for the operator's review, holding no one: what the file's whole change since the item was made flags, its diff and the file kept beside the item (`Inbox.diff`, `Inbox.files`).
 
-    The judge's (`lup_dev.policy.flags`). A later flagged write to the same file
-    by the same conversation joins the item while it gathers them
-    (`Inbox.gathering`), the file kept whole since the first.
+    The judge's (`lup_dev.policy.flags`). A later write to the same file by the
+    same conversation, flagged or not, joins the item while it gathers them
+    (`Inbox.gathering`), the file kept whole since the first and as it stands.
     """
 
     reason: Literal["flagged"] = "flagged"
@@ -269,7 +269,8 @@ class Flagged(Model):
     """The commit a move of `HEAD` reached, where the write came with it; none
     where a conversation's call made it."""
     writes: int = 1
-    """How many flagged writes it gathers: the page reads its file again as it
+    """How many writes it gathers, the flagged one that made it and each by the
+    same conversation to the file since: the page reads its file again as it
     grows."""
 
 

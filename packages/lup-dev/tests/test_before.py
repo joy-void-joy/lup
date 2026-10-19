@@ -234,7 +234,7 @@ def test_a_later_flagged_write_joins_the_item_judged_whole_since_it_was_made(
         new=room + "\n\ndef open_room() -> None:\n    pass\n",
     )
     landed(kit, repo, plain)
-    _, joined = kit.flags.asked
+    _, joined, refreshed = kit.flags.asked
     # The class added asks on its own; joined, the file is judged whole since the item was made: new, with its class.
     assert joined.joining == 1
     assert joined.file.before is None
@@ -255,9 +255,14 @@ def test_a_later_flagged_write_joins_the_item_judged_whole_since_it_was_made(
         "src/pkg/rooms.py is a new production file\n"
         "src/pkg/rooms.py adds the class `Room`"
     )
-    # A write flagging nothing puts nothing before the operator.
-    assert len(kit.flags.asked) == 2
+    # A write flagging nothing of its own refreshes the item, judged whole: it shows the file as it stands.
     kept = (repo / ROOMS).read_text()
+    assert (refreshed.joining, refreshed.refreshing, refreshed.call) == (1, True, "e2")
+    assert (refreshed.file.before, refreshed.file.after) == (None, Text(text=kept))
+    assert refreshed.file.reading == joined.file.reading
+    assert refreshed.flagged.summary == joined.flagged.summary
+    assert "def open_room" in refreshed.diff
+    assert sorted(kit.flags.items) == [1]
     # Read, the item gathers no more: the next flagged write is an item of its own, from where the file stands.
     kit.flags.read.append(1)
     landed(
@@ -291,6 +296,60 @@ def test_a_later_flagged_write_joins_the_item_judged_whole_since_it_was_made(
     assert sorted(kit.flags.items) == [1, 2, 3]
 
 
+def test_a_write_to_a_file_no_item_gathers_asks_the_inbox_nothing(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    landed(kit, repo, replace(repo, "return x\n", "return x + 1\n"))
+    assert (kit.flags.shown, kit.flags.asked) == ([], [])
+
+
+def test_once_the_item_is_read_a_write_flagging_nothing_makes_none_nor_asks_again(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    first = '"""Rooms."""\n'
+    landed(kit, repo, Overwrite(call="w1", tool="Write", path=repo / ROOMS, text=first))
+    kit.flags.read.append(1)
+
+    def plain(call: str) -> Replacement:
+        kept = (repo / ROOMS).read_text()
+        return Replacement(
+            call=call,
+            tool="Edit",
+            path=repo / ROOMS,
+            old=kept,
+            new=f"{kept}\nX_{call.upper()} = 1\n",
+        )
+
+    landed(kit, repo, plain("e1"))
+    # The inbox said no item gathers the file: nothing's made, and the next write doesn't ask again.
+    assert len(kit.flags.shown) == 2
+    assert len(kit.flags.asked) == 1
+    landed(kit, repo, plain("e2"))
+    assert len(kit.flags.shown) == 2
+    session = read_model(kit.layout.store(repo).session("s1"), Session)
+    assert session is not None
+    assert session.flagging == {"": []}
+
+
+def test_a_refresh_taking_out_all_the_item_flagged_says_so(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    was = (repo / CORE).read_text()
+    room = "\n\nclass Room:\n    pass\n"
+    landed(kit, repo, replace(repo, "return x\n", "return x\n" + room))
+    landed(kit, repo, replace(repo, room, ""))
+    made, refreshed = kit.flags.asked
+    assert made.flagged.summary == "src/pkg/core.py adds the class `Room`"
+    assert (refreshed.joining, refreshed.refreshing) == (1, True)
+    assert refreshed.file.after == Text(text=was)
+    assert refreshed.flagged.summary == (
+        "src/pkg/core.py's whole change flags nothing any more"
+    )
+
+
 def test_a_flagged_write_lands_though_the_operators_inbox_cant_be_reached(
     kit: Kit, repo: Path
 ) -> None:
@@ -303,6 +362,25 @@ def test_a_flagged_write_lands_though_the_operators_inbox_cant_be_reached(
         f"lup couldn't put the flagged write to {repo}/src/pkg/rooms.py before the "
         "operator (no host service answers on /run/control.sock). It landed all "
         "the same: tell the operator."
+    )
+
+
+def test_a_refresh_the_inbox_cant_take_lands_its_write_saying_so(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    first = '"""Rooms."""\n'
+    landed(kit, repo, Overwrite(call="w1", tool="Write", path=repo / ROOMS, text=first))
+    kit.flags.refusing = "no host service answers on /run/control.sock"
+    edit = Replacement(
+        call="e1", tool="Edit", path=repo / ROOMS, old=first, new=first + "X = 1\n"
+    )
+    decision = landed(kit, repo, edit)
+    assert decision.outcome == "allow"
+    assert decision.told == (
+        f"lup couldn't bring the operator's item on {repo}/src/pkg/rooms.py to your "
+        "write (no host service answers on /run/control.sock). It landed all the "
+        "same."
     )
 
 

@@ -594,6 +594,8 @@ class Flags(Flagging):
     """Records each flagged write put before the operator, gathering a conversation's flagged writes to one file into one item as the inbox does, until the test marks it read (`read`); or refuses each, as an unreachable host would, with `refusing`."""
 
     def __init__(self) -> None:
+        self.shown: list[ShowGathering] = []
+        """Each time the judge asked for the item a write would join."""
         self.asked: list[AskFlag] = []
         self.items: dict[int, AskFlag] = {}
         """Each item by its number, as its latest write made it."""
@@ -601,6 +603,7 @@ class Flags(Flagging):
         self.refusing = ""
 
     def gathering(self, asked: ShowGathering) -> Gathering:
+        self.shown.append(asked)
         if self.refusing:
             raise HostError(self.refusing)
         found = [
@@ -618,7 +621,10 @@ class Flags(Flagging):
 
     def flagged(self, asking: AskFlag) -> None:
         self.asked.append(asking)
-        number = asking.joining or len(self.items) + 1
+        joins = asking.joining is not None and asking.joining not in self.read
+        if asking.refreshing and not joins:
+            return
+        number = asking.joining if joins and asking.joining else len(self.items) + 1
         self.items[number] = asking
 
 

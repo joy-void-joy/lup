@@ -1277,33 +1277,35 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         *,
         call: str | None = None,
         joining: int | None = None,
+        refreshing: bool = False,
     ) -> Item:
         """Put a write that landed flagged in the operator's inbox from the conversation that made it, holding no one, and raising no notice (`ranked`).
 
         It joins item `joining`, its file whole since that item was made and its
         diff in place of those kept, where that item still gathers the
-        conversation's flagged writes to the file (`Inbox.gathering`); else it's
-        an item of its own, anchored to `call`, its diff and file kept beside it.
+        conversation's writes to the file (`Inbox.gathering`); else it's an
+        item of its own, anchored to `call`, its diff and file kept beside it.
+        A write `refreshing` the item it joins, flagging nothing of its own,
+        makes none: where the item gathers no more, it's left as it was.
         """
-        match self.inbox.gathering(sender, flagged.worktree, flagged.path):
-            case Item(number=number, reason=Flagged(writes=writes)) as gathered if (
-                number == joining
-            ):
-                self.inbox.attached(number, diff, [file])
-                joined = flagged.model_copy(update={"writes": writes + 1})
-                return self.inbox.kept(gathered.model_copy(update={"reason": joined}))
-            case _:
-                item = self.inbox.made(
-                    flagged,
-                    sender,
-                    Operator(),
-                    flagged.worktree,
-                    self.clock.now(),
-                    call=call,
-                )
-                self.inbox.attached(item.number, diff, [file])
-                await self.delivered(item)
-                return item
+        gathered = self.inbox.gathering(sender, flagged.worktree, flagged.path)
+        if (
+            gathered is not None
+            and gathered.number == joining
+            and isinstance(gathered.reason, Flagged)
+        ):
+            self.inbox.attached(gathered.number, diff, [file])
+            writes = gathered.reason.writes + 1
+            joined = flagged.model_copy(update={"writes": writes})
+            return self.inbox.kept(gathered.model_copy(update={"reason": joined}))
+        if refreshing and joining is not None:
+            return self.inbox.item(joining)
+        item = self.inbox.made(
+            flagged, sender, Operator(), flagged.worktree, self.clock.now(), call=call
+        )
+        self.inbox.attached(item.number, diff, [file])
+        await self.delivered(item)
+        return item
 
     def changing(self, number: int) -> Item:
         """Return item `number`, or say it changes no file: an approval, a held change and a flagged write keep theirs beside them."""
