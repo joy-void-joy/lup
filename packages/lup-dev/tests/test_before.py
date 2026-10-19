@@ -3,9 +3,22 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup_dev.inbox.store import Asked, ChangedFile, Reading, Text
-from lup_dev.policy.before import Decision, Overwrite, Replacement, before
-from lup_dev.policy.checkpoint import Session, SessionStarted
+from lup_dev.inbox.store import (
+    ApiChanged,
+    Asked,
+    ChangedFile,
+    Conversation,
+    Flagged,
+    Reading,
+    Text,
+)
+from lup_dev.policy.before import Decision, Overwrite, Proposal, Replacement, before
+from lup_dev.policy.checkpoint import (
+    CallFinished,
+    CallStarted,
+    Session,
+    SessionStarted,
+)
 from lup_dev.policy.holds import Holds, Response
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.policy.worktrees import Place, place
@@ -126,6 +139,150 @@ def test_a_flagged_write_lands_unasked_unless_the_operator_holds_its_agents(
     assert kit.announced.asked == ["asking/s1/a1"]
     [verdict] = VerdictLog(path=kit.layout.verdicts(repo / ".git")).read()
     assert (verdict.outcome, verdict.reasons) == ("allow", ["whole-file"])
+
+
+ROOMS = Path("src/pkg/rooms.py")
+
+
+def landed(kit: Kit, repo: Path, proposal: Proposal, agent: str = "") -> Decision:
+    """Judge a file tool's write before it lands, then land it as its call runs and finishes."""
+    decision = before(kit.bench, proposal, "s1", repo, agent=agent or None)
+    call = proposal.call
+    CallStarted(
+        session="s1", agent=agent, cwd=repo, call=call, tool=proposal.tool
+    ).apply(kit.bench)
+    path = proposal.path
+    path.write_text(
+        proposal.content(path.read_text() if path.is_file() else None) or ""
+    )
+    CallFinished(session="s1", agent=agent, cwd=repo, call=call).apply(kit.bench)
+    return decision
+
+
+def test_a_flagged_write_is_put_before_the_operator_as_it_lands_holding_no_one(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    text = '"""Rooms."""\n'
+    write = Overwrite(call="w1", tool="Write", path=repo / ROOMS, text=text)
+    decision = landed(kit, repo, write, agent="a1")
+    assert decision == Decision(outcome="allow")
+    assert kit.announced.holds == []
+    [asked] = kit.flags.asked
+    assert (asked.sender, asked.call, asked.joining) == (
+        Conversation(
+            repository=repo / ".git", runtime="asking", session="s1", agent="a1"
+        ),
+        "w1",
+        None,
+    )
+    assert asked.flagged == Flagged(
+        text="src/pkg/rooms.py landed, flagged for the operator's review.",
+        summary=f"src/pkg/rooms.py: {repo}/src/pkg/rooms.py is a new production file",
+        worktree=repo,
+        path=ROOMS,
+    )
+    assert asked.file == ChangedFile(
+        path=ROOMS,
+        before=None,
+        after=Text(text=text),
+        reading=Reading(
+            role="production", asks=[Asked(name="new-file", taken="flagged")]
+        ),
+    )
+    assert asked.diff.startswith("--- a/src/pkg/rooms.py\n+++ b/src/pkg/rooms.py\n")
+
+
+def test_a_later_flagged_write_joins_the_item_judged_whole_since_it_was_made(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    first = '"""Rooms."""\n'
+    room = "\n\nclass Room:\n    pass\n"
+    hall = "\n\nclass Hall:\n    pass\n"
+    landed(kit, repo, Overwrite(call="w1", tool="Write", path=repo / ROOMS, text=first))
+    adds = Replacement(
+        call="e1", tool="Edit", path=repo / ROOMS, old=first, new=first + room
+    )
+    landed(kit, repo, adds)
+    plain = Replacement(
+        call="e2",
+        tool="Edit",
+        path=repo / ROOMS,
+        old=room,
+        new=room + "\n\ndef open_room() -> None:\n    pass\n",
+    )
+    landed(kit, repo, plain)
+    _, joined = kit.flags.asked
+    # The class added asks on its own; joined, the file is judged whole since the item was made: new, with its class.
+    assert joined.joining == 1
+    assert joined.file.before is None
+    assert joined.file.after == Text(text=first + room)
+    assert joined.file.reading == Reading(
+        role="production",
+        asks=[
+            Asked(name="new-file", taken="flagged"),
+            Asked(
+                name="public-api",
+                taken="flagged",
+                line=4,
+                api=ApiChanged(kind="class-added", name="Room"),
+            ),
+        ],
+    )
+    assert joined.flagged.summary == (
+        f"src/pkg/rooms.py: {repo}/src/pkg/rooms.py is a new production file\n"
+        f"src/pkg/rooms.py: {repo}/src/pkg/rooms.py adds the class `Room`"
+    )
+    # A write flagging nothing puts nothing before the operator.
+    assert len(kit.flags.asked) == 2
+    kept = (repo / ROOMS).read_text()
+    # Read, the item gathers no more: the next flagged write is an item of its own, from where the file stands.
+    kit.flags.read.append(1)
+    landed(
+        kit,
+        repo,
+        Replacement(
+            call="e3", tool="Edit", path=repo / ROOMS, old=kept, new=kept + hall
+        ),
+    )
+    # Another conversation's flagged write to the file is its own item too.
+    later = (repo / ROOMS).read_text()
+    landed(
+        kit,
+        repo,
+        Replacement(
+            call="e4",
+            tool="Edit",
+            path=repo / ROOMS,
+            old=later,
+            new=later + "\n\nclass Door:\n    pass\n",
+        ),
+        agent="a2",
+    )
+    *_, alone, other = kit.flags.asked
+    assert (alone.joining, alone.file.before) == (None, Text(text=kept))
+    assert alone.file.reading is not None
+    assert [each.api for each in alone.file.reading.asks] == [
+        ApiChanged(kind="class-added", name="Hall")
+    ]
+    assert (other.joining, other.sender.agent) == (None, "a2")
+    assert sorted(kit.flags.items) == [1, 2, 3]
+
+
+def test_a_flagged_write_lands_though_the_operators_inbox_cant_be_reached(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    kit.flags.refusing = "no host service answers on /run/control.sock"
+    write = Overwrite(call="w1", tool="Write", path=repo / ROOMS, text='"""Rooms."""\n')
+    decision = before(kit.bench, write, "s1", repo)
+    assert decision.outcome == "allow"
+    assert decision.told == (
+        f"lup couldn't put the flagged write to {repo}/src/pkg/rooms.py before the "
+        "operator (no host service answers on /run/control.sock). It landed all "
+        "the same: tell the operator."
+    )
 
 
 def test_a_held_write_declined_never_lands_its_version_saved_the_comment_told(

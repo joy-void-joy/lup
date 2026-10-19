@@ -63,6 +63,7 @@ from lup_dev.git import Git
 from lup_dev.inbox import ends
 from lup_dev.inbox.store import ChangedFile
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, Layout
+from lup_dev.policy.flags import Flagging, Landed, flagged
 from lup_dev.policy.holds import Announcing, HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
 from lup_dev.policy.judge import Change, Judge, Judgement, RemovedNote
@@ -100,6 +101,8 @@ class Services(Model, arbitrary_types_allowed=True):
     until the operator approves a commit (`lup_dev.approval`)."""
     announcing: Announcing
     """Where each hold is put before the operator, whose answer comes back to it."""
+    flagging: Flagging
+    """Where each write that landed flagged is put before the operator."""
 
 
 class Bench(Model, arbitrary_types_allowed=True):
@@ -971,10 +974,11 @@ def act(
 
 
 class Brought(Model):
-    """What a move of `HEAD` brought, judged once: what to tell, and what landed."""
+    """What a move of `HEAD` brought, judged once: what to tell, what landed, and what landed flagged, to put before the operator."""
 
     told: Checked = Checked()
     landed: list[Judgement] = []
+    flagged: list[Landed] = []
 
 
 def brought(
@@ -1053,7 +1057,17 @@ def brought(
     )
     information = [found for judgement in judgements for found in judgement.information]
     told = Checked(moves=[report], information=placed(root, information))
-    return Brought(told=told, landed=judgements)
+    landed = [
+        Landed(
+            change=change,
+            judgement=judgement,
+            session=snapshot.session,
+            commit=move.after,
+        )
+        for change, judgement in zip(changes, judgements, strict=True)
+        if judgement.outcome == "allow" and judgement.flags
+    ]
+    return Brought(told=told, landed=judgements, flagged=landed)
 
 
 def moving(worktree: Worktree, heads: Heads, head: str | None) -> Move | None:
@@ -1075,8 +1089,9 @@ def checkpoint(
 ) -> Checked:
     """Judge what changed since the accepted tree, act on it, and report; `call` is the call whose finish ran it, which a hold it makes is anchored to.
 
-    Holds, on a runtime that can't ask before a call, are waited on once the
-    store is released, then settled, and the checkpoint runs again for what the
+    What landed flagged, the conversation's writes and what a move brought, is
+    put before the operator once the store is released (`flagged`). Holds are
+    waited on then, settled, and the checkpoint runs again for what the
     operator approved.
     """
     services = bench.services
@@ -1132,6 +1147,20 @@ def checkpoint(
         )
         deciding = [plan.path for plan in plans if plan.change and plan.decide]
         fated = fates(judgements, deciding)
+        approved = session.approved
+        landed = [
+            Landed(
+                change=change,
+                judgement=judgement,
+                session=key,
+                agent=agent or None,
+                call=call,
+            )
+            for change, judgement in zip(changes, judgements, strict=True)
+            if judgement.path in deciding
+            and judgement.outcome == "allow"
+            and judgement.flags
+        ]
         held = [judgement.path for judgement in fated.held]
         hold = worktree.holds().unused() if held else None
         to = Attributed(worktree=root, session=key, tool="checkpoint")
@@ -1151,6 +1180,32 @@ def checkpoint(
         notice = worktree.told() if plans else ""
         told = commits.told.then(Checked(notices=[notice] if notice else []))
         checked = remember(worktree, session, agent, acted, told=told, wrote=wrote)
+    runtime = bench.runtime.name()
+    unsaid = [
+        *(
+            flagged(
+                services.flagging,
+                worktree.judge(services, approved),
+                runtime,
+                worktree.repository,
+                landed,
+            )
+            if landed
+            else []
+        ),
+        *(
+            flagged(
+                services.flagging,
+                worktree.judge(services, []),
+                runtime,
+                worktree.repository,
+                commits.flagged,
+            )
+            if commits.flagged
+            else []
+        ),
+    ]
+    checked = checked.then(Checked(notices=unsaid))
     python = list(
         dict.fromkeys(
             judgement.path

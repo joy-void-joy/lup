@@ -186,6 +186,7 @@ export function body(item: Item): string {
         case "approval":
             return `${reason.text}\n${plain(reason.summary)}`;
         case "held":
+        case "flagged":
             return `${reason.text}\n${reason.summary}`;
         case "answer":
             return reason.comment;
