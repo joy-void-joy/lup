@@ -17,10 +17,10 @@ A convention a rule enforces is followed; one written only in prose splits, each
 Every concern has exactly one owner, so two tools never report the same thing in two ways or steer in opposite directions.
 
 - **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/judging-writes.md`, *The engine: one typed tree*) and read one typed tree, not as ruff `banned-api` entries beside a syntax checker, which would split where they live and grow into a patchwork. Each rule names the mistake it prevents and where it steers, and has a timing (`DESIGN.md`, *Keeping the operator in the loop*):
-  - **at the edit,** the rules that pick an approach other code gets built on (parsers over regex and splitting, named fields over tuples and sets, the library for each job, errors and types, suppressions, truncation, historical voice): a finding on the lines an edit touches refuses it before it lands;
+  - **at the edit,** the rules that pick an approach other code gets built on (parsers over regex and splitting, named fields over tuples and sets, the library for each job, errors and types, suppressions, truncation, historical voice): a finding on the lines an edit touches is told right after it, while nothing is built on it yet;
   - **at the gate,** the rules about how a correct thing is spelled (`elif`, `collection-loop`, `private-name`, `docstring-code`, `constant-home`): reported once before landing, and fixed silently where ruff has a fixer. A gate rule still blocks landing.
 
-  The timing is issue #49; until it's built, every rule refuses at the edit.
+  The timing is issue #49; until it's built, every rule's findings are told at the edit.
 - **ruff** owns generic Python hygiene: its own catalog, `select = ["ALL"]`, minus every rule that overlaps or contradicts another owner (*ruff's selection*). Its findings arrive as information at each checkpoint, like type errors, and must be clean when the turn ends and at the gate. A finding it fixes safely isn't reported to the agent: the session landing the work applies the fix (`lup-dev check --fix`), and the gate fails on it until then.
 - **pyright**, in strict mode, owns types. Same channel as ruff.
 - **import-linter** owns the import boundaries, over the whole import graph at the gate. The engine reads the same contracts to check each file's own imports at the edit; that's issue #39 until built, and until then the gate alone catches a wrong import.
@@ -238,7 +238,18 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 - **A word the library uses means the same thing in the environment:** `adapters` holds each runtime's adapter in `lup` and in `lup_dev` alike.
 - **Every subpackage's `__init__.py` docstring says in one line what it is.**
 - **Package-wide modules stay at the root:** errors, settings, layout, the clock, the command line, and the front door a project's declaration imports (`__init__.py`). So do the tools more than one subsystem needs, which belong to none of them: git (`git.py`), which judging and the launch both ask, the models kept in files (`stored.py`), and what the operator approved (`approval.py`), which the launch records and the judge reads.
-- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `launch` > `policy` > `codescan` > `declaration` > `catalog` > `remote` \| `forge` > `inbox` > `host`, so the runtimes' adapters sit on the launch (each spells its CLI's release channel) and on judging, the launch above judging, though it imports none of it, judging on reading code, both on what a project declares, everything on the catalog's data; git through the host, the forge and the inbox, which need only the host's seams and the library, just above the host, though none imports another (`remote` and `forge` side by side, which the contract holds independent), the remote where the launch reaches it for the room's git configuration, the forge where reading code reaches it for the gate's issue states in a room and the launch for the program it names on the host, the inbox where judging reaches it for the rule its turn's end holds by; and the host service, which imports none of them and is handed what it runs, sits lowest, where any of them can reach its client.
+- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`, from the top:
+  1. `adapters`, the runtimes' hooks. They sit on the launch, since each spells its CLI's release channel, and on judging.
+  2. `launch`, above judging, though it imports none of it.
+  3. `policy`, judging, which reads code.
+  4. `codescan`, reading code.
+  5. `declaration`, what a project declares, which judging and reading code both build on.
+  6. `catalog`, the data everything above reads.
+  7. `remote`, `forge` and `clipboard`, side by side, the contract holding them independent. The launch reaches `remote` for the room's git configuration, and `clipboard` for the room's clipboard. Reading code reaches `forge` for the gate's issue states in a room, and the launch reaches it for the program it names on the host.
+  8. `inbox`, which judging reaches for the rule its turn's end holds by.
+  9. `host`, the host service, lowest. It imports none of the others and is handed what it runs, so any of them can reach its client.
+
+  Layers 7 and 8 need only the host's seams and the library, and none of them imports another.
 
 | `lup_dev` | What it is |
 |---|---|
