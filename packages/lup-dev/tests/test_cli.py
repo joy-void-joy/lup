@@ -3,7 +3,7 @@
 import json
 import socketserver
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
 
@@ -24,7 +24,7 @@ from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
     import pytest
-    from conftest import Kit, Shell
+    from conftest import FakeClock, Kit, Shell
 
     from lup_dev.layout import Layout
 
@@ -32,12 +32,17 @@ runner = CliRunner()
 
 
 def test_verdicts_summarizes_this_repository(
-    state: Layout, repo: Path, shell: Shell, monkeypatch: pytest.MonkeyPatch
+    state: Layout,
+    repo: Path,
+    shell: Shell,
+    clock: FakeClock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     common = Path(
         shell.git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
     )
-    now = datetime.now(UTC)
+    monkeypatch.setattr(cli, "SystemClock", lambda: clock)
+    now = clock.now()
     VerdictLog(path=state.verdicts(common)).append(
         [
             Verdict(

@@ -1859,13 +1859,7 @@ def verdicts(
         typer.echo(f"No verdicts in the last {days} days.")
         return
     for tally in tallies:
-        answers = (
-            f"  (approved {tally.approved}, declined {tally.declined}, "
-            f"unanswered {tally.unanswered})"
-            if tally.outcome in ["ask", "hold"]
-            else ""
-        )
-        typer.echo(f"{tally.count:6}  {tally.outcome:7} {tally.reason}{answers}")
+        typer.echo(tally.line())
 
 
 @app.command("importers", hidden=True)

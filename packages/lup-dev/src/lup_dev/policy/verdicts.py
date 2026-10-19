@@ -58,6 +58,59 @@ class Tally(Model):
     declined: int = 0
     unanswered: int = 0
 
+    def line(self) -> str:
+        """Say the tally in a line: its count, outcome and reason, and for an ask or a hold, how they were answered.
+
+        >>> Tally(outcome="hold", reason="protected", count=3, approved=2).line()
+        '     3  hold    protected  (approved 2, declined 0, unanswered 0)'
+        """
+        answers = (
+            f"  (approved {self.approved}, declined {self.declined}, "
+            f"unanswered {self.unanswered})"
+            if self.outcome in ["ask", "hold"]
+            else ""
+        )
+        return f"{self.count:6}  {self.outcome:7} {self.reason}{answers}"
+
+
+def tallied(verdicts: list[Verdict]) -> list[Tally]:
+    """Tally `verdicts` by outcome and reason, most frequent first.
+
+    A verdict with several reasons counts once under each.
+    """
+
+    class Group(Model):
+        """An outcome and one of its reasons, which a tally counts."""
+
+        outcome: VerdictOutcome
+        reason: str
+
+    groups = dict.fromkeys(
+        Group(outcome=verdict.outcome, reason=reason)
+        for verdict in verdicts
+        for reason in verdict.reasons
+    )
+
+    def tally(outcome: VerdictOutcome, reason: str) -> Tally:
+        matching = [
+            verdict
+            for verdict in verdicts
+            if verdict.outcome == outcome and reason in verdict.reasons
+        ]
+        answers = [verdict.answer for verdict in matching]
+        return Tally(
+            outcome=outcome,
+            reason=reason,
+            count=len(matching),
+            approved=answers.count("approved"),
+            declined=answers.count("declined"),
+            unanswered=answers.count("unanswered"),
+        )
+
+    tallies = [tally(group.outcome, group.reason) for group in groups]
+    by_name = sorted(tallies, key=lambda each: f"{each.outcome} {each.reason}")
+    return sorted(by_name, key=lambda each: each.count, reverse=True)
+
 
 class VerdictLog(Model):
     """The verdict log of one repository."""
@@ -89,40 +142,5 @@ class VerdictLog(Model):
         return list(latest.values())
 
     def summary(self, since: datetime) -> list[Tally]:
-        """Tally the verdicts since `since` by outcome and reason, most frequent first.
-
-        A verdict with several reasons counts once under each.
-        """
-
-        class Group(Model):
-            """An outcome and one of its reasons, which a tally counts."""
-
-            outcome: VerdictOutcome
-            reason: str
-
-        recent = [verdict for verdict in self.read() if verdict.time >= since]
-        groups = dict.fromkeys(
-            Group(outcome=verdict.outcome, reason=reason)
-            for verdict in recent
-            for reason in verdict.reasons
-        )
-
-        def tally(outcome: VerdictOutcome, reason: str) -> Tally:
-            matching = [
-                verdict
-                for verdict in recent
-                if verdict.outcome == outcome and reason in verdict.reasons
-            ]
-            answers = [verdict.answer for verdict in matching]
-            return Tally(
-                outcome=outcome,
-                reason=reason,
-                count=len(matching),
-                approved=answers.count("approved"),
-                declined=answers.count("declined"),
-                unanswered=answers.count("unanswered"),
-            )
-
-        tallies = [tally(group.outcome, group.reason) for group in groups]
-        by_name = sorted(tallies, key=lambda each: f"{each.outcome} {each.reason}")
-        return sorted(by_name, key=lambda each: each.count, reverse=True)
+        """Tally the verdicts since `since` by outcome and reason, most frequent first (`tallied`)."""
+        return tallied([verdict for verdict in self.read() if verdict.time >= since])
