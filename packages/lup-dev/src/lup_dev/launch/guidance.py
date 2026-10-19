@@ -12,6 +12,9 @@ installed `lup_dev` for lup's own, and rendered with Jinja (`docs/launch.md`,
   `{{ data("transcripts") }}`, and asks whether it's mounted, `{% if
   mounted("transcripts") %}`, for a module whose data a launch may lend; a
   section rendering to nothing is left out;
+- a section lists lup's code rules the project runs, `{{ rules() }}`, one line
+  each, its id and its steer (`steers`), from the engine's rule table, which
+  the caller passes, so the list can't drift from the rules;
 - a name the section doesn't have is refused, rather than rendered as nothing;
 - the environment is Jinja's sandbox, since an agent can write a section's file
   and the rendering runs on the host, outside every room.
@@ -50,6 +53,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup.tools.tool import ToolSpec
+    from lup_dev.codescan.contract import Rule
     from lup_dev.declaration.kinds import Section
     from lup_dev.declaration.resolve import Resolved
     from lup_dev.launch.room import Lent, RelatedRepository
@@ -113,6 +117,21 @@ def listed(tools: list[ToolSpec]) -> str:
         "its name, with its full description:"
     )
     return "\n".join(["## lup's tools", "", opening, "", *lines])
+
+
+def steers(rules: list[Rule]) -> str:
+    """Return lup's code rules as a section lists them: one line each, its id and its steer, in the table's order.
+
+    >>> from lup_dev.codescan.contract import Examples, Rule
+    >>> print(steers([
+    ...     Rule(id="elif", mistake="A chain.", steer="Decide with `match`.", examples=Examples(flags=[])),
+    ...     Rule(id="regex", mistake="A pattern.", steer="Read it with a parser.", examples=Examples(flags=[])),
+    ... ]))
+    - `elif`: Decide with `match`.
+    - `regex`: Read it with a parser.
+    """
+    # lup: defer(issue=49, why="the list groups the rules by when each fires, at the write or at the gate, once the table gives each its timing")
+    return "\n".join(f"- `{rule.id}`: {rule.steer}" for rule in rules)
 
 
 def repositories(neighbours: list[RelatedRepository]) -> str:
@@ -207,6 +226,7 @@ def render(
     *,
     shared: dict[str, Path] | None = None,
     lent: list[Lent] | None = None,
+    rules: list[Rule] | None = None,
 ) -> str:
     """Render the session's guidance from `resolved`'s sections, the tools it's served, and the other repositories it may read.
 
@@ -219,7 +239,9 @@ def render(
     (`lent_here`), then the person's own, where there's one. Raise
     `GuidanceError` naming the section that can't be read, or doesn't render.
     `shared` is where each module whose data the room mounts has it, by the
-    module's name: every room's, and those this launch lends.
+    module's name: every room's, and those this launch lends. `rules` are lup's
+    code rules the project runs, which a section lists with `rules()`; where
+    none are given, a section listing them is refused.
     """
     runner = resolved.runner
     mounted = shared or {}
@@ -249,19 +271,31 @@ def render(
         """Say whether the room mounts module `module`'s own data, every room or this launch lending it."""
         return module in mounted
 
+    def ruled() -> str:
+        """List lup's code rules the project runs, one line each: its id and its steer."""
+        if rules is None:
+            message = (
+                "`rules()` has no rules to list: none were given to this rendering"
+            )
+            raise TemplateRuntimeError(message)
+        return steers(rules)
+
     sandbox = SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
 
     def rendered(where: str, text: str) -> str:
         try:
             return (
                 sandbox.from_string(text)
-                .render(run=run, data=data, mounted=lent_data)
+                .render(run=run, data=data, mounted=lent_data, rules=ruled)
                 .strip()
             )
         except TemplateError as error:
             message = (
                 f"Guidance: {where} doesn't render: {error}. A section can use "
-                '`run("<command>")`, which spells a command as the project runs it'
+                '`run("<command>")`, which spells a command as the project runs it; '
+                '`data("<module>")`, where a module\'s data is mounted in the room; '
+                '`mounted("<module>")`, whether it is; and `rules()`, which lists '
+                "lup's code rules the project runs, each with its steer"
             )
             raise GuidanceError(message) from error
 
