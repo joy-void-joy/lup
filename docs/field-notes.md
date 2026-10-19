@@ -593,6 +593,18 @@ What each runtime records of a subagent's spawn, which lup reads to name it and 
   - **Naming a spawn:** the first `spawn_agent` takes no name (`create_spawn_agent_tool_v1`, `core/src/tools/handlers/multi_agents_spec.rs`: `message`, `items`, `agent_type`, `fork_context`, `model`, `reasoning_effort`), and spawns with no `agent_path` (`tools/handlers/multi_agents/spawn.rs` passes `task_name` as `None`). The second requires `task_name`, `[a-z0-9_]`, and joins it onto the parent's path.
   - **Its tool's name in hooks:** `spawn_agent` for the first, or for the second without a namespace (`core/src/tools/registry.rs`, `function_hook_tool_name`, with `Agent` as a matcher alias); the second is namespaced `collaboration` by default (`DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE`), and a namespaced tool's hook name is the namespace and the name joined with nothing between, `collaborationspawn_agent` (`core/src/tools/mod.rs`, `flat_tool_name`).
 
+## A turn's end told through `additionalContext` (Claude Code 2.1.303, measured 2026-10-19)
+
+`claude -p` on Haiku with `--setting-sources ""`, `--strict-mcp-config` and `--settings` holding only a spike's hooks, a script printing JSON; what the model reads checked in the transcript and in the binary's renderers.
+- **`Stop` answering `hookSpecificOutput.additionalContext` continues the turn.** The transcript keeps a `hook_additional_context` attachment, which the model reads as a system reminder, `Stop hook additional context: <text>` (several hooks' texts joined by newlines). A block's reason reaches it twice: a meta user message, `Stop hook feedback:\n<reason>`, and a `hook_blocking_error` attachment, `Stop hook blocking error from command: "<command>": <reason>`. Given both, the model reads all three.
+- **The next end carries `stop_hook_active: true`** after an `additionalContext` continue, as after a block: after a tool call in the continued turn too, and after each of two continues in a row.
+- **`SubagentStop` is the same:** the subagent goes on (`SubagentStop hook additional context: <text>` in its record), and its next `SubagentStop` carries `stop_hook_active: true`.
+
+## A session's title, and a subagent's name on screen (Claude Code 2.1.303, measured 2026-10-19)
+
+- **`sessionTitle` does what `/rename` does.** `SessionStart`'s at startup, and `UserPromptSubmit`'s, each wrote a `custom-title` and an `agent-name` line with it, the two lines `/rename` writes. The next `UserPromptSubmit`, and a resume's `SessionStart`, carry it as `session_title`, so after lup's first start every resume brings lup's own earlier title; `sessionTitle` at a resume sets it again. Each resume writes the current title's two lines again.
+- **A subagent on screen** (interactive): the panel below the prompt shows the `Agent` call's `name`, else the subagent's type, then the call's `description`; the call's line and its end show the description (`Agent (quote test)`, `Agent "quote test" finished`), and what it sends comes `from @<name or type>`. No hook sets it: `SubagentStart` takes context alone (*hooks*).
+
 ## A conversation resumed in a later launch (read 2026-10-16)
 
 For `docs/resume-guidance.md`: Claude Code's docs (code.claude.com/docs/en: *hooks*, *cli-reference*, *sessions*) and its 2.1.301 binary's help; Codex's docs (developers.openai.com/codex: *hooks*, *config-reference*) and its source at `rust-v0.163.0` (paths under `codex-rs/`), the same at `rust-v0.162.1` where checked.

@@ -489,7 +489,12 @@ def test_a_turns_end_holds_once_and_a_later_end_with_nothing_new_ends_at_once(
         let = send(hook, claude("Stop", stop_hook_active=True))
         later = send(hook, claude("Stop", stop_hook_active=False))
         item = delivery.inbox.item(1)
-    assert held == {"decision": "block", "reason": first_note("Before you stop.")}
+    assert held == {
+        "hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": first_note("Before you stop."),
+        }
+    }
     assert item.state == Told(at=clock.now(), how="turn's end")
     assert let == ""
     assert later == ""
@@ -503,7 +508,7 @@ def test_an_end_following_a_hold_ends_and_what_came_meanwhile_waits_for_a_call(
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
         inbox("send", "one", "One.")
-        assert json.loads(send(hook, claude("Stop")))["decision"] == "block"
+        assert context(send(hook, claude("Stop"))) == first_note("One.")
         inbox("send", "one", "Two.")
         let = send(hook, claude("Stop", stop_hook_active=True))
         told = send(hook, bash("b1"))
@@ -523,12 +528,10 @@ def test_a_subagents_end_holds_once_on_what_waits_for_it(
         )["hookSpecificOutput"]["updatedInput"]
         call(machine.host.launch("one").mcp, "ask", arguments)
         inbox("answer", "1", "--comment", "Yes.")
-        held = json.loads(
-            send(hook, claude("SubagentStop", agent_id="a1", stop_hook_active=False))
-        )
+        held = send(hook, claude("SubagentStop", agent_id="a1", stop_hook_active=False))
         let = send(hook, claude("SubagentStop", agent_id="a1", stop_hook_active=True))
-    assert held["decision"] == "block"
-    assert held["reason"] == (
+    assert json.loads(held)["hookSpecificOutput"]["hookEventName"] == "SubagentStop"
+    assert context(held) == (
         "lup's inbox, item 2: an answer from the operator, to the question of item "
         "1:\nAsked: May I?\nTheir answer: Yes."
     )
@@ -815,8 +818,12 @@ def test_a_session_in_its_turn_is_told_at_its_hooks_and_never_woken(
         frames = messages.close()
     assert context(finished) == first_note("While you run.")
     assert json.loads(ended) == {
-        "decision": "block",
-        "reason": "lup's inbox, item 2: a note from the operator:\nBetween calls.",
+        "hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": (
+                "lup's inbox, item 2: a note from the operator:\nBetween calls."
+            ),
+        }
     }
     assert frames == []
 
@@ -2411,7 +2418,7 @@ def test_a_sessions_last_message_of_a_turn_is_a_note_in_the_operators_inbox(
             for each in delivery.inbox.waiting(Operator())
             if isinstance(each.sender, Conversation)
         ]
-    assert json.loads(held)["decision"] == "block"
+    assert context(held) == first_note("One more thing.")
     assert ended == ""
     assert notes == [
         (Message(kind="note", text="Done now.", ending=True), None, tmp_path)

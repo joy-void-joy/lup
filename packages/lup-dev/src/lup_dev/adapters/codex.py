@@ -69,7 +69,14 @@ end is held (`decision: "block"`). From the source at `rust-v0.162.1`:
 - `PreToolUse`'s `additionalContext` is collected for the model unless the
   answer is one it refuses (`pre_tool_use.rs`, `parse_completed`), as are
   `SessionStart`'s and `PostToolUse`'s; `Stop` and `SubagentStop` hold the turn
-  on `decision: "block"` with a `reason` that isn't blank (`parse_stop`);
+  on `decision: "block"` with a `reason` that isn't blank (`parse_stop`), and
+  take no `additionalContext` that would tell the agent without a block: their
+  outputs (`StopCommandOutputWire`,
+  `SubagentStopCommandOutputWire`, `hooks/src/schema.rs`) hold the universal
+  fields, `decision` and `reason`, with `deny_unknown_fields`, so an answer
+  carrying `hookSpecificOutput` fails as "hook returned invalid stop hook JSON
+  output" (`hooks/src/events/stop.rs`) and holds nothing. So a turn's end is
+  held with a block here, a gap read again at `rust-v0.163.0`;
 - what a hook tells whole is 10,000 bytes (`heard`'s `fits`): an
   `additionalContext` past its handler's `additionalContextLimit`, 2,500 tokens
   by default, and a turn's end's continuation past the same default, are kept

@@ -169,7 +169,16 @@ def test_claude_hears_a_checkpoint_beside_the_result(
     assert output["additionalContext"].startswith("lup's findings on the lines changed")
 
 
-def test_claude_stop_blocks_while_touched_files_have_type_errors(
+def held_on(printed: str, event: str = "Stop") -> str:
+    """What a Claude Code turn's end's answer holds it on: its `additionalContext`, for `event`, holding nothing else."""
+    output = json.loads(printed)
+    assert "decision" not in output
+    told = output["hookSpecificOutput"]
+    assert told["hookEventName"] == event
+    return told["additionalContext"]
+
+
+def test_claude_stop_holds_while_touched_files_have_type_errors(
     on_claude: Bench, repo: Path
 ) -> None:
     claude.hook(pre_tool_use(repo, "Bash", {"command": "sed"}), on_claude)
@@ -177,11 +186,9 @@ def test_claude_stop_blocks_while_touched_files_have_type_errors(
     claude.hook(
         payload(repo, "PostToolUse", tool_name="Bash", tool_use_id="t1"), on_claude
     )
-    output = json.loads(
-        claude.hook(payload(repo, "Stop", stop_hook_active=False), on_claude)
-    )
-    assert output["decision"] == "block"
-    assert output["reason"].startswith("lup won't end the turn yet")
+    printed = claude.hook(payload(repo, "Stop", stop_hook_active=False), on_claude)
+    assert held_on(printed).startswith("lup won't end the turn yet")
+    assert not claude.ends(printed)
 
 
 def test_claude_subagent_stop(on_claude: Bench, repo: Path) -> None:
@@ -239,9 +246,8 @@ def test_claude_subagent_stop_holds_once_on_a_held_changes_answer(
     subagent_stop = payload(
         repo, "SubagentStop", agent_id="sub", stop_hook_active=False
     )
-    first = json.loads(claude.hook(subagent_stop, on_claude))
-    assert first["decision"] == "block"
-    assert first["reason"].startswith("The operator approved")
+    first = claude.hook(subagent_stop, on_claude)
+    assert held_on(first, "SubagentStop").startswith("The operator approved")
     assert claude.hook(subagent_stop, on_claude) == ""
 
 
@@ -249,14 +255,12 @@ def test_claude_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
     on_claude: Bench, repo: Path
 ) -> None:
     claude_breaks_core(on_claude, repo)
-    first = json.loads(
-        claude.hook(payload(repo, "Stop", stop_hook_active=False), on_claude)
-    )
-    assert first["decision"] == "block"
-    again = json.loads(
-        claude.hook(payload(repo, "Stop", stop_hook_active=True), on_claude)
-    )
-    assert "decision" not in again
+    first = claude.hook(payload(repo, "Stop", stop_hook_active=False), on_claude)
+    assert held_on(first).startswith("lup won't end the turn yet")
+    printed = claude.hook(payload(repo, "Stop", stop_hook_active=True), on_claude)
+    again = json.loads(printed)
+    assert claude.ends(printed)
+    assert "hookSpecificOutput" not in again
     assert again["systemMessage"].startswith(
         "lup held the turn's end once already, and lets it end"
     )
@@ -1131,16 +1135,59 @@ def test_claude_adds_what_a_conversation_is_told_to_every_answer() -> None:
     stop = payload(Path("/w"), "Stop", stop_hook_active=False)
     assert claude.told(stop, "", TOLD) is None
     assert json.loads(claude.told(stop, "", ITEMS) or "") == {
-        "decision": "block",
-        "reason": BOTH,
+        "hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": BOTH}
     }
     noted = json.dumps({"systemMessage": "a note", "suppressOutput": True})
     assert json.loads(claude.told(stop, noted, ITEMS) or "") == {
         "systemMessage": "a note",
         "suppressOutput": True,
-        "decision": "block",
-        "reason": BOTH,
+        "hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": BOTH},
     }
+    findings = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "Stop",
+                "additionalContext": "lup won't end the turn yet.",
+            }
+        }
+    )
+    assert json.loads(claude.told(stop, findings, ITEMS) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": f"lup won't end the turn yet.\n\n{BOTH}",
+        }
+    }
+    subagent = payload(Path("/w"), "SubagentStop", agent_id="a1")
+    assert json.loads(claude.told(subagent, "", ITEMS) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "SubagentStop",
+            "additionalContext": BOTH,
+        }
+    }
+
+
+def told_at(event: str) -> dict[str, object]:
+    return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": "x"}}
+
+
+@pytest.mark.parametrize(
+    ("printed", "ending"),
+    [
+        ({"systemMessage": "a note"}, True),
+        ({"decision": "block", "reason": "wait"}, False),
+        (told_at("Stop"), False),
+        (told_at("SubagentStop"), False),
+        (told_at("PreToolUse"), True),
+    ],
+)
+def test_claude_reads_whether_a_turns_end_is_held(
+    printed: dict[str, object], ending: bool
+) -> None:
+    """Claude Code 2.1.303 holds a turn's end on `Stop`'s or `SubagentStop`'s
+    `additionalContext` as on a block (`docs/field-notes.md`, *A turn's end
+    told through `additionalContext`*); context beside a call ends nothing."""
+    assert claude.ends("")
+    assert claude.ends(json.dumps(printed)) is ending
 
 
 def codex_lups(arguments: object) -> str:

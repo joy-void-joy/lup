@@ -12,12 +12,13 @@ A file tool's write that asks is held in `PreToolUse` for the operator's answer
 in their inbox, then let through (`allow`) or denied (`deny`) with it: Claude
 Code's own prompt isn't used, so a hold is answered the same way on every
 runtime. The agent hears a
-checkpoint's report as `additionalContext` beside the call's result, and a turn,
-the session's or a subagent's, can't end while a `Stop` or `SubagentStop` hook
-answers `decision: block`; `Stop`'s `stop_hook_active` says the session's turn's
-end follows such a block. When judging itself fails at a turn's end, the turn
-ends, and the operator is warned once in `systemMessage`, which also carries what
-the session's turn's end tells without holding it.
+checkpoint's report as `additionalContext` beside the call's result, and what a
+turn's end tells it, the session's or a subagent's, as `additionalContext` of
+`Stop` or `SubagentStop`, which holds the turn: it goes on, the text shown as
+hook feedback rather than a hook error. `stop_hook_active` says a turn's end
+follows such a hold. When judging itself fails at a turn's end, the turn ends,
+and the operator is warned once in `systemMessage`, which also carries what the
+session's turn's end tells without holding it.
 
 In a launched room (`docs/launch.md`, *The one hook and the host service*), Claude
 Code runs the room's hook on `SessionStart`, `PreToolUse` for every call, `Stop`
@@ -38,8 +39,8 @@ The service adds to each answer through `told`: a call to lup's tools
 (`mcp__lup__<tool>`, `TOOL_PREFIX`) is rewritten to carry `caller`, lup's id for
 the conversation calling, as `updatedInput` with no decision, so the call goes
 through the session's own permission mode as it would have; and what the
-conversation is told goes in as `additionalContext` beside a call or a session's
-start, or as the reason a turn's end is held (`decision: "block"`). What a hook
+conversation is told goes in as `additionalContext`, beside a call or a session's
+start, or holding a turn's end. What a hook
 tells whole is 10,000 bytes (`heard`'s `fits`): Claude Code caps a hook's
 `additionalContext` at 10,000 characters, which a text's UTF-8 bytes never
 undercount, and an item past it is announced instead. A turn's end following a
@@ -84,10 +85,18 @@ What the host's part relies on, from Claude Code's hooks reference
   the start of the conversation", and a hook's `additionalContext` is "capped at
   10,000 characters", past which Claude Code saves it to a file that "Claude can
   read ... but Claude Code doesn't ask it to";
-- `Stop` and `SubagentStop`: `decision: "block"` "prevents Claude from
-  stopping", its `reason` "Required when `decision` is `"block"`. Tells Claude
-  why it should continue"; "SubagentStop hooks receive `stop_hook_active`" as
-  `Stop` hooks do.
+- `Stop` and `SubagentStop`: `hookSpecificOutput.additionalContext` is
+  "Non-error feedback for Claude. The conversation continues so Claude can act on
+  it, but unlike `decision: "block"` it is shown in the transcript as hook
+  feedback rather than a hook error", with "the same loop protections as
+  `decision: "block"`, namely the `stop_hook_active` input and the
+  8-consecutive-continuation cap" (read 2026-10-19); "SubagentStop hooks receive
+  `stop_hook_active`" as `Stop` hooks do. Measured on 2.1.303
+  (`docs/field-notes.md`, *A turn's end told through `additionalContext`*): the
+  model reads `Stop hook additional context: <text>` in a system reminder, where
+  a block's reason comes as `Stop hook feedback:` and again as `Stop hook
+  blocking error from command: "<command>": <reason>`; the turn goes on, and its
+  next end carries `stop_hook_active: true`, a subagent's too.
 
 What its judging relies on, from Claude Code's hooks reference
 (code.claude.com/docs/en/hooks):
@@ -129,7 +138,7 @@ Its release channel (`ClaudeChannel`) is the one its native installer reads
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Literal, override
+from typing import TYPE_CHECKING, Annotated, Literal, get_args, override
 
 from pydantic import Field, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
@@ -237,17 +246,21 @@ class PostToolUseAnswer(Output):
     additional_context: str
 
 
+type TurnEnd = Literal["Stop", "SubagentStop"]
+"""The hooks at a conversation's turn's end, whose `additionalContext` holds it."""
+
+
+class StopAnswer(Output):
+    """What `Stop` or `SubagentStop` tells the conversation, which holds its turn's end: it goes on, told it as hook feedback, not a hook error."""
+
+    hook_event_name: TurnEnd
+    additional_context: str
+
+
 class Specific(Output):
     """An answer in the `hookSpecificOutput` field."""
 
-    hook_specific_output: PreToolUseAnswer | PostToolUseAnswer
-
-
-class Blocked(Output):
-    """`Stop` or `SubagentStop` refusing to let the conversation end, and why."""
-
-    decision: Literal["block"] = "block"
-    reason: str
+    hook_specific_output: PreToolUseAnswer | PostToolUseAnswer | StopAnswer
 
 
 class OperatorWarning(Output):
@@ -306,13 +319,10 @@ def context(said: Said, event: str, items: list[str]) -> Said:
     return said.model_copy(update={"hook_specific_output": added})
 
 
-def held(said: Said, items: list[str]) -> Said:
-    """Return `said` holding a turn's end on `items`, after any reason it holds it for."""
-    if not items:
-        return said
-    return said.model_copy(
-        update={"decision": "block", "reason": joined(said.reason, items)}
-    )
+def held(event: TurnEnd, told: str) -> Specific:
+    """Return the answer holding a conversation's turn's end at `event`, telling it `told`."""
+    answer = StopAnswer(hook_event_name=event, additional_context=told)
+    return Specific(hook_specific_output=answer)
 
 
 def failure_note(failure: Exception) -> str:
@@ -614,9 +624,10 @@ class PostToolUse(Payload):
 class Stop(Payload):
     """`Stop`: the session's own conversation ends its turn.
 
-    What the turn's end tells without holding it goes to the operator, in
-    `systemMessage`: the hooks reference says `Stop`'s `additionalContext`, like
-    `reason`, means "The conversation continues so Claude can act on it".
+    What the turn's end tells the agent holds it, as `additionalContext`, which
+    the hooks reference says means "The conversation continues so Claude can act
+    on it"; what it tells without holding it goes to the operator, in
+    `systemMessage`.
     """
 
     hook_event_name: Literal["Stop"]
@@ -639,8 +650,8 @@ class Stop(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Hold the turn's end on the conversation's items."""
-        return held(said, telling.items)
+        """Hold the turn's end on the conversation's items, after anything it tells already."""
+        return context(said, self.hook_event_name, telling.items)
 
     @override
     def answer(self, bench: Bench) -> Output | None:
@@ -652,7 +663,7 @@ class Stop(Payload):
         )
         reply = ended.apply(bench)
         if reply.block:
-            return Blocked(reason=reply.block)
+            return held(self.hook_event_name, reply.block)
         if reply.note:
             return OperatorWarning(system_message=reply.note)
         return None
@@ -674,8 +685,9 @@ class SubagentStop(Payload):
     """`SubagentStop`: a subagent's conversation ends its turn.
 
     The hooks reference: it takes "the same decision control format as Stop
-    hooks", and a block "keeps the subagent running and delivers `reason` to the
-    subagent as its next instruction".
+    hooks, including `hookSpecificOutput.additionalContext` with `hookEventName`
+    set to `"SubagentStop"`, for non-error feedback that keeps the subagent
+    running".
     """
 
     hook_event_name: Literal["SubagentStop"]
@@ -694,8 +706,8 @@ class SubagentStop(Payload):
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Hold the subagent's turn's end on its items."""
-        return held(said, telling.items)
+        """Hold the subagent's turn's end on its items, after anything it tells already."""
+        return context(said, self.hook_event_name, telling.items)
 
     @override
     def answer(self, bench: Bench) -> Output | None:
@@ -703,7 +715,7 @@ class SubagentStop(Payload):
             session=self.session_id, agent=self.agent_id, cwd=self.cwd
         )
         reply = ended.apply(bench)
-        return Blocked(reason=reply.block) if reply.block else None
+        return held(self.hook_event_name, reply.block) if reply.block else None
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
@@ -825,13 +837,23 @@ def heard(raw: str, fits: int = 10_000) -> Heard:
 
 
 def ends(printed: str) -> bool:
-    """Say whether what a turn's end hook prints lets the turn end: it holds the turn with `decision: "block"`.
+    """Say whether what a hook prints lets a turn end: a turn's end's `additionalContext`, or `decision: "block"`, holds it.
 
     >>> ends(""), ends('{"decision":"block","reason":"wait"}')
     (True, False)
+    >>> ends('{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"wait"}}')
+    False
+    >>> ends('{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"see"}}')
+    True
     """
     said = Said.model_validate_json(printed) if printed.strip() else Said()
-    return said.decision != "block"
+    given = said.hook_specific_output
+    told = (
+        given is not None
+        and given.hook_event_name in get_args(TurnEnd.__value__)
+        and bool(given.additional_context)
+    )
+    return said.decision != "block" and not told
 
 
 def told(raw: str, answer: str, telling: Telling) -> str | None:
