@@ -495,21 +495,25 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
 
 
 def room_tools(delivery: Delivery, layout: Layout) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's, and the judge's, reading lup's state at `layout`."""
-    return [InboxTools(delivery=delivery), JudgeTools(layout=layout)]
+    """List the core's tools the host service serves each launched session: the inbox's, and the judge's, reading lup's state at `layout` by the delivery's clock."""
+    return [
+        InboxTools(delivery=delivery),
+        JudgeTools(layout=layout, clock=delivery.clock),
+    ]
 
 
 def served_tools(resolved: Resolved) -> list[ToolSpec]:
     """List what a launched session is told of each of lup's tools, which its guidance lists: the core's, then its modules'.
 
     The core's are read from the tools the service is handed, made over a
-    delivery and a layout without their fields: what a tool is doesn't depend
-    on whom it delivers to or where lup's state is. The modules' are read from
-    their classes, with no instance.
+    delivery with nothing but its clock and a layout without its fields: what a
+    tool is doesn't depend on whom it delivers to or where lup's state is. The
+    modules' are read from their classes, with no instance.
     """
+    unread = Delivery.model_construct(clock=SystemClock())
     core = [
         spec
-        for tools in room_tools(Delivery.model_construct(), Layout.model_construct())
+        for tools in room_tools(unread, Layout.model_construct())
         for spec in tools.specs()
     ]
     naming = Naming.model_construct().specs()
@@ -1859,13 +1863,7 @@ def verdicts(
         typer.echo(f"No verdicts in the last {days} days.")
         return
     for tally in tallies:
-        answers = (
-            f"  (approved {tally.approved}, declined {tally.declined}, "
-            f"unanswered {tally.unanswered})"
-            if tally.outcome in ["ask", "hold"]
-            else ""
-        )
-        typer.echo(f"{tally.count:6}  {tally.outcome:7} {tally.reason}{answers}")
+        typer.echo(tally.line())
 
 
 @app.command("importers", hidden=True)
