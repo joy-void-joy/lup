@@ -37,6 +37,7 @@ import {
     regionAt,
     shownAt,
     stepped,
+    stranded,
     toggled,
     waited,
     withWritten,
@@ -286,6 +287,8 @@ export function Review({
     reviewed,
     now,
 }: Props) {
+    // Where the groups were laid out this sitting, which ends once nothing's left to read: each keeps its place.
+    const places = useRef<string[]>([]);
     const laidOut = useMemo(
         () =>
             laid(
@@ -309,6 +312,7 @@ export function Review({
                 },
                 draft,
                 around,
+                places.current,
             ),
         [items, agents, banner, draft, around, reviewed, now],
     );
@@ -338,6 +342,8 @@ export function Review({
     });
     const { view, landing, unfolded } = editor;
     const before = useRef<Laid | null>(null);
+    // What was written as it was last laid out.
+    const wrote = useRef<Written[]>([]);
 
     useEffect(() => {
         const current = view.current;
@@ -354,9 +360,16 @@ export function Review({
             // A comment being written keeps the cursor, though what arrived moved it, as its agent's group comes first;
             // one just opened takes it, though vim moved it into another under the same line, as `S` does.
             const writing = arriving === null && editor.writing() ? writtenAt(before.current, laidOut, head) : undefined;
+            // What it was on gone, as a reply sent takes what it covered, it goes back to what that was about.
+            const away =
+                arriving === null && writing === undefined && before.current !== null
+                    ? stranded(before.current, wrote.current, laidOut, written(draft), head)
+                    : undefined;
             const anchor =
                 writing ??
+                away ??
                 (arriving === null ? moved(head, made, doc) : followed(before.current, laidOut, head, made, doc, arriving));
+            const landed = arriving !== null || away !== undefined;
             const closed = laidFor.folds.filter((each) => !unfolded.current.has(each.key));
             // Where the view is, anchored to the text at its top and mapped through the changes.
             const changing = current.state.changes(made);
@@ -364,11 +377,11 @@ export function Review({
             current.dispatch({
                 changes: changing,
                 selection: { anchor: uncovered(closed, anchor) },
-                scrollIntoView: arriving !== null,
+                scrollIntoView: landed,
                 annotations: rebuilt.of(true),
             });
             refold(current, laidFor.folds, unfolded.current);
-            if (arriving === null && kept !== undefined) {
+            if (!landed && kept !== undefined) {
                 current.dispatch({ effects: kept });
             }
             if (writing !== undefined) {
@@ -379,6 +392,8 @@ export function Review({
             refold(current, laidFor.folds, unfolded.current);
         }
         before.current = laidOut;
+        wrote.current = written(draft);
+        places.current = items.length === 0 ? [] : laidOut.groups.map((each) => each.place);
         landing.current = null;
         editor.draw(decorations(laidOut, draft, reviewed));
         if (arriving !== null && "comment" in arriving) {

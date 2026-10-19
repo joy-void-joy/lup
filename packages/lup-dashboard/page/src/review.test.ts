@@ -26,6 +26,7 @@ import {
     shownAt,
     stepped,
     steps,
+    stranded,
     toggled,
     waited,
     whose,
@@ -582,6 +583,50 @@ describe("every agent's group, and the messages under its banner", () => {
         expect(regionAt(out, at("Approve?"))?.item.number).toBe(54);
         expect(groupAt(out, at("Hi."))?.conversation).toEqual(S3);
         expect(groupAt(out, at("Approve?"))).toBeUndefined();
+    });
+
+    it("keeps each group where it was this sitting, items coming and going, and lays a new one after them", () => {
+        const S1 = from("s1", "a1");
+        const first = laid([QUESTION, NOTE], [S1, S3], banner, header, EMPTY, NOTHING);
+        const heads = (out: typeof first) => out.text.split("\n").filter((line) => line.startsWith("━━"));
+        expect(heads(first)).toEqual(["━━ s2 ━━", "━━ s1 ━━", "━━ s3 ━━"]);
+        const places = first.groups.map((each) => each.place);
+        // s2's note answered and a newer item for s1: unsorted again, they keep their places, and s4's comes after.
+        const newer: Item = { ...QUESTION, number: 60, made: "2026-10-17T13:00:00Z" };
+        const fourth: Item = { ...NOTE, number: 61, sender: S4 };
+        const next = laid([QUESTION, newer, fourth], [S1, S3, from("s2")], banner, header, EMPTY, NOTHING, places);
+        expect(heads(next)).toEqual(["━━ s2 ━━", "━━ s1 ━━", "━━ s3 ━━", "━━ s4 ━━"]);
+        expect(heads(laid([QUESTION, newer, fourth], [S1, S3, from("s2")], banner, header, EMPTY, NOTHING))).toEqual([
+            "━━ s1 ━━",
+            "━━ s4 ━━",
+            "━━ s3 ━━",
+            "━━ s2 ━━",
+        ]);
+        // What's left for later has places of its own.
+        const parked = laid([QUESTION, NOTE], [S1, S3], banner, header, { ...EMPTY, parked: [52] }, NOTHING, places);
+        expect(heads(parked)).toEqual(["━━ s1 ━━", "━━ s3 ━━", "━━ s2 · later ━━"]);
+    });
+
+    it("lands back on what was written about, once it's sent, and on the group's banner where that's gone too", () => {
+        const letter = { to: S3, text: "Look at the cache too." };
+        const comment: Comment = { item: 51, quote: { text: "Use lark", start: 17, end: 25 }, text: "Yes." };
+        const draft: Draft = { ...EMPTY, comments: [comment], letters: [letter] };
+        const before = laid([QUESTION, NOTE], [S3], banner, header, draft, NOTHING);
+        const places = before.groups.map((each) => each.place);
+        const at = (out: typeof before, text: string) => out.text.indexOf(text);
+        // The message sent: on its agent's banner.
+        const sent = laid([QUESTION, NOTE], [S3], banner, header, { ...EMPTY, comments: [comment] }, NOTHING, places);
+        expect(stranded(before, written(draft), sent, [comment], at(before, "Look at"))).toBe(at(sent, "━━ s3"));
+        // The comment sent, its item still there: on its passage's last character.
+        const answered = laid([QUESTION, NOTE], [S3], banner, header, { ...EMPTY, letters: [letter] }, NOTHING, places);
+        expect(stranded(before, written(draft), answered, [letter], at(before, "Yes."))).toBe(at(answered, "Use lark") + 7);
+        // Its item gone too, and from the item's own lines: on its group's banner, here empty.
+        const gone = laid([NOTE], [S3, from("s1", "a1")], banner, header, EMPTY, NOTHING, places);
+        expect(stranded(before, written(draft), gone, [], at(before, "Yes."))).toBe(at(gone, "━━ s1"));
+        expect(stranded(before, written(draft), gone, [], at(before, "Keep the cache"))).toBe(at(gone, "━━ s1"));
+        // What's still there: carried by the text's changes.
+        expect(stranded(before, written(draft), answered, [letter], at(before, "Look at"))).toBeUndefined();
+        expect(stranded(before, written(draft), gone, [], at(before, "I assumed"))).toBeUndefined();
     });
 
     it("keeps what the editor holds in the draft's two lists, and sends only the messages that say something", () => {

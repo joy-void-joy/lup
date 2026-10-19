@@ -94,6 +94,8 @@ export interface Group {
     /** The agent it's of; none for lup's approvals, which no message goes to. */
     conversation: Conversation | null;
     later: boolean;
+    /** What names its place across layouts: whose it is, and whether it's of what's left for later. */
+    place: string;
     banner: Span;
     blocks: Block[];
 }
@@ -379,6 +381,11 @@ function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
     return ranked.sort((a, b) => told(a) - told(b) || made(b) - made(a) || numbered(b) - numbered(a));
 }
 
+/** Return what names a group's place across layouts: `key`, whose it is, and whether it's of what's left for later. */
+function placeOf(key: string, later: boolean): string {
+    return `${later ? "later" : "now"} ${key}`;
+}
+
 /** Return a group for each of `conversations` with none among `groups`, in their order, once each. */
 function emptyGroups(conversations: Conversation[], groups: Grouping[]): Grouping[] {
     const keys = new Set(groups.map((each) => each.key));
@@ -413,6 +420,9 @@ export function fresh(item: Item, reviewed: string | null | undefined): boolean 
  * each item's own text, what the host has answered of it: each file an approval or a held change changes, its header
  * then its lines, each run of unchanged ones folding under a summary line; then the item's context, a summary line
  * with the lines that fold under it. Where the host showed none, a line says why.
+ *
+ * `places` are where the groups were laid out before in this sitting (`Group.place`, in order): each among them keeps
+ * its place, items coming and going, and any other comes after them, in the order above.
  */
 export function laid(
     items: Item[],
@@ -421,6 +431,7 @@ export function laid(
     header: (item: Item, parked: boolean) => string,
     draft: Draft,
     around: Around,
+    places: readonly string[] = [],
 ): Laid {
     const parked = draft.parked ?? [];
     const done = draft.done ?? [];
@@ -432,13 +443,22 @@ export function laid(
     let text = "";
     const groups: Group[] = [];
     const regions: Region[] = [];
-    for (const group of [...now, ...empty]) {
+    for (const group of kept([...now, ...empty], false)) {
         layGroup(group, false);
     }
-    for (const group of later) {
+    for (const group of kept(later, true)) {
         layGroup(group, true);
     }
     return { text, groups, regions };
+
+    /** Return `section` with each group laid out before in its place, any other after them, in its own order. */
+    function kept(section: Grouping[], isParked: boolean): Grouping[] {
+        const rank = (group: Grouping) => {
+            const at = places.indexOf(placeOf(group.key, isParked));
+            return at < 0 ? places.length : at;
+        };
+        return [...section].sort((a, b) => rank(a) - rank(b));
+    }
 
     function layGroup(group: Grouping, isParked: boolean): void {
         const said = banner(group.head, isParked);
@@ -457,7 +477,7 @@ export function laid(
         if (group.items.length === 0 && blocks.length > 0) {
             text += "\n";
         }
-        groups.push({ conversation: group.conversation, later: isParked, banner: opening, blocks });
+        groups.push({ conversation: group.conversation, later: isParked, place: placeOf(group.key, isParked), banner: opening, blocks });
         for (const item of group.items) {
             layItem(item, isParked);
         }
@@ -607,6 +627,38 @@ export function groupAt(laidOut: Laid, position: number): Group | undefined {
     const region = lastFrom(laidOut.regions, (each) => each.header.from, position);
     const group = lastFrom(laidOut.groups, (each) => each.banner.from, position);
     return group !== undefined && (region === undefined || group.banner.from > region.header.from) ? group : undefined;
+}
+
+/** Return whether two of what's written are the same one, whatever it says: a comment on the same passage of the same item, or a message to the same agent. */
+function same(a: Written, b: Written): boolean {
+    if (isLetter(a) || isLetter(b)) {
+        return isLetter(a) && isLetter(b) && whose(a.to) === whose(b.to);
+    }
+    return a.item === b.item && a.quote?.start === b.quote?.start && a.quote?.end === b.quote?.end;
+}
+
+/**
+ * Return where the cursor goes as the review is laid out again, from `before` and what was written in it to `after`
+ * and what's written now, where what it was on at `head` is gone, as a reply sent takes what it covered: from a
+ * comment or a message gone, back on what it was about (`aboutAt`), the last character of its passage, its item's
+ * header, its group's banner; from an item gone, or what it was about gone too, onto its group's banner. None where
+ * what it was on is still there, or its group is gone too, where the text's changes carry it.
+ */
+export function stranded(before: Laid, wrote: Written[], after: Laid, writes: Written[], head: number): number | undefined {
+    const group = lastFrom(before.groups, (each) => each.banner.from, head);
+    const banner = after.groups.find((each) => each.place === group?.place)?.banner.from;
+    const block = blockAt(before, head);
+    const was = block === undefined ? undefined : wrote[block.comment];
+    if (was !== undefined) {
+        if (writes.some((each) => same(each, was))) {
+            return undefined;
+        }
+        const region = isLetter(was) ? undefined : after.regions.find((each) => each.item.number === was.item);
+        return isLetter(was) || region === undefined ? banner : commentedAt(region, was);
+    }
+    const region = regionAt(before, head);
+    const gone = region !== undefined && !after.regions.some((each) => each.item.number === region.item.number);
+    return gone ? banner : undefined;
 }
 
 /** Return every comment and message shown, as blocks of the editor's list of what's written. */
@@ -796,10 +848,12 @@ export function aboutAt(laidOut: Laid, written: Written, block: Block): number |
         return groupAt(laidOut, block.from)?.banner.from;
     }
     const region = regionAt(laidOut, block.from);
-    if (region === undefined) {
-        return undefined;
-    }
-    return written.quote == null ? region.header.from : shownAt(region, lastOf(written.quote));
+    return region === undefined ? undefined : commentedAt(region, written);
+}
+
+/** Return where a comment on `region`'s item is about: the last character of the passage it quotes, or the item's header for one on the item whole. */
+function commentedAt(region: Region, comment: Comment): number {
+    return comment.quote == null ? region.header.from : shownAt(region, lastOf(comment.quote));
 }
 
 /** Return `draft` with `number` in `list` if it wasn't, and out of it if it was. */
