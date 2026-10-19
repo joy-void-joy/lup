@@ -4,8 +4,9 @@
 // enters it opens one where the cursor is, or edits the one it's in, and the
 // cursor stays in it until it ends. Space `c` opens one on the whole (an item,
 // a conversation); vim's change, `c` and a motion, on the passage it covers
-// (`ct.`, `ciw`, `cip`, `cc` a line's); `o`, `C` and vim's other keys of insert
-// mode on the line; `v` and a motion, then `c` or `s`, on the selection. `]]` and
+// (`ct.`, `ciw`, `cip`, `cc` a line's, `C` to the line's end); `o` and vim's other
+// keys of insert mode on the line; `v` and a motion, then `c` or `s`, on the
+// selection; where what's covered isn't one item's or one turn's, on the line. `]]` and
 // `[[` go to the next and previous item or turn, `]c` and `[c` to the next and
 // previous line that matters, where a view has some. Ctrl+Enter in a comment ends
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
@@ -222,9 +223,9 @@ function commentAt(bound: Bound, position: number): Block | undefined {
 
 /**
  * The keys that vim's keymap can't say, read ahead of vim, which takes every key it's given before a keymap would:
- * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere; and `C` alone outside every comment, a comment
- * on the line, which in a comment stays vim's change. Every key is noted first, for what vim makes of it (`Keyed`):
- * one with no key of vim's pending begins what it notes, `c` in normal mode beginning vim's change.
+ * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere. Every key is noted first, for what vim makes of
+ * it (`Keyed`): one with no key of vim's pending begins what it notes, `c` or `C` in normal mode beginning vim's
+ * change.
  *
  * A dead key, as `` ` `` on a layout where it waits for the next key, gives no key of its own: the browser composes it
  * with the next, `` ` `` then Space making a `` ` ``. Outside insert mode, vim gets the first text it types, once, and
@@ -276,7 +277,7 @@ const keys = Prec.highest(
             keyed.passage = null;
             const modified = event.ctrlKey || event.metaKey || event.altKey;
             if (idle(cm)) {
-                keyed.changing = event.key === "c" && !modified && !keyed.visual;
+                keyed.changing = (event.key === "c" || event.key === "C") && !modified && !keyed.visual;
             }
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 if (cm.state.vim.insertMode) {
@@ -284,11 +285,6 @@ const keys = Prec.highest(
                 } else {
                     bound.actions?.send();
                 }
-                event.preventDefault();
-                return true;
-            }
-            if (event.key === "C" && !modified && idle(cm) && commentAt(bound, head) === undefined) {
-                bound.actions?.comment(cm, "line");
                 event.preventDefault();
                 return true;
             }
@@ -727,7 +723,9 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     return;
                 }
                 const passage = keyed.visual || keyed.changing ? keyed.passage : null;
-                const comment = passage === null ? own.opened(keyed.from) : own.quoted(passage.from, passage.to);
+                // A passage no comment can quote, as `C` on an item's header, opens one on the line, as `o` does.
+                const quoted = passage === null ? undefined : own.quoted(passage.from, passage.to);
+                const comment = quoted ?? own.opened(keyed.from);
                 if (comment === undefined) {
                     Vim.exitInsertMode(cm, true);
                     return;

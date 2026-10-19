@@ -487,7 +487,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
                     </div>
                 ) : (
                     <div className="keys muted">
-                        comment: <kbd>c</kbd>+motion passage · <kbd>o</kbd>/<kbd>C</kbd> line · <kbd>v</kbd>…<kbd>c</kbd>{" "}
+                        comment: <kbd>c</kbd>+motion passage · <kbd>o</kbd> line · <kbd>C</kbd> to its end · <kbd>v</kbd>…<kbd>c</kbd>{" "}
                         selection · <kbd>␣c</kbd> message · <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>za</kbd> fold ·{" "}
                         <kbd>zR</kbd>/<kbd>zM</kbd> unfold/fold all · <kbd>]]</kbd>/<kbd>[[</kbd> turns · <kbd>␣r</kbd> review ·{" "}
                         <kbd>␣h</kbd> agents

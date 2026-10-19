@@ -464,7 +464,7 @@ export function App() {
                         </div>
                     ) : (
                         <div className="keys muted">
-                            comment: <kbd>␣c</kbd> item · <kbd>c</kbd>+motion passage · <kbd>o</kbd>/<kbd>C</kbd> line ·{" "}
+                            comment: <kbd>␣c</kbd> item · <kbd>c</kbd>+motion passage · <kbd>o</kbd> line · <kbd>C</kbd> to its end ·{" "}
                             <kbd>v</kbd>…<kbd>c</kbd> selection · <kbd>o</kbd> on a banner: message ·{" "}
                             <kbd>u</kbd>/<kbd>^r</kbd> undo/redo · <kbd>␣d</kbd> read ·{" "}
                             <kbd>␣z</kbd> later · <kbd>␣a</kbd>/<kbd>␣x</kbd> approve/decline · <kbd>za</kbd> fold ·{" "}

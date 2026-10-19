@@ -247,6 +247,16 @@ describe("laid", () => {
         expect(regionAt(out, out.text.indexOf("UTF-8"))?.item.number).toBe(52);
     });
 
+    it("quotes from the cursor to the line's end, as `C` covers, and nothing on a header, where `C` opens the line's comment", () => {
+        const out = laid([QUESTION], [], banner, header, EMPTY, NOTHING);
+        const keep = out.text.indexOf("the cache");
+        const end = out.text.indexOf("\n", keep);
+        expect(onItem(quoted(out, keep, end))?.quote?.text).toBe("the cache");
+        const head = out.text.indexOf("── #51");
+        expect(quoted(out, head + 3, out.text.indexOf("\n", head))).toBeUndefined();
+        expect(opened(out, head + 3)).toEqual({ item: 51, quote: null, text: "" });
+    });
+
     it("shows an approval's diff without git's colours", () => {
         expect(plain("\u001b[32m+added\u001b[m")).toBe("+added");
     });
