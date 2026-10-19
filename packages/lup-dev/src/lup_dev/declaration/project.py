@@ -13,10 +13,17 @@ from lup.types import Model
 from lup_dev.declaration.module import Modules
 
 type Asking = Literal[
-    "protected", "operator", "new-file", "whole-file", "public-api", "ignore"
+    "protected",
+    "operator",
+    "new-file",
+    "whole-file",
+    "public-api",
+    "ignore",
+    "private",
 ]
 """What a change asks the operator about, besides a rule's finding: a path's role
-(`protected`, `operator`) or a kind of change."""
+(`protected`, `operator`) or a kind of change, `private` a value never published
+on a line it touches (`lup_dev.private`)."""
 
 
 class Project(Model, extra="forbid"):
@@ -31,10 +38,10 @@ class Project(Model, extra="forbid"):
     held: list[str] = ["protected", "operator", "ignore"]
     """What a change waits for the operator's answer on, by name: a path's role
     (`protected`, `operator`), a kind of change (`new-file`, `whole-file`,
-    `public-api`, `ignore`), or one of lup's rules, a finding of on the lines the
-    change touches. Which paths have a role is `Paths`'s to say; how each is
-    answered is said here alone."""
-    flagged: list[str] = ["new-file", "whole-file", "public-api"]
+    `public-api`, `ignore`, `private`), or one of lup's rules, a finding of on
+    the lines the change touches. Which paths have a role is `Paths`'s to say;
+    how each is answered is said here alone."""
+    flagged: list[str] = ["new-file", "whole-file", "public-api", "private"]
     """What a change lands with, flagged for the operator's review of the branch,
     by the same names. A name in neither list is let through."""
 

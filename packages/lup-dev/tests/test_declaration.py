@@ -377,7 +377,7 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
     assert resolved.conditions == []
     assert (resolved.held, resolved.flagged) == (
         ["protected", "operator", "ignore"],
-        ["new-file", "whole-file", "public-api"],
+        ["new-file", "whole-file", "public-api", "private"],
     )
     assert [(each.module, each.requirement.tool) for each in resolved.requirements] == [
         ("code-rules", "node"),

@@ -85,6 +85,9 @@ from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.store import Elsewhere, Entry, Heads, Held, Store
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.policy.worktrees import Holding, Place, SessionIndex, place
+from lup_dev.private.module import Private
+from lup_dev.private.withheld import Withheld
+from lup_dev.private.withheld import kept as listed_at
 from lup_dev.stored import read_model, write_model
 
 
@@ -481,7 +484,12 @@ class Worktree(Model):
     def judge(
         self, services: Services, approved: list[Path], *, holding: bool = False
     ) -> Judge:
-        """Return a judge for this worktree, the operator having approved `approved`, and holding each flagged write where `holding`."""
+        """Return a judge for this worktree, the operator having approved `approved`, and holding each flagged write where `holding`.
+
+        It finds the values never published the repository's last launch
+        listed on the host, where one did.
+        """
+        listed = listed_at(services.layout.module_data(Private.name, self.repository))
         return Judge(
             root=self.root,
             roles=self.roles,
@@ -490,6 +498,7 @@ class Worktree(Model):
             conditions=declared(self.loaded.root, self.declaration.conditions),
             approved=approved,
             holding=holding,
+            withheld=read_model(listed, Withheld),
         )
 
     def verdicts(self, layout: Layout) -> VerdictLog:

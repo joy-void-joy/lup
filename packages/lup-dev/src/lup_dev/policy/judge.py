@@ -12,15 +12,21 @@ so a change gets the same outcome whichever way it was made (`docs/judging-write
 | `whole-file` | a whole-file write over one |
 | `public-api` | a change to the public API |
 | `ignore` | an added `# lup: ignore` |
+| `private` | a value never published on a line it touches, in any path git doesn't ignore |
 | a rule's name | one of lup's rules, a finding of on the lines a change touches |
 
 The declaration says how each is answered (`Project.held`, `Project.flagged`):
 held, the change waiting for the operator's answer (an `ask`); flagged, the
 change landing, for the operator to see in their review of the branch; or
 neither, let through. By default a protected path, an operator's document and
-an added `ignore` are held, the changes of design flagged, and no rule either.
-The operator's switch for an agent, "hold each flagged write", holds what's
-flagged (`Judge.holding`). Tests, scratch, docs and data are allowed at any size.
+an added `ignore` are held, the changes of design and a private value flagged,
+and no rule either. The operator's switch for an agent, "hold each flagged
+write", holds what's flagged (`Judge.holding`). Tests, scratch, docs and data
+are allowed at any size.
+
+A private value is found from the list the `Private` module's launch built on
+the host (`lup_dev.private`), in every role, and told as a lup finding is,
+naming its kind and never the value (`Judge.withheld`).
 
 lup's findings are told to the agent right after the write, as a type error is,
 and fail the gate until each is cleared or kept with an `ignore`, whatever the
@@ -63,6 +69,12 @@ from lup_dev.inbox.store import (
 )
 from lup_dev.policy.roles import Role, Roles
 from lup_dev.policy.surface import ApiChange, api_changes
+from lup_dev.private.found import found as values_in
+from lup_dev.private.withheld import Withheld, said
+
+PRIVATE: Asking = "private"
+"""The name a private value on a touched line asks by, and the rule its finding
+is told under."""
 
 type AskKind = Asking | Literal["rule"]
 """What a change asks the operator about: a path's role, a kind of change
@@ -88,6 +100,9 @@ class Change(Model):
     """Its content when the session started; none where it didn't exist then."""
     whole: bool = False
     """Whether the change writes the whole of a file that existed."""
+    published: bool = True
+    """Whether git would publish the file: false for a path the repository
+    ignores, which no value never published is looked for in."""
 
 
 class Ask(Model):
@@ -99,8 +114,8 @@ class Ask(Model):
     rule: str | None = None
     """The rule a finding of asks, for a `rule` ask; none for any other."""
     line: int | None = None
-    """The line an `ignore` the change adds is on, counted from 1, in the content
-    after it; none for any other ask."""
+    """The line an `ignore` the change adds, or a private value, is on, counted
+    from 1, in the content after it; none for any other ask."""
     api: ApiChange | None = None
     """The change to the public API, with the line naming it, for a `public-api`
     ask; none for any other."""
@@ -184,11 +199,16 @@ class Judgement(Model):
                 api=ApiChanged(kind=ask.api.kind, name=ask.api.name),
             )
 
+        through = ["rule", PRIVATE]
         return Reading(
             role=self.role,
             asks=[
-                *(asked(ask, "held") for ask in self.asks if ask.kind != "rule"),
-                *(asked(ask, "flagged") for ask in self.flags if ask.kind != "rule"),
+                *(asked(ask, "held") for ask in self.asks if ask.kind not in through),
+                *(
+                    asked(ask, "flagged")
+                    for ask in self.flags
+                    if ask.kind not in through
+                ),
             ],
             findings=[
                 Found(
@@ -301,6 +321,10 @@ class Judge(Model, arbitrary_types_allowed=True):
     holding: bool = False
     """Whether every flagged ask is held: the operator's switch for the agent
     writing, "hold each flagged write"."""
+    withheld: Withheld | None = None
+    """The values never published from the repository, as the `Private`
+    module's launch listed them on the host; none where no list was built,
+    which finds none."""
 
     def judge(self, changes: list[Change], *, inform: bool = True) -> list[Judgement]:
         """Judge each change, asking the engine about every version at once.
@@ -341,13 +365,16 @@ class Judge(Model, arbitrary_types_allowed=True):
             self.roles.declaration.runner,
         )
         return [
-            self.one(
+            self.with_private(
                 change,
-                Versions(
-                    after=after.get(change.path),
-                    before=before.get(change.path),
-                    baseline=baseline.get(change.path),
-                    ruff=[found for found in ruff if found.path == change.path],
+                self.one(
+                    change,
+                    Versions(
+                        after=after.get(change.path),
+                        before=before.get(change.path),
+                        baseline=baseline.get(change.path),
+                        ruff=[found for found in ruff if found.path == change.path],
+                    ),
                 ),
             )
             for change in changes
@@ -377,12 +404,15 @@ class Judge(Model, arbitrary_types_allowed=True):
             return read.get(Source(path=path, content=content))
 
         return [
-            self.one(
+            self.with_private(
                 change,
-                Versions(
-                    after=report(change.path, change.after),
-                    before=report(change.path, change.before),
-                    baseline=report(change.path, change.baseline),
+                self.one(
+                    change,
+                    Versions(
+                        after=report(change.path, change.after),
+                        before=report(change.path, change.before),
+                        baseline=report(change.path, change.baseline),
+                    ),
                 ),
             )
             for change in changes
@@ -480,6 +510,75 @@ class Judge(Model, arbitrary_types_allowed=True):
                     outcome="allow",
                     information=self.information(versions),
                 )
+
+    def private(self, change: Change) -> list[Finding]:
+        """Return each value never published in what a change writes, as a lup finding naming its kind, never the value: in its content, and in the path of a file it creates.
+
+        None where no list was built, where the change deletes the file, or
+        where git ignores its path, which nothing publishes.
+        """
+        if self.withheld is None or change.after is None or not change.published:
+            return []
+
+        def finding(line: int, column: int, end: int, what: str, steer: str) -> Finding:
+            return Finding(
+                path=change.path,
+                span=Span(
+                    start=Position(line=line, column=column),
+                    end=Position(line=line, column=end),
+                ),
+                owner="lup",
+                rule=PRIVATE,
+                message=what,
+                steer=steer,
+            )
+
+        within = [
+            finding(each.line, each.column, each.end, said_.what, said_.steer)
+            for each in values_in(change.after, self.withheld)
+            for said_ in [said(each.held.kind)]
+        ]
+        named = [
+            finding(1, 1, 1, f"{said_.what}, in the file's path", said_.steer)
+            for each in values_in(str(change.path), self.withheld)
+            if change.before is None
+            for said_ in [said(each.held.kind)]
+        ]
+        return [*named, *within]
+
+    def with_private(self, change: Change, judgement: Judgement) -> Judgement:
+        """Add to `judgement` each value never published the change writes: on a line it touches, a finding told and an ask by `private`, held or flagged as the declaration says; elsewhere, a finding told apart."""
+        every = self.private(change)
+        if not every:
+            return judgement
+        touched = touched_lines(change.before, change.after or "")
+        on = [each for each in every if touches(each, touched)]
+        asks = self.sorted(
+            [
+                Ask(
+                    kind=PRIVATE,
+                    reason=(
+                        f"{self.root / change.path}:{each.span.start.line} - "
+                        f"{each.message}"
+                    ),
+                    line=each.span.start.line,
+                )
+                for each in on
+            ]
+        )
+        held = [*judgement.asks, *asks.held]
+        return judgement.model_copy(
+            update={
+                "outcome": "ask" if held else judgement.outcome,
+                "asks": held,
+                "flags": [*judgement.flags, *asks.flagged],
+                "findings": [*judgement.findings, *on],
+                "untouched": [
+                    *judgement.untouched,
+                    *(each for each in every if not touches(each, touched)),
+                ],
+            }
+        )
 
     def sorted(self, asks: list[Ask]) -> Sorted:
         """Sort a change's asks as the declaration says: each held or flagged by its name (`Project.held`, `Project.flagged`), and the rest let through; every flagged one held where the operator holds each flagged write of the agent (`holding`)."""

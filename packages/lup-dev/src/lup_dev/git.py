@@ -156,6 +156,11 @@ class Git(Model):
         [main, *_] = self.worktrees()
         return main
 
+    def ignored(self, path: Path) -> bool:
+        """Say whether the repository ignores `path`, from the work tree's root: a tracked file never is."""
+        found = self.run("check-ignore", "--quiet", "--", str(path), ok=[0, 1])
+        return found.status == 0
+
     def commit(self, revision: str) -> str | None:
         """Return the commit `revision` names, or none where it names none."""
         found = self.run(
