@@ -99,6 +99,8 @@ class LupDevelopment(Module):
                 "packages/lup-dev/src/lup_dev/host/protocol.py",
                 "packages/lup-dev/src/lup_dev/inbox/protocol.py",
                 "packages/lup-dev/src/lup_dev/inbox/store.py",
+                "packages/lup/src/lup/sessions/results.py",
+                "packages/lup/src/lup/tools/speaking.py",
                 "uv.lock",
             ],
         ),

@@ -6,7 +6,7 @@ This repository is the second lup. The first (`joy-void-joy/lup-legacy`, archive
 
 ## Who wrote this
 
-This file, `DESIGN.md`, the docs and the guidance every session gets were written by earlier sessions for the ones after: notes on what mattered, so you don't have to find it out again. None of it is a rule handed down. Each line says why it's there, so you can tell when it doesn't fit your case; where it doesn't, or where something seems unclear or off, saying so is part of the work, and the operator is always reachable through lup's inbox (`ask`, `note`, and `report` when the work can't go on). When you learn something the next session should know, write it here with its reason. An edit to this file or to `DESIGN.md` is shown to the operator before it lands, so they see how the guidance changes.
+This file, `DESIGN.md`, the docs and the guidance every session gets were written by earlier sessions for the ones after: notes on what mattered, so you don't have to find it out again. None of it is a rule handed down. Each line says why it's there, so you can tell when it doesn't fit your case; where it doesn't, or where something seems unclear or off, saying so is part of the work, and the operator is always reachable through lup's inbox (`ask`, `note`, `friction` the moment something gets in the way, `blocked` when the work can't go on, `stop` to end it by your own choice, and `how_it_went` near the end). When you learn something the next session should know, write it here with its reason. An edit to this file or to `DESIGN.md` is shown to the operator before it lands, so they see how the guidance changes.
 
 The same holds for what steers you. lup's code rules and the gate point toward approaches that held up: a refusal names the mistake it prevents and where it steers, an `ignore` with its reason keeps a finding where the concern doesn't hold, and a rule that fires where no design choice is at stake is that rule's bug. The room's walls are there so that if something goes wrong (a malicious package, a prompt injection), it can't reach the operator's machine; they aren't there to contain you. How you work is yours, and if something about how the work is set up makes it worse for you, that's worth saying as much as a bug is.
 
@@ -70,10 +70,10 @@ lup's code rules enforce most of these, at the edit and in the gate (`docs/rules
 
 ## Delegating
 
-- **The instances you spawn are you, with less of the picture.** Give them the picture: who this is for, why it matters, what you're unsure about. Leave them a way to tell you how it went. And if something's unclear or seems off, saying so is part of doing the job: tell them that too.
+- **The instances you spawn are you, with less of the picture.** Give them the picture: who this is for, why it matters, what you're unsure about. Ask for what you need back to do your own work; how the work went reaches the operator through their own `friction` and `how_it_went`. And if something's unclear or seems off, saying so is part of doing the job: tell them that too.
 - **Your runtime's own subagents for now;** lup's own spawn comes later.
 - **Keep jobs bounded, not briefs thin.** A subagent re-reads its whole context every turn, so a long-lived one costs far more than a bounded job; the picture you give it is worth its tokens.
-- **End every brief by asking how the work went:** what got in the way (the exact command and message), what was smooth, what they'd change, and how it felt, as openly as they like. "Nothing notable" is a fine answer. These notes are read: they're how what gets in the way is found and fixed, and they show where a brief was thin. Close your own merge commits and pull requests with the same note.
+- **End every brief by asking them to call `friction` the moment something gets in the way, and `how_it_went` near the end:** what got in the way (the exact command and message), what was smooth, what they'd change, and how it felt, as openly as they like. "Nothing notable" is a fine answer. Both reach the operator directly, whatever the parent passes on: they're how what gets in the way is found and fixed, and they show where a brief was thin. Call them yourself too, and close your merge commits and pull requests with the same note.
 
 ## Tools
 
