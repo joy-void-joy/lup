@@ -28,7 +28,7 @@ from typer.testing import CliRunner
 from lup.github.tools import GitHubTools
 from lup.rooms import Podman
 from lup.rooms.engine import Exited, Process
-from lup.tools.speaking import Problem, Remark
+from lup.tools.speaking import SPEAKING
 from lup_dev import Modules, Project, cli
 from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts
 from lup_dev.codescan.engine import EngineError
@@ -79,7 +79,9 @@ from lup_dev.inbox.store import (
     Done,
     Draft,
     Found,
+    Friction,
     HeldChange,
+    HowItWent,
     Inbox,
     InboxError,
     Item,
@@ -96,6 +98,7 @@ from lup_dev.inbox.store import (
     Told,
     Waiting,
 )
+from lup_dev.inbox.store import Stop as Stopped
 from lup_dev.inbox.tools import specs
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
@@ -1038,14 +1041,14 @@ def test_the_operator_replies_to_a_note_the_reply_saying_what_it_answers(
     )
 
 
-def test_report_note_and_send_reach_the_operator_with_a_desktop_notice(
+def test_blocked_note_and_send_reach_the_operator_with_a_desktop_notice(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     with inboxed(machine, clock, notices, said):
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         mcp = machine.host.launch("one").mcp
-        reported = call(mcp, "report", {"problem": "The build is broken."})
+        reported = call(mcp, "blocked", {"problem": "The build is broken."})
         noted = call(mcp, "note", {"remark": "I assumed UTF-8."})
         sent = call(
             mcp,
@@ -1055,7 +1058,7 @@ def test_report_note_and_send_reach_the_operator_with_a_desktop_notice(
         invalid = call(mcp, "send", {"to": "someone", "kind": "note", "text": "x"})
         listed = inbox()
     assert reported == (
-        "Your report is with the operator, item 1. End your turn.",
+        "Your problem is with the operator, item 1. End your turn.",
         False,
     )
     assert noted == ("Your note is with the operator, item 2. Carry on.", False)
@@ -1083,6 +1086,132 @@ def test_report_note_and_send_reach_the_operator_with_a_desktop_notice(
         "The build is broken.\nlup-dev inbox show 1"
     )
     assert len(notices.raised) == 3
+
+
+def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_subagent(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    jammed: dict[str, JsonValue] = {
+        "got_in_the_way": "`uv run lup-dev check` printed: engine stale",
+        "trying": "run the gate",
+        "would_change": "say the rebuild's time first",
+    }
+    went: dict[str, JsonValue] = {"smooth": "The brief.", "felt": "Good."}
+    stopping: dict[str, JsonValue] = {"why": "Done; nothing more is worth doing."}
+
+    def stamped(hook: Path, started: str) -> dict[str, JsonValue]:
+        found = json.loads(send(hook, started))
+        return found["hookSpecificOutput"]["updatedInput"]
+
+    def codex_call(
+        tool: str, arguments: dict[str, JsonValue], call: str, **fields: object
+    ) -> str:
+        return codex(
+            "PreToolUse",
+            tool_name=f"mcp__lup__{tool}",
+            tool_input=arguments,
+            tool_use_id=call,
+            **fields,
+        )
+
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        launched(machine, clock, other, "two", "codex")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        hook2, mcp2 = machine.host.launch("two").hook, machine.host.launch("two").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, codex("SessionStart", source="startup"))
+        answers = [
+            call(
+                mcp,
+                "friction",
+                stamped(hook, lup_call("friction", jammed, "f1", agent_id="a1")),
+            ),
+            call(mcp, "how_it_went", stamped(hook, lup_call("how_it_went", {}, "h1"))),
+            call(mcp, "stop", stamped(hook, lup_call("stop", stopping, "s1"))),
+            call(
+                mcp2, "friction", stamped(hook2, codex_call("friction", jammed, "c1"))
+            ),
+            call(
+                mcp2,
+                "how_it_went",
+                stamped(hook2, codex_call("how_it_went", went, "c2", agent_id="b1")),
+            ),
+            call(
+                mcp2,
+                "stop",
+                stamped(hook2, codex_call("stop", stopping, "c3", agent_id="b1")),
+            ),
+        ]
+        missing = call(mcp, "friction", {"trying": "run the gate"})
+        waiting = delivery.inbox.waiting(Operator())
+        listed = inbox()
+        shown = inbox("show", "1")
+        replied = inbox("answer", "1", "--comment", "The rebuild is fixed.")
+        reply = delivery.inbox.item(7)
+        done = inbox("done", "2")
+    assert [text for text, _ in answers] == [
+        "Your friction is with the operator, item 1. Carry on.",
+        "How it went is with the operator, item 2.",
+        "Your stop is with the operator, item 3. End your turn.",
+        "Your friction is with the operator, item 4. Carry on.",
+        "How it went is with the operator, item 5.",
+        "Your stop is with the operator, item 6. End your turn.",
+    ]
+    assert not any(error for _, error in answers)
+    assert missing[1]
+    assert missing[0].startswith("Refused: 1 validation error for Friction")
+    claude_session = Conversation(
+        repository=tmp_path / ".git", runtime="claude", session="s1"
+    )
+    codex_session = Conversation(
+        repository=other / ".git", runtime="codex", session="t1"
+    )
+    assert [
+        (each.number, each.sender, each.recipient, each.call) for each in waiting
+    ] == [
+        (1, claude_session.model_copy(update={"agent": "a1"}), Operator(), "f1"),
+        (2, claude_session, Operator(), "h1"),
+        (3, claude_session, Operator(), "s1"),
+        (4, codex_session, Operator(), "c1"),
+        (5, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c2"),
+        (6, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c3"),
+    ]
+    friction = Friction.model_validate(jammed)
+    assert [each.reason for each in waiting] == [
+        friction,
+        HowItWent(),
+        Stopped.model_validate(stopping),
+        friction,
+        HowItWent.model_validate(went),
+        Stopped.model_validate(stopping),
+    ]
+    first = listed.splitlines()[0]
+    assert first.startswith("   1  2026-10-01 12:00  a friction from `")
+    assert first.endswith(
+        f"(subagent a1 of claude session s1) in {tmp_path}: "
+        "`uv run lup-dev check` printed: engine stale"
+    )
+    assert "how the work went from" in listed.splitlines()[1]
+    assert listed.splitlines()[1].endswith(": Nothing notable.")
+    assert "a stop by choice from" in listed.splitlines()[2]
+    assert shown.endswith(
+        "`uv run lup-dev check` printed: engine stale\n"
+        "Trying: run the gate\n"
+        "Would change: say the rebuild's time first\n"
+    )
+    assert replied.startswith(
+        "Replied to item 1: your reply, item 7, is for subagent a1"
+    )
+    assert reply.reason == Message(kind="note", text="The rebuild is fixed.", of=1)
+    assert reply.recipient == claude_session.model_copy(update={"agent": "a1"})
+    assert done.startswith("Item 2")
+    assert len(notices.raised) == 6
+    assert notices.raised[2].startswith(
+        f"lup: a stop by choice from claude session s1 in {tmp_path}\n"
+    )
 
 
 def test_numbered_decisions_are_each_answered_once_and_a_message_is_done(
@@ -1575,19 +1704,26 @@ def test_lup_dev_inbox_refuses_inside_an_agents_session(
 def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
     served = specs()
     assert [spec.name for spec in served] == [
-        "report",
+        "blocked",
+        "stop",
         "note",
+        "friction",
+        "how_it_went",
         "ask",
         "send",
         "wait_inbox",
         "inbox",
         "withdraw",
     ]
-    assert served[0].input_schema == Problem.model_json_schema()
-    assert served[1].input_schema == Remark.model_json_schema()
+    assert [spec.input_schema for spec in served[:5]] == [
+        tool.spec().input_schema for tool in SPEAKING
+    ]
     assert [spec.summary for spec in served] == [
-        "Stop, and tell the operator what's wrong.",
+        "Say the work can't go on, and what's wrong.",
+        "End your work by your own choice, saying why.",
         "Tell the operator a doubt, and carry on.",
+        "Say what got in your way, and carry on.",
+        "Tell the operator how the work went, once.",
         "Ask the operator, with numbered decisions.",
         "Send a message to a party's inbox.",
         "Wait until something reaches your inbox.",

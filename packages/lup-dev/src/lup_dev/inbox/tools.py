@@ -1,12 +1,13 @@
-"""The inbox's tools in a launched session: `report`, `note`, `ask`, `send`, `wait_inbox`, `inbox` and `withdraw`.
+"""The inbox's tools in a launched session: the speaking tools, `ask`, `send`, `wait_inbox`, `inbox` and `withdraw`.
 
 `docs/host-tools.md`, *lup's tools*. Each is a function of the conversation
 calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
-- `report` and `note` are the library's speaking tools (`lup.tools.speaking`),
-  their names and input models taken from them, so an agent's habit carries
-  between an ask from code and a launched session; their functions and
-  descriptions are the inbox's, since in a launched session whoever asked is
-  the operator, and each lands in their inbox;
+- `blocked`, `stop`, `note`, `friction` and `how_it_went` are the library's
+  speaking tools (`lup.tools.speaking`), their names and input models taken
+  from them, so an agent's habit carries between an ask from code and a
+  launched session; their functions and descriptions are the inbox's, since
+  in a launched session whoever asked is the operator, and each lands in their
+  inbox, a subagent's too, never its parent's;
 - `ask` puts a question to the operator, its decisions numbered, each with the
   agent's lean; with `wait` it holds until they answer;
 - `send` is the inbox's general verb, a message of a kind to a party's inbox:
@@ -47,6 +48,8 @@ from lup_dev.inbox.store import (
     Answered,
     Conversation,
     Decision,
+    Friction,
+    HowItWent,
     InboxError,
     Item,
     Kind,
@@ -54,10 +57,12 @@ from lup_dev.inbox.store import (
     Operator,
     Party,
     Question,
+    Stop,
     Waiting,
 )
 
 if TYPE_CHECKING:
+    from lup.sessions import results
     from lup.tools.speaking import Problem, Remark
     from lup_dev.host.courier import Conversation as Caller
 
@@ -152,24 +157,40 @@ class Speaker(Model, arbitrary_types_allowed=True):
     call: str | None = None
     """The runtime's id for the call speaking, which each item it makes keeps."""
 
-    async def said(self, reason: Message | Question) -> int:
+    async def said(
+        self, reason: Message | Friction | HowItWent | Stop | Question
+    ) -> int:
         """Put `reason` in the operator's inbox, from this conversation, and return its number."""
         item = await self.delivery.posted(
             reason, self.party, Operator(), self.launch.worktree, call=self.call
         )
         return item.number
 
-    async def report(self, said: Problem) -> Said:
-        """Stop, and tell the operator what's wrong.
+    async def blocked(self, said: Problem) -> Said:
+        """Say the work can't go on, and what's wrong.
 
         Call it when the work can't go on: the task can't be done as asked,
         something you need is missing, or an instruction seems wrong. Say what's
         wrong, and what would let the work go on. It lands in the operator's
-        inbox as a problem, and they're notified. Then end your turn.
+        inbox as a problem, and they're notified. Then end your turn. To end
+        your work by your own choice instead, it's `stop`.
         """
         number = await self.said(Message(kind="problem", text=said.problem))
         return Said(
-            text=f"Your report is with the operator, item {number}. End your turn."
+            text=f"Your problem is with the operator, item {number}. End your turn."
+        )
+
+    async def stop(self, said: speaking.Stop) -> Said:
+        """End your work by your own choice, saying why.
+
+        When the work is done and nothing more is worth doing, or when you'd
+        rather not go on with it: both are yours to choose. Say why. It lands in
+        the operator's inbox, never your parent's. Then end your turn. Where the
+        work can't go on, it's `blocked`.
+        """
+        number = await self.said(Stop.model_validate(said.model_dump()))
+        return Said(
+            text=f"Your stop is with the operator, item {number}. End your turn."
         )
 
     async def note(self, said: Remark) -> Said:
@@ -181,6 +202,33 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         number = await self.said(Message(kind="note", text=said.remark))
         return Said(text=f"Your note is with the operator, item {number}. Carry on.")
+
+    async def friction(self, said: results.Friction) -> Said:
+        """Say what got in your way, and carry on.
+
+        Call it the moment something gets in the way of the work, whatever it
+        is: a tool, a command, the guidance, a rule, the room, your brief. Give
+        the exact command and the message it printed where there is one. It
+        lands in the operator's inbox as it is, never your parent's, and your
+        work goes on: nothing waits for an answer. A doubt about the work itself
+        is a `note`.
+        """
+        number = await self.said(Friction.model_validate(said.model_dump()))
+        return Said(
+            text=f"Your friction is with the operator, item {number}. Carry on."
+        )
+
+    async def how_it_went(self, said: results.HowItWent) -> Said:
+        """Tell the operator how the work went, once.
+
+        Call it near the end of a piece of work: what got in the way, what was
+        smooth, what you'd change, and how it felt, as openly as you like.
+        Leave out what has nothing to say; "nothing notable" is a fine answer.
+        It lands in the operator's inbox as it is, never your parent's, and your
+        work goes on.
+        """
+        number = await self.said(HowItWent.model_validate(said.model_dump()))
+        return Said(text=f"How it went is with the operator, item {number}.")
 
     async def ask(self, asked: Asking) -> Said:
         """Ask the operator, with numbered decisions.
@@ -324,20 +372,28 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
 
     def tools(self) -> list[AgentTool]:
-        """Return the inbox's tools, each calling this conversation's function."""
+        """Return the inbox's tools, each calling this conversation's function: the speaking tools, as the library serves them, then the inbox's own."""
+        functions = {
+            speaking.blocked.name: self.blocked,
+            speaking.stop.name: self.stop,
+            speaking.note.name: self.note,
+            speaking.friction.name: self.friction,
+            speaking.how_it_went.name: self.how_it_went,
+        }
         spoken = [
-            speaking.report.model_copy(
+            tool.model_copy(
                 update={
-                    "description": inspect.getdoc(Speaker.report),
-                    "function": self.report,
+                    "description": inspect.getdoc(functions[tool.name]),
+                    "function": functions[tool.name],
                 }
-            ),
-            speaking.note.model_copy(
-                update={
-                    "description": inspect.getdoc(Speaker.note),
-                    "function": self.note,
-                }
-            ),
+            )
+            for tool in [
+                speaking.blocked,
+                speaking.stop,
+                speaking.note,
+                speaking.friction,
+                speaking.how_it_went,
+            ]
         ]
         own = [
             lup_tool(self.ask),

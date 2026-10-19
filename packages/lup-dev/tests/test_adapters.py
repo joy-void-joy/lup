@@ -1034,13 +1034,13 @@ BOTH = "The operator answered.\n\nAnd again."
             ),
         ),
         (
-            pre_tool_use(Path("/w"), "mcp__lup__report", {"problem": "x"}, "t3"),
+            pre_tool_use(Path("/w"), "mcp__lup__blocked", {"problem": "x"}, "t3"),
             Heard(
                 fits=10_000,
                 event="call-started",
                 session="s1",
                 call="t3",
-                tool="mcp__lup__report",
+                tool="mcp__lup__blocked",
                 served=True,
                 judged=False,
             ),
@@ -1079,7 +1079,7 @@ def test_claude_says_whos_speaking_and_whether_the_judge_reads_it(
 
 
 def test_claude_stamps_a_call_to_lups_tools_with_its_caller_and_no_decision() -> None:
-    raw = pre_tool_use(Path("/w"), "mcp__lup__report", {"problem": "stuck"})
+    raw = pre_tool_use(Path("/w"), "mcp__lup__blocked", {"problem": "stuck"})
 
     assert json.loads(claude.told(raw, "", TOLD) or "") == {
         "hookSpecificOutput": {
@@ -1147,7 +1147,7 @@ def codex_lups(arguments: object) -> str:
     """The shell call Codex 0.162.1 sent, as a call to one of lup's tools: an MCP tool's hook carries its arguments as `tool_input`."""
     sent = json.loads((CAPTURED / "6-pre-tool-use-bash.json").read_text())
     return json.dumps(
-        {**sent, "tool_name": "mcp__lup__report", "tool_input": arguments}
+        {**sent, "tool_name": "mcp__lup__blocked", "tool_input": arguments}
     )
 
 

@@ -117,7 +117,9 @@ from lup_dev.inbox.store import (
     Approval,
     ChangedFile,
     Comment,
+    Friction,
     HeldChange,
+    HowItWent,
     Inbox,
     InboxError,
     Item,
@@ -126,6 +128,7 @@ from lup_dev.inbox.store import (
     Question,
     Review,
     Ruling,
+    Stop,
     Verdict,
 )
 from lup_dev.inbox.store import Conversation as InboxConversation
@@ -613,7 +616,12 @@ def hold_answered(
 def shown(item: Item) -> str:
     """Say an item whole, for the operator: an approval by its summary, its whole diff on request."""
     match item.reason:
-        case Message(text=text):
+        case (
+            Message(text=text)
+            | Friction(text=text)
+            | HowItWent(text=text)
+            | Stop(text=text)
+        ):
             body = [text]
         case Question(text=text, decisions=decisions):
             numbered = [
@@ -678,7 +686,7 @@ def prompted(item: Item) -> AnswerItem:
     """Ask the operator their answer to a question, each decision in turn, then a comment on the whole; a plain question, or a reply to a message, in words."""
     typer.echo(shown(item))
     match item.reason:
-        case Message():
+        case Message() | Friction() | HowItWent() | Stop():
             words = typer.prompt("Your reply")
             return AnswerItem(number=item.number, comment=words)
         case Question(decisions=[]):
