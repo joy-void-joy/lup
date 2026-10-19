@@ -502,12 +502,11 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                         "AGENTS.md: AGENTS.md is the operator's document, asked "
                         "about every time\n"
                         "packages/lup-dashboard/page/package.json: "
-                        "/home/op/lup.git/tree/dev/packages/lup-dashboard/page/"
-                        "package.json is a protected path (package.json)\n"
+                        "packages/lup-dashboard/page/package.json is a protected "
+                        "path (package.json)\n"
                         "packages/lup/src/lup/transcripts/records.py: adds "
                         '`# lup: ignore("string-split", why="JSONL is an object a '
-                        'line")` to /home/op/lup.git/tree/dev/packages/lup/src/lup/'
-                        "transcripts/records.py"
+                        'line")` to packages/lup/src/lup/transcripts/records.py'
                     ),
                     worktree=dev,
                     key="a1b2c3",
@@ -567,9 +566,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 reason=Flagged(
                     text=f"{reader} landed, flagged for the operator's review.",
                     summary=(
-                        f"{reader}: {dev / reader} is a new production file\n"
-                        f"{reader}: {dev / reader} adds the class `Turn`\n"
-                        f"{reader}: {dev / reader} adds the class `Reader`"
+                        f"{reader} is a new production file\n"
+                        f"{reader} adds the class `Turn`\n"
+                        f"{reader} adds the class `Reader`"
                     ),
                     worktree=dev,
                     path=reader,
@@ -585,9 +584,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 number=60,
                 reason=Flagged(
                     text=f"{clock} landed, flagged for the operator's review.",
-                    summary=(
-                        f"{clock}: {dev / clock} changes the signature of `Clock.sleep`"
-                    ),
+                    summary=f"{clock} changes the signature of `Clock.sleep`",
                     worktree=dev,
                     path=clock,
                 ),

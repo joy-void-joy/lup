@@ -108,9 +108,7 @@ def asking(landed: Landed, root: Path, sender: Conversation) -> AskFlag:
     path = change.path
     judgement = landed.judgement
     brought = "" if landed.commit is None else f" with commit {landed.commit}"
-    summary = "\n".join(
-        f"{path}: {ask.reason}" for ask in [*judgement.asks, *judgement.flags]
-    )
+    summary = "\n".join(ask.reason for ask in [*judgement.asks, *judgement.flags])
     return AskFlag(
         flagged=Flagged(
             text=f"{path} landed{brought}, flagged for the operator's review.",

@@ -95,7 +95,9 @@ class Ask(Model):
 
     kind: AskKind
     reason: str
-    """What's asked, in one line, naming the path, the name or the rule."""
+    """What's asked, in one line, naming the path, the name or the rule: the
+    file from its worktree's root, as the operator reads it beside the file and
+    the agent under the file's absolute path."""
     rule: str | None = None
     """The rule a finding of asks, for a `rule` ask; none for any other."""
     line: int | None = None
@@ -444,7 +446,7 @@ class Judge(Model, arbitrary_types_allowed=True):
             case "protected":
                 pattern = self.roles.protecting(change.path)
                 why = f" ({pattern})" if pattern else ", the project's declaration"
-                reason = f"{self.root / change.path} is a protected path{why}"
+                reason = f"{change.path} is a protected path{why}"
                 ask = Ask(kind="protected", reason=reason)
                 if change.after is None or not self.roles.ruled(change.path):
                     sorted_ = self.sorted([ask])
@@ -458,7 +460,7 @@ class Judge(Model, arbitrary_types_allowed=True):
                     )
                 return self.ruled(change, versions, removed, [ask])
             case "operator":
-                reason = f"{self.root / change.path} is one of the operator's documents"
+                reason = f"{change.path} is one of the operator's documents"
                 sorted_ = self.sorted([Ask(kind="operator", reason=reason)])
                 return Judgement(
                     path=change.path,
@@ -556,7 +558,7 @@ class Judge(Model, arbitrary_types_allowed=True):
                 kind="rule",
                 rule=found.rule,
                 reason=(
-                    f"{self.root / change.path}:{found.span.start.line} - "
+                    f"{change.path}:{found.span.start.line} - "
                     f"{found.rule}: {found.message}"
                 ),
             )
@@ -609,10 +611,10 @@ class Judge(Model, arbitrary_types_allowed=True):
 
     def design(self, change: Change, versions: Versions) -> list[Ask]:
         """List the design asks of a production change: created, whole, public API."""
-        new_file = f"{self.root / change.path} is a new production file"
+        new_file = f"{change.path} is a new production file"
         new = [Ask(kind="new-file", reason=new_file)] if change.before is None else []
         replaced = change.whole and change.before is not None
-        whole_file = f"the write replaces the whole of {self.root / change.path}"
+        whole_file = f"the write replaces the whole of {change.path}"
         whole = [Ask(kind="whole-file", reason=whole_file)] if replaced else []
         if versions.after is None:
             return [*new, *whole]
@@ -624,7 +626,7 @@ class Judge(Model, arbitrary_types_allowed=True):
         public = [
             Ask(
                 kind="public-api",
-                reason=f"{self.root / change.path} {each.describe()}",
+                reason=f"{change.path} {each.describe()}",
                 api=each,
             )
             for each in api
@@ -639,7 +641,7 @@ class Judge(Model, arbitrary_types_allowed=True):
         return [
             Ask(
                 kind="ignore",
-                reason=f"adds `# lup: {added.identity().text}` to {self.root / path}",
+                reason=f"adds `# lup: {added.identity().text}` to {path}",
                 line=added.line,
             )
             for added in added_suppressions(before, versions.after.directives)

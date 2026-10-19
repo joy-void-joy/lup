@@ -78,7 +78,7 @@ def test_claude_holds_a_new_production_file_in_its_hook_and_lets_it_through_on_a
         }
     }
     assert [each.asks for each in hold.files] == [
-        [f"{repo}/src/pkg/new.py is a new production file"]
+        ["src/pkg/new.py is a new production file"]
     ]
     assert kit.announced.runtimes == ["claude"]
     assert running(kit, repo) == ["t1"]

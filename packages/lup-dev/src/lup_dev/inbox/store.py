@@ -260,7 +260,8 @@ class Flagged(Model):
     text: str
     """What landed, in a line."""
     summary: str
-    """What the file's whole change flags, a line each."""
+    """What the file's whole change flags, a line each, naming the file from
+    the worktree's root where it names it."""
     worktree: Path
     path: Path
     """The file, from the worktree's root."""

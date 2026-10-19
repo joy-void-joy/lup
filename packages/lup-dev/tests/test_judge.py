@@ -122,9 +122,10 @@ def test_the_operators_documents_ask(judge: Judging) -> None:
 def test_a_protected_path_asks(judge: Judging) -> None:
     judgement = judge(edit("pyproject.toml", "a\n", "b\n"))
     assert judgement.outcome == "ask"
+    # Named from the worktree's root: the agent reads it under the file's absolute path, the operator beside the file.
     assert (
         judgement.asks[0].reason
-        == f"{judge.root}/pyproject.toml is a protected path (**/pyproject.toml)"
+        == "pyproject.toml is a protected path (**/pyproject.toml)"
     )
 
 
@@ -277,10 +278,7 @@ def test_a_new_class_asks(judge: Judging) -> None:
     after = CORE + "\n\nclass Room:\n    pass\n"
     judgement = judge(edit("src/pkg/core.py", CORE, after))
     assert judgement.outcome == "ask"
-    assert (
-        judgement.asks[0].reason
-        == f"{judge.root}/src/pkg/core.py adds the class `Room`"
-    )
+    assert judgement.asks[0].reason == "src/pkg/core.py adds the class `Room`"
 
 
 def test_a_changed_signature_of_a_definition_from_the_sessions_start_asks(
@@ -291,7 +289,7 @@ def test_a_changed_signature_of_a_definition_from_the_sessions_start_asks(
     )
     judgement = judge(edit("src/pkg/core.py", CORE, after))
     assert [ask.reason for ask in judgement.asks] == [
-        f"{judge.root}/src/pkg/core.py changes the signature of `helper`"
+        "src/pkg/core.py changes the signature of `helper`"
     ]
 
 
@@ -313,11 +311,11 @@ def test_names_added_to_or_removed_from_a_package_root_ask(judge: Judging) -> No
         )
     )
     assert [ask.reason for ask in added.asks] == [
-        f"{judge.root}/src/pkg/__init__.py adds `Room` to the package's root"
+        "src/pkg/__init__.py adds `Room` to the package's root"
     ]
     removed = judge(edit("src/pkg/__init__.py", init, init.replace('["Client"]', "[]")))
     assert [ask.reason for ask in removed.asks] == [
-        f"{judge.root}/src/pkg/__init__.py removes `Client` from the package's root"
+        "src/pkg/__init__.py removes `Client` from the package's root"
     ]
 
 
@@ -330,8 +328,7 @@ def test_an_added_ignore_asks_naming_its_rule_and_reason(judge: Judging) -> None
     judgement = judge(edit("src/pkg/core.py", CORE, after))
     assert judgement.outcome == "ask"
     assert judgement.asks[0].reason == (
-        'adds `# lup: ignore("tuple-shape", why="sh takes tuples")` to '
-        f"{judge.root}/src/pkg/core.py"
+        'adds `# lup: ignore("tuple-shape", why="sh takes tuples")` to src/pkg/core.py'
     )
     assert judgement.findings == []
 
@@ -473,9 +470,7 @@ def test_a_rule_named_held_holds_its_finding_and_still_tells_it(
     )
     assert judgement.outcome == "ask"
     assert [ask.name() for ask in judgement.asks] == ["regex"]
-    assert judgement.asks[0].reason.startswith(
-        f"{judge.root}/src/pkg/core.py:11 - regex"
-    )
+    assert judgement.asks[0].reason.startswith("src/pkg/core.py:11 - regex")
     assert [finding.rule for finding in judgement.findings] == ["regex"]
     assert judgement.reasons() == ["regex"]
 

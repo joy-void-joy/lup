@@ -2493,8 +2493,8 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
     assert item.reason == Flagged(
         text="src/pkg/rooms.py landed, flagged for the operator's review.",
         summary=(
-            f"src/pkg/rooms.py: {rooms} is a new production file\n"
-            f"src/pkg/rooms.py: {rooms} adds the class `Room`"
+            "src/pkg/rooms.py is a new production file\n"
+            "src/pkg/rooms.py adds the class `Room`"
         ),
         worktree=repo,
         path=Path("src/pkg/rooms.py"),

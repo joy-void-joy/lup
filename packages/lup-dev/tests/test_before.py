@@ -113,7 +113,7 @@ def test_a_write_that_asks_is_held_for_the_operator_and_let_through_on_a_yes(
     ]
     assert decision == Decision(outcome="allow")
     assert [each.asks for each in hold.files] == [
-        [f"the write replaces the whole of {repo}/src/pkg/core.py"]
+        ["the write replaces the whole of src/pkg/core.py"]
     ]
     assert hold.diff.startswith("--- a/src/pkg/core.py\n+++ b/src/pkg/core.py\n")
     assert kit.announced.runtimes == ["asking"]
@@ -139,6 +139,26 @@ def test_a_flagged_write_lands_unasked_unless_the_operator_holds_its_agents(
     assert kit.announced.asked == ["asking/s1/a1"]
     [verdict] = VerdictLog(path=kit.layout.verdicts(repo / ".git")).read()
     assert (verdict.outcome, verdict.reasons) == ("allow", ["whole-file"])
+
+
+def test_a_flagged_items_text_names_its_file_from_the_worktrees_root_alone(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    was = (repo / CORE).read_text()
+    write = Overwrite(
+        call="w1",
+        tool="Write",
+        path=repo / CORE,
+        text=was + "\n\nclass Room:\n    pass\n",
+    )
+    before(kit.bench, write, "s1", repo)
+    [asked] = kit.flags.asked
+    assert asked.flagged.summary.splitlines() == [
+        "the write replaces the whole of src/pkg/core.py",
+        "src/pkg/core.py adds the class `Room`",
+    ]
+    assert str(repo) not in f"{asked.flagged.text}\n{asked.flagged.summary}"
 
 
 ROOMS = Path("src/pkg/rooms.py")
@@ -176,9 +196,10 @@ def test_a_flagged_write_is_put_before_the_operator_as_it_lands_holding_no_one(
         "w1",
         None,
     )
+    # Each summary line is the reason alone, naming the file from the worktree's root: the file's header names it.
     assert asked.flagged == Flagged(
         text="src/pkg/rooms.py landed, flagged for the operator's review.",
-        summary=f"src/pkg/rooms.py: {repo}/src/pkg/rooms.py is a new production file",
+        summary="src/pkg/rooms.py is a new production file",
         worktree=repo,
         path=ROOMS,
     )
@@ -231,8 +252,8 @@ def test_a_later_flagged_write_joins_the_item_judged_whole_since_it_was_made(
         ],
     )
     assert joined.flagged.summary == (
-        f"src/pkg/rooms.py: {repo}/src/pkg/rooms.py is a new production file\n"
-        f"src/pkg/rooms.py: {repo}/src/pkg/rooms.py adds the class `Room`"
+        "src/pkg/rooms.py is a new production file\n"
+        "src/pkg/rooms.py adds the class `Room`"
     )
     # A write flagging nothing puts nothing before the operator.
     assert len(kit.flags.asked) == 2
@@ -371,7 +392,7 @@ def test_the_edit_is_judged_against_the_accepted_state(kit: Kit, repo: Path) -> 
     before(kit.bench, edit, "s1", repo)
     [hold] = kit.announced.holds
     assert [each.asks for each in hold.files] == [
-        [f"{repo}/src/pkg/sneaked.py is a new production file"]
+        ["src/pkg/sneaked.py is a new production file"]
     ]
 
 

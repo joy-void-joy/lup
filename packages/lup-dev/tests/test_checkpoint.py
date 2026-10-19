@@ -249,7 +249,7 @@ def test_a_new_file_through_the_shell_is_held_and_lands_on_a_yes(
     start(kit, repo)
     reply = shell_write(kit, repo, "c1", Path("src/pkg/new.py"), '"""New."""\n')
     assert reply.context.startswith("The operator approved the held change to")
-    assert last_asks(kit) == [f"{repo}/src/pkg/new.py is a new production file"]
+    assert last_asks(kit) == ["src/pkg/new.py is a new production file"]
     assert (repo / "src" / "pkg" / "new.py").read_text() == '"""New."""\n'
 
 
@@ -312,7 +312,8 @@ def test_a_protected_file_committed_through_the_shell_stays_and_asks_the_operato
     new.write_text("on: push\n")
     shell.commit(repo, "CI through the shell")
     told = finish(kit, repo, "c1").context
-    assert f"asks: {new} is a protected path" in told
+    # The agent reads what it asks under the file's absolute path.
+    assert f"{new}\n  asks: .github/ci.yml is a protected path" in told
     [hold] = waiting(kit.layout)
     assert told.endswith(f"in their inbox (hold {hold.key}).")
     assert kit.announced.holds == [hold]
@@ -485,7 +486,7 @@ def test_an_edit_judged_before_it_lands_is_accepted_as_judged(
         new="    return x\n" + added,
     )
     assert held(kit, lambda: before(kit.bench, edit, SESSION, repo))
-    assert last_asks(kit) == [f"{repo}/src/pkg/core.py adds the class `Room`"]
+    assert last_asks(kit) == ["src/pkg/core.py adds the class `Room`"]
     call(kit, repo, "e1", tool="Edit")
     (repo / CORE).write_text(edit.content((repo / CORE).read_text()) or "")
     assert finish(kit, repo, "e1").context == ""
@@ -910,8 +911,13 @@ def test_a_write_flagged_at_the_checkpoint_is_put_before_the_operator_holding_no
             role="production", asks=[Asked(name="new-file", taken="flagged")]
         ),
     )
+    assert made.flagged.summary == "src/pkg/new.py is a new production file"
     # Joined, the file is judged whole since the item was made.
     assert (joined.joining, joined.call, joined.file.before) == (1, "p2", None)
+    assert joined.flagged.summary.splitlines() == [
+        "src/pkg/new.py is a new production file",
+        "src/pkg/new.py adds the class `Room`",
+    ]
     assert joined.file.reading is not None
     assert [each.name for each in joined.file.reading.asks] == [
         "new-file",
@@ -1291,9 +1297,8 @@ def test_every_worktree_is_judged_by_the_integration_branchs_declaration(
     shell.commit(linked, "feat: protect nothing")
     start(kit, repo)
     assert held(kit, lambda: before(kit.bench, core_edit(linked), SESSION, repo))
-    assert last_asks(kit) == [
-        f"{linked}/src/pkg/core.py is a protected path (src/pkg/core.py)"
-    ]
+    assert last_asks(kit) == ["src/pkg/core.py is a protected path (src/pkg/core.py)"]
+    assert [hold.worktree for hold in kit.announced.holds][-1] == linked
     assert Worktree.at(linked, kit.layout).roles.protecting(CORE) is None
 
 

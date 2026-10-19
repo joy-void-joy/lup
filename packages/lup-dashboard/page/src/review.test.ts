@@ -105,7 +105,7 @@ const FLAGGED: Item = {
     reason: {
         reason: "flagged",
         text: "a.py landed, flagged for the operator's review.",
-        summary: "a.py: /w/a.py is a new production file",
+        summary: "a.py is a new production file",
         worktree: "/w",
         path: "a.py",
         writes: 2,
