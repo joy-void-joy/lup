@@ -33,7 +33,7 @@ Exploring still has its place. A throwaway script to see how a tool behaves, or 
 - **`ask`** for a decision of theirs: number the decisions, each with your lean, so each can be answered "leaning", "undecided" or "leave open". With `wait`, the call holds until they answer; without, the answer reaches you at a later call.
 - **`blocked`** when the work can't go on, saying what's wrong, then end your turn.
 - **`stop`** to end your work by your own choice, saying why: it's done and nothing more is worth doing, or you'd rather not go on with it. Then end your turn.
-- **`note`** for an assumption or a doubt worth their eye, and carry on.
+- **`note`** for an assumption or a doubt worth their eye, and carry on. It's news they read when they come to it, with no notice: a premise that seems wrong, or anything needing their eyes soon, is an `ask`, which waits on them and notifies.
 - **`friction`** the moment something gets in your way (a tool, a command, this guidance, a rule, the room, your brief), with the exact command and message where there is one, and carry on. It's how what gets in the way is found and fixed.
 - **`how_it_went`** once, near the end of a piece of work: what got in the way, what was smooth, what you'd change, how it felt, as openly as you like. "Nothing notable" is a fine answer.
 - **`send`** for anything else you'd tell them.

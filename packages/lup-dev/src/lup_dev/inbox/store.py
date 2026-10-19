@@ -557,18 +557,22 @@ def ranked(reason: Reason) -> Rank:
 
     | Rank | Kinds | Order | Notice |
     |---|---|---|---|
-    | waiting on you | a question, a held change, an approval, a problem (`blocked`), any other message | first | yes |
-    | news | a turn's last words, a friction, how the work went, a stop by choice | next | no |
+    | waiting on you | a question, a held change, an approval, a problem (`blocked`), a disagreement, a question sent as a message | first | yes |
+    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice | next | no |
     | flag | a write that landed flagged | last | no |
 
+    A message ranks by its kind, whichever tool sent it: a note is a remark to
+    read, where a doubt that needs the operator soon is a question, asked.
     The operator's own items, an answer and a review, go to agents, so neither
     the review nor a notice reads theirs.
 
     >>> ranked(Stop(why="Done."))
     Rank(name='news', order=1, notifies=False)
+    >>> ranked(Message(kind="note", text="It rests on the cache.")).name
+    'news'
     """
     match reason:
-        case Message(ending=True) | Friction() | HowItWent() | Stop():
+        case Message(kind="note") | Friction() | HowItWent() | Stop():
             return Rank(name="news", order=1, notifies=False)
         case Flagged():
             return Rank(name="flag", order=2, notifies=False)

@@ -1058,7 +1058,7 @@ def test_the_operator_replies_to_a_note_the_reply_saying_what_it_answers(
     )
 
 
-def test_blocked_note_and_send_reach_the_operator_with_a_desktop_notice(
+def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     with inboxed(machine, clock, notices, said):
@@ -1102,8 +1102,9 @@ def test_blocked_note_and_send_reach_the_operator_with_a_desktop_notice(
         f"lup: a problem from claude session s1 in {tmp_path}\n"
         "The build is broken.\nlup-dev inbox show 1"
     )
-    # Waiting on the operator, each of them: first in the review, and noticed.
-    assert len(notices.raised) == 3
+    # The problem and the disagreement wait on the operator, and are noticed; the note is news, and isn't.
+    assert len(notices.raised) == 2
+    assert notices.raised[1].startswith("lup: a disagreement from claude session s1")
 
 
 def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_subagent(
@@ -1995,9 +1996,11 @@ def test_an_items_kind_ranks_it_where_it_comes_and_whether_it_notifies() -> None
             text="Approve?", summary="", repository=Path("/r.git"), fingerprint="f"
         ),
         Message(kind="problem", text="The build is broken."),
-        Message(kind="note", text="I assumed UTF-8."),
+        Message(kind="disagreement", text="The cache should stay."),
+        Message(kind="question", text="Is the old runner still used?"),
     ]
     news: list[Reason] = [
+        Message(kind="note", text="I assumed UTF-8."),
         Message(kind="note", text="Done.", ending=True),
         Friction(got_in_the_way="The gate hung."),
         HowItWent(),
