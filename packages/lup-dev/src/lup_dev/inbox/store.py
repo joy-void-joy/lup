@@ -251,16 +251,17 @@ class HeldChange(Model):
 class Flagged(Model):
     """A write that landed flagged for the operator's review, holding no one: what the file's whole change since the item was made flags, its diff and the file kept beside the item (`Inbox.diff`, `Inbox.files`).
 
-    The judge's (`lup_dev.policy.flags`). A later flagged write to the same file
-    by the same conversation joins the item while it gathers them
-    (`Inbox.gathering`), the file kept whole since the first.
+    The judge's (`lup_dev.policy.flags`). A later write to the same file by the
+    same conversation, flagged or not, joins the item while it gathers them
+    (`Inbox.gathering`), the file kept whole since the first and as it stands.
     """
 
     reason: Literal["flagged"] = "flagged"
     text: str
     """What landed, in a line."""
     summary: str
-    """What the file's whole change flags, a line each."""
+    """What the file's whole change flags, a line each, naming the file from
+    the worktree's root where it names it."""
     worktree: Path
     path: Path
     """The file, from the worktree's root."""
@@ -268,7 +269,8 @@ class Flagged(Model):
     """The commit a move of `HEAD` reached, where the write came with it; none
     where a conversation's call made it."""
     writes: int = 1
-    """How many flagged writes it gathers: the page reads its file again as it
+    """How many writes it gathers, the flagged one that made it and each by the
+    same conversation to the file since: the page reads its file again as it
     grows."""
 
 
@@ -557,18 +559,22 @@ def ranked(reason: Reason) -> Rank:
 
     | Rank | Kinds | Order | Notice |
     |---|---|---|---|
-    | waiting on you | a question, a held change, an approval, a problem (`blocked`), any other message | first | yes |
-    | news | a turn's last words, a friction, how the work went, a stop by choice | next | no |
+    | waiting on you | a question, a held change, an approval, a problem (`blocked`), a disagreement, a question sent as a message | first | yes |
+    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice | next | no |
     | flag | a write that landed flagged | last | no |
 
+    A message ranks by its kind, whichever tool sent it: a note is a remark to
+    read, where a doubt that needs the operator soon is a question, asked.
     The operator's own items, an answer and a review, go to agents, so neither
     the review nor a notice reads theirs.
 
     >>> ranked(Stop(why="Done."))
     Rank(name='news', order=1, notifies=False)
+    >>> ranked(Message(kind="note", text="It rests on the cache.")).name
+    'news'
     """
     match reason:
-        case Message(ending=True) | Friction() | HowItWent() | Stop():
+        case Message(kind="note") | Friction() | HowItWent() | Stop():
             return Rank(name="news", order=1, notifies=False)
         case Flagged():
             return Rank(name="flag", order=2, notifies=False)

@@ -45,6 +45,7 @@ from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.protocol import (
     AnswerApproval,
     AskApproval,
+    AskFlag,
     Context,
     Conversed,
     Drafted,
@@ -1058,7 +1059,7 @@ def test_the_operator_replies_to_a_note_the_reply_saying_what_it_answers(
     )
 
 
-def test_blocked_note_and_send_reach_the_operator_with_a_desktop_notice(
+def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     with inboxed(machine, clock, notices, said):
@@ -1102,8 +1103,9 @@ def test_blocked_note_and_send_reach_the_operator_with_a_desktop_notice(
         f"lup: a problem from claude session s1 in {tmp_path}\n"
         "The build is broken.\nlup-dev inbox show 1"
     )
-    # Waiting on the operator, each of them: first in the review, and noticed.
-    assert len(notices.raised) == 3
+    # The problem and the disagreement wait on the operator, and are noticed; the note is news, and isn't.
+    assert len(notices.raised) == 2
+    assert notices.raised[1].startswith("lup: a disagreement from claude session s1")
 
 
 def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_subagent(
@@ -1995,9 +1997,11 @@ def test_an_items_kind_ranks_it_where_it_comes_and_whether_it_notifies() -> None
             text="Approve?", summary="", repository=Path("/r.git"), fingerprint="f"
         ),
         Message(kind="problem", text="The build is broken."),
-        Message(kind="note", text="I assumed UTF-8."),
+        Message(kind="disagreement", text="The cache should stay."),
+        Message(kind="question", text="Is the old runner still used?"),
     ]
     news: list[Reason] = [
+        Message(kind="note", text="I assumed UTF-8."),
         Message(kind="note", text="Done.", ending=True),
         Friction(got_in_the_way="The gate hung."),
         HowItWent(),
@@ -2490,8 +2494,8 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
     assert item.reason == Flagged(
         text="src/pkg/rooms.py landed, flagged for the operator's review.",
         summary=(
-            f"src/pkg/rooms.py: {rooms} is a new production file\n"
-            f"src/pkg/rooms.py: {rooms} adds the class `Room`"
+            "src/pkg/rooms.py is a new production file\n"
+            "src/pkg/rooms.py adds the class `Room`"
         ),
         worktree=repo,
         path=Path("src/pkg/rooms.py"),
@@ -2521,6 +2525,89 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
     assert [type(each) for each in states] == [Done, Done]
     with pytest.raises(InboxError, match="it isn't withdrawn"):
         delivery.withdrawn(2, sender, "never mind")
+
+
+def test_an_edit_flagging_nothing_refreshes_the_open_item_and_makes_none_once_its_read(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    kit: Kit,
+    repo: Path,
+) -> None:
+    kit.runtime.called = "claude"
+    kit.announced.holding_all = False
+    flagging = InboxFlagging(layout=machine.host, clock=clock)
+    bench = Bench(
+        runtime=kit.runtime,
+        services=kit.bench.services.model_copy(update={"flagging": flagging}),
+    )
+    rooms = repo / "src" / "pkg" / "rooms.py"
+    first = '"""Rooms."""\n'
+
+    def landed(proposal: Overwrite | Replacement) -> None:
+        before(bench, proposal, "s1", repo)
+        CallStarted(
+            session="s1", cwd=repo, call=proposal.call, tool=proposal.tool
+        ).apply(bench)
+        current = rooms.read_text() if rooms.is_file() else None
+        rooms.write_text(proposal.content(current) or "")
+        CallFinished(session="s1", cwd=repo, call=proposal.call).apply(bench)
+
+    def plain(call: str, line: str) -> Replacement:
+        kept = rooms.read_text()
+        return Replacement(
+            call=call, tool="Edit", path=rooms, old=kept, new=f"{kept}{line}\n"
+        )
+
+    sender = Conversation(repository=repo / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(
+            machine,
+            clock,
+            tmp_path / "launch",
+            "one",
+            "claude",
+            repository=sender.repository,
+        )
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        landed(Overwrite(call="w1", tool="Write", path=rooms, text=first))
+        landed(plain("e1", "LIMIT = 3"))
+        [item] = delivery.inbox.waiting(Operator())
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        [file] = host.ask(ShowFiles(number=item.number), Files).files
+        drafting(machine, clock, Draft(done=[1]))
+        sending(machine, clock)
+        landed(plain("e2", "LIMIT = 4"))
+        # A refresh reaching the inbox after the operator read its item, as a race would have it, makes none.
+        assert isinstance(item.reason, Flagged)
+        late = host.ask(
+            AskFlag(
+                flagged=item.reason,
+                sender=sender,
+                diff="",
+                file=file,
+                joining=1,
+                refreshing=True,
+            ),
+            Shown,
+        )
+        items = sorted(delivery.inbox.items)
+    # The edit flags nothing of its own: the item shows the file as it stands, its whole change judged again.
+    assert item.reason == Flagged(
+        text="src/pkg/rooms.py landed, flagged for the operator's review.",
+        summary="src/pkg/rooms.py is a new production file",
+        worktree=repo,
+        path=Path("src/pkg/rooms.py"),
+        writes=2,
+    )
+    assert (file.before, file.after) == (None, Text(text=f"{first}LIMIT = 3\n"))
+    assert notices.raised == []
+    # Read, the item gathers no more: an edit flagging nothing makes no item.
+    assert items == [1]
+    assert (late.item.number, type(late.item.state)) == (1, Done)
 
 
 def test_with_no_host_service_nothing_is_held_for_the_operators_switch(

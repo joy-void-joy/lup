@@ -214,6 +214,10 @@ class AskFlag(Request):
     own keeps."""
     joining: int | None = None
     """The item it joins, as `ShowGathering` found it; none for one of its own."""
+    refreshing: bool = False
+    """Whether the write flags nothing of its own, and only brings the item it
+    joins to its file as it stands: where that item gathers no more, it makes
+    none."""
 
 
 class ShowDiff(Request):
@@ -557,6 +561,7 @@ class FlagAsking(Model, Handler[AskFlag], arbitrary_types_allowed=True):
             request.file,
             call=request.call,
             joining=request.joining,
+            refreshing=request.refreshing,
         )
         return Shown(item=item)
 

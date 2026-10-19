@@ -7,18 +7,23 @@ item of their inbox showing its file as a held change shows its files, its diff
 and the judge's reading of it. They read it, or comment on it, the comment
 reaching the agent with their review ("yes, but"); it never waits for them.
 
-A later flagged write to the same file by the same conversation joins the item
-while the operator hasn't read it (`Inbox.gathering`), the file judged whole
-since the item was made (`gathered`), so ten edits to one new module read as
-one item. Where the operator holds each flagged write of a conversation, its
-writes are held instead (`Judge.holding`), and none is flagged.
+A later write to the same file by the same conversation joins the item while
+the operator hasn't read it (`Inbox.gathering`), the file judged whole since
+the item was made (`gathered`), so ten edits to one new module read as one
+item, showing the file as it stands. One that flags nothing of its own joins it
+too, refreshing it, and makes none where the operator has read it; it asks the
+inbox only for a file the session's record says an item may gather
+(`Session.flagging`), so a write to any other file costs nothing. Where the
+operator holds each flagged write of a conversation, its writes are held
+instead (`Judge.holding`), and none is flagged.
 
 A write lands whatever fails here: what couldn't be put before the operator is
 said to the agent, to pass on.
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, override
+from pathlib import Path
+from typing import override
 
 from lup.types import Model
 from lup_dev.clock import Clock
@@ -30,13 +35,9 @@ from lup_dev.layout import HostLayout
 from lup_dev.policy.holds import unified
 from lup_dev.policy.judge import Change, Judge, Judgement
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-    from pathlib import Path
-
 
 class Landed(Model):
-    """A write that landed flagged, as the judge judged it, and whose it is."""
+    """A write that landed flagged, or to a file an item of its conversation's may gather, as the judge judged it, and whose it is."""
 
     change: Change
     judgement: Judgement
@@ -103,14 +104,17 @@ def gathered(judge: Judge, landed: Landed, gathering: Gathering) -> Landed | Non
 
 
 def asking(landed: Landed, root: Path, sender: Conversation) -> AskFlag:
-    """Return the request putting `landed` before the operator, its file whole as its change has it, from `sender`, in the worktree at `root`."""
+    """Return the request putting `landed` before the operator, its file whole as its change has it, from `sender`, in the worktree at `root`.
+
+    Its summary is what that change asks, a line each; where a later write took
+    out all it flagged, it says so.
+    """
     change = landed.change
     path = change.path
     judgement = landed.judgement
     brought = "" if landed.commit is None else f" with commit {landed.commit}"
-    summary = "\n".join(
-        f"{path}: {ask.reason}" for ask in [*judgement.asks, *judgement.flags]
-    )
+    asks = [ask.reason for ask in [*judgement.asks, *judgement.flags]]
+    summary = "\n".join(asks) or f"{path}'s whole change flags nothing any more"
     return AskFlag(
         flagged=Flagged(
             text=f"{path} landed{brought}, flagged for the operator's review.",
@@ -131,42 +135,71 @@ def asking(landed: Landed, root: Path, sender: Conversation) -> AskFlag:
     )
 
 
+class Put(Model):
+    """What putting landed writes before the operator came to."""
+
+    unsaid: list[str] = []
+    """What couldn't be put there, a line each, for the agent to pass on: the
+    write landed all the same."""
+    read: list[Path] = []
+    """The files of writes that would only have refreshed an item, which the
+    operator has read since, so it gathers them no more: a later write to one
+    asks the inbox nothing."""
+
+
 def flagged(
     flagging: Flagging,
     judge: Judge,
     runtime: str,
     repository: Path,
     landed: list[Landed],
-) -> list[str]:
-    """Put each write that landed flagged before the operator, from its conversation of `runtime` in `repository`, judged whole since the item it joins was made; `judge` judged them, in their worktree.
+) -> Put:
+    """Put each write that landed before the operator, from its conversation of `runtime` in `repository`, judged whole since the item it joins was made; `judge` judged them, in their worktree.
 
-    Return what couldn't be put there, a line each, for the agent to pass on:
-    the write landed all the same.
+    A write its judgement flags joins the item gathering its conversation's
+    writes to its file, or makes one. One it flags nothing in only refreshes
+    that item, so it shows the file as it stands: where none gathers them, the
+    operator having read it, it makes none, and says so (`Put.read`).
     """
     root = judge.root
 
-    def unsaid() -> Iterator[str]:
-        for each in landed:
-            path = each.change.path
-            sender = Conversation(
-                repository=repository,
-                runtime=runtime,
-                session=each.session,
-                agent=each.agent,
+    def one(each: Landed) -> Put:
+        path = each.change.path
+        refreshing = not each.judgement.flags
+        sender = Conversation(
+            repository=repository,
+            runtime=runtime,
+            session=each.session,
+            agent=each.agent,
+        )
+        try:
+            found = flagging.gathering(
+                ShowGathering(sender=sender, worktree=root, path=path)
             )
-            try:
-                found = flagging.gathering(
-                    ShowGathering(sender=sender, worktree=root, path=path)
+            whole = gathered(judge, each, found)
+            if refreshing and whole is None:
+                return Put(read=[path] if found.number is None else [])
+            request = asking(whole or each, root, sender)
+            joining = None if whole is None else found.number
+            flagging.flagged(
+                request.model_copy(
+                    update={"joining": joining, "refreshing": refreshing}
                 )
-                whole = gathered(judge, each, found)
-                request = asking(whole or each, root, sender)
-                joining = None if whole is None else found.number
-                flagging.flagged(request.model_copy(update={"joining": joining}))
-            except LupDevError as failure:
-                yield (
-                    f"lup couldn't put the flagged write to {root / path} before "
-                    f"the operator ({failure}). It landed all the same: tell the "
-                    "operator."
-                )
+            )
+        except LupDevError as failure:
+            unsaid = (
+                f"lup couldn't bring the operator's item on {root / path} to "
+                f"your write ({failure}). It landed all the same."
+                if refreshing
+                else f"lup couldn't put the flagged write to {root / path} before "
+                f"the operator ({failure}). It landed all the same: tell the "
+                "operator."
+            )
+            return Put(unsaid=[unsaid])
+        return Put()
 
-    return list(unsaid())
+    puts = [one(each) for each in landed]
+    return Put(
+        unsaid=[line for put in puts for line in put.unsaid],
+        read=[path for put in puts for path in put.read],
+    )

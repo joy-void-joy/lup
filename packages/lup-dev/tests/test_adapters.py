@@ -12,6 +12,7 @@ from lup.sessions.terminal import Hook
 from lup_dev.adapters import claude, codex
 from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
 from lup_dev.host.courier import Conversations, Heard, Spawned, Spawning, Telling
+from lup_dev.inbox.store import Text
 from lup_dev.policy.checkpoint import Bench, Running, Services
 from lup_dev.policy.holds import Holds, Response, waiting
 from lup_dev.stored import read_model
@@ -78,7 +79,7 @@ def test_claude_holds_a_new_production_file_in_its_hook_and_lets_it_through_on_a
         }
     }
     assert [each.asks for each in hold.files] == [
-        [f"{repo}/src/pkg/new.py is a new production file"]
+        ["src/pkg/new.py is a new production file"]
     ]
     assert kit.announced.runtimes == ["claude"]
     assert running(kit, repo) == ["t1"]
@@ -109,6 +110,30 @@ def test_claude_lets_a_flagged_write_through_putting_it_before_the_operator(
     )
     assert asked.flagged.path == Path("src/pkg/new.py")
     assert running(kit, repo) == ["t1"]
+
+
+def test_claude_refreshes_a_flagged_item_with_an_edit_flagging_nothing(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    kit.announced.holding_all = False
+    new = repo / "src" / "pkg" / "new.py"
+    written: dict[str, object] = {"file_path": str(new), "content": '"""New."""\n'}
+    claude.hook(pre_tool_use(repo, "Write", written), on_claude)
+    new.write_text('"""New."""\n')
+    claude.hook(
+        payload(repo, "PostToolUse", tool_name="Write", tool_use_id="t1"), on_claude
+    )
+    edit: dict[str, object] = {
+        "file_path": str(new),
+        "old_string": '"""New."""\n',
+        "new_string": "x = 1\n",
+    }
+    output = json.loads(claude.hook(pre_tool_use(repo, "Edit", edit, "t2"), on_claude))
+    assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+    made, refreshed = kit.flags.asked
+    assert (refreshed.joining, refreshed.refreshing, refreshed.call) == (1, True, "t2")
+    assert refreshed.file.after == Text(text="x = 1\n")
+    assert refreshed.flagged.summary == made.flagged.summary
 
 
 def test_claude_denies_a_held_write_the_operator_declined(
@@ -510,6 +535,31 @@ def test_codex_puts_a_flagged_patch_before_the_operator_after_its_call(
     )
     assert asked.flagged.path == Path("src/pkg/new.py")
     assert (repo / "src" / "pkg" / "new.py").exists()
+
+
+def test_codex_refreshes_a_flagged_item_with_a_patch_flagging_nothing(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    kit.announced.holding_all = False
+    new = repo / "src" / "pkg" / "new.py"
+    for call, text in [("p1", '"""New."""\n'), ("p2", "x = 1\n")]:
+        codex.hook(
+            payload(
+                repo,
+                "PreToolUse",
+                turn_id="u1",
+                tool_name="apply_patch",
+                tool_input={},
+                tool_use_id=call,
+            ),
+            on_codex,
+        )
+        new.write_text(text)
+        codex.hook(post(repo, {"output": "done"}, call), on_codex)
+    made, refreshed = kit.flags.asked
+    assert (refreshed.joining, refreshed.refreshing, refreshed.call) == (1, True, "p2")
+    assert refreshed.file.after == Text(text="x = 1\n")
+    assert refreshed.flagged.summary == made.flagged.summary
 
 
 def test_codex_prints_nothing_when_theres_nothing_to_say(

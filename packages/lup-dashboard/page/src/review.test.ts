@@ -4,6 +4,7 @@ import {
     EMPTY,
     aboutAt,
     answer,
+    answering,
     arrival,
     blockAt,
     blocksOf,
@@ -105,7 +106,7 @@ const FLAGGED: Item = {
     reason: {
         reason: "flagged",
         text: "a.py landed, flagged for the operator's review.",
-        summary: "a.py: /w/a.py is a new production file",
+        summary: "a.py is a new production file",
         worktree: "/w",
         path: "a.py",
         writes: 2,
@@ -584,6 +585,16 @@ describe("comments on a changed file's lines", () => {
         expect(flagged.text.startsWith("━━ s2 ━━\n── #70 ──\na.py landed, flagged for the operator's review.\n")).toBe(true);
         expect(flagged.regions[0]!.code.length).toBeGreaterThan(0);
         expect(onItem(opened(flagged, line("L7")))).toEqual({ item: 70, quote: { text: "a.py:7\n+L7", start: expect.any(Number), end: expect.any(Number) }, text: "" });
+        // Its file is a flagged one to the line of keys, read rather than approved.
+        expect(placeAt(flagged, line("L7"))).toBe("flagged");
+        expect(placeAt(flagged, flagged.text.indexOf("a.py landed"))).toBe("item");
+    });
+
+    it("answers an approval or a held change with Space a and Space x, and reads a flagged write with Space a, never declining it", () => {
+        expect([answering(APPROVAL, true), answering(HELD, false)]).toEqual([{ kind: "answer" }, { kind: "answer" }]);
+        expect(answering(FLAGGED, true)).toEqual({ kind: "read" });
+        expect(answering(FLAGGED, false)).toEqual({ kind: "say", text: "A flag is read or commented on, never declined." });
+        expect([answering(NOTE, true), answering(QUESTION, false)]).toEqual([{ kind: "nothing" }, { kind: "nothing" }]);
     });
 
     it("quotes a passage across a file's lines, and across files, each under its path and the span of its lines", () => {

@@ -226,8 +226,26 @@ const SESSION: Item["recipient"] = { party: "conversation", repository: "/r.git"
 const SURVEY: Item["recipient"] = { ...SESSION, agent: "a04" };
 const OPERATOR: Item["sender"] = { party: "operator" };
 
-/** The rank the host gives what waits on the operator (`ranked`, `inbox/store.py`), which the conversation doesn't read. */
+/** The ranks the host gives each item by its kind (`ranked`, `inbox/store.py`), which say whether one waiting is waiting on the operator. */
 const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
+const NEWS: Item["rank"] = { name: "news", order: 1, notifies: false };
+const FLAG: Item["rank"] = { name: "flag", order: 2, notifies: false };
+
+/** The rank the host gives an item of `reason`'s kind, for the kinds these tests make. */
+function ranked(reason: Item["reason"]): Item["rank"] {
+    switch (reason.reason) {
+        case "message":
+            return reason.kind === "note" ? NEWS : WAITING;
+        case "friction":
+        case "how it went":
+        case "stop":
+            return NEWS;
+        case "flagged":
+            return FLAG;
+        default:
+            return WAITING;
+    }
+}
 
 /** An item of the session's, sent to the operator unless `fields` say otherwise. */
 function item(number: number, reason: Item["reason"], minute: number, fields: Partial<Item> = {}): Item {
@@ -238,7 +256,7 @@ function item(number: number, reason: Item["reason"], minute: number, fields: Pa
         recipient: OPERATOR,
         made: at(minute),
         state: { state: "waiting" },
-        rank: WAITING,
+        rank: ranked(reason),
         ...fields,
     };
 }
@@ -334,14 +352,18 @@ describe("the items of lup's inbox in a conversation", () => {
         expect(out.text).not.toContain("#55");
     });
 
-    it("says where each it sent stands: waiting on you, read, withdrawn, approved or declined with your comment", () => {
+    it("says where each it sent stands: waiting on you, unread, read, withdrawn, approved or declined with your comment", () => {
         const held = item(55, { reason: "held", text: "Let the change land?", summary: "AGENTS.md: the operator's", worktree: "/w", key: "k" }, 12, {
             state: { state: "decided", at: at(13), approved: false, comment: "Not this file." },
         });
+        const flagged = { reason: "flagged", text: "a.py landed, flagged.", summary: "a.py is a new production file", worktree: "/w", path: "a.py", writes: 1 } as const;
         const sent = [
             item(56, { reason: "message", ending: false, kind: "problem", text: "Stuck." }, 12),
             item(57, { reason: "message", ending: false, kind: "note", text: "Done." }, 12, { state: { state: "done", at: at(13) } }),
             item(58, { reason: "question", text: "Which?", decisions: [] }, 12, { state: { state: "withdrawn", at: at(13), why: "Found it." } }),
+            // A flag and news wait on no one, as the review ranks them: unread, never waiting on you.
+            item(59, flagged, 12),
+            item(60, { reason: "message", ending: false, kind: "note", text: "Assumed UTF-8." }, 12),
         ];
         const out = laid(
             STEPS,
@@ -361,6 +383,10 @@ describe("the items of lup's inbox in a conversation", () => {
                 "→ #57 note to you · read",
                 "  …",
                 "→ #58 question to you · withdrawn: Found it.",
+                "  …",
+                "→ #59 flagged write to you · unread",
+                "  …",
+                "→ #60 note to you · unread",
                 "  …",
             ].join("\n"),
         );
@@ -408,11 +434,11 @@ describe("the items of lup's inbox in a conversation", () => {
         expect(lines(untimed)).toEqual([
             "you: Go.",
             "· called Bash",
-            "→ #60 note to you · waiting on you",
+            "→ #60 note to you · unread",
             "Ran it.",
             "· called Read",
             "Read it.",
-            "→ #61 note to you · waiting on you",
+            "→ #61 note to you · unread",
         ]);
         expect(lines(untimed.map(({ at: _, ...each }) => each))).toEqual([
             "you: Go.",
@@ -420,8 +446,8 @@ describe("the items of lup's inbox in a conversation", () => {
             "Ran it.",
             "· called Read",
             "Read it.",
-            "→ #60 note to you · waiting on you",
-            "→ #61 note to you · waiting on you",
+            "→ #60 note to you · unread",
+            "→ #61 note to you · unread",
         ]);
     });
 

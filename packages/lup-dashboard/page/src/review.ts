@@ -350,7 +350,7 @@ interface Grouping {
 
 /**
  * Whether an item is news, to read and mark read rather than answer, as its kind's rank says (`Item.rank`, which the
- * host gives each item): a turn's last words, which lup made a note, a friction, how the work went, or a stop by choice.
+ * host gives each item): a note, a turn's last words among them, a friction, how the work went, or a stop by choice.
  */
 export function news(item: Item): boolean {
     return item.rank.name === "news";
@@ -359,6 +359,29 @@ export function news(item: Item): boolean {
 /** Whether an item is a write that landed flagged, ranked last, to read or comment on: it waits on no one. */
 export function flag(item: Item): boolean {
     return item.rank.name === "flag";
+}
+
+/** What Space a or Space x does on an item: answer it, mark it read, say why it does nothing, or nothing. */
+export type Answering = { kind: "answer" } | { kind: "read" } | { kind: "say"; text: string } | { kind: "nothing" };
+
+/** Why Space x does nothing on a flagged write, as the page says it. */
+export const NEVER_DECLINED = "A flag is read or commented on, never declined.";
+
+/**
+ * Return what Space a (`approved`) or Space x does on `item`: approve or decline an approval or a held change; on a
+ * flagged write, Space a marks it read, "looks good", as Space d does, and Space x says it's never declined; on any
+ * other item, nothing.
+ */
+export function answering(item: Item, approved: boolean): Answering {
+    switch (item.reason.reason) {
+        case "approval":
+        case "held":
+            return { kind: "answer" };
+        case "flagged":
+            return approved ? { kind: "read" } : { kind: "say", text: NEVER_DECLINED };
+        default:
+            return { kind: "nothing" };
+    }
 }
 
 /**
@@ -681,10 +704,10 @@ export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "inse
     if (region === undefined || asideAt(region, head) !== undefined) {
         return "aside";
     }
-    if (codeAt(region, head) !== undefined) {
-        return "file";
-    }
     const reason = region.item.reason.reason;
+    if (codeAt(region, head) !== undefined) {
+        return reason === "flagged" ? "flagged" : "file";
+    }
     return reason === "approval" || reason === "held" ? "change" : "item";
 }
 

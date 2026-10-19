@@ -197,8 +197,11 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """Tell the operator a doubt, and carry on.
 
         An assumption your work rests on, a doubt, or a counterargument the
-        operator should weigh. It lands in their inbox as a note, and your work
-        goes on: nothing waits for an answer.
+        operator should weigh. It lands in their inbox as a note, news they
+        read when they come to it, raising no notice, and your work goes on:
+        nothing waits for an answer. A premise that seems wrong, or anything
+        that needs their eyes soon, is an `ask`, which waits on them and
+        notifies them.
         """
         number = await self.said(Message(kind="note", text=said.remark))
         return Said(text=f"Your note is with the operator, item {number}. Carry on.")
@@ -275,8 +278,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         A message of a kind: a `note`, a `problem`, a `disagreement`, or a
         `question` asking for no answer you wait on (a decision of the
-        operator's is `ask`'s). The operator's inbox is the one there is; it
-        never holds.
+        operator's is `ask`'s). A note is news to the operator, raising no
+        notice, as `note`'s is; the other kinds wait on them. The operator's
+        inbox is the one there is; it never holds.
         """
         number = await self.said(Message(kind=sending.kind, text=sending.text))
         return Said(text=f"Your message is with the {sending.to}, item {number}.")

@@ -14,8 +14,9 @@ A replacement whose string isn't there exactly as the tool requires is allowed:
 the tool fails on its own. A write let through is remembered until its call
 finishes, so the checkpoint after it accepts that content as already judged, and
 tells its findings; one flagged is put before the operator as it's let through,
-holding no one (`flags.py`); one declined, or left unanswered, never lands, and
-the agent's version is saved.
+holding no one, as is one to a file whose item may still gather the
+conversation's writes, refreshing it (`flags.py`); one declined, or left
+unanswered, never lands, and the agent's version is saved.
 
 A write is judged in the worktree of the session's repository its path is in,
 which the session then holds; a write in the repository's own git directory
@@ -37,9 +38,10 @@ from lup_dev.policy.checkpoint import (
     Worktree,
     decoded,
     holding,
+    unflag,
     verdict,
 )
-from lup_dev.policy.flags import Landed, flagged
+from lup_dev.policy.flags import Landed, Put, flagged
 from lup_dev.policy.holds import HeldFile, Hold, answered, unified
 from lup_dev.policy.judge import Ask, Change, Judgement
 from lup_dev.policy.report import Refused, information, placed, refusal, sections
@@ -212,6 +214,8 @@ def before(
         judgement = judge.judge([change], inform=False)[0]
         to = Attributed(worktree=worktree.root, session=session, tool=proposal.tool)
         logged = None if judgement.outcome == "ask" else verdict(bench, to, judgement)
+        writer = agent or ""
+        gathering = path in record.flagging.get(writer, [])
         if logged is not None:
             pending = Pending(
                 call=proposal.call,
@@ -222,6 +226,7 @@ def before(
                 removed=judgement.removed,
             )
             record.pending = [*record.pending, pending]
+            record.flagged(writer, [path] if judgement.flags else [])
             worktree.keep(record)
     if logged is None:
         return held_write(
@@ -242,7 +247,7 @@ def before(
         agent=agent,
         call=proposal.call,
     )
-    unsaid = (
+    put = (
         flagged(
             services.flagging,
             judge,
@@ -250,11 +255,12 @@ def before(
             worktree.repository,
             [landed],
         )
-        if judgement.flags
-        else []
+        if judgement.flags or gathering
+        else Put()
     )
+    unflag(bench, worktree, session, writer, put.read)
     return Decision(
-        outcome="allow", told=sections([told(worktree.root, judgement), *unsaid])
+        outcome="allow", told=sections([told(worktree.root, judgement), *put.unsaid])
     )
 
 
