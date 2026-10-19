@@ -1461,14 +1461,14 @@ def ended(launcher: Launcher, launch: str) -> None:
     """End a launch's registration, and remove its directory.
 
     Where the host service can't end it, that's said, and the launch's record
-    stays for the next launch's sweep.
+    stays for the sweep.
     """
     try:
         launcher.host.unregister(launch)
     except HostError as failed:
         launcher.say(
-            f"The host service didn't end launch {launch}: {failed}. The next "
-            "launch ends it."
+            f"The host service didn't end launch {launch}: {failed}. The sweep "
+            "ends it, once its container is gone too."
         )
     own = launcher.layout.launch(launch)
     released(launcher.podman, own, launcher.say)
