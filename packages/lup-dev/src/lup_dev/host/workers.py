@@ -27,6 +27,7 @@ from lup.tools.tool import ToolSpec
 from lup.types import JsonObject, MutableModel
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import HostError, Refused, Register, Reply, Request
+from lup_dev.host.publishing import Published, Refusal
 from lup_dev.layout import HostLayout
 
 if TYPE_CHECKING:
@@ -52,10 +53,10 @@ class Listing(Request):
     kind: Literal["module-listing"] = "module-listing"
 
 
-type Occasion = Event | Literal["launched", "stopped"]
+type Occasion = Event | Literal["launched", "stopped", "publishing"]
 """When a module's hooks may run, as the service tells it: the launch opening, the
-launch ending once its session has fully stopped, and each event a runtime's
-hooks are read as."""
+launch ending once its session has fully stopped, something about to leave under
+the operator's name, and each event a runtime's hooks are read as."""
 
 
 class Offered(Reply):
@@ -76,13 +77,17 @@ class Happening(Request):
     """The conversation it's of, for a session's events."""
     call: str | None = None
     tool: str | None = None
+    published: Published | None = None
+    """What would leave, at `publishing`."""
 
 
 class Happened(Reply):
-    """The hooks ran: what failed among them, each said whole."""
+    """The hooks ran: what failed among them, each said whole, and at `publishing` what they refused."""
 
     kind: Literal["module-happened"] = "module-happened"
     failures: list[str] = []
+    refusals: list[Refusal] = []
+    """Each hook's refusal at `publishing`, a hook that failed there among them."""
 
 
 class Calling(Request):
@@ -148,6 +153,25 @@ class LaunchModules(ABC):
     @abstractmethod
     async def close(self, launch: Register) -> None:
         """Stop serving `launch`'s modules."""
+
+
+async def refusals(
+    modules: LaunchModules, launch: Register, published: Published
+) -> list[Refusal]:
+    """Run `launch`'s modules' hooks at `publishing` on `published`, and return their refusals: none lets it leave.
+
+    Raise `HostError` where they can't be asked, so what can't be checked
+    doesn't leave.
+    """
+    reply = await modules.ask(
+        launch, Happening(occasion="publishing", published=published)
+    )
+    match reply:
+        case Happened(refusals=refused):
+            return refused
+        case _:
+            message = f"the launch's modules replied {reply.kind} at publishing"
+            raise HostError(message)
 
 
 class Worker(MutableModel, arbitrary_types_allowed=True):

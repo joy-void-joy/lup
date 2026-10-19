@@ -46,12 +46,15 @@ from lup_dev.host.records import Record, Records
 from lup_dev.host.service import Answerer, Asked, HostService, Judged
 from lup_dev.host.workers import Calling
 from lup_dev.layout import HostLayout, Layout
+from lup_dev.private import hooks
+from lup_dev.private.withheld import Held, Withheld, kept
+from lup_dev.stored import read_model, write_model
 from lup_dev.worker import Serving
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from conftest import InProcess
+    from conftest import InProcess, StubFacts
     from pydantic import JsonValue
 
     from lup_dev.host.workers import LaunchModules
@@ -177,16 +180,35 @@ def launch(
     )
 
 
+PRIVATE = Withheld(
+    held=[
+        Held(kind="value", text="Kestrel Labs"),
+        Held(kind="home", text="/home/op"),
+        Held(kind="alias", text="forge-op"),
+    ]
+)
+"""Made-up values never published, as a launch would list them on the host."""
+
+
 def called(
-    name: str, arguments: JsonValue, registered: Register, limit: int = 100
+    name: str,
+    arguments: JsonValue,
+    registered: Register,
+    limit: int = 100,
+    withheld: Withheld | None = PRIVATE,
 ) -> Answer:
-    """Call one of the GitHub module's tools as a launch's own process calls it."""
+    """Call one of the GitHub module's tools as a launch's own process calls it, `Private`'s list for the launch's repository `withheld`, or none."""
     declared = Project(modules=Modules.default().edit(GitHub(limit=limit)))
+    layout = Layout(state=registered.worktree, data=registered.worktree)
+    if withheld is not None:
+        write_model(
+            kept(layout.module_data("private", registered.repository)), withheld
+        )
     serving = Serving(
         launch=registered,
         resolved=resolve(declared),
         records=Nothing(),
-        layout=Layout(state=registered.worktree, data=registered.worktree),
+        layout=layout,
     )
     calling = Calling(name=name, arguments=arguments, caller=CALLER)
     return asyncio.run(serving.call(calling))
@@ -844,3 +866,84 @@ def test_a_room_without_its_request_socket_is_unreachable(tmp_path: Path) -> Non
     assert issues.unreachable() == (
         f"the launch's request socket, {tmp_path / 'request.sock'}, isn't there"
     )
+
+
+# The door: what a tool would post, put to the modules' hooks at `publishing`
+
+
+def test_an_issue_carrying_a_value_is_refused_before_gh_runs(
+    gh: Gh, tmp_path: Path
+) -> None:
+    answer = called(
+        "file_issue",
+        {"title": "Kestrel Labs asks", "body": "It broke.\n\nSee /home/op/x.\n"},
+        launch(tmp_path),
+    )
+    assert answer.error
+    assert answer.text == (
+        "`file_issue` didn't run: lup refused to publish this issue: a module's "
+        "check at the `publishing` moment found what isn't published, at each "
+        "place below.\n"
+        "  the title:1:1 - one of the operator's private values\n"
+        "      steer: leave it out of what's published; the operator, who listed "
+        "it, knows which it is\n"
+        "  the body:3:5 - the operator's home path\n"
+        "      steer: write it as `~`, or a path in the repository from its root"
+    )
+    assert gh.calls() == []
+
+
+def test_a_comment_and_a_draft_carrying_a_value_are_refused_before_gh_runs(
+    gh: Gh, tmp_path: Path
+) -> None:
+    commented = called(
+        "comment", {"number": 66, "body": "Pushed via forge-op."}, launch(tmp_path)
+    )
+    drafted = called(
+        "draft_pull_request",
+        {"branch": "forge-op-fix", "title": "A fix", "body": "Why."},
+        launch(tmp_path),
+    )
+    assert commented.error
+    assert "  the body:1:12 - an SSH alias in the repository's remote" in commented.text
+    assert drafted.error
+    assert "  the branch:1:1 - an SSH alias" in drafted.text
+    assert gh.calls() == []
+
+
+def test_a_post_with_no_list_kept_builds_it_first_and_goes(
+    gh: Gh,
+    tmp_path: Path,
+    stub_facts: type[StubFacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered = launch(tmp_path)
+    subprocess.run(
+        ["git", "init", "-q", "--bare", str(registered.repository)], check=True
+    )
+    monkeypatch.setattr(hooks, "HostFacts", lambda: stub_facts(home=Path("/home/op")))
+    link = "https://github.com/joy-void-joy/lup/issues/66#issuecomment-1"
+    gh.answer("issue comment", f"{link}\n")
+    answer = called(
+        "comment", {"number": 66, "body": "Fine."}, registered, withheld=None
+    )
+    assert answer == Answer(text=f"Commented: {link}")
+    layout = Layout(state=registered.worktree, data=registered.worktree)
+    built = read_model(
+        kept(layout.module_data("private", registered.repository)), Withheld
+    )
+    assert built is not None
+    assert Held(kind="home", text="/home/op") in built.held
+
+
+def test_a_post_whose_list_can_t_be_built_is_refused_saying_why(
+    gh: Gh, tmp_path: Path
+) -> None:
+    answer = called(
+        "comment", {"number": 66, "body": "Fine."}, launch(tmp_path), withheld=None
+    )
+    assert answer.error
+    assert (
+        "  all of it - a list of private values that couldn't be built" in answer.text
+    )
+    assert gh.calls() == []

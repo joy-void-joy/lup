@@ -18,7 +18,7 @@ from typing import Literal
 
 from lup.types import Model
 from lup_dev.codescan.contract import Finding
-from lup_dev.policy.judge import Ask, RemovedNote
+from lup_dev.policy.judge import PRIVATE, Ask, RemovedNote
 
 
 def placed(root: Path, findings: list[Finding]) -> list[Finding]:
@@ -125,7 +125,27 @@ def information(
     untouched: list[Finding],
     importers: list[Finding],
 ) -> str:
-    """Report what a checkpoint found in the files it judged: lup's findings on the lines changed, type errors and ruff's findings, lup's findings elsewhere, and type errors in the files importing them."""
+    """Report what a checkpoint found in the files it judged: values never published on the lines changed, lup's findings on them, type errors and ruff's findings, lup's findings elsewhere, and type errors in the files importing them.
+
+    A value never published is told apart from a rule's finding, since no
+    `ignore` keeps it: each names its kind, never the value.
+    """
+    private = [found for found in reported if found.rule == PRIVATE]
+    elsewhere = [found for found in untouched if found.rule == PRIVATE]
+    withheld = (
+        [
+            (
+                "Values never published, on the lines changed (rewrite each before "
+                "it's committed: the operator sees this write with them, the gate's "
+                "`private` step fails on them, and a push or a post carrying one is "
+                "refused):"
+            ),
+            *(line for found in private for line in finding_lines(found)),
+        ]
+        if private
+        else []
+    )
+    rules = [found for found in reported if found.rule != PRIVATE]
     ruled = (
         [
             (
@@ -133,9 +153,9 @@ def information(
                 '`# lup: ignore("<rule>", why="<reason>")` on its line or the line '
                 "above, which the operator is asked about; they fail the gate):"
             ),
-            *(line for found in reported for line in finding_lines(found)),
+            *(line for found in rules for line in finding_lines(found)),
         ]
-        if reported
+        if rules
         else []
     )
     checked = (
@@ -149,12 +169,24 @@ def information(
         if findings
         else []
     )
+    others = [found for found in untouched if found.rule != PRIVATE]
     older = (
         [
             "lup's findings on lines no change touched (they fail the gate too):",
-            *(line for found in untouched for line in finding_lines(found)),
+            *(line for found in others for line in finding_lines(found)),
         ]
-        if untouched
+        if others
+        else []
+    )
+    kept = (
+        [
+            (
+                "Values never published, on lines no change touched (the gate's "
+                "`private` step fails on them too):"
+            ),
+            *(line for found in elsewhere for line in finding_lines(found)),
+        ]
+        if elsewhere
         else []
     )
     importing = (
@@ -168,7 +200,9 @@ def information(
         if importers
         else []
     )
-    return sections(["\n".join(part) for part in [ruled, checked, older, importing]])
+    return sections(
+        ["\n".join(part) for part in [withheld, ruled, checked, older, kept, importing]]
+    )
 
 
 def removed_notes(notes: list[RemovedNote]) -> str:

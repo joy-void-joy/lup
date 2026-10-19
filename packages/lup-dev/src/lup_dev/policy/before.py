@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Literal, override
 
 from lup.types import Model
+from lup_dev.git import Git
 from lup_dev.inbox.store import ChangedFile
 from lup_dev.policy.checkpoint import (
     Attributed,
@@ -204,6 +205,7 @@ def before(
             after=after,
             baseline=decoded(store.content(store.started(session), path)),
             whole=proposal.whole() and (earlier is not None or disk.is_file()),
+            published=not Git(cwd=worktree.root).ignored(path),
         )
         each_held = services.announcing.holding(bench.runtime.name(), session, agent)
         judge = worktree.judge(services, record.approved, holding=each_held)

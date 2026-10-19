@@ -40,6 +40,7 @@ of its conversation, and while one is, the session's end doesn't hold on a file
 they both touched, which may be the subagent's in progress (#32).
 """
 
+import asyncio
 import difflib
 import secrets
 import shutil
@@ -57,8 +58,10 @@ from lup_dev.codescan.conditions import declared
 from lup_dev.codescan.contract import Checker, Due, FileReport, Finding, Source
 from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.errors import ProjectError
+from lup_dev.declaration.load import load
 from lup_dev.declaration.project import Project
-from lup_dev.declaration.resolve import Declaration
+from lup_dev.declaration.resolve import Declaration, resolve
+from lup_dev.errors import LupDevError
 from lup_dev.git import Git
 from lup_dev.inbox import ends
 from lup_dev.inbox.store import ChangedFile
@@ -85,6 +88,10 @@ from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.store import Elsewhere, Entry, Heads, Held, Store
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.policy.worktrees import Holding, Place, SessionIndex, place
+from lup_dev.private.building import listed
+from lup_dev.private.module import Private
+from lup_dev.private.withheld import Facts, Withheld
+from lup_dev.private.withheld import kept as listed_at
 from lup_dev.stored import read_model, write_model
 
 
@@ -101,6 +108,9 @@ class Services(Model, arbitrary_types_allowed=True):
     until the operator approves a commit (`lup_dev.approval`)."""
     announcing: Announcing
     """Where each hold is put before the operator, whose answer comes back to it."""
+    facts: Facts
+    """What the host says of itself, which a list of values never published is
+    built from where no launch built one."""
     flagging: Flagging
     """Where each write that landed flagged is put before the operator."""
 
@@ -481,7 +491,11 @@ class Worktree(Model):
     def judge(
         self, services: Services, approved: list[Path], *, holding: bool = False
     ) -> Judge:
-        """Return a judge for this worktree, the operator having approved `approved`, and holding each flagged write where `holding`."""
+        """Return a judge for this worktree, the operator having approved `approved`, and holding each flagged write where `holding`.
+
+        It finds the values never published listed on the host for the
+        repository (`withheld`).
+        """
         return Judge(
             root=self.root,
             roles=self.roles,
@@ -490,7 +504,28 @@ class Worktree(Model):
             conditions=declared(self.loaded.root, self.declaration.conditions),
             approved=approved,
             holding=holding,
+            withheld=self.withheld(services),
         )
+
+    def withheld(self, services: Services) -> Withheld | None:
+        """Return the values never published listed on the host for the repository, building the list where none is kept and the declaration it's judged by selects `Private`, as a launch would, and keeping it.
+
+        Where it can't be built, the judge finds none, and the write is judged
+        as it would be without the module: a write is never refused for a
+        value, and the door, which builds the list too, says why it can't.
+        """
+        data = services.layout.module_data(Private.name, self.repository)
+        kept = read_model(listed_at(data), Withheld)
+        if kept is not None or Private.name not in self.declaration.modules:
+            return kept
+        try:
+            resolved = resolve(load(self.loaded.root).project)
+            made = asyncio.run(
+                listed(resolved, self.repository, services.facts, services.layout)
+            )
+        except LupDevError, OSError:
+            return None
+        return None if made is None else made.withheld
 
     def verdicts(self, layout: Layout) -> VerdictLog:
         """Return this repository's verdict log."""

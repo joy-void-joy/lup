@@ -32,7 +32,7 @@ from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.catalog.room import SessionDefaults
 from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import resolve
-from lup_dev.forge.github import GitHubError
+from lup_dev.forge.github import GitHubError, Visibility
 from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.names import container_name
 from lup_dev.host.protocol import (
@@ -57,8 +57,11 @@ from lup_dev.launch.session import (
 )
 from lup_dev.launch.trust import Outcome, Unchanged
 from lup_dev.layout import Layout
+from lup_dev.private.withheld import Facts, Withheld
+from lup_dev.private.withheld import Machine as PrivateMachine
+from lup_dev.private.withheld import kept as withheld_kept
 from lup_dev.settings import TerminalVariables
-from lup_dev.stored import write_model
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -280,6 +283,24 @@ class Engine:
         return ran
 
 
+class Here(Facts):
+    """The host as a launch's list of private values reads it: made-up, its remotes' hosts their own names, every repository public."""
+
+    def __init__(self, home: Path) -> None:
+        self.home = home
+
+    def machine(self) -> PrivateMachine:
+        return PrivateMachine(home=self.home, user="op", hostname="kestrel-box")
+
+    def resolved(self, host: str) -> str | None:
+        return host
+
+    async def visibility(
+        self, directory: Path, repository: GitHubRepository
+    ) -> Visibility:
+        return "public"
+
+
 class Machine:
     """A launch's machine, every seam a stub recording into one list."""
 
@@ -333,6 +354,7 @@ class Machine:
             ),
             say=record,
             github=self.github,
+            facts=Here(tmp_path / "home"),
         )
         self.adapter = claude.adapter().model_copy(
             update={"channel": Offline(events=self.events)}
@@ -1111,3 +1133,61 @@ def test_a_launch_imposes_what_the_project_declares_and_its_defaults_yield_to_th
     assert on_claude["idleCompaction"] is False
     assert "features.memories=false" in on_codex
     assert not any(argument.startswith("features.apps") for argument in on_codex)
+
+
+QUIET = '''"""This person's own values, and the repository beside the project."""
+
+from pathlib import Path
+
+from lup_dev import Module, Modules, Private, Project, Repositories, Repository, Values
+
+
+class Mine(Module):
+    """The repository beside the project, as this person has it."""
+
+    name = "mine"
+
+    repositories: Repositories = Repositories.of(
+        Repository(name="atlas", path=Path("atlas.git"), about="a neighbour"),
+    )
+
+
+project = Project(
+    modules=Modules().add(Mine()).edit(Private(values=Values().add("Kestrel Labs")))
+)
+'''
+
+
+def test_a_launch_keeps_the_list_of_private_values_where_its_module_reads_it(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock, local=QUIET)
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    kept = read_model(
+        withheld_kept(machine.layout.module_data("private", project / ".git")),
+        Withheld,
+    )
+    assert kept is not None
+    texts = {each.kind: each.text for each in kept.held}
+    assert texts["value"] == "Kestrel Labs"
+    assert texts["user"] == "op"
+    assert texts["private-repository"] == "atlas"
+    assert str(project / ".git") in [each.text for each in kept.held]
+    assert not [each for each in machine.events.said if "Kestrel" in each]
+
+
+def test_a_launch_whose_declaration_drops_private_keeps_no_list(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+    kept = withheld_kept(machine.layout.module_data("private", project / ".git"))
+    assert kept.is_file()
+    machine.local = (
+        '"""Not this one."""\n\nfrom lup_dev import Modules, Project\n\n'
+        'project = Project(modules=Modules().drop("private", why="a scratch copy"))\n'
+    )
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+    assert not kept.exists()

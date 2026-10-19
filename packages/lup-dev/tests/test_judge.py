@@ -24,7 +24,9 @@ from lup_dev.policy.judge import (
     Judgement,
     touched_lines,
 )
+from lup_dev.policy.report import information
 from lup_dev.policy.roles import Roles
+from lup_dev.private.withheld import Held, Withheld
 
 if TYPE_CHECKING:
     from conftest import Kit
@@ -67,6 +69,7 @@ class Judging:
         conditions: list[str] | None = None,
         project: Project | None = None,
         holding: bool = False,
+        withheld: Withheld | None = None,
     ) -> Judgement:
         judging = Judge(
             root=self.root,
@@ -78,6 +81,7 @@ class Judging:
             conditions=conditions,
             approved=approved or [],
             holding=holding,
+            withheld=withheld,
         )
         [judgement] = judging.judge([change])
         return judgement
@@ -747,3 +751,116 @@ def test_touched_lines() -> None:
     assert touched_lines("a\nb\nc\n", "a\nc\n") == [2]
     assert touched_lines("a\nb\n", "a\nb\nc\n") == [3]
     assert touched_lines("a\nb\n", "a\n") == [1]
+
+
+# A value never published, on a line a write touches
+
+
+WITHHELD = Withheld(
+    held=[
+        Held(kind="home", text="/home/op"),
+        Held(kind="value", text="Kestrel Labs"),
+    ]
+)
+"""Made-up values never published, as a launch would list them on the host."""
+
+
+def test_a_value_on_a_touched_line_is_told_and_flagged_in_every_role(
+    judge: Judging,
+) -> None:
+    for path in [
+        "docs/notes.md",
+        "tests/test_a.py",
+        "data/a.json",
+        "src/pkg/core.py",
+        "pyproject.toml",
+        "AGENTS.md",
+    ]:
+        change = edit(path, "a\nb\n", "a\nsee /home/op/x\n")
+        judgement = judge(change, project=Project(), withheld=WITHHELD)
+        [found] = judgement.findings
+        assert (found.rule, found.span.start.line, found.span.start.column) == (
+            "private",
+            2,
+            5,
+        ), path
+        assert found.message == "the operator's home path"
+        assert "private" in [ask.name() for ask in judgement.flags], path
+        assert "/home/op" not in found.message + found.steer
+
+
+def test_a_value_nobody_wrote_now_is_told_apart_and_asks_nothing(
+    judge: Judging,
+) -> None:
+    change = edit("docs/notes.md", "Kestrel Labs\nb\n", "Kestrel Labs\nc\n")
+    judgement = judge(change, project=Project(), withheld=WITHHELD)
+    assert judgement.findings == []
+    assert [each.span.start.line for each in judgement.untouched] == [1]
+    assert judgement.flags == []
+    assert judgement.outcome == "allow"
+
+
+def test_a_path_git_ignores_and_a_judge_with_no_list_find_nothing(
+    judge: Judging,
+) -> None:
+    ignored = edit("notes.md", None, "/home/op\n").model_copy(
+        update={"published": False}
+    )
+    assert judge(ignored, project=Project(), withheld=WITHHELD).findings == []
+    plain = edit("notes.md", None, "/home/op\n")
+    assert judge(plain, project=Project()).findings == []
+
+
+def test_a_new_file_s_path_holding_a_value_is_told(judge: Judging) -> None:
+    created = edit("docs/kestrel labs.md", None, "Plain.\n")
+    [found] = judge(created, project=Project(), withheld=WITHHELD).findings
+    assert found.message == "one of the operator's private values, in the file's path"
+
+
+def test_a_project_holding_private_values_holds_the_write(judge: Judging) -> None:
+    holding = Project(held=["protected", "operator", "ignore", "private"], flagged=[])
+    change = edit("docs/notes.md", "a\n", "a\nKestrel Labs\n")
+    judgement = judge(change, project=holding, withheld=WITHHELD)
+    assert judgement.outcome == "ask"
+    assert [(ask.kind, ask.line) for ask in judgement.asks] == [("private", 2)]
+    assert judgement.reasons() == ["private"]
+
+
+def test_the_review_reads_a_private_value_by_its_finding_flagged(
+    judge: Judging,
+) -> None:
+    change = edit("docs/notes.md", "a\n", "a\nKestrel Labs\n")
+    reading = judge(change, project=Project(), withheld=WITHHELD).reading()
+    assert reading.asks == []
+    assert reading.findings == [
+        Found(
+            rule="private",
+            message="one of the operator's private values",
+            steer=(
+                "leave it out of what's published; the operator, who listed it, "
+                "knows which it is"
+            ),
+            start=2,
+            end=2,
+            taken="flagged",
+        )
+    ]
+
+
+def test_a_private_value_is_told_in_a_block_of_its_own(judge: Judging) -> None:
+    change = edit("docs/notes.md", "Kestrel Labs\n", "Kestrel Labs\nsee /home/op\n")
+    judgement = judge(change, project=Project(), withheld=WITHHELD)
+    told = information(judgement.findings, [], judgement.untouched, [])
+    assert told == (
+        "Values never published, on the lines changed (rewrite each before it's "
+        "committed: the operator sees this write with them, the gate's `private` "
+        "step fails on them, and a push or a post carrying one is refused):\n"
+        "  docs/notes.md:2:5 - private: the operator's home path\n"
+        "      steer: write it as `~`, or a path in the repository from its root\n"
+        "\n"
+        "Values never published, on lines no change touched (the gate's `private` "
+        "step fails on them too):\n"
+        "  docs/notes.md:1:1 - private: one of the operator's private values\n"
+        "      steer: leave it out of what's published; the operator, who listed "
+        "it, knows which it is"
+    )

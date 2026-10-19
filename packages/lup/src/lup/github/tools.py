@@ -8,7 +8,9 @@ on the host (`lup_dev.forge.github`), and only within the limits the project's
 declaration sets (`Register.limits`): a tool's action (`read-issues`,
 `file-issue`, `comment`, `draft-pull-request`) is checked before anything runs,
 and one beyond the limits is refused, saying the declaration doesn't allow it and
-that allowing it is the operator's call. There's no merge tool, and none closes
+that allowing it is the operator's call. What a tool that writes would post is
+put to every module's hooks at the `publishing` moment first
+(`ModuleTools.publish`), and refused there, it isn't posted. There's no merge tool, and none closes
 or edits an issue: closing one is the operator's judgement, which a comment can
 ask for.
 
@@ -26,6 +28,7 @@ from lup_dev.declaration.serving import ModuleTools
 from lup_dev.forge import github as gh
 from lup_dev.forge.github import GitHubError, terms
 from lup_dev.host.protocol import Action, GitHubRepository
+from lup_dev.host.publishing import Part, Post
 from lup_dev.settings import LupDevSettings
 
 if TYPE_CHECKING:
@@ -203,6 +206,16 @@ class GitHubTools(ModuleTools):
         first, to find one already open. Its link is the answer.
         """
         github = self.github("file-issue", asked)
+        await self.publish(
+            Post(
+                what="an issue",
+                parts=[
+                    Part(name="title", text=asked.title),
+                    Part(name="body", text=asked.body),
+                ],
+            ),
+            "this issue",
+        )
         return f"Filed: {await github.file(asked.title, asked.body)}"
 
     @lup_tool
@@ -215,6 +228,13 @@ class GitHubTools(ModuleTools):
         answer.
         """
         github = self.github("comment", asked)
+        await self.publish(
+            Post(
+                what=f"a comment on #{asked.number}",
+                parts=[Part(name="body", text=asked.body)],
+            ),
+            "this comment",
+        )
         return f"Commented: {await github.comment(asked.number, asked.body)}"
 
     @lup_tool
@@ -226,6 +246,17 @@ class GitHubTools(ModuleTools):
         reviews and merges: there's no merging here. Its link is the answer.
         """
         github = self.github("draft-pull-request", asked)
+        await self.publish(
+            Post(
+                what="a draft pull request",
+                parts=[
+                    Part(name="branch", text=asked.branch),
+                    Part(name="title", text=asked.title),
+                    Part(name="body", text=asked.body),
+                ],
+            ),
+            "this pull request",
+        )
         if not await github.pushed(asked.branch):
             message = (
                 f"`{asked.branch}` isn't a branch of {github.repository} on GitHub: "

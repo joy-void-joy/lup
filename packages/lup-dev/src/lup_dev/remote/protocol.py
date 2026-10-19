@@ -17,6 +17,12 @@
 - each update is held to the launch's limits (`Register.limits`) before git
   runs: a forced one (`+`, `option force`, a lease), a deletion, or one to a
   protected ref is refused where the declaration doesn't allow it, saying why;
+- what each update would publish is put to the launch's modules' hooks at the
+  `publishing` moment before git runs (`lup_dev.host.publishing`), with what the
+  remote holds already: the listing git asked for before the push
+  (`list for-push`), or a fresh one. An update a hook refuses isn't pushed, its
+  error pointing at the refusals, which the reply says whole (`Pushed.said`)
+  for the helper to print; where the modules can't be asked, nothing is pushed;
 - each is pushed by object id, one at a time (together where git asked for an
   atomic push), forced only where the limits allow it and git asked, so the
   forge refuses a push that isn't a fast-forward too. The objects are already in
@@ -48,11 +54,13 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import AfterValidator
 
-from lup.types import Model
+from lup.types import Model, MutableModel
 from lup_dev.git import pinning
 from lup_dev.host.protocol import Action, HostError, Register, Reply, Request
+from lup_dev.host.publishing import Place, Push, Refusal, Updating, told
 from lup_dev.host.rooms import RoomHandler, RoomRoute
 from lup_dev.host.service import Asked, Judged, judged
+from lup_dev.host.workers import LaunchModules, refusals
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -202,10 +210,34 @@ class Updated(Model):
 
 
 class Pushed(Reply):
-    """How each update of a push ended, in the order asked."""
+    """How each update of a push ended, in the order asked, and what the room is told beside: the refusals at `publishing`, whole."""
 
     kind: Literal["remote-pushed"] = "remote-pushed"
     updates: list[Updated]
+    said: str = ""
+    """What the helper prints on git's standard error before the updates' lines:
+    git shows one line for each ref, so the places a refusal names go here."""
+
+
+class Barred(Model):
+    """The updates refused at `publishing`, each by its destination with its one line, and what the room is told of them whole."""
+
+    refused: dict[str, str] = {}
+    said: str = ""
+
+
+BARRED = (
+    "refused by lup: it would publish what isn't published, at the places listed above"
+)
+"""An update's one line where a hook at `publishing` refused it: git shows one
+line for each ref, so the places are said before them (`Pushed.said`)."""
+
+REWRITE = (
+    "A push sends every commit the remote lacks, so rewrite the commit that "
+    "carries it (amend it, or rebase) and push again: a commit on top leaves it "
+    "in what's pushed."
+)
+"""What a refused push is told to do beneath its refusals."""
 
 
 class Wanted(Model):
@@ -304,6 +336,26 @@ def oneline(said: str) -> str:
     return " ".join(said.split())
 
 
+class Listings(MutableModel):
+    """What each launch's remotes held when git last listed them before a push, kept for that push."""
+
+    held: dict[str, list[str]] = {}
+    """The objects listed, by the launch and the remote's name."""
+
+    @staticmethod
+    def key(launch: Register, remote: str) -> str:
+        """Name one launch's remote, for the listing kept of it."""
+        return f"{launch.launch} {remote}"
+
+    def keep(self, launch: Register, remote: str, refs: list[Ref]) -> None:
+        """Keep what `launch`'s `remote` listed before a push."""
+        self.held[self.key(launch, remote)] = [ref.object for ref in refs]
+
+    def take(self, launch: Register, remote: str) -> list[str] | None:
+        """Return what `launch`'s `remote` listed before this push, once; none where nothing was kept."""
+        return self.held.pop(self.key(launch, remote), None)
+
+
 class Remotes(Model, arbitrary_types_allowed=True):
     """git on the host for each launch's room: in its repository's own git directory, to that repository's own remotes."""
 
@@ -316,6 +368,46 @@ class Remotes(Model, arbitrary_types_allowed=True):
     room hears: a push moving the integration branch puts the approval of the
     host zone at its tip in the operator's inbox (`cli.py`). None tells
     nothing."""
+    modules: LaunchModules | None = None
+    """Each launch's modules, whose hooks at `publishing` see what a push would
+    publish before git runs; none asks nothing, for a service serving no
+    modules."""
+    listings: Listings = Listings()
+    """What git listed of each remote before a push, so the push knows what
+    the remote holds without listing it again."""
+
+    async def listed(self, launch: Register, remote: str, *, push: bool) -> list[Ref]:
+        """List the refs of `launch`'s `remote`, as `git ls-remote` gives them on its URL for a push or a fetch.
+
+        Raise `HostError` where git can't.
+        """
+        url = await self.url(launch, remote, push=push)
+        ran = await self.git(launch, "ls-remote", "--end-of-options", url)
+        if ran.status != 0:
+            self.told(launch, f"listing `{remote}` ({url})", ran)
+            message = f"git couldn't list `{remote}`: {oneline(ran.error)}"
+            raise HostError(message)
+
+        def read() -> Iterator[Ref]:
+            for line in ran.output.splitlines():
+                match line.split():
+                    case [listed, name]:
+                        yield Ref(object=listed, name=name)
+                    case _:
+                        message = (
+                            f"git ls-remote listed {line!r}, not an object and a "
+                            "ref's name"
+                        )
+                        raise HostError(message)
+
+        return list(read())
+
+    async def held(self, launch: Register, remote: str) -> list[str]:
+        """Return the objects `launch`'s `remote` holds: as git listed them before this push, or listed afresh where nothing was kept."""
+        kept = self.listings.take(launch, remote)
+        if kept is not None:
+            return kept
+        return [ref.object for ref in await self.listed(launch, remote, push=True)]
 
     async def git(self, launch: Register, *arguments: str) -> Judged:
         """Run git in `launch`'s repository's own git directory, pinned there (`pinning`), with what it could be led into turned off."""
@@ -398,27 +490,12 @@ class ListHandler(Model, RoomHandler[Listing]):
 
     @override
     async def answer(self, request: Listing, launch: Register) -> Reply:
+        """List the remote's refs; before a push, keep them for it, as what the remote holds already."""
         require("push" if request.for_push else "fetch", launch)
-        url = await self.remotes.url(launch, request.remote, push=request.for_push)
-        ran = await self.remotes.git(launch, "ls-remote", "--end-of-options", url)
-        if ran.status != 0:
-            self.remotes.told(launch, f"listing `{request.remote}` ({url})", ran)
-            message = f"git couldn't list `{request.remote}`: {oneline(ran.error)}"
-            raise HostError(message)
-
-        def read() -> Iterator[Ref]:
-            for line in ran.output.splitlines():
-                match line.split():
-                    case [listed, name]:
-                        yield Ref(object=listed, name=name)
-                    case _:
-                        message = (
-                            f"git ls-remote listed {line!r}, not an object and a "
-                            "ref's name"
-                        )
-                        raise HostError(message)
-
-        return Advertised(refs=list(read()))
+        refs = await self.remotes.listed(launch, request.remote, push=request.for_push)
+        if request.for_push:
+            self.remotes.listings.keep(launch, request.remote, refs)
+        return Advertised(refs=refs)
 
 
 class PushHandler(Model, RoomHandler[Pushing]):
@@ -449,11 +526,18 @@ class PushHandler(Model, RoomHandler[Pushing]):
             return refusal(update, forced=forced, launch=launch)
 
         reasons = [await why(update) for update in request.updates]
-        refused = {
+        limited = {
             update.destination: reason
             for update, reason in zip(request.updates, reasons, strict=True)
             if reason is not None
         }
+        within = [each for each in request.updates if each.destination not in limited]
+        barred = (
+            Barred()
+            if limited and request.atomic
+            else await self.barred(request, launch, within)
+        )
+        refused = {**limited, **barred.refused}
         for destination, reason in refused.items():
             self.remotes.say(
                 f"{launch.launch}: refused a push to `{destination}` on "
@@ -470,7 +554,8 @@ class PushHandler(Model, RoomHandler[Pushing]):
                         error=refused.get(each.destination, held),
                     )
                     for each in request.updates
-                ]
+                ],
+                said=barred.said,
             )
         await self.remotes.contained(launch)
         url = await self.remotes.url(launch, request.remote, push=True)
@@ -490,12 +575,60 @@ class PushHandler(Model, RoomHandler[Pushing]):
                     error=refused.get(each.destination, pushed.get(each.destination)),
                 )
                 for each in request.updates
-            ]
+            ],
+            said=barred.said,
         )
         updated = [each.destination for each in outcome.updates if each.error is None]
         if self.remotes.landed is not None and updated and not request.dry_run:
             await self.remotes.landed(launch, updated)
         return outcome
+
+    async def barred(
+        self, request: Pushing, launch: Register, allowed: list[Update]
+    ) -> Barred:
+        """Put what each update `allowed` would publish to the launch's modules' hooks at `publishing`, and return those they refuse, with their refusals said whole.
+
+        A deletion publishes nothing, so it isn't asked about. Where the modules
+        can't be asked, the update is refused, since what wasn't checked
+        doesn't leave.
+        """
+        modules = self.remotes.modules
+        publishing = [
+            Updating(source=each.source, destination=each.destination)
+            for each in allowed
+            if each.source is not None
+        ]
+        if modules is None or not publishing:
+            return Barred()
+        await self.remotes.contained(launch)
+        has = await self.remotes.held(launch, request.remote)
+
+        async def asked(update: Updating) -> list[Refusal]:
+            push = Push(remote=request.remote, updates=[update], has=has)
+            try:
+                return await refusals(modules, launch, push)
+            except HostError as failed:
+                return [
+                    Refusal(
+                        what=f"a check that didn't run: {failed}",
+                        place=Place(within="all of it"),
+                        steer=(
+                            "what can't be checked doesn't leave from a room: tell "
+                            "the operator, who can push it from their own terminal"
+                        ),
+                    )
+                ]
+
+        answers = [(update, await asked(update)) for update in publishing]
+        refused = [(update, answer) for update, answer in answers if answer]
+        said = [
+            f"{told(answer, f'this push to `{update.destination}`')}\n{REWRITE}"
+            for update, answer in refused
+        ]
+        return Barred(
+            refused={update.destination: BARRED for update, _ in refused},
+            said="\n\n".join(said),
+        )
 
     async def pushed(
         self,

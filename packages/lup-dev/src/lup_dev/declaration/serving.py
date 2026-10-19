@@ -10,16 +10,25 @@ its module's settings (`self.module`, which the class narrows to its own module,
 
 A room's request is answered the same way: a `ModuleHandler` names the request
 it answers by narrowing its `request` field to that request's model, and
-`answer` replies, the module and the launch through `self`.
+`answer` replies, the module, the launch, the module's own data directory for
+the repository and the other repositories the declaration names (`Related`)
+through `self`.
 
 What a module does at lup's moments is a `ModuleHooks` class, each method run at
 a moment marked with the library's `@lup_hook`: at the one its name names, or
-those its `on` names. lup's moments are its own two, a launch opening and a
-launch ending once its session has fully stopped, and the five each runtime's
-hooks are read as (`lup.sessions.terminal.Event`). A hook observes: it can't hold
-or answer the moment. Through `self` it reaches its module, the launch, where
-the launch's runtime keeps its sessions' records, and the module's own data
-directory for the repository.
+those its `on` names. lup's moments are its own three, a launch opening, a launch
+ending once its session has fully stopped, and `publishing`, before anything
+leaves under the operator's name; and the five each runtime's hooks are read as
+(`lup.sessions.terminal.Event`). A hook observes, but at a moment that's
+answered (`ANSWERED`: `publishing`) it may refuse, returning its refusals
+(`lup_dev.host.publishing`), each naming what it found and where; one refusal
+keeps what would leave from leaving. Through `self` it reaches its module, the
+launch, where the launch's runtime keeps its sessions' records, the module's own
+data directory for the repository, and the other repositories the declaration
+names, as the host finds them.
+
+A module's tool that would publish something puts it through the door first
+(`ModuleTools.publish`), which runs every module's hooks at `publishing`.
 
 Each runs on the host, in the launch's own process of the repository's approved
 copy (`lup_dev.worker`), never in the host service that serves every launch.
@@ -36,8 +45,10 @@ from lup.tools.tool import AgentTool, ToolSpec, bound, declared
 from lup.types import Model
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.module import Module
+from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Register, Reply, Request
+from lup_dev.host.publishing import Published, Refusal, told
 from lup_dev.host.records import Records
 
 if TYPE_CHECKING:
@@ -75,7 +86,21 @@ def made_with(owner: type[BaseModel], module: Module) -> bool:
     return isinstance(module, narrowed(owner, "module"))
 
 
-class ModuleTools(Model):
+class Door(ABC):
+    """Where what a module's tool would publish under the operator's name is put to every module's hooks at `publishing` first."""
+
+    @abstractmethod
+    async def refusals(
+        self, published: Published, conversation: Conversation | None
+    ) -> list[Refusal]:
+        """Run every module's hooks at `publishing` on `published`, for `conversation`, and return their refusals: none lets it leave."""
+
+
+class UnpublishedError(LupDevError):
+    """What a tool would publish was refused at the `publishing` moment; its message lists each refusal."""
+
+
+class ModuleTools(Model, arbitrary_types_allowed=True):
     """A module's tools in a launched session: each a method decorated with `@lup_tool`.
 
     A subclass narrows `module` to its own module's class, so its tools read
@@ -87,6 +112,8 @@ class ModuleTools(Model):
     """The launch whose session calls."""
     caller: Conversation
     """The conversation calling: the session's own, or one of its subagents'."""
+    door: Door
+    """Where what a tool would publish is checked first (`publish`)."""
 
     @classmethod
     def specs(cls) -> list[ToolSpec]:
@@ -96,6 +123,27 @@ class ModuleTools(Model):
     def tools(self) -> list[AgentTool]:
         """Return each tool, bound to this call."""
         return bound(self)
+
+    async def publish(self, published: Published, naming: str) -> None:
+        """Put what a tool would publish under the operator's name to every module's hooks at `publishing`, before it leaves.
+
+        `naming` names it in a refusal (`this issue`). Raise `UnpublishedError`,
+        listing each refusal, where any hook refuses; the tool then publishes
+        nothing.
+        """
+        refused = await self.door.refusals(published, self.caller)
+        if refused:
+            raise UnpublishedError(told(refused, naming))
+
+
+class Related(Model):
+    """Another repository the declaration names for the project's sessions to read, as the host finds it."""
+
+    name: str
+    path: Path
+    """Where it is on the host, absolute and resolved."""
+    github: str | None
+    """Its `owner/name` on GitHub, where its entry gives one."""
 
 
 class ModuleHandler(Model, ABC):
@@ -109,6 +157,11 @@ class ModuleHandler(Model, ABC):
     launch: Register
     """The launch whose room asks."""
     request: Request
+    data: Path
+    """The module's own directory for the repository, under lup's data."""
+    related: list[Related]
+    """The other repositories the launch's declaration names, as the host finds
+    them."""
 
     @abstractmethod
     async def answer(self) -> Reply:
@@ -136,6 +189,7 @@ def answering(handler: type[ModuleHandler]) -> type[Request]:
 type MomentName = Literal[
     "launched",
     "stopped",
+    "publishing",
     "session_started",
     "call_started",
     "call_finished",
@@ -143,7 +197,12 @@ type MomentName = Literal[
     "conversation_ended",
 ]
 """lup's moments, which a module's hooks run at: a launch opening; a launch ending,
-its session fully stopped; and the five each runtime's hooks are read as."""
+its session fully stopped; something about to leave under the operator's name;
+and the five each runtime's hooks are read as."""
+
+ANSWERED: list[MomentName] = ["publishing"]
+"""The moments a hook may answer: at `publishing` it returns its refusals. At
+every other one it observes, returning nothing."""
 
 HEARD: dict[Event, MomentName] = {
     "session-started": "session_started",
@@ -160,18 +219,23 @@ class Moment(Model):
 
     name: MomentName
     conversation: Conversation | None = None
-    """The conversation it's of, for a session's moments; none for a launch's."""
+    """The conversation it's of, for a session's moments and a post; none for a
+    launch's and a push."""
     call: str | None = None
     """The call's id, at a call's start or finish."""
     tool: str | None = None
     """The tool called, by the runtime's name for it."""
+    published: Published | None = None
+    """What would leave, at `publishing`: a push, or a post."""
 
 
 class ModuleHooks(Model, arbitrary_types_allowed=True):
     """What a module does at lup's moments: each method marked with `@lup_hook`.
 
     A subclass narrows `module` to its own module's class, as a class of tools
-    does. A hook naming no moment of lup's fails the class's definition.
+    does. A hook naming no moment of lup's fails the class's definition. A hook
+    at `publishing` returns its refusals, `list[Refusal]`, an empty list letting
+    what would leave go; at every other moment it returns nothing.
     """
 
     module: Module
@@ -180,6 +244,9 @@ class ModuleHooks(Model, arbitrary_types_allowed=True):
     """Where the launch's runtime keeps its sessions' records on this machine."""
     data: Path
     """The module's own directory for the repository, under lup's data."""
+    related: list[Related]
+    """The other repositories the launch's declaration names, as the host finds
+    them."""
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:

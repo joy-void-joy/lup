@@ -36,6 +36,7 @@ from lup_dev.declaration.serving import ModuleHooks, Moment
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Limits, Register, Reply, Request
+from lup_dev.host.publishing import Part, Place, Post, Refusal
 from lup_dev.host.records import Record, Records
 from lup_dev.host.workers import Called, Calling, Happening, Sent, Workers
 from lup_dev.layout import HostLayout, Layout
@@ -171,7 +172,7 @@ def test_lup_s_defaults_serve_github_s_tools_until_it_s_dropped() -> None:
     assert names == ["GitHubTools"]
     dropped = Project(modules=Modules.default().drop("github"))
     assert resolve(dropped).served == []
-    assert resolve(dropped).handled == []
+    assert [each.module.name for each in resolve(dropped).handled] == ["private"]
 
 
 def test_a_toolset_is_dropped_by_its_class_s_name() -> None:
@@ -432,3 +433,143 @@ def test_a_hook_or_a_tool_named_like_a_field_is_refused() -> None:
             async def caller(self, said: Said) -> str:
                 """Would vanish under the field."""
                 return said.text
+
+
+# The `publishing` moment: the one a hook answers, refusing what would leave.
+
+
+class Guarded(ModuleHooks):
+    """Refuses a post whose body says `hush`; fails where its body says `crash`."""
+
+    module: Guarding
+
+    @lup_hook
+    async def publishing(self, moment: Moment) -> list[Refusal]:
+        """Refuse each part saying `hush`, by its place."""
+        match moment.published:
+            case Post(parts=parts):
+                if any("crash" in part.text for part in parts):
+                    message = "the check broke"
+                    raise RuntimeError(message)
+                return [
+                    Refusal(
+                        what="a word kept quiet",
+                        place=Place(within=f"the {part.name}", line=1),
+                        steer="say it another way",
+                    )
+                    for part in parts
+                    if "hush" in part.text
+                ]
+            case _:
+                return []
+
+
+class Overstepping(ModuleHooks):
+    """Refuses at a moment a hook only observes."""
+
+    module: Guarding
+
+    @lup_hook
+    async def launched(self, moment: Moment) -> list[Refusal]:
+        """Refuse the launch opening, which nothing can."""
+        return [
+            Refusal(what="a launch", place=Place(within="it"), steer="nothing to do")
+        ]
+
+
+class Announcing(ModuleTools):
+    """A tool that publishes."""
+
+    module: Guarding
+
+    @lup_tool
+    async def announce(self, said: Said) -> str:
+        """Announce what you're told."""
+        await self.publish(
+            Post(what="an announcement", parts=[Part(name="body", text=said.text)]),
+            "this announcement",
+        )
+        return f"announced: {said.text}"
+
+
+class Guarding(Module):
+    """Keeping a word quiet."""
+
+    name = "guarding"
+
+    hooks: Hooks = Hooks.of(Guarded, Overstepping)
+    tools: Toolsets = Toolsets.of(Announcing)
+
+
+def guarding(tmp_path: Path) -> Serving:
+    resolved = resolve(Project(modules=Modules.only(Core(), Guarding())))
+    return Serving(
+        launch=launch(tmp_path),
+        resolved=resolved,
+        records=Nothing(),
+        layout=Layout(state=tmp_path, data=tmp_path / "data"),
+    )
+
+
+def post(text: str) -> Post:
+    return Post(
+        what="a note",
+        parts=[Part(name="title", text="t"), Part(name="body", text=text)],
+    )
+
+
+def test_publishing_is_a_moment_a_module_s_hooks_offer(tmp_path: Path) -> None:
+    assert "publishing" in guarding(tmp_path).offered().occasions
+
+
+def test_a_hook_at_publishing_refuses_naming_what_and_where(tmp_path: Path) -> None:
+    happening = Happening(occasion="publishing", published=post("please hush"))
+    happened = asyncio.run(guarding(tmp_path).happen(happening))
+    assert happened.failures == []
+    assert happened.refusals == [
+        Refusal(
+            what="a word kept quiet",
+            place=Place(within="the body", line=1),
+            steer="say it another way",
+        )
+    ]
+    quiet = Happening(occasion="publishing", published=post("all fine"))
+    assert asyncio.run(guarding(tmp_path).happen(quiet)).refusals == []
+
+
+def test_a_hook_failing_at_publishing_refuses_what_it_couldn_t_check(
+    tmp_path: Path,
+) -> None:
+    happening = Happening(occasion="publishing", published=post("crash"))
+    happened = asyncio.run(guarding(tmp_path).happen(happening))
+    [failure] = happened.failures
+    assert failure.startswith("`Guarded.publishing` failed at publishing:")
+    [refusal] = happened.refusals
+    assert refusal.what.startswith("a check that didn't run: `Guarded.publishing`")
+    assert refusal.place == Place(within="all of it")
+
+
+def test_a_hook_refusing_where_it_only_observes_has_failed(tmp_path: Path) -> None:
+    happened = asyncio.run(guarding(tmp_path).happen(Happening(occasion="launched")))
+    assert happened.refusals == []
+    assert happened.failures == [
+        (
+            "`Overstepping.launched` refused at launched, where a hook only "
+            "observes: only publishing can be refused"
+        )
+    ]
+
+
+def test_a_tool_publishes_through_every_module_s_hooks_first(tmp_path: Path) -> None:
+    calling = Calling(name="announce", arguments={"text": "hush now"}, caller=CALLER)
+    answer = asyncio.run(guarding(tmp_path).call(calling))
+    assert answer.error
+    assert answer.text == (
+        "`announce` didn't run: lup refused to publish this announcement: a "
+        "module's check at the `publishing` moment found what isn't published, at "
+        "each place below.\n"
+        "  the body:1 - a word kept quiet\n"
+        "      steer: say it another way"
+    )
+    fine = Calling(name="announce", arguments={"text": "hello"}, caller=CALLER)
+    assert asyncio.run(guarding(tmp_path).call(fine)).text == "announced: hello"

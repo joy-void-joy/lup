@@ -28,6 +28,7 @@ lup's findings never decide the outcome: those on the lines a change touches are
 | A change to the public API (*The public-API ask*) | `public-api` | flagged |
 | An added `# lup: ignore` | `ignore`, every time | held |
 | A finding of lup's rules on a line the change touches | the rule's name | told; held or flagged only where the declaration names the rule |
+| A value never published on a line the change touches, in any path git doesn't ignore (`docs/private.md`) | `private` | told, and flagged |
 | Removing a `# lup:` note present when the session started | nothing, and it's reported | allow |
 | A deleted file | `protected` or `operator` where it's one; otherwise nothing | held, or allow |
 | Any other production change | nothing | allow, its findings told |
@@ -35,7 +36,7 @@ lup's findings never decide the outcome: those on the lines a change touches are
 `policy/judge.py` holds this (`Judge`, `Judgement`), shared by the judgement before a write lands and by the checkpoint, so a change gets the same outcome however it was made. There's no line count: a size limit makes agents split their edits to fit it.
 
 - **Approvals.** An approval covers the path's design asks (a new file, a whole write, a public-API change) for the rest of the session, in that worktree alone, so a file approved isn't asked again as it's worked on (`Ask.covered`).
-- **Held and flagged, by name.** The declaration names what's held and what's flagged, in one vocabulary: the two roles that ask (`protected`, `operator`), the kinds of change (`new-file`, `whole-file`, `public-api`, `ignore`), and lup's rules by their ids (`Project.held`, `Project.flagged`; `docs/declaration.md`). An ask named in neither is let through. By default `protected`, `operator` and `ignore` are held, and `new-file`, `whole-file` and `public-api` flagged: a protected change takes effect outside the agent's reach before anything lands, and an `ignore` takes a check away, while a change of design can be seen once it has landed. A name both lists hold, or neither vocabulary knows, fails the declaration's load; a rule's name is checked against the engine's table at the first judgement (`Judge.named_rules`).
+- **Held and flagged, by name.** The declaration names what's held and what's flagged, in one vocabulary: the two roles that ask (`protected`, `operator`), the kinds of change (`new-file`, `whole-file`, `public-api`, `ignore`, `private`), and lup's rules by their ids (`Project.held`, `Project.flagged`; `docs/declaration.md`). An ask named in neither is let through. By default `protected`, `operator` and `ignore` are held, and `new-file`, `whole-file`, `public-api` and `private` flagged: a protected change takes effect outside the agent's reach before anything lands, and an `ignore` takes a check away, while a change of design, or a value never published, can be seen once it has landed, before anything is published. A name both lists hold, or neither vocabulary knows, fails the declaration's load; a rule's name is checked against the engine's table at the first judgement (`Judge.named_rules`).
 - **The operator's switch, per conversation.** "Hold each flagged write" holds what the declaration flags for one conversation, a session's own or a subagent's: `h` on its row of the dashboard's tree turns it, and the row says "holding" (`docs/dashboard.md`). The host service keeps it with the launch's conversations (`SetHolding`, `Conversation.holding`), through restarts, and the judge asks it for the conversation writing, before a file tool's write and at each checkpoint (`ShowHolding`, `Announcing.holding`, `Judge.holding`). A move of `HEAD` isn't any conversation's, so it never holds for the switch; with no host service running, nothing does.
 
 **Path roles.** Each path has one role, the first that matches (`Roles.role`, `policy/roles.py`):
@@ -151,6 +152,8 @@ The session's own turn's end (`TurnEnded`; `end_turn`, `policy/checkpoint.py`) r
 ### Findings
 
 lup's findings on the lines a change touched (`touched_lines`; every line of a new file), and what's wrong with its directives, are told with the call that made it: a file tool's write beside the call itself, where it's judged before it lands (*Before an edit lands*), anything else right after the call, beside its result, each with its steer, as a type error is: the change has landed, and the agent clears each finding or keeps it with an `ignore`, which asks the operator. Those on lines no change touched are told apart. They hold the session's turn's end, as type errors do (*The turn's end*), and fail the gate.
+
+A value never published, found from the list the `Private` module's launch built on the host (`Judge.withheld`; `docs/private.md`), is told the same way, in every role and in each path git doesn't ignore, as a finding of `private` naming its kind and never the value, in a block of its own since no `ignore` keeps it. The write lands, flagged; the gate's `private` step fails on it, and the push or the post carrying it is refused.
 
 The report, in pyright's shape:
 

@@ -351,6 +351,7 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
     ]
     assert resolved.paths.protected == [
         *CorePaths().protected,
@@ -364,6 +365,7 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
         "format",
         "pytest",
         "lint-imports",
+        "private",
     ]
     assert resolved.tests == [Pytest(root=Path("tests"))]
     assert resolved.runner == Uv()
@@ -376,7 +378,7 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
     assert resolved.conditions == []
     assert (resolved.held, resolved.flagged) == (
         ["protected", "operator", "ignore"],
-        ["new-file", "whole-file", "public-api"],
+        ["new-file", "whole-file", "public-api", "private"],
     )
     assert [(each.module, each.requirement.tool) for each in resolved.requirements] == [
         ("code-rules", "node"),
@@ -488,7 +490,7 @@ def test_a_layer_starting_over_replaces_what_s_below() -> None:
     resolved = resolve(Project(modules=modules))
     assert resolved.rules[0].rules == Rules.only("regex")
     assert resolved.exempt == []
-    assert [each.name for each in resolved.gate] == ["pytest"]
+    assert [each.name for each in resolved.gate] == ["pytest", "private"]
 
 
 def test_modules_only_is_an_exact_list_with_settings() -> None:
@@ -509,6 +511,7 @@ def test_a_module_added_starts_from_its_own_defaults() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
         "ledger",
         "narration",
     ]
@@ -525,6 +528,7 @@ def test_a_module_added_goes_where_it_s_placed() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
     ]
 
 
@@ -535,6 +539,7 @@ def test_all_is_every_module_lup_ships() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
     ]
 
 
@@ -564,8 +569,9 @@ def test_replace_puts_another_module_in_place_from_its_own_defaults() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
     ]
-    assert [each.name for each in resolved.gate] == ["lake"]
+    assert [each.name for each in resolved.gate] == ["lake", "private"]
     assert resolved.runner == Plain()
     assert "**/pyproject.toml" not in resolved.paths.protected
 
@@ -857,7 +863,7 @@ def test_dropping_a_module_drops_its_parts(dropped: str) -> None:
     packages = [each.name for each in resolved.packages]
     match dropped:
         case "python":
-            assert resolved.gate == []
+            assert [each.name for each in resolved.gate] == ["private"]
             assert resolved.tests == []
             assert resolved.paths.python == []
             assert "**/pyproject.toml" not in resolved.paths.protected
@@ -1266,6 +1272,7 @@ def test_guidance_lists_each_module_s_sections_in_module_order() -> None:
         "python",
         "code-rules",
         "transcripts",
+        "private",
     ]
     first = Section(name="first", path=Path("first.md"))
     placed = modules.edit(
@@ -1279,6 +1286,7 @@ def test_guidance_lists_each_module_s_sections_in_module_order() -> None:
         "python",
         "code-rules",
         "transcripts",
+        "private",
     ]
 
 
@@ -1305,6 +1313,7 @@ def test_lup_s_modules_each_bring_a_section_their_package_ships() -> None:
         ("python", "lup_dev.declaration.modules", Path("guidance/python.md")),
         ("code-rules", "lup_dev.declaration.modules", Path("guidance/code_rules.md")),
         ("transcripts", "lup.transcripts", Path("guidance.md")),
+        ("private", "lup_dev.private", Path("guidance.md")),
     ]
 
 

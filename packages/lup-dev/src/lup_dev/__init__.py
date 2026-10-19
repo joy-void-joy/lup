@@ -54,12 +54,14 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Requirement, Tools
 from lup_dev.declaration.runner import Interpreter, Plain, RoomNeeds, Runner, Uv
 from lup_dev.declaration.serving import ModuleHandler, ModuleHooks, ModuleTools, Moment
+from lup_dev.private.module import Details, Private, Values
 
 __all__ = [
     "Actions",
     "CodeRules",
     "Core",
     "Credentials",
+    "Details",
     "Exemption",
     "Exemptions",
     "Gate",
@@ -80,6 +82,7 @@ __all__ = [
     "Paths",
     "Patterns",
     "Plain",
+    "Private",
     "Project",
     "ProjectError",
     "Pytest",
@@ -99,4 +102,5 @@ __all__ = [
     "Tools",
     "Toolsets",
     "Uv",
+    "Values",
 ]

@@ -31,6 +31,7 @@ from lup_dev.policy.checkpoint import (
 from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.private.withheld import Held, Withheld, kept
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
@@ -1776,3 +1777,37 @@ def test_before_the_first_commit_the_defaults_rule_selection_judges(
     (root / "lup_project.py").write_text(dropping("regex"))
     judged = Worktree.of(root, root / ".git", kit.bench.services).declaration
     assert judged.rules == Declaration.of(Project()).rules
+
+
+# A value never published, told at the checkpoint after the call
+
+
+def test_a_patch_carrying_a_private_value_lands_its_value_told_after_the_call(
+    holding_kit: Kit, repo: Path
+) -> None:
+    withheld = Withheld(held=[Held(kind="value", text="Kestrel Labs")])
+    repository = worktree(holding_kit, repo).repository
+    write_model(kept(holding_kit.layout.module_data("private", repository)), withheld)
+    holding_kit.announced.holding_all = False
+    start(holding_kit, repo)
+    call(holding_kit, repo, "p1", tool="apply_patch")
+    notes = repo / "docs" / "notes.md"
+    notes.parent.mkdir()
+    notes.write_text("# Notes\n\nFor Kestrel Labs.\n")
+    reply = finish(holding_kit, repo, "p1")
+    assert reply.context.startswith("Values never published, on the lines changed")
+    assert (
+        f"  {repo}/docs/notes.md:3:5 - private: one of the operator's private values"
+    ) in reply.context
+    assert notes.read_text() == "# Notes\n\nFor Kestrel Labs.\n"
+    assert holding_kit.announced.holds == []
+    [flagged] = holding_kit.flags.asked
+    assert flagged.flagged.summary == (
+        f"docs/notes.md: {repo}/docs/notes.md:3 - one of the operator's private values"
+    )
+    [verdict] = [
+        each
+        for each in log(holding_kit, repo).read()
+        if each.path == Path("docs/notes.md")
+    ]
+    assert (verdict.outcome, verdict.reasons) == ("allow", ["private"])

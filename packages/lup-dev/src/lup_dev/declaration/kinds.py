@@ -485,6 +485,14 @@ class Repository(Model, extra="forbid"):
     """Its `owner/name` on GitHub, where it has one, which the guidance gives so
     a session reads its issues through lup's GitHub tools."""
 
+    def on_host(self, holding: Path) -> Path:
+        """Return where it is on the host: its path from `holding`, the directory holding the project's own repository, or absolute, a leading `~` the operator's home, resolved.
+
+        >>> Repository(name="atlas", path=Path("atlas.git"), about="x").on_host(Path("/r"))
+        PosixPath('/r/atlas.git')
+        """
+        return (holding / self.path.expanduser()).resolve()
+
     @model_validator(mode="after")
     def written(self) -> Self:
         """Refuse an entry without a name, a path or an `about`, or with a GitHub identity that isn't `owner/name`."""

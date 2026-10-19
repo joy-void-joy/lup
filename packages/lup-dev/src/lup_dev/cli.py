@@ -158,6 +158,7 @@ from lup_dev.launch.room import (
     room_git,
     unlent,
 )
+from lup_dev.launch.room import repository as repository_of
 from lup_dev.launch.session import (
     LaunchError,
     approved_declaration,
@@ -189,11 +190,18 @@ from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.tools import JudgeTools
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.private.building import listed
+from lup_dev.private.module import Private
+from lup_dev.private.protocol import Scanned as Read
+from lup_dev.private.protocol import Scanning, Sent
+from lup_dev.private.scanning import UNAPPROVED, UNSELECTED
+from lup_dev.private.scanning import scanned as read_for_values
+from lup_dev.private.withheld import Facts, HostFacts, Withheld, kept
 from lup_dev.remote.config import Gating
 from lup_dev.remote.protocol import Remotes
 from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
-from lup_dev.stored import write_model
+from lup_dev.stored import read_model, write_model
 from lup_dev.worker import worked
 
 if TYPE_CHECKING:
@@ -215,10 +223,15 @@ transcripts = typer.Typer(
         "each with what it answered."
     ),
 )
+private = typer.Typer(
+    no_args_is_help=True,
+    help="What never leaves under your name: the `Private` module's values.",
+)
 app.add_typer(rules, name="rules")
 app.add_typer(host, name="host")
 app.add_typer(inbox, name="inbox")
 app.add_typer(transcripts, name="transcripts")
+app.add_typer(private, name="private")
 
 
 def engine() -> Checker:
@@ -334,6 +347,7 @@ def services() -> Services:
         integration=settings.lup_integration_branch,
         announcing=InboxAnnouncing(layout=host, clock=SystemClock()),
         flagging=InboxFlagging(layout=host, clock=SystemClock()),
+        facts=HostFacts(),
     )
 
 
@@ -439,6 +453,7 @@ def host_serve(context: typer.Context) -> None:
     sweeping = Sweeping(
         layout=layout, host=host_client(), podman=podman, say=typer.echo
     )
+    workers = Workers(layout=layout.host, say=typer.echo)
     service = HostService(
         layout=layout.host,
         answerer=known,
@@ -452,11 +467,15 @@ def host_serve(context: typer.Context) -> None:
         tools=room_tools(delivery, layout),
         room_routes=[
             *remote_routes(
-                Remotes(say=typer.echo, landed=partial(proposed_after, delivery))
+                Remotes(
+                    say=typer.echo,
+                    landed=partial(proposed_after, delivery),
+                    modules=workers,
+                )
             ),
             *clipboard_routes(Desktop.of(settings)),
         ],
-        modules=Workers(layout=layout.host, say=typer.echo),
+        modules=workers,
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
         podman=podman,
@@ -1212,6 +1231,21 @@ class Launcher(Model, arbitrary_types_allowed=True):
     github: Callable[[Path], GitHubRepository]
     """Names the repository on GitHub whose git directory it's given, from its own
     remotes, raising `GitHubError` where `gh` can't."""
+    facts: Facts
+    """What the host says of itself, which the list of values never published
+    is built from."""
+
+
+def withheld_at_launch(launcher: Launcher, resolved: Resolved, worktree: Path) -> None:
+    """Build the list of values never published from the repository of `worktree`, where the declaration selects `Private`, and keep it where the module reads it; where it doesn't, remove the one kept.
+
+    What the build couldn't read is said once, in the operator's terminal; no
+    value is.
+    """
+    project = repository_of(worktree)
+    made = asyncio.run(listed(resolved, project.git, launcher.facts, launcher.layout))
+    for note in [] if made is None else made.notes:
+        launcher.say(f"Private: {note}.")
 
 
 def on_github(
@@ -1386,6 +1420,7 @@ def launched(
                     f"sessions to read isn't at {each.path}, so the room doesn't "
                     "mount it, and its guidance says it's missing."
                 )
+        withheld_at_launch(launcher, declared.resolved, worktree)
         lendable = [each.module for each in declared.resolved.shared]
         unknown = [each for each in modules or [] if each not in lendable]
         if unknown:
@@ -1537,6 +1572,7 @@ def launching(say: Callable[[str], None]) -> Launcher:
         terminal=TerminalVariables(),
         say=say,
         github=github,
+        facts=HostFacts(),
     )
 
 
@@ -1835,6 +1871,97 @@ def rules_check(
         write_model(GitDirectoryLayout(common=Path(common)).due, due)
     typer.echo(f"lup checked {len(found.files)} files: {len(failing)} findings.")
     if failing:
+        raise typer.Exit(code=1)
+
+
+def worktree_files(root: Path) -> list[Sent]:
+    """Return each file of the worktree at `root` git doesn't ignore, tracked or not, whole, by its path from the root."""
+    listed = Git(cwd=root).run(
+        "ls-files", "-z", "--cached", "--others", "--exclude-standard"
+    )
+    return [
+        Sent.of(name, (root / name).read_bytes())
+        for name in nul_separated(listed.output)
+        if (root / name).is_file()
+    ]
+
+
+def withheld_here(root: Path, common: Path) -> Withheld | Read:
+    """Return the list of values never published kept for the repository whose git directory is `common`, building it where none is kept, as a launch would; or, where it isn't read, what the gate says.
+
+    It's built from the declaration at the commit approved for the repository on
+    this machine, with the person's own layer approved beside it. Where nothing
+    is approved, as on a machine no launch ran on, nothing is read; where it
+    can't be built, the gate fails, saying why.
+    """
+    layout = Layout.of(LupDevSettings())
+    held = read_model(kept(layout.module_data(Private.name, common)), Withheld)
+    if held is not None:
+        return held
+    approval = approved(layout, common)
+    if approval is None:
+        return Read(unchecked=UNAPPROVED)
+    try:
+        with approved_declaration(
+            root, approval.commit, local=approval.local
+        ) as declared:
+            made = asyncio.run(listed(declared.resolved, common, HostFacts(), layout))
+    except (LupDevError, OSError) as failed:
+        return Read(unbuilt=f"the host couldn't build it: {failed}")
+    if made is None:
+        return Read(unchecked=UNSELECTED)
+    return made.withheld
+
+
+@private.command("check")
+def private_check() -> None:
+    """Read the worktree for a value never published, as the gate's `private` step does, failing on one.
+
+    Every file git doesn't ignore, whole, its path too, and the commits `HEAD`
+    reaches that the repository's remotes lack, each as a push reads it. Each
+    value found is said by its kind and place, never the value. On the host it
+    reads the list kept for the repository, building it where none is, as a
+    launch would; in a room, which never sees the list, the host reads them on
+    the launch's request socket. Where no launch was approved on this machine,
+    as in CI, or the host can't be reached from a room, it says so and passes:
+    the push or the post is where a value is refused. Where the list can't be
+    built, it fails, saying why.
+    """
+    root = toplevel(Path.cwd())
+    files = worktree_files(root)
+    head = Git(cwd=root).commit("HEAD")
+    room = RoomClient()
+    if room.socket.exists():
+        try:
+            scan = room.ask(Scanning(files=files, head=head), Read)
+        except HostError as refused:
+            typer.echo(f"Values never published weren't read: the host said {refused}.")
+            return
+    else:
+        common = Path(
+            Git(cwd=root).text(
+                "rev-parse", "--path-format=absolute", "--git-common-dir"
+            )
+        )
+        match withheld_here(root, common):
+            case Withheld() as held:
+                scan = read_for_values(files, head, common, held)
+            case Read() as said:
+                scan = said
+    if scan.unbuilt is not None:
+        typer.echo(f"Values never published weren't read: {scan.unbuilt}.")
+        raise typer.Exit(code=1)
+    for each in scan.found:
+        typer.echo(f"{each.place.text()} - private: {each.what}")
+        typer.echo(f"    steer: {each.steer}")
+    if scan.unchecked is not None:
+        typer.echo(f"Not read: {scan.unchecked}.")
+    commits = "commit" if scan.commits == 1 else "commits"
+    typer.echo(
+        f"lup read {len(files)} files and {scan.commits} {commits} for values "
+        f"never published: {len(scan.found)} found."
+    )
+    if scan.found:
         raise typer.Exit(code=1)
 
 

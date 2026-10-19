@@ -649,6 +649,8 @@ class Declaration(Model):
     """What a change waits for the operator's answer on, by name."""
     flagged: list[str] = Project().flagged
     """What a change lands with, flagged, by name."""
+    modules: list[str] = []
+    """The modules it selects, by name, in order."""
 
     @classmethod
     def of(cls, project: Project, source: Path | None = None) -> Declaration:
@@ -671,6 +673,7 @@ class Declaration(Model):
             runner=Prefixed.of(resolved.runner),
             held=resolved.held,
             flagged=resolved.flagged,
+            modules=[module.name for module in resolved.modules],
         )
 
     @classmethod

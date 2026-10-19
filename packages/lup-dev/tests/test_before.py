@@ -22,7 +22,8 @@ from lup_dev.policy.checkpoint import (
 from lup_dev.policy.holds import Holds, Response
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.policy.worktrees import Place, place
-from lup_dev.stored import read_model
+from lup_dev.private.withheld import Held, Withheld, kept
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from conftest import Kit, Shell
@@ -383,3 +384,59 @@ def test_each_edit_is_logged(kit: Kit, repo: Path) -> None:
     assert (verdict.tool, verdict.outcome, verdict.session) == ("Edit", "allow", "s1")
     assert verdict.reasons == ["regex"]
     assert (verdict.worktree, verdict.path) == (repo, CORE)
+
+
+# A value never published, told with the call before it lands
+
+
+def listed(kit: Kit, repo: Path) -> None:
+    """Keep a made-up list of values never published for `repo`, as a launch would."""
+    withheld = Withheld(held=[Held(kind="home", text="/home/op")])
+    write_model(kept(kit.layout.module_data("private", repo / ".git")), withheld)
+
+
+def test_an_edit_carrying_a_private_value_lands_its_value_told_with_the_call(
+    kit: Kit, repo: Path
+) -> None:
+    listed(kit, repo)
+    kit.announced.holding_all = False
+    edit = replace(repo, "    return x\n", "    return x  # see /home/op\n")
+    decision = before(kit.bench, edit, "s1", repo)
+    assert decision.outcome == "allow"
+    assert decision.told.startswith("Values never published, on the lines changed")
+    assert (
+        f"  {repo}/src/pkg/core.py:10:21 - private: the operator's home path\n"
+        "      steer: write it as `~`, or a path in the repository from its root"
+    ) in decision.told
+    [verdict] = VerdictLog(path=kit.layout.verdicts(repo / ".git")).read()
+    assert (verdict.outcome, verdict.reasons) == ("allow", ["private"])
+    assert kit.announced.holds == []
+    [flagged] = kit.flags.asked
+    assert flagged.flagged.summary == (
+        f"src/pkg/core.py: {repo}/src/pkg/core.py:10 - the operator's home path"
+    )
+
+
+def test_a_write_to_a_path_git_ignores_is_told_no_private_value(
+    kit: Kit, repo: Path
+) -> None:
+    listed(kit, repo)
+    write = Overwrite(
+        call="w1", tool="Write", path=repo / ".lup" / "notes.md", text="/home/op\n"
+    )
+    decision = before(kit.bench, write, "s1", repo)
+    assert decision.outcome == "allow"
+    assert "private" not in decision.told
+
+
+def test_a_judge_finding_no_list_builds_it_as_a_launch_would(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    kit.facts.home = Path("/home/op")
+    edit = replace(repo, "    return x\n", "    return x  # see /home/op\n")
+    decision = before(kit.bench, edit, "s1", repo)
+    assert "core.py:10:21 - private: the operator's home path" in decision.told
+    built = read_model(kept(kit.layout.module_data("private", repo / ".git")), Withheld)
+    assert built is not None
+    assert Held(kind="home", text="/home/op") in built.held

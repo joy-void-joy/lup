@@ -278,7 +278,7 @@ def test_no_section_of_lup_s_spells_the_runner() -> None:
         files(section.package or "").joinpath(*section.path.parts).read_text()
         for section in resolve(Project()).guidance
     ]
-    assert len(texts) == 4
+    assert len(texts) == 5
     assert all("uv run" not in text for text in texts)
 
 
