@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, JsonValue
 
-from lup.sessions.errors import OutputMissingError, ProblemReportedError
-from lup.sessions.results import Rejection, TurnResult, Usage
+from lup.sessions.errors import BlockedError, OutputMissingError, StoppedError
+from lup.sessions.results import Friction, HowItWent, Rejection, TurnResult, Usage
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -34,7 +34,11 @@ class CallRecord(Model):
     """The error's type and message, where the ask failed."""
     rejected: list[Rejection] = []
     notes: list[str] = []
-    """The remarks the agent attached, answering or reporting a problem."""
+    """The remarks the agent attached, whether it answered or not."""
+    frictions: list[Friction] = []
+    """What got in the agent's way, whether it answered or not."""
+    how_it_went: HowItWent | None = None
+    """How the agent said the work went, where it said."""
     usage: Usage | None = None
     """None where the ask failed before the runtime reported any."""
 
@@ -50,6 +54,8 @@ class Kept(Model):
 
     rejected: list[Rejection] = []
     notes: list[str] = []
+    frictions: list[Friction] = []
+    how_it_went: HowItWent | None = None
     usage: Usage | None = None
 
 
@@ -62,6 +68,8 @@ class Answered(Model):
     duration: timedelta
     rejected: list[Rejection]
     notes: list[str]
+    frictions: list[Friction]
+    how_it_went: HowItWent | None
 
     @classmethod
     def of[T: BaseModel | str](cls, result: TurnResult[T]) -> Answered:
@@ -75,6 +83,8 @@ class Answered(Model):
             duration=result.duration,
             rejected=result.rejected,
             notes=result.notes,
+            frictions=result.frictions,
+            how_it_went=result.how_it_went,
         )
 
 
@@ -99,20 +109,34 @@ class Asked(Model):
             output=answer.output,
             rejected=answer.rejected,
             notes=answer.notes,
+            frictions=answer.frictions,
+            how_it_went=answer.how_it_went,
             usage=answer.usage,
         )
 
     def failed(self, error: Exception, duration: timedelta) -> CallRecord:
         """Return the record of this ask failing with `error` after `duration`.
 
-        A turn that ran without an answer keeps the notes the agent attached and
-        what the turn used; a missing answer also keeps every rejected attempt.
+        A turn that ran without an answer keeps what the agent said beside it
+        (its notes, its frictions, how it went) and what the turn used; a missing
+        answer also keeps every rejected attempt.
         """
         match error:
-            case ProblemReportedError(notes=notes, usage=usage):
-                kept = Kept(notes=notes, usage=usage)
-            case OutputMissingError(rejected=rejected, notes=notes, usage=usage):
-                kept = Kept(rejected=rejected, notes=notes, usage=usage)
+            case BlockedError() | StoppedError():
+                kept = Kept(
+                    notes=error.notes,
+                    frictions=error.frictions,
+                    how_it_went=error.how_it_went,
+                    usage=error.usage,
+                )
+            case OutputMissingError():
+                kept = Kept(
+                    rejected=error.rejected,
+                    notes=error.notes,
+                    frictions=error.frictions,
+                    how_it_went=error.how_it_went,
+                    usage=error.usage,
+                )
             case _:
                 kept = Kept()
         return CallRecord(
@@ -125,5 +149,7 @@ class Asked(Model):
             error=f"{type(error).__name__}: {error}",
             rejected=kept.rejected,
             notes=kept.notes,
+            frictions=kept.frictions,
+            how_it_went=kept.how_it_went,
             usage=kept.usage,
         )

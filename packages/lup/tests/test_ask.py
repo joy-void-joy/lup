@@ -11,10 +11,13 @@ from tenacity import stop_after_attempt, wait_none
 
 from lup import (
     AgentUnavailableError,
+    BlockedError,
+    Friction,
+    HowItWent,
     OutputMissingError,
-    ProblemReportedError,
     Recovery,
     SessionLayers,
+    StoppedError,
     TurnResult,
     TurnTimeoutError,
     UsageLimitReachedError,
@@ -142,45 +145,110 @@ def test_notes_come_back_beside_the_answer(fake_agents: FakeAgents) -> None:
     assert result.notes == ["Assumes the forecast means London."]
 
 
-def test_a_reported_problem_raises_with_the_agents_words(
+def test_frictions_and_how_it_went_come_back_beside_the_answer(
     fake_agents: FakeAgents,
 ) -> None:
-    fake_agents.report(
+    jammed = Friction(got_in_the_way="The forecast feed timed out.", trying="read it")
+    went = HowItWent(smooth="The question was clear.")
+    fake_agents.answer(
+        Forecast, Forecast(probability=0.6), frictions=[jammed], how_it_went=went
+    )
+    fake_agents.answer_text("Bonjour", how_it_went=HowItWent())
+    result = asyncio.run(probe().ask("Will it rain?", Forecast))
+    text = asyncio.run(probe().ask("Hello"))
+    assert result.frictions == [jammed]
+    assert result.how_it_went == went
+    assert text.frictions == []
+    assert text.how_it_went == HowItWent()
+
+
+def test_being_blocked_raises_with_the_agents_words(
+    fake_agents: FakeAgents,
+) -> None:
+    fake_agents.blocked(
         Forecast, "The question names no place or date.", notes=["Tried London."]
     )
-    with pytest.raises(ProblemReportedError) as raised:
+    with pytest.raises(BlockedError) as raised:
         asyncio.run(probe().ask("Will it rain?", Forecast))
     assert raised.value.problem == "The question names no place or date."
     assert raised.value.notes == ["Tried London."]
     assert len(fake_agents.calls) == 1
 
 
-def test_a_turn_without_an_answer_keeps_its_notes_and_usage_in_the_trace(
+def test_stopping_by_choice_raises_its_own_error_saying_why(
+    fake_agents: FakeAgents,
+) -> None:
+    went = HowItWent(felt="Uneasy about the brief.")
+    fake_agents.stop(Forecast, "I'd rather not forecast this.", how_it_went=went)
+    fake_agents.stop(None, "It's done; nothing more is worth doing.")
+    with pytest.raises(StoppedError) as raised:
+        asyncio.run(probe().ask("Will it rain?", Forecast))
+    with pytest.raises(StoppedError, match="nothing more is worth doing"):
+        asyncio.run(probe().ask("Translate this."))
+    assert not isinstance(raised.value, BlockedError)
+    assert raised.value.why == "I'd rather not forecast this."
+    assert raised.value.how_it_went == went
+    assert len(fake_agents.calls) == 2
+
+
+def test_a_turn_without_an_answer_keeps_what_the_agent_said_and_usage_in_the_trace(
     fake_agents: FakeAgents, tmp_path: Path
 ) -> None:
     trace = tmp_path / "calls.jsonl"
     layers = FAST.model_copy(update={"trace": trace})
+    jammed = Friction(got_in_the_way="No units given.")
     fake_agents.queue(
         Forecast,
-        Submitting(submissions=[{"probability": "x"}] * 3, notes=["Unsure of units."]),
+        Submitting(
+            submissions=[{"probability": "x"}] * 3,
+            notes=["Unsure of units."],
+            frictions=[jammed],
+        ),
     )
-    fake_agents.report(None, "Nothing to translate.", notes=["The input was empty."])
+    fake_agents.blocked(None, "Nothing to translate.", notes=["The input was empty."])
+    fake_agents.stop(None, "Not mine to translate.", how_it_went=HowItWent(felt="Odd."))
     with pytest.raises(OutputMissingError) as missing:
         asyncio.run(probe(layers).ask("Will it rain?", Forecast))
     assert missing.value.notes == ["Unsure of units."]
-    with pytest.raises(ProblemReportedError):
+    assert missing.value.frictions == [jammed]
+    with pytest.raises(BlockedError):
         asyncio.run(probe(layers).ask(""))
-    unanswered, reported = [json.loads(line) for line in trace.read_text().splitlines()]
+    with pytest.raises(StoppedError):
+        asyncio.run(probe(layers).ask(""))
+    unanswered, blocked, stopped = [
+        json.loads(line) for line in trace.read_text().splitlines()
+    ]
     assert unanswered["notes"] == ["Unsure of units."]
+    assert unanswered["frictions"] == [jammed.model_dump(mode="json")]
     assert len(unanswered["rejected"]) == 3
     assert unanswered["usage"] is not None
-    assert reported["notes"] == ["The input was empty."]
-    assert reported["usage"] is not None
+    assert blocked["notes"] == ["The input was empty."]
+    assert blocked["usage"] is not None
+    assert blocked["error"].startswith("BlockedError: ")
+    assert stopped["error"].startswith("StoppedError: ")
+    assert stopped["how_it_went"]["felt"] == "Odd."
 
 
-def test_an_untyped_ask_can_report_a_problem_too(fake_agents: FakeAgents) -> None:
-    fake_agents.report(None, "There's nothing to translate.")
-    with pytest.raises(ProblemReportedError, match="nothing to translate"):
+def test_an_answered_asks_trace_keeps_its_frictions_and_how_it_went(
+    fake_agents: FakeAgents, tmp_path: Path
+) -> None:
+    trace = tmp_path / "calls.jsonl"
+    jammed = Friction(got_in_the_way="Slow.", would_change="Cache it.")
+    fake_agents.answer(
+        Forecast,
+        Forecast(probability=0.2),
+        frictions=[jammed],
+        how_it_went=HowItWent(smooth="All of it."),
+    )
+    asyncio.run(probe(FAST.model_copy(update={"trace": trace})).ask("Rain?", Forecast))
+    [record] = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert record["frictions"] == [jammed.model_dump(mode="json")]
+    assert record["how_it_went"]["smooth"] == "All of it."
+
+
+def test_an_untyped_ask_can_be_blocked_too(fake_agents: FakeAgents) -> None:
+    fake_agents.blocked(None, "There's nothing to translate.")
+    with pytest.raises(BlockedError, match="nothing to translate"):
         asyncio.run(probe().ask(""))
 
 

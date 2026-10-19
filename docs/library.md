@@ -11,7 +11,7 @@
 from datetime import timedelta
 from pathlib import Path
 
-from lup import Agent, Claude, ProblemReportedError, SessionLayers
+from lup import Agent, BlockedError, Claude, SessionLayers
 from lup.tools import Allow, Deny, Submit
 from pydantic import BaseModel
 
@@ -40,8 +40,8 @@ forecaster = Claude(
 async def forecast(question: str, agent: Agent = forecaster) -> Forecast | None:
     try:
         result = await agent.ask(question, Submit(Forecast, before=[cites_sources]))
-    except ProblemReportedError:
-        return None  # the agent called `report`: it says the question can't be answered
+    except BlockedError:
+        return None  # the agent called `blocked`: it says the question can't be answered
     return result.output  # a Forecast; result.notes, .rejected and .usage sit beside it
 ```
 
@@ -63,8 +63,8 @@ def test_a_forecast_must_cite_its_sources(fake_agents: FakeAgents) -> None:
 ```
 
 - **The answer is a tool call.** The ask serves `submit`, a tool whose input is `Forecast`: pydantic validates each call, then `cites_sources` reviews the typed value, and a refusal is the tool's answer, so the agent fixes its answer in the same turn. `ask(question, Forecast)` gives the plain `Submit(Forecast)`.
-- **Every ask also serves `report` and `note`:** `report` ends the turn without an answer, and the ask raises `ProblemReportedError`; `note` attaches a remark, read in `result.notes`.
-- **`result` is a `TurnResult[Forecast]`:** `output`, `usage` (tokens, and `cost_usd` where the runtime reports it), `duration`, `session_id`, `rejected` (the refused submissions, oldest first) and `notes`. `ask(prompt)` with no model returns the final message's text, a `TurnResult[str]`.
+- **Every ask also serves the speaking tools** (*The speaking tools*): `blocked` and `stop` end the turn without an answer, raising `BlockedError` or `StoppedError`; `note`, `friction` and `how_it_went` are read in `result.notes`, `.frictions` and `.how_it_went`.
+- **`result` is a `TurnResult[Forecast]`:** `output`, `usage` (tokens, and `cost_usd` where the runtime reports it), `duration`, `session_id`, `rejected` (the refused submissions, oldest first), `notes`, `frictions` and `how_it_went`. `ask(prompt)` with no model returns the final message's text, a `TurnResult[str]`.
 - **`Codex(model="gpt-6.1-sol", ...)` in place of `Claude(...)`** changes nothing else: both are an `Agent`, which is what code that shouldn't care holds.
 - **The test** runs the real ask, its layers, the tool and the hook; only the turn is scripted. The hook refuses the first submission, so `rejected` holds it.
 
@@ -92,15 +92,15 @@ A field arrives with the piece that uses it, so a declaration holds nothing an a
 
 A declaration's `ask` builds its runtime's adapter from its own fields and hands the ask to `Asking` (`sessions/declaration.py`), the behaviour every declaration shares. The adapter takes the fields, not the declaration, since the declaration's module imports the adapter and pydantic reads field types at runtime: an adapter holding a `Claude` would import it back in a cycle.
 
-`Asking` gives each attempt a fresh `Toolbox` (`sessions/submission.py`) of `report`, `note` and, on a typed ask, `submit`, and runs it on the adapter `seam` chooses (`sessions/contract.py`): the declaration's own, unless a test set the fake. An `Adapter` takes a `TurnRequest` (prompt, toolbox, output model) and returns a `RawTurn` (final text, usage, session id). It serves the toolbox's specs, routes each call to `Toolbox.call`, asks `Toolbox.end` when the model tries to end its turn, and raises the errors of *Errors*.
+`Asking` gives each attempt a fresh `Toolbox` (`sessions/submission.py`) of the speaking tools and, on a typed ask, `submit`, and runs it on the adapter `seam` chooses (`sessions/contract.py`): the declaration's own, unless a test set the fake. An `Adapter` takes a `TurnRequest` (prompt, toolbox, output model) and returns a `RawTurn` (final text, usage, session id). It serves the toolbox's specs, routes each call to `Toolbox.call`, asks `Toolbox.end` when the model tries to end its turn, and raises the errors of *Errors*.
 
-The calls the toolbox records are the one source of what a turn said: the last accepted `submit` is the answer, the refused ones are `rejected`, the `report` and `note` calls the problem and the notes. A turn that both answered and reported raises the report.
+The calls the toolbox records are the one source of what a turn said: the last accepted `submit` is the answer, the refused ones are `rejected`, the last `blocked` or `stop` call why the turn ended without one, and the other speaking tools' calls what the agent said beside it. A turn that both answered and called `blocked` or `stop` raises.
 
 ### Typed answers: the output tool and its guard
 
 - **Validated, then reviewed.** `Submit` (`tools/submit.py`) is an ordinary lup tool: the arguments are validated as sent, then each `before` hook runs in order on the typed value, returning `Allow()` or `Deny(reason)`. Review is a hook on the tool, so the answer keeps its type through it.
 - **A refusal answers the call:** every validation error at once, or the hook's reason, as `Refused: …`, marked as an error. No new prompt is sent; the agent corrects itself with its own context. An accepted answer gets a `Receipt` ("Your answer is accepted. End your turn.").
-- **The guard.** A typed turn can't end until an answer is accepted or a problem reported. `Toolbox.end` decides, the same on both runtimes: `End`, `GiveUp`, or `KeepGoing` with a reason naming the tools as the model sees them ("Call the `mcp__lup__submit` tool with your final answer, or `mcp__lup__report` if it can't be answered: your turn can't end until one is accepted."). Claude Code hears it through a `Stop` hook, Codex as another turn on the same thread.
+- **The guard.** A typed turn can't end until an answer is accepted, or the agent calls `blocked` or `stop`. `Toolbox.end` decides, the same on both runtimes: `End`, `GiveUp`, or `KeepGoing` with a reason naming the tools as the model sees them ("Call the `mcp__lup__submit` tool with your final answer, `mcp__lup__blocked` if it can't be answered, or `mcp__lup__stop` to stop by your own choice: your turn can't end until one is accepted."). Claude Code hears it through a `Stop` hook, Codex as another turn on the same thread.
 - **Bounded.** `Submission.attempts` (3) counts rejected answers and refused endings together, checked when the model tries to end. Past it, the turn ends and the ask raises `OutputMissingError` with every rejection. An agent that keeps submitting without trying to end is bounded by the timeout.
 
 It's one mechanism on both runtimes, and neither's native structured output: Codex's (`outputSchema`) shapes the final message, so nothing could refuse an answer inside the turn. A tool keeps hooks, and the guard keeps the agent in its turn, where a correction sent as a new prompt would start it over.
@@ -109,9 +109,12 @@ The tool is `submit`. Claude Code shows it as `mcp__lup__submit`, a tool of lup'
 
 ### The speaking tools
 
-`report` and `note` (`tools/speaking.py`) are served on every ask, typed or not. They act on nothing, so they're safe where an agent has no other tool.
-- **`report(problem)`** stops the turn without an answer and says what's wrong: the question can't be answered, something needed is missing, an instruction seems wrong. The ask raises `ProblemReportedError` with the agent's words, so a caller tells "the agent says this can't be done" from a failure. It isn't retried: asking again gets the same problem.
-- **`note(remark)`** attaches an assumption, a doubt or a counterargument without ending the turn, read in `TurnResult.notes` or `ProblemReportedError.notes`.
+`blocked`, `stop`, `note`, `friction` and `how_it_went` (`tools/speaking.py`, `SPEAKING`) are served on every ask, typed or not. They act on nothing, so they're safe where an agent has no other tool. What the last three take is kept on the result, and on `OutputMissingError`, `BlockedError` and `StoppedError` where there's none.
+- **`blocked(problem)`** stops the turn without an answer because the work can't go on: the question can't be answered, something needed is missing, an instruction seems wrong. The ask raises `BlockedError` with the agent's words, so a caller tells "the agent says this can't be done" from a failure. It isn't retried: asking again gets the same problem.
+- **`stop(why)`** stops the turn without an answer by the agent's own choice: it's done and nothing more is worth doing, or it would rather not go on. The ask raises `StoppedError`, so a caller tells "the agent chose to end" from "the agent can't". It isn't retried.
+- **`note(remark)`** attaches an assumption, a doubt or a counterargument without ending the turn, read in `TurnResult.notes`.
+- **`friction(got_in_the_way, trying, would_change)`** says what got in the agent's way, at the moment it does, the exact command and message where there's one; only the first is required. Read in `TurnResult.frictions` (`Friction`).
+- **`how_it_went(got_in_the_way, smooth, would_change, felt)`** says how the work went as a whole, once near its end, every field optional: none says nothing was notable. Read in `TurnResult.how_it_went` (`HowItWent`), the last where it's called twice.
 
 ### Tools
 
@@ -139,7 +142,7 @@ Claude Code gets a turn's tools through lup's MCP server, in-process. Codex gets
 
 An ask from code can't run commands, touch files, reach the network or start agents: it can only call lup's tools. Each adapter configures its runtime for that (the module docstrings list each setting and what it rests on).
 - **Claude Code:** no built-in tools, skills or plugins, and no MCP server but lup's; lup's tools pre-approved and every other call denied (`dontAsk`); no settings files, so the operator's and the project's hooks, `CLAUDE.md` and servers don't load, and auto memory off by its variable; prompts delivered verbatim, so text from data can't attach a local file with `@path`. **Checked on every call:** the session's `init` message lists the tools and servers it loaded, and anything beyond lup's interrupts the turn with `ToolsPresentError` before the model runs. A turn whose `init` never came raises `TurnError`, since its check never ran.
-- **Codex:** an ephemeral thread with no environment (no shell, no file tools), Codex's subagents off, approvals never asked, a read-only sandbox; `LAUNCH`'s overrides turn off web search, skills, each built-in feature that brings a tool and the instructions describing them; lup's own Codex home, so the operator's configuration, servers, hooks and skills and a project's `AGENTS.md` don't load. A question for the user is answered that no one can answer, pointing at `report`; any other request from Codex fails the ask.
+- **Codex:** an ephemeral thread with no environment (no shell, no file tools), Codex's subagents off, approvals never asked, a read-only sandbox; `LAUNCH`'s overrides turn off web search, skills, each built-in feature that brings a tool and the instructions describing them; lup's own Codex home, so the operator's configuration, servers, hooks and skills and a project's `AGENTS.md` don't load. A question for the user is answered that no one can answer, pointing at `blocked`; any other request from Codex fails the ask.
   - **Code mode.** On `code_mode_only` models, the default `gpt-6.1-sol` among them, every tool is reached through a JavaScript `exec` tool, beside `wait` (which polls a running cell) and `request_user_input_async`, and no setting removes them. None of the three reaches a shell, files, the network or another agent (`docs/field-notes.md`, *The Codex SDK*), so code-mode models are accepted, with the code-mode host on, since lup's tools are out of reach without it.
   - **The declared gap:** Codex has no API listing a session's tools, so nothing checks them per call; a check by hand on each pinned version confirms the model's request carries only lup's tools.
 
@@ -161,8 +164,9 @@ Every error lup raises descends from `LupError` (`lup/errors.py`), so one `excep
 | `AgentUnavailableError` | The model is out of reach for a while: overload, a rate limit, a server error, a connection that failed or dropped | Yes |
 | `UsageLimitReachedError` | The account's usage window is spent; `reset_at` where the runtime said | No |
 | `AuthMissingError` | No usable login, or the login refused | No |
-| `OutputMissingError` | No answer accepted within `submission.attempts`; `rejected`, `notes`, `usage` | No |
-| `ProblemReportedError` | The agent called `report`; `problem`, `notes`, `usage` | No |
+| `OutputMissingError` | No answer accepted within `submission.attempts`; `rejected`, `notes`, `frictions`, `how_it_went`, `usage` | No |
+| `BlockedError` | The agent called `blocked`; `problem`, `notes`, `frictions`, `how_it_went`, `usage` | No |
+| `StoppedError` | The agent called `stop`; `why`, `notes`, `frictions`, `how_it_went`, `usage` | No |
 | `ToolsPresentError` | The session loaded tools beyond lup's; `tools` lists what it loaded | No |
 | `TurnTimeoutError` | The timeout passed and the turn was interrupted; also the built-in `TimeoutError` | No |
 | `RuntimeMissingError` | The runtime's extra isn't installed, or Claude Code's bundled CLI is missing; a `LupError`, not a `TurnError` | No |
@@ -172,14 +176,14 @@ Outside an ask: `ToolError` (`lup.tools.tool`) and `UnscriptedAskError` (`lup.te
 
 ### The call record
 
-With `layers.trace` set, every ask, answered or failed, appends one `CallRecord` (`observability/trace.py`): the runtime, the model named, the start and duration, the prompt and system prompt, the output (the model as JSON, or the text) or the error's type and message, the rejections, the notes and the usage, all in full. A failed ask keeps the notes and usage where its turn ran, and the rejections on `OutputMissingError`. The record is derived from the result or the error, and the request, so the two can't disagree. Codex reports no cost.
+With `layers.trace` set, every ask, answered or failed, appends one `CallRecord` (`observability/trace.py`): the runtime, the model named, the start and duration, the prompt and system prompt, the output (the model as JSON, or the text) or the error's type and message, the rejections, the notes, the frictions, how it went and the usage, all in full. A failed ask keeps what the agent said and the usage where its turn ran, and the rejections on `OutputMissingError`. The record is derived from the result or the error, and the request, so the two can't disagree. Codex reports no cost.
 
 ### Testing: the fake and the guard
 
-**The fake replaces the adapter, not the agent** (`testing/fake.py`): a test's `Claude(...)` goes through the real `ask`, with its layers, tools, hooks and record, and only the turn is scripted, its answers, notes and reports going through the real tools. It stands in at the seam, so nothing is patched, and no project writes its own stub (live-translator's took about 70 lines, `docs/field-notes.md`, *From the downstream projects*).
-- `answer(Output, value, notes=[...])` queues an accepted answer for the next ask of that output type; `answer_text(text, notes=[...])` the next untyped one's.
+**The fake replaces the adapter, not the agent** (`testing/fake.py`): a test's `Claude(...)` goes through the real `ask`, with its layers, tools, hooks and record, and only the turn is scripted, its answers and what the agent says beside or instead of them going through the real tools. It stands in at the seam, so nothing is patched, and no project writes its own stub (live-translator's took about 70 lines, `docs/field-notes.md`, *From the downstream projects*).
+- `answer(Output, value, notes=[...], frictions=[...], how_it_went=...)` queues an accepted answer for the next ask of that output type; `answer_text(text, ...)` the next untyped one's.
 - `reject_then(Output, invalid, value)` queues a refused submission, then the accepted one.
-- `report(Output, problem, notes=[...])` queues a reported problem (`Output` is `None` for an untyped ask); `fail(Output, error)` makes the next such ask raise `error`.
+- `blocked(Output, problem, ...)` and `stop(Output, why, ...)` queue the agent ending without an answer (`Output` is `None` for an untyped ask); `fail(Output, error)` makes the next such ask raise `error`.
 - `calls` lists every ask as a `FakeCall`: the declaration, the prompt, the output model.
 
 Scripts match by output type, first queued first; an ask with none raises `UnscriptedAskError` naming the type and the prompt. A fake turn reports zero usage and the session ids `fake-1`, `fake-2`, and so on.
@@ -208,11 +212,11 @@ Each is the only module importing its SDK, and its docstring holds what it relie
 | `sessions/contract.py` | `Adapter`, `TurnRequest`, `RawTurn`; the seam and `guarded` |
 | `sessions/layers.py` | `SessionLayers`, `Recovery`, `Submission` |
 | `sessions/submission.py` | `Toolbox`: one turn's tools, the calls made to them, and the guard |
-| `sessions/results.py` | `TurnResult`, `Usage`, `Rejection` |
+| `sessions/results.py` | `TurnResult`, `Usage`, `Rejection`, `Friction`, `HowItWent` |
 | `sessions/errors.py` | The ask's errors, `RuntimeMissingError`, `RealCallInTestError`; `needs_extra` |
 | `tools/tool.py` | `@lup_tool`, `Tool`, `Method`, `AgentTool`, `ToolSpec` and `summary_of`; `Allow`, `Deny`; `ToolError` |
 | `tools/submit.py` | `Submit` and its `Receipt` |
-| `tools/speaking.py` | `report` and `note` |
+| `tools/speaking.py` | `blocked`, `stop`, `note`, `friction` and `how_it_went` |
 | `tools/serving.py` | `Toolset`, `Answer`, `tool_server`, `serve` |
 | `observability/trace.py` | `CallRecord` |
 | `testing/fake.py`, `testing/plugin.py` | `FakeAgents`, `FakeCall`, `UnscriptedAskError`; the pytest plugin, its guard and `fake_agents` |

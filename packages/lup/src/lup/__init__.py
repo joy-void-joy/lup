@@ -38,31 +38,35 @@ from lup.errors import LupError
 from lup.sessions.errors import (
     AgentUnavailableError,
     AuthMissingError,
+    BlockedError,
     OutputMissingError,
-    ProblemReportedError,
     RuntimeMissingError,
+    StoppedError,
     ToolsPresentError,
     TurnError,
     TurnTimeoutError,
     UsageLimitReachedError,
 )
 from lup.sessions.layers import Recovery, SessionLayers, Submission
-from lup.sessions.results import Rejection, TurnResult, Usage
+from lup.sessions.results import Friction, HowItWent, Rejection, TurnResult, Usage
 from lup.sessions.surface import Agent
 
 __all__ = [
     "Agent",
     "AgentUnavailableError",
     "AuthMissingError",
+    "BlockedError",
     "Claude",
     "Codex",
+    "Friction",
+    "HowItWent",
     "LupError",
     "OutputMissingError",
-    "ProblemReportedError",
     "Recovery",
     "Rejection",
     "RuntimeMissingError",
     "SessionLayers",
+    "StoppedError",
     "Submission",
     "ToolsPresentError",
     "TurnError",

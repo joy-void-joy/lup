@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from datetime import datetime
 
-    from lup.sessions.results import Rejection, Usage
+    from lup.sessions.results import Friction, HowItWent, Rejection, Usage
 
 
 class TurnError(LupError):
@@ -42,8 +42,9 @@ class OutputMissingError(TurnError):
     """No answer was accepted within the submission layer's attempts.
 
     `rejected` holds every refused attempt in full: what was submitted, and why it
-    was refused. `notes` holds the remarks the agent attached, and `usage` what
-    the turn used, where the runtime reported it.
+    was refused. `notes`, `frictions` and `how_it_went` hold what the agent said
+    beside its attempts, and `usage` what the turn used, where the runtime
+    reported it.
     """
 
     def __init__(
@@ -52,30 +53,69 @@ class OutputMissingError(TurnError):
         *,
         rejected: list[Rejection],
         notes: list[str],
+        frictions: list[Friction],
+        how_it_went: HowItWent | None,
         usage: Usage | None,
     ) -> None:
-        """Record the message, every refused attempt, the notes and the usage."""
+        """Record the message, every refused attempt, what the agent said beside them, and the usage."""
         super().__init__(message)
         self.rejected = rejected
         self.notes = notes
+        self.frictions = frictions
+        self.how_it_went = how_it_went
         self.usage = usage
 
 
-class ProblemReportedError(TurnError):
-    """The agent stopped without an answer and said what's wrong.
+class BlockedError(TurnError):
+    """The agent stopped without an answer, saying the work can't go on and what's wrong.
 
-    `problem` is its report, in its own words; `notes` the remarks it attached
-    before reporting; `usage` what the turn used, where the runtime reported it.
+    `problem` is its words; `notes`, `frictions` and `how_it_went` what it said
+    before stopping; `usage` what the turn used, where the runtime reported it.
     It isn't retried: asking again gets the same problem.
     """
 
-    def __init__(self, problem: str, *, notes: list[str], usage: Usage | None) -> None:
-        """Record the agent's report, its notes and the turn's usage."""
-        super().__init__(
-            f"the agent reported a problem instead of answering: {problem}"
-        )
+    def __init__(
+        self,
+        problem: str,
+        *,
+        notes: list[str],
+        frictions: list[Friction],
+        how_it_went: HowItWent | None,
+        usage: Usage | None,
+    ) -> None:
+        """Record the agent's problem, what it said before it, and the turn's usage."""
+        super().__init__(f"the agent is blocked and didn't answer: {problem}")
         self.problem = problem
         self.notes = notes
+        self.frictions = frictions
+        self.how_it_went = how_it_went
+        self.usage = usage
+
+
+class StoppedError(TurnError):
+    """The agent stopped without an answer by its own choice, saying why.
+
+    It's done and nothing more is worth doing, or it would rather not go on: not
+    a failure, nor `BlockedError`'s "it can't". `why` is its words; `notes`,
+    `frictions` and `how_it_went` what it said before stopping; `usage` what the
+    turn used, where the runtime reported it. It isn't retried.
+    """
+
+    def __init__(
+        self,
+        why: str,
+        *,
+        notes: list[str],
+        frictions: list[Friction],
+        how_it_went: HowItWent | None,
+        usage: Usage | None,
+    ) -> None:
+        """Record why the agent stopped, what it said before it, and the turn's usage."""
+        super().__init__(f"the agent chose to stop without an answer: {why}")
+        self.why = why
+        self.notes = notes
+        self.frictions = frictions
+        self.how_it_went = how_it_went
         self.usage = usage
 
 

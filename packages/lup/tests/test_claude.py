@@ -36,10 +36,14 @@ import lup
 from lup import (
     AgentUnavailableError,
     AuthMissingError,
+    BlockedError,
+    Friction,
+    HowItWent,
     OutputMissingError,
     Recovery,
     RuntimeMissingError,
     SessionLayers,
+    StoppedError,
     Submission,
     ToolsPresentError,
     TurnError,
@@ -54,7 +58,7 @@ from lup.sessions.contract import TurnRequest, seam
 from lup.sessions.declaration import Asking
 from lup.sessions.errors import RealCallInTestError
 from lup.sessions.submission import Toolbox
-from lup.tools.speaking import note, report
+from lup.tools.speaking import SPEAKING
 from lup.tools.submit import Submit
 
 if TYPE_CHECKING:
@@ -212,7 +216,7 @@ class Clients:
         return client
 
 
-UNTYPED_TOOLS = ["mcp__lup__report", "mcp__lup__note"]
+UNTYPED_TOOLS = [f"mcp__lup__{tool.spec().name}" for tool in SPEAKING]
 TYPED_TOOLS = [*UNTYPED_TOOLS, "mcp__lup__submit"]
 USAGE = {
     "input_tokens": 12,
@@ -305,10 +309,10 @@ def request(
     attempts: int = 3,
     prompt: str = "Will it rain?",
 ) -> TurnRequest:
-    speaking: list[AgentTool] = [report, note]
     submit = None if output is None else Submit(output)
+    tools: list[AgentTool] = SPEAKING if submit is None else [*SPEAKING, submit]
     toolbox = Toolbox(
-        tools=speaking if submit is None else [*speaking, submit],
+        tools=tools,
         output=None if submit is None else submit.name,
         attempts=attempts,
     )
@@ -394,7 +398,14 @@ def test_the_server_lists_each_tool_with_its_schema() -> None:
     clients = Clients([init(), Listing(), result()])
     asyncio.run(adapter(clients).run(request()))
     listed = clients.only().listed
-    assert [tool.name for tool in listed] == ["report", "note", "submit"]
+    assert [tool.name for tool in listed] == [
+        "blocked",
+        "stop",
+        "note",
+        "friction",
+        "how_it_went",
+        "submit",
+    ]
     [submit] = [tool for tool in listed if tool.name == "submit"]
     assert submit.input_schema == Forecast.model_json_schema()
     assert submit.description == Submit(Forecast).description
@@ -436,6 +447,27 @@ def test_a_note_is_taken_through_the_server() -> None:
     assert turn.toolbox.notes() == ["Assumes London."]
 
 
+def test_a_friction_and_how_it_went_are_taken_through_the_server() -> None:
+    jammed = {"got_in_the_way": "The feed timed out.", "would_change": "Retry it."}
+    clients = Clients(
+        [
+            init(tools=UNTYPED_TOOLS),
+            Call(name="friction", arguments=jammed),
+            Call(name="how_it_went", arguments={"felt": "Calm."}),
+            result(),
+        ]
+    )
+    turn = request(None)
+    asyncio.run(adapter(clients).run(turn))
+    taken, went = clients.only().answers
+    assert not taken.is_error
+    assert not went.is_error
+    assert turn.toolbox.frictions() == [
+        Friction(got_in_the_way="The feed timed out.", would_change="Retry it.")
+    ]
+    assert turn.toolbox.how_it_went() == HowItWent(felt="Calm.")
+
+
 # The Stop hook: the turn's guard.
 
 
@@ -463,8 +495,9 @@ def test_the_stop_hook_keeps_an_unanswered_turn_going_saying_why() -> None:
     assert blocked == {
         "decision": "block",
         "reason": (
-            "Call the `mcp__lup__submit` tool with your final answer, or `mcp__lup__report` "
-            "if it can't be answered: your turn can't end until one is accepted."
+            "Call the `mcp__lup__submit` tool with your final answer, "
+            "`mcp__lup__blocked` if it can't be answered, or `mcp__lup__stop` to stop "
+            "by your own choice: your turn can't end until one is accepted."
         ),
     }
     assert ended == {}
@@ -480,6 +513,41 @@ def test_the_stop_hook_gives_up_past_the_attempts_and_the_ask_raises() -> None:
     blocked, let_go = clients.only().stops
     assert blocked.get("decision") == "block"
     assert let_go == {}
+
+
+@pytest.mark.usefixtures("unseamed")
+def test_the_stop_hook_lets_a_turn_end_once_the_agent_stops_and_the_ask_raises() -> (
+    None
+):
+    clients = Clients(
+        [
+            init(),
+            Call(name="friction", arguments={"got_in_the_way": "No date given."}),
+            Call(name="stop", arguments={"why": "I'd rather not guess."}),
+            Stop(),
+            result("Stopped."),
+        ]
+    )
+    with pytest.raises(StoppedError) as raised:
+        asyncio.run(asking(clients).ask("Will it rain?", Forecast))
+    assert clients.only().stops == [{}]
+    assert raised.value.why == "I'd rather not guess."
+    assert raised.value.frictions == [Friction(got_in_the_way="No date given.")]
+
+
+@pytest.mark.usefixtures("unseamed")
+def test_the_stop_hook_lets_a_blocked_turn_end_and_the_ask_raises() -> None:
+    clients = Clients(
+        [
+            init(),
+            Call(name="blocked", arguments={"problem": "No place given."}),
+            Stop(),
+            result("Blocked."),
+        ]
+    )
+    with pytest.raises(BlockedError, match="No place given"):
+        asyncio.run(asking(clients).ask("Will it rain?", Forecast))
+    assert clients.only().stops == [{}]
 
 
 # The tool check.

@@ -82,7 +82,7 @@ from lup.sessions.errors import (
 )
 from lup.sessions.results import Usage
 from lup.sessions.submission import End, GiveUp, KeepGoing, Toolbox
-from lup.tools.speaking import report
+from lup.tools.speaking import blocked
 from lup.types import JsonObject, Model, MutableModel
 
 if TYPE_CHECKING:
@@ -269,7 +269,7 @@ def serving(toolbox: Toolbox, loop: asyncio.AbstractEventLoop) -> ApprovalHandle
                 asked = UserInputRequest.model_validate(params)
                 refused = (
                     "No one can answer here. Carry on with what you have, or call "
-                    f"`{report.name}` to say what's missing."
+                    f"`{blocked.name}` to say what's missing."
                 )
                 refusal = Answers(answers=[refused])
                 answers = {question.id: refusal for question in asked.questions}

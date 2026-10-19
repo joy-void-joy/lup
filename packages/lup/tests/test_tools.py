@@ -3,13 +3,14 @@
 import asyncio
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
+from lup.sessions.results import Friction, HowItWent
 from lup.sessions.submission import End, GiveUp, KeepGoing, Toolbox
 from lup.tools import Allow, Deny, Hook, Submit, Tool, lup_hook, lup_tool
 from lup.tools.hook import hooks
 from lup.tools.serving import Answer
-from lup.tools.speaking import Heard, Problem, note, report
+from lup.tools.speaking import SPEAKING, Heard, Problem, Stop
 from lup.tools.tool import Accepted, Refused, ToolError, ToolSpec, bound, declared
 
 
@@ -95,11 +96,14 @@ def test_a_tool_made_without_lup_tool_is_checked_too() -> None:
 
 
 def test_every_tool_of_lup_s_has_a_summary() -> None:
-    summaries = [tool.spec().summary for tool in [Submit(Query), report, note]]
+    summaries = [tool.spec().summary for tool in [Submit(Query), *SPEAKING]]
     assert summaries == [
         "Submit your final answer once it's complete.",
-        "Stop without an answer and say what's wrong.",
+        "Say what keeps you from answering, and stop.",
+        "Stop by your own choice, saying why.",
         "Attach a remark to your answer, and carry on.",
+        "Say what got in your way, and carry on.",
+        "Say how the work went, once, near its end.",
     ]
 
 
@@ -200,14 +204,56 @@ def test_a_typed_turn_ends_only_once_an_answer_is_accepted() -> None:
     assert toolbox.accepted() == Query(city="Rome")
 
 
-def test_a_reported_problem_ends_a_typed_turn() -> None:
-    toolbox = Toolbox(tools=[Submit(Query), report, note], output="submit", attempts=3)
+def test_being_blocked_ends_a_typed_turn() -> None:
+    toolbox = Toolbox(tools=[Submit(Query), *SPEAKING], output="submit", attempts=3)
     asyncio.run(toolbox.call("note", {"remark": "No city was named."}))
-    asyncio.run(toolbox.call("report", {"problem": "Which city?"}))
+    asyncio.run(toolbox.call("blocked", {"problem": "Which city?"}))
     assert isinstance(toolbox.end(), End)
     assert toolbox.accepted() is None
-    assert toolbox.reported() == "Which city?"
+    assert toolbox.ending() == Problem(problem="Which city?")
     assert toolbox.notes() == ["No city was named."]
+
+
+def test_stopping_ends_a_typed_turn_and_the_last_ending_holds() -> None:
+    toolbox = Toolbox(tools=[Submit(Query), *SPEAKING], output="submit", attempts=3)
+    asyncio.run(toolbox.call("blocked", {"problem": "Which city?"}))
+    asyncio.run(toolbox.call("stop", {"why": "Nothing more is worth doing."}))
+    assert isinstance(toolbox.end(), End)
+    assert toolbox.ending() == Stop(why="Nothing more is worth doing.")
+
+
+def test_frictions_and_how_it_went_are_kept_and_end_nothing() -> None:
+    toolbox = Toolbox(tools=[Submit(Query), *SPEAKING], output="submit", attempts=3)
+    jammed: dict[str, JsonValue] = {
+        "got_in_the_way": "`ls` printed: Permission denied",
+        "trying": "look",
+    }
+    taken = asyncio.run(toolbox.call("friction", jammed))
+    asyncio.run(toolbox.call("friction", {"got_in_the_way": "No city."}))
+    asyncio.run(toolbox.call("how_it_went", {}))
+    asyncio.run(toolbox.call("how_it_went", {"smooth": "The tools.", "felt": "Fine."}))
+    missing = asyncio.run(toolbox.call("friction", {"trying": "look"}))
+    assert not taken.error
+    assert "Carry on" in taken.text
+    assert missing.error
+    assert isinstance(toolbox.end(), KeepGoing)
+    assert toolbox.frictions() == [
+        Friction(got_in_the_way="`ls` printed: Permission denied", trying="look"),
+        Friction(got_in_the_way="No city."),
+    ]
+    assert toolbox.how_it_went() == HowItWent(smooth="The tools.", felt="Fine.")
+
+
+def test_the_guard_names_the_answer_blocked_and_stop() -> None:
+    toolbox = Toolbox(tools=[Submit(Query), *SPEAKING], output="submit", attempts=3)
+    kept = toolbox.end("mcp__lup__")
+    assert kept == KeepGoing(
+        reason=(
+            "Call the `mcp__lup__submit` tool with your final answer, "
+            "`mcp__lup__blocked` if it can't be answered, or `mcp__lup__stop` to "
+            "stop by your own choice: your turn can't end until one is accepted."
+        )
+    )
 
 
 def test_an_untyped_turn_may_always_end() -> None:
