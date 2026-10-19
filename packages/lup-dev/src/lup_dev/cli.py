@@ -20,7 +20,7 @@ import secrets
 import shutil
 import sys
 import webbrowser
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -29,13 +29,13 @@ from typing import TYPE_CHECKING, Annotated, override
 import typer
 from filelock import FileLock
 from filelock import Timeout as Held
-from pydantic import TypeAdapter, ValidationError
+from pydantic import Field, TypeAdapter, ValidationError
 
 from lup.errors import LupError
 from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.transcripts import views
 from lup.transcripts.module import Transcripts
-from lup.types import Model
+from lup.types import Model, MutableModel
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import Adapter, claude, codex
@@ -84,7 +84,7 @@ from lup_dev.host.dashboard import (
 from lup_dev.host.names import shaped
 from lup_dev.host.protocol import GitHubRepository, HostError, Listed, Register
 from lup_dev.host.records import Called, Recorded
-from lup_dev.host.service import Answerer, HostService, Naming, Route
+from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import Workers
 from lup_dev.inbox.delivery import (
@@ -167,6 +167,7 @@ from lup_dev.layout import (
     CheckoutLayout,
     GitDirectoryLayout,
     HostLayout,
+    LaunchLayout,
     Layout,
 )
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
@@ -398,8 +399,9 @@ def host_serve(context: typer.Context) -> None:
     """Run the host service in the foreground, until it's stopped.
 
     It answers each launch's hooks as `lup-dev hook` does, on the launch's own
-    socket. `lup-dev host stop` or Ctrl-C stops it; the launches it serves stay
-    recorded, and the next service serves them.
+    socket, and ends each launch whose launcher and container are both gone
+    (`Sweeping`). `lup-dev host stop` or Ctrl-C stops it; the launches it serves
+    stay recorded, and the next service serves them.
     """
     if context.invoked_subcommand is not None:
         return
@@ -421,6 +423,10 @@ def host_serve(context: typer.Context) -> None:
         ),
     )
     types = TypeReader(delivery=delivery, read=typed_reading, say=typer.echo)
+    podman = Podman()
+    sweeping = Sweeping(
+        layout=layout, host=host_client(), podman=podman, say=typer.echo
+    )
     service = HostService(
         layout=layout.host,
         answerer=known,
@@ -441,9 +447,9 @@ def host_serve(context: typer.Context) -> None:
         modules=Workers(layout=layout.host, say=typer.echo),
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
-        podman=Podman(),
+        podman=podman,
         changes=changes,
-        companions=[types, *([] if dashboard is None else [dashboard])],
+        companions=[types, sweeping, *([] if dashboard is None else [dashboard])],
     )
     asyncio.run(service.serve())
 
@@ -1148,16 +1154,19 @@ def on_github(
         return None
 
 
-def swept(launcher: Launcher) -> None:
+def swept(
+    layout: Layout, host: HostClient, podman: Podman, say: Callable[[str], None]
+) -> None:
     """End each launch the host service serves whose launcher and container are both gone.
 
     A launcher holds its launch's lock for its whole life, which the OS frees, so
     a launch whose lock can be taken has no launcher left; its container, named
     when it registered, tells whether its session still runs. Each launch ended
-    is said, and a launch another launcher ended first is passed over.
+    is said, and a launch ended first elsewhere is passed over. A launch runs it
+    before it registers, and the host service on its own (`Sweeping`).
     """
-    for each in launcher.host.launches():
-        own = launcher.layout.launch(each.launch)
+    for each in host.launches():
+        own = layout.launch(each.launch)
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         lock = FileLock(own.lock, timeout=0)
         try:
@@ -1165,23 +1174,76 @@ def swept(launcher: Launcher) -> None:
         except Held:
             continue
         try:
-            if each.container is None or launcher.podman.exists(each.container):
+            if each.container is None or podman.exists(each.container):
                 continue
             try:
-                launcher.host.unregister(each.launch)
+                host.unregister(each.launch)
             except HostError as gone:
-                launcher.say(f"Launch {each.launch} was ended already: {gone}")
+                say(f"Launch {each.launch} was ended already: {gone}")
                 continue
-            released(launcher, each.launch)
+            released(podman, own, say)
             if own.directory.is_dir():
                 shutil.rmtree(own.directory)
-            launcher.say(
+            say(
                 f"Ended launch {each.launch}, {each.runtime} in {each.worktree}: its "
                 f"launcher and its container, {each.container}, are gone."
             )
         finally:
             lock.release()
         own.lock.unlink(missing_ok=True)
+
+
+class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
+    """The sweep beside the host service (`swept`): once it listens, then every `every`, so a launch whose launcher and container are gone is ended though no launch follows it.
+
+    It asks the service as a launch does, from a thread, so the service goes on
+    answering meanwhile; its end waits for a sweep under way, so none outlives
+    the service's socket.
+    """
+
+    layout: Layout
+    host: HostClient
+    podman: Podman
+    say: Callable[[str], None]
+    every: timedelta = timedelta(seconds=30)
+    pause: Callable[[float], Awaitable[None]] = asyncio.sleep
+    """Waits the seconds between two sweeps; a test gives its own."""
+    stopping: asyncio.Event = Field(default_factory=asyncio.Event)
+    task: asyncio.Task[None] | None = None
+
+    @override
+    async def begin(self) -> None:
+        await self.sweep()
+        self.task = asyncio.create_task(self.sweeping())
+
+    @override
+    async def end(self) -> None:
+        self.stopping.set()
+        if self.task is not None:
+            await self.task
+
+    async def sweeping(self) -> None:
+        """Sweep every `every`, until the service stops."""
+        while not self.stopping.is_set():
+            paused = asyncio.ensure_future(self.pause(self.every.total_seconds()))
+            stopped = asyncio.ensure_future(self.stopping.wait())
+            await asyncio.wait([paused, stopped], return_when=asyncio.FIRST_COMPLETED)
+            paused.cancel()
+            stopped.cancel()
+            if not self.stopping.is_set():
+                await self.sweep()
+
+    async def sweep(self) -> None:
+        """Sweep once, off the event loop; where it fails, say why, and the next sweep goes on."""
+        try:
+            await asyncio.to_thread(
+                swept, self.layout, self.host, self.podman, self.say
+            )
+        except (HostError, ContainerError, OSError) as failed:
+            self.say(
+                "The sweep of launches whose launcher and container are gone "
+                f"failed: {failed}"
+            )
 
 
 def launched(
@@ -1311,7 +1373,7 @@ def launched(
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         try:
             with FileLock(own.lock):
-                swept(launcher)
+                swept(launcher.layout, launcher.host, launcher.podman, launcher.say)
                 served = launcher.host.register(registered)
                 sockets = served.directory
                 launcher.say(f"This launch is `{served.name}`.")
@@ -1356,17 +1418,19 @@ def ended(launcher: Launcher, launch: str) -> None:
             "launch ends it."
         )
     own = launcher.layout.launch(launch)
-    released(launcher, launch)
+    released(launcher.podman, own, launcher.say)
     if own.directory.is_dir():
         shutil.rmtree(own.directory)
 
 
-def released(launcher: Launcher, launch: str) -> None:
+def released(podman: Podman, launch: LaunchLayout, say: Callable[[str], None]) -> None:
     """Unmount what was lent to a launch's room while it ran; where podman can't, say so."""
     try:
-        unlent(launcher.podman, launcher.layout.launch(launch))
+        unlent(podman, launch)
     except ContainerError as failed:
-        launcher.say(f"What was lent to launch {launch} wasn't unmounted: {failed}")
+        say(
+            f"What was lent to launch {launch.directory.name} wasn't unmounted: {failed}"
+        )
 
 
 def launching(say: Callable[[str], None]) -> Launcher:

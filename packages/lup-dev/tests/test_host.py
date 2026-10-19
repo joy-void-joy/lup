@@ -1537,6 +1537,76 @@ def test_a_name_whose_container_another_launch_holds_is_refused_saying_whose(
         own.unregister("two")
 
 
+class Pauses:
+    """The waits between the service's sweeps: each lasts until the test ends it, and the test then waits until the sweep after it is done."""
+
+    def __init__(self) -> None:
+        self.begun = threading.Semaphore(0)
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.going: asyncio.Event | None = None
+        self.seconds: list[float] = []
+
+    async def __call__(self, seconds: float) -> None:
+        self.seconds.append(seconds)
+        self.loop = asyncio.get_running_loop()
+        self.going = asyncio.Event()
+        self.begun.release()
+        await self.going.wait()
+
+    def next(self) -> None:
+        """End the wait under way, once it's begun, and wait until the sweep after it is done and the next wait begun."""
+        assert self.begun.acquire(timeout=60)
+        assert self.loop is not None
+        assert self.going is not None
+        self.loop.call_soon_threadsafe(self.going.set)
+        assert self.begun.acquire(timeout=60)
+        self.begun.release()
+
+
+def test_the_service_ends_a_launch_whose_launcher_and_container_are_gone(
+    tmp_path_factory: pytest.TempPathFactory,
+    said: list[str],
+    tmp_path: Path,
+    clock: FakeClock,
+) -> None:
+    base = tmp_path_factory.mktemp("swept")
+    machine = Layout(state=base / "state", runtime=base / "run")
+    layout = machine.host
+    own = client(layout, clock)
+    containers = Containers("lup-live", "lup-stopping")
+    pauses = Pauses()
+    sweeping = cli.Sweeping(
+        layout=machine,
+        host=own,
+        podman=Podman(execute=containers),
+        say=said.append,
+        pause=pauses,
+    )
+    with served(service(layout, Judge(), said)):
+        for each in ["gone", "held", "live", "stopping"]:
+            own.register(launch(tmp_path, each, "first"))
+    held = machine.launch("held").lock
+    held.parent.mkdir(parents=True)
+    with (
+        FileLock(held),
+        served(service(layout, Judge(), said, companions=[sweeping])),
+    ):
+        started = [each.launch for each in own.launches()]
+        containers.running.remove("lup-stopping")
+        pauses.next()
+        later = [each.launch for each in own.launches()]
+    assert started == ["held", "live", "stopping"]
+    assert later == ["held", "live"]
+    assert pauses.seconds[0] == 30
+    for each in ["gone", "stopping"]:
+        assert (
+            f"Ended launch {each}, first in {tmp_path}: its launcher and its "
+            f"container, lup-{each}, are gone."
+        ) in said
+        assert not machine.launch(each).lock.exists()
+    assert ["container", "exists", "lup-held"] not in containers.asked
+
+
 def test_what_a_conversation_is_doing_outlasts_a_restart_of_the_service(
     layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
 ) -> None:
