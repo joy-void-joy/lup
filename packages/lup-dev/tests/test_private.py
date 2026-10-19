@@ -6,14 +6,24 @@ stub (`StubFacts`); git runs for real on a scratch repository.
 """
 
 import asyncio
+import threading
+from contextlib import contextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from typer.testing import CliRunner
 
-from lup_dev import Modules, Private, Project, ProjectError, Values
+from lup_dev import Modules, Private, Project, ProjectError, Values, cli
 from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.serving import answering
 from lup_dev.forge.github import GitHubError
+from lup_dev.host.client import RoomClient, asked
+from lup_dev.host.courier import Courier, Heard, Printed, Telling
+from lup_dev.host.protocol import Action, Done, Limits, Register, Registered, Stop
+from lup_dev.host.service import Answerer, Asked, HostService, Judged
+from lup_dev.layout import HostLayout, Layout
 from lup_dev.private.found import added_lines, counted, found, textual
 from lup_dev.private.module import Details
 from lup_dev.private.withheld import (
@@ -22,11 +32,17 @@ from lup_dev.private.withheld import (
     Seen,
     Withheld,
     built,
+    kept,
     said,
 )
+from lup_dev.stored import write_model
 
 if TYPE_CHECKING:
-    from conftest import Shell, StubFacts
+    from collections.abc import Generator
+
+    from conftest import InProcess, Shell, StubFacts
+
+    from lup_dev.host.workers import LaunchModules
 
 HOME = "/home/op"
 USER = Held(kind="user", text="op")
@@ -246,3 +262,254 @@ def test_a_detail_that_isn_t_one_or_a_blank_value_is_refused_where_written() -> 
         Details().drop("hostnme")
     with pytest.raises(ProjectError, match=r"blank or spans lines"):
         Values().add("two\nlines")
+
+
+# The gate's `private` step
+
+
+runner = CliRunner()
+
+GATED = Withheld(
+    held=[
+        Held(kind="value", text="Kestrel Labs"),
+        Held(kind="home", text="/home/op"),
+    ]
+)
+"""Made-up values never published, as a launch would list them on the host."""
+
+
+@pytest.fixture
+def forged(
+    bare: Path, tmp_path: Path, shell: Shell, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """The bare repository's worktree, run from, its remote `origin` a forge on disk holding `main`."""
+    forge = tmp_path / "forge.git"
+    shell.git(tmp_path, "init", "-q", "--bare", str(forge))
+    shell.git(bare, "remote", "set-url", "origin", str(forge))
+    shell.git(bare, "push", "-q", "origin", "main")
+    worktree = bare / "tree" / "main"
+    monkeypatch.chdir(worktree)
+    return worktree
+
+
+def gated(worktree: Path, shell: Shell) -> str:
+    """Leave a value in an untracked file, another in a commit's message the remote lacks, and one in a file git ignores; return the commit's short id."""
+    (worktree / "docs").mkdir()
+    (worktree / "docs" / "notes.md").write_text("See /home/op/x.\n")
+    (worktree / ".lup").mkdir()
+    (worktree / ".lup" / "scratch.md").write_text("/home/op\n")
+    shell.git(worktree, "commit", "-q", "--allow-empty", "-m", "For Kestrel Labs")
+    return shell.git(worktree, "rev-parse", "--short", "HEAD").strip()
+
+
+EXPECTED = (
+    "docs/notes.md:1:5 - private: the operator's home path\n"
+    "    steer: write it as `~`, or a path in the repository from its root\n"
+    "{short}'s message:1:5 - private: one of the operator's private values\n"
+    "    steer: leave it out of what's published; the operator, who listed it, "
+    "knows which it is\n"
+)
+
+
+def test_the_gate_on_the_host_fails_on_a_value_in_a_file_or_a_new_commit(
+    forged: Path, shell: Shell, state: Layout
+) -> None:
+    short = gated(forged, shell)
+    write_model(kept(state.module_data("private", forged.parents[1])), GATED)
+    result = runner.invoke(cli.app, ["private", "check"])
+    assert result.exit_code == 1
+    assert result.output.startswith(EXPECTED.format(short=short))
+    assert result.output.endswith("1 commit for values never published: 2 found.\n")
+    assert "Kestrel" not in result.output
+    assert "/home/op" not in result.output
+
+
+def test_the_gate_where_no_launch_built_a_list_says_so_and_passes(
+    forged: Path, shell: Shell, state: Layout
+) -> None:
+    gated(forged, shell)
+    result = runner.invoke(cli.app, ["private", "check"])
+    assert result.exit_code == 0
+    assert result.output.startswith(
+        "Not read: no list of values never published was built for this "
+        "repository on this machine (a launch builds it), so nothing was read.\n"
+    )
+
+
+def test_a_remote_that_can_t_be_listed_leaves_the_commits_unread_said(
+    forged: Path, shell: Shell, state: Layout
+) -> None:
+    gated(forged, shell)
+    shell.git(
+        forged.parents[1], "remote", "add", "gone", str(forged.parents[2] / "gone.git")
+    )
+    write_model(kept(state.module_data("private", forged.parents[1])), GATED)
+    result = runner.invoke(cli.app, ["private", "check"])
+    assert result.exit_code == 1
+    assert (
+        "Not read: `HEAD`'s commits weren't read: `gone` couldn't be listed, so "
+        "which commits are new wasn't known.\n"
+    ) in result.output
+    assert "'s message" not in result.output
+
+
+@contextmanager
+def hosted(
+    tmp_path_factory: pytest.TempPathFactory,
+    registered: Register,
+    modules: LaunchModules | None,
+) -> Generator[Path]:
+    """Serve `registered` in a host service of its own thread with `modules`, or none as an older service; yield its room's request socket."""
+    base = tmp_path_factory.mktemp("host")
+    layout = HostLayout(sockets=base / "run", state=base / "state")
+    service = HostService(
+        layout=layout,
+        answerer=Nobody(),
+        courier=Deaf(),
+        judge=unjudged,
+        say=lambda line: None,
+        modules=modules,
+    )
+    bound = threading.Event()
+
+    def run() -> None:
+        async def serve() -> None:
+            async with service.serving() as serving:
+                bound.set()
+                await serving.stopped.wait()
+
+        asyncio.run(serve())
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    bound.wait()
+    patience = timedelta(seconds=30)
+    asked(layout.control, registered, Registered, patience)
+    try:
+        yield layout.launch(registered.launch).request
+    finally:
+        asked(layout.control, Stop(), Done, patience)
+        thread.join(timeout=60)
+
+
+class Nobody(Answerer):
+    def runtimes(self) -> list[str]:
+        return ["claude"]
+
+    def unanswered(self, runtime: str, payload: str, failure: str) -> str:
+        return ""
+
+
+class Deaf(Courier):
+    def heard(self, runtime: str, payload: str) -> Heard:
+        return Heard(event="call-started", session="s1", judged=False, fits=10_000)
+
+    def told(
+        self, runtime: str, payload: str, answer: str, telling: Telling
+    ) -> Printed:
+        return Printed(text=answer)
+
+    def woken(self, runtime: str, session: str, text: str) -> str | None:
+        return None
+
+
+async def unjudged(asked: Asked) -> Judged:
+    message = f"no hook reaches a judge here: {asked}"
+    raise AssertionError(message)
+
+
+def registered(worktree: Path, actions: list[Action] | None = None) -> Register:
+    judge = worktree.parents[2] / "judge"
+    judge.touch()
+    return Register(
+        launch="one",
+        runtime="claude",
+        worktree=worktree,
+        repository=worktree.parents[1],
+        judge=judge,
+        container="lup-one",
+        limits=Limits(
+            actions=["fetch", "push"] if actions is None else actions, protected=[]
+        ),
+        github=None,
+    )
+
+
+def in_the_room(socket: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def room() -> RoomClient:
+        return RoomClient(socket=socket)
+
+    monkeypatch.setattr(cli, "RoomClient", room)
+
+
+def test_the_gate_in_a_room_asks_the_host_which_never_says_a_value(
+    forged: Path,
+    shell: Shell,
+    *,
+    in_process: type[InProcess],
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    short = gated(forged, shell)
+    layout = Layout(state=tmp_path / "host-state", data=tmp_path / "host-data")
+    write_model(kept(layout.module_data("private", forged.parents[1])), GATED)
+    modules = in_process(resolved=resolve(Project()), layout=layout)
+    with hosted(tmp_path_factory, registered(forged), modules) as socket:
+        in_the_room(socket, monkeypatch)
+        result = runner.invoke(cli.app, ["private", "check"])
+    assert result.exit_code == 1
+    assert result.output.startswith(EXPECTED.format(short=short))
+
+
+def test_the_gate_in_a_room_whose_host_doesn_t_answer_says_so_and_passes(
+    forged: Path,
+    shell: Shell,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gated(forged, shell)
+    with hosted(tmp_path_factory, registered(forged), None) as socket:
+        in_the_room(socket, monkeypatch)
+        result = runner.invoke(cli.app, ["private", "check"])
+    assert result.exit_code == 0
+    assert result.output == (
+        "Values never published weren't read: the host said no handler for "
+        "`private-scan`; a room's request socket answers no kind.\n"
+    )
+
+
+def test_a_launch_whose_limits_leave_out_fetching_reads_the_files_alone(
+    forged: Path,
+    shell: Shell,
+    *,
+    in_process: type[InProcess],
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gated(forged, shell)
+    layout = Layout(state=tmp_path / "host-state", data=tmp_path / "host-data")
+    write_model(kept(layout.module_data("private", forged.parents[1])), GATED)
+    modules = in_process(resolved=resolve(Project()), layout=layout)
+    with hosted(tmp_path_factory, registered(forged, ["push"]), modules) as socket:
+        in_the_room(socket, monkeypatch)
+        result = runner.invoke(cli.app, ["private", "check"])
+    assert result.exit_code == 1
+    assert "'s message" not in result.output
+    assert (
+        "Not read: `HEAD`'s commits weren't read, since listing the remotes is fetching"
+        in result.output
+    )
+
+
+def test_private_brings_its_gate_step_its_handler_and_its_hook() -> None:
+    resolved = resolve(Project())
+    assert [each.name for each in resolved.gate][-1] == "private"
+    assert [each.command for each in resolved.gate if each.name == "private"] == [
+        ["lup-dev", "private", "check"]
+    ]
+    assert "private-scan" in [
+        answering(each.handler).named() for each in resolved.handled
+    ]
+    assert "PrivateHooks" in [each.hooks.__name__ for each in resolved.hooked]

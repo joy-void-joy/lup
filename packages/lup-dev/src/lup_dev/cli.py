@@ -192,6 +192,10 @@ from lup_dev.policy.report import finding_lines
 from lup_dev.policy.tools import JudgeTools
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.private.module import Private
+from lup_dev.private.protocol import Scanned as Read
+from lup_dev.private.protocol import Scanning, Sent
+from lup_dev.private.scanning import UNBUILT
+from lup_dev.private.scanning import scanned as read_for_values
 from lup_dev.private.withheld import (
     Facts,
     HostFacts,
@@ -226,10 +230,15 @@ transcripts = typer.Typer(
         "each with what it answered."
     ),
 )
+private = typer.Typer(
+    no_args_is_help=True,
+    help="What never leaves under your name: the `Private` module's values.",
+)
 app.add_typer(rules, name="rules")
 app.add_typer(host, name="host")
 app.add_typer(inbox, name="inbox")
 app.add_typer(transcripts, name="transcripts")
+app.add_typer(private, name="private")
 
 
 def engine() -> Checker:
@@ -1893,6 +1902,68 @@ def rules_check(
         write_model(GitDirectoryLayout(common=Path(common)).due, due)
     typer.echo(f"lup checked {len(found.files)} files: {len(failing)} findings.")
     if failing:
+        raise typer.Exit(code=1)
+
+
+def worktree_files(root: Path) -> list[Sent]:
+    """Return each file of the worktree at `root` git doesn't ignore, tracked or not, whole, by its path from the root."""
+    listed = Git(cwd=root).run(
+        "ls-files", "-z", "--cached", "--others", "--exclude-standard"
+    )
+    return [
+        Sent.of(name, (root / name).read_bytes())
+        for name in nul_separated(listed.output)
+        if (root / name).is_file()
+    ]
+
+
+@private.command("check")
+def private_check() -> None:
+    """Read the worktree for a value never published, as the gate's `private` step does, failing on one.
+
+    Every file git doesn't ignore, whole, its path too, and the commits `HEAD`
+    reaches that the repository's remotes lack, each as a push reads it. Each
+    value found is said by its kind and place, never the value. On the host it
+    reads the list the last launch built for the repository; in a room, which
+    never sees the list, the host reads them on the launch's request socket.
+    Where no list was built, as on a machine no launch ran on, or the host can't
+    be asked, it says so and passes: the push or the post is where a value is
+    refused.
+    """
+    root = toplevel(Path.cwd())
+    files = worktree_files(root)
+    head = Git(cwd=root).commit("HEAD")
+    room = RoomClient()
+    if room.socket.exists():
+        try:
+            scan = room.ask(Scanning(files=files, head=head), Read)
+        except HostError as refused:
+            typer.echo(f"Values never published weren't read: the host said {refused}.")
+            return
+    else:
+        common = Path(
+            Git(cwd=root).text(
+                "rev-parse", "--path-format=absolute", "--git-common-dir"
+            )
+        )
+        layout = Layout.of(LupDevSettings())
+        held = read_model(kept(layout.module_data(Private.name, common)), Withheld)
+        scan = (
+            Read(unchecked=UNBUILT)
+            if held is None
+            else read_for_values(files, head, common, held)
+        )
+    for each in scan.found:
+        typer.echo(f"{each.place.text()} - private: {each.what}")
+        typer.echo(f"    steer: {each.steer}")
+    if scan.unchecked is not None:
+        typer.echo(f"Not read: {scan.unchecked}.")
+    commits = "commit" if scan.commits == 1 else "commits"
+    typer.echo(
+        f"lup read {len(files)} files and {scan.commits} {commits} for values "
+        f"never published: {len(scan.found)} found."
+    )
+    if scan.found:
         raise typer.Exit(code=1)
 
 

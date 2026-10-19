@@ -365,6 +365,7 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
         "format",
         "pytest",
         "lint-imports",
+        "private",
     ]
     assert resolved.tests == [Pytest(root=Path("tests"))]
     assert resolved.runner == Uv()
@@ -489,7 +490,7 @@ def test_a_layer_starting_over_replaces_what_s_below() -> None:
     resolved = resolve(Project(modules=modules))
     assert resolved.rules[0].rules == Rules.only("regex")
     assert resolved.exempt == []
-    assert [each.name for each in resolved.gate] == ["pytest"]
+    assert [each.name for each in resolved.gate] == ["pytest", "private"]
 
 
 def test_modules_only_is_an_exact_list_with_settings() -> None:
@@ -570,7 +571,7 @@ def test_replace_puts_another_module_in_place_from_its_own_defaults() -> None:
         "transcripts",
         "private",
     ]
-    assert [each.name for each in resolved.gate] == ["lake"]
+    assert [each.name for each in resolved.gate] == ["lake", "private"]
     assert resolved.runner == Plain()
     assert "**/pyproject.toml" not in resolved.paths.protected
 
@@ -862,7 +863,7 @@ def test_dropping_a_module_drops_its_parts(dropped: str) -> None:
     packages = [each.name for each in resolved.packages]
     match dropped:
         case "python":
-            assert resolved.gate == []
+            assert [each.name for each in resolved.gate] == ["private"]
             assert resolved.tests == []
             assert resolved.paths.python == []
             assert "**/pyproject.toml" not in resolved.paths.protected

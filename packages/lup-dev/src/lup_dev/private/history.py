@@ -210,13 +210,50 @@ def pushed(
         for update in updates
         for each in found(update.destination, held)
     ]
-    trees: dict[str, list[Tracked]] = {}
     commits = walked(repository, [update.source for update in updates], has)
+    return [*refs, *in_commits(repository, commits, held)]
+
+
+def in_commits(repository: Git, commits: list[str], held: Withheld) -> list[Spot]:
+    """Find what each of `commits` publishes that its parents didn't, in order, each tree read once."""
+    trees: dict[str, list[Tracked]] = {}
     return [
-        *refs,
-        *(
-            spot
-            for commit in commits
-            for spot in in_commit(repository, commit, held, trees)
-        ),
+        spot
+        for commit in commits
+        for spot in in_commit(repository, commit, held, trees)
     ]
+
+
+class Remotes(Model):
+    """What the repository's remotes hold, as each lists it, and those that couldn't be listed."""
+
+    objects: list[str] = []
+    unlisted: list[str] = []
+    """Each remote that couldn't be listed, by its name."""
+
+
+def remotes_hold(repository: Git) -> Remotes:
+    """List what each of the repository's remotes holds (`git ls-remote`, by the remote's name, as its `config` gives its URL), and its remote-tracking refs beside.
+
+    git reaches each remote with the credentials of whoever runs it: on the
+    host, the operator's.
+    """
+    names = repository.run("remote").output.decode().splitlines()
+    listed = {
+        name: repository.run("ls-remote", "--end-of-options", name, ok=[0, 1, 2, 128])
+        for name in names
+    }
+    tracking = repository.run(
+        "for-each-ref", "--format=%(objectname)", "refs/remotes"
+    ).output.decode()
+    objects = [
+        words[0]
+        for ran in listed.values()
+        if ran.status == 0
+        for line in ran.output.decode().splitlines()
+        if len(words := line.split()) == 2
+    ]
+    return Remotes(
+        objects=list(dict.fromkeys([*objects, *tracking.splitlines()])),
+        unlisted=[name for name, ran in listed.items() if ran.status != 0],
+    )

@@ -786,7 +786,7 @@ DECLARED = """\
 from lup_dev import Gate, Modules, Plain, Project, Python, Step
 
 project = Project(
-    modules=Modules.default().edit(
+    modules=Modules.default().drop("private", why="these read Python's steps alone").edit(
         Python(
             runner=Plain(),
             gate=Gate.of(
@@ -799,7 +799,7 @@ project = Project(
 )
 """
 """A declaration whose `Python` runs three steps of its own, each as the `PATH`
-finds it."""
+finds it, and without `Private`, whose step would run beside them."""
 
 BUILDING = '''
 from lup_dev import Gate, Module, Modules, Project, Step
@@ -855,6 +855,7 @@ def test_lup_dev_check_runs_lups_default_gate_through_uv(scripted: Scripted) -> 
     assert scripted.ran == [
         *(["uv", "run", *step.command] for step in Fixes().steps),
         *(["uv", "run", *step.command] for step in Gate().steps),
+        ["uv", "run", "lup-dev", "private", "check"],
     ]
 
 
@@ -867,6 +868,7 @@ def test_lup_dev_check_runs_the_steps_a_module_of_the_projects_own_adds(
     assert scripted.ran == [
         ["uv", "run", "build", "it"],
         *(["uv", "run", *step.command] for step in Gate().steps),
+        ["uv", "run", "lup-dev", "private", "check"],
     ]
 
 

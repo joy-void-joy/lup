@@ -172,7 +172,7 @@ def test_lup_s_defaults_serve_github_s_tools_until_it_s_dropped() -> None:
     assert names == ["GitHubTools"]
     dropped = Project(modules=Modules.default().drop("github"))
     assert resolve(dropped).served == []
-    assert resolve(dropped).handled == []
+    assert [each.module.name for each in resolve(dropped).handled] == ["private"]
 
 
 def test_a_toolset_is_dropped_by_its_class_s_name() -> None:
