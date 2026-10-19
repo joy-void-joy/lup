@@ -1337,10 +1337,31 @@ def named_talkers(
     return [(each.path, each.parent, each.depth) for each in listed.talkers["one"]]
 
 
+def podman_having(monkeypatch: pytest.MonkeyPatch, *running: str) -> None:
+    """Stand podman in for the command line, having the containers `running` and no other."""
+
+    def answered(process: Process) -> Exited:
+        match process.arguments:
+            case ["podman", "container", "exists", name]:
+                return Exited(status=0 if name in running else 1)
+            case _:
+                message = f"podman asked {process.arguments}"
+                raise AssertionError(message)
+
+    monkeypatch.setattr(cli, "Podman", lambda: Podman(execute=answered))
+
+
 def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_too(
-    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     records = Subagents(tmp_path)
+    podman_having(monkeypatch, "lup-one")
     with inboxed(machine, clock, notices, said):
         launched(machine, clock, tmp_path / "w", "one", "claude")
         hook = machine.host.launch("one").hook
@@ -1371,7 +1392,8 @@ def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_
         ("w/explore-auth", "w", 1),
         ("w/explore-auth/grep-tokens", "w/explore-auth", 2),
     ]
-    assert listing.output.splitlines()[1:] == [
+    assert listing.output.splitlines() == [
+        f"`w`  claude in {tmp_path / 'w'}  (one)  container lup-one, running",
         "  w",
         "    w/explore-auth  Explore",
         "      w/explore-auth/grep-tokens  general-purpose",
@@ -1380,6 +1402,44 @@ def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_
         "   1  2026-10-01 12:00  a note from `w/explore-auth/grep-tokens` "
         f"(subagent a2 of claude session s1) in {tmp_path / 'w'}: Found it.\n"
     )
+
+
+def test_lup_dev_sessions_counts_the_subagents_that_ended_and_lists_them_with_all(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = Subagents(tmp_path)
+    podman_having(monkeypatch)
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        for agent, name, call in [("a1", "parser", "t1"), ("a2", "lexer", "t2")]:
+            send(hook, records.spawn(call, name=name))
+            records.recorded(agent, "Explore", call, name=name)
+        send(hook, records.call("a1", "Explore", "c1"))
+        send(hook, records.call("a2", "Explore", "c2"))
+        send(hook, claude("SubagentStop", agent_id="a1"))
+        folded = runner.invoke(cli.app, ["sessions"])
+        every = runner.invoke(cli.app, ["sessions", "--all"])
+    launch = f"`w`  claude in {tmp_path / 'w'}  (one)  container lup-one, not running"
+    assert folded.output.splitlines() == [
+        launch,
+        "  w",
+        "    w/lexer  Explore",
+        "    1 ended, which `--all` lists",
+    ]
+    assert every.output.splitlines() == [
+        launch,
+        "  w",
+        "    w/parser  Explore  ended",
+        "    w/lexer  Explore",
+    ]
 
 
 def test_a_subagent_spawned_without_a_name_is_asked_and_its_parent_told_once(

@@ -82,7 +82,13 @@ from lup_dev.host.dashboard import (
     Showing,
 )
 from lup_dev.host.names import shaped
-from lup_dev.host.protocol import GitHubRepository, HostError, Listed, Register
+from lup_dev.host.protocol import (
+    GitHubRepository,
+    HostError,
+    Listed,
+    Register,
+    Talker,
+)
 from lup_dev.host.records import Called, Recorded
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.watch import Changes
@@ -755,25 +761,72 @@ def transcripts_search(
 
 
 @app.command("sessions")
-def sessions() -> None:
+def sessions(
+    *,
+    every: Annotated[
+        bool,
+        typer.Option(
+            "--all", help="List each ended subagent too, rather than counting them."
+        ),
+    ] = False,
+) -> None:
     """List the sessions the host service serves, each with its subagents under it.
 
     Run it yourself, in your own terminal. Each launch by its name, its runtime,
-    its worktree and its id; under it, its session and each subagent beneath
-    the conversation that spawned it, by its path (`dev/explore-auth`) and its
-    kind; an unnamed one by its kind and its id, until it names itself.
+    its worktree, its id, and its container, running or not as podman has it;
+    under it, its session and each subagent beneath the conversation that
+    spawned it, by its path (`dev/explore-auth`) and its kind; an unnamed one by
+    its kind and its id, until it names itself. The subagents that ended under
+    a conversation are counted, as the dashboard folds them; `--all` lists
+    them, each said ended.
     """
     listed = answering().listed()
     if not listed.launches:
         typer.echo("No session runs.")
         return
+    podman = Podman()
     for launch in listed.launches:
+        container = launch.container
+        running = container is not None and podman.exists(container)
         typer.echo(
-            f"`{launch.name}`  {launch.runtime} in {launch.worktree}  ({launch.launch})"
+            f"`{launch.name}`  {launch.runtime} in {launch.worktree}  "
+            f"({launch.launch})  container {container}, "
+            f"{'running' if running else 'not running'}"
         )
-        for talker in listed.talkers.get(launch.launch, []):
-            kind = "" if talker.kind is None else f"  {talker.kind}"
-            typer.echo(f"{'  ' * (talker.depth + 1)}{talker.path}{kind}")
+        for line in conversations(listed.talkers.get(launch.launch, []), every=every):
+            typer.echo(line)
+
+
+def conversations(talkers: list[Talker], *, every: bool) -> list[str]:
+    """Return a launch's conversations as `lup-dev sessions` lists them: each under the one that spawned it, by its path and its kind.
+
+    The subagents over under a conversation are counted after those that
+    aren't, unless `every`, which lists them in their place, each said ended.
+    A subagent is over where it ended, or where nothing it did is kept, as
+    from before the host kept it: as the dashboard folds them (`over`,
+    `agents.ts`).
+    """
+
+    def over(talker: Talker) -> bool:
+        activity = talker.activity
+        return talker.agent is not None and (
+            activity is None or activity.state == "ended"
+        )
+
+    def shown(talker: Talker, depth: int) -> list[str]:
+        kind = "" if talker.kind is None else f"  {talker.kind}"
+        ended = "  ended" if over(talker) else ""
+        children = [each for each in talkers if each.parent == talker.path]
+        listed = children if every else [each for each in children if not over(each)]
+        folded = len(children) - len(listed)
+        counted = f"{'  ' * (depth + 1)}{folded} ended, which `--all` lists"
+        return [
+            f"{'  ' * depth}{talker.path}{kind}{ended}",
+            *(line for each in listed for line in shown(each, depth + 1)),
+            *([counted] if folded else []),
+        ]
+
+    return [line for each in talkers if each.parent is None for line in shown(each, 1)]
 
 
 @app.command("dashboard")

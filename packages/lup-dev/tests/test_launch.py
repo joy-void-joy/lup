@@ -423,7 +423,9 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
     assert status == 7
     said = machine.events.said
     [launch] = [
-        each.launch for each in machine.host.served if each.launch not in ["dead", "live"]
+        each.launch
+        for each in machine.host.served
+        if each.launch not in ["dead", "live"]
     ]
     container = "lup-work-dev"
     assert [each for each in said if not each.startswith("The host zone")] == [
