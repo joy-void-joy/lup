@@ -24,9 +24,10 @@ export interface Part<P extends string> {
 /**
  * Where the cursor is in the review, for the line of keys: writing a comment; on one written; on an agent's banner, or
  * on lup's approvals'; on an item's own lines, an approval's or a held change's as a change; on a changed file's
- * lines; on a line under an item that isn't its own, as a fold's summary; or on nothing, the review empty.
+ * lines, a flagged write's apart, since it's read rather than approved; on a line under an item that isn't its own, as
+ * a fold's summary; or on nothing, the review empty.
  */
-export type ReviewPlace = "insert" | "written" | "banner" | "approvals" | "item" | "change" | "file" | "aside" | "nothing";
+export type ReviewPlace = "insert" | "written" | "banner" | "approvals" | "item" | "change" | "file" | "flagged" | "aside" | "nothing";
 
 /** Where the cursor is in a conversation, for the line of keys: writing a comment, or not. */
 export type ConversationPlace = "insert" | "normal";
@@ -40,6 +41,7 @@ export const REVIEW_PLACES: Record<ReviewPlace, string> = {
     item: "item",
     change: "change",
     file: "file",
+    flagged: "flagged file",
     aside: "fold",
     nothing: "nothing waiting",
 };
@@ -71,9 +73,19 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
     {
         title: "Answering",
         keys: [
-            { keys: "␣a", does: "approve the approval or held change, the comments under it going with it", short: "approve", at: ["change", "file"] },
-            { keys: "␣x", does: "decline it, the comments under it going with it", short: "decline", at: ["change", "file"] },
-            { keys: "␣d", does: "mark the item read, folding it, or unmark it", short: "read", at: ["item", "change"] },
+            {
+                keys: "␣a",
+                does: "approve the approval or held change, the comments under it going with it; a flagged write, mark it read, as ␣d does",
+                short: "approve",
+                at: ["change", "file"],
+            },
+            {
+                keys: "␣x",
+                does: "decline it, the comments under it going with it; a flagged write is read or commented on, never declined",
+                short: "decline",
+                at: ["change", "file"],
+            },
+            { keys: "␣d", does: "mark the item read, folding it, or unmark it", short: "read", at: ["item", "change", "flagged"] },
             { keys: "␣z", does: "leave the item for later, folding it, or bring it back", short: "later", at: ["item"] },
             { keys: "^⏎", does: "send the reply: every comment, message and item marked read", short: "send", at: [] },
         ],
@@ -81,8 +93,13 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
     {
         title: "Commenting",
         keys: [
-            { keys: "o", does: "comment on the line", short: "comment", at: ["item", "change", "file"] },
-            { keys: "c…", does: "comment on the passage a motion covers: ct. ciw cip, cc the line", short: "on a passage", at: ["item", "change", "file"] },
+            { keys: "o", does: "comment on the line", short: "comment", at: ["item", "change", "file", "flagged"] },
+            {
+                keys: "c…",
+                does: "comment on the passage a motion covers: ct. ciw cip, cc the line",
+                short: "on a passage",
+                at: ["item", "change", "file", "flagged"],
+            },
             { keys: "C", does: "comment from the cursor to the line's end", short: "to its end", at: ["item"] },
             { keys: "v… c", does: "comment on a selection: v or V and a motion, then c or s", short: "on a selection", at: [] },
             { keys: "␣c", does: "comment on the item whole", short: "on the item", at: ["item", "change"] },
@@ -96,8 +113,18 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
         title: "Moving",
         keys: [
             { keys: "]] [[", does: "next and previous item, on its first line that matters", short: "items", at: ["banner", "approvals", "item", "aside", "written"] },
-            { keys: "]c [c", does: "next and previous line that matters, in what an approval or held change changes", short: "what matters", at: ["change", "file"] },
-            { keys: "]n [n", does: "next and previous comment or message written, where you last were in it", short: "comments", at: ["written", "banner", "approvals", "item", "change", "file"] },
+            {
+                keys: "]c [c",
+                does: "next and previous line that matters, in what an approval, a held change or a flagged write changes",
+                short: "what matters",
+                at: ["change", "file", "flagged"],
+            },
+            {
+                keys: "]n [n",
+                does: "next and previous comment or message written, where you last were in it",
+                short: "comments",
+                at: ["written", "banner", "approvals", "item", "change", "file", "flagged"],
+            },
             { keys: "␣h", does: "to the agents' tree; Space l there comes back", short: "agents", at: ["banner", "approvals", "nothing"] },
             { keys: "^k", does: "go to an agent's conversation, or the review", short: "go to", at: [] },
         ],
@@ -105,9 +132,9 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
     {
         title: "Folds",
         keys: [
-            { keys: "za", does: "open or close the fold the cursor is on", short: "fold", at: ["file", "aside"] },
+            { keys: "za", does: "open or close the fold the cursor is on", short: "fold", at: ["file", "flagged", "aside"] },
             { keys: "zo zc", does: "open or close it", short: "open close", at: [] },
-            { keys: "zr zm", does: "open or close those hiding a change", short: "changes", at: ["file", "aside"] },
+            { keys: "zr zm", does: "open or close those hiding a change", short: "changes", at: ["file", "flagged", "aside"] },
             { keys: "zR zM", does: "open or close them all", short: "all", at: ["aside"] },
         ],
     },

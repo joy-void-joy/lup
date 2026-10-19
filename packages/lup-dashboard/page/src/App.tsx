@@ -443,6 +443,7 @@ export function App() {
                             }
                         }}
                         approve={approve}
+                        say={setSaid}
                         inserting={setInserting}
                         epoch={epoch}
                         shown={selected === null}

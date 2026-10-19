@@ -14,8 +14,13 @@ describe("the line of keys", () => {
         expect(barOf(CONVERSATION_KEYS, "normal").map((key) => key.keys)).toEqual(["o", "c…", "␣c", "]] [[", "]n [n", "␣r", "za"]);
     });
 
+    it("offers a flagged write's file reading it, never approving or declining it", () => {
+        expect(shown("flagged")).toEqual(["␣d", "o", "c…", "]c [c", "]n [n", "za", "zr zm"]);
+        expect(shown("file")).toEqual(["␣a", "␣x", "o", "c…", "]c [c", "]n [n", "za", "zr zm"]);
+    });
+
     it("shows no key of insert mode outside it, and none of the others in it", () => {
-        const places: ReviewPlace[] = ["written", "banner", "approvals", "item", "change", "file", "aside", "nothing"];
+        const places: ReviewPlace[] = ["written", "banner", "approvals", "item", "change", "file", "flagged", "aside", "nothing"];
         const writing = shown("insert");
         for (const place of places) {
             expect(shown(place).filter((key) => writing.includes(key) && key !== "^⏎")).toEqual([]);

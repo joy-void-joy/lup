@@ -361,6 +361,29 @@ export function flag(item: Item): boolean {
     return item.rank.name === "flag";
 }
 
+/** What Space a or Space x does on an item: answer it, mark it read, say why it does nothing, or nothing. */
+export type Answering = { kind: "answer" } | { kind: "read" } | { kind: "say"; text: string } | { kind: "nothing" };
+
+/** Why Space x does nothing on a flagged write, as the page says it. */
+export const NEVER_DECLINED = "A flag is read or commented on, never declined.";
+
+/**
+ * Return what Space a (`approved`) or Space x does on `item`: approve or decline an approval or a held change; on a
+ * flagged write, Space a marks it read, "looks good", as Space d does, and Space x says it's never declined; on any
+ * other item, nothing.
+ */
+export function answering(item: Item, approved: boolean): Answering {
+    switch (item.reason.reason) {
+        case "approval":
+        case "held":
+            return { kind: "answer" };
+        case "flagged":
+            return approved ? { kind: "read" } : { kind: "say", text: NEVER_DECLINED };
+        default:
+            return { kind: "nothing" };
+    }
+}
+
 /**
  * Return `items` in groups, one per agent, and one per banner of lup's approvals: the group whose first item ranks
  * first first (`Item.rank`: what's waiting on the operator, then news, then flags), then the group with the newest item
@@ -681,10 +704,10 @@ export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "inse
     if (region === undefined || asideAt(region, head) !== undefined) {
         return "aside";
     }
-    if (codeAt(region, head) !== undefined) {
-        return "file";
-    }
     const reason = region.item.reason.reason;
+    if (codeAt(region, head) !== undefined) {
+        return reason === "flagged" ? "flagged" : "file";
+    }
     return reason === "approval" || reason === "held" ? "change" : "item";
 }
 

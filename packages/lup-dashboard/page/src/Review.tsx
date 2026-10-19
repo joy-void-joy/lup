@@ -23,6 +23,7 @@ import { folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing 
 import type { ReviewPlace } from "./keys";
 import {
     aboutAt,
+    answering,
     arrival,
     blockAt,
     blocksOf,
@@ -67,6 +68,8 @@ interface Props {
     around: Around;
     send: () => void;
     approve: (number: number, approved: boolean) => void;
+    /** Say something on the page's line of messages, as why a key did nothing. */
+    say: (text: string) => void;
     /** Told each time vim enters or leaves insert mode, so the page can say what the keys do in it. */
     inserting: (yes: boolean) => void;
     /** Changed each time the draft is replaced from outside, as when it's sent: what was done before can't be undone. */
@@ -290,6 +293,7 @@ export function Review({
     around,
     send,
     approve,
+    say,
     inserting,
     epoch,
     shown,
@@ -419,6 +423,23 @@ export function Review({
         return regionAt(laidOut, editor.head());
     }
 
+    /** Mark the item the cursor is in read, or left for later, folding it; or unmark it. */
+    function toggle(list: "done" | "parked") {
+        const region = here();
+        if (region === undefined) {
+            return;
+        }
+        if (list === "parked") {
+            const at = laidOut.regions.indexOf(region);
+            landing.current = { item: (laidOut.regions[at + 1] ?? region).item.number };
+        }
+        // Marked again, it folds again, however it was left open before.
+        for (const name of ["read", "later"]) {
+            unfolded.current.delete(foldKey({ item: region.item.number, kind: "whole", name }));
+        }
+        editor.record(toggled(editor.latest.current, list, region.item.number));
+    }
+
     /** Open each fold over `target`, as a motion into it would, so the line it's on is in view. */
     function opening(current: EditorView, target: number) {
         const effects = laidFor.folds
@@ -441,21 +462,7 @@ export function Review({
         opened: (position) => opened(laidOut, position),
         quoted: (from, to) => quoted(laidOut, from, to),
         about: (comment, block) => aboutAt(laidOut, comment, block),
-        toggle: (list) => {
-            const region = here();
-            if (region === undefined) {
-                return;
-            }
-            if (list === "parked") {
-                const at = laidOut.regions.indexOf(region);
-                landing.current = { item: (laidOut.regions[at + 1] ?? region).item.number };
-            }
-            // Marked again, it folds again, however it was left open before.
-            for (const name of ["read", "later"]) {
-                unfolded.current.delete(foldKey({ item: region.item.number, kind: "whole", name }));
-            }
-            editor.record(toggled(editor.latest.current, list, region.item.number));
-        },
+        toggle,
         move: (forward) => {
             const current = view.current;
             if (current === null) {
@@ -513,9 +520,22 @@ export function Review({
         },
         approve: (approved) => {
             const region = here();
-            const reason = region?.item.reason.reason;
-            if (region !== undefined && (reason === "approval" || reason === "held")) {
-                approve(region.item.number, approved);
+            if (region === undefined) {
+                return;
+            }
+            const does = answering(region.item, approved);
+            switch (does.kind) {
+                case "answer":
+                    approve(region.item.number, approved);
+                    return;
+                case "read":
+                    toggle("done");
+                    return;
+                case "say":
+                    say(does.text);
+                    return;
+                case "nothing":
+                    return;
             }
         },
         send,
