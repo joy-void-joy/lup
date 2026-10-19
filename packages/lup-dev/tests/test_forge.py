@@ -46,14 +46,15 @@ from lup_dev.host.records import Record, Records
 from lup_dev.host.service import Answerer, Asked, HostService, Judged
 from lup_dev.host.workers import Calling
 from lup_dev.layout import HostLayout, Layout
+from lup_dev.private import hooks
 from lup_dev.private.withheld import Held, Withheld, kept
-from lup_dev.stored import write_model
+from lup_dev.stored import read_model, write_model
 from lup_dev.worker import Serving
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from conftest import InProcess
+    from conftest import InProcess, StubFacts
     from pydantic import JsonValue
 
     from lup_dev.host.workers import LaunchModules
@@ -910,12 +911,39 @@ def test_a_comment_and_a_draft_carrying_a_value_are_refused_before_gh_runs(
     assert gh.calls() == []
 
 
-def test_a_post_with_no_list_built_for_the_repository_is_refused(
+def test_a_post_with_no_list_kept_builds_it_first_and_goes(
+    gh: Gh,
+    tmp_path: Path,
+    stub_facts: type[StubFacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registered = launch(tmp_path)
+    subprocess.run(
+        ["git", "init", "-q", "--bare", str(registered.repository)], check=True
+    )
+    monkeypatch.setattr(hooks, "HostFacts", lambda: stub_facts(home=Path("/home/op")))
+    link = "https://github.com/joy-void-joy/lup/issues/66#issuecomment-1"
+    gh.answer("issue comment", f"{link}\n")
+    answer = called(
+        "comment", {"number": 66, "body": "Fine."}, registered, withheld=None
+    )
+    assert answer == Answer(text=f"Commented: {link}")
+    layout = Layout(state=registered.worktree, data=registered.worktree)
+    built = read_model(
+        kept(layout.module_data("private", registered.repository)), Withheld
+    )
+    assert built is not None
+    assert Held(kind="home", text="/home/op") in built.held
+
+
+def test_a_post_whose_list_can_t_be_built_is_refused_saying_why(
     gh: Gh, tmp_path: Path
 ) -> None:
     answer = called(
         "comment", {"number": 66, "body": "Fine."}, launch(tmp_path), withheld=None
     )
     assert answer.error
-    assert "  all of it - a repository with no list of private values" in answer.text
+    assert (
+        "  all of it - a list of private values that couldn't be built" in answer.text
+    )
     assert gh.calls() == []

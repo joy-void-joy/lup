@@ -123,7 +123,7 @@ def test_transcripts_copy_the_repository_s_records_at_its_moments(
         github=None,
     )
     hooks = TranscriptsHooks(
-        module=Transcripts(), launch=registered, records=held, data=data
+        module=Transcripts(), launch=registered, records=held, data=data, related=[]
     )
     asyncio.run(hooks.keep(Moment(name="stopped")))
     assert (data / "claude" / "projects" / "p" / "s1.jsonl").is_file()

@@ -26,13 +26,23 @@ from lup.rooms.container import Mask, Mount
 from lup.types import Model
 from lup_dev import Project
 from lup_dev.declaration.resolve import resolve
+from lup_dev.errors import LupDevError
 from lup_dev.host.client import HostClient, RoomClient, Starter, asked
 from lup_dev.host.courier import Courier, Heard, Printed, Telling
-from lup_dev.host.protocol import Done, HostError, Limits, Register, Reply, Stop
+from lup_dev.host.protocol import (
+    Done,
+    GitHubRepository,
+    HostError,
+    Limits,
+    Register,
+    Reply,
+    Stop,
+)
 from lup_dev.host.service import Answerer, Asked, HostService, Judged
 from lup_dev.launch.room import RoomError, RoomGit, programs, refreshed, room_git
 from lup_dev.layout import ROOM_PATH, HostLayout, LaunchLayout, LaunchSockets, Layout
-from lup_dev.private.withheld import Held, Withheld, kept
+from lup_dev.private import hooks
+from lup_dev.private.withheld import Facts, Held, Machine, Withheld, kept
 from lup_dev.remote.config import Gating, room_config
 from lup_dev.remote.protocol import (
     Advertised,
@@ -50,13 +60,14 @@ from lup_dev.remote.protocol import (
     refusal,
     routes,
 )
-from lup_dev.stored import write_model
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from conftest import FakeClock, InProcess
+    from conftest import FakeClock, InProcess, StubFacts
 
+    from lup_dev.forge.github import Visibility
     from lup_dev.host.workers import LaunchModules
 
 
@@ -1364,20 +1375,73 @@ def test_an_object_the_listing_names_that_the_store_lacks_is_skipped(
     assert world.on_forge("refs/heads/feat") == git(world.worktree, "rev-parse", "HEAD")
 
 
-def test_a_push_whose_modules_can_t_check_it_is_refused(
-    world: World, clock: FakeClock, in_process: type[InProcess], tmp_path: Path
+def test_a_launch_without_a_list_gets_one_at_its_first_push(
+    world: World,
+    clock: FakeClock,
+    *,
+    in_process: type[InProcess],
+    stub_facts: type[StubFacts],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A launch started before `Private` was approved has no list: the host builds it at the door, as a launch would, and keeps it."""
+    layout = Layout(state=tmp_path / "state-none", data=tmp_path / "data-none")
+    unlisted = in_process(resolved=resolve(Project()), layout=layout)
+    place = kept(layout.module_data("private", world.project))
+    monkeypatch.setattr(hooks, "HostFacts", lambda: stub_facts(home=Path("/home/op")))
+    clean = world.wrote("docs/clean.md", "Nothing here.\n", "clean")
+    carrying = world.wrote("docs/notes.md", "See /home/op/x.\n", "notes")
+
+    with world.served(clock, modules=unlisted):
+        first = world.room_git("push", "origin", f"{clean}:refs/heads/clean")
+        second = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    assert first.exit_code == 0, stderr(first)
+    assert world.on_forge("refs/heads/clean") is not None
+    built = read_model(place, Withheld)
+    assert built is not None
+    assert Held(kind="home", text="/home/op") in built.held
+    assert str(world.project) in [each.text for each in built.held]
+    assert world.on_forge("refs/heads/feat") is None
+    assert f"  {carrying} docs/notes.md:1:5 - the operator's home path" in told(second)
+
+
+def test_a_push_whose_list_can_t_be_built_is_refused_saying_why(
+    world: World,
+    clock: FakeClock,
+    in_process: type[InProcess],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Gone(Facts):
+        def machine(self) -> Machine:
+            message = "the account database is unreadable"
+            raise LupDevError(message)
+
+        def resolved(self, host: str) -> str | None:
+            return host
+
+        async def visibility(
+            self, directory: Path, repository: GitHubRepository
+        ) -> Visibility:
+            return "public"
+
     unlisted = in_process(
         resolved=resolve(Project()),
         layout=Layout(state=tmp_path / "state-none", data=tmp_path / "data-none"),
     )
+    monkeypatch.setattr(hooks, "HostFacts", Gone)
     world.wrote("docs/clean.md", "Nothing here.\n", "clean")
 
     with world.served(clock, modules=unlisted):
         pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
 
     assert world.on_forge("refs/heads/feat") is None
-    assert "  all of it - a repository with no list of private values" in stderr(pushed)
+    assert (
+        "  all of it - a list of private values that couldn't be built\n"
+        "      steer: the host couldn't build it (the account database is "
+        "unreadable), so what it would check doesn't leave: tell the operator"
+    ) in stderr(pushed)
 
 
 def test_a_deletion_and_a_push_with_no_modules_ask_nothing(

@@ -645,6 +645,11 @@ class Kit:
         self.runtime = runtime
         self.announced = Announced(self.layout, self.clock, answering)
         self.flags = Flags()
+        self.facts = StubFacts(
+            home=Path("/home/nobody-here"), user="nobody-here", hostname="no-such-box"
+        )
+        """The host as the judge reads it where it builds a list of values never
+        published: made up, so only a test that means to finds one."""
         self.bench = Bench(
             runtime=runtime,
             services=Services(
@@ -656,6 +661,7 @@ class Kit:
                 integration="dev",
                 announcing=self.announced,
                 flagging=self.flags,
+                facts=self.facts,
             ),
         )
 

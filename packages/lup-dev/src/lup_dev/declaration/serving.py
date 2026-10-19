@@ -10,8 +10,9 @@ its module's settings (`self.module`, which the class narrows to its own module,
 
 A room's request is answered the same way: a `ModuleHandler` names the request
 it answers by narrowing its `request` field to that request's model, and
-`answer` replies, the module, the launch and the module's own data directory for
-the repository through `self`.
+`answer` replies, the module, the launch, the module's own data directory for
+the repository and the other repositories the declaration names (`Related`)
+through `self`.
 
 What a module does at lup's moments is a `ModuleHooks` class, each method run at
 a moment marked with the library's `@lup_hook`: at the one its name names, or
@@ -22,8 +23,9 @@ leaves under the operator's name; and the five each runtime's hooks are read as
 answered (`ANSWERED`: `publishing`) it may refuse, returning its refusals
 (`lup_dev.host.publishing`), each naming what it found and where; one refusal
 keeps what would leave from leaving. Through `self` it reaches its module, the
-launch, where the launch's runtime keeps its sessions' records, and the module's
-own data directory for the repository.
+launch, where the launch's runtime keeps its sessions' records, the module's own
+data directory for the repository, and the other repositories the declaration
+names, as the host finds them.
 
 A module's tool that would publish something puts it through the door first
 (`ModuleTools.publish`), which runs every module's hooks at `publishing`.
@@ -134,6 +136,16 @@ class ModuleTools(Model, arbitrary_types_allowed=True):
             raise UnpublishedError(told(refused, naming))
 
 
+class Related(Model):
+    """Another repository the declaration names for the project's sessions to read, as the host finds it."""
+
+    name: str
+    path: Path
+    """Where it is on the host, absolute and resolved."""
+    github: str | None
+    """Its `owner/name` on GitHub, where its entry gives one."""
+
+
 class ModuleHandler(Model, ABC):
     """A module's answer to one kind of request from a launch's room.
 
@@ -147,6 +159,9 @@ class ModuleHandler(Model, ABC):
     request: Request
     data: Path
     """The module's own directory for the repository, under lup's data."""
+    related: list[Related]
+    """The other repositories the launch's declaration names, as the host finds
+    them."""
 
     @abstractmethod
     async def answer(self) -> Reply:
@@ -229,6 +244,9 @@ class ModuleHooks(Model, arbitrary_types_allowed=True):
     """Where the launch's runtime keeps its sessions' records on this machine."""
     data: Path
     """The module's own directory for the repository, under lup's data."""
+    related: list[Related]
+    """The other repositories the launch's declaration names, as the host finds
+    them."""
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:

@@ -55,5 +55,8 @@ class Scanned(Reply):
     commits: int = 0
     """How many commits were read."""
     unchecked: str | None = None
-    """Why something wasn't read, where it wasn't: no list built for the
-    repository, or a remote that couldn't be listed."""
+    """Why something wasn't read, where it wasn't: no launch approved on the
+    machine, or a remote that couldn't be listed. The gate passes."""
+    unbuilt: str | None = None
+    """Why the list couldn't be built on the host, where none was kept. The
+    gate fails."""

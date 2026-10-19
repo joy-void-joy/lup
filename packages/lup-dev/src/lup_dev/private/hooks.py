@@ -7,8 +7,10 @@ the module's own data directory. A push is read commit by commit
 there; a post part by part. Each value found is a refusal naming its kind and
 place, never the value.
 
-Where no list was built for the repository, nothing it would check leaves: a
-launch builds one, and only one that predates the module wouldn't.
+Where no list is kept for the repository, as for a launch started before the
+module was approved, the hook builds it then, as a launch would, from its
+module and the related repositories the launch's process found, and keeps it.
+Where it can't be built, nothing it would check leaves, saying why.
 """
 
 import asyncio
@@ -16,11 +18,12 @@ from typing import TYPE_CHECKING
 
 from lup.tools.hook import lup_hook
 from lup_dev.declaration.serving import ModuleHooks, Moment
+from lup_dev.errors import LupDevError
 from lup_dev.git import Git
 from lup_dev.host.publishing import Part, Place, Post, Push, Refusal
 from lup_dev.private.found import found
 from lup_dev.private.history import Spot, pushed
-from lup_dev.private.withheld import Withheld, kept, said
+from lup_dev.private.withheld import HostFacts, Withheld, kept, prepared, said
 from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
@@ -48,15 +51,16 @@ def refused(spots: list[Spot]) -> list[Refusal]:
     ]
 
 
-UNBUILT = Refusal(
-    what="a repository with no list of private values",
-    place=Place(within="all of it"),
-    steer=(
-        "a launch builds the list on the host, and this one didn't: tell the "
-        "operator, who launches again with a `lup-dev` that has the `Private` module"
-    ),
-)
-"""Why nothing leaves where no list was built for the repository."""
+def unbuilt(failed: Exception) -> Refusal:
+    """Say why nothing leaves where the list couldn't be built on the host."""
+    return Refusal(
+        what="a list of private values that couldn't be built",
+        place=Place(within="all of it"),
+        steer=(
+            f"the host couldn't build it ({failed}), so what it would check "
+            "doesn't leave: tell the operator"
+        ),
+    )
 
 
 class PrivateHooks(ModuleHooks):
@@ -69,7 +73,18 @@ class PrivateHooks(ModuleHooks):
         """Refuse each value never published in a push or a post, by its kind and place."""
         held = read_model(kept(self.data), Withheld)
         if held is None:
-            return [UNBUILT]
+            try:
+                made = await prepared(
+                    HostFacts(),
+                    self.launch.repository,
+                    related=self.related,
+                    details=self.module.chosen_details(),
+                    values=self.module.chosen_values(),
+                    data=self.data,
+                )
+            except (LupDevError, OSError) as failed:
+                return [unbuilt(failed)]
+            held = made.withheld
         match moment.published:
             case Push(updates=updates, has=has):
                 repository = Git(

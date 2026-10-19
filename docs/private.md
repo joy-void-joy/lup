@@ -4,7 +4,7 @@ A room mounts everything at the host's real paths (`docs/launch.md`, *The mounts
 
 ## What's on the list
 
-Built on the host by each launch, from the declaration at the approved commit (`withheld.py`, `built`; `docs/launch.md`, *The command*), and kept in the module's own data directory for the repository, which no room mounts:
+Built on the host by each launch, from the declaration at the approved commit (`building.py`, `withheld.py`; `docs/launch.md`, *The command*), and kept in the module's own data directory for the repository, which no room mounts. Where none is kept, as for a launch started before `Private` was approved, the host builds it the same way the first time the door, the judge or the gate's handler needs it, and keeps it; only where it can't be built does the door refuse, saying why. The project's own paths are its git directory and each worktree's root.
 
 | Detail | Read on the host as |
 |---|---|
@@ -12,7 +12,7 @@ Built on the host by each launch, from the declaration at the approved commit (`
 | `user` | their user name |
 | `hostname` | the machine's name |
 | `alias` | each host in the URLs of the repository's remotes (`git url-parse -c host`) that `ssh -G` resolves to another name |
-| `repository-path` | the project's own repository (its git directory, main worktree, the tree a room mounts) and each related repository, each also as `~/…` |
+| `repository-path` | the project's own repository (its git directory and each worktree's root) and each related repository, each also as `~/…` |
 | `private-repository` | each related repository GitHub says is private or internal (`gh repo view --json visibility`), or that has no copy there, by its name, `owner/name` and GitHub name |
 
 GitHub is asked at each launch; where it can't answer, its answer at the last launch stands, and a repository it never answered for is left out, the launch saying so. The project's own name is never on the list: a private project names itself.
@@ -40,9 +40,9 @@ A value written in the committed `lup_project.py` would be published by its comm
 
 ## Where it's checked
 
-- **The door, the guarantee.** lup fires the `publishing` moment before a push through its remote helper and a post through its GitHub tools (`docs/declaration.md`, *What a module serves a launch*), and `Private`'s hook refuses one carrying a value (`hooks.py`). A push is read commit by commit beyond what the remote lists: each message, each path added or changed, each line added against every parent (a merge's resolution, not what a parent brought), a file that isn't text by its occurrences, and each ref's name (`history.py`). Where no list was built for the repository, nothing leaves.
+- **The door, the guarantee.** lup fires the `publishing` moment before a push through its remote helper and a post through its GitHub tools (`docs/declaration.md`, *What a module serves a launch*), and `Private`'s hook refuses one carrying a value (`hooks.py`). A push is read commit by commit beyond what the remote lists: each message, each path added or changed, each line added against every parent (a merge's resolution, not what a parent brought), a file that isn't text by its occurrences, and each ref's name (`history.py`). Where the list can't be built, nothing leaves, saying why.
 - **At a write.** A value on a line the write touches, in any path git doesn't ignore (docs, tests and data included), is a finding told right after the write, and the write is flagged for the operator (`private` in `Project.flagged`; `docs/judging-writes.md`). It's never refused there: the write lands.
-- **The gate's `private` step** (`lup-dev private check`) reads every file and `HEAD`'s commits the remotes lack, catching what the shell wrote and what a commit's message says, before the branch lands. In a room it asks the host through the module's handler (`scanning.py`, `Scanning`); where no list was built, or the host doesn't answer, it says so and passes.
+- **The gate's `private` step** (`lup-dev private check`) reads every file and `HEAD`'s commits the remotes lack, catching what the shell wrote and what a commit's message says, before the branch lands. In a room it asks the host through the module's handler (`scanning.py`, `Scanning`). Where the list can't be built it fails, saying why; it passes, saying so, only where the host can't be reached from a room, or, outside one, where no launch was approved on the machine, as in CI, since a CI runner's user name, `runner`, is an ordinary word.
 
 ## What a room is told
 

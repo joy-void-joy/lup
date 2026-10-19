@@ -146,7 +146,6 @@ from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
     Lent,
-    RelatedRepository,
     RoomClipboard,
     RoomError,
     host_needs,
@@ -191,19 +190,13 @@ from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.tools import JudgeTools
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.private.building import listed
 from lup_dev.private.module import Private
 from lup_dev.private.protocol import Scanned as Read
 from lup_dev.private.protocol import Scanning, Sent
-from lup_dev.private.scanning import UNBUILT
+from lup_dev.private.scanning import UNAPPROVED, UNSELECTED
 from lup_dev.private.scanning import scanned as read_for_values
-from lup_dev.private.withheld import (
-    Facts,
-    HostFacts,
-    Neighbour,
-    Withheld,
-    built,
-    kept,
-)
+from lup_dev.private.withheld import Facts, HostFacts, Withheld, kept
 from lup_dev.remote.config import Gating
 from lup_dev.remote.protocol import Remotes
 from lup_dev.remote.protocol import routes as remote_routes
@@ -354,6 +347,7 @@ def services() -> Services:
         integration=settings.lup_integration_branch,
         announcing=InboxAnnouncing(layout=host, clock=SystemClock()),
         flagging=InboxFlagging(layout=host, clock=SystemClock()),
+        facts=HostFacts(),
     )
 
 
@@ -1242,40 +1236,15 @@ class Launcher(Model, arbitrary_types_allowed=True):
     is built from."""
 
 
-def withheld_at_launch(
-    launcher: Launcher,
-    resolved: Resolved,
-    worktree: Path,
-    neighbours: list[RelatedRepository],
-) -> None:
+def withheld_at_launch(launcher: Launcher, resolved: Resolved, worktree: Path) -> None:
     """Build the list of values never published from the repository of `worktree`, where the declaration selects `Private`, and keep it where the module reads it; where it doesn't, remove the one kept.
 
     What the build couldn't read is said once, in the operator's terminal; no
     value is.
     """
     project = repository_of(worktree)
-    place = kept(launcher.layout.module_data(Private.name, project.git))
-    chosen = [each for each in resolved.modules if isinstance(each, Private)]
-    if not chosen:
-        place.unlink(missing_ok=True)
-        return
-    [private] = chosen
-    made = asyncio.run(
-        built(
-            launcher.facts,
-            project.git,
-            own=[project.git, project.main, project.tree],
-            related=[
-                Neighbour(name=each.name, path=each.path, github=each.github)
-                for each in neighbours
-            ],
-            details=private.chosen_details(),
-            values=private.chosen_values(),
-            last=read_model(place, Withheld),
-        )
-    )
-    write_model(place, made.withheld)
-    for note in made.notes:
+    made = asyncio.run(listed(resolved, project.git, launcher.facts, launcher.layout))
+    for note in [] if made is None else made.notes:
         launcher.say(f"Private: {note}.")
 
 
@@ -1451,7 +1420,7 @@ def launched(
                     f"sessions to read isn't at {each.path}, so the room doesn't "
                     "mount it, and its guidance says it's missing."
                 )
-        withheld_at_launch(launcher, declared.resolved, worktree, neighbours)
+        withheld_at_launch(launcher, declared.resolved, worktree)
         lendable = [each.module for each in declared.resolved.shared]
         unknown = [each for each in modules or [] if each not in lendable]
         if unknown:
@@ -1917,6 +1886,33 @@ def worktree_files(root: Path) -> list[Sent]:
     ]
 
 
+def withheld_here(root: Path, common: Path) -> Withheld | Read:
+    """Return the list of values never published kept for the repository whose git directory is `common`, building it where none is kept, as a launch would; or, where it isn't read, what the gate says.
+
+    It's built from the declaration at the commit approved for the repository on
+    this machine, with the person's own layer approved beside it. Where nothing
+    is approved, as on a machine no launch ran on, nothing is read; where it
+    can't be built, the gate fails, saying why.
+    """
+    layout = Layout.of(LupDevSettings())
+    held = read_model(kept(layout.module_data(Private.name, common)), Withheld)
+    if held is not None:
+        return held
+    approval = approved(layout, common)
+    if approval is None:
+        return Read(unchecked=UNAPPROVED)
+    try:
+        with approved_declaration(
+            root, approval.commit, local=approval.local
+        ) as declared:
+            made = asyncio.run(listed(declared.resolved, common, HostFacts(), layout))
+    except (LupDevError, OSError) as failed:
+        return Read(unbuilt=f"the host couldn't build it: {failed}")
+    if made is None:
+        return Read(unchecked=UNSELECTED)
+    return made.withheld
+
+
 @private.command("check")
 def private_check() -> None:
     """Read the worktree for a value never published, as the gate's `private` step does, failing on one.
@@ -1924,11 +1920,12 @@ def private_check() -> None:
     Every file git doesn't ignore, whole, its path too, and the commits `HEAD`
     reaches that the repository's remotes lack, each as a push reads it. Each
     value found is said by its kind and place, never the value. On the host it
-    reads the list the last launch built for the repository; in a room, which
-    never sees the list, the host reads them on the launch's request socket.
-    Where no list was built, as on a machine no launch ran on, or the host can't
-    be asked, it says so and passes: the push or the post is where a value is
-    refused.
+    reads the list kept for the repository, building it where none is, as a
+    launch would; in a room, which never sees the list, the host reads them on
+    the launch's request socket. Where no launch was approved on this machine,
+    as in CI, or the host can't be reached from a room, it says so and passes:
+    the push or the post is where a value is refused. Where the list can't be
+    built, it fails, saying why.
     """
     root = toplevel(Path.cwd())
     files = worktree_files(root)
@@ -1946,13 +1943,14 @@ def private_check() -> None:
                 "rev-parse", "--path-format=absolute", "--git-common-dir"
             )
         )
-        layout = Layout.of(LupDevSettings())
-        held = read_model(kept(layout.module_data(Private.name, common)), Withheld)
-        scan = (
-            Read(unchecked=UNBUILT)
-            if held is None
-            else read_for_values(files, head, common, held)
-        )
+        match withheld_here(root, common):
+            case Withheld() as held:
+                scan = read_for_values(files, head, common, held)
+            case Read() as said:
+                scan = said
+    if scan.unbuilt is not None:
+        typer.echo(f"Values never published weren't read: {scan.unbuilt}.")
+        raise typer.Exit(code=1)
     for each in scan.found:
         typer.echo(f"{each.place.text()} - private: {each.what}")
         typer.echo(f"    steer: {each.steer}")

@@ -15,8 +15,8 @@ that can't do its work raises a `LupDevError`, whose message is its answer;
 anything else that fails is told the host service's way, its traceback said.
 
 Each occasion makes each listening class of hooks afresh, with its module, the
-launch, where the launch's runtime keeps its records, and the module's own data
-directory for the repository, and runs its hooks at that moment in the order
+launch, where the launch's runtime keeps its records, the module's own data
+directory for the repository and the other repositories the declaration names, and runs its hooks at that moment in the order
 they're declared. A hook that fails is told back whole, and the others still run.
 At `publishing` each hook's refusals are gathered, and a hook that fails there,
 or answers anything but its refusals, refuses too: what a check couldn't look
@@ -42,6 +42,7 @@ from lup_dev.declaration.serving import (
     ModuleHooks,
     Moment,
     MomentName,
+    Related,
     answering,
     at,
     listening,
@@ -66,6 +67,7 @@ from lup_dev.host.workers import (
 )
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Services, Worktree
+from lup_dev.private.withheld import related_of
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -168,6 +170,10 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
             layout=services.layout,
         )
 
+    def related(self) -> list[Related]:
+        """Find on the host the other repositories the declaration names, for a module's hooks and handlers."""
+        return related_of(self.resolved.repositories, self.launch.repository)
+
     def offered(self) -> Offered:
         """Return what the modules serve: each tool, each kind of request, and each occasion their hooks run at."""
         listened = [
@@ -239,7 +245,11 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
         request = model.model_validate(sent.model_dump())
         data = self.layout.module_data(owner.module.name, self.launch.repository)
         made = owner.handler(
-            module=owner.module, launch=self.launch, request=request, data=data
+            module=owner.module,
+            launch=self.launch,
+            request=request,
+            data=data,
+            related=self.related(),
         )
         return await made.answer()
 
@@ -267,7 +277,11 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
         data = self.layout.module_data(hooked.module.name, self.launch.repository)
         data.mkdir(parents=True, exist_ok=True)
         made = hooked.hooks(
-            module=hooked.module, launch=self.launch, records=self.records, data=data
+            module=hooked.module,
+            launch=self.launch,
+            records=self.records,
+            data=data,
+            related=self.related(),
         )
         return [await attempted(made, name, now) for name in at(made, now.name)]
 

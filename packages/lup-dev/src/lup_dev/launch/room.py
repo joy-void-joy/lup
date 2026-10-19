@@ -285,7 +285,7 @@ def related(named: list[kinds.Repository], worktree: Path) -> list[RelatedReposi
     holding = repository(worktree).main.parent
 
     def found(declared: kinds.Repository) -> RelatedRepository:
-        path = (holding / declared.path.expanduser()).resolve()
+        path = declared.on_host(holding)
         return RelatedRepository(
             name=declared.name,
             path=path,

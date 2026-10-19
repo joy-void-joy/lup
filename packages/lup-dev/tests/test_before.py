@@ -427,3 +427,16 @@ def test_a_write_to_a_path_git_ignores_is_told_no_private_value(
     decision = before(kit.bench, write, "s1", repo)
     assert decision.outcome == "allow"
     assert "private" not in decision.told
+
+
+def test_a_judge_finding_no_list_builds_it_as_a_launch_would(
+    kit: Kit, repo: Path
+) -> None:
+    kit.announced.holding_all = False
+    kit.facts.home = Path("/home/op")
+    edit = replace(repo, "    return x\n", "    return x  # see /home/op\n")
+    decision = before(kit.bench, edit, "s1", repo)
+    assert "core.py:10:21 - private: the operator's home path" in decision.told
+    built = read_model(kept(kit.layout.module_data("private", repo / ".git")), Withheld)
+    assert built is not None
+    assert Held(kind="home", text="/home/op") in built.held

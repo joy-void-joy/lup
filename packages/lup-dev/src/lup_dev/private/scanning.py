@@ -5,7 +5,8 @@ the shell wrote, a commit's message, a value added in one commit and taken out
 in the next. On the host, `lup-dev private check` reads the list itself; in a
 room, which never sees the list, it sends the files and `HEAD` to the host
 (`Scanning`), and the `Private` module's handler answers (`Scanner`) with each
-kind and place, never a value.
+kind and place, never a value. Where no list is kept for the repository, the
+host builds it first, as a launch would.
 
 Each file is read whole, its path too; a file that isn't text by its bytes.
 `HEAD`'s commits are those it reaches beyond what every remote of the
@@ -19,13 +20,14 @@ import asyncio
 from typing import TYPE_CHECKING, override
 
 from lup_dev.declaration.serving import ModuleHandler
+from lup_dev.errors import LupDevError
 from lup_dev.git import Git
 from lup_dev.host.publishing import Place
 from lup_dev.private.found import counted, found, masked, textual
 from lup_dev.private.history import Spot, in_commits, remotes_hold, walked
 from lup_dev.private.hooks import refused
 from lup_dev.private.protocol import Scanned, Scanning, Sent
-from lup_dev.private.withheld import Withheld, kept
+from lup_dev.private.withheld import HostFacts, Withheld, kept, prepared
 from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
@@ -34,11 +36,17 @@ if TYPE_CHECKING:
     from lup_dev.host.protocol import Reply
     from lup_dev.private.module import Private
 
-UNBUILT = (
-    "no list of values never published was built for this repository on this "
-    "machine (a launch builds it), so nothing was read"
+UNAPPROVED = (
+    "no launch was approved for this repository on this machine, so no list of "
+    "values never published is built here, and nothing was read"
 )
-"""Why a gate where no launch ran passes, said."""
+"""Why the gate passes on a machine no launch ran on, as in CI, said."""
+
+UNSELECTED = (
+    "the declaration at the approved commit doesn't select `Private`, so nothing "
+    "was read"
+)
+"""Why the gate passes where the approved declaration drops the module, said."""
 
 
 def in_file(sent: Sent, held: Withheld) -> list[Spot]:
@@ -103,9 +111,21 @@ class Scanner(ModuleHandler):
 
     @override
     async def answer(self) -> Reply:
+        """Read the room's files and `HEAD`'s new commits against the list kept for the repository, building it first where none is, as a launch would."""
         held = read_model(kept(self.data), Withheld)
         if held is None:
-            return Scanned(unchecked=UNBUILT)
+            try:
+                made = await prepared(
+                    HostFacts(),
+                    self.launch.repository,
+                    related=self.related,
+                    details=self.module.chosen_details(),
+                    values=self.module.chosen_values(),
+                    data=self.data,
+                )
+            except (LupDevError, OSError) as failed:
+                return Scanned(unbuilt=f"the host couldn't build it: {failed}")
+            held = made.withheld
         refusal = self.launch.limits.refusal("fetch")
         head = self.request.head if refusal is None else None
         answer = await asyncio.to_thread(

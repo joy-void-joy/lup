@@ -1,9 +1,10 @@
 """The values never published from a repository: the details lup reads on the host, and the person's own.
 
 `docs/private.md`. A launch builds the list on the host from the declaration at
-the approved commit (`built`), and keeps it in the `Private` module's own data
-directory for the repository (`kept`), which no room mounts: the judge, the
-module's hooks and its handler, and the gate on the host read it there. What a
+the approved commit (`prepared`, `built`), and keeps it in the `Private` module's
+own data directory for the repository (`kept`), which no room mounts: the judge,
+the module's hooks and its handler, and the gate on the host read it there, and
+each builds it the same way where none is kept. What a
 room ever hears of it is a kind and a place, never a value (`Said`).
 
 The details, each read on the host through `Facts`, which tests stub:
@@ -14,9 +15,9 @@ The details, each read on the host through `Facts`, which tests stub:
 - `alias`: each host a URL of the repository's remotes names (as its `config`
   writes it and as git rewrites it, `git url-parse -c host`) that ssh's
   configuration resolves to another name: an alias of the operator's;
-- `repository-path`: the project's own repository (its git directory, its main
-  worktree, the tree a room mounts) and each related repository, by its path on
-  the host, each also as `~/…` where it's under the home;
+- `repository-path`: the project's own repository (its git directory and each
+  worktree's root) and each related repository, by its path on the host, each
+  also as `~/…` where it's under the home;
 - `private-repository`: each related repository GitHub says is private or
   internal, or that has no copy there, by its name, and by its `owner/name` and
   name on GitHub where it has one. GitHub is asked at each launch; where it
@@ -34,13 +35,18 @@ import pwd
 import socket
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Literal, get_args, override
+from typing import TYPE_CHECKING, Literal, get_args, override
 
 from lup.programs import ProgramError, run
 from lup.types import Model
+from lup_dev.declaration.serving import Related
 from lup_dev.forge.github import GitHubError, Visibility, visibility
 from lup_dev.git import Git
 from lup_dev.host.protocol import GitHubRepository
+from lup_dev.stored import read_model, write_model
+
+if TYPE_CHECKING:
+    from lup_dev.declaration.kinds import Repository
 
 type Detail = Literal[
     "home", "user", "hostname", "alias", "repository-path", "private-repository"
@@ -201,16 +207,6 @@ class HostFacts(Facts):
         return await visibility(directory, repository)
 
 
-class Neighbour(Model):
-    """A related repository, as a launch found it on the host."""
-
-    name: str
-    path: Path
-    """Absolute and resolved."""
-    github: str | None
-    """Its `owner/name` on GitHub, where its entry gives one."""
-
-
 class Built(Model):
     """The list a launch built, and what it says in the operator's terminal of what it couldn't read."""
 
@@ -312,15 +308,15 @@ def answered(
             raise answer
 
 
-def private_names(related: list[Neighbour], seen: list[Seen]) -> list[str]:
+def private_names(related: list[Related], seen: list[Seen]) -> list[str]:
     """Name each related repository that isn't public: one GitHub says is private or internal, or one with no copy there; by its name, and by its `owner/name` and name on GitHub.
 
-    >>> private_names([Neighbour(name="atlas", path=Path("/x"), github=None)], [])
+    >>> private_names([Related(name="atlas", path=Path("/x"), github=None)], [])
     ['atlas']
     """
     hidden = [each.repository for each in seen if each.visibility != "public"]
 
-    def names(neighbour: Neighbour) -> list[str]:
+    def names(neighbour: Related) -> list[str]:
         if neighbour.github is None:
             return [neighbour.name]
         if neighbour.github not in hidden:
@@ -336,7 +332,7 @@ async def built(
     repository: Path,
     *,
     own: list[Path],
-    related: list[Neighbour],
+    related: list[Related],
     details: list[Detail],
     values: list[str],
     last: Withheld | None,
@@ -413,3 +409,48 @@ async def built(
         *(each.note for each in read if each.note is not None),
     ]
     return Built(withheld=Withheld(held=longest, seen=seen), notes=notes)
+
+
+def own_paths(repository: Path) -> list[Path]:
+    """Return the project's own repository's paths on the host: its git directory, and each worktree's root, its main one first."""
+    return list(dict.fromkeys([repository, *Git.pinned(repository).worktrees()]))
+
+
+def related_of(repositories: list[Repository], repository: Path) -> list[Related]:
+    """Find on the host each other repository a declaration names, a relative path being from the directory holding the project's own repository, whose git directory is `repository`."""
+    if not repositories:
+        return []
+    holding = Git.pinned(repository).main_worktree().parent
+    return [
+        Related(name=each.name, path=each.on_host(holding), github=each.github)
+        for each in repositories
+    ]
+
+
+async def prepared(
+    facts: Facts,
+    repository: Path,
+    *,
+    related: list[Related],
+    details: list[Detail],
+    values: list[str],
+    data: Path,
+) -> Built:
+    """Build the list for the repository whose git directory is `repository`, as a launch does, and keep it in the `Private` module's own data directory for it, `data`.
+
+    The list kept before, where there's one, gives GitHub's last word on a
+    repository it gives none for at this build. Raise `LupDevError` or
+    `OSError` where the host can't be read.
+    """
+    place = kept(data)
+    made = await built(
+        facts,
+        repository,
+        own=own_paths(repository),
+        related=related,
+        details=details,
+        values=values,
+        last=read_model(place, Withheld),
+    )
+    write_model(place, made.withheld)
+    return made

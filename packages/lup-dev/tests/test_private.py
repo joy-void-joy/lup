@@ -10,7 +10,7 @@ import os
 import shutil
 import threading
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,26 +18,27 @@ import pytest
 from typer.testing import CliRunner
 
 from lup_dev import Modules, Private, Project, ProjectError, Values, cli
+from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.declaration.resolve import resolve
-from lup_dev.declaration.serving import answering
+from lup_dev.declaration.serving import Related, answering
 from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import RoomClient, asked
 from lup_dev.host.courier import Courier, Heard, Printed, Telling
 from lup_dev.host.protocol import Action, Done, Limits, Register, Registered, Stop
 from lup_dev.host.service import Answerer, Asked, HostService, Judged
 from lup_dev.layout import HostLayout, Layout
+from lup_dev.private import scanning
 from lup_dev.private.found import added_lines, counted, found, textual
 from lup_dev.private.module import Details
 from lup_dev.private.withheld import (
     Held,
-    Neighbour,
     Seen,
     Withheld,
     built,
     kept,
     said,
 )
-from lup_dev.stored import write_model
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -139,7 +140,7 @@ def building(
     facts: StubFacts,
     git: Path,
     *,
-    related: list[Neighbour] | None = None,
+    related: list[Related] | None = None,
     details: list[str] | None = None,
     values: list[str] | None = None,
     last: Withheld | None = None,
@@ -233,11 +234,11 @@ def test_a_related_repository_that_isn_t_public_is_kept_by_its_names(
         },
     )
     related = [
-        Neighbour(name="gannet", path=tmp_path / "gannet", github=None),
-        Neighbour(name="atlas", path=tmp_path / "atlas", github="op/atlas"),
-        Neighbour(name="public-one", path=tmp_path / "pub", github="op/pub"),
-        Neighbour(name="gull", path=tmp_path / "gull", github="op/gull"),
-        Neighbour(name="tern", path=tmp_path / "tern", github="op/tern"),
+        Related(name="gannet", path=tmp_path / "gannet", github=None),
+        Related(name="atlas", path=tmp_path / "atlas", github="op/atlas"),
+        Related(name="public-one", path=tmp_path / "pub", github="op/pub"),
+        Related(name="gull", path=tmp_path / "gull", github="op/gull"),
+        Related(name="tern", path=tmp_path / "tern", github="op/tern"),
     ]
     last = Withheld(seen=[Seen(repository="op/gull", visibility="private")])
     held, notes, seen = building(
@@ -338,6 +339,14 @@ def gated(worktree: Path, shell: Shell) -> str:
     return shell.git(worktree, "rev-parse", "--short", "HEAD").strip()
 
 
+QUIET_LAYER = (
+    '"""This person\'s own values."""\n\n'
+    "from lup_dev import Modules, Private, Project, Values\n\n"
+    'project = Project(modules=Modules().edit(Private(values=Values().add("Kestrel Labs"))))\n'
+)
+"""A person's own layer, approved with the commit, adding a value of theirs."""
+
+
 EXPECTED = (
     "docs/notes.md:1:5 - private: the operator's home path\n"
     "    steer: write it as `~`, or a path in the repository from its root\n"
@@ -360,16 +369,46 @@ def test_the_gate_on_the_host_fails_on_a_value_in_a_file_or_a_new_commit(
     assert "/home/op" not in result.output
 
 
-def test_the_gate_where_no_launch_built_a_list_says_so_and_passes(
+def test_the_gate_on_a_machine_no_launch_ran_on_says_so_and_passes(
     forged: Path, shell: Shell, state: Layout
 ) -> None:
     gated(forged, shell)
     result = runner.invoke(cli.app, ["private", "check"])
     assert result.exit_code == 0
     assert result.output.startswith(
-        "Not read: no list of values never published was built for this "
-        "repository on this machine (a launch builds it), so nothing was read.\n"
+        "Not read: no launch was approved for this repository on this machine, "
+        "so no list of values never published is built here, and nothing was "
+        "read.\n"
     )
+
+
+def test_the_gate_on_the_host_builds_a_missing_list_as_a_launch_would(
+    forged: Path,
+    shell: Shell,
+    state: Layout,
+    stub_facts: type[StubFacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    short = gated(forged, shell)
+    common = forged.parents[1]
+    approval = Approval(
+        commit=shell.git(forged, "rev-parse", "HEAD").strip(),
+        fingerprint="f",
+        paths=[],
+        tool=ReleaseTool(
+            name="lup-dev", version="0.4.0", registry="https://pypi.org/simple", pins={}
+        ),
+        time=datetime(2026, 10, 19, tzinfo=UTC),
+        local=QUIET_LAYER,
+    )
+    write_model(state.approved(common), approval)
+    monkeypatch.setattr(cli, "HostFacts", lambda: stub_facts(home=Path("/home/op")))
+    result = runner.invoke(cli.app, ["private", "check"])
+    assert result.exit_code == 1
+    assert result.output.startswith(EXPECTED.format(short=short))
+    built = read_model(kept(state.module_data("private", common)), Withheld)
+    assert built is not None
+    assert Held(kind="value", text="Kestrel Labs") in built.held
 
 
 def test_a_remote_that_can_t_be_listed_leaves_the_commits_unread_said(
@@ -496,6 +535,31 @@ def test_the_gate_in_a_room_asks_the_host_which_never_says_a_value(
         result = runner.invoke(cli.app, ["private", "check"])
     assert result.exit_code == 1
     assert result.output.startswith(EXPECTED.format(short=short))
+
+
+def test_the_gate_in_a_room_whose_launch_has_no_list_has_the_host_build_it(
+    forged: Path,
+    shell: Shell,
+    *,
+    in_process: type[InProcess],
+    stub_facts: type[StubFacts],
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    short = gated(forged, shell)
+    layout = Layout(state=tmp_path / "host-state", data=tmp_path / "host-data")
+    declared = Modules.default().edit(Private(values=Values().add("Kestrel Labs")))
+    modules = in_process(resolved=resolve(Project(modules=declared)), layout=layout)
+    monkeypatch.setattr(
+        scanning, "HostFacts", lambda: stub_facts(home=Path("/home/op"))
+    )
+    with hosted(tmp_path_factory, registered(forged), modules) as socket:
+        in_the_room(socket, monkeypatch)
+        result = runner.invoke(cli.app, ["private", "check"])
+    assert result.exit_code == 1
+    assert result.output.startswith(EXPECTED.format(short=short))
+    assert read_model(kept(layout.module_data("private", forged.parents[1])), Withheld)
 
 
 def test_the_gate_in_a_room_whose_host_doesn_t_answer_says_so_and_passes(
