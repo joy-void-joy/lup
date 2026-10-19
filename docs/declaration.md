@@ -176,10 +176,10 @@ At load, every module a selected module `requires` must be selected too, and no 
 
 **What a module serves a launch** (`declaration/serving.py`). It all runs on the host, in a process of the launch's own, from the repository's approved copy (`lup_dev/worker.py`). The host service passes it each call, request and moment (`host/workers.py`); the core's tools, the inbox's, and git's helper stay in the service.
 - **Tools,** `tools: Toolsets = Toolsets.of(GitHubTools)`: classes of `ModuleTools`, each tool a method decorated with the library's `@lup_tool`. A class narrows `module` to its module's class (`module: GitHub`), so a tool reads its module's settings through `self.module`, beside `self.launch` and `self.caller`.
-- **Handlers,** `handlers: Handlers = Handlers.of(Stating)`: `ModuleHandler`s, each narrowing `request` to the model of the room's requests it answers. A request's `kind` routes it to its handler.
+- **Handlers,** `handlers: Handlers = Handlers.of(Stating)`: `ModuleHandler`s, each narrowing `request` to the model of the room's requests it answers. A request's `kind` routes it to its handler, which reaches its module, the launch and the module's own data directory through `self`.
 - **Hooks,** `hooks: Hooks = Hooks.of(TranscriptsHooks)`: `ModuleHooks` classes, each method marked with `@lup_hook`.
-  - A method runs at the moment its name names, or at those its `on` names. lup's moments are `launched`, `stopped` (once the launch's session has fully stopped), and the five each runtime's hooks are read as: `session_started`, `call_started`, `call_finished`, `turn_ended` and `conversation_ended`.
-  - A hook observes a `Moment`; it can't hold or answer it.
+  - A method runs at the moment its name names, or at those its `on` names. lup's moments are `launched`, `stopped` (once the launch's session has fully stopped), `publishing` (before anything leaves under the operator's name), and the five each runtime's hooks are read as: `session_started`, `call_started`, `call_finished`, `turn_ended` and `conversation_ended`.
+  - A hook observes a `Moment`, returning nothing, except at `publishing`, the one moment a hook answers (`ANSWERED`): there it returns its refusals (`list[Refusal]`, `host/publishing.py`), each naming what it found and where, and one refusal keeps the push or the post from leaving. A hook failing there refuses too, since what wasn't checked doesn't leave; a hook refusing at a moment it only observes has failed. lup fires `publishing` with what would leave (`Moment.published`): a push through git's remote helper, with each ref it updates and what the remote holds already (`Push`), or a post through a module's tool, each of its parts (`Post`), which the tool puts through its `door` first (`ModuleTools.publish`; `docs/private.md`).
   - Through `self` it reaches its module, the launch, the runtime's session records (`Records`), and the module's own data directory.
 - **Data,** `data: Mounted = Mounted()`: the module's own data directory for the repository, mounted at its host path, read-only unless it says otherwise.
   - It's mounted in every room with `Mounted(always=True)`, or only in a room whose launch lends it by the module's name (`lup-dev launch <runtime> --mount transcripts`) with `Mounted()`.
@@ -345,7 +345,7 @@ In `packages/lup-dev/src/lup_dev/`:
 | `declaration/resolve.py` | `resolve` and `Resolved`; `Selected`, `SessionChoices`; `Declaration`, what judging reads |
 | `declaration/runner.py` | `Runner`, `Uv`, `Plain`, `Prefixed`; `RoomNeeds`, `Interpreter` |
 | `declaration/requirements.py` | `Requirement`; `Tools` and `Machine`; `check` and its `Report` |
-| `declaration/serving.py` | `ModuleTools`, `ModuleHandler`, `ModuleHooks`, `Moment` |
+| `declaration/serving.py` | `ModuleTools`, `ModuleHandler`, `ModuleHooks`, `Moment`; `Door`, which a tool publishes through (`UnpublishedError`); `ANSWERED` |
 | `declaration/modules/` | `Core`, `Python` and `CodeRules`; `shipped.py`, the default list and every module shipped; `guidance/`, their sections |
 | `catalog/` | lup's defaults, which the modules read: `paths.py`, `gate.py` (`Step`), `rules.py`, `room.py`, `credentials.py` |
 

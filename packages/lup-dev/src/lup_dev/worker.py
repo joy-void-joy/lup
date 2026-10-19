@@ -8,15 +8,19 @@ beside it, makes each module's tools, handlers and hooks from it, says it's read
 on its output's first line, and answers one request per connection on `<socket>`
 until its input closes, which it does when the service ends it or dies.
 
-Each call makes the tools' class afresh, with its module, the launch and the
-conversation calling, so a tool reads them through `self`. A tool that can't do
-its work raises a `LupDevError`, whose message is its answer; anything else that
-fails is told the host service's way, its traceback said.
+Each call makes the tools' class afresh, with its module, the launch, the
+conversation calling and the door what it would publish goes through (this
+process's own hooks at `publishing`), so a tool reads them through `self`. A tool
+that can't do its work raises a `LupDevError`, whose message is its answer;
+anything else that fails is told the host service's way, its traceback said.
 
 Each occasion makes each listening class of hooks afresh, with its module, the
 launch, where the launch's runtime keeps its records, and the module's own data
 directory for the repository, and runs its hooks at that moment in the order
 they're declared. A hook that fails is told back whole, and the others still run.
+At `publishing` each hook's refusals are gathered, and a hook that fails there,
+or answers anything but its refusals, refuses too: what a check couldn't look
+at doesn't leave.
 """
 
 import asyncio
@@ -24,13 +28,17 @@ import sys
 import traceback
 from typing import TYPE_CHECKING, override
 
+from pydantic import TypeAdapter, ValidationError
+
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused
 from lup.types import Model
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import Handled, Hooked, Resolved, Served, resolve
 from lup_dev.declaration.serving import (
+    ANSWERED,
     HEARD,
+    Door,
     ModuleHooks,
     Moment,
     MomentName,
@@ -40,6 +48,7 @@ from lup_dev.declaration.serving import (
 )
 from lup_dev.errors import LupDevError
 from lup_dev.host.protocol import Register, Reply
+from lup_dev.host.publishing import Place, Published, Refusal
 from lup_dev.host.records import Records
 from lup_dev.host.service import Dispatcher, Handler, Route
 from lup_dev.host.watch import Changes
@@ -62,34 +71,79 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
+    from lup_dev.host.courier import Conversation
+
 
 def moment(occasion: Occasion) -> MomentName:
     """Return the moment of lup's that an occasion the service tells is."""
     match occasion:
-        case "launched" | "stopped":
+        case "launched" | "stopped" | "publishing":
             return occasion
         case _:
             return HEARD[occasion]
 
 
-async def attempted(made: ModuleHooks, name: str, now: Moment) -> str | None:
-    """Run the hook `name` of `made` at `now`; return why it failed, or none.
+class Ran(Model):
+    """One hook run at a moment: why it failed, where it did, and what it refused."""
+
+    failure: str | None = None
+    """Why it failed, its traceback with it; none where it didn't."""
+    refusals: list[Refusal] = []
+
+
+ANSWER = TypeAdapter[list[Refusal] | None](list[Refusal] | None)
+"""What a hook may return: its refusals at a moment that's answered, nothing at
+any other."""
+
+
+async def attempted(made: ModuleHooks, name: str, now: Moment) -> Ran:
+    """Run the hook `name` of `made` at `now`, and return how it went.
 
     A hook's failure is told back whole, its traceback with it, and doesn't keep
-    the next from running.
+    the next from running. At a moment that's answered (`ANSWERED`), a hook that
+    fails, or returns anything but its refusals, refuses what would leave; at
+    any other, a hook returning refusals has failed, since nothing there can be
+    refused.
     """
-    hook: Callable[[Moment], Awaitable[None]] = getattr(made, name)
+    hook: Callable[[Moment], Awaitable[list[Refusal] | None]] = getattr(made, name)
+    who = f"`{type(made).__name__}.{name}`"
     try:
-        await hook(now)
+        answered = ANSWER.validate_python(await hook(now))
+    except ValidationError as unread:
+        failure = f"{who} answered {now.name} with what isn't its refusals: {unread}"
+        return failed(failure, now)
     except Exception:
-        return (
-            f"`{type(made).__name__}.{name}` failed at {now.name}:\n"
-            f"{traceback.format_exc()}"
+        failure = f"{who} failed at {now.name}:\n{traceback.format_exc()}"
+        return failed(failure, now)
+    refused = answered or []
+    if refused and now.name not in ANSWERED:
+        return Ran(
+            failure=(
+                f"{who} refused at {now.name}, where a hook only observes: only "
+                f"{', '.join(ANSWERED)} can be refused"
+            )
         )
-    return None
+    return Ran(refusals=refused)
 
 
-class Serving(Model, arbitrary_types_allowed=True):
+def failed(failure: str, now: Moment) -> Ran:
+    """Return a hook's failure at `now`: at a moment that's answered, a refusal too, since what it couldn't check doesn't leave."""
+    if now.name not in ANSWERED:
+        return Ran(failure=failure)
+    [first, *_] = failure.splitlines()
+    refusal = Refusal(
+        what=f"a check that didn't run: {first}",
+        place=Place(within="all of it"),
+        steer=(
+            "the host service's log has why; what can't be checked doesn't leave "
+            "from a room, so tell the operator, who can publish it from their own "
+            "terminal"
+        ),
+    )
+    return Ran(failure=failure, refusals=[refusal])
+
+
+class Serving(Model, Door, arbitrary_types_allowed=True):
     """A launch's modules, as its declaration resolves them: what they serve, and each answer."""
 
     launch: Register
@@ -119,7 +173,7 @@ class Serving(Model, arbitrary_types_allowed=True):
         listened = [
             each for hooked in self.resolved.hooked for each in listening(hooked.hooks)
         ]
-        told: list[Occasion] = ["launched", "stopped", *HEARD]
+        told: list[Occasion] = ["launched", "stopped", "publishing", *HEARD]
         return Offered(
             tools=[
                 spec for each in self.resolved.served for spec in each.tools.specs()
@@ -157,7 +211,7 @@ class Serving(Model, arbitrary_types_allowed=True):
         if owner is None:
             return Answer(text=f"no module of this launch serves `{name}`", error=True)
         made = owner.tools(
-            module=owner.module, launch=self.launch, caller=calling.caller
+            module=owner.module, launch=self.launch, caller=calling.caller, door=self
         )
         [tool] = [tool for tool in made.tools() if tool.spec().name == name]
         try:
@@ -183,36 +237,51 @@ class Serving(Model, arbitrary_types_allowed=True):
             raise LupDevError(message)
         model = answering(owner.handler)
         request = model.model_validate(sent.model_dump())
-        made = owner.handler(module=owner.module, launch=self.launch, request=request)
+        data = self.layout.module_data(owner.module.name, self.launch.repository)
+        made = owner.handler(
+            module=owner.module, launch=self.launch, request=request, data=data
+        )
         return await made.answer()
 
     async def happen(self, happening: Happening) -> Happened:
-        """Run every hook at the moment `happening` tells, and return what failed among them."""
+        """Run every hook at the moment `happening` tells, and return what failed among them, and what they refused."""
         now = Moment(
             name=moment(happening.occasion),
             conversation=happening.conversation,
             call=happening.call,
             tool=happening.tool,
+            published=happening.published,
         )
-        failures = [
-            failure
+        ran = [
+            each
             for hooked in self.resolved.hooked
-            for failure in await self.ran(hooked, now)
+            for each in await self.ran(hooked, now)
         ]
-        return Happened(failures=failures)
+        return Happened(
+            failures=[each.failure for each in ran if each.failure is not None],
+            refusals=[refusal for each in ran for refusal in each.refusals],
+        )
 
-    async def ran(self, hooked: Hooked, now: Moment) -> list[str]:
-        """Run one class's hooks at `now`, made afresh with its module's data directory; return what failed."""
+    async def ran(self, hooked: Hooked, now: Moment) -> list[Ran]:
+        """Run one class's hooks at `now`, made afresh with its module's data directory; return how each went."""
         data = self.layout.module_data(hooked.module.name, self.launch.repository)
         data.mkdir(parents=True, exist_ok=True)
         made = hooked.hooks(
             module=hooked.module, launch=self.launch, records=self.records, data=data
         )
-        return [
-            failure
-            for name in at(made, now.name)
-            if (failure := await attempted(made, name, now)) is not None
-        ]
+        return [await attempted(made, name, now) for name in at(made, now.name)]
+
+    @override
+    async def refusals(
+        self, published: Published, conversation: Conversation | None
+    ) -> list[Refusal]:
+        happening = Happening(
+            occasion="publishing", conversation=conversation, published=published
+        )
+        happened = await self.happen(happening)
+        for failure in happened.failures:
+            sys.stderr.write(f"{failure}\n")
+        return happened.refusals
 
 
 class Listed(Model, Handler[Listing]):
