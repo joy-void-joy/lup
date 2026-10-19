@@ -11,7 +11,8 @@
 // previous line that matters, where a view has some, `]n` and `[n` to the next
 // and previous comment, where the cursor last was in it. Ctrl+Enter in a comment ends
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
-// any change to the draft. What folds is folded until opened: `za` opens or
+// any change to the draft, `g-` and `g+` go through its history in the order it
+// was made (`History`). What folds is folded until opened: `za` opens or
 // closes the fold under the cursor, `zo` and `zc` open and close it, `zR` and
 // `zM` open and close them all, `zr` and `zm` those hiding a change alone (a file
 // folded whole, a run holding changed lines), unchanged context left as it is. Space `h`, or Space `w` `h`, goes to the agents'
@@ -53,7 +54,7 @@ interface Actions {
     foldAll: (closing: boolean) => void;
     foldDiffs: (closing: boolean) => void;
     folded: (state: EditorState) => void;
-    undo: (back: boolean) => void;
+    undo: (way: "undo" | "redo" | "earlier" | "later") => void;
     send: () => void;
     blocks: () => Block[];
     edited: (update: ViewUpdate) => void;
@@ -147,6 +148,64 @@ export function nextWritten(blocks: readonly Span[], head: number, forward: bool
     return Math.min(visited.find((at) => at >= target.from && at <= target.to) ?? last, last);
 }
 
+/** One state the draft was in, in its history: what it was, the state it was made from, and the one Ctrl+R goes to. */
+interface State<D> {
+    draft: D;
+    /** The state it was made from, `u`'s; none for the first. */
+    parent: number | null;
+    /** The state made from it last, or last undone back to it, Ctrl+R's. */
+    child: number | null;
+}
+
+/**
+ * The draft's history, as vim's undo tree: each state it was in after a step, numbered in the order they were made,
+ * each but the first made from another; and the state it's in. `u` and Ctrl+R go to the state one was made from and
+ * back; `g-` and `g+` to the state made before and after, whatever it was made from, so a state undone and left by a
+ * change after it is still reached.
+ */
+export interface History<D> {
+    states: State<D>[];
+    at: number;
+}
+
+/** Return a history of `draft` alone. */
+export function begun<D>(draft: D): History<D> {
+    return { states: [{ draft, parent: null, child: null }], at: 0 };
+}
+
+/** Return `history` with the state it's in now holding `draft`: a step still being made, as a comment being written, or a change no step made. */
+export function rewritten<D>(history: History<D>, draft: D): History<D> {
+    return { ...history, states: history.states.map((each, at) => (at === history.at ? { ...each, draft } : each)) };
+}
+
+/** Return `history` with a step made from the state it's in to `draft`, numbered after every other. */
+export function stepped<D>(history: History<D>, draft: D): History<D> {
+    const made = history.states.length;
+    const states = history.states.map((each, at) => (at === history.at ? { ...each, child: made } : each));
+    return { states: [...states, { draft, parent: history.at, child: null }], at: made };
+}
+
+/**
+ * Return `history` gone to another state: `undo` to the one the state it's in was made from, its own Ctrl+R's;
+ * `redo` to the one Ctrl+R goes to; `earlier` and `later` to the one made before or after it. As it was where there's
+ * none.
+ */
+export function went<D>(history: History<D>, way: "undo" | "redo" | "earlier" | "later"): History<D> {
+    const now = history.states[history.at];
+    if (now === undefined) {
+        return history;
+    }
+    const to = { undo: now.parent, redo: now.child, earlier: history.at - 1, later: history.at + 1 }[way];
+    if (to === null || to < 0 || to >= history.states.length) {
+        return history;
+    }
+    if (way !== "undo") {
+        return { ...history, at: to };
+    }
+    const states = history.states.map((each, at) => (at === to ? { ...each, child: history.at } : each));
+    return { states, at: to };
+}
+
 /** One editor's own: what its keys do, and what it knows of the last key. */
 interface Bound {
     actions: Actions | null;
@@ -204,8 +263,10 @@ function mapKeys(): void {
     action("lupFoldCloseAll", (actions) => actions.foldAll(true));
     action("lupFoldOpenDiffs", (actions) => actions.foldDiffs(false));
     action("lupFoldCloseDiffs", (actions) => actions.foldDiffs(true));
-    action("lupUndo", (actions) => actions.undo(true));
-    action("lupRedo", (actions) => actions.undo(false));
+    action("lupUndo", (actions) => actions.undo("undo"));
+    action("lupRedo", (actions) => actions.undo("redo"));
+    action("lupEarlierState", (actions) => actions.undo("earlier"));
+    action("lupLaterState", (actions) => actions.undo("later"));
     const map = (keys: string, name: string, context: string) =>
         Vim.mapCommand(keys, "action", name, {}, { context });
     map("o", "lupCommentLine", "normal");
@@ -228,6 +289,8 @@ function mapKeys(): void {
     map("zm", "lupFoldCloseDiffs", "normal");
     map("u", "lupUndo", "normal");
     map("<C-r>", "lupRedo", "normal");
+    map("g-", "lupEarlierState", "normal");
+    map("g+", "lupLaterState", "normal");
     map("]]", "lupNext", "normal");
     map("[[", "lupPrevious", "normal");
     map("]c", "lupNextMatter", "normal");
@@ -604,10 +667,9 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     telling.current = config.inserting;
     const following = useRef(config.moved);
     following.current = config.moved;
-    // The drafts before each change, for `u`; those undone, for Ctrl+R; and whether the comment being
-    // written has its step already, so it's undone whole.
-    const past = useRef<D[]>([]);
-    const future = useRef<D[]>([]);
+    // The draft's history, for `u`, Ctrl+R, `g-` and `g+`; and whether the comment being written has its step
+    // already, so it's undone whole.
+    const history = useRef<History<D>>(begun(config.draft));
     const writing = useRef(false);
     // Where the key that opened the comment being written was pressed.
     const opener = useRef<number | null>(null);
@@ -705,8 +767,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     }, [config.shownNow]);
 
     useEffect(() => {
-        past.current = [];
-        future.current = [];
+        history.current = begun(latest.current);
     }, [config.epoch]);
 
     function head(): number {
@@ -719,10 +780,9 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
 
     /** Change the draft as one step `u` undoes: the comment being written, from its opening to its end, is one. */
     function record(next: D) {
-        if (!writing.current) {
-            past.current = [...past.current, latest.current];
-            future.current = [];
-        }
+        // What changed the draft since, by no step of its own, as an emptied comment dropped, is the state it was in.
+        const now = rewritten(history.current, latest.current);
+        history.current = writing.current ? rewritten(now, next) : stepped(now, next);
         writing.current = keyed.inserting;
         change(next);
     }
@@ -876,16 +936,13 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     }
                 }
             },
-            undo: (back) => {
-                const from = back ? past : future;
-                const to = back ? future : past;
-                const restored = from.current.at(-1);
-                if (restored === undefined) {
-                    return;
+            undo: (way) => {
+                const now = rewritten(history.current, latest.current);
+                const gone = went(now, way);
+                history.current = gone;
+                if (gone.at !== now.at) {
+                    change(gone.states[gone.at]?.draft ?? latest.current);
                 }
-                from.current = from.current.slice(0, -1);
-                to.current = [...to.current, latest.current];
-                change(restored);
             },
             send: own.send,
             paint: (from, to) => own.paint?.(from, to) ?? [],

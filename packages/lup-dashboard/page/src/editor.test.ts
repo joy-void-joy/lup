@@ -1,6 +1,35 @@
 import { describe, expect, it } from "vitest";
 
-import { deadPressed, deadTyped, nextWritten, visit, type Dead, type Pressed } from "./editor";
+import { begun, deadPressed, deadTyped, nextWritten, rewritten, stepped, visit, went, type Dead, type History, type Pressed } from "./editor";
+
+describe("the draft's history", () => {
+    const draft = (history: History<string>) => history.states[history.at]?.draft;
+
+    it("undoes and redoes steps, a step being written one", () => {
+        let history = stepped(begun(""), "a");
+        history = rewritten(history, "ab");
+        history = stepped(history, "ab c");
+        expect(draft(went(history, "undo"))).toBe("ab");
+        expect(draft(went(went(history, "undo"), "undo"))).toBe("");
+        expect(draft(went(went(went(history, "undo"), "undo"), "redo"))).toBe("ab");
+        expect(went(begun(""), "undo")).toEqual(begun(""));
+        expect(went(history, "redo")).toEqual(history);
+    });
+
+    it("reaches with g- a state undone and left by a change after it, which Ctrl+R no longer does", () => {
+        // Text written, undone, then a change made: vim's g- still reaches what was undone.
+        let history = stepped(begun(""), "kept");
+        history = stepped(history, "kept, lost");
+        history = went(history, "undo");
+        history = stepped(history, "kept, other");
+        expect(went(history, "redo")).toEqual(history);
+        expect(draft(went(history, "earlier"))).toBe("kept, lost");
+        expect(draft(went(went(history, "earlier"), "later"))).toBe("kept, other");
+        // `u` from the change goes back to what it was made from, and Ctrl+R to the change again.
+        expect(draft(went(history, "undo"))).toBe("kept");
+        expect(draft(went(went(history, "undo"), "redo"))).toBe("kept, other");
+    });
+});
 
 describe("going between the comments one wrote", () => {
     // Three comments, at 10–15, 16–20 and 40–48.

@@ -89,6 +89,7 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
             { keys: "o ␣c", does: "on a banner, write a message to its agent", short: "message", at: ["banner"] },
             { keys: "i a A", does: "in a comment, write in it, with vim's keys of insert mode", short: "write in it", at: ["written"] },
             { keys: "u ^r", does: "undo and redo a change to the draft, a comment written one step", short: "undo redo", at: ["written"] },
+            { keys: "g- g+", does: "the draft as it was a step earlier or later, what was undone then changed after among them", short: "earlier later", at: [] },
         ],
     },
     {
@@ -125,6 +126,7 @@ export const CONVERSATION_KEYS: Part<ConversationPlace>[] = [
             { keys: "v… c", does: "comment on a selection", short: "on a selection", at: [] },
             { keys: "␣c", does: "write your message on the whole, at the end", short: "message", at: ["normal"] },
             { keys: "u ^r", does: "undo and redo a change to what you wrote", short: "undo redo", at: [] },
+            { keys: "g- g+", does: "what you wrote as it was a step earlier or later, what was undone then changed after among them", short: "earlier later", at: [] },
             { keys: "^⏎", does: "send the comments and the message, as one message", short: "send", at: [] },
         ],
     },
