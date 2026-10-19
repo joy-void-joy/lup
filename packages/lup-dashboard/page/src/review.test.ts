@@ -42,6 +42,10 @@ import {
 
 const AT = "2026-10-17T12:00:00Z";
 
+/** The ranks the host gives each item by its kind (`ranked`, `inbox/store.py`). */
+const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
+const NEWS: Item["rank"] = { name: "news", order: 1, notifies: false };
+
 function from(session: string, agent: string | null = null): Conversation {
     return { party: "conversation", repository: "/r/.git", runtime: "claude", session, agent };
 }
@@ -60,6 +64,7 @@ const QUESTION: Item = {
     recipient: { party: "operator" },
     made: AT,
     state: { state: "waiting" },
+    rank: WAITING,
 };
 
 const NOTE: Item = {
@@ -69,6 +74,7 @@ const NOTE: Item = {
     recipient: { party: "operator" },
     made: AT,
     state: { state: "waiting" },
+    rank: WAITING,
 };
 
 const APPROVAL: Item = {
@@ -85,6 +91,7 @@ const APPROVAL: Item = {
     recipient: { party: "operator" },
     made: AT,
     state: { state: "waiting" },
+    rank: WAITING,
 };
 
 const CONTEXT: Context = {
@@ -146,12 +153,14 @@ describe("laid", () => {
             number: 60,
             reason: { reason: "friction", got_in_the_way: "`ls` failed", trying: "", would_change: "" },
             sender: from("s1", "a1"),
+            rank: NEWS,
         };
         const ended: Item = {
             ...NOTE,
             number: 61,
             reason: { reason: "message", ending: true, kind: "note", text: "Done." },
             sender: from("s3"),
+            rank: NEWS,
         };
         const out = laid([friction, QUESTION, NOTE, ended], [], banner, header, EMPTY, NOTHING);
         expect(out.text.split("\n").filter((line) => line.startsWith("━━") || line.startsWith("──"))).toEqual([
@@ -434,6 +443,7 @@ describe("comments on a changed file's lines", () => {
         recipient: { party: "operator" },
         made: AT,
         state: { state: "waiting" },
+        rank: WAITING,
     };
     const CREATED: ChangedFile = { path: "b.md", before: null, after: { kind: "text", text: "# B\n\nNew.\n" } };
     const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]) };

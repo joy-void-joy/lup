@@ -337,27 +337,17 @@ interface Grouping {
 }
 
 /**
- * Whether an item is news, to read and mark read rather than answer: a turn's last words, which lup made a note, a
- * friction, how the work went, or a stop by choice.
+ * Whether an item is news, to read and mark read rather than answer, as its kind's rank says (`Item.rank`, which the
+ * host gives each item): a turn's last words, which lup made a note, a friction, how the work went, or a stop by choice.
  */
 export function news(item: Item): boolean {
-    const reason = item.reason;
-    switch (reason.reason) {
-        case "message":
-            return reason.ending === true;
-        case "friction":
-        case "how it went":
-        case "stop":
-            return true;
-        default:
-            return false;
-    }
+    return item.rank.name === "news";
 }
 
 /**
- * Return `items` in groups, one per agent, and one per banner of lup's approvals: those with something to answer
- * before those with news alone, then the group with the newest item first; in each, what's to answer, then the news,
- * each in its own order.
+ * Return `items` in groups, one per agent, and one per banner of lup's approvals: the group whose first item ranks
+ * first first (`Item.rank`: what's waiting on the operator, then news), then the group with the newest item first; in
+ * each, its items by their rank, each rank's in their own order.
  */
 function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
     const groups = new Map<string, Grouping>();
@@ -370,12 +360,12 @@ function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
     }
     const ranked = [...groups.values()].map((group) => ({
         ...group,
-        items: [...group.items.filter((each) => !news(each)), ...group.items.filter(news)],
+        items: group.items.toSorted((a, b) => a.rank.order - b.rank.order),
     }));
-    const told = (group: Grouping) => (group.items.every(news) ? 1 : 0);
+    const first = (group: Grouping) => Math.min(...group.items.map((each) => each.rank.order));
     const made = (group: Grouping) => Math.max(...group.items.map((each) => new Date(each.made).getTime()));
     const numbered = (group: Grouping) => Math.max(...group.items.map((each) => each.number));
-    return ranked.sort((a, b) => told(a) - told(b) || made(b) - made(a) || numbered(b) - numbered(a));
+    return ranked.sort((a, b) => first(a) - first(b) || made(b) - made(a) || numbered(b) - numbered(a));
 }
 
 /** Return a group for each of `conversations` with none among `groups`, in their order, once each. */
@@ -403,11 +393,11 @@ export function fresh(item: Item, reviewed: string | null | undefined): boolean 
 }
 
 /**
- * Lay `items` out as one text, in groups, one per agent, each under its banner: those with items now first, those with
- * something to answer before those with news alone (`news`), the newest first; then a group for each agent of `agents`
- * (those running, in the tree's order) with none, and for each the draft writes to with none; then the parked items'
- * groups. Under each banner but the parked ones', the draft's messages to its agent; then each item, what's to answer
- * before the news, under a header naming it, each comment of the draft on it under the
+ * Lay `items` out as one text, in groups, one per agent, each under its banner: those with items now first, by the
+ * rank of their first item (`Item.rank`), the newest first; then a group for each agent of `agents` (those running, in
+ * the tree's order) with none, and for each the draft writes to with none; then the parked items' groups. Under each
+ * banner but the parked ones', the draft's messages to its agent; then each item, by its rank, under a header naming
+ * it, each comment of the draft on it under the
  * line it's on: a comment on a passage under the passage's last line, one on the item whole under its header. Under
  * each item's own text, what the host has answered of it: each file an approval or a held change changes, its header
  * then its lines, each run of unchanged ones folding under a summary line; then the item's context, a summary line

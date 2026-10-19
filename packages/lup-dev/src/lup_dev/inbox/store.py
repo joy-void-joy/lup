@@ -35,7 +35,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, computed_field
 
 from lup.sessions import results
 from lup.tools import speaking
@@ -516,6 +516,36 @@ type State = Annotated[
 """Where an item stands."""
 
 
+class Rank(Model):
+    """What an item's kind is to the operator: where the review shows it among the rest, and whether it raises a desktop notice as it reaches them (`ranked`)."""
+
+    name: Literal["waiting on you", "news"]
+    order: int
+    """Where its items come in the review, the lowest first."""
+    notifies: bool
+
+
+def ranked(reason: Reason) -> Rank:
+    """Return the rank of an item of `reason`'s kind: the one place each kind's is said, which the review orders by (`page/src/review.ts`) and the desktop notices read (`Delivery.noticed`).
+
+    | Rank | Kinds | Order | Notice |
+    |---|---|---|---|
+    | waiting on you | a question, a held change, an approval, a problem (`blocked`), any other message | first | yes |
+    | news | a turn's last words, a friction, how the work went, a stop by choice | next | no |
+
+    The operator's own items, an answer and a review, go to agents, so neither
+    the review nor a notice reads theirs.
+
+    >>> ranked(Stop(why="Done."))
+    Rank(name='news', order=1, notifies=False)
+    """
+    match reason:
+        case Message(ending=True) | Friction() | HowItWent() | Stop():
+            return Rank(name="news", order=1, notifies=False)
+        case Message() | Question() | Approval() | HeldChange() | Answer() | Review():
+            return Rank(name="waiting on you", order=0, notifies=True)
+
+
 class Item(Model):
     """One item in a party's inbox."""
 
@@ -534,6 +564,12 @@ class Item(Model):
     sender's record; none where no agent's call did (`ShowContext`)."""
     made: datetime
     state: State = Waiting()
+
+    @computed_field
+    @property
+    def rank(self) -> Rank:
+        """Its kind's rank (`ranked`), carried with it to the dashboard's page, whose review orders by it."""
+        return ranked(self.reason)
 
 
 class Whereabouts(Model):

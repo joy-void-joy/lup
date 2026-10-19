@@ -88,8 +88,11 @@ from lup_dev.inbox.store import (
     Letter,
     Message,
     Operator,
+    Question,
     Quote,
+    Rank,
     Reading,
+    Reason,
     Review,
     Sent,
     Talk,
@@ -97,6 +100,7 @@ from lup_dev.inbox.store import (
     Text,
     Told,
     Waiting,
+    ranked,
 )
 from lup_dev.inbox.store import Stop as Stopped
 from lup_dev.inbox.tools import specs
@@ -1095,6 +1099,7 @@ def test_blocked_note_and_send_reach_the_operator_with_a_desktop_notice(
         f"lup: a problem from claude session s1 in {tmp_path}\n"
         "The build is broken.\nlup-dev inbox show 1"
     )
+    # Waiting on the operator, each of them: first in the review, and noticed.
     assert len(notices.raised) == 3
 
 
@@ -1218,10 +1223,9 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
     assert reply.reason == Message(kind="note", text="The rebuild is fixed.", of=1)
     assert reply.recipient == claude_session.model_copy(update={"agent": "a1"})
     assert done.startswith("Item 2")
-    assert len(notices.raised) == 6
-    assert notices.raised[2].startswith(
-        f"lup: a stop by choice from claude session s1 in {tmp_path}\n"
-    )
+    # News, each of them: to read, never raising a notice.
+    assert [each.rank.name for each in waiting] == ["news"] * 6
+    assert notices.raised == []
 
 
 def test_numbered_decisions_are_each_answered_once_and_a_message_is_done(
@@ -1980,6 +1984,40 @@ def test_what_doesnt_fit_waits_for_the_next_hook_and_what_a_gone_hook_told_is_pu
     assert asyncio.run(told(10_000)).numbers == [3]
 
 
+def test_an_items_kind_ranks_it_where_it_comes_and_whether_it_notifies() -> None:
+    waiting: list[Reason] = [
+        Question(text="Which parser?"),
+        HeldChange(text="Let it land?", summary="", worktree=Path("/w"), key="k"),
+        Approval(
+            text="Approve?", summary="", repository=Path("/r.git"), fingerprint="f"
+        ),
+        Message(kind="problem", text="The build is broken."),
+        Message(kind="note", text="I assumed UTF-8."),
+    ]
+    news: list[Reason] = [
+        Message(kind="note", text="Done.", ending=True),
+        Friction(got_in_the_way="The gate hung."),
+        HowItWent(),
+        Stopped(why="Nothing more is worth doing."),
+    ]
+    assert [ranked(each) for each in waiting] == [
+        Rank(name="waiting on you", order=0, notifies=True)
+    ] * len(waiting)
+    assert [ranked(each) for each in news] == [
+        Rank(name="news", order=1, notifies=False)
+    ] * len(news)
+    item = Item(
+        number=1,
+        reason=news[0],
+        sender=Operator(),
+        recipient=Operator(),
+        made=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    # Carried with the item to the page, and read back as the item it was.
+    assert json.loads(item.model_dump_json())["rank"]["name"] == "news"
+    assert Item.model_validate_json(item.model_dump_json()) == item
+
+
 def test_a_stored_item_that_doesnt_read_is_named(tmp_path: Path) -> None:
     layout = InboxLayout(home=tmp_path / "inbox")
     layout.items.mkdir(parents=True)
@@ -2725,6 +2763,7 @@ def test_a_sessions_last_message_of_a_turn_is_a_note_in_the_operators_inbox(
     assert notes == [
         (Message(kind="note", text="Done now.", ending=True), None, tmp_path)
     ]
+    assert notices.raised == []
 
 
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(

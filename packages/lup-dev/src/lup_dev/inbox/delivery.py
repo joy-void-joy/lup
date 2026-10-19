@@ -42,7 +42,8 @@ call's result, and never again:
 conversation, saying whose it was: one made for it then (`Inbox.made`), and
 those still waiting when it ends.
 
-The operator hears of each item that reaches them through the desktop's notices.
+The operator hears of each item that reaches them waiting on them through the
+desktop's notices; news never raises one (`ranked`).
 
 **An approval** (trust on launch's) is the operator's alone, never told to a
 conversation: a launch puts it in their inbox and waits on it (`settled`), and
@@ -888,7 +889,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     await self.wake(conversation)
 
     async def noticed(self, item: Item) -> None:
-        """Raise a desktop notice for an item reaching the operator: where it's from, what it is, and its first line."""
+        """Raise a desktop notice for an item reaching the operator, where its kind's rank raises one (`ranked`): where it's from, what it is, and its first line."""
+        if not item.rank.notifies:
+            return
         where = "" if item.worktree is None else f" in {item.worktree}"
         summary = f"lup: {what(item)} from {who(item.sender)}{where}"
         body = f"{opening(item)}\nlup-dev inbox show {item.number}"
