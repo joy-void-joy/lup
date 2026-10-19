@@ -84,6 +84,33 @@ def test_claude_holds_a_new_production_file_in_its_hook_and_lets_it_through_on_a
     assert running(kit, repo) == ["t1"]
 
 
+def test_claude_lets_a_flagged_write_through_putting_it_before_the_operator(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    kit.announced.holding_all = False
+    raw = pre_tool_use(
+        repo,
+        "Write",
+        {"file_path": str(repo / "src/pkg/new.py"), "content": '"""New."""\n'},
+    )
+    output = json.loads(claude.hook(raw, on_claude))
+    assert output == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+        }
+    }
+    assert kit.announced.holds == []
+    [asked] = kit.flags.asked
+    assert (asked.sender.runtime, asked.sender.session, asked.call) == (
+        "claude",
+        "s1",
+        "t1",
+    )
+    assert asked.flagged.path == Path("src/pkg/new.py")
+    assert running(kit, repo) == ["t1"]
+
+
 def test_claude_denies_a_held_write_the_operator_declined(
     on_claude: Bench, repo: Path, kit: Kit
 ) -> None:
@@ -454,6 +481,34 @@ def test_codex_holds_an_ask_until_the_operator_answers(
     assert output["hookSpecificOutput"]["additionalContext"].startswith(
         f"The operator approved the held change to {repo}/src/pkg/new.py."
     )
+    assert (repo / "src" / "pkg" / "new.py").exists()
+
+
+def test_codex_puts_a_flagged_patch_before_the_operator_after_its_call(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    kit.announced.holding_all = False
+    codex.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            turn_id="u1",
+            tool_name="apply_patch",
+            tool_input={},
+            tool_use_id="p1",
+        ),
+        on_codex,
+    )
+    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+    assert codex.hook(post(repo, {"output": "done"}), on_codex) == ""
+    assert kit.announced.holds == []
+    [asked] = kit.flags.asked
+    assert (asked.sender.runtime, asked.sender.session, asked.call) == (
+        "codex",
+        "s1",
+        "p1",
+    )
+    assert asked.flagged.path == Path("src/pkg/new.py")
     assert (repo / "src" / "pkg" / "new.py").exists()
 
 

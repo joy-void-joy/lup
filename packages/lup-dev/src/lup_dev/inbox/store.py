@@ -9,10 +9,11 @@ in a launch of its own finds what waited for it there.
 An item has a number, one sequence per user, so the operator answers `12`; a
 reason (a message with its kind, a question with its numbered decisions, an
 answer, an approval asked yes or no; a friction, how a piece of work went, or a
-stop by choice, each as the agent's tool took it); a sender and a recipient;
-when it was made; and its state: waiting, told (when, and how), answered, done,
-or for an approval decided. An item for a conversation that has ended goes to its
-session's main conversation, saying whose it was.
+stop by choice, each as the agent's tool took it; a change held, or a write that
+landed flagged, as the judge put it), whose kind ranks it (`ranked`); a sender
+and a recipient; when it was made; and its state: waiting, told (when, and
+how), answered, done, or for an approval decided. An item for a conversation
+that has ended goes to its session's main conversation, saying whose it was.
 
 An approval is trust on launch's: the launch's own question, put to the
 operator's inbox and answered at the launching terminal or any other, whichever
@@ -20,7 +21,8 @@ comes first. It's from the operator's own launch to the operator, and its answer
 is its state, since no party's inbox waits for it: the launches waiting on it
 read it there. Its whole diff, which can run to megabytes, is kept beside it in a
 file of its own, and each file it changes, whole, in another, as a held change's
-are; each is read only when asked for, so listing the inbox never carries them.
+and a flagged write's are; each is read only when asked for, so listing the
+inbox never carries them.
 
 The host service is the only writer, on its event loop, and nothing mounts the
 store into a room: the first lup's sessions approved their own questions by
@@ -35,7 +37,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, computed_field
 
 from lup.sessions import results
 from lup.tools import speaking
@@ -246,6 +248,30 @@ class HeldChange(Model):
     where an agent waits on it."""
 
 
+class Flagged(Model):
+    """A write that landed flagged for the operator's review, holding no one: what the file's whole change since the item was made flags, its diff and the file kept beside the item (`Inbox.diff`, `Inbox.files`).
+
+    The judge's (`lup_dev.policy.flags`). A later flagged write to the same file
+    by the same conversation joins the item while it gathers them
+    (`Inbox.gathering`), the file kept whole since the first.
+    """
+
+    reason: Literal["flagged"] = "flagged"
+    text: str
+    """What landed, in a line."""
+    summary: str
+    """What the file's whole change flags, a line each."""
+    worktree: Path
+    path: Path
+    """The file, from the worktree's root."""
+    commit: str | None = None
+    """The commit a move of `HEAD` reached, where the write came with it; none
+    where a conversation's call made it."""
+    writes: int = 1
+    """How many flagged writes it gathers: the page reads its file again as it
+    grows."""
+
+
 class Quote(Model):
     """A passage of an item the operator commented on: the text they selected, and where it is in the item as the page shows it."""
 
@@ -297,6 +323,7 @@ type Reason = Annotated[
     | Answer
     | Approval
     | HeldChange
+    | Flagged
     | Review,
     Field(discriminator="reason"),
 ]
@@ -516,6 +543,39 @@ type State = Annotated[
 """Where an item stands."""
 
 
+class Rank(Model):
+    """What an item's kind is to the operator: where the review shows it among the rest, and whether it raises a desktop notice as it reaches them (`ranked`)."""
+
+    name: Literal["waiting on you", "news", "flag"]
+    order: int
+    """Where its items come in the review, the lowest first."""
+    notifies: bool
+
+
+def ranked(reason: Reason) -> Rank:
+    """Return the rank of an item of `reason`'s kind: the one place each kind's is said, which the review orders by (`page/src/review.ts`) and the desktop notices read (`Delivery.noticed`).
+
+    | Rank | Kinds | Order | Notice |
+    |---|---|---|---|
+    | waiting on you | a question, a held change, an approval, a problem (`blocked`), any other message | first | yes |
+    | news | a turn's last words, a friction, how the work went, a stop by choice | next | no |
+    | flag | a write that landed flagged | last | no |
+
+    The operator's own items, an answer and a review, go to agents, so neither
+    the review nor a notice reads theirs.
+
+    >>> ranked(Stop(why="Done."))
+    Rank(name='news', order=1, notifies=False)
+    """
+    match reason:
+        case Message(ending=True) | Friction() | HowItWent() | Stop():
+            return Rank(name="news", order=1, notifies=False)
+        case Flagged():
+            return Rank(name="flag", order=2, notifies=False)
+        case Message() | Question() | Approval() | HeldChange() | Answer() | Review():
+            return Rank(name="waiting on you", order=0, notifies=True)
+
+
 class Item(Model):
     """One item in a party's inbox."""
 
@@ -534,6 +594,12 @@ class Item(Model):
     sender's record; none where no agent's call did (`ShowContext`)."""
     made: datetime
     state: State = Waiting()
+
+    @computed_field
+    @property
+    def rank(self) -> Rank:
+        """Its kind's rank (`ranked`), carried with it to the dashboard's page, whose review orders by it."""
+        return ranked(self.reason)
 
 
 class Whereabouts(Model):
@@ -781,21 +847,45 @@ class Inbox(MutableModel):
             None,
         )
 
+    def gathering(
+        self, sender: Conversation, worktree: Path, path: Path
+    ) -> Item | None:
+        """Return the item a write of `sender`'s to `path` in `worktree` that landed flagged joins, rather than making one of its own; none where it makes one.
+
+        One item for each conversation and file while the operator hasn't read
+        it: it's read once it's off their list, and while their draft marks it
+        read or comments on it, so what they're writing on stays as they read it.
+        """
+        draft = self.draft()
+        read = [*draft.done, *(each.item for each in draft.comments)]
+        return next(
+            (
+                item
+                for item in reversed(self.waiting(Operator()))
+                if isinstance(item.reason, Flagged)
+                and item.sender == sender
+                and item.reason.worktree == worktree
+                and item.reason.path == path
+                and item.number not in read
+            ),
+            None,
+        )
+
     def attached(self, number: int, diff: str, files: list[ChangedFile]) -> None:
-        """Keep approval or held change `number`'s whole diff and each file it changes beside it, each in a file of its own."""
+        """Keep approval, held change or flagged write `number`'s whole diff and each file it changes beside it, each in a file of its own, in place of those kept before."""
         write_model(self.layout.diff(number), Diff(text=diff))
         self.filed(number, files)
 
     def filed(self, number: int, files: list[ChangedFile]) -> None:
-        """Keep each file approval or held change `number` changes beside it, whole, in place of those kept before: an approval's files once their types are read."""
+        """Keep each file approval, held change or flagged write `number` changes beside it, whole, in place of those kept before: an approval's files once their types are read, a flagged write's as a later one joins it."""
         write_model(self.layout.changed(number), ChangedFiles(files=files))
 
     def diff(self, number: int) -> str:
-        """Return approval or held change `number`'s whole diff, or say it isn't kept."""
+        """Return approval, held change or flagged write `number`'s whole diff, or say it isn't kept."""
         return read(self.layout.diff(number), Diff).text
 
     def files(self, number: int) -> list[ChangedFile]:
-        """Return each file approval or held change `number` changes, whole, or say they aren't kept."""
+        """Return each file approval, held change or flagged write `number` changes, whole, or say they aren't kept."""
         return read(self.layout.changed(number), ChangedFiles).files
 
     def placed(self, place: Whereabouts) -> Whereabouts:

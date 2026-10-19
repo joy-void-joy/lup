@@ -1,6 +1,7 @@
-// The code under an approval or a held change: each file it changes shown whole,
-// what it was and what it becomes, its lines marked added, removed (in place,
-// where they were) or the same, each run of unchanged lines away from the
+// The code under an approval, a held change or a write that landed flagged: each
+// file it changes shown whole, what it was and what it becomes, its lines marked
+// added, removed (in place, where they were) or the same, each run of unchanged
+// lines away from the
 // changes folded under a summary, a few lines of context kept around each; and
 // its text highlighted by CodeMirror's own language packages, chosen by its
 // name. The judge's reading of the file says why it's open, in its header's last

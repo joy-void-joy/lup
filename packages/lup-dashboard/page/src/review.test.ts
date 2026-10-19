@@ -9,7 +9,9 @@ import {
     blocksOf,
     body,
     calls,
+    changing,
     covered,
+    flag,
     foldAt,
     foldKey,
     fresh,
@@ -46,6 +48,10 @@ import {
 
 const AT = "2026-10-17T12:00:00Z";
 
+/** The ranks the host gives each item by its kind (`ranked`, `inbox/store.py`). */
+const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
+const NEWS: Item["rank"] = { name: "news", order: 1, notifies: false };
+
 function from(session: string, agent: string | null = null): Conversation {
     return { party: "conversation", repository: "/r/.git", runtime: "claude", session, agent };
 }
@@ -64,6 +70,7 @@ const QUESTION: Item = {
     recipient: { party: "operator" },
     made: AT,
     state: { state: "waiting" },
+    rank: WAITING,
 };
 
 const NOTE: Item = {
@@ -73,6 +80,7 @@ const NOTE: Item = {
     recipient: { party: "operator" },
     made: AT,
     state: { state: "waiting" },
+    rank: WAITING,
 };
 
 const APPROVAL: Item = {
@@ -89,6 +97,24 @@ const APPROVAL: Item = {
     recipient: { party: "operator" },
     made: AT,
     state: { state: "waiting" },
+    rank: WAITING,
+};
+
+const FLAGGED: Item = {
+    number: 70,
+    reason: {
+        reason: "flagged",
+        text: "a.py landed, flagged for the operator's review.",
+        summary: "a.py: /w/a.py is a new production file",
+        worktree: "/w",
+        path: "a.py",
+        writes: 2,
+    },
+    sender: from("s2"),
+    recipient: { party: "operator" },
+    made: AT,
+    state: { state: "waiting" },
+    rank: { name: "flag", order: 2, notifies: false },
 };
 
 const CONTEXT: Context = {
@@ -164,12 +190,14 @@ describe("laid", () => {
             number: 60,
             reason: { reason: "friction", got_in_the_way: "`ls` failed", trying: "", would_change: "" },
             sender: from("s1", "a1"),
+            rank: NEWS,
         };
         const ended: Item = {
             ...NOTE,
             number: 61,
             reason: { reason: "message", ending: true, kind: "note", text: "Done." },
             sender: from("s3"),
+            rank: NEWS,
         };
         const out = laid([friction, QUESTION, NOTE, ended], [], banner, header, EMPTY, NOTHING);
         expect(out.text.split("\n").filter((line) => line.startsWith("━━") || line.startsWith("──"))).toEqual([
@@ -184,6 +212,35 @@ describe("laid", () => {
         expect(news(friction)).toBe(true);
         expect(news(ended)).toBe(true);
         expect([news(QUESTION), news(NOTE), news(APPROVAL)]).toEqual([false, false, false]);
+    });
+
+    it("ranks flags last: after the news in a group, and a group of flags alone after a group of news", () => {
+        const flagged = (number: number, sender: Conversation): Item => ({ ...FLAGGED, number, sender });
+        const ended: Item = {
+            ...NOTE,
+            number: 61,
+            reason: { reason: "message", ending: true, kind: "note", text: "Done." },
+            sender: from("s3"),
+            rank: NEWS,
+        };
+        const went: Item = {
+            ...NOTE,
+            number: 62,
+            reason: { reason: "how it went", got_in_the_way: "", smooth: "", would_change: "", felt: "Good." },
+            rank: NEWS,
+        };
+        const out = laid([flagged(70, from("s2")), flagged(71, from("s4")), went, NOTE, ended], [], banner, header, EMPTY, NOTHING);
+        expect(out.text.split("\n").filter((line) => line.startsWith("━━") || line.startsWith("──"))).toEqual([
+            "━━ s2 ━━",
+            "── #52 ──",
+            "── #62 ──",
+            "── #70 ──",
+            "━━ s3 ━━",
+            "── #61 ──",
+            "━━ s4 ━━",
+            "── #71 ──",
+        ]);
+        expect([flag(FLAGGED), flag(NOTE), news(FLAGGED)]).toEqual([true, false, false]);
     });
 
     it("shows a friction, how the work went and a stop by their parts, each labelled where it says something", () => {
@@ -494,6 +551,7 @@ describe("comments on a changed file's lines", () => {
         recipient: { party: "operator" },
         made: AT,
         state: { state: "waiting" },
+        rank: WAITING,
     };
     const CREATED: ChangedFile = { path: "b.md", before: null, after: { kind: "text", text: "# B\n\nNew.\n" } };
     const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]) };
@@ -517,6 +575,15 @@ describe("comments on a changed file's lines", () => {
     it("opens a comment on an empty line of a file, not on the item whole", () => {
         const empty = out.text.indexOf("# B\n\n") + "# B\n".length;
         expect(onItem(opened(out, empty))?.quote?.text).toBe("b.md:2\n+");
+    });
+
+    it("shows a flagged write's file under it as a held change's, its lines quoted the same", () => {
+        const flagged = laid([FLAGGED], [], banner, header, EMPTY, { contexts: new Map(), files: new Map([[70, { shown: [CHANGED] }]]) });
+        const line = (text: string) => flagged.text.indexOf(`\n${text}\n`) + 1;
+        expect([changing(FLAGGED), changing(HELD), changing(NOTE)]).toEqual([true, true, false]);
+        expect(flagged.text.startsWith("━━ s2 ━━\n── #70 ──\na.py landed, flagged for the operator's review.\n")).toBe(true);
+        expect(flagged.regions[0]!.code.length).toBeGreaterThan(0);
+        expect(onItem(opened(flagged, line("L7")))).toEqual({ item: 70, quote: { text: "a.py:7\n+L7", start: expect.any(Number), end: expect.any(Number) }, text: "" });
     });
 
     it("quotes a passage across a file's lines, and across files, each under its path and the span of its lines", () => {

@@ -1,10 +1,11 @@
 // The review: everything waiting for the operator laid out as one text to read
 // and move through, in groups, one per agent, every agent running having one,
 // empty or not; their comments in it, each under the line it's on, and their
-// messages to each agent under its banner. Under an approval or a held change,
-// each file it changes, whole (`code.ts`), its lines commented on as the item's
-// own are, the lines that matter in it, by the judge's reading, kept in order for
-// the keys to walk; under each item its context. What's folded by default: the
+// messages to each agent under its banner. Under an approval, a held change or a
+// write that landed flagged, each file it changes, whole (`code.ts`), its lines
+// commented on as the item's own are, the lines that matter in it, by the judge's
+// reading, kept in order for the keys to walk; under each item its context. Its
+// items by their kind's rank, which the host gives. What's folded by default: the
 // context, each run of a file's unchanged lines away from its changes and the
 // lines that matter, and an automatic file whole under its header. Pure: the
 // editor (`Review.tsx`) draws it, folds it and lets the comments and messages be
@@ -44,7 +45,7 @@ export type Written = Comment | Letter;
 /** What the host answered, asked for more of an item than its own text: what it showed, or why it refused. */
 export type Answered<T> = { shown: T } | { refused: string };
 
-/** What the review shows of each item beyond its own text, by the item's number, once the host has answered: its context, and each file an approval or a held change changes. */
+/** What the review shows of each item beyond its own text, by the item's number, once the host has answered: its context, and each file it changes (`changing`). */
 export interface Around {
     contexts: Map<number, Answered<Context>>;
     files: Map<number, Answered<ChangedFile[]>>;
@@ -190,6 +191,7 @@ export function body(item: Item): string {
         case "approval":
             return `${reason.text}\n${plain(reason.summary)}`;
         case "held":
+        case "flagged":
             return `${reason.text}\n${reason.summary}`;
         case "answer":
             return reason.comment;
@@ -287,14 +289,20 @@ interface Filed {
     ends: boolean;
 }
 
+/** Whether an item keeps the files it changes beside it, for the review to show under it: an approval, a held change, or a write that landed flagged. */
+export function changing(item: Item): boolean {
+    const reason = item.reason.reason;
+    return reason === "approval" || reason === "held" || reason === "flagged";
+}
+
 /**
- * Return the lines of each file an approval or a held change changes, as the host answered them: each file's header,
- * then its rows, its runs of unchanged ones folding, and the whole of an automatic one folding under its header; none
- * for any other item, or before the host has answered.
+ * Return the lines of each file an item changes (`changing`), as the host answered them: each file's header, then its
+ * rows, its runs of unchanged ones folding, and the whole of an automatic one folding under its header; none for any
+ * other item, or before the host has answered.
  */
 function filed(item: Item, around: Around): Filed[] {
     const files = around.files.get(item.number);
-    if ((item.reason.reason !== "approval" && item.reason.reason !== "held") || files === undefined || !("shown" in files)) {
+    if (!changing(item) || files === undefined || !("shown" in files)) {
         return [];
     }
     return files.shown.flatMap((file) => {
@@ -341,27 +349,22 @@ interface Grouping {
 }
 
 /**
- * Whether an item is news, to read and mark read rather than answer: a turn's last words, which lup made a note, a
- * friction, how the work went, or a stop by choice.
+ * Whether an item is news, to read and mark read rather than answer, as its kind's rank says (`Item.rank`, which the
+ * host gives each item): a turn's last words, which lup made a note, a friction, how the work went, or a stop by choice.
  */
 export function news(item: Item): boolean {
-    const reason = item.reason;
-    switch (reason.reason) {
-        case "message":
-            return reason.ending === true;
-        case "friction":
-        case "how it went":
-        case "stop":
-            return true;
-        default:
-            return false;
-    }
+    return item.rank.name === "news";
+}
+
+/** Whether an item is a write that landed flagged, ranked last, to read or comment on: it waits on no one. */
+export function flag(item: Item): boolean {
+    return item.rank.name === "flag";
 }
 
 /**
- * Return `items` in groups, one per agent, and one per banner of lup's approvals: those with something to answer
- * before those with news alone, then the group with the newest item first; in each, what's to answer, then the news,
- * each in its own order.
+ * Return `items` in groups, one per agent, and one per banner of lup's approvals: the group whose first item ranks
+ * first first (`Item.rank`: what's waiting on the operator, then news, then flags), then the group with the newest item
+ * first; in each, its items by their rank, each rank's in their own order.
  */
 function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
     const groups = new Map<string, Grouping>();
@@ -374,12 +377,12 @@ function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
     }
     const ranked = [...groups.values()].map((group) => ({
         ...group,
-        items: [...group.items.filter((each) => !news(each)), ...group.items.filter(news)],
+        items: group.items.toSorted((a, b) => a.rank.order - b.rank.order),
     }));
-    const told = (group: Grouping) => (group.items.every(news) ? 1 : 0);
+    const first = (group: Grouping) => Math.min(...group.items.map((each) => each.rank.order));
     const made = (group: Grouping) => Math.max(...group.items.map((each) => new Date(each.made).getTime()));
     const numbered = (group: Grouping) => Math.max(...group.items.map((each) => each.number));
-    return ranked.sort((a, b) => told(a) - told(b) || made(b) - made(a) || numbered(b) - numbered(a));
+    return ranked.sort((a, b) => first(a) - first(b) || made(b) - made(a) || numbered(b) - numbered(a));
 }
 
 /** Return what names a group's place across layouts: `key`, whose it is, and whether it's of what's left for later. */
@@ -412,13 +415,13 @@ export function fresh(item: Item, reviewed: string | null | undefined): boolean 
 }
 
 /**
- * Lay `items` out as one text, in groups, one per agent, each under its banner: those with items now first, those with
- * something to answer before those with news alone (`news`), the newest first; then a group for each agent of `agents`
- * (those running, in the tree's order) with none, and for each the draft writes to with none; then the parked items'
- * groups. Under each banner but the parked ones', the draft's messages to its agent; then each item, what's to answer
- * before the news, under a header naming it, each comment of the draft on it under the
+ * Lay `items` out as one text, in groups, one per agent, each under its banner: those with items now first, by the
+ * rank of their first item (`Item.rank`), the newest first; then a group for each agent of `agents` (those running, in
+ * the tree's order) with none, and for each the draft writes to with none; then the parked items' groups. Under each
+ * banner but the parked ones', the draft's messages to its agent; then each item, by its rank, under a header naming
+ * it, each comment of the draft on it under the
  * line it's on: a comment on a passage under the passage's last line, one on the item whole under its header. Under
- * each item's own text, what the host has answered of it: each file an approval or a held change changes, its header
+ * each item's own text, what the host has answered of it: each file it changes (`changing`), its header
  * then its lines, each run of unchanged ones folding under a summary line; then the item's context, a summary line
  * with the lines that fold under it. Where the host showed none, a line says why.
  *

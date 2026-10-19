@@ -882,6 +882,59 @@ def held_file(holding_kit: Kit, repo: Path) -> Path:
     return new
 
 
+def test_a_write_flagged_at_the_checkpoint_is_put_before_the_operator_holding_no_one(
+    holding_kit: Kit, repo: Path
+) -> None:
+    holding_kit.announced.holding_all = False
+    start(holding_kit, repo)
+    call(holding_kit, repo, "p1", tool="apply_patch", agent="a1")
+    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+    assert finish(holding_kit, repo, "p1", agent="a1").context == ""
+    assert holding_kit.announced.holds == []
+    call(holding_kit, repo, "p2", tool="apply_patch", agent="a1")
+    (repo / "src" / "pkg" / "new.py").write_text(
+        '"""New."""\n\n\nclass Room:\n    pass\n'
+    )
+    finish(holding_kit, repo, "p2", agent="a1")
+    made, joined = holding_kit.flags.asked
+    assert (made.sender.runtime, made.sender.agent, made.call) == (
+        "holding",
+        "a1",
+        "p1",
+    )
+    assert made.file == ChangedFile(
+        path=Path("src/pkg/new.py"),
+        before=None,
+        after=Text(text='"""New."""\n'),
+        reading=Reading(
+            role="production", asks=[Asked(name="new-file", taken="flagged")]
+        ),
+    )
+    # Joined, the file is judged whole since the item was made.
+    assert (joined.joining, joined.call, joined.file.before) == (1, "p2", None)
+    assert joined.file.reading is not None
+    assert [each.name for each in joined.file.reading.asks] == [
+        "new-file",
+        "public-api",
+    ]
+
+
+def test_what_a_move_brought_flagged_is_put_before_the_operator_naming_its_commit(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    start(kit, repo)
+    call(kit, repo, "c1")
+    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+    shell.commit(repo, "sneak it in")
+    finish(kit, repo, "c1")
+    head = shell.git(repo, "rev-parse", "HEAD")
+    [asked] = kit.flags.asked
+    assert asked.flagged.text == (
+        f"src/pkg/new.py landed with commit {head}, flagged for the operator's review."
+    )
+    assert (asked.flagged.commit, asked.sender.agent, asked.call) == (head, None, None)
+
+
 def answer_on_sleep(kit: Kit, response: Response) -> None:
     def answer() -> None:
         [hold] = waiting(kit.layout)

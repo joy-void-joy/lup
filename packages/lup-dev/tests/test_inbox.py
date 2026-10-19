@@ -78,6 +78,7 @@ from lup_dev.inbox.store import (
     Decided,
     Done,
     Draft,
+    Flagged,
     Found,
     Friction,
     HeldChange,
@@ -88,8 +89,11 @@ from lup_dev.inbox.store import (
     Letter,
     Message,
     Operator,
+    Question,
     Quote,
+    Rank,
     Reading,
+    Reason,
     Review,
     Sent,
     Talk,
@@ -97,6 +101,7 @@ from lup_dev.inbox.store import (
     Text,
     Told,
     Waiting,
+    ranked,
 )
 from lup_dev.inbox.store import Stop as Stopped
 from lup_dev.inbox.tools import specs
@@ -104,6 +109,8 @@ from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import InboxLayout, Layout
 from lup_dev.policy.before import Overwrite, Replacement, before
+from lup_dev.policy.checkpoint import Bench, CallFinished, CallStarted
+from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import Answer as HoldAnswer
 from lup_dev.policy.holds import HeldFile, Hold, Holds, InboxAnnouncing, Response
 from lup_dev.policy.tools import JudgeTools, stands
@@ -1095,6 +1102,7 @@ def test_blocked_note_and_send_reach_the_operator_with_a_desktop_notice(
         f"lup: a problem from claude session s1 in {tmp_path}\n"
         "The build is broken.\nlup-dev inbox show 1"
     )
+    # Waiting on the operator, each of them: first in the review, and noticed.
     assert len(notices.raised) == 3
 
 
@@ -1218,10 +1226,9 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
     assert reply.reason == Message(kind="note", text="The rebuild is fixed.", of=1)
     assert reply.recipient == claude_session.model_copy(update={"agent": "a1"})
     assert done.startswith("Item 2")
-    assert len(notices.raised) == 6
-    assert notices.raised[2].startswith(
-        f"lup: a stop by choice from claude session s1 in {tmp_path}\n"
-    )
+    # News, each of them: to read, never raising a notice.
+    assert [each.rank.name for each in waiting] == ["news"] * 6
+    assert notices.raised == []
 
 
 def test_numbered_decisions_are_each_answered_once_and_a_message_is_done(
@@ -1980,6 +1987,40 @@ def test_what_doesnt_fit_waits_for_the_next_hook_and_what_a_gone_hook_told_is_pu
     assert asyncio.run(told(10_000)).numbers == [3]
 
 
+def test_an_items_kind_ranks_it_where_it_comes_and_whether_it_notifies() -> None:
+    waiting: list[Reason] = [
+        Question(text="Which parser?"),
+        HeldChange(text="Let it land?", summary="", worktree=Path("/w"), key="k"),
+        Approval(
+            text="Approve?", summary="", repository=Path("/r.git"), fingerprint="f"
+        ),
+        Message(kind="problem", text="The build is broken."),
+        Message(kind="note", text="I assumed UTF-8."),
+    ]
+    news: list[Reason] = [
+        Message(kind="note", text="Done.", ending=True),
+        Friction(got_in_the_way="The gate hung."),
+        HowItWent(),
+        Stopped(why="Nothing more is worth doing."),
+    ]
+    assert [ranked(each) for each in waiting] == [
+        Rank(name="waiting on you", order=0, notifies=True)
+    ] * len(waiting)
+    assert [ranked(each) for each in news] == [
+        Rank(name="news", order=1, notifies=False)
+    ] * len(news)
+    item = Item(
+        number=1,
+        reason=news[0],
+        sender=Operator(),
+        recipient=Operator(),
+        made=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    # Carried with the item to the page, and read back as the item it was.
+    assert json.loads(item.model_dump_json())["rank"]["name"] == "news"
+    assert Item.model_validate_json(item.model_dump_json()) == item
+
+
 def test_a_stored_item_that_doesnt_read_is_named(tmp_path: Path) -> None:
     layout = InboxLayout(home=tmp_path / "inbox")
     layout.items.mkdir(parents=True)
@@ -2369,6 +2410,119 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
     assert not unserved
 
 
+def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_agent(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    kit: Kit,
+    repo: Path,
+) -> None:
+    kit.runtime.called = "claude"
+    kit.announced.holding_all = False
+    flagging = InboxFlagging(layout=machine.host, clock=clock)
+    bench = Bench(
+        runtime=kit.runtime,
+        services=kit.bench.services.model_copy(update={"flagging": flagging}),
+    )
+    rooms = repo / "src" / "pkg" / "rooms.py"
+    first = '"""Rooms."""\n'
+    room = "\n\nclass Room:\n    pass\n"
+    hall = "\n\nclass Hall:\n    pass\n"
+
+    def landed(proposal: Overwrite | Replacement) -> str:
+        decision = before(bench, proposal, "s1", repo)
+        CallStarted(
+            session="s1", cwd=repo, call=proposal.call, tool=proposal.tool
+        ).apply(bench)
+        current = rooms.read_text() if rooms.is_file() else None
+        rooms.write_text(proposal.content(current) or "")
+        CallFinished(session="s1", cwd=repo, call=proposal.call).apply(bench)
+        return decision.told
+
+    sender = Conversation(repository=repo / ".git", runtime="claude", session="s1")
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(
+            machine,
+            clock,
+            tmp_path / "launch",
+            "one",
+            "claude",
+            repository=sender.repository,
+        )
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        told = [
+            landed(Overwrite(call="w1", tool="Write", path=rooms, text=first)),
+            landed(
+                Replacement(
+                    call="e1", tool="Edit", path=rooms, old=first, new=first + room
+                )
+            ),
+        ]
+        [item] = delivery.inbox.waiting(Operator())
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        files = host.ask(ShowFiles(number=item.number), Files).files
+        shown = inbox("show", "1")
+        diff = inbox("show", "1", "--diff")
+        # Commented on in the draft, it's read: the next flagged write is an item of its own.
+        drafting(
+            machine,
+            clock,
+            Draft(comments=[Comment(item=1, text="Yes, but call it Chamber.")]),
+        )
+        kept = first + room
+        landed(
+            Replacement(call="e2", tool="Edit", path=rooms, old=kept, new=kept + hall)
+        )
+        reviews = sending(machine, clock)
+        reviewed = send(hook, bash("b1"))
+        drafting(machine, clock, Draft(done=[2]))
+        marked = sending(machine, clock)
+        quiet = send(hook, bash("b2"))
+        states = [delivery.inbox.item(each).state for each in [1, 2]]
+        second = delivery.inbox.item(2)
+    assert told == ["", ""]
+    assert notices.raised == []
+    assert item.sender == sender
+    assert item.reason == Flagged(
+        text="src/pkg/rooms.py landed, flagged for the operator's review.",
+        summary=(
+            f"src/pkg/rooms.py: {rooms} is a new production file\n"
+            f"src/pkg/rooms.py: {rooms} adds the class `Room`"
+        ),
+        worktree=repo,
+        path=Path("src/pkg/rooms.py"),
+        writes=2,
+    )
+    assert item.rank.name == "flag"
+    assert item.call == "w1"
+    [file] = files
+    assert (file.before, file.after) == (None, Text(text=first + room))
+    assert file.reading is not None
+    assert [each.name for each in file.reading.asks] == ["new-file", "public-api"]
+    assert "src/pkg/rooms.py landed, flagged for the operator's review." in shown
+    assert "+class Room:" in diff
+    assert isinstance(second.reason, Flagged)
+    assert (second.reason.writes, second.call) == (1, "e2")
+    [review] = reviews
+    assert review.recipient == sender
+    assert context(reviewed) == (
+        "lup's inbox, item 3: a review from the operator, of item 1:\n"
+        'On item 1, a flagged write yours ("src/pkg/rooms.py landed, flagged for '
+        "the operator's review.\"):\n"
+        "  Yes, but call it Chamber."
+    )
+    # Marked read, it tells its agent nothing.
+    assert marked == []
+    assert "lup's inbox" not in quiet
+    assert [type(each) for each in states] == [Done, Done]
+    with pytest.raises(InboxError, match="it isn't withdrawn"):
+        delivery.withdrawn(2, sender, "never mind")
+
+
 def test_with_no_host_service_nothing_is_held_for_the_operators_switch(
     machine: Layout, clock: FakeClock
 ) -> None:
@@ -2421,7 +2575,8 @@ def test_an_approval_keeps_each_file_it_changes_whole_and_shows_them_on_request(
             host.ask(ShowFiles(number=asked.number + 1), Files)
     assert shown == Files(number=asked.number, files=changed)
     assert str(unasked.value) == (
-        f"item {asked.number + 1} isn't an approval or a held change, but a note"
+        f"item {asked.number + 1} is a note, which changes no file: an approval, a "
+        "held change or a flagged write does"
     )
 
 
@@ -2725,6 +2880,7 @@ def test_a_sessions_last_message_of_a_turn_is_a_note_in_the_operators_inbox(
     assert notes == [
         (Message(kind="note", text="Done now.", ending=True), None, tmp_path)
     ]
+    assert notices.raised == []
 
 
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(

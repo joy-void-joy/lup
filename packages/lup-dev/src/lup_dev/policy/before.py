@@ -13,8 +13,9 @@ words:
 A replacement whose string isn't there exactly as the tool requires is allowed:
 the tool fails on its own. A write let through is remembered until its call
 finishes, so the checkpoint after it accepts that content as already judged, and
-tells its findings; one declined, or left unanswered, never lands, and the
-agent's version is saved.
+tells its findings; one flagged is put before the operator as it's let through,
+holding no one (`flags.py`); one declined, or left unanswered, never lands, and
+the agent's version is saved.
 
 A write is judged in the worktree of the session's repository its path is in,
 which the session then holds; a write in the repository's own git directory
@@ -22,7 +23,6 @@ asks, since what's there runs outside the agent's reach; a write anywhere else
 isn't judged here.
 """
 
-import difflib
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Literal, override
@@ -38,9 +38,10 @@ from lup_dev.policy.checkpoint import (
     holding,
     verdict,
 )
-from lup_dev.policy.holds import HeldFile, Hold, answered
+from lup_dev.policy.flags import Landed, flagged
+from lup_dev.policy.holds import HeldFile, Hold, answered, unified
 from lup_dev.policy.judge import Ask, Change, Judgement
-from lup_dev.policy.report import Refused, information, placed, refusal
+from lup_dev.policy.report import Refused, information, placed, refusal, sections
 from lup_dev.policy.worktrees import place
 
 
@@ -232,7 +233,27 @@ def before(
             agent=agent,
         )
     worktree.verdicts(services.layout).append([logged])
-    return Decision(outcome="allow", told=told(worktree.root, judgement))
+    landed = Landed(
+        change=change,
+        judgement=judgement,
+        session=session,
+        agent=agent,
+        call=proposal.call,
+    )
+    unsaid = (
+        flagged(
+            services.flagging,
+            judge,
+            bench.runtime.name(),
+            worktree.repository,
+            [landed],
+        )
+        if judgement.flags
+        else []
+    )
+    return Decision(
+        outcome="allow", told=sections([told(worktree.root, judgement), *unsaid])
+    )
 
 
 def held_write(
@@ -341,14 +362,3 @@ def held_write(
         unanswered=answer is None,
     )
     return Decision(outcome="deny", reason=refusal([refused]))
-
-
-def unified(path: Path, before: str | None, after: str) -> str:
-    """Show a write as a unified diff of `path`, from what it was to what it would be."""
-    lines = difflib.unified_diff(
-        (before or "").splitlines(keepends=True),
-        after.splitlines(keepends=True),
-        fromfile=f"a/{path}",
-        tofile=f"b/{path}",
-    )
-    return "".join(lines)

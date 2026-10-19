@@ -483,6 +483,12 @@ kbd {
     font-weight: 400;
 }
 
+/* A write that landed flagged: last, holding no one, to read or comment on. */
+.review-header.is-flag {
+    color: var(--purple);
+    font-weight: 400;
+}
+
 .review-header.is-done {
     color: var(--muted);
     text-decoration: line-through;

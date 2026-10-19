@@ -124,6 +124,7 @@ from lup_dev.inbox.store import (
     Approval,
     ChangedFile,
     Comment,
+    Flagged,
     Friction,
     HeldChange,
     HowItWent,
@@ -181,6 +182,7 @@ from lup_dev.layout import (
     Layout,
 )
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
+from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import InboxAnnouncing, Response, answer
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
@@ -322,6 +324,7 @@ class Couriers(Model, Courier):
 def services() -> Services:
     """Return what judging reaches, as configured on this machine."""
     settings = LupDevSettings()
+    host = Layout.of(settings).host
     return Services(
         checker=engine(),
         linter=Ruff(),
@@ -329,9 +332,8 @@ def services() -> Services:
         layout=Layout.of(settings),
         spawner=BackgroundSpawner(),
         integration=settings.lup_integration_branch,
-        announcing=InboxAnnouncing(
-            layout=Layout.of(settings).host, clock=SystemClock()
-        ),
+        announcing=InboxAnnouncing(layout=host, clock=SystemClock()),
+        flagging=InboxFlagging(layout=host, clock=SystemClock()),
     )
 
 
@@ -657,6 +659,7 @@ def shown(item: Item) -> str:
         case (
             Approval(text=text, summary=summary)
             | HeldChange(text=text, summary=summary)
+            | Flagged(text=text, summary=summary)
         ):
             body = [
                 summary,
@@ -704,7 +707,7 @@ def prompted(item: Item) -> AnswerItem:
     """Ask the operator their answer to a question, each decision in turn, then a comment on the whole; a plain question, or a reply to a message, in words."""
     typer.echo(shown(item))
     match item.reason:
-        case Message() | Friction() | HowItWent() | Stop():
+        case Message() | Friction() | HowItWent() | Stop() | Flagged():
             words = typer.prompt("Your reply")
             return AnswerItem(number=item.number, comment=words)
         case Question(decisions=[]):
@@ -890,7 +893,13 @@ def inbox_show(
     *,
     diff: Annotated[
         bool,
-        typer.Option("--diff", help="An approval's whole diff, through your pager."),
+        typer.Option(
+            "--diff",
+            help=(
+                "An approval's, a held change's or a flagged write's whole diff, "
+                "through your pager."
+            ),
+        ),
     ] = False,
     context: Annotated[
         bool,
@@ -1007,6 +1016,10 @@ def inbox_answer(
     land, and a comment for the agent; `--approve` or `--decline`, with
     `--comment`, answer without asking. The agent waiting on it goes on with
     the answer.
+
+    A write that landed flagged takes your reply in words, as a message does,
+    for the agent that made it: the write has landed, and your reply comes to
+    it as "yes, but".
     """
     client = answering()
     approvals = InboxApprovals(host=client)
@@ -1091,7 +1104,7 @@ def held_answer(
 def inbox_done(
     number: Annotated[int, typer.Argument(help="The message's number.")],
 ) -> None:
-    """Take a message you've read off your list."""
+    """Take a message or a flagged write you've read off your list."""
     answering().ask(FinishItem(number=number), Shown)
     typer.echo(f"Item {number} is done.")
 

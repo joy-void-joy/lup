@@ -15,7 +15,9 @@ waits on its answer (`AwaitApproval`, whose reply comes once it's answered); the
 launching terminal, or `lup-dev inbox answer` at any other, answers it
 (`AnswerApproval`), whichever comes first; `lup-dev inbox show --diff` reads its
 whole diff (`ShowDiff`), and the dashboard each file it changes, whole
-(`ShowFiles`), as of a held change (`AskHold`).
+(`ShowFiles`), as of a held change (`AskHold`) and of a write that landed
+flagged (`AskFlag`, joining the item `ShowGathering` finds gathering the
+conversation's flagged writes to the file).
 
 The dashboard reads a conversation whole: its steps, as its runtime records
 them (`ShowConversation`), and the items it sent and was sent, in every state
@@ -38,6 +40,7 @@ from lup_dev.inbox.store import (
     ChangedFile,
     Conversation,
     Draft,
+    Flagged,
     HeldChange,
     Item,
     Operator,
@@ -186,15 +189,42 @@ class AskHold(Request):
     """The runtime's id for the call that made the change, which the item keeps."""
 
 
+class ShowGathering(Request):
+    """Find the item a write that landed flagged would join: the one gathering the same conversation's flagged writes to the same file, while the operator hasn't read it (`Inbox.gathering`)."""
+
+    kind: Literal["inbox-show-gathering"] = "inbox-show-gathering"
+    sender: Conversation
+    worktree: Path
+    path: Path
+    """The file, from the worktree's root."""
+
+
+class AskFlag(Request):
+    """Put a write that landed flagged in the operator's inbox: what its file's whole change flags, that change's diff and its file whole, and the conversation that made it."""
+
+    kind: Literal["inbox-ask-flag"] = "inbox-ask-flag"
+    flagged: Flagged
+    sender: Conversation
+    diff: str
+    file: ChangedFile
+    """The file whole since the item it joins was made: what it held before that
+    item's first write, and what this write makes it, judged as one change."""
+    call: str | None = None
+    """The runtime's id for the call that made the write, which an item of its
+    own keeps."""
+    joining: int | None = None
+    """The item it joins, as `ShowGathering` found it; none for one of its own."""
+
+
 class ShowDiff(Request):
-    """Read an approval's whole diff."""
+    """Read the whole diff of an approval, a held change or a flagged write."""
 
     kind: Literal["inbox-show-diff"] = "inbox-show-diff"
     number: int
 
 
 class ShowFiles(Request):
-    """Read each file an approval or a held change touches, whole before and after."""
+    """Read each file an approval, a held change or a flagged write touches, whole before and after."""
 
     kind: Literal["inbox-show-files"] = "inbox-show-files"
     number: int
@@ -284,15 +314,23 @@ class Reviewed(Reply):
     comments stay drafted."""
 
 
+class Gathering(Reply):
+    """The item a flagged write would join, and its file whole as it's kept; none where it would make one of its own."""
+
+    kind: Literal["inbox-gathering"] = "inbox-gathering"
+    number: int | None = None
+    file: ChangedFile | None = None
+
+
 class Whole(Reply):
-    """An approval's whole diff, coloured."""
+    """An approval's whole diff, coloured; a held change's or a flagged write's."""
 
     kind: Literal["inbox-diff"] = "inbox-diff"
     text: str
 
 
 class Files(Reply):
-    """Each file an approval or a held change touches, whole before and after, in the order it was asked with."""
+    """Each file an approval, a held change or a flagged write touches, whole before and after, in the order it was asked with."""
 
     kind: Literal["inbox-files"] = "inbox-files"
     number: int
@@ -481,6 +519,48 @@ class HoldAsking(Model, Handler[AskHold], arbitrary_types_allowed=True):
         return Shown(item=item)
 
 
+class GatheringShowing(Model, Handler[ShowGathering], arbitrary_types_allowed=True):
+    """Answers `ShowGathering`: the item gathering the conversation's flagged writes to the file, with its file as it's kept."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[ShowGathering]:
+        return ShowGathering
+
+    @override
+    async def answer(self, request: ShowGathering) -> Reply:
+        inbox = self.delivery.inbox
+        found = inbox.gathering(request.sender, request.worktree, request.path)
+        if found is None:
+            return Gathering()
+        files = await asyncio.to_thread(inbox.files, found.number)
+        file = next((each for each in files if each.path == request.path), None)
+        return Gathering(number=found.number, file=file)
+
+
+class FlagAsking(Model, Handler[AskFlag], arbitrary_types_allowed=True):
+    """Answers `AskFlag`: the flagged write in the operator's inbox, joining the item it names where that one still gathers."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[AskFlag]:
+        return AskFlag
+
+    @override
+    async def answer(self, request: AskFlag) -> Reply:
+        item = await self.delivery.flagged(
+            request.flagged,
+            request.sender,
+            request.diff,
+            request.file,
+            call=request.call,
+            joining=request.joining,
+        )
+        return Shown(item=item)
+
+
 class ContextShowing(Model, Handler[ShowContext], arbitrary_types_allowed=True):
     """Answers `ShowContext`: an item's moment, read from its sender's record as it stands (`inbox/context.py`)."""
 
@@ -500,9 +580,11 @@ class ContextShowing(Model, Handler[ShowContext], arbitrary_types_allowed=True):
 
 
 def written(item: Item) -> str:
-    """Return the text of an item a conversation sent, whole: as it wrote it, a question with its decisions and leans; a change held from it, with what's held and why."""
+    """Return the text of an item a conversation sent, whole: as it wrote it, a question with its decisions and leans; a change held from it, with what's held and why, or one that landed flagged, with what's flagged."""
     match item.reason:
-        case HeldChange(text=text, summary=summary):
+        case (
+            HeldChange(text=text, summary=summary) | Flagged(text=text, summary=summary)
+        ):
             return f"{text}\n{summary}"
         case _:
             return body(item)
@@ -564,7 +646,7 @@ class ConversationShowing(
 
 
 class DiffShowing(Model, Handler[ShowDiff], arbitrary_types_allowed=True):
-    """Answers `ShowDiff`: the approval's whole diff."""
+    """Answers `ShowDiff`: the item's whole diff."""
 
     delivery: Delivery
 
@@ -574,12 +656,12 @@ class DiffShowing(Model, Handler[ShowDiff], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: ShowDiff) -> Reply:
-        self.delivery.approval(request.number)
+        self.delivery.changing(request.number)
         return Whole(text=self.delivery.inbox.diff(request.number))
 
 
 class FilesShowing(Model, Handler[ShowFiles], arbitrary_types_allowed=True):
-    """Answers `ShowFiles`: each file the approval or held change touches, whole, read off the event loop, since they can run to megabytes."""
+    """Answers `ShowFiles`: each file the approval, held change or flagged write touches, whole, read off the event loop, since they can run to megabytes."""
 
     delivery: Delivery
 
@@ -589,7 +671,7 @@ class FilesShowing(Model, Handler[ShowFiles], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: ShowFiles) -> Reply:
-        self.delivery.approval(request.number)
+        self.delivery.changing(request.number)
         files = await asyncio.to_thread(self.delivery.inbox.files, request.number)
         return Files(number=request.number, files=files)
 
@@ -683,6 +765,8 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.to(ApprovalAwaiting(delivery=delivery)),
         Route.to(ApprovalAnswering(delivery=delivery)),
         Route.to(HoldAsking(delivery=delivery)),
+        Route.to(GatheringShowing(delivery=delivery)),
+        Route.to(FlagAsking(delivery=delivery)),
         Route.to(DiffShowing(delivery=delivery)),
         Route.to(FilesShowing(delivery=delivery)),
         Route.to(ContextShowing(delivery=delivery, recorded=recorded)),

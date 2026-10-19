@@ -226,9 +226,21 @@ const SESSION: Item["recipient"] = { party: "conversation", repository: "/r.git"
 const SURVEY: Item["recipient"] = { ...SESSION, agent: "a04" };
 const OPERATOR: Item["sender"] = { party: "operator" };
 
+/** The rank the host gives what waits on the operator (`ranked`, `inbox/store.py`), which the conversation doesn't read. */
+const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
+
 /** An item of the session's, sent to the operator unless `fields` say otherwise. */
 function item(number: number, reason: Item["reason"], minute: number, fields: Partial<Item> = {}): Item {
-    return { number, reason, sender: SESSION, recipient: OPERATOR, made: at(minute), state: { state: "waiting" }, ...fields };
+    return {
+        number,
+        reason,
+        sender: SESSION,
+        recipient: OPERATOR,
+        made: at(minute),
+        state: { state: "waiting" },
+        rank: WAITING,
+        ...fields,
+    };
 }
 
 /** An item and its text, as the host lists it. */

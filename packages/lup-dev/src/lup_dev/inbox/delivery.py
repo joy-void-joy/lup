@@ -42,7 +42,14 @@ call's result, and never again:
 conversation, saying whose it was: one made for it then (`Inbox.made`), and
 those still waiting when it ends.
 
-The operator hears of each item that reaches them through the desktop's notices.
+The operator hears of each item that reaches them waiting on them through the
+desktop's notices; news and flags never raise one (`ranked`).
+
+**A write that landed flagged** (the judge's) holds no one: it joins the item
+gathering its conversation's flagged writes to the file while the operator
+hasn't read it (`Inbox.gathering`), or is an item of its own (`flagged`). It's
+reviewed as a message is: a comment on it reaches its agent with the review,
+and marking it read tells the agent nothing.
 
 **An approval** (trust on launch's) is the operator's alone, never told to a
 conversation: a launch puts it in their inbox and waits on it (`settled`), and
@@ -79,6 +86,7 @@ from lup_dev.inbox.store import (
     Decided,
     Done,
     Draft,
+    Flagged,
     Friction,
     HeldChange,
     How,
@@ -151,6 +159,8 @@ def what(item: Item) -> str:
             return "an approval"
         case HeldChange():
             return "a held change"
+        case Flagged():
+            return "a flagged write"
         case Review():
             return "a review"
 
@@ -166,6 +176,7 @@ def opening(item: Item) -> str:
             | Question(text=text)
             | Approval(text=text)
             | HeldChange(text=text)
+            | Flagged(text=text)
         ):
             said = text
         case Answer(comment=comment):
@@ -191,6 +202,7 @@ def body(item: Item) -> str:
             | Stop(text=text)
             | Approval(text=text)
             | HeldChange(text=text)
+            | Flagged(text=text)
         ):
             return text
         case Answer(comment=comment):
@@ -249,7 +261,12 @@ def reviewable(item: Item) -> None:
     match item:
         case Item(
             sender=Conversation(),
-            reason=Message() | Friction() | HowItWent() | Stop() | Question(),
+            reason=Message()
+            | Friction()
+            | HowItWent()
+            | Stop()
+            | Question()
+            | Flagged(),
         ):
             return
         case _:
@@ -547,6 +564,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 | Question()
                 | Approval()
                 | HeldChange()
+                | Flagged()
                 | Review()
             ):
                 return f"{head}{passed}"
@@ -562,6 +580,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 | Question(text=text)
                 | Approval(text=text)
                 | HeldChange(text=text)
+                | Flagged(text=text)
             ):
                 return text
             case Answer() as answer:
@@ -888,7 +907,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     await self.wake(conversation)
 
     async def noticed(self, item: Item) -> None:
-        """Raise a desktop notice for an item reaching the operator: where it's from, what it is, and its first line."""
+        """Raise a desktop notice for an item reaching the operator, where its kind's rank raises one (`ranked`): where it's from, what it is, and its first line."""
+        if not item.rank.notifies:
+            return
         where = "" if item.worktree is None else f" in {item.worktree}"
         summary = f"lup: {what(item)} from {who(item.sender)}{where}"
         body = f"{opening(item)}\nlup-dev inbox show {item.number}"
@@ -970,7 +991,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         item = self.inbox.item(number)
         match item:
             case Item(
-                reason=Message() | Friction() | HowItWent() | Stop(),
+                reason=Message() | Friction() | HowItWent() | Stop() | Flagged(),
                 sender=Conversation() as sender,
             ):
                 return await self.replied(item, sender, rulings, comment)
@@ -1061,7 +1082,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         item = self.inbox.item(number)
         match item:
             case Item(
-                reason=Message() | Friction() | HowItWent() | Stop(),
+                reason=Message() | Friction() | HowItWent() | Stop() | Flagged(),
                 recipient=Operator(),
                 state=Waiting(),
             ):
@@ -1103,6 +1124,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 message = (
                     f"item {number} is {what(item)}, which the operator answers: it "
                     "isn't withdrawn"
+                )
+                raise InboxError(message)
+            case Item(reason=Flagged()):
+                message = (
+                    f"item {number} is {what(item)}, which lup put before the "
+                    "operator for their review: it isn't withdrawn"
                 )
                 raise InboxError(message)
             case _:
@@ -1239,4 +1266,52 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
         self.inbox.attached(item.number, diff, files)
         await self.noticed(item)
+        return item
+
+    async def flagged(
+        self,
+        flagged: Flagged,
+        sender: Conversation,
+        diff: str,
+        file: ChangedFile,
+        *,
+        call: str | None = None,
+        joining: int | None = None,
+    ) -> Item:
+        """Put a write that landed flagged in the operator's inbox from the conversation that made it, holding no one, and raising no notice (`ranked`).
+
+        It joins item `joining`, its file whole since that item was made and its
+        diff in place of those kept, where that item still gathers the
+        conversation's flagged writes to the file (`Inbox.gathering`); else it's
+        an item of its own, anchored to `call`, its diff and file kept beside it.
+        """
+        match self.inbox.gathering(sender, flagged.worktree, flagged.path):
+            case Item(number=number, reason=Flagged(writes=writes)) as gathered if (
+                number == joining
+            ):
+                self.inbox.attached(number, diff, [file])
+                joined = flagged.model_copy(update={"writes": writes + 1})
+                return self.inbox.kept(gathered.model_copy(update={"reason": joined}))
+            case _:
+                item = self.inbox.made(
+                    flagged,
+                    sender,
+                    Operator(),
+                    flagged.worktree,
+                    self.clock.now(),
+                    call=call,
+                )
+                self.inbox.attached(item.number, diff, [file])
+                await self.delivered(item)
+                return item
+
+    def changing(self, number: int) -> Item:
+        """Return item `number`, or say it changes no file: an approval, a held change and a flagged write keep theirs beside them."""
+        item = self.inbox.item(number)
+        if not isinstance(item.reason, Approval | HeldChange | Flagged):
+            message = (
+                f"item {number} is {what(item)}, which changes no file: an approval, "
+                "a held change or a flagged write does"
+            )
+            raise InboxError(message)
         return item

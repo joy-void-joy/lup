@@ -52,6 +52,7 @@ from lup_dev.codescan.directives import (
 from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.host.client import RoomClient
+from lup_dev.host.protocol import HostError
 from lup_dev.host.records import Record, Records
 from lup_dev.host.workers import (
     Called,
@@ -64,8 +65,10 @@ from lup_dev.host.workers import (
     Relaying,
     Sent,
 )
+from lup_dev.inbox.protocol import AskFlag, Gathering, ShowGathering
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench, Services
+from lup_dev.policy.flags import Flagging
 from lup_dev.policy.holds import Announcing, Hold, Response, answer
 from lup_dev.policy.importers import Spawner
 from lup_dev.policy.runtime import Runtime
@@ -587,6 +590,38 @@ class Announced(Announcing):
         return self.holding_all
 
 
+class Flags(Flagging):
+    """Records each flagged write put before the operator, gathering a conversation's flagged writes to one file into one item as the inbox does, until the test marks it read (`read`); or refuses each, as an unreachable host would, with `refusing`."""
+
+    def __init__(self) -> None:
+        self.asked: list[AskFlag] = []
+        self.items: dict[int, AskFlag] = {}
+        """Each item by its number, as its latest write made it."""
+        self.read: list[int] = []
+        self.refusing = ""
+
+    def gathering(self, asked: ShowGathering) -> Gathering:
+        if self.refusing:
+            raise HostError(self.refusing)
+        found = [
+            (number, kept)
+            for number, kept in self.items.items()
+            if number not in self.read
+            and kept.sender == asked.sender
+            and kept.flagged.worktree == asked.worktree
+            and kept.flagged.path == asked.path
+        ]
+        if not found:
+            return Gathering()
+        number, kept = found[-1]
+        return Gathering(number=number, file=kept.file)
+
+    def flagged(self, asking: AskFlag) -> None:
+        self.asked.append(asking)
+        number = asking.joining or len(self.items) + 1
+        self.items[number] = asking
+
+
 class Kit:
     """A bench with its fakes, for one test."""
 
@@ -606,6 +641,7 @@ class Kit:
         self.layout = Layout(state=state, data=state.parent / "data")
         self.runtime = runtime
         self.announced = Announced(self.layout, self.clock, answering)
+        self.flags = Flags()
         self.bench = Bench(
             runtime=runtime,
             services=Services(
@@ -616,6 +652,7 @@ class Kit:
                 spawner=self.spawner,
                 integration="dev",
                 announcing=self.announced,
+                flagging=self.flags,
             ),
         )
 

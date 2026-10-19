@@ -20,6 +20,7 @@ as each runtime's adapter recognizes it. That stops a mistake, not a determined
 agent; the real separation comes with containers.
 """
 
+import difflib
 import secrets
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
@@ -378,3 +379,14 @@ def answer(
         log = VerdictLog(path=layout.verdicts(Path(common)))
         log.append(answered(hold, "approved" if response.approved else "declined"))
     return hold
+
+
+def unified(path: Path, before: str | None, after: str | None) -> str:
+    """Show a write as a unified diff of `path`, from what it was to what it would be; none on a side where the file isn't."""
+    lines = difflib.unified_diff(
+        (before or "").splitlines(keepends=True),
+        (after or "").splitlines(keepends=True),
+        fromfile=f"a/{path}",
+        tofile=f"b/{path}",
+    )
+    return "".join(lines)
