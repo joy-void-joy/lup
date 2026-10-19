@@ -2,7 +2,7 @@
 
 lup is the environment agents and the operator work in together: the workflows, skills, defaults and patterns that make a session on Claude Code or Codex better than a plain one, for the agent working in it and for the operator working with it, in one codebase every project can use. It began as a way to build agent loops for aib, and grew into the environment projects are developed and run in.
 
-This document was written by sessions for the sessions after, so each knows what it's working on. It describes lup; it isn't a record of decisions, and none of it is a rule handed down: where your work reaches a choice, ask the operator.
+This document describes lup; it isn't a record of decisions: where your work reaches a choice, ask the operator.
 
 ## Who it's for
 
