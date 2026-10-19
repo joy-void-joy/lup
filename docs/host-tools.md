@@ -18,7 +18,7 @@ Paths are under `packages/lup-dev/src/lup_dev/` unless they name another package
 | `inbox` | `number`, `every` | Reads the inbox of the agent's repository, changing nothing: each item in a line, those still waiting or every one; given a number, one of the agent's own whole | none |
 | `withdraw` | `number`, `why` | Takes back a message or question the agent sent that still waits for the operator, with its reason | none: the item is `withdrawn` |
 | `judged` | `every`, `path` | Reads what lup's judge made of the writes in the agent's repository, changing nothing: its session's verdicts, or every session's, a line each, then the repository's holds, open and answered | none |
-| `rename` | `name` | Names the session's launch after its task; from a subagent, names that subagent alone, under its parent. Refused where another launch, or another subagent of the launch, holds the name, saying whose (`docs/launch.md`, *Names*) | none |
+| `rename` | `name` | Names the session's launch after its task; from a subagent, names that subagent alone, under its parent. Refused where another launch, or another subagent of the launch, holds the name (or another launch the container it would give), saying whose (`docs/launch.md`, *Names*) | none |
 | `read_issue` | `number`, `repository` | An issue or pull request of this repository, or of another the operator's login can read (`owner/name`), with its comments, and a pull request's checks | none |
 | `find_issues` | `query`, `state`, `repository` | Searches the issues and pull requests of this repository, or of another the operator's login can read (`owner/name`) | none |
 | `file_issue` | `title`, `body` | Opens an issue | none |
