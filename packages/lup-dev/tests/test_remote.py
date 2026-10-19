@@ -24,12 +24,15 @@ import pytest
 
 from lup.rooms.container import Mask, Mount
 from lup.types import Model
+from lup_dev import Project
+from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, RoomClient, Starter, asked
 from lup_dev.host.courier import Courier, Heard, Printed, Telling
 from lup_dev.host.protocol import Done, HostError, Limits, Register, Reply, Stop
 from lup_dev.host.service import Answerer, Asked, HostService, Judged
 from lup_dev.launch.room import RoomError, RoomGit, programs, refreshed, room_git
-from lup_dev.layout import ROOM_PATH, HostLayout, LaunchLayout, LaunchSockets
+from lup_dev.layout import ROOM_PATH, HostLayout, LaunchLayout, LaunchSockets, Layout
+from lup_dev.private.withheld import Held, Withheld, kept
 from lup_dev.remote.config import Gating, room_config
 from lup_dev.remote.protocol import (
     Advertised,
@@ -47,11 +50,14 @@ from lup_dev.remote.protocol import (
     refusal,
     routes,
 )
+from lup_dev.stored import write_model
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from conftest import FakeClock
+    from conftest import FakeClock, InProcess
+
+    from lup_dev.host.workers import LaunchModules
 
 
 @pytest.fixture(autouse=True)
@@ -222,14 +228,21 @@ class World:
         )
 
     @contextmanager
-    def served(self, clock: FakeClock, limits: Limits = DEFAULT) -> Generator[None]:
+    def served(
+        self,
+        clock: FakeClock,
+        limits: Limits = DEFAULT,
+        modules: LaunchModules | None = None,
+    ) -> Generator[None]:
+        remotes = Remotes(say=self.said.append, landed=self.landing, modules=modules)
         service = HostService(
             layout=self.layout,
             answerer=Stub(),
             courier=Deaf(),
             judge=no_judge,
             say=self.said.append,
-            room_routes=routes(Remotes(say=self.said.append, landed=self.landing)),
+            room_routes=routes(remotes),
+            modules=modules,
         )
         running = Background(service)
         running.thread.start()
@@ -265,6 +278,18 @@ class World:
         made = self.room_git("commit", "-q", "--allow-empty", "-m", message)
         assert made.exit_code == 0, made.stderr.decode()
         return git(self.worktree, "rev-parse", "HEAD")
+
+    def wrote(self, path: str, content: str | bytes, message: str) -> str:
+        """Write `path` in the room's worktree and commit it, and return the commit's short id."""
+        file = self.worktree / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes):
+            file.write_bytes(content)
+        else:
+            file.write_text(content)
+        assert self.room_git("add", "--", path).exit_code == 0
+        self.commit(message)
+        return git(self.worktree, "rev-parse", "--short", "HEAD")
 
     def gated(self) -> list[dict[str, str | None]]:
         """Return each run of the gate, in order: its commit, where it ran, and the git directory it was given."""
@@ -1148,3 +1173,224 @@ def test_the_room_s_git_is_written_from_the_repository_s_own_config_past_a_plant
         )
         == f"url.lup::{origin}.insteadof {origin}"
     )
+
+
+# The door: what a push would publish, put to the modules' hooks at `publishing`
+
+
+PRIVATE = Withheld(
+    held=[
+        Held(kind="value", text="Kestrel Labs"),
+        Held(kind="home", text="/home/op"),
+        Held(kind="alias", text="forge-op"),
+    ]
+)
+"""Made-up values never published, as a launch would list them on the host."""
+
+
+@pytest.fixture
+def guarded(world: World, in_process: type[InProcess], tmp_path: Path) -> InProcess:
+    """lup's default modules, served in the test's own process, `Private`'s list for the world's repository made up."""
+    layout = Layout(state=tmp_path / "lup-state", data=tmp_path / "lup-data")
+    write_model(kept(layout.module_data("private", world.project)), PRIVATE)
+    return in_process(resolved=resolve(Project()), layout=layout)
+
+
+def told(ran: Ran) -> str:
+    """What the room's git said, which must hold no value never published."""
+    said = stderr(ran)
+    assert "/home/op" not in said
+    assert "Kestrel" not in said
+    return said
+
+
+def test_a_push_carrying_a_value_is_refused_naming_commit_file_and_line(
+    world: World, clock: FakeClock, guarded: InProcess
+) -> None:
+    world.wrote("docs/clean.md", "Nothing here.\n", "clean")
+    short = world.wrote("docs/notes.md", "Notes.\nSee /home/op/notes.\n", "notes")
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    assert pushed.exit_code != 0
+    assert world.on_forge("refs/heads/feat") is None
+    said = told(pushed)
+    assert (
+        "lup refused to publish this push to `refs/heads/feat`: a module's check at "
+        "the `publishing` moment found what isn't published, at each place below.\n"
+        f"  {short} docs/notes.md:2:5 - the operator's home path\n"
+        "      steer: write it as `~`, or a path in the repository from its root\n"
+        "A push sends every commit the remote lacks, so rewrite the commit that "
+        "carries it (amend it, or rebase) and push again: a commit on top leaves "
+        "it in what's pushed."
+    ) in said
+    assert (
+        "refused by lup: it would publish what isn't published, at the places "
+        "listed above"
+    ) in said
+    assert not [line for line in world.said if "/home/op" in line]
+    [publishing] = [each for each in guarded.told if each.occasion == "publishing"]
+    assert publishing.conversation is None
+
+
+def test_a_value_the_remote_holds_already_isnt_refused_again(
+    world: World, clock: FakeClock, guarded: InProcess
+) -> None:
+    world.wrote("docs/notes.md", "See /home/op/notes.\n", "notes")
+    git(world.worktree, "push", "-q", str(world.forge), "HEAD:refs/heads/feat")
+    world.wrote("README.md", "# Work\n\nMore.\n", "more")
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    assert pushed.exit_code == 0, stderr(pushed)
+    assert world.on_forge("refs/heads/feat") == git(world.worktree, "rev-parse", "HEAD")
+
+
+def test_a_message_a_path_and_a_ref_s_name_carrying_a_value_are_each_refused(
+    world: World, clock: FakeClock, guarded: InProcess
+) -> None:
+    world.commit("For Kestrel Labs, at last")
+    message = git(world.worktree, "rev-parse", "--short", "HEAD")
+    named = world.wrote("docs/forge-op.md", "Plain.\n", "a page")
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/to-forge-op")
+
+    said = told(pushed)
+    assert world.on_forge("refs/heads/to-forge-op") is None
+    assert (
+        "  the name of the ref it updates, at column 15 - an SSH alias in the "
+        "repository's remote"
+    ) in said
+    assert (f"  {message}'s message:1:5 - one of the operator's private values") in said
+    assert (
+        f"  {named} docs/••••••••.md, in its path, at column 6 - an SSH alias in "
+        "the repository's remote"
+    ) in said
+
+
+def test_a_file_that_isnt_text_and_a_link_are_read_for_what_they_add(
+    world: World, clock: FakeClock, guarded: InProcess
+) -> None:
+    binary = world.wrote("assets/blob.bin", b"\x00\x01HOME/OP? /home/op\x00", "a blob")
+    (world.worktree / "notes").symlink_to("/home/op/notes")
+    assert world.room_git("add", "notes").exit_code == 0
+    world.commit("a link")
+    link = git(world.worktree, "rev-parse", "--short", "HEAD")
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    said = told(pushed)
+    assert f"  {binary} assets/blob.bin, at byte 11 - the operator's home path" in said
+    assert f"  {link} notes:1:1 - the operator's home path" in said
+
+
+def test_a_value_added_and_removed_within_the_push_is_refused_where_it_was_added(
+    world: World, clock: FakeClock, guarded: InProcess
+) -> None:
+    added = world.wrote("docs/notes.md", "Kestrel Labs said so.\n", "added")
+    world.wrote("docs/notes.md", "Someone said so.\n", "removed")
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    assert world.on_forge("refs/heads/feat") is None
+    said = told(pushed)
+    assert f"  {added} docs/notes.md:1:1 - one of the operator's private values" in said
+
+
+def test_a_merge_is_refused_for_what_its_resolution_adds_not_what_a_parent_brought(
+    world: World, clock: FakeClock, guarded: InProcess
+) -> None:
+    world.wrote("docs/notes.md", "one\n", "base")
+    git(world.worktree, "push", "-q", str(world.forge), "HEAD:refs/heads/base")
+    assert world.room_git("checkout", "-q", "-b", "side").exit_code == 0
+    world.wrote("docs/notes.md", "side\n", "side")
+    assert world.room_git("checkout", "-q", "main").exit_code == 0
+    world.wrote("docs/notes.md", "main\n", "main")
+    world.room_git("merge", "-q", "side", "-m", "merge")
+    (world.worktree / "docs" / "notes.md").write_text("main and side, at /home/op\n")
+    assert world.room_git("add", "docs/notes.md").exit_code == 0
+    assert world.room_git("commit", "-q", "--no-edit").exit_code == 0
+    merge = git(world.worktree, "rev-parse", "--short", "HEAD")
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    said = told(pushed)
+    assert said.count(" - the operator's home path") == 1
+    assert f"  {merge} docs/notes.md:1:19 - the operator's home path" in said
+
+
+def test_an_atomic_push_with_an_update_refused_at_publishing_pushes_none(
+    world: World, clock: FakeClock, guarded: InProcess
+) -> None:
+    clean = world.commit("clean")
+    world.wrote("docs/notes.md", "See /home/op.\n", "notes")
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git(
+            "push",
+            "--atomic",
+            "origin",
+            f"{clean}:refs/heads/clean",
+            "HEAD:refs/heads/feat",
+        )
+
+    assert pushed.exit_code != 0
+    assert world.on_forge("refs/heads/clean") is None
+    assert world.on_forge("refs/heads/feat") is None
+    assert "not pushed: the push is atomic, and `refs/heads/feat` was refused" in told(
+        pushed
+    )
+
+
+def test_an_object_the_listing_names_that_the_store_lacks_is_skipped(
+    world: World, clock: FakeClock, guarded: InProcess, tmp_path: Path
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    git(tmp_path, "clone", "-q", str(world.forge), str(elsewhere))
+    git(elsewhere, "commit", "-q", "--allow-empty", "-m", "theirs")
+    git(elsewhere, "push", "-q", "origin", "HEAD:refs/heads/theirs")
+    world.wrote("docs/clean.md", "Nothing here.\n", "clean")
+
+    with world.served(clock, modules=guarded):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    assert pushed.exit_code == 0, stderr(pushed)
+    assert world.on_forge("refs/heads/feat") == git(world.worktree, "rev-parse", "HEAD")
+
+
+def test_a_push_whose_modules_can_t_check_it_is_refused(
+    world: World, clock: FakeClock, in_process: type[InProcess], tmp_path: Path
+) -> None:
+    unlisted = in_process(
+        resolved=resolve(Project()),
+        layout=Layout(state=tmp_path / "state-none", data=tmp_path / "data-none"),
+    )
+    world.wrote("docs/clean.md", "Nothing here.\n", "clean")
+
+    with world.served(clock, modules=unlisted):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    assert world.on_forge("refs/heads/feat") is None
+    assert "  all of it - a repository with no list of private values" in stderr(pushed)
+
+
+def test_a_deletion_and_a_push_with_no_modules_ask_nothing(
+    world: World, clock: FakeClock, guarded: InProcess
+) -> None:
+    world.wrote("docs/notes.md", "See /home/op.\n", "notes")
+    git(world.worktree, "push", "-q", str(world.forge), "HEAD:refs/heads/feat")
+    allowing = Limits(actions=["fetch", "push", "delete-ref"], protected=[])
+
+    with world.served(clock, allowing, modules=guarded):
+        deleted = world.room_git("push", "origin", ":refs/heads/feat")
+
+    assert deleted.exit_code == 0, stderr(deleted)
+    assert guarded.told == [
+        each for each in guarded.told if each.occasion != "publishing"
+    ]

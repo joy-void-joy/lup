@@ -80,9 +80,13 @@ class Place(Model):
         '4e1f2a3 docs/notes.md:12:9'
         >>> Place(within="4e1f2a3 logo.png", byte=40).text()
         '4e1f2a3 logo.png, at byte 40'
+        >>> Place(within="the ref it updates", column=12).text()
+        'the ref it updates, at column 12'
         """
         if self.byte is not None:
             return f"{self.within}, at byte {self.byte}"
+        if self.line is None and self.column is not None:
+            return f"{self.within}, at column {self.column}"
         if self.line is None:
             return self.within
         if self.column is None:

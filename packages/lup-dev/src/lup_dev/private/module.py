@@ -14,8 +14,9 @@ from pydantic import model_validator
 
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Named, listed
-from lup_dev.declaration.kinds import Guidance, Section, mentioned
+from lup_dev.declaration.kinds import Guidance, Hooks, Section, mentioned
 from lup_dev.declaration.module import Module
+from lup_dev.private.hooks import PrivateHooks
 from lup_dev.private.withheld import DETAILS, Detail
 
 
@@ -84,6 +85,8 @@ class Private(Module):
     values: Values = Values()
     """The person's own values: none, unless their own layer,
     `lup_project.local.py`, adds them."""
+    hooks: Hooks = Hooks.of(PrivateHooks)
+    """At `publishing`, refusing a push or a post that carries a value."""
     guidance: Guidance = Guidance.of(
         Section(name="private", package="lup_dev.private", path=Path("guidance.md"))
     )

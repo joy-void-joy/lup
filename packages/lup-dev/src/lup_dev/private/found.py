@@ -156,6 +156,19 @@ def found(text: str, withheld: Withheld) -> list[Found]:
     return [at(span) for span in spans(text, withheld)]
 
 
+def masked(text: str, withheld: Withheld) -> str:
+    """Return `text` with each character of a value of `withheld` in it shown as `•`, for naming a place by it, such as a file's path.
+
+    >>> masked("docs/Kestrel-notes.md", Withheld(held=[Held(kind="value", text="kestrel")]))
+    'docs/•••••••-notes.md'
+    """
+    found = spans(text, withheld)
+    return "".join(
+        "•" if any(span.start <= at < span.end for span in found) else char
+        for at, char in enumerate(text)
+    )
+
+
 def worded(byte: int) -> bool:
     """Say whether a byte is an ASCII letter or digit.
 

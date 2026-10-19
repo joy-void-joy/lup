@@ -18,7 +18,9 @@ directory, within the limits the project's declaration sets
 - `push`: each source resolved in the room with `git rev-parse --verify`, since
   git hands over the revision as written (`HEAD~1`), and sent as an object id
   with its destination and whether it's forced (`+`); an empty source is a
-  deletion. Each destination's `ok`, or `error` with why;
+  deletion. Each destination's `ok`, or `error` with why; what the host says
+  beside them, the places a refusal at `publishing` names, is printed on
+  git's standard error first, since git shows one line for each ref;
 - `fetch`: the objects fetched on the host into the repository's own store,
   which the room shares, so git writes the room's refs itself.
 
@@ -311,6 +313,14 @@ class Helper:
             }
         )
         match reply:
+            case {
+                "kind": "remote-pushed",
+                "updates": list() as outcomes,
+                "said": str() as told,
+            } if told:
+                sys.stderr.write(f"{told}\n")
+                sys.stderr.flush()
+                self.said(*(self.outcome(each) for each in outcomes), *stopped, "")
             case {"kind": "remote-pushed", "updates": list() as outcomes}:
                 self.said(*(self.outcome(each) for each in outcomes), *stopped, "")
             case {"kind": "refused", "error": str() as error}:

@@ -450,6 +450,7 @@ def host_serve(context: typer.Context) -> None:
     sweeping = Sweeping(
         layout=layout, host=host_client(), podman=podman, say=typer.echo
     )
+    workers = Workers(layout=layout.host, say=typer.echo)
     service = HostService(
         layout=layout.host,
         answerer=known,
@@ -463,11 +464,15 @@ def host_serve(context: typer.Context) -> None:
         tools=room_tools(delivery, layout),
         room_routes=[
             *remote_routes(
-                Remotes(say=typer.echo, landed=partial(proposed_after, delivery))
+                Remotes(
+                    say=typer.echo,
+                    landed=partial(proposed_after, delivery),
+                    modules=workers,
+                )
             ),
             *clipboard_routes(Desktop.of(settings)),
         ],
-        modules=Workers(layout=layout.host, say=typer.echo),
+        modules=workers,
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
         podman=podman,
