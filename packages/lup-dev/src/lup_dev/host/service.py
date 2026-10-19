@@ -585,14 +585,15 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         holder = held(name, self.claims(), served.launch)
         if holder is not None:
             raise HostError(taken(holder, name))
-        before = served.launch.name
-        self.recorded(served.launch.model_copy(update={"name": name}))
+        named = served.launch.model_copy(update={"name": name})
+        self.recorded(named)
         session = served.conversations.session
         if session is not None:
             self.names.keep(session, name)
-        self.say(f"{launch}: renamed from `{before}` to `{name}`")
-        await self.moved(served.launch, container_name(served.launch.repository, name))
-        return self.served[launch].launch
+        self.say(f"{launch}: renamed from `{served.launch.name}` to `{name}`")
+        await self.moved(named, container_name(named.repository, name))
+        current = self.served.get(launch)
+        return named if current is None else current.launch
 
     async def moved(self, launch: Register, container: str) -> None:
         """Rename `launch`'s container to `container` where podman has it, and record its name; otherwise it keeps its own.
