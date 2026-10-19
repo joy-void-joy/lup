@@ -766,24 +766,39 @@ class Subagented(Model, extra="ignore"):
     transcript_path: Path | None = None
 
 
+FORK = "fork"
+"""The type of a subagent spawned with the conversation so far: its record's
+`agentType` (measured on 2.1.303, `docs/field-notes.md`, *Subagents' records*).
+A fork "sees the same system prompt, tools, model, and message history as the
+main session" (the `sub-agents` docs, *Fork the current conversation*), so it
+reads the session's guidance, which the system prompt carries."""
+
+
 def spawned(raw: str) -> Spawned | None:
     """Return how the subagent a Claude Code hook fires for was spawned, from its record beside the session's transcript; none for the session's own conversation.
 
-    A subagent whose record isn't there is said by its type alone.
+    A subagent whose record isn't there is said by its type alone. Only a fork
+    reads the session's guidance: every other subagent's system prompt is "the
+    agent's own prompt plus environment details that Claude Code appends, not
+    the Claude Code system prompt" (the `sub-agents` docs, *What loads at
+    startup*), which lup's guidance is appended to.
     """
     payload = Subagented.model_validate_json(raw)
     if not payload.agent_id:
         return None
     kind = payload.agent_type or None
-    if payload.transcript_path is None:
-        return Spawned(kind=kind)
-    folder = payload.transcript_path.with_suffix("") / "subagents"
-    record = folder / f"agent-{payload.agent_id}.meta.json"
-    if not record.is_file():
-        return Spawned(kind=kind)
+    folder = (
+        None
+        if payload.transcript_path is None
+        else payload.transcript_path.with_suffix("") / "subagents"
+    )
+    record = None if folder is None else folder / f"agent-{payload.agent_id}.meta.json"
+    if record is None or not record.is_file():
+        return Spawned(kind=kind, guided=kind == FORK)
     kept = SubagentRecord.model_validate_json(record.read_text())
+    kind = kept.agent_type or kind
     return Spawned(
-        name=kept.name, parent=kept.parent_agent_id, kind=kept.agent_type or kind
+        name=kept.name, parent=kept.parent_agent_id, kind=kind, guided=kind == FORK
     )
 
 

@@ -1373,6 +1373,7 @@ def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
         parent="a1", kind="general-purpose"
     )
     assert claude.spawned(subagent("a3", "Plan")) == Spawned(kind="Plan")
+    assert claude.spawned(subagent("a4", "fork")) == Spawned(kind="fork", guided=True)
     assert claude.spawned(pre_tool_use(Path("/w"), "Bash", {"command": "ls"})) is None
 
 
@@ -1443,14 +1444,15 @@ def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
     )
 
     assert codex.spawned(subagent("th-a1", child)) == Spawned(
-        name="explore_auth", kind="explorer"
+        name="explore_auth", kind="explorer", guided=True
     )
     assert codex.spawned(subagent("th-a2", grandchild)) == Spawned(
-        name="grep_tokens", parent="th-a1", kind="explorer"
+        name="grep_tokens", parent="th-a1", kind="explorer", guided=True
     )
-    assert codex.spawned(subagent("th-a3", unnamed)) == Spawned(kind="explorer")
-    assert codex.spawned(subagent("th-a4", None)) == Spawned(kind="explorer")
-    assert codex.spawned(subagent("th-a1", roots)) == Spawned(kind="explorer")
+    explorer = Spawned(kind="explorer", guided=True)
+    assert codex.spawned(subagent("th-a3", unnamed)) == explorer
+    assert codex.spawned(subagent("th-a4", None)) == explorer
+    assert codex.spawned(subagent("th-a1", roots)) == explorer
     assert codex.spawned((CAPTURED / "6-pre-tool-use-bash.json").read_text()) is None
 
 

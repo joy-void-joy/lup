@@ -35,7 +35,7 @@ from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.courier import Conversation as Caller
-from lup_dev.host.courier import Heard, Posted
+from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
 from lup_dev.host.protocol import HostError, Limits, Register, Stop
 from lup_dev.host.records import Called, Recorded, Said
 from lup_dev.host.service import Asked, HostService, Judged, Naming
@@ -314,8 +314,9 @@ def inboxed(
     typed: Callable[[Approval, Path, list[ChangedFile]], list[ChangedFile]]
     | None = None,
     told: Callable[[str], None] | None = None,
+    spawns: Spawns | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too."""
+    """A host service with lup's inbox, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     changes = Changes()
@@ -337,7 +338,7 @@ def inboxed(
         layout=machine.host,
         answerer=known,
         courier=couriers,
-        spawns=cli.SpawnRecords(adapters=known),
+        spawns=spawns or cli.SpawnRecords(adapters=known),
         post=delivery,
         routes=inbox_routes(delivery, recorded or {}),
         tools=cli.room_tools(delivery, judging or machine),
@@ -1394,6 +1395,28 @@ def test_lup_dev_rename_and_send_name_a_launch_by_its_name(
     assert sent == "Sent item 1 to `reviewer`, claude session s2.\n"
 
 
+def introduction() -> str:
+    """What a subagent is told of lup's tools at its first hook, as the tests' service serves them: the inbox's, `judged` and `rename`, each by its docstring's first line."""
+    served = [
+        *specs(),
+        *JudgeTools.model_construct().specs(),
+        *Naming.model_construct().specs(),
+    ]
+    opening = (
+        "lup, the environment this session runs in, serves its subagents these "
+        "tools, as it does its main conversation. Your tool search finds each "
+        "by its name, with its full description. Some subagent types are given "
+        "only their own tools, without lup's: where your tool search finds none "
+        "of these, this subagent is one of them."
+    )
+    direct = (
+        "`friction` and `how_it_went` reach the operator directly, whatever your "
+        "parent passes on."
+    )
+    lines = [f"- `{spec.name}`: {spec.summary}" for spec in served]
+    return "\n".join([opening, "", *lines, "", direct])
+
+
 class Subagents:
     """A Claude Code session's transcript and its subagents' records beside it, as Claude Code keeps them."""
 
@@ -1519,9 +1542,10 @@ def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_
         listing = runner.invoke(cli.app, ["sessions"])
         listed = inbox()
     assert spawned == ""
-    assert first == ""
+    assert context(first) == introduction()
     assert nested == ""
     assert asked.startswith(
+        f"{introduction()}\n\n"
         "lup: this subagent is `w/explore-auth/general-purpose·a2` for now"
     )
     assert renamed[0].startswith("This subagent is `w/explore-auth/grep-tokens`")
@@ -1610,6 +1634,7 @@ def test_a_subagent_spawned_without_a_name_is_asked_and_its_parent_told_once(
     )
     assert second_spawn == ""
     assert asked.startswith(
+        f"{introduction()}\n\n"
         "lup: this subagent is `w/Explore·a1` for now, with no name of its own"
     )
     assert before[1] == ("w/Explore·a1", "w", 1)
@@ -1637,6 +1662,87 @@ def test_a_subagents_name_and_place_outlast_a_restart_of_lups_host(
         shown = named_talkers(machine, clock)
     assert told == ""
     assert shown == [("w", None, 0), ("w/parser", "w", 1)]
+
+
+class Unguided(Spawns):
+    """Says every subagent, of either runtime, was named after its id and reads none of its session's guidance."""
+
+    @override
+    def spawned(self, runtime: str, payload: str) -> Spawned | None:
+        agent = json.loads(payload).get("agent_id")
+        return None if agent is None else Spawned(name=f"sub-{agent}")
+
+
+def codex_bash(call: str, agent: str | None = None) -> str:
+    """A Codex `Bash` call starting, of the session's own conversation or of subagent `agent`."""
+    return codex(
+        "PreToolUse",
+        tool_name="Bash",
+        tool_input={"command": "ls"},
+        tool_use_id=call,
+        **({} if agent is None else {"agent_id": agent}),
+    )
+
+
+def test_a_subagent_not_reading_the_guidance_is_told_lups_tools_once_on_each_runtime(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    with inboxed(machine, clock, notices, said, spawns=Unguided()):
+        launched(machine, clock, tmp_path, "one", "claude")
+        launched(machine, clock, other, "two", "codex")
+        hook, hook2 = machine.host.launch("one").hook, machine.host.launch("two").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, codex("SessionStart", source="startup"))
+        main = send(hook, bash("m1"))
+        first = send(hook, bash("b1", agent_id="a1", agent_type="general-purpose"))
+        again = send(hook, bash("b2", agent_id="a1", agent_type="general-purpose"))
+        internal = send(hook, claude("SubagentStop", agent_id="x1", agent_type=""))
+        codex_main = send(hook2, codex_bash("d1"))
+        ended = send(hook2, codex("SubagentStop", agent_id="b1"))
+        later = send(hook2, codex_bash("d2", "b1"))
+        codex_again = send(hook2, codex_bash("d3", "b1"))
+    assert main == ""
+    assert json.loads(first)["hookSpecificOutput"] == {
+        "hookEventName": "PreToolUse",
+        "additionalContext": introduction(),
+    }
+    assert again == ""
+    assert internal == ""
+    assert codex_main == ""
+    assert ended == ""
+    assert json.loads(later)["hookSpecificOutput"] == {
+        "hookEventName": "PreToolUse",
+        "additionalContext": introduction(),
+    }
+    assert codex_again == ""
+
+
+def test_a_claude_fork_and_a_codex_subagent_read_the_guidance_and_are_told_nothing_of_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, other, "two", "codex")
+        hook, hook2 = machine.host.launch("one").hook, machine.host.launch("two").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, codex("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.spawn("t2"))
+        records.recorded("f1", "fork", "t2")
+        told = context(send(hook, records.call("a1", "Explore", "c1")))
+        forked = context(send(hook, records.call("f1", "fork", "c2")))
+        codex_told = context(send(hook2, codex_bash("d1", "b1")))
+    assert told == introduction()
+    assert forked.startswith("lup: this subagent is `w/fork·f1` for now")
+    assert introduction() not in forked
+    assert codex_told.startswith("lup: this subagent is `other/subagent·b1` for now")
+    assert introduction() not in codex_told
 
 
 def test_lup_dev_inbox_send_names_a_launch_by_its_id_or_its_worktree(

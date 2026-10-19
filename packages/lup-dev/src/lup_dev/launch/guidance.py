@@ -43,6 +43,7 @@ from jinja2 import StrictUndefined, TemplateError, TemplateRuntimeError
 from jinja2.sandbox import SandboxedEnvironment
 
 from lup_dev.errors import LupDevError
+from lup_dev.host.rooms import summaries
 from lup_dev.layout import CheckoutLayout
 
 if TYPE_CHECKING:
@@ -106,7 +107,7 @@ def listed(tools: list[ToolSpec]) -> str:
     <BLANKLINE>
     - `note`: Attach a remark to your answer, and carry on.
     """
-    lines = [f"- `{tool.name}`: {tool.summary}" for tool in tools]
+    lines = summaries(tools)
     opening = (
         "lup serves these tools in this session. Your tool search finds each by "
         "its name, with its full description:"

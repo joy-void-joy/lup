@@ -52,6 +52,7 @@ from filelock import FileLock, Timeout
 from pydantic import Field, JsonValue, ValidationError, model_validator
 
 from lup.rooms.engine import ContainerError, Podman
+from lup.tools import speaking
 from lup.tools.serving import Answer, serve
 from lup.tools.tool import Accepted, AgentTool, ToolSpec, lup_tool
 from lup.tools.tool import Refused as Rejected
@@ -89,7 +90,7 @@ from lup_dev.host.protocol import (
     Unregister,
     handle,
 )
-from lup_dev.host.rooms import SERVER, LaunchTools, RoomRoute, RoomTools
+from lup_dev.host.rooms import SERVER, LaunchTools, RoomRoute, RoomTools, summaries
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
     Called,
@@ -374,7 +375,7 @@ def relayed(modules: LaunchModules, launch: Register, kind: str) -> Route:
 
 
 class Noted(Model):
-    """A hook's conversation as it stands once what the hook says of subagents is noted, and what it's told of names."""
+    """A hook's conversation as it stands once what the hook says of subagents is noted, and what it's told of lup's tools and of names."""
 
     conversation: Conversation
     said: list[str] = []
@@ -405,6 +406,36 @@ def named_here(name: str) -> str:
         "other sessions call it. Once you know your task, name it after it with "
         "lup's `rename` tool, unless the operator named it."
     )
+
+
+def introduction(tools: list[ToolSpec]) -> str:
+    """Tell a subagent the tools lup serves it, which its session's guidance lists and it doesn't read: each by its name and summary, as the guidance lists them (`summaries`).
+
+    What a subagent's hooks say names its type, not its tools, and a type's
+    name doesn't fix them (a project's agent of the same name replaces a
+    built-in one), so it's told some types go without lup's.
+
+    >>> from lup.tools.speaking import friction, how_it_went
+    >>> print(introduction([friction.spec(), how_it_went.spec()]))
+    lup, the environment this session runs in, serves its subagents these tools, as it does its main conversation. Your tool search finds each by its name, with its full description. Some subagent types are given only their own tools, without lup's: where your tool search finds none of these, this subagent is one of them.
+    <BLANKLINE>
+    - `friction`: Say what got in your way, and carry on.
+    - `how_it_went`: Say how the work went, once, near its end.
+    <BLANKLINE>
+    `friction` and `how_it_went` reach the operator directly, whatever your parent passes on.
+    """
+    opening = (
+        "lup, the environment this session runs in, serves its subagents these "
+        "tools, as it does its main conversation. Your tool search finds each by "
+        "its name, with its full description. Some subagent types are given only "
+        "their own tools, without lup's: where your tool search finds none of "
+        "these, this subagent is one of them."
+    )
+    direct = (
+        f"`{speaking.friction.name}` and `{speaking.how_it_went.name}` reach the "
+        "operator directly, whatever your parent passes on."
+    )
+    return "\n".join([opening, "", *summaries(tools), "", direct])
 
 
 class Spoken(Model):
@@ -857,15 +888,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         Where serving breaks (a line past the limit, a connection reset), it's
         said with its traceback, and the connection closes.
         """
-        offered = self.served[request.launch].offered
-        modules = (
-            []
-            if self.modules is None
-            else [ModuleTools(modules=self.modules, offered=offered)]
-        )
         toolset = LaunchTools(
             launch=request,
-            tools=[*self.tools, Naming(launches=self), *modules],
+            tools=self.toolsets(request),
             conversations=conversations,
             say=self.say,
         )
@@ -881,6 +906,16 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             self.say(
                 f"{request.launch}: lup's tool server was gone before it closed: {gone}"
             )
+
+    def toolsets(self, request: Register) -> list[RoomTools]:
+        """Return what serves launch `request`'s session lup's tools: the core's, `rename`, and its modules'."""
+        offered = self.served[request.launch].offered
+        modules = (
+            []
+            if self.modules is None
+            else [ModuleTools(modules=self.modules, offered=offered)]
+        )
+        return [*self.tools, Naming(launches=self), *modules]
 
     async def close(self, launch: str) -> None:
         """End a launch: its sockets closed, its record and directory removed.
@@ -910,17 +945,23 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         heard: Heard,
         payload: str,
     ) -> Noted:
-        """Note what a hook says of subagents, and return the conversation as it stands, with what it's told of names.
+        """Note what a hook says of subagents, and return the conversation as it stands, with what it's told of lup's tools and of names.
 
         A subagent heard the first time is linked to its spawn as its runtime
         recorded it (`Spawns`, `Conversations.linked`): its parent, its kind,
-        and the name its parent gave; one with no name is asked to name itself,
-        beside a call, never as the reason its turn's end is held.
+        the name its parent gave, and whether it reads its session's guidance;
+        one with no name is asked to name itself, beside a call, never as the
+        reason its turn's end is held.
+        A subagent that doesn't read the guidance is told once, at its first
+        hook that isn't its turn's end, the tools lup serves it, which the
+        guidance lists (`introduction`). Not at its end, which would hold it to
+        read them: the internal agents a runtime runs for its own features are
+        heard only there.
         A conversation spawning one without a name, where it could have given
         one, is told once to give names. Its launch's conversations are kept, so
         a service started again knows them.
         """
-        said: list[str] = []
+        naming: list[str] = []
         if heard.agent is not None and not conversation.linked:
             spawned = (
                 None
@@ -930,17 +971,25 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             conversation = conversations.linked(conversation, spawned)
             calling = heard.event in ["call-started", "call-finished"]
             if conversation.name is None and calling:
-                said.append(
+                naming.append(
                     unnamed(conversations.path(conversation, self.named(request)))
                 )
+        introducing: list[str] = []
+        ending = heard.event in ["turn-ended", "conversation-ended"]
+        if heard.agent is not None and not conversation.introduced and not ending:
+            conversation = conversations.kept(
+                conversation.model_copy(update={"introduced": True})
+            )
+            tools = [spec for each in self.toolsets(request) for spec in each.specs()]
+            introducing.append(introduction(tools))
         spawning = heard.spawning
         if spawning is not None and spawning.name is None and not conversation.nudged:
             conversation = conversations.kept(
                 conversation.model_copy(update={"nudged": True})
             )
-            said.append(name_spawns(spawning.naming))
+            naming.append(name_spawns(spawning.naming))
         write_model(self.layout.conversations(request.launch), conversations)
-        return Noted(conversation=conversation, said=said)
+        return Noted(conversation=conversation, said=[*introducing, *naming])
 
     def subagent_renamed(self, launch: str, subagent: Conversation, name: str) -> str:
         """Rename `subagent`, a subagent of launch `launch`, and return how it's called: its launch's name, then each name down to it.

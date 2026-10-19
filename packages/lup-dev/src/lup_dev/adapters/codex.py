@@ -708,6 +708,14 @@ def spawned(raw: str) -> Spawned | None:
     path, and so no name. Its end names the root's rollout instead (measured
     by the first lup on 0.158.0, `docs/field-notes.md`, *Subagents' records*),
     so a rollout whose meta is another thread's says nothing of it.
+
+    Every subagent reads the session's guidance, Codex's managed developer
+    instructions: a spawned thread's configuration is its parent's, the
+    requirements holding them among it, whatever its role
+    (`core/src/agent/child_config.rs`, `build_agent_shared_config`;
+    `core/src/agent/role.rs`, `build_config_layer_stack`), and every thread but
+    a reviewer's of Codex's own is given them (`core/src/session/world_state.rs`),
+    read at `rust-v0.163.0`.
     """
     payload = Subagented.model_validate_json(raw)
     if payload.agent_id is None:
@@ -715,12 +723,12 @@ def spawned(raw: str) -> Spawned | None:
     kind = payload.agent_type or None
     rollout = payload.transcript_path
     if rollout is None or not rollout.is_file():
-        return Spawned(kind=kind)
+        return Spawned(kind=kind, guided=True)
     with rollout.open() as lines:
         first = MetaLine.model_validate_json(lines.readline())
     meta = first.payload
     if meta.id != payload.agent_id:
-        return Spawned(kind=kind)
+        return Spawned(kind=kind, guided=True)
     parent = (
         None if meta.parent_thread_id == payload.session_id else meta.parent_thread_id
     )
@@ -728,6 +736,7 @@ def spawned(raw: str) -> Spawned | None:
         name=None if meta.agent_path is None else PurePosixPath(meta.agent_path).name,
         parent=parent,
         kind=meta.agent_role or kind,
+        guided=True,
     )
 
 

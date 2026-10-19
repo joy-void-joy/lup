@@ -196,6 +196,10 @@ class Spawned(Model):
     session's own conversation did, or where the runtime doesn't say."""
     kind: str | None = None
     """What kind of subagent it is, as its runtime calls it (`Explore`)."""
+    guided: bool = False
+    """Whether it reads its session's guidance, as the session's own
+    conversation does: its runtime gives the guidance to every thread it
+    spawns, or it was spawned with its parent's own prompt."""
 
 
 class Conversation(Model):
@@ -219,6 +223,9 @@ class Conversation(Model):
     """Whether what its runtime recorded of its spawn was read."""
     nudged: bool = False
     """Whether it was told, once, to name the subagents it spawns."""
+    introduced: bool = False
+    """Whether a subagent knows the tools lup serves it: told them once, or
+    reading the guidance that lists them to its session (`Spawned.guided`)."""
     holding: bool = False
     """Whether the operator holds each flagged write of it: their switch, "hold
     each flagged write", which the judge asks (`ShowHolding`)."""
@@ -264,13 +271,14 @@ class Conversations(MutableModel):
     def linked(
         self, conversation: Conversation, spawned: Spawned | None
     ) -> Conversation:
-        """Link a subagent to its spawn as its runtime recorded it, and return it: its name, its parent, its kind.
+        """Link a subagent to its spawn as its runtime recorded it, and return it: its name, its parent, its kind, and whether the guidance tells it lup's tools.
 
         Its parent is the subagent the runtime names, else the session's own
         conversation.
         """
         above = None if spawned is None else spawned.parent
         parent = self.named(conversation.session, above)
+        guided = spawned is not None and spawned.guided
         return self.kept(
             conversation.model_copy(
                 update={
@@ -278,6 +286,7 @@ class Conversations(MutableModel):
                     "parent": parent.id,
                     "kind": None if spawned is None else spawned.kind,
                     "linked": True,
+                    "introduced": conversation.introduced or guided,
                 }
             )
         )
