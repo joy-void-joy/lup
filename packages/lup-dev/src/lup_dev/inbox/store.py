@@ -9,9 +9,9 @@ in a launch of its own finds what waited for it there.
 An item has a number, one sequence per user, so the operator answers `12`; a
 reason (a message with its kind, a question with its numbered decisions, an
 answer, an approval asked yes or no; a friction, how a piece of work went, or a
-stop by choice, each as the agent's tool took it); a sender and a recipient; when it was
-made; and its state: waiting, told (when, and how), answered, done, or for an
-approval decided. An item for a conversation that has ended goes to its
+stop by choice, each as the agent's tool took it); a sender and a recipient;
+when it was made; and its state: waiting, told (when, and how), answered, done,
+or for an approval decided. An item for a conversation that has ended goes to its
 session's main conversation, saying whose it was.
 
 An approval is trust on launch's: the launch's own question, put to the

@@ -128,9 +128,9 @@ class Asking(Model, arbitrary_types_allowed=True):
         """Ask for an answer of `output`'s model, through its tool and guard."""
         submit = Submit(output) if isinstance(output, type) else output
         ran = await self.run(prompt, submit)
-        answer = ran.toolbox.accepted()
-        rejected = ran.toolbox.rejected()
         toolbox = ran.toolbox
+        answer = toolbox.accepted()
+        rejected = toolbox.rejected()
         if answers(answer, submit.input):
             return TurnResult[T](
                 output=answer,
