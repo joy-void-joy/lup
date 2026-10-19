@@ -136,6 +136,35 @@ async def named(directory: Path) -> GitHubRepository:
     return GitHubRepository(owner=viewed.owner.login, name=viewed.name)
 
 
+type Visibility = Literal["public", "private", "internal"]
+"""Who GitHub lets read a repository: anyone, those it's shared with, or its
+enterprise's members."""
+
+
+class Seen(Answered):
+    """`gh repo view --json visibility`'s answer, as GitHub spells it."""
+
+    visibility: Literal["PUBLIC", "PRIVATE", "INTERNAL"]
+
+
+async def visibility(directory: Path, repository: GitHubRepository) -> Visibility:
+    """Say who GitHub lets read `repository`, asked with `gh` in the git directory `directory`.
+
+    Raise `GitHubError` where `gh` can't say: missing, without a login, or no
+    such repository the login can see.
+    """
+    printed = await ran(
+        ["repo", "view", str(repository), f"--json={Seen.fields()}"], directory
+    )
+    match Seen.model_validate_json(printed).visibility:
+        case "PUBLIC":
+            return "public"
+        case "PRIVATE":
+            return "private"
+        case "INTERNAL":
+            return "internal"
+
+
 class Label(Answered):
     """A label on an issue or pull request."""
 

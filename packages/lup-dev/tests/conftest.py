@@ -51,6 +51,7 @@ from lup_dev.codescan.directives import (
 )
 from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.resolve import Resolved, resolve
+from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import RoomClient
 from lup_dev.host.protocol import HostError
 from lup_dev.host.records import Record, Records
@@ -72,6 +73,7 @@ from lup_dev.policy.flags import Flagging
 from lup_dev.policy.holds import Announcing, Hold, Response, answer
 from lup_dev.policy.importers import Spawner
 from lup_dev.policy.runtime import Runtime
+from lup_dev.private.withheld import Facts, Machine
 from lup_dev.worker import Serving
 
 if TYPE_CHECKING:
@@ -79,7 +81,8 @@ if TYPE_CHECKING:
 
     from lup_dev.declaration.resolve import Selected
     from lup_dev.declaration.runner import Runner
-    from lup_dev.host.protocol import Register, Reply, Request
+    from lup_dev.forge.github import Visibility
+    from lup_dev.host.protocol import GitHubRepository, Register, Reply, Request
     from lup_dev.inbox.store import ChangedFile
 
 
@@ -769,3 +772,45 @@ def default_modules() -> InProcess:
 def in_process() -> type[InProcess]:
     """Serves a launch's modules in the test's own process, from the declaration it's given."""
     return InProcess
+
+
+class StubFacts(Facts):
+    """A host whose account, ssh configuration and GitHub answers a test gives: made-up values, never the machine's own."""
+
+    def __init__(
+        self,
+        home: Path = Path("/home/op"),
+        user: str = "op",
+        hostname: str = "kestrel-box",
+        aliases: dict[str, str] | None = None,
+        visible: dict[str, Visibility | GitHubError] | None = None,
+    ) -> None:
+        self.home = home
+        self.user = user
+        self.hostname = hostname
+        self.aliases = aliases or {}
+        """What ssh resolves each host to; a host not here, to itself."""
+        self.visible = visible or {}
+        """GitHub's answer for each `owner/name`; one not here is public."""
+        self.asked: list[str] = []
+
+    def machine(self) -> Machine:
+        return Machine(home=self.home, user=self.user, hostname=self.hostname)
+
+    def resolved(self, host: str) -> str | None:
+        return self.aliases.get(host, host)
+
+    async def visibility(
+        self, directory: Path, repository: GitHubRepository
+    ) -> Visibility:
+        self.asked.append(str(repository))
+        answer = self.visible.get(str(repository), "public")
+        if isinstance(answer, GitHubError):
+            raise answer
+        return answer
+
+
+@pytest.fixture
+def stub_facts() -> type[StubFacts]:
+    """A host a test describes, with made-up values."""
+    return StubFacts

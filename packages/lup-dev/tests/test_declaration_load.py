@@ -188,6 +188,7 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
         "lup-development",
     ]
     assert (resolved.held, resolved.flagged) == (Project().held, Project().flagged)
@@ -211,6 +212,7 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
         "python",
         "code-rules",
         "transcripts",
+        "private",
         "lup",
     ]
     assert resolved.guidance[-1] == Section(name="lup", path=Path("AGENTS.md"))

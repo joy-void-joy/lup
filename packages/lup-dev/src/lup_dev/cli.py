@@ -146,6 +146,7 @@ from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
     Lent,
+    RelatedRepository,
     RoomClipboard,
     RoomError,
     host_needs,
@@ -158,6 +159,7 @@ from lup_dev.launch.room import (
     room_git,
     unlent,
 )
+from lup_dev.launch.room import repository as repository_of
 from lup_dev.launch.session import (
     LaunchError,
     approved_declaration,
@@ -189,11 +191,20 @@ from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.tools import JudgeTools
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.private.module import Private
+from lup_dev.private.withheld import (
+    Facts,
+    HostFacts,
+    Neighbour,
+    Withheld,
+    built,
+    kept,
+)
 from lup_dev.remote.config import Gating
 from lup_dev.remote.protocol import Remotes
 from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
-from lup_dev.stored import write_model
+from lup_dev.stored import read_model, write_model
 from lup_dev.worker import worked
 
 if TYPE_CHECKING:
@@ -1212,6 +1223,46 @@ class Launcher(Model, arbitrary_types_allowed=True):
     github: Callable[[Path], GitHubRepository]
     """Names the repository on GitHub whose git directory it's given, from its own
     remotes, raising `GitHubError` where `gh` can't."""
+    facts: Facts
+    """What the host says of itself, which the list of values never published
+    is built from."""
+
+
+def withheld_at_launch(
+    launcher: Launcher,
+    resolved: Resolved,
+    worktree: Path,
+    neighbours: list[RelatedRepository],
+) -> None:
+    """Build the list of values never published from the repository of `worktree`, where the declaration selects `Private`, and keep it where the module reads it; where it doesn't, remove the one kept.
+
+    What the build couldn't read is said once, in the operator's terminal; no
+    value is.
+    """
+    project = repository_of(worktree)
+    place = kept(launcher.layout.module_data(Private.name, project.git))
+    chosen = [each for each in resolved.modules if isinstance(each, Private)]
+    if not chosen:
+        place.unlink(missing_ok=True)
+        return
+    [private] = chosen
+    made = asyncio.run(
+        built(
+            launcher.facts,
+            project.git,
+            own=[project.git, project.main, project.tree],
+            related=[
+                Neighbour(name=each.name, path=each.path, github=each.github)
+                for each in neighbours
+            ],
+            details=private.chosen_details(),
+            values=private.chosen_values(),
+            last=read_model(place, Withheld),
+        )
+    )
+    write_model(place, made.withheld)
+    for note in made.notes:
+        launcher.say(f"Private: {note}.")
 
 
 def on_github(
@@ -1386,6 +1437,7 @@ def launched(
                     f"sessions to read isn't at {each.path}, so the room doesn't "
                     "mount it, and its guidance says it's missing."
                 )
+        withheld_at_launch(launcher, declared.resolved, worktree, neighbours)
         lendable = [each.module for each in declared.resolved.shared]
         unknown = [each for each in modules or [] if each not in lendable]
         if unknown:
@@ -1537,6 +1589,7 @@ def launching(say: Callable[[str], None]) -> Launcher:
         terminal=TerminalVariables(),
         say=say,
         github=github,
+        facts=HostFacts(),
     )
 
 

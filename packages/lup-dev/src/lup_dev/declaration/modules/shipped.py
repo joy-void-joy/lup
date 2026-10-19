@@ -12,6 +12,7 @@ from lup.transcripts.module import Transcripts
 from lup_dev.declaration.modules.code_rules import CodeRules
 from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.python import Python
+from lup_dev.private.module import Private
 
 if TYPE_CHECKING:
     from lup_dev.declaration.module import Module
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
 
 def default() -> list[Module]:
     """List lup's default modules, in their order."""
-    return [Core(), Python(), CodeRules(), GitHub(), Transcripts()]
+    return [Core(), Python(), CodeRules(), GitHub(), Transcripts(), Private()]
 
 
 def shipped() -> list[Module]:

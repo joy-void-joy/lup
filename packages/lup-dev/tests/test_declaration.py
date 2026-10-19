@@ -351,6 +351,7 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
     ]
     assert resolved.paths.protected == [
         *CorePaths().protected,
@@ -509,6 +510,7 @@ def test_a_module_added_starts_from_its_own_defaults() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
         "ledger",
         "narration",
     ]
@@ -525,6 +527,7 @@ def test_a_module_added_goes_where_it_s_placed() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
     ]
 
 
@@ -535,6 +538,7 @@ def test_all_is_every_module_lup_ships() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
     ]
 
 
@@ -564,6 +568,7 @@ def test_replace_puts_another_module_in_place_from_its_own_defaults() -> None:
         "code-rules",
         "github",
         "transcripts",
+        "private",
     ]
     assert [each.name for each in resolved.gate] == ["lake"]
     assert resolved.runner == Plain()
@@ -1266,6 +1271,7 @@ def test_guidance_lists_each_module_s_sections_in_module_order() -> None:
         "python",
         "code-rules",
         "transcripts",
+        "private",
     ]
     first = Section(name="first", path=Path("first.md"))
     placed = modules.edit(
@@ -1279,6 +1285,7 @@ def test_guidance_lists_each_module_s_sections_in_module_order() -> None:
         "python",
         "code-rules",
         "transcripts",
+        "private",
     ]
 
 
@@ -1305,6 +1312,7 @@ def test_lup_s_modules_each_bring_a_section_their_package_ships() -> None:
         ("python", "lup_dev.declaration.modules", Path("guidance/python.md")),
         ("code-rules", "lup_dev.declaration.modules", Path("guidance/code_rules.md")),
         ("transcripts", "lup.transcripts", Path("guidance.md")),
+        ("private", "lup_dev.private", Path("guidance.md")),
     ]
 
 
