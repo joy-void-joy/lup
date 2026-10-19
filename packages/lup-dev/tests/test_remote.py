@@ -73,10 +73,10 @@ if TYPE_CHECKING:
 
 @pytest.fixture(autouse=True)
 def own_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the operator's git configuration out of the host's git, as the room's is."""
-    empty = tmp_path / "gitconfig"
-    empty.write_text("")
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    """Keep the operator's git configuration out of the host's git, as the room's is, with an identity of its own to commit with."""
+    own = tmp_path / "gitconfig"
+    own.write_text("[user]\n\tname = test\n\temail = test@example.com\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(own))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
