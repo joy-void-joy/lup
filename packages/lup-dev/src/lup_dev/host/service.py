@@ -463,8 +463,14 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     clock: Clock
     """When each conversation's activity began."""
     served: dict[str, Served] = {}
+    opening: dict[str, Register] = {}
+    """The launches whose registration is under way, by id, each named."""
     pending: list[asyncio.Task[None]] = []
     """What the launches' modules' hooks are running that nothing waits on."""
+
+    def claims(self) -> list[Register]:
+        """Return every launch holding a name: those served, and those whose registration is under way."""
+        return [*(each.launch for each in self.served.values()), *self.opening.values()]
 
     async def open(self, registering: Register) -> Register:
         """Serve a launch: its name, its directory, its sockets inside, its record; and return it as it stands, named.
@@ -479,11 +485,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         operator's alone (mode 0700): a runtime's own messaging socket, placed in
         it, refuses a directory anyone else could reach (its adapter says which).
         """
-        if registering.launch in self.served:
+        if registering.launch in self.served or registering.launch in self.opening:
             message = f"a launch with the id `{registering.launch}` is served already"
             raise HostError(message)
-        others = [served.launch for served in self.served.values()]
-        name = claimed(registering, others)
+        name = claimed(registering, self.claims())
         container = registering.container or container_name(
             registering.repository, name
         )
@@ -510,21 +515,6 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         def said(line: str) -> None:
             self.say(f"{request.launch}: {line}")
 
-        offered = await self.offered(request)
-        own = {room.kind: bound(room, request) for room in self.room_routes}
-        modules = self.modules
-        relaying = (
-            {}
-            if modules is None
-            else {kind: relayed(modules, request, kind) for kind in offered.kinds}
-        )
-        requests = Dispatcher(
-            routes={**relaying, **own},
-            answering="a room's request socket",
-            say=said,
-            changes=self.changes,
-        )
-
         async def hook(
             reader: asyncio.StreamReader, writer: asyncio.StreamWriter
         ) -> None:
@@ -535,23 +525,43 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         ) -> None:
             await self.tools_served(request, conversations, reader, writer)
 
-        async with AsyncExitStack() as opening:
-            hooks = await asyncio.start_unix_server(hook, path=sockets.hook)
-            opening.push_async_callback(closed, hooks)
-            served = await asyncio.start_unix_server(
-                tools, path=sockets.mcp, limit=self.line_limit
+        # Its name is held while its modules start, so a launch registering
+        # meanwhile can't claim it, and with it its container's name.
+        self.opening[request.launch] = request
+        try:
+            offered = await self.offered(request)
+            own = {room.kind: bound(room, request) for room in self.room_routes}
+            modules = self.modules
+            relaying = (
+                {}
+                if modules is None
+                else {kind: relayed(modules, request, kind) for kind in offered.kinds}
             )
-            opening.push_async_callback(closed, served)
-            asked = await asyncio.start_unix_server(
-                requests.connection, path=sockets.request
+            requests = Dispatcher(
+                routes={**relaying, **own},
+                answering="a room's request socket",
+                say=said,
+                changes=self.changes,
             )
-            opening.pop_all()
-        self.served[request.launch] = Served(
-            launch=request,
-            conversations=conversations,
-            servers=[hooks, served, asked],
-            offered=offered,
-        )
+            async with AsyncExitStack() as opening:
+                hooks = await asyncio.start_unix_server(hook, path=sockets.hook)
+                opening.push_async_callback(closed, hooks)
+                served = await asyncio.start_unix_server(
+                    tools, path=sockets.mcp, limit=self.line_limit
+                )
+                opening.push_async_callback(closed, served)
+                asked = await asyncio.start_unix_server(
+                    requests.connection, path=sockets.request
+                )
+                opening.pop_all()
+            self.served[request.launch] = Served(
+                launch=request,
+                conversations=conversations,
+                servers=[hooks, served, asked],
+                offered=offered,
+            )
+        finally:
+            del self.opening[request.launch]
         self.layout.record(request.launch).write_text(request.model_dump_json(indent=2))
         if "launched" in offered.occasions:
             self.background(self.happened(request, Happening(occasion="launched")))
@@ -572,8 +582,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         if served is None:
             message = f"no launch served is `{launch}`"
             raise HostError(message)
-        others = [each.launch for each in self.served.values()]
-        holder = held(name, others, served.launch)
+        holder = held(name, self.claims(), served.launch)
         if holder is not None:
             raise HostError(taken(holder, name))
         before = served.launch.name
@@ -627,12 +636,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         `session`'s.
         """
         current = self.served[launch].launch
-        others = [each.launch for each in self.served.values()]
         given = None if title is None else shaped(title)
         wanted = [
             each
             for each in [given, self.names.last(session)]
-            if each is not None and held(each, others, current) is None
+            if each is not None and held(each, self.claims(), current) is None
         ]
         name = next(iter(wanted), current.name or "")
         if name != current.name:

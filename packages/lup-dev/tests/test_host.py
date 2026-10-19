@@ -1537,6 +1537,52 @@ def test_a_name_whose_container_another_launch_holds_is_refused_saying_whose(
         own.unregister("two")
 
 
+class Starting(LaunchModules):
+    """A launch's modules slow to start for launch `one`: its opening waits until the test lets it go."""
+
+    def __init__(self) -> None:
+        self.opening = threading.Event()
+        self.go = threading.Event()
+
+    @override
+    async def open(self, launch: Register) -> Offered:
+        if launch.launch == "one":
+            self.opening.set()
+            await asyncio.to_thread(self.go.wait, 60)
+        return Offered()
+
+    @override
+    async def ask(self, launch: Register, request: Request) -> Reply:
+        message = "nothing is served to ask"
+        raise AssertionError(message)
+
+    @override
+    async def close(self, launch: Register) -> None:
+        return None
+
+
+def test_a_name_is_held_while_its_launch_s_modules_start(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    own = client(layout, clock)
+    starting = Starting()
+
+    def dev(launch: str) -> Register:
+        return unnamed(tmp_path, launch).model_copy(update={"name": "dev"})
+
+    with (
+        served(service(layout, Judge(), said, modules=starting)),
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        first = pool.submit(own.register, dev("one"))
+        assert starting.opening.wait(60)
+        second = own.register(dev("two"))
+        starting.go.set()
+        named = first.result(timeout=60)
+    assert (named.name, named.container) == ("dev", f"lup-{tmp_path.name}-dev")
+    assert (second.name, second.container) == ("dev-2", f"lup-{tmp_path.name}-dev-2")
+
+
 class Pauses:
     """The waits between the service's sweeps: each lasts until the test ends it, and the test then waits until the sweep after it is done."""
 
