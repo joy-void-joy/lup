@@ -139,7 +139,7 @@ class Roles(Model):
         The test roots are the ones the declaration names; where it keeps lup's
         default, pytest's configuration says where tests are, as it did before a
         project could name its own, until the gate checks `testpaths` against the
-        declared roots (`docs/declaration.md`, *lup's settings for ruff and pyright*).
+        declared roots (#176).
         """
         if not self.is_python(path):
             return False

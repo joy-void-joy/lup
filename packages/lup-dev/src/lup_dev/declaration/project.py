@@ -1,8 +1,8 @@
 """`Project`: what a project declares in `lup_project.py`, its modules above all.
 
 Every part lives in a module, so reading one module says what it does; `Project`
-holds the modules, and what isn't a module's (`docs/declaration.md`, *A project is
-its modules*).
+holds the modules, and what isn't a module's (`docs/declaration.md`, *An
+example*).
 """
 
 from typing import Literal, get_args
