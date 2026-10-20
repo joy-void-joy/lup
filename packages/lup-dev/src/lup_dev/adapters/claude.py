@@ -3,6 +3,7 @@
 | Claude Code hook | lup's event |
 |---|---|
 | `SessionStart` | `SessionStarted` |
+| `UserPromptSubmit` | `turn-started`, the host service's alone |
 | `PreToolUse` | `CallStarted`; for `Edit` and `Write`, judged before it lands first |
 | `PostToolUse`, `PostToolUseFailure` | `CallFinished` |
 | `Stop` | `TurnEnded` |
@@ -21,9 +22,10 @@ and the operator is warned once in `systemMessage`, which also carries what the
 session's turn's end tells without holding it.
 
 In a launched room (`docs/launch.md`, *The one hook and the host service*), Claude
-Code runs the room's hook on `SessionStart`, `PreToolUse` for every call, `Stop`
-and `SubagentStop` (`hooks`), so the host service hears each conversation's start,
-calls and turn's ends (`docs/host-tools.md`, *How an agent is told*). The judge
+Code runs the room's hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse` for
+every call, `Stop` and `SubagentStop` (`hooks`), so the host service hears each
+conversation's start, each turn's start and the prompt it starts on, its calls
+and its turn's ends (`docs/host-tools.md`, *How an agent is told*). The judge
 reads only `SessionStart` and the file tools' writes, judged before they land
 (`heard`, `WRITING`): no checkpoint, as in lup's own repository, so the turn's ends
 hold back nothing of the judge's. Every other hook the service answers itself,
@@ -47,11 +49,29 @@ undercount, and an item past it is announced instead. A turn's end following a
 hold, the session's or a subagent's, carries `stop_hook_active`, so the next
 end is let through.
 
-An idle session is woken through its own messaging socket (`woken`), which the
-launch puts in the room's socket directory: Claude Code "starts a new turn with
-the message" when the receiving session is idle, and closes a connection that
-hasn't sent a complete line within 30 seconds, so the host writes the whole line
-at once (its `cross-session-messaging` docs, read 2026-10-14). The docs give
+An idle session is woken first through lup's tool server, as a channel's
+message (`pushed`, `CHANNEL`), which the launch loads with
+`--dangerously-load-development-channels server:lup`. Claude Code 2.1.304 queues
+a channel's `notifications/claude/channel` as a prompt, `<channel source="lup"
+wake="…">` around its `content`, with no line saying it came from another
+session, at priority `next`: an idle session starts a turn on it, a busy one
+takes it after its running call, and it fires `UserPromptSubmit` with the whole
+tag as `prompt` either way, its `wake` attribute the push's token. It registers
+a server as a channel only where the server declares
+`capabilities.experimental["claude/channel"]`, is named in the flag, connected
+on the handshake revisions (lup's server refuses `server/discover`:
+`lup.tools.serving`), on first-party authentication, with channels turned on
+for the account and not blocked by its organization; one it doesn't drops what
+the server pushes, saying nothing to the server (`docs/field-notes.md`,
+*Channels*). Taken mid-turn, a channel's message comes with "IMPORTANT: This is
+NOT from your user", so lup pushes only to a session it takes for idle, and
+tells a busy one at its hooks.
+
+Where a push isn't taken, the session is woken through its own messaging
+socket (`woken`), which the launch puts in the room's socket directory: Claude
+Code "starts a new turn with the message" when the receiving session is idle,
+and closes a connection that hasn't sent a complete line within 30 seconds, so
+the host writes the whole line at once (its `cross-session-messaging` docs, read 2026-10-14). The docs give
 only the optional first line, `{"type":"auth","token":…}`, which Linux doesn't
 require; the message's own frame is undocumented. The first lup measured it on
 2.1.278 to 2.1.285: `{"type":"user","message":{"role":"user","content":…}}`, the
@@ -147,8 +167,9 @@ import lup
 from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.sessions.terminal import Cli, Hook
+from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, Settings
-from lup_dev.adapters import Adapter
+from lup_dev.adapters import Adapter, Pushing
 from lup_dev.host.courier import Heard, Spawned, Spawning, Telling
 from lup_dev.host.records import (
     Called,
@@ -388,6 +409,45 @@ class SessionStart(Payload):
         SessionStarted(
             session=self.session_id, agent=self.agent_id, cwd=self.cwd
         ).apply(bench)
+        return None
+
+    @override
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
+        return None
+
+    @override
+    def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
+
+
+class UserPromptSubmit(Payload):
+    """`UserPromptSubmit`: a turn starts on a prompt, the operator's or a channel's.
+
+    Measured on 2.1.304 (`docs/field-notes.md`, *Channels*): a channel's message
+    fires it with the whole `<channel …>` text as its `prompt`, when an idle
+    session starts a turn on it and when a busy one takes it after a call.
+    """
+
+    hook_event_name: Literal["UserPromptSubmit"]
+    prompt: str
+
+    def heard(self, fits: int) -> Heard:
+        """Read the turn's start, and the prompt it starts on: the judge doesn't read it."""
+        return Heard(
+            event="turn-started",
+            session=self.session_id,
+            agent=self.agent_id or None,
+            judged=False,
+            fits=fits,
+            prompt=self.prompt,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Tell the conversation its items beside the prompt."""
+        return context(said, self.hook_event_name, telling.items)
+
+    @override
+    def answer(self, bench: Bench) -> Output | None:
         return None
 
     @override
@@ -803,7 +863,7 @@ def spawned(raw: str) -> Spawned | None:
 
 
 type Received = Annotated[
-    SessionStart | PreToolUse | PostToolUse | Stop | SubagentStop,
+    SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Stop | SubagentStop,
     Field(discriminator="hook_event_name"),
 ]
 """Any hook payload this adapter answers, told apart by its event's name."""
@@ -910,10 +970,34 @@ def woken(session: str, text: str) -> str:
     return Frame(message=UserTurn(content=text), session_id=session).model_dump_json()
 
 
+class ChannelMessage(Model):
+    """What a channel's notification carries (`channels-reference`, *Notification format*): its text, and the attributes its tag shows."""
+
+    content: str
+    meta: dict[str, str]
+    """Each an attribute of the `<channel>` tag; a key that isn't letters,
+    digits and underscores is dropped."""
+
+
+CHANNEL = "claude/channel"
+"""The experimental capability a server declares to be a channel."""
+
+
+def pushed(text: str, token: str) -> Notice:
+    """Return the notice that starts a turn of an idle Claude Code session with `text`, a channel's message whose tag carries `token`.
+
+    >>> pushed("Hi.", "t1").params
+    {'content': 'Hi.', 'meta': {'wake': 't1'}}
+    """
+    message = ChannelMessage(content=text, meta={"wake": token})
+    return Notice(method=f"notifications/{CHANNEL}", params=message.model_dump())
+
+
 def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
     """Return the hooks a launched Claude Code session runs `command` at: the events the host service hears.
 
-    `SessionStart`; `PreToolUse` on every call, the file tools' writes judged
+    `SessionStart`; `UserPromptSubmit`, each turn's start, a channel's message
+    among them; `PreToolUse` on every call, the file tools' writes judged
     before they land, every call told what waits for its conversation, and a
     call to lup's tools stamped with its caller; `Stop` and `SubagentStop`, each
     conversation's turn's end. Each waits up to `timeout`, which a hold's wait
@@ -921,6 +1005,7 @@ def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
     """
     events: list[Event] = [
         "session-started",
+        "turn-started",
         "call-started",
         "turn-ended",
         "conversation-ended",
@@ -1293,6 +1378,7 @@ def adapter() -> Adapter:
         ends=ends,
         spawned=spawned,
         woken=woken,
+        pushing=Pushing(capabilities={CHANNEL: {}}, notice=pushed),
         hooks=hooks,
         channel=ClaudeChannel(),
         agent=agent,

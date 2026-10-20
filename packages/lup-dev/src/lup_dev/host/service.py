@@ -53,7 +53,7 @@ from pydantic import Field, JsonValue, ValidationError, model_validator
 
 from lup.rooms.engine import ContainerError, Podman
 from lup.tools import speaking
-from lup.tools.serving import Answer, serve
+from lup.tools.serving import Answer, Outbox, serve
 from lup.tools.tool import Accepted, AgentTool, ToolSpec, lup_tool
 from lup.tools.tool import Refused as Rejected
 from lup.types import Model, MutableModel
@@ -67,6 +67,7 @@ from lup_dev.host.courier import (
     Posted,
     Spawns,
     Telling,
+    Waker,
 )
 from lup_dev.host.names import Names, claimed, container_name, held, shaped, taken
 from lup_dev.host.protocol import (
@@ -90,6 +91,7 @@ from lup_dev.host.protocol import (
     Unregister,
     handle,
 )
+from lup_dev.host.pushes import Pushes
 from lup_dev.host.rooms import SERVER, LaunchTools, RoomRoute, RoomTools, summaries
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
@@ -478,6 +480,12 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     """Serves each launch's modules in a process of its own; none serves none."""
     line_limit: int
     """The longest line lup's tool server reads: one MCP message."""
+    waker: Waker | None
+    """Says what lup's tool server declares to each runtime, for it to take
+    what's pushed to its session; none declares nothing."""
+    pushes: Pushes
+    """Each launch's open connections to lup's tool server, kept while each is
+    served, for what's pushed to its session."""
     say: Callable[[str], None]
     names: Names
     """The name each session last had, so a session resumed takes it back."""
@@ -883,9 +891,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Serve lup's tools over one connection on a launch's `mcp.sock`, until it closes.
+        """Serve lup's tools over one connection on a launch's `mcp.sock`, until it closes, keeping it among the launch's open connections meanwhile, for what's pushed to its session.
 
-        Where serving breaks (a line past the limit, a connection reset), it's
+        The server declares what the launch's runtime reads to take what it
+        pushes (`Waker.capabilities`). Where serving breaks (a line past the limit, a connection reset), it's
         said with its traceback, and the connection closes.
         """
         toolset = LaunchTools(
@@ -894,11 +903,26 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             conversations=conversations,
             say=self.say,
         )
+        outbox = Outbox()
+        self.pushes.opened(request.launch, outbox)
         try:
-            await serve(toolset, reader, writer, name=SERVER)
+            await serve(
+                toolset,
+                reader,
+                writer,
+                name=SERVER,
+                experimental=(
+                    {}
+                    if self.waker is None
+                    else self.waker.capabilities(request.runtime)
+                ),
+                outbox=outbox,
+            )
         except Exception as failure:
             told = "".join(traceback.format_exception(failure))
             self.say(f"{request.launch}: serving lup's tools failed:\n{told}")
+        finally:
+            self.pushes.closed(request.launch, outbox)
         writer.close()
         try:
             await writer.wait_closed()
@@ -1376,6 +1400,12 @@ class HostService(Model, arbitrary_types_allowed=True):
     line_limit: int = 16 * 1024 * 1024
     """The longest line lup's tool server reads, one MCP message: well above
     asyncio's 64 KiB, which a long message to the operator could pass."""
+    waker: Waker | None = None
+    """Says what lup's tool server declares to each runtime, for it to take
+    what's pushed to its session (`cli.py`'s adapters); none declares nothing."""
+    pushes: Pushes = Field(default_factory=Pushes)
+    """Each launch's open connections to lup's tool server, which the inbox
+    pushes to its session through, given the same (`cli.py`)."""
     spawns: Spawns | None = None
     """How each runtime recorded its subagents' spawns, read once at a
     subagent's first hook (`cli.py`'s adapters); none reads nothing."""
@@ -1463,6 +1493,8 @@ class HostService(Model, arbitrary_types_allowed=True):
             room_routes=self.room_routes,
             modules=self.modules,
             line_limit=self.line_limit,
+            waker=self.waker,
+            pushes=self.pushes,
             say=self.say,
             names=Names(path=self.layout.names),
             spawns=self.spawns,

@@ -484,9 +484,6 @@ class Deaf(Courier):
     ) -> Printed:
         return Printed(text=answer)
 
-    def woken(self, runtime: str, session: str, text: str) -> str | None:
-        return None
-
 
 async def unjudged(asked: Asked) -> Judged:
     message = f"no hook reaches a judge here: {asked}"

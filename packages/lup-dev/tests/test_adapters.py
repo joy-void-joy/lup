@@ -985,11 +985,12 @@ def test_codex_clears_a_failed_patchs_call_at_the_turns_end(
 HOOK = ["sh", "-c", "socat …"]
 
 
-def test_claude_hooks_every_call_and_each_turns_end_in_a_room() -> None:
+def test_claude_hooks_every_call_and_each_turns_start_and_end_in_a_room() -> None:
     hold = timedelta(hours=25)
 
     assert claude.hooks(HOOK, hold) == [
         Hook(event="session-started", command=HOOK, timeout=hold),
+        Hook(event="turn-started", command=HOOK, timeout=hold),
         Hook(event="call-started", command=HOOK, timeout=hold),
         Hook(event="turn-ended", command=HOOK, timeout=hold),
         Hook(event="conversation-ended", command=HOOK, timeout=hold),
@@ -1013,11 +1014,12 @@ def test_claudes_judge_reads_the_tools_whose_writes_it_proposes(repo: Path) -> N
     assert not claude.heard(bash).judged
 
 
-def test_codex_hooks_the_judges_events_in_a_room() -> None:
+def test_codex_hooks_each_turns_start_and_the_judges_events_in_a_room() -> None:
     hold = timedelta(hours=25)
 
     assert codex.hooks(HOOK, hold) == [
         Hook(event="session-started", command=HOOK, timeout=hold),
+        Hook(event="turn-started", command=HOOK, timeout=hold),
         Hook(event="call-started", command=HOOK, timeout=hold),
         Hook(event="call-finished", command=HOOK, timeout=hold),
         Hook(event="turn-ended", command=HOOK, timeout=hold),
@@ -1208,6 +1210,72 @@ def test_claude_stamps_a_call_to_lups_tools_with_its_caller_and_no_decision() ->
         }
     )
     assert claude.told(raw, refused, TOLD) is None
+
+
+CLAUDE_PROMPT = json.dumps(
+    {
+        "session_id": "s1",
+        "transcript_path": "/home/u/.claude/projects/-w/s1.jsonl",
+        "cwd": "/w",
+        "prompt_id": "p1",
+        "permission_mode": "auto",
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": '<channel source="lup" wake="t1">\nHi.\n</channel>',
+    }
+)
+"""A turn's start as Claude Code 2.1.304 sent it for a channel's message, its paths shortened."""
+
+CODEX_PROMPT = json.dumps(
+    {
+        "session_id": "t1",
+        "turn_id": "u1",
+        "transcript_path": None,
+        "cwd": "/w",
+        "hook_event_name": "UserPromptSubmit",
+        "model": "gpt-5.5",
+        "permission_mode": "default",
+        "prompt": "Go on.",
+    }
+)
+"""A turn's start with each field Codex's `user-prompt-submit.command.input` names."""
+
+
+def test_each_runtime_hears_a_turns_start_with_its_prompt_and_tells_beside_it() -> None:
+    for adapter, raw, session, prompt in [
+        (
+            claude,
+            CLAUDE_PROMPT,
+            "s1",
+            '<channel source="lup" wake="t1">\nHi.\n</channel>',
+        ),
+        (codex, CODEX_PROMPT, "t1", "Go on."),
+    ]:
+        assert adapter.heard(raw) == Heard(
+            fits=10_000,
+            event="turn-started",
+            session=session,
+            judged=False,
+            prompt=prompt,
+        )
+        assert adapter.told(raw, "", TOLD) is None
+        assert json.loads(adapter.told(raw, "", ITEMS) or "") == {
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": BOTH,
+            }
+        }
+
+
+def test_claude_pushes_through_a_channel_and_codex_takes_no_push() -> None:
+    pushing = claude.adapter().pushing
+    assert pushing is not None
+    assert pushing.capabilities == {"claude/channel": {}}
+    notice = pushing.notice("Hi.", "t1")
+    assert (notice.method, notice.params) == (
+        "notifications/claude/channel",
+        {"content": "Hi.", "meta": {"wake": "t1"}},
+    )
+    assert codex.adapter().pushing is None
 
 
 def test_claude_adds_what_a_conversation_is_told_to_every_answer() -> None:

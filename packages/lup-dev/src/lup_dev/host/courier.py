@@ -10,8 +10,10 @@ the `Courier` again (`told`): with what the conversation is told added, and a ca
 to lup's tools rewritten to carry its `caller`, lup's id for the conversation.
 Each runtime's adapter fills both, since only it knows its runtime's spelling;
 `cli.py` builds the `Courier` from them, as it builds the `Answerer`. The
-`Courier` also spells how an idle session is woken, where its runtime has a way
-(`woken`).
+`Waker` spells how an idle session is woken, where its runtime has a way: what
+lup's tool server pushes on the session's own connection (`pushed`), with the
+capabilities it declares for the runtime to take it (`capabilities`), and the
+line written to its messaging socket (`woken`).
 
 What a conversation is told at each hook is the `Post`'s: the inbox's, which
 `cli.py` hands the service too. It hears every hook, and returns what waits for
@@ -31,10 +33,11 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from lup.sessions.terminal import Event
-from lup.types import Model, MutableModel
+from lup.types import JsonObject, Model, MutableModel
 from lup_dev.host.protocol import Activity
 
 if TYPE_CHECKING:
+    from lup.tools.serving import Notice
     from lup_dev.host.protocol import Register
 
 
@@ -76,6 +79,9 @@ class Heard(Model):
     said: str | None = None
     """At a turn's end, the agent's last message before it, as the runtime hands
     it to the hook; none for any other hook, or where it has none."""
+    prompt: str | None = None
+    """At a turn's start, the prompt it starts on, the operator's or one lup's
+    tool server pushed; none for any other hook."""
 
 
 class Telling(Model):
@@ -124,12 +130,28 @@ class Courier(ABC):
         runtime's.
         """
 
+
+class Waker(ABC):
+    """How each runtime's idle session is woken: what lup's tool server pushes to it and declares for it to be taken, and the line written to its messaging socket."""
+
     @abstractmethod
     def woken(self, runtime: str, session: str, text: str) -> str | None:
         """Return the line that starts a turn of `runtime`'s idle session `session` with `text`, written to its messaging socket.
 
         None where the runtime has no such socket, which its adapter declares.
         """
+
+    @abstractmethod
+    def pushed(self, runtime: str, text: str, token: str) -> Notice | None:
+        """Return the notice lup's tool server sends to start a turn of `runtime`'s idle session with `text`, its prompt carrying `token` whole.
+
+        None where the runtime takes nothing a server pushes, which its adapter
+        declares.
+        """
+
+    @abstractmethod
+    def capabilities(self, runtime: str) -> dict[str, JsonObject]:
+        """Return the experimental capabilities lup's tool server declares to `runtime`, so it takes what the server pushes; none where it takes nothing."""
 
 
 class Spawns(ABC):

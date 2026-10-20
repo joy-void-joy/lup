@@ -123,9 +123,6 @@ class Hears(Courier):
     ) -> Printed:
         return Printed(text=answer)
 
-    def woken(self, runtime: str, session: str, text: str) -> str | None:
-        return None
-
 
 class Judge:
     """A launch's judge, answering each hook with its runtime and payload.
@@ -1348,9 +1345,6 @@ class Reads(Courier):
         self, runtime: str, payload: str, answer: str, telling: Telling
     ) -> Printed:
         return Printed(text=answer)
-
-    def woken(self, runtime: str, session: str, text: str) -> str | None:
-        return None
 
 
 def hook(event: Event, **fields: object) -> str:

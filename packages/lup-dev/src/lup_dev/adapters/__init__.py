@@ -11,12 +11,23 @@ from datetime import timedelta
 
 from lup.sessions.declaration import Declaration
 from lup.sessions.terminal import Hook
-from lup.types import Model
+from lup.tools.serving import Notice
+from lup.types import JsonObject, Model
 from lup_dev.host.courier import Heard, Spawned, Telling
 from lup_dev.host.records import Reader, Records
 from lup_dev.launch.clis import Channel
 from lup_dev.policy.checkpoint import Bench
 from lup_dev.policy.runtime import Runtime
+
+
+class Pushing(Model, arbitrary_types_allowed=True):
+    """How lup's tool server starts a turn of a runtime's idle session: what it declares, and the notice it pushes."""
+
+    capabilities: dict[str, JsonObject]
+    """What the server declares as experimental, for the runtime to take what it pushes."""
+    notice: Callable[[str, str], Notice]
+    """The notice for a message: its text and a token in, the notice out, its
+    turn's prompt carrying the token whole."""
 
 
 class Adapter(Model, arbitrary_types_allowed=True):
@@ -47,6 +58,10 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """Starts a turn of an idle session: its id and what to tell it in, the line
     written to its messaging socket out; none where the runtime has no way, a gap
     its module declares."""
+    pushing: Pushing | None
+    """Starts a turn of an idle session through lup's tool server, on its own
+    connection; none where the runtime takes nothing a server pushes, a gap its
+    module declares."""
     hooks: Callable[[list[str], timedelta], list[Hook]]
     """The hooks a launched session runs a command at, each waiting up to a
     timeout: the events the host service hears."""
