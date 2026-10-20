@@ -386,7 +386,7 @@ class Credentials(Layer, extra="forbid"):
     A layer on it changes only the fields it sets, as on `Session`: a project
     allowing force pushes keeps lup's protected refs, and `Refs().add(…)` adds
     to them where they stand. A launch sends them, resolved, to the host
-    service, whose handlers hold each action to them (`docs/host-tools.md`,
+    service, whose handlers hold each action to them (`docs/credentials.md`,
     *What the declaration allows*).
 
     >>> mine = Credentials(actions=Actions().add("force-push")).over(Credentials())
@@ -460,7 +460,7 @@ class Repository(Model, extra="forbid"):
     """Another repository the project's sessions may read, where it is on the host, and what it is.
 
     A launched room mounts it whole and read-only at its host path, and the
-    guidance lists it (`docs/related-repositories.md`). A name, a path, an
+    guidance lists it (`docs/launch.md`, *Related repositories*). A name, a path, an
     `about` and a GitHub identity that's `owner/name` where one is given, or
     the load fails, naming the entry.
 
@@ -526,7 +526,7 @@ class Repositories(Named[Repository]):
     Any module may hold one; `Core` holds none. Which repositories a person
     relates, and what each is, are theirs, so they go in a module of their own
     layer, `lup_project.local.py`, never in a committed declaration
-    (`docs/related-repositories.md`, *A person's own layer*). One name from two modules is
+    (`docs/declaration.md`, *A person's own layer*). One name from two modules is
     one repository, the first's, where both give it the same path; with
     different paths, the load fails naming both.
     """

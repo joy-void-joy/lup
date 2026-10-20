@@ -265,7 +265,7 @@ def test_lup_s_own_sections_render_through_the_project_s_runner(
 ) -> None:
     shared = {"transcripts": tmp_path / "transcripts"}
     rendered = render(resolve(Project()), tmp_path, tmp_path, [], [], shared=shared)
-    assert rendered.startswith(f"{OPENING}\n\n# The room\n")
+    assert rendered.startswith(f"{OPENING}\n\n# Where you are\n")
     assert "`uv run lup-dev check`" in rendered
     assert "{{" not in rendered
     assert rendered.index("# The room") < rendered.index("# Running the project's")

@@ -1,6 +1,6 @@
 """The judge's tool in a launched session: `judged`, what lup's judge made of the writes in the session's repository.
 
-`docs/host-tools.md`, *lup's tools*. The judge runs on the host, and keeps its
+`docs/inbox.md`, *lup's tools*. The judge runs on the host, and keeps its
 verdict log and its holds in lup's state there, which no room mounts
 (`docs/judging-writes.md`, *The verdict log*, *Asking the operator*), so a
 session can't see from its room whether a write landed, was flagged, or waited

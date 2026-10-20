@@ -4,7 +4,11 @@ Every subsystem asks git through `Git`: the judge's store (`policy/store.py`), t
 launch (`lup_dev.launch`), and the command line. git runs with `core.fsmonitor`
 and hooks turned off, in any repository it's asked about: the effects probe saw a
 planted `core.fsmonitor` run inside a call (`docs/field-notes.md`, *Isolation and
-effects*). git's `-z` output is read by splitting it on its NUL separators
+effects*). It also ignores replace refs (`--no-replace-objects`): a room writes
+`refs/`, so a `refs/replace/` of its own would hand git another blob for an
+object whose id `git ls-tree` still lists, and an export of the approved commit,
+which trust's fingerprint of those ids calls unchanged, would carry the room's
+content to the host. git's `-z` output is read by splitting it on its NUL separators
 (`nul_separated`), not through a git library such as dulwich or pygit2, which
 `lup_dev` doesn't depend on.
 
@@ -113,6 +117,7 @@ class Git(Model):
     ) -> Ran:
         """Run git with `arguments`; raise `GitError` on an exit status not in `ok`, or where git can't run."""
         safe = [
+            "--no-replace-objects",
             "-c",
             "core.fsmonitor=false",
             "-c",

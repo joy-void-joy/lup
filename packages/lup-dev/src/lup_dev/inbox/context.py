@@ -1,6 +1,6 @@
 """A conversation as its runtime records it, and an item's moment in it, read from the record as it stands.
 
-`docs/host-tools.md`, *An item's moment*. An item an agent's call made keeps the
+`docs/inbox.md`, *An item's moment*. An item an agent's call made keeps the
 runtime's id for that call (`Item.call`), which the call's hook stamped, and the
 record keeps the same id beside the call (`Called.id`). Its moment is the steps
 around it: from the operator's last words before the call, through the call, to

@@ -53,6 +53,23 @@ def test_an_export_writes_each_file_as_the_commit_holds_it(
     assert "$Format:%H$" not in archived
 
 
+def test_a_replace_ref_a_room_plants_changes_neither_the_listing_nor_the_export(
+    repo: Path, tmp_path: Path, shell: Shell
+) -> None:
+    approved = '"""The declaration as approved."""\n'
+    commit = committed(repo, {"lup_project.py": approved}, shell)
+    listed = Git(cwd=repo).text("ls-tree", "-r", commit)
+    planted = tmp_path / "planted.py"
+    planted.write_text('"""A room\'s own."""\n')
+    blob = shell.git(repo, "rev-parse", f"{commit}:lup_project.py")
+    shell.git(repo, "replace", blob, shell.git(repo, "hash-object", "-w", str(planted)))
+    assert shell.git(repo, "cat-file", "-p", blob) == '"""A room\'s own."""'
+    assert Git(cwd=repo).text("ls-tree", "-r", commit) == listed
+    into = tmp_path / "export"
+    Git(cwd=repo).export(commit, into)
+    assert (into / "lup_project.py").read_text() == approved
+
+
 def test_the_judges_export_keeps_python_and_project_files_from_the_objects(
     repo: Path, tmp_path: Path, shell: Shell
 ) -> None:

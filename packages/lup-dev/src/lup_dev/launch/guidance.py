@@ -24,12 +24,12 @@ After the declared sections come lup's tools, where the session is served any
 themselves, saying they're found through the runtime's tool search by name. Each
 runtime defers an MCP server's tools behind its tool search, and the first lup
 found that agents told nothing of deferred tools concluded they didn't exist
-(`docs/host-tools.md`, *Found through tool search, listed in the guidance*).
+(`docs/inbox.md`, *Found through tool search, listed in the guidance*).
 
 After lup's tools come the other repositories named for the project's sessions
 to read (`repositories`): each by its name, what it is, its path in the room,
 whether it's mounted or missing on this machine, and its GitHub identity, which
-lup's GitHub tools take (`docs/related-repositories.md`).
+lup's GitHub tools take (`docs/launch.md`, *Related repositories*).
 
 The person's own section, `AGENTS.local.md` at the root of the worktree launched,
 which git ignores, is appended after every other where there's one, so it holds
@@ -59,8 +59,9 @@ if TYPE_CHECKING:
     from lup_dev.launch.room import Lent, RelatedRepository
 
 OPENING = (
-    "This guidance adds to your runtime's own instructions and replaces none of "
-    "them; where two of its sections differ, the later one holds."
+    "lup is the environment this session runs in, set up by the operator for this "
+    "project, and this is its guidance. Where it differs from your runtime's own "
+    "instructions, it holds; where two of its sections differ, the later one holds."
 )
 """The document's first line: how its sections stand to each other and to the
 runtime's own instructions."""

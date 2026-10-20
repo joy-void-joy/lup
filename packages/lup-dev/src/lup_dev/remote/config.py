@@ -1,6 +1,6 @@
 """The room's git configuration: each of the repository's remotes through lup's helper, and nothing that writes the repository's `config`.
 
-`docs/host-tools.md`, *git through a remote helper*. A room's git reads the
+`docs/credentials.md`, *git through a remote helper*. A room's git reads the
 repository's `config`, mounted read-only, and a file of its own in place of the
 operator's `~/.gitconfig`, which isn't mounted (`docs/launch.md`, *The
 mounts*): "if `GIT_CONFIG_GLOBAL` is set, neither `$HOME/.gitconfig` nor

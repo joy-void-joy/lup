@@ -1,6 +1,6 @@
 """Telling each conversation what waits in its inbox, once: at its hooks, by a held call, and by starting a turn of its idle session.
 
-`docs/host-tools.md`, *How an agent is told*. Every item waiting for a
+`docs/inbox.md`, *How an agent is told*. Every item waiting for a
 conversation is told together, oldest first, by whichever comes first:
 - **its next call,** beside it, as the hook's context (`telling`, which the host
   service asks at every hook, the `Post` it's handed); but not at the start of a
