@@ -104,15 +104,28 @@ class Decision(Model):
     lean: str
 
 
+class Passage(Model):
+    """A passage of a conversation's own words the operator quoted where they read it, with their reply to it."""
+
+    quote: str
+    text: str
+
+
 class Message(Model):
     """A message, of its kind; the operator's reply to a conversation's item says which."""
 
     reason: Literal["message"] = "message"
     kind: Kind
     text: str
+    """Its words; for the operator's message from where they read a
+    conversation, their message on it whole, empty where they wrote none."""
     of: int | None = None
     """The item it replies to, where it's the operator's reply to one of a
     conversation's messages (`lup-dev inbox answer`)."""
+    passages: list[Passage] = []
+    """The passages of the conversation's words the operator replied to, from
+    where they read it (`docs/dashboard.md`, *The conversation*), in the
+    conversation's order: told before its words, each quoted with their reply."""
     ending: bool = False
     """Whether it's a session's last words of a turn, made a note by lup rather
     than sent by the agent: the conversation already shows them as its words."""

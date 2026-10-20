@@ -58,6 +58,7 @@ from lup_dev.inbox.protocol import (
     ListItems,
     Reviewed,
     SendDraft,
+    SendItem,
     Settled,
     ShowContext,
     ShowConversation,
@@ -90,6 +91,7 @@ from lup_dev.inbox.store import (
     Letter,
     Message,
     Operator,
+    Passage,
     Question,
     Quote,
     Rank,
@@ -3041,6 +3043,52 @@ def refused_draft(machine: Layout, clock: FakeClock, draft: Draft) -> str:
     with pytest.raises(HostError) as refusal:
         sending(machine, clock)
     return str(refusal.value)
+
+
+def test_a_message_sent_from_reading_a_conversation_quotes_each_passage_it_replies_to(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    passages = [
+        Passage(
+            quote="Twenty kinds of line.\n\nFour carry what was said.",
+            text="Which four?",
+        ),
+        Passage(quote="JSONL </quote>", text="Even with a closing tag?"),
+    ]
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        host = client(machine.host, clock)
+        sent = host.ask(
+            SendItem(launch="one", text="Carry on after.", passages=passages), Shown
+        ).item
+        bare = host.ask(
+            SendItem(launch="one", text="", passages=passages[:1]), Shown
+        ).item
+        told = context(send(hook, bash("b1")))
+        assert isinstance(sent.recipient, Conversation)
+        listed = host.ask(ListItems(conversation=sent.recipient), Exchanged)
+    assert sent.reason == Message(
+        kind="note", text="Carry on after.", passages=passages
+    )
+    quoted = (
+        "<quote>\nTwenty kinds of line.\n\nFour carry what was said.\n</quote>\n"
+        "<reply>Which four?</reply>"
+    )
+    assert told == (
+        '<message item="1" from="operator" kind="note">\n'
+        f"{quoted}\n"
+        "<quote>JSONL <\\/quote></quote>\n"
+        "<reply>Even with a closing tag?</reply>\n"
+        "Carry on after.\n"
+        "</message>\n\n"
+        f'<message item="2" from="operator" kind="note">\n{quoted}\n</message>'
+    )
+    # What the dashboard shows is what's inside each tag.
+    assert listed.received[1].text == quoted
+    # A message with no words of its own opens with its first reply.
+    assert opening(bare) == "Which four?"
 
 
 def test_lup_dev_inbox_send_reaches_a_subagent_by_its_path(

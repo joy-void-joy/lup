@@ -27,6 +27,7 @@ import {
     opened,
     quoted,
     reading,
+    sending,
     type Beside,
     type Earlier,
     type Entry,
@@ -434,7 +435,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         await refresh();
         const after = have.current;
         try {
-            const answer = await ask({ kind: "inbox-send", launch: launch.launch.launch, text, agent: subagent });
+            const answer = await ask({ kind: "inbox-send", launch: launch.launch.launch, ...sending(talk), agent: subagent });
             if (answer.kind === "refused") {
                 say(answer.error);
                 return;

@@ -107,6 +107,7 @@ from lup_dev.inbox.store import (
     Message,
     Operator,
     Party,
+    Passage,
     Question,
     Reason,
     Review,
@@ -177,8 +178,10 @@ def what(item: Item) -> str:
 
 
 def opening(item: Item) -> str:
-    """Return an item's first line: its text's, an answer's comment's, or a review's first message's or comment's."""
+    """Return an item's first line: its text's, a message with no words of its own its first reply's, an answer's comment's, or a review's first message's or comment's."""
     match item.reason:
+        case Message(text="", passages=[first, *_]):
+            said = first.text
         case (
             Message(text=text)
             | Friction(text=text)
@@ -657,9 +660,20 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return Tag(
                     name="message", attributes={**head, "kind": said}, parts=[replied]
                 )
-            case Message(kind=said, text=text):
+            case Message(kind=said, text=text, passages=passages):
+                replies = [
+                    part
+                    for each in passages
+                    for part in [
+                        Tag(name="quote", parts=[each.quote]),
+                        Tag(name="reply", parts=[each.text]),
+                    ]
+                ]
+                whole = [text] if text or not passages else []
                 return Tag(
-                    name="message", attributes={**head, "kind": said}, parts=[text]
+                    name="message",
+                    attributes={**head, "kind": said},
+                    parts=[*replies, *whole],
                 )
             case Answer(question=question) as answer:
                 return Tag(
@@ -1258,12 +1272,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
                 raise InboxError(message)
 
-    async def sent(self, launch: str, text: str, agent: str | None = None) -> Item:
-        """Send the operator's message to a conversation of the session `launch` runs: its main one, or its subagent `agent`."""
+    async def sent(
+        self,
+        launch: str,
+        text: str,
+        agent: str | None = None,
+        passages: list[Passage] | None = None,
+    ) -> Item:
+        """Send the operator's message to a conversation of the session `launch` runs: its main one, or its subagent `agent`; with the passages of its words they replied to, where they send it from reading it."""
         conversation = self.main_of(launch).model_copy(update={"agent": agent})
-        return await self.posted(
-            Message(kind="note", text=text), Operator(), conversation, None
-        )
+        message = Message(kind="note", text=text, passages=passages or [])
+        return await self.posted(message, Operator(), conversation, None)
 
     async def asked(
         self, approval: Approval, diff: str, files: list[ChangedFile], worktree: Path

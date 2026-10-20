@@ -88,7 +88,7 @@ Every party has an inbox, kept by the host service (`inbox/`).
 
 - **Parties:** the operator, and each conversation of each session, its main one or one of its subagents. A conversation is keyed by its runtime, its session's id and its own, within a repository (`Conversation`, `inbox/store.py`), rather than by the launch it runs in, so a session resumed in a later launch (`lup-dev launch claude --resume <id>`) finds what waited for it there.
 - **An item** has a number (one sequence per user, so the operator types `lup-dev inbox answer 12`), a reason, a sender and a recipient, the worktree it's from, when it was made (through `lup_dev.clock`), and its state: waiting, told (when, and how), answered, done, decided, or superseded. Its reason is one of:
-  - a message with its kind (`Message`, whose `of` names the item a reply answers);
+  - a message with its kind (`Message`, whose `of` names the item a reply answers, and whose `passages` hold what the operator replied to where they read the conversation, each quote with their reply);
   - a friction, how a piece of work went, or a stop by choice (`Friction`, `HowItWent`, `Stop`), replied to, marked read and withdrawn as a message is;
   - a question with its decisions (`Question`);
   - an answer (`Answer`);
@@ -124,6 +124,38 @@ A session's last message of each turn is an item in the operator's inbox, a note
 - **A held call abandoned:** a call cancelled while it holds, its connection gone, leaves everything waiting. Codex never sends `notifications/cancelled`, on a timeout or on Esc, and whether Claude Code sends it on Esc is unchecked; where it isn't sent, an answer written into a call nobody reads is lost to the agent.
 
 Every item an agent receives comes from the operator's own act (an answer, a message, a review), so nothing is held back, and a burst is told together.
+
+**As tags.** Each item is told as one element (`Delivery.tagged`, written by `inbox/tags.py`), so a quote, the operator's reply to it and their comment on a whole item can't be taken for one another, and an item says whom it's from before anything it says:
+
+```
+<review item="153" from="operator" covers="150 151 149">
+<message>…the operator's message to you…</message>
+<on item="150" kind="note">
+<opening>…its first line…</opening>
+<quote>…the passage they selected…</quote>
+<reply>…their comment on that passage…</reply>
+<comment>…their comment on the whole item…</comment>
+</on>
+<on item="151" kind="question" read="with nothing to add">
+<opening>…</opening>
+</on>
+<context>
+What the operator said in the same reply on other agents' items and to other agents: not yours to act on, unless it says so.
+<on item="149" kind="friction" from="claude session 3a2d…" worktree="…">
+<text>…that item whole…</text>
+<quote>…</quote>
+<reply>…</reply>
+</on>
+<message to="claude session 77e1…" worktree="…">…</message>
+</context>
+</review>
+```
+
+- **A message** is `<message item from kind>`, its text inside; one sent from reading the conversation holds each passage as `<quote>` and `<reply>`, then the message on the whole; a reply holds `<on item kind>` with that item's `<opening>` and the operator's `<comment>`.
+- **An answer** is `<answer item from question>`: `<asked>`, then a `<decision number lean verdict>` with the decision's text for each, the operator's words on it as `<comment>`, then their comment on the whole; a plain question's answer is its text.
+- **One passed on** from a conversation that had ended says whom it was for (`for="subagent a1 of claude session s1, whose conversation had ended"`); the doorbell is `<doorbell>`, one `<waiting item kind from>` an item, and an item too long for a hook `<announced item kind from bytes>`.
+- **Text stays as written,** the operator's code as code: only `</` is written `<\/`, so no text closes a tag, an `ignore` of `string-replace` saying why. An attribute's value is quoted by `xml.sax.saxutils.quoteattr`.
+- What an approval's note and a held change's answer carry of the operator's comments stays prose (`remark`), told as a message's text.
 
 #### No turn that won't end
 
@@ -322,7 +354,7 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 
 No agent and no network in any test. The host service serves on sockets under the test's temporary directory, in a thread of its own; `gh` is a stand-in on the `PATH` answering `gh` 2.102.0's recorded JSON (`tests/payloads/gh-2.102.0/`); git runs for real on scratch repositories laid out as lup's, a bare repository as the forge; the clipboard's desktop programs are stood in.
 - `packages/lup/tests/`: `test_serving.py` (a toolset over a socket pair to `mcp`'s own client), `test_bridge.py` (a stand-in server stopping and starting under the bridge), `test_terminal.py` (each runtime's compile, compared whole).
-- `packages/lup-dev/tests/`: `test_host.py` (the room sockets, `caller`, a hook the judge doesn't read, watches), `test_adapters.py` (each `Courier` on recorded payloads), `test_inbox.py` (each way an item is told, once; a subagent told lup's tools once, on each runtime's hooks, and one reading the guidance told nothing; the tools, a friction, how it went and a stop from a session and a subagent of each runtime reaching the operator with their calls and no notice, each kind's rank, a flagged write the kit's judge let through an item gathering the conversation's later ones to its file until it's read, a comment on it reaching its agent, `judged` reading the kit's judge's verdicts and holds, and a large log a page at a time, among them; `lup-dev inbox`; a conversation's items listed), `test_remote.py` (the helper run by real git against the service, a push carrying a value never published refused at `publishing`), `test_forge.py`, `test_clipboard.py`, `test_declaration.py` (`Credentials`).
+- `packages/lup-dev/tests/`: `test_host.py` (the room sockets, `caller`, a hook the judge doesn't read, watches), `test_adapters.py` (each `Courier` on recorded payloads), `test_inbox.py` (each way an item is told, once, as its tag, a message sent from reading a conversation quoting each passage with its reply; a subagent told lup's tools once, on each runtime's hooks, and one reading the guidance told nothing; the tools, a friction, how it went and a stop from a session and a subagent of each runtime reaching the operator with their calls and no notice, each kind's rank, a flagged write the kit's judge let through an item gathering the conversation's later ones to its file until it's read, a comment on it reaching its agent, `judged` reading the kit's judge's verdicts and holds, and a large log a page at a time, among them; `lup-dev inbox`; a conversation's items listed), `test_remote.py` (the helper run by real git against the service, a push carrying a value never published refused at `publishing`), `test_forge.py`, `test_clipboard.py`, `test_declaration.py` (`Credentials`).
 
 ## Where it's going
 

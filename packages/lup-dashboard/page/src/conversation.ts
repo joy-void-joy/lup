@@ -29,6 +29,7 @@ import type { components } from "./generated/api";
 export type Entry = components["schemas"]["Entry"];
 export type Item = components["schemas"]["Item"];
 export type Exchange = components["schemas"]["Exchange"];
+export type Passage = components["schemas"]["Passage"];
 type Party = components["schemas"]["Conversation"];
 
 /** A comment of the operator's: on a line or a passage of what the agent said at step `step`; or, with no step, their message on the conversation whole. */
@@ -561,20 +562,32 @@ export function aboutAt(laidOut: Laid, comment: Remark): number | undefined {
 }
 
 /**
- * Say the operator's comments as one message an agent reads: each comment on its words under what it quotes, set
- * off as a quotation is in a mail, in the order they were said; then the message on the whole.
+ * Return what's sent of the operator's comments, for lup to tell the agent (`SendItem`): each passage of its words
+ * they replied to, with their reply, in the order they were said; then their message on the whole.
  */
-export function message(talk: Talk): string {
+export function sending(talk: Talk): { text: string; passages: Passage[] } {
     const comments = saying(talk.comments);
     const quoted = comments
         .filter((each) => each.step !== null && each.quote != null)
         .sort((a, b) => (a.step ?? 0) - (b.step ?? 0) || (a.quote?.start ?? 0) - (b.quote?.start ?? 0));
     const rest = comments.filter((each) => each.step === null || each.quote == null);
-    const parts = quoted.map((each) => {
-        const lines = (each.quote?.text ?? "").split("\n").map((line) => (line === "" ? ">" : `> ${line}`));
-        return `${lines.join("\n")}\n\n${each.text.trim()}`;
+    return {
+        passages: quoted.map((each) => ({ quote: each.quote?.text ?? "", text: each.text.trim() })),
+        text: rest.map((each) => each.text.trim()).join("\n\n"),
+    };
+}
+
+/**
+ * Say what's sent as the page shows it until its item is listed: each reply under the passage it quotes, set off
+ * as a quotation is in a mail; then the message on the whole.
+ */
+export function message(talk: Talk): string {
+    const { passages, text } = sending(talk);
+    const parts = passages.map((each) => {
+        const lines = each.quote.split("\n").map((line) => (line === "" ? ">" : `> ${line}`));
+        return `${lines.join("\n")}\n\n${each.text}`;
     });
-    return [...parts, ...rest.map((each) => each.text.trim())].join("\n\n");
+    return [...parts, ...(text === "" ? [] : [text])].join("\n\n");
 }
 
 /** Where the reader is, as the conversation grows: on its last line, writing their message at its end, or anywhere else, where nothing they see moves. */

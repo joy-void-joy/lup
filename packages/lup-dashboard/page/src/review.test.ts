@@ -76,7 +76,7 @@ const QUESTION: Item = {
 
 const NOTE: Item = {
     number: 52,
-    reason: { reason: "message", ending: false, kind: "note", text: "I assumed UTF-8." },
+    reason: { reason: "message", passages: [], ending: false, kind: "note", text: "I assumed UTF-8." },
     sender: from("s2"),
     recipient: { party: "operator" },
     made: AT,
@@ -196,7 +196,7 @@ describe("laid", () => {
         const ended: Item = {
             ...NOTE,
             number: 61,
-            reason: { reason: "message", ending: true, kind: "note", text: "Done." },
+            reason: { reason: "message", passages: [], ending: true, kind: "note", text: "Done." },
             sender: from("s3"),
             rank: NEWS,
         };
@@ -220,7 +220,7 @@ describe("laid", () => {
         const ended: Item = {
             ...NOTE,
             number: 61,
-            reason: { reason: "message", ending: true, kind: "note", text: "Done." },
+            reason: { reason: "message", passages: [], ending: true, kind: "note", text: "Done." },
             sender: from("s3"),
             rank: NEWS,
         };
