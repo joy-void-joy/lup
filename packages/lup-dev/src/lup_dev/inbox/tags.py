@@ -7,8 +7,8 @@ one for another, and an item says whom it's from before anything it says.
 Text in a tag stays as its writer wrote it, so the operator's code reads as
 code, where XML's escaping would write each `<` as `&lt;`. Only `</` is written
 `<\/`, so no text closes a tag around it, the way a runtime's channel writes
-a `</channel>` in what it carries. An attribute's value is quoted by
-`xml.sax.saxutils.quoteattr`.
+a `</channel>` in what it carries (`docs/field-notes.md`, *Channels*). An
+attribute's value is quoted by `xml.sax.saxutils.quoteattr`.
 """
 
 from xml.sax.saxutils import quoteattr
