@@ -83,7 +83,7 @@ def scanned(
 ) -> Scanned:
     """Read `files`, and the commits `head` reaches that the remotes of the repository at `repository` lack, for each value of `held`."""
     in_files = [spot for sent in files for spot in in_file(sent, held)]
-    git = Git(cwd=repository, common=repository, arguments=["--no-replace-objects"])
+    git = Git.pinned(repository)
     if head is None:
         return Scanned(found=refused(in_files))
     remotes = remotes_hold(git)

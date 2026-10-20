@@ -1375,7 +1375,8 @@ def launched(
     """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, and return its CLI's exit status.
 
     In the order `docs/launch.md` gives (*The command*): trust on launch, its
-    report said; the declaration at the commit approved, with the person's own
+    report said; replace refs in the repository said, which lup's git ignores
+    (`lup_dev.git`); the declaration at the commit approved, with the person's own
     layer approved beside it, and the rules its selection runs, which the
     engine resolves for the guidance; the host's requirements, each optional
     one off said; the repository named on GitHub, or why not said; the host
@@ -1395,6 +1396,12 @@ def launched(
             "rev-parse", "--path-format=absolute", "--git-common-dir"
         )
     )
+    if Git.pinned(repository).text("for-each-ref", "--count=1", "refs/replace/"):
+        launcher.say(
+            "This repository holds replace refs (`refs/replace/`), which a room "
+            "can write to hand git other content for an object: lup's git ignores "
+            "them. `git replace -l` lists them, and `git replace -d` removes one."
+        )
     approval = approved(launcher.layout, repository)
     if approval is None:
         message = f"nothing is approved for {repository}, so nothing launches"
