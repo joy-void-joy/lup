@@ -319,7 +319,7 @@ def test_claude_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
 
 
 class Broken(Checker):
-    def rules(self) -> list[Rule]:
+    def rules(self, selected: list[Selected] | None = None) -> list[Rule]:
         crashed = "the engine crashed"
         raise RuntimeError(crashed)
 

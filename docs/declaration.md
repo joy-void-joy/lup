@@ -269,6 +269,8 @@ Python only composes and records a selection. Each check request carries every m
 
 The judge, the turn's end and `lup-dev rules check` all send the same selection: the one from the declaration the worktree is judged by (`Declaration.rules`), so a stand-in sends its own. Exemptions and `# lup: ignore` apply afterwards, in Python.
 
+**Listing what a selection runs** goes through the same resolution, with no project loaded: the engine's `rules` command, given the selections on its input, prints the rules their union runs, in the table's order, and refuses what a check would; given nothing, the whole table (`Checker.rules`). `lup-dev rules list` lists the worktree's own declaration's rules that way, and `--all` the whole table, each it doesn't run marked `(left out)`. A launch asks for the approved declaration's, which a section of the guidance lists (`docs/launch.md`, *Guidance*).
+
 ### The runner
 
 `Python.runner` says how the project runs its tools (`declaration/runner.py`). Everything that runs a tool in the project's environment derives its command from it, so uv is spelled once, in `Uv`.

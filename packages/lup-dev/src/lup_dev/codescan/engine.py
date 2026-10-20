@@ -160,10 +160,17 @@ class EngineChecker(Model, Checker):
         stat = self.script().stat()
         return f"{stat.st_size}-{stat.st_mtime_ns}"
 
-    def rules(self) -> list[Rule]:
-        """List the engine's rules, read from its table without loading a project."""
-        listed = self.run_engine("rules")
-        return [Rule.model_validate(rule) for rule in json.loads(listed)]
+    def rules(self, selected: list[Selected] | None = None) -> list[Rule]:
+        """List the engine's rules, those `selected` chooses or its whole table, read from its table without loading a project.
+
+        A selection goes to the engine's `rules` command on its input, a process
+        of its own, as `parse`'s files do, so it costs Node's start whatever the
+        worktree's engine is doing.
+        """
+        given = None if selected is None else SELECTIONS.dump_json(selected)
+        return LISTED.validate_json(
+            printed(self.node, self.bundle, "rules", stdin=given)
+        )
 
     def check(
         self,
@@ -378,6 +385,12 @@ PARSED = TypeAdapter(list[ParsedSource])
 
 REPORTS = TypeAdapter(list[FileReport])
 """What it prints."""
+
+SELECTIONS = TypeAdapter(list[Selected])
+"""What the engine's `rules` command reads on its input, given a selection."""
+
+LISTED = TypeAdapter(list[Rule])
+"""What it prints: the rules chosen, or its whole table."""
 
 
 def built(bundle: Bundle) -> Path:

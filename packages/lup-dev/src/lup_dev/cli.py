@@ -45,7 +45,7 @@ from lup_dev.clipboard.desktop import Desktop
 from lup_dev.clipboard.protocol import routes as clipboard_routes
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan.conditions import loaded
-from lup_dev.codescan.contract import Checker, Due, Finding, Source
+from lup_dev.codescan.contract import Checker, Due, Finding, Rule, Source
 from lup_dev.codescan.directives import (
     Checking,
     Fired,
@@ -61,7 +61,7 @@ from lup_dev.codescan.ruff import Ruff
 from lup_dev.declaration.load import load, person_layer
 from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
-from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.resolve import Declaration, Selected, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM, GitHubError, named
 from lup_dev.gate import Check, Passed, Passes, Shell, at_commit, failed, report
@@ -1234,6 +1234,9 @@ class Launcher(Model, arbitrary_types_allowed=True):
     facts: Facts
     """What the host says of itself, which the list of values never published
     is built from."""
+    rules: Callable[[list[Selected]], list[Rule]]
+    """Lists the rules a project's selection runs, which the engine resolves,
+    raising `EngineError` where it refuses the selection or can't run."""
 
 
 def withheld_at_launch(launcher: Launcher, resolved: Resolved, worktree: Path) -> None:
@@ -1374,15 +1377,17 @@ def launched(
 
     In the order `docs/launch.md` gives (*The command*): trust on launch, its
     report said; the declaration at the commit approved, with the person's own
-    layer approved beside it; the host's requirements, each optional one off
-    said; the repository named on GitHub, or why not said; the host service; the
-    latest CLI, a fallback said; the other repositories the declaration names
-    for its sessions to read, each missing one said; the room, its image built
-    where it's missing; the terminal settings; the repository's `config` checked
-    for the room's git; the sweep, then the launch registered, under its
-    launcher's lock; the room's git configuration and helper written; the CLI in
-    the room, with `arguments` after lup's own. The registration ends, and the launch's directory goes,
-    whatever the CLI did.
+    layer approved beside it, and the rules its selection runs, which the
+    engine resolves for the guidance; the host's requirements, each optional
+    one off said; the repository named on GitHub, or why not said; the host
+    service; the latest CLI, a fallback said; the other repositories the
+    declaration names for its sessions to read, each missing one said; the
+    room, its image built where it's missing; the terminal settings; the
+    repository's `config` checked for the room's git; the sweep, then the
+    launch registered, under its launcher's lock; the room's git configuration
+    and helper written; the CLI in the room, with `arguments` after lup's own.
+    The registration ends, and the launch's directory goes, whatever the CLI
+    did.
     """
     runtime = adapter.runtime.name()
     launcher.say(launcher.trust(worktree).report())
@@ -1399,6 +1404,7 @@ def launched(
     with approved_declaration(
         worktree, approval.commit, local=approval.local
     ) as declared:
+        running = launcher.rules(declared.resolved.rules)
         needs = checked(host_needs(), launcher.tools).require()
         for off in needs.off:
             launcher.say(f"Turned off, for want of a tool: {off.described()}")
@@ -1463,6 +1469,7 @@ def launched(
             neighbours=neighbours,
             shared=shared,
             lent=lending,
+            rules=running,
         )
         gating = Gating(
             command=declared.resolved.runner.command(["lup-dev", "check", "--at"]),
@@ -1573,6 +1580,7 @@ def launching(say: Callable[[str], None]) -> Launcher:
         say=say,
         github=github,
         facts=HostFacts(),
+        rules=engine().rules,
     )
 
 
@@ -1727,10 +1735,30 @@ def mount(
 
 
 @rules.command("list")
-def rules_list() -> None:
-    """List the engine's rules: the mistake each prevents, and its steer."""
-    for rule in engine().rules():
-        typer.echo(f"{rule.id}: {rule.mistake}\n    steer: {rule.steer}")
+def rules_list(
+    *,
+    every: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help=(
+                "Every rule of lup's table, each this project doesn't run marked "
+                "`(left out)`."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """List the rules this project runs: the mistake each prevents, and its steer.
+
+    The worktree's own declaration is read, as `rules check` reads it, and the
+    engine resolves its selection as it does for a check.
+    """
+    checker = engine()
+    running = checker.rules(Declaration.read(toplevel(Path.cwd())).rules)
+    runs = [rule.id for rule in running]
+    for rule in checker.rules() if every else running:
+        mark = "" if rule.id in runs else " (left out)"
+        typer.echo(f"{rule.id}{mark}: {rule.mistake}\n    steer: {rule.steer}")
 
 
 @rules.command("docs")

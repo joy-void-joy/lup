@@ -226,8 +226,14 @@ class Checker(ABC):
     """A typed engine the judge asks about the files of one project."""
 
     @abstractmethod
-    def rules(self) -> list[Rule]:
-        """List lup's rules, which a project's selection and `ignore`s name."""
+    def rules(self, selected: list[Selected] | None = None) -> list[Rule]:
+        """List lup's rules: those `selected` chooses, or every rule of the table, which a project's selection and `ignore`s name.
+
+        `selected` is each module's selection, as the project's declaration
+        records it, which the engine resolves as it does for a check, refusing
+        what it would refuse there; the rules come in the table's order. With
+        none, the whole table; an empty list chooses none.
+        """
 
     @abstractmethod
     def check(

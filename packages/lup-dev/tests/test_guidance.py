@@ -20,6 +20,7 @@ from lup_dev import (
     Runner,
     Section,
 )
+from lup_dev.codescan.contract import Examples, Rule
 from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.launch.guidance import OPENING, GuidanceError, listed, render
 from lup_dev.launch.room import RelatedRepository
@@ -293,3 +294,60 @@ def test_a_section_naming_data_no_module_shares_is_refused(root: Path) -> None:
     (root / "AGENTS.md").write_text('Kept at {{ data("ledger") }}.\n')
     with pytest.raises(GuidanceError, match=r"`data\('ledger'\)` names no module"):
         render(declared(), root, root, [], [], shared={"transcripts": Path("/d")})
+
+
+RULES = [
+    Rule(
+        id="elif",
+        mistake="A chain of conditions hides the value's structure.",
+        steer="Decide on a value's structure with `match`.",
+        examples=Examples(flags=[]),
+    ),
+    Rule(
+        id="regex",
+        mistake="A pattern reads a format by hand.",
+        steer="Read the text with its format's parser.",
+        examples=Examples(flags=[]),
+    ),
+]
+"""Two made-up rules, as the engine's table would list them."""
+
+
+def test_a_section_lists_the_rules_it_s_given_each_by_its_id_and_steer(
+    root: Path,
+) -> None:
+    (root / "AGENTS.md").write_text("Write this way:\n\n{{ rules() }}\n\nThat's all.\n")
+    rendered = render(declared(), root, root, [], [], rules=RULES)
+    assert rendered == (
+        f"{OPENING}\n\nWrite this way:\n\n"
+        "- `elif`: Decide on a value's structure with `match`.\n"
+        "- `regex`: Read the text with its format's parser.\n\n"
+        "That's all.\n"
+    )
+
+
+def test_a_section_listing_rules_where_none_were_given_is_refused(
+    root: Path,
+) -> None:
+    (root / "AGENTS.md").write_text("{{ rules() }}\n")
+    with pytest.raises(
+        GuidanceError,
+        match=r"`project` \(`AGENTS.md`\) doesn't render: `rules\(\)` has no rules",
+    ):
+        render(declared(), root, root, [], [])
+
+
+def test_a_refusal_names_every_function_a_section_can_call(root: Path) -> None:
+    (root / "AGENTS.md").write_text("{{ gate }}\n")
+    with pytest.raises(GuidanceError) as refused:
+        render(declared(), root, root, [], [], rules=RULES)
+    said = str(refused.value)
+    assert all(
+        name in said
+        for name in [
+            '`run("<command>")`',
+            '`data("<module>")`',
+            "`mounted(",
+            "`rules()`",
+        ]
+    )

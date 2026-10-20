@@ -32,8 +32,11 @@ const table: Catalog = rules;
 // replaced that isn't there, one added that is.
 export class SelectionError extends Error {}
 
-export function ruleInfos(): RuleInfo[] {
-    return Object.entries(table).map(([id, rule]) => ({
+// The rules as the engine lists them: every rule of the table, or, given each
+// module's selection, those their union runs, as a check resolves them.
+export function ruleInfos(selections?: Selected[]): RuleInfo[] {
+    const listed = selections === undefined ? Object.entries(table) : selected(selections);
+    return listed.map(([id, rule]) => ({
         id,
         mistake: rule.mistake,
         steer: rule.steer,
