@@ -1,6 +1,6 @@
 """The gate's `private` step: every file of the worktree, and `HEAD`'s commits the remotes lack, read for a value never published.
 
-`docs/private.md`, *The gate*. It sees what a write's judgement didn't: what
+`docs/private.md`, *The gate's `private` step*. It sees what a write's judgement didn't: what
 the shell wrote, a commit's message, a value added in one commit and taken out
 in the next. On the host, `lup-dev private check` reads the list itself; in a
 room, which never sees the list, it sends the files and `HEAD` to the host

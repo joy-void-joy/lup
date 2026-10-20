@@ -78,7 +78,7 @@ What the host's part relies on, from Claude Code's hooks reference
   alongside modified ones"; the reference pairs it with `allow` or `ask`, and is
   silent on it alone. The first lup measured on Claude Code 2.1.283 that "a
   rewrite with no decision reached the server even for a tool with
-  `additionalProperties: false`" (its `docs/platform-differentiation.md`); owed
+  `additionalProperties: false`" (`docs/platform-differentiation.md` in `lup-legacy`); owed
   live on the version a launch runs (`docs/field-notes.md`, *Piece 2, live*);
 - `PreToolUse`'s `additionalContext` is a "String added to Claude's context
   alongside the tool result", `SessionStart`'s one "added to Claude's context at

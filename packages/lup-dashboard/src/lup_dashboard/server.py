@@ -1,6 +1,6 @@
 """The dashboard's server: the page, and its API relaying the host service's requests, on localhost alone.
 
-`docs/dashboard.md`, *The server* and *Access*. `POST /api/ask` sends one of the
+`docs/dashboard.md`, *The API* and *Access*. `POST /api/ask` sends one of the
 host's requests the page may send (`api.Asked`) and returns its reply. The
 page's watches are carried on one socket, `/api/socket`, each started and
 stopped by its frames and its replies sent at once and again each time they
