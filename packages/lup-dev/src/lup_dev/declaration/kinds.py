@@ -386,7 +386,7 @@ class Credentials(Layer, extra="forbid"):
     A layer on it changes only the fields it sets, as on `Session`: a project
     allowing force pushes keeps lup's protected refs, and `Refs().add(…)` adds
     to them where they stand. A launch sends them, resolved, to the host
-    service, whose handlers hold each action to them (`docs/host-tools.md`,
+    service, whose handlers hold each action to them (`docs/credentials.md`,
     *What the declaration allows*).
 
     >>> mine = Credentials(actions=Actions().add("force-push")).over(Credentials())

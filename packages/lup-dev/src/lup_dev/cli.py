@@ -11,8 +11,7 @@ judge couldn't with the answerer (`docs/launch.md`); `hook` answers through it.
 first (`docs/trust.md`). `launch` opens a runtime's session in
 a room for the worktree (*The command*). `host` runs the host service, handed
 the inbox as what each conversation is told at its hooks, its tools and its
-requests; `inbox` is the operator's face on it (`docs/host-tools.md`, *The
-operator's face*).
+requests; `inbox` is the operator's face on it (`docs/inbox.md`, *The operator's face*).
 """
 
 import asyncio
@@ -498,7 +497,7 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
     Trust reads the zone with git and asks the service itself, so it runs off
     the event loop. Its repository is the launch's git directory, found
     through git from its main worktree; one holding a `commondir`, which would
-    lead git elsewhere, isn't read (`docs/host-tools.md`, *Running git on the
+    lead git elsewhere, isn't read (`docs/credentials.md`, *Running git on the
     host*). The approval names the main conversation of the session the launch
     runs, as `delivery` last heard it, which the operator's comment on their
     answer is told to: a push comes from the room's git, not from a call, so

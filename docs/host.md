@@ -1,6 +1,6 @@
 # The host service
 
-One program per user on the operator's machine, outside every room, which rooms call for what only the host can do (`host/service.py`): the judge for each hook (`docs/judging-writes.md`), lup's tools and the inbox (`docs/host-tools.md`), git and GitHub with the operator's credentials, the clipboard, and the dashboard, which it runs as its child (`docs/dashboard.md`).
+One program per user on the operator's machine, outside every room, which rooms call for what only the host can do (`host/service.py`): the judge for each hook (`docs/judging-writes.md`), lup's tools and the inbox (`docs/inbox.md`), git and GitHub with the operator's credentials, the clipboard, and the dashboard, which it runs as its child (`docs/dashboard.md`).
 
 ## Using it
 
@@ -15,7 +15,7 @@ Each launch has a socket directory of its own, mode 0700, mounted into its room 
 - **`hook.sock`, the one hook.** Every hook of every runtime is one command, which pipes the runtime's payload unchanged to the socket with `socat` and prints the answer, so nothing in the room parses it (`piped`, `launch/session.py`; *The one hook*).
 - **`mcp.sock`, lup's tool server.** In the room, the runtime's stdio server is lup's bridge (`packages/lup/src/lup/sessions/bridge.py`), on the room's Python and the standard library alone, carrying each line across. Each connection is one MCP session.
 - **`request.sock`, the room's requests:** one typed request per connection from the room's programs: git's remote helper, the gate asking an issue's state, the clipboard, and modules' handlers. Its routes are apart from the control socket's, so a room never reaches a control kind, such as answering the inbox: the first lup's sessions approved their own questions by writing to a store they could reach.
-- **`messages.sock`,** Claude Code's own messaging socket, which the service uses to start a turn of an idle session (`docs/host-tools.md`, *How an agent is told*).
+- **`messages.sock`,** Claude Code's own messaging socket, which the service uses to start a turn of an idle session (`docs/inbox.md`, *How an agent is told*).
 
 On the host alone:
 - **The control socket.** One JSON request per connection, a pydantic model told apart by its `kind`, and one reply (`host/protocol.py`). Modules register the handlers for their own kinds, so a kind is added without editing the service. What the service can't carry out is replied as `Refused`, saying why.

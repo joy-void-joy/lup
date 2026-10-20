@@ -1,6 +1,6 @@
 """No turn that won't end: a turn's end held once per thing, across turns.
 
-`docs/host-tools.md`, *No turn that won't end*. An agent can always end its
+`docs/inbox.md`, *No turn that won't end*. An agent can always end its
 turn, and nothing holds it again for what it's already been told. Every hold at
 a turn's end, the inbox's and the judge's alike, goes through `holding`:
 - **once, then the turn ends:** an end that follows a hold (`after_block`, from

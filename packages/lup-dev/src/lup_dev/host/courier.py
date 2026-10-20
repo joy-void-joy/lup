@@ -1,7 +1,7 @@
 """What the host reads of each runtime's hooks, and how it answers them; lup's own id for each conversation.
 
-`docs/host.md`, *Who's calling*, and `docs/host-tools.md`, *How an agent is
-told*. Every hook a launch's room sends reaches the host service, which hears
+`docs/host.md`, *Who's calling*, and `docs/inbox.md`, *How an agent is told*.
+Every hook a launch's room sends reaches the host service, which hears
 it through the `Courier` (`heard`): its event, the runtime's own ids for the
 session and the conversation in it, its call and tool, and whether the launch's
 judge reads it.
@@ -63,7 +63,7 @@ class Heard(Model):
     after_block: bool = False
     """At a turn's end, whether the turn went on because its end was held just
     before: an end that follows a hold is let through, whatever's still there
-    (`docs/host-tools.md`, *No turn that won't end*)."""
+    (`docs/inbox.md`, *No turn that won't end*)."""
     fits: int
     """The most this hook's answer tells the model whole, in bytes of UTF-8: past
     it, the runtime keeps the text in a file the model isn't asked to read."""

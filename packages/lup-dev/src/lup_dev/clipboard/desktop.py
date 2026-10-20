@@ -1,6 +1,6 @@
 """The operator's clipboard on the host, through their desktop's own programs.
 
-`docs/host-tools.md`, *The clipboard*. The host service runs in the operator's
+`docs/launch.md`, *The clipboard*. The host service runs in the operator's
 graphical session, the environment of the launch that started it, so it reaches
 the clipboard as any of their programs does: `wl-paste` and `wl-copy` under
 Wayland, `xclip` under X. A room reaches it only through the service, which

@@ -2,7 +2,7 @@
 
 The inbox raises one for each item that reaches the operator where its kind's
 rank says it notifies, as what waits on them does and news doesn't
-(`inbox/store.py`, `ranked`; `docs/host-tools.md`, *The operator's face*).
+(`inbox/store.py`, `ranked`; `docs/inbox.md`, *The operator's face*).
 `notify-send` is an optional
 requirement of the host (`launch/room.py`, `host_needs`): where it isn't
 installed, no notice is raised, and a launch says so once.

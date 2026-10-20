@@ -154,8 +154,9 @@ class HostIssues(Issues, arbitrary_types_allowed=True):
     """GitHub's issues as the host service reads them for a room, asked on its launch's request socket.
 
     A room holds no `gh` and no GitHub login, so the gate there asks the host,
-    which reads an issue's state with the operator's `gh` (`docs/host-tools.md`,
-    *The gate in a room*). Where the host doesn't say (no service answering, an
+    which reads an issue's state with the operator's `gh`
+    (`docs/credentials.md`, *The gate in a room*). Where the host doesn't say
+    (no service answering, an
     older one that doesn't know the request, `gh` out of reach there, or reading
     issues beyond the project's limits), the issue goes unchecked, said with the
     host's reason, and the gate goes on.

@@ -24,7 +24,7 @@ After the declared sections come lup's tools, where the session is served any
 themselves, saying they're found through the runtime's tool search by name. Each
 runtime defers an MCP server's tools behind its tool search, and the first lup
 found that agents told nothing of deferred tools concluded they didn't exist
-(`docs/host-tools.md`, *Found through tool search, listed in the guidance*).
+(`docs/inbox.md`, *Found through tool search, listed in the guidance*).
 
 After lup's tools come the other repositories named for the project's sessions
 to read (`repositories`): each by its name, what it is, its path in the room,

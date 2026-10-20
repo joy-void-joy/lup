@@ -247,7 +247,7 @@ A launch reads the declaration at the approved commit (`launch/session.py`, `app
 - **Session settings:** `Core`'s `session`, as `SessionChoices`, in neutral terms that each runtime's adapter spells.
   - Its `declared` names the fields some layer set. Those are imposed over the person's own runtime settings; the rest are lup's defaults, which theirs outrank (`docs/launch.md`, *The settings compiled for each runtime*).
   - `declared` is read off the final value's `model_fields_set`. `applied` makes each layer a copy of the one below with its fields updated, which pydantic counts as set, so a field set to lup's own value still counts as declared.
-- **The limits on the operator's credentials:** `Core`'s `credentials`, resolved to a `Limits` (`host/protocol.py`). That's the actions allowed, in `Action`'s order, plus the protected and the gated ref patterns. It's sent with the launch's registration, and the host's handlers hold each action to it (`docs/host-tools.md`, *What the declaration allows*). Each selection changes where it stands, so allowing force pushes is an `.add`, with its reason:
+- **The limits on the operator's credentials:** `Core`'s `credentials`, resolved to a `Limits` (`host/protocol.py`). That's the actions allowed, in `Action`'s order, plus the protected and the gated ref patterns. It's sent with the launch's registration, and the host's handlers hold each action to it (`docs/credentials.md`, *What the declaration allows*). Each selection changes where it stands, so allowing force pushes is an `.add`, with its reason:
 
   ```python
   .edit(

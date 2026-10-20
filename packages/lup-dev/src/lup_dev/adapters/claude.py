@@ -23,7 +23,7 @@ session's turn's end tells without holding it.
 In a launched room (`docs/host.md`, *The one hook*), Claude
 Code runs the room's hook on `SessionStart`, `PreToolUse` for every call, `Stop`
 and `SubagentStop` (`hooks`), so the host service hears each conversation's start,
-calls and turn's ends (`docs/host-tools.md`, *How an agent is told*). The judge
+calls and turn's ends (`docs/inbox.md`, *How an agent is told*). The judge
 reads only `SessionStart` and the file tools' writes, judged before they land
 (`heard`, `WRITING`): no checkpoint, as in lup's own repository, so the turn's ends
 hold back nothing of the judge's. Every other hook the service answers itself,

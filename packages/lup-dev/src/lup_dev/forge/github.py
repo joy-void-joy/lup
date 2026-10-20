@@ -1,6 +1,6 @@
 """GitHub through `gh`, on one repository named from its own remote, each answer read into a model.
 
-`docs/host-tools.md`, *GitHub through `gh`*. A room holds no `gh` and no GitHub
+`docs/credentials.md`, *GitHub through `gh`*. A room holds no `gh` and no GitHub
 login (`docs/launch.md`, *The mounts*), so lup reaches GitHub from the host,
 through the operator's `gh` and its login:
 - **One repository, named once.** When a launch starts, `named` runs `gh repo

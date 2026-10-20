@@ -1,6 +1,6 @@
 """git's pushes and fetches on the host for a launch's room: the remote helper's requests, and their handlers.
 
-`docs/host-tools.md`, *git through a remote helper*. The room's helper
+`docs/credentials.md`, *git through a remote helper*. The room's helper
 (`remote/helper.py`) sends one request per batch git hands it, on the launch's
 `request.sock`, and the service answers with the launch it knows by the socket
 (`host/rooms.py`). Where git runs, and to which remote, is the host's word:

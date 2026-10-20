@@ -1,6 +1,6 @@
 """The inbox's tools in a launched session: the speaking tools, `ask`, `send`, `wait_inbox`, `inbox` and `withdraw`.
 
-`docs/host-tools.md`, *lup's tools*. Each is a function of the conversation
+`docs/inbox.md`, *lup's tools*. Each is a function of the conversation
 calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
 - `blocked`, `stop`, `note`, `friction` and `how_it_went` are the library's
   speaking tools (`lup.tools.speaking`), their names and input models taken

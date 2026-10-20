@@ -49,7 +49,7 @@ refuses with the runner's remedy: without it, `uv run` in the room set about
 remaking the shared `.venv` (`docs/launch.md`, *The project's environment,
 shared with the host*). A system interpreter is outside every mount.
 
-The room's git (`room_git`, `docs/host-tools.md`, *git through a remote
+The room's git (`room_git`, `docs/credentials.md`, *git through a remote
 helper*): its own configuration in place of the operator's (`GIT_CONFIG_GLOBAL`,
 `remote/config.py`), and lup's remote helper first on its `PATH`, both written
 into the launch's directory and mounted read-only on every runtime, since not
@@ -494,7 +494,7 @@ class RoomGit(Model):
 
 
 class RoomClipboard(Model):
-    """What a room gets for the operator's clipboard: `wl-paste` and `wl-copy` first on its `PATH`, beside git's helper, reaching the host; and a Wayland display named, so its programs reach for them (`docs/host-tools.md`, *The clipboard*)."""
+    """What a room gets for the operator's clipboard: `wl-paste` and `wl-copy` first on its `PATH`, beside git's helper, reaching the host; and a Wayland display named, so its programs reach for them (`docs/launch.md`, *The clipboard*)."""
 
     launch: LaunchLayout
     display: str = "lup"
