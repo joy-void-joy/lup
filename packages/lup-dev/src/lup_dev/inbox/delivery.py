@@ -18,10 +18,11 @@ conversation is told together, oldest first, by whichever comes first:
   service hasn't heard since it started. A session in its turn is told at its
   next call, or its turn's end, instead. Where its runtime takes a push (the
   waker's `pushed`), the items themselves are pushed through lup's tool
-  server on the session's own connection (`pushed`, `Pushes`), counted told;
-  its turn's start carrying the push's token takes it, and one that doesn't
-  within `patience` puts them back as waiting, said once, its launch woken
-  through its messaging socket from then on (`unless_taken`). Through the
+  server on the session's own connection (`pushed`, `Pushes`), held back from
+  every other way while the push is pending (`tellable`); its turn's start
+  carrying the push's token takes it, counting them told (`taken`), and where
+  none does within `patience`, they're told as anything waiting is, said once,
+  its launch woken through its messaging socket from then on (`unless_taken`). Through the
   socket (the waker's `woken`, `rung`) what's written is a doorbell, what
   waits and that `wait_inbox` reads it (`doorbell`), never the items: the
   socket takes any local session's message, and the runtime says so of each.
@@ -31,8 +32,7 @@ conversation is told together, oldest first, by whichever comes first:
   gap its adapter declares.
 
 **Told once.** An item is told when it's written into a hook's answer or a held
-call's result, or pushed (put back where the push isn't taken), and never
-again:
+call's result, or when a push carrying it is taken, and never again:
 - one past what a hook tells the model whole (`Heard.fits`) is announced there
   instead, who sent it and its size, with a line saying `wait_inbox` returns it
   whole; it waits until then, and isn't announced again. Nothing is cut;
@@ -564,6 +564,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             self.presences = {**self.presences, key: Presence()}
         return self.presences[key]
 
+    def tellable(self, party: Conversation) -> list[Item]:
+        """Return what waits for `party` that a hook or a held call may tell: all of it but what's pushed to its session and not yet taken."""
+        pushed = self.presence(party).pushed
+        pending = [] if pushed is None else pushed.numbers
+        return [
+            item for item in self.inbox.waiting(party) if item.number not in pending
+        ]
+
     @override
     async def telling(
         self, launch: Register, conversation: Caller, heard: Heard, room: int
@@ -589,9 +597,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case "turn-ended" | "conversation-ended":
                 for each in presence.held:
                     each.ended = True
-                fresh = [
-                    item for item in self.inbox.waiting(party) if not announced(item)
-                ]
+                fresh = [item for item in self.tellable(party) if not announced(item)]
                 if holding(fresh, [], after_block=heard.after_block):
                     posted = self.told(party, room, heard.fits, "turn's end")
                     if posted.items:
@@ -607,7 +613,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 presence.turning = True
                 taken = presence.pushed
                 if taken is not None and taken.token in (heard.prompt or ""):
-                    presence.pushed = None
+                    self.taken(party, taken)
                 return self.told(party, room, heard.fits, "turn's start")
             case "call-started" if heard.served:
                 presence.turning = True
@@ -987,7 +993,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         def chosen() -> Generator[Choice]:
             left = room
-            for item in self.inbox.waiting(party):
+            for item in self.tellable(party):
                 if announced(item):
                     continue
                 text = self.said(item)
@@ -1015,7 +1021,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
     def whole(self, party: Conversation, how: How) -> str:
         """Tell `party` everything waiting for it, each whole, oldest first; empty where nothing is."""
-        waiting = self.inbox.waiting(party)
+        waiting = self.tellable(party)
         told = Told(at=self.clock.now(), how=how)
         for item in waiting:
             self.inbox.kept(item.model_copy(update={"state": told}))
@@ -1112,11 +1118,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     ) -> bool:
         """Push what waits for idle `party` to its session through lup's tool server, each item whole, and say whether it was pushed.
 
-        What's pushed is counted told, and put back as waiting where no turn's
-        start carries the push's token within `patience` (`unless_taken`).
-        Nothing's pushed where the runtime takes no push, the launch has no
-        open connection to lup's tool server, or its session took no push
-        before.
+        What's pushed stays waiting, which no hook or held call tells while the
+        push is pending (`tellable`), and is counted told once a turn's start
+        carries the push's token (`taken`); where none does within `patience`,
+        it's told as anything waiting is (`unless_taken`). The pending push is
+        held in memory alone, so a service started again tells what it pushed
+        at the next hook, at worst a second time, never not at all. Nothing's
+        pushed where the runtime takes no push, the launch has no open
+        connection to lup's tool server, or its session took no push before.
         """
         if place.launch in self.unpushed:
             return False
@@ -1125,9 +1134,6 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         notice = self.waker.pushed(party.runtime, text, token)
         if notice is None or not self.pushes.push(place.launch, notice):
             return False
-        told = Told(at=self.clock.now(), how="wake")
-        for item in waiting:
-            self.inbox.kept(item.model_copy(update={"state": told}))
         presence = self.presence(party)
         presence.woken = True
         pushed = Pushed(token=token, numbers=[item.number for item in waiting])
@@ -1138,22 +1144,27 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.say(f"{place.launch}: pushed items {numbers} to {who(party)}")
         return True
 
+    def taken(self, party: Conversation, pushed: Pushed) -> None:
+        """Count what `pushed` told `party` as told, its session having started a turn on it."""
+        self.presence(party).pushed = None
+        told = Told(at=self.clock.now(), how="wake")
+        for number in pushed.numbers:
+            match self.inbox.item(number):
+                case Item(state=Waiting()) as item:
+                    self.inbox.kept(item.model_copy(update={"state": told}))
+                case _:
+                    pass
+
     async def unless_taken(
         self, party: Conversation, place: Whereabouts, pushed: Pushed
     ) -> None:
-        """Wait `patience` for `party`'s session to take `pushed`; where it doesn't, put what it told back as waiting, say so once, and wake it through its messaging socket from then on."""
+        """Wait `patience` for `party`'s session to take `pushed`; where it doesn't, leave what it told to be told as anything waiting is, say so once, and wake the session through its messaging socket from then on."""
         await asyncio.sleep(self.patience.total_seconds())
         presence = self.presence(party)
         if presence.pushed != pushed:
             return
         presence.pushed = None
         presence.woken = False
-        for number in pushed.numbers:
-            match self.inbox.item(number):
-                case Item(state=Told(how="wake")) as item:
-                    self.inbox.kept(item.model_copy(update={"state": Waiting()}))
-                case _:
-                    pass
         self.unpushed = [*self.unpushed, place.launch]
         self.say(
             f"{place.launch}: {who(party)} took nothing lup pushed within "

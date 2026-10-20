@@ -983,11 +983,14 @@ def test_an_idle_claude_session_is_pushed_what_waits_and_takes_it_at_its_turns_s
         inbox("send", "one", "Wake up.")
         notice = session.pushed()
         pushed = ChannelMessage.model_validate(notice.params)
-        state = delivery.inbox.item(1).state
+        pending = delivery.inbox.item(1).state
+        # A hook while the push is pending tells nothing of it.
+        between = send(hook, claude("UserPromptSubmit", prompt="Typed meanwhile."))
         token = pushed.meta["wake"]
         taken = send(
             hook, claude("UserPromptSubmit", prompt=channel(pushed.content, token))
         )
+        state = delivery.inbox.item(1).state
         after = send(hook, bash("b1"))
         session.close()
         frames = messages.close()
@@ -995,6 +998,8 @@ def test_an_idle_claude_session_is_pushed_what_waits_and_takes_it_at_its_turns_s
     assert notice.method == "notifications/claude/channel"
     # The items themselves, told once: no `wait_inbox`, and no doorbell.
     assert pushed.content == first_note("Wake up.")
+    assert pending == Waiting()
+    assert between == ""
     assert state == Told(at=clock.now(), how="wake")
     assert taken == ""
     assert after == ""
