@@ -181,7 +181,7 @@ containers = ["lup_dev"]
 layers = ["adapters", "launch", "policy", "codescan", "declaration", "catalog", "remote | forge | clipboard", "inbox", "host"]
 
 # git's remote helper runs on a room's own Python, which has the standard library
-# alone (`docs/host-tools.md`, *git through a remote helper*): it imports nothing
+# alone (`docs/credentials.md`, *git through a remote helper*): it imports nothing
 # but the standard library's modules listed here, each one it uses.
 [[tool.importlinter.contracts]]
 name = "lup_dev.remote.helper imports the standard library alone"
@@ -202,7 +202,7 @@ ignore_imports = [
 ]
 
 # The clipboard's `wl-paste` and `wl-copy` run on a room's Python too
-# (`docs/host-tools.md`, *The clipboard*): the standard library's modules alone.
+# (`docs/launch.md`, *The clipboard*): the standard library's modules alone.
 [[tool.importlinter.contracts]]
 name = "lup_dev.clipboard.shim imports the standard library alone"
 type = "forbidden"

@@ -1,7 +1,7 @@
 """What lup's default lets the host do with the operator's credentials, and the refs no push updates.
 
 `Core`'s `credentials` reads these (`lup_dev.declaration.kinds`, `Credentials`;
-`docs/host-tools.md`, *What the declaration allows*). Its actions are every one
+`docs/credentials.md`, *What the declaration allows*). Its actions are every one
 lup carries out but those withheld here, each with its reason, as
 `lup_dev.catalog.rules` leaves rules out: so an action a later release adds is
 allowed unless it's withheld here too, and a project allows one back with
@@ -51,4 +51,4 @@ class CredentialDefaults(Model):
     `dev`, so it never takes a commit the gate fails on. A project whose
     integration branch is another names that one. The gate runs in the room,
     before the host is asked: it steers, and guards nothing
-    (`docs/host-tools.md`, *git through a remote helper*)."""
+    (`docs/credentials.md`, *git through a remote helper*)."""

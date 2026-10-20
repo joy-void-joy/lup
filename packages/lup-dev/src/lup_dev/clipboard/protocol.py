@@ -1,6 +1,6 @@
 """The clipboard's requests from a room, and their handlers on the host.
 
-`docs/host-tools.md`, *The clipboard*. A room has no display, so its programs
+`docs/launch.md`, *The clipboard*. A room has no display, so its programs
 can't reach the operator's clipboard; the room's `wl-paste` and `wl-copy`
 (`clipboard/shim.py`) send these on the launch's `request.sock` instead, and the
 host answers them with the operator's own desktop (`clipboard/desktop.py`):

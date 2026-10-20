@@ -336,7 +336,7 @@ class LaunchSockets(Model):
 
 
 class InboxLayout(Model):
-    """Where lup's inbox keeps its items and its parties, one JSON file each (`docs/host-tools.md`, *The inbox*).
+    """Where lup's inbox keeps its items and its parties, one JSON file each (`docs/inbox.md`).
 
     The host service is the only writer; no room mounts it.
     """

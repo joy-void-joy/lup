@@ -1,6 +1,6 @@
 """lup's inbox: its items and its parties, kept one JSON file each in lup's state.
 
-`docs/host-tools.md`, *Parties and items*. Every party has an inbox: the
+`docs/inbox.md`, *Parties and items*. Every party has an inbox: the
 operator, and each conversation of each session, its main one or one of its
 subagents. A conversation is keyed by its runtime, its session's id and its own,
 within a repository, rather than by the launch it runs in, so a session resumed

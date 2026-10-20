@@ -1,6 +1,6 @@
 """The operator's requests to lup's inbox, on the host service's control socket, and their handlers.
 
-`docs/host-tools.md`, *The operator's face*. `lup-dev inbox` and its commands
+`docs/inbox.md`, *The operator's face*. `lup-dev inbox` and its commands
 send these, each a typed request on the control socket, starting the service
 where none runs, as a launch does: what waits for the operator (`ListInbox`), one
 item whole (`ShowItem`), a question's answer (`AnswerItem`), a message read

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`wl-paste` and `wl-copy` in a room: the operator's clipboard, through lup's host service.
 
-`docs/host-tools.md`, *The clipboard*. A room has no display; the room sets
+`docs/launch.md`, *The clipboard*. A room has no display; the room sets
 `WAYLAND_DISPLAY`, so its programs reach for Wayland's clipboard programs, and
 finds these first on its `PATH`, one program under both names, each acting as
 the one it's run as. Each sends one request on the launch's request socket

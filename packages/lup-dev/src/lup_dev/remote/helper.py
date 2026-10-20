@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`git-remote-lup`: git's remote helper in a room, which pushes and fetches through lup's host service.
 
-`docs/host-tools.md`, *git through a remote helper*. The room's git configuration
+`docs/credentials.md`, *git through a remote helper*. The room's git configuration
 rewrites each of the repository's remotes to `lup::<url>` (`remote/config.py`),
 so git runs this for them, with the remote's name and its address
 (`gitremote-helpers(7)`). It speaks git's helper protocol on its input and

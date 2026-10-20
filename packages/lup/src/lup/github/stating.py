@@ -1,6 +1,6 @@
 """The answer to a room's question of whether an issue is open, through `gh` on the host within the launch's limits.
 
-`docs/host-tools.md`, *The gate in a room*. The gate checks each deferral's
+`docs/credentials.md`, *The gate in a room*. The gate checks each deferral's
 issue is still open, and a room holds no `gh` and no login, so the gate there
 asks the host on the launch's `request.sock` (`lup_dev.codescan.directives`,
 `HostIssues`), which reads the state with the operator's `gh`. Reading an issue

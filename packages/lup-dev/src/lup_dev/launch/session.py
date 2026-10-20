@@ -12,7 +12,7 @@ worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
   waiting as long as a hold may;
 - the session's own messaging socket, put in the launch's socket directory, so
   the host service reaches it to start a turn of the idle session where its
-  runtime has one (`docs/host-tools.md`, *How an agent is told*);
+  runtime has one (`docs/inbox.md`, *How an agent is told*);
 - `Core`'s session settings, in the library's terms: the fields the declaration
   set, imposed over the person's own runtime settings, and the rest as lup's
   defaults, which theirs outrank (`session_settings`);
