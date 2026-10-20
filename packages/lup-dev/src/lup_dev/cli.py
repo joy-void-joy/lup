@@ -2,7 +2,7 @@
 
 It stands in for the real `lup` command tree until the declaration and command
 line piece builds it; the commands keep their meaning there, and their final
-names are that piece's call (`docs/judging-writes.md`, *Modules*). It's the one
+names are that piece's call (#114). It's the one
 place that lists the runtimes' adapters: the host service reads each hook and
 adds to its answer with the courier built here, and answers a hook a launch's
 judge couldn't with the answerer (`docs/launch.md`); `hook` answers through it.
