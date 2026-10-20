@@ -46,7 +46,7 @@ lup-dev inbox send <to> <text>        a message to a launch's session, or to a s
 ## Parties and items
 
 - **The parties:** the operator, and each conversation of each session, its main one or a subagent. A conversation is keyed by its runtime, its session and its own id within a repository, not by the launch it runs in, so a session resumed in a later launch finds what waited for it.
-- **An item** has a number (one sequence per user, so the operator types `lup-dev inbox answer 12`), a sender and a recipient, the worktree it's from, when it was made, and its state: waiting, told, answered, done, decided, superseded or withdrawn. It's one of: a message of its kind; a friction, how it went or a stop; a question; an answer; a review; trust's approval (`docs/trust.md`); a held change; a flagged write (`docs/judging-writes.md`, *Asking the operator*).
+- **An item** has a number (one sequence per user, so the operator types `lup-dev inbox answer 12`), a sender and a recipient, the worktree it's from, when it was made, and its state: waiting, told, answered, done, decided, superseded or withdrawn. It's one of: a message of its kind, one the operator sent from reading a conversation holding each passage they replied to with their reply (`Message.passages`); a friction, how it went or a stop; a question; an answer; a review; trust's approval (`docs/trust.md`); a held change; a flagged write (`docs/judging-writes.md`, *Asking the operator*).
 - **Its kind's rank** (`ranked`, `inbox/store.py`), the one place each kind's is said: what waits on the operator first, raising a notice; news next (a note, a friction, how it went, a stop, a turn's last words); flags last.
 - **What an approval, a held change or a flagged write changes** is kept beside it: its whole diff, and each file whole before and after, a binary one by its size, which the dashboard shows. Nothing is cut.
 - **An item for a conversation that has ended** goes to its session's main conversation, saying whose it was: a subagent that asked without waiting is usually gone by the time the operator answers.
@@ -65,6 +65,32 @@ Every item waiting for a conversation is told together, oldest first, by whichev
 - **too long for a hook** (past 10,000 bytes, which Claude Code would save to a file that Claude "can read" but "Claude Code doesn't ask it to"), it's announced there instead, who sent it and its size, and waits for `wait_inbox`, which returns it whole. Nothing is cut;
 - **a held call whose turn ended** while it held, as a Codex model in code mode may, returns saying the items come at the next call;
 - **a hook gone before its answer was written** puts back as waiting what it would have told.
+
+**As tags.** Each item is told as one tag (`Delivery.tagged`, written by `inbox/tags.py`), saying first what it is, its number and whom it's from, so a quote, the operator's reply to it and their comment on a whole item can't be taken for one another:
+
+```
+<review item="153" from="operator" covers="150 151 149">
+<message>…the operator's message to you…</message>
+<on item="150" kind="note">
+<opening>…its first line…</opening>
+<quote>…the passage they selected…</quote>
+<reply>…their reply to it…</reply>
+<comment>…their comment on the whole item…</comment>
+</on>
+<on item="151" kind="question" read="with nothing to add">…</on>
+<context>
+What the operator said in the same reply on other agents' items and to other agents: not yours to act on, unless it says so.
+<on item="149" kind="friction" from="claude session 3a2d…" worktree="…"><text>…that item whole…</text>…</on>
+<message to="claude session 77e1…" worktree="…">…</message>
+</context>
+</review>
+```
+
+- A message is `<message item from kind>`; one sent from reading the conversation holds `<quote>` and `<reply>` for each passage, then the message on the whole; a reply holds `<on>` with its item's `<opening>` and the operator's `<comment>`.
+- An answer is `<answer item from question>`: `<asked>`, a `<decision number lean verdict>` for each, then the comment on the whole, or a plain question's answer.
+- One passed on from a conversation that had ended says whom it was for (`for=`); the doorbell and an item too long for a hook are `<doorbell>` and `<announced>`.
+- Text stays as written, the operator's code as code: only `</` becomes `<\/`, so no text closes a tag. The dashboard shows what's inside an item's tag (`Delivery.words`).
+- The comments an approval's note and a held change's answer carry stay prose (`remark`).
 
 **A turn's last message** becomes a note in the operator's inbox (`Delivery.concluded`), so what a session ends its turn saying reaches them without the agent sending it again. An end that's held makes none, since the turn goes on; a subagent's last message is its parent's, and makes none either.
 

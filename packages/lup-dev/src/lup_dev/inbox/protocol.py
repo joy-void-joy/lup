@@ -44,6 +44,7 @@ from lup_dev.inbox.store import (
     HeldChange,
     Item,
     Operator,
+    Passage,
     Ruling,
     Talk,
     Waiting,
@@ -87,6 +88,9 @@ class SendItem(Request):
     text: str
     agent: str | None = None
     """The runtime's id for the subagent; none for the session's own conversation."""
+    passages: list[Passage] = []
+    """The passages of the conversation's words the operator replied to, where
+    they send it from reading the conversation."""
 
 
 class ShowDraft(Request):
@@ -449,7 +453,9 @@ class Sending(Model, Handler[SendItem], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: SendItem) -> Reply:
-        sent = await self.delivery.sent(request.launch, request.text, request.agent)
+        sent = await self.delivery.sent(
+            request.launch, request.text, request.agent, request.passages
+        )
         return Shown(item=sent)
 
 

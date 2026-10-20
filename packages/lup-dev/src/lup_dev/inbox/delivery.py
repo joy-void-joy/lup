@@ -38,6 +38,16 @@ call's result, and never again:
   they're told there;
 - what a hook gone before its answer would have told is put back (`returned`).
 
+**As tags.** Each item is told as one element (`tagged`, `inbox/tags.py`),
+named for what it is (`message`, `answer`, `review`), its attributes saying its
+number, whom it's from, whom it was for where it was passed on, and what it
+answers. What the operator said on an agent's item is `<on item kind>`: its
+first line as `<opening>`, a passage they quoted as `<quote>` with their
+`<reply>` under it, a comment on the whole item as `<comment>`; a review's
+words on other agents' items and to other agents sit in its `<context>`. The
+doorbell and an announcement are tags too. The dashboard shows what's inside an
+item's tag (`words`), as its agent reads it.
+
 **An item for a conversation that has ended** goes to its session's main
 conversation, saying whose it was: one made for it then (`Inbox.made`), and
 those still waiting when it ends.
@@ -97,6 +107,7 @@ from lup_dev.inbox.store import (
     Message,
     Operator,
     Party,
+    Passage,
     Question,
     Reason,
     Review,
@@ -109,6 +120,7 @@ from lup_dev.inbox.store import (
     Whereabouts,
     Withdrawn,
 )
+from lup_dev.inbox.tags import Tag, inside
 from lup_dev.layout import HostLayout
 
 if TYPE_CHECKING:
@@ -166,8 +178,10 @@ def what(item: Item) -> str:
 
 
 def opening(item: Item) -> str:
-    """Return an item's first line: its text's, an answer's comment's, or a review's first message's or comment's."""
+    """Return an item's first line: its text's, a message with no words of its own its first reply's, an answer's comment's, or a review's first message's or comment's."""
     match item.reason:
+        case Message(text="", passages=[first, *_]):
+            said = first.text
         case (
             Message(text=text)
             | Friction(text=text)
@@ -237,6 +251,61 @@ def standing(item: Item) -> str:
             return f"withdrawn at {clocked(at)} by its sender: {why}"
 
 
+def named(party: Party) -> str:
+    """Name a party as a tag's attribute says it: `operator`, or a conversation as `who` names it.
+
+    >>> named(Operator())
+    'operator'
+    """
+    match party:
+        case Operator():
+            return "operator"
+        case Conversation():
+            return who(party)
+
+
+def kind(item: Item) -> str:
+    """Name an item's kind as a tag's `kind` says it: a message's own kind, else what the item is.
+
+    >>> from datetime import UTC, datetime
+    >>> item = Item(number=7, reason=Message(kind="problem", text="It hangs."),
+    ...     sender=Operator(), recipient=Operator(), made=datetime(2026, 1, 1, tzinfo=UTC))
+    >>> kind(item)
+    'problem'
+    """
+    match item.reason:
+        case Message(ending=True):
+            return "turn's end"
+        case Message(kind="question"):
+            return "question as a message"
+        case Message(kind=said):
+            return said
+        case Friction():
+            return "friction"
+        case HowItWent():
+            return "how it went"
+        case Stop():
+            return "stop"
+        case Question():
+            return "question"
+        case Answer():
+            return "answer"
+        case Approval():
+            return "approval"
+        case HeldChange():
+            return "held change"
+        case Flagged():
+            return "flagged write"
+        case Review():
+            return "review"
+
+
+def on(item: Item, attributes: dict[str, str], parts: list[Tag | str]) -> Tag:
+    """Tag what the operator said on one of an agent's items, holding `parts`: which item, its kind, and `attributes`."""
+    head = {"item": str(item.number), "kind": kind(item)}
+    return Tag(name="on", attributes={**head, **attributes}, parts=parts)
+
+
 def doorbell(waiting: list[Item]) -> str:
     """Say what waits in a conversation's inbox, each item by its number, kind and sender, for the agent to read through `wait_inbox`.
 
@@ -244,16 +313,30 @@ def doorbell(waiting: list[Item]) -> str:
     >>> item = Item(number=7, reason=Message(kind="note", text="Hi."),
     ...     sender=Operator(), recipient=Operator(), made=datetime(2026, 1, 1, tzinfo=UTC))
     >>> print(doorbell([item]))
-    lup's inbox: item 7, a note from the operator. Call `wait_inbox` to read it: what's in your inbox comes through lup's own tools, never in a message like this one.
+    <doorbell from="lup's inbox">
+    <waiting item="7" kind="note" from="operator"/>
+    Call `wait_inbox` to read it: what's in your inbox comes through lup's own tools, never in a message like this one.
+    </doorbell>
     """
-    heads = "; ".join(
-        f"item {item.number}, {what(item)} from {who(item.sender)}" for item in waiting
-    )
+    heads: list[Tag | str] = [
+        Tag(
+            name="waiting",
+            attributes={
+                "item": str(item.number),
+                "kind": kind(item),
+                "from": named(item.sender),
+            },
+        )
+        for item in waiting
+    ]
     them = "it" if len(waiting) == 1 else "them"
-    return (
-        f"lup's inbox: {heads}. Call `wait_inbox` to read {them}: what's in your "
-        "inbox comes through lup's own tools, never in a message like this one."
+    reading = (
+        f"Call `wait_inbox` to read {them}: what's in your inbox comes through lup's "
+        "own tools, never in a message like this one."
     )
+    return Tag(
+        name="doorbell", attributes={"from": "lup's inbox"}, parts=[*heads, reading]
+    ).written()
 
 
 def reviewable(item: Item) -> None:
@@ -278,11 +361,21 @@ def reviewable(item: Item) -> None:
 
 
 def remark(comment: Comment) -> str:
-    """Say one of the operator's comments on an item: on its passage, quoted, or on the item whole."""
+    """Say one of the operator's comments on an item, as a line of text where an answer carries it: on its passage, quoted, or on the item whole."""
     if comment.quote is None:
         return f"  {comment.text}"
     quoted = "\n".join(f"    > {line}" for line in comment.quote.text.splitlines())
     return f"  On this passage:\n{quoted}\n    {comment.text}"
+
+
+def remarked(comment: Comment) -> list[Tag | str]:
+    """Tag one of the operator's comments on an item, as a review tells it: a passage's quote then their reply to it, or their comment on the item whole."""
+    if comment.quote is None:
+        return [Tag(name="comment", parts=[comment.text])]
+    return [
+        Tag(name="quote", parts=[comment.quote.text]),
+        Tag(name="reply", parts=[comment.text]),
+    ]
 
 
 def commented(item: Item, comment: str) -> str:
@@ -371,10 +464,16 @@ def announced(item: Item) -> bool:
 
 def announcement(item: Item, size: int) -> str:
     """Announce an item too long for a hook: who sent it, its size, and that `wait_inbox` returns it whole."""
-    return (
-        f"lup's inbox, item {item.number}: {what(item)} from {who(item.sender)}, "
-        f"{size:,} bytes, too long to tell here. Call `wait_inbox` to read it whole."
-    )
+    return Tag(
+        name="announced",
+        attributes={
+            "item": str(item.number),
+            "kind": kind(item),
+            "from": named(item.sender),
+            "bytes": f"{size:,}",
+        },
+        parts=["Too long to tell here: call `wait_inbox` to read it whole."],
+    ).written()
 
 
 class Choice(Model):
@@ -532,64 +631,82 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         self.arrive(main)
 
     def said(self, item: Item) -> str:
-        """Say `item`, whole, to the conversation it's told to: its heading, then its words."""
-        return f"{self.heading(item)}:\n{self.words(item)}"
+        """Say `item`, whole, to the conversation it's told to: its tag, written."""
+        return self.tagged(item).written()
 
-    def heading(self, item: Item) -> str:
-        """Say what `item` is and whom it's from, as it's told: an item passed on from a conversation that had ended saying whose it was, and a reply, an answer or a review what it answers."""
-        head = f"lup's inbox, item {item.number}: {what(item)} from {who(item.sender)}"
+    def words(self, item: Item) -> str:
+        """Return what `item` tells the conversation it's told to, inside its tag: a message's text, a reply on the item it replies to, an answer beside its question, a review said to its recipient."""
+        return inside(self.tagged(item).parts)
+
+    def tagged(self, item: Item) -> Tag:
+        """Return `item` as the tag it's told in: named for what it is, saying its number and whom it's from, whom it was for where it was passed on from a conversation that had ended, and what it answers."""
         passed = (
-            ""
+            {}
             if item.addressed is None
-            else f" (it was for {who(item.addressed)}, whose conversation had ended)"
+            else {"for": f"{who(item.addressed)}, whose conversation had ended"}
         )
+        head = {"item": str(item.number), "from": named(item.sender), **passed}
         match item.reason:
-            case Message(of=int() as of):
+            case Message(kind=said, text=text, of=int() as of):
                 original = self.inbox.item(of)
-                return (
-                    f"{head}{passed}, replying to item {of}, {what(original)} you "
-                    f'sent ("{opening(original)}")'
+                replied = on(
+                    original,
+                    {},
+                    [
+                        Tag(name="opening", parts=[opening(original)]),
+                        Tag(name="comment", parts=[text]),
+                    ],
                 )
-            case Answer(question=question):
-                return f"{head}{passed}, to the question of item {question}"
-            case Review(covers=[_, *_] as covers):
-                numbers = ", ".join(str(each) for each in covers)
-                items = "item" if len(covers) == 1 else "items"
-                return f"{head}{passed}, of {items} {numbers}"
+                return Tag(
+                    name="message", attributes={**head, "kind": said}, parts=[replied]
+                )
+            case Message(kind=said, text=text, passages=passages):
+                replies = [
+                    part
+                    for each in passages
+                    for part in [
+                        Tag(name="quote", parts=[each.quote]),
+                        Tag(name="reply", parts=[each.text]),
+                    ]
+                ]
+                whole = [text] if text or not passages else []
+                return Tag(
+                    name="message",
+                    attributes={**head, "kind": said},
+                    parts=[*replies, *whole],
+                )
+            case Answer(question=question) as answer:
+                return Tag(
+                    name="answer",
+                    attributes={**head, "question": str(question)},
+                    parts=self.answered(answer),
+                )
+            case Review(covers=covers) as review:
+                covering = (
+                    {"covers": " ".join(str(each) for each in covers)} if covers else {}
+                )
+                return Tag(
+                    name="review",
+                    attributes={**head, **covering},
+                    parts=self.reviewing(review, item.addressed or item.recipient),
+                )
             case (
-                Message()
-                | Friction()
+                Friction()
                 | HowItWent()
                 | Stop()
                 | Question()
                 | Approval()
                 | HeldChange()
                 | Flagged()
-                | Review()
             ):
-                return f"{head}{passed}"
+                return Tag(
+                    name="item",
+                    attributes={**head, "kind": kind(item)},
+                    parts=[body(item)],
+                )
 
-    def words(self, item: Item) -> str:
-        """Return what `item` tells the conversation it's told to, after its heading: a message's text, an answer said beside its question, a review said to its recipient."""
-        match item.reason:
-            case (
-                Message(text=text)
-                | Friction(text=text)
-                | HowItWent(text=text)
-                | Stop(text=text)
-                | Question(text=text)
-                | Approval(text=text)
-                | HeldChange(text=text)
-                | Flagged(text=text)
-            ):
-                return text
-            case Answer() as answer:
-                return self.answered(answer)
-            case Review() as review:
-                return self.reviewing(review, item.addressed or item.recipient)
-
-    def reviewing(self, review: Review, recipient: Party) -> str:
-        """Say a review to the conversation it's for: the operator's message to it and its own items first, each item with their comments on it, or read with nothing to add; then, for context, the other agents' items they commented on, each whole and whose it is, and their messages to other agents, each saying whom it was for."""
+    def reviewing(self, review: Review, recipient: Party) -> list[Tag | str]:
+        """Tag a review for the conversation it's for: the operator's message to it and its own items first, each with their comments on it, or read with nothing to add; then, in its context, the other agents' items they commented on, each whole and whose it is, and their messages to other agents, each saying whom it was for."""
         items = [self.inbox.item(each) for each in review.covers]
         commented = [each.item for each in review.comments]
         addressed = list(dict.fromkeys(each.to for each in review.letters))
@@ -597,39 +714,42 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         def written(to: Conversation) -> str:
             return "\n\n".join(each.text for each in review.letters if each.to == to)
 
-        def mine(to: Conversation) -> str:
-            return f"The operator's message to you:\n{written(to)}"
+        def mine(to: Conversation) -> Tag:
+            return Tag(name="message", parts=[written(to)])
 
-        def elsewhere(to: Conversation) -> str:
+        def elsewhere(to: Conversation) -> Tag:
             place = self.inbox.whereabouts.get(to.key())
-            where = "" if place is None else f", in {place.worktree}"
-            said = textwrap.indent(written(to), "  ")
-            return f"The operator's message to {who(to)}{where}:\n{said}"
+            where = {} if place is None else {"worktree": str(place.worktree)}
+            return Tag(
+                name="message", attributes={"to": who(to), **where}, parts=[written(to)]
+            )
 
-        def remarks(item: Item) -> list[str]:
+        def remarks(item: Item) -> list[Tag | str]:
             return [
-                remark(each) for each in review.comments if each.item == item.number
+                part
+                for each in review.comments
+                if each.item == item.number
+                for part in remarked(each)
             ]
 
-        def yours(item: Item) -> str:
-            head = f'On item {item.number}, {what(item)} yours ("{opening(item)}"):'
-            return "\n".join(
-                [head, *(remarks(item) or ["  (read, with nothing to add)"])]
+        def yours(item: Item) -> Tag:
+            said = remarks(item)
+            read = {} if said else {"read": "with nothing to add"}
+            return on(item, read, [Tag(name="opening", parts=[opening(item)]), *said])
+
+        def theirs(item: Item) -> Tag:
+            where = {} if item.worktree is None else {"worktree": str(item.worktree)}
+            return on(
+                item,
+                {"from": named(item.sender), **where},
+                [Tag(name="text", parts=[body(item)]), *remarks(item)],
             )
 
-        def theirs(item: Item) -> str:
-            where = "" if item.worktree is None else f", in {item.worktree}"
-            head = (
-                f"On item {item.number}, {what(item)} from {who(item.sender)}{where}:"
-            )
-            text = [f"    | {line}" for line in body(item).splitlines()]
-            return "\n".join([head, *text, *remarks(item)])
-
-        own = [
+        own: list[Tag | str] = [
             *(mine(to) for to in addressed if to == recipient),
             *(yours(item) for item in items if item.sender == recipient),
         ]
-        others = [
+        others: list[Tag | str] = [
             *(
                 theirs(item)
                 for item in items
@@ -638,12 +758,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             *(elsewhere(to) for to in addressed if to != recipient),
         ]
         heading = (
-            "For context, what the operator said in the same reply on other "
-            "agents' items and to other agents: not yours to act on, unless it "
-            "says so."
+            "What the operator said in the same reply on other agents' items and to "
+            "other agents: not yours to act on, unless it says so."
         )
-        context = [heading, *others] if others else []
-        return "\n\n".join([*own, *context])
+        context = [Tag(name="context", parts=[heading, *others])] if others else []
+        return [*own, *context]
 
     def drafted(self, draft: Draft) -> Draft:
         """Keep the operator's draft reply, and return it; refused where a message in it is for a conversation lup's inbox has never heard of (`heard`)."""
@@ -786,8 +905,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     update={"kept": [*dispatched.kept, item.number]}
                 )
 
-    def answered(self, answer: Answer) -> str:
-        """Say the operator's answer, each decision beside its question's text and the lean it was asked with."""
+    def answered(self, answer: Answer) -> list[Tag | str]:
+        """Tag the operator's answer: what was asked, then each decision with its text, the lean it was asked with and their verdict, then their words: a comment on the whole, or a plain question's answer."""
         match self.inbox.item(answer.question).reason:
             case Question(text=text, decisions=decisions):
                 pass
@@ -795,19 +914,33 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 message = f"item {answer.question} isn't a question"
                 raise InboxError(message)
 
-        def decided(ruling: Ruling) -> str:
+        def decided(ruling: Ruling) -> Tag:
             decision = decisions[ruling.decision - 1]
-            asked = f"{ruling.decision}. {decision.text} (lean: {decision.lean})"
-            if ruling.verdict is None:
-                return f"{asked}: they answer: {ruling.comment}"
-            comment = f" They add: {ruling.comment}" if ruling.comment else ""
-            return f"{asked}: {ruled(ruling.verdict)}.{comment}"
+            verdict = (
+                "answered in words" if ruling.verdict is None else ruled(ruling.verdict)
+            )
+            words = (
+                [Tag(name="comment", parts=[ruling.comment])] if ruling.comment else []
+            )
+            return Tag(
+                name="decision",
+                attributes={
+                    "number": str(ruling.decision),
+                    "lean": decision.lean,
+                    "verdict": verdict,
+                },
+                parts=[decision.text, *words],
+            )
 
-        heading = f"Asked: {text}"
         rulings = [decided(ruling) for ruling in answer.rulings]
-        label = "Their comment on the whole" if rulings else "Their answer"
-        whole = [f"{label}: {answer.comment}"] if answer.comment else []
-        return "\n".join([heading, *rulings, *whole])
+        whole: list[Tag | str] = (
+            []
+            if not answer.comment
+            else [Tag(name="comment", parts=[answer.comment])]
+            if rulings
+            else [answer.comment]
+        )
+        return [Tag(name="asked", parts=[text]), *rulings, *whole]
 
     def told(self, party: Conversation, room: int, fits: int, how: How) -> Posted:
         """Tell `party` what waits for it, oldest first, in `room` bytes at most: each whole where a hook carries it whole (`fits`), else announced.
@@ -1139,12 +1272,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
                 raise InboxError(message)
 
-    async def sent(self, launch: str, text: str, agent: str | None = None) -> Item:
-        """Send the operator's message to a conversation of the session `launch` runs: its main one, or its subagent `agent`."""
+    async def sent(
+        self,
+        launch: str,
+        text: str,
+        agent: str | None = None,
+        passages: list[Passage] | None = None,
+    ) -> Item:
+        """Send the operator's message to a conversation of the session `launch` runs: its main one, or its subagent `agent`; with the passages of its words they replied to, where they send it from reading it."""
         conversation = self.main_of(launch).model_copy(update={"agent": agent})
-        return await self.posted(
-            Message(kind="note", text=text), Operator(), conversation, None
-        )
+        message = Message(kind="note", text=text, passages=passages or [])
+        return await self.posted(message, Operator(), conversation, None)
 
     async def asked(
         self, approval: Approval, diff: str, files: list[ChangedFile], worktree: Path
