@@ -65,7 +65,7 @@ def test_an_image_is_tagged_by_its_definition_and_project() -> None:
     assert int(digest, 16) >= 0
     assert IMAGE.model_copy().tag == tag
     assert Image(definition=IMAGE.definition + "RUN true\n", project="lup").tag != tag
-    assert Image(definition=IMAGE.definition, project="adlib").tag != tag
+    assert Image(definition=IMAGE.definition, project="zoetrope").tag != tag
 
 
 def test_a_mount_is_at_its_own_path_unless_given_a_target() -> None:

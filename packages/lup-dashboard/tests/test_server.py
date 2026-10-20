@@ -308,7 +308,7 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
         "/api/ask", json={"kind": "inbox-show", "number": 51}, headers=bearing()
     )
     names = [each["name"] for each in listed.json()["launches"]]
-    assert names == ["lup-impl", "guidance-voice", "main", "nori-search"]
+    assert names == ["lup-impl", "guidance-voice", "main", "magpie-search"]
     assert [each["number"] for each in items.json()["items"]] == [
         51,
         52,
