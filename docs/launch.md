@@ -20,10 +20,10 @@ lup-dev sessions [--all]
 1. checks the code the host runs against the copy the operator approved, and asks where it changed (`docs/trust.md`);
 2. reads the declaration at the approved commit, exported from git's objects, so neither a branch nor an edit made in a room changes the room a launch runs in;
 3. checks the host's requirements: podman and git, and `gh`, `notify-send` and a clipboard program, each optional and said where missing; and names the repository on GitHub;
-4. fetches the runtime's latest CLI where a newer one is out (*The CLIs*), and starts the host service where none answers;
+4. starts the host service where none answers, and fetches the runtime's latest CLI where a newer one is out (*The CLIs*);
 5. finds the related repositories, builds the list of values never published (`docs/private.md`), and makes the room, refusing what can't be mounted safely before an image build that may take minutes;
-6. builds the room's image where it's missing, and compiles the session's settings and guidance into the launch's own directory under lup's state;
-7. registers with the host service, which opens the launch's sockets, and runs the container in the foreground;
+6. builds the room's image where it's missing, and compiles the session's settings and renders its guidance;
+7. registers with the host service, which opens the launch's sockets, writes the settings into the launch's own directory under lup's state, and runs the container in the foreground;
 8. when the CLI exits, ends the registration and removes the launch's directory.
 
 A container starts in under a second; an image already built and a CLI already current cost nothing more.
@@ -31,18 +31,18 @@ A container starts in under a second; an image already built and a CLI already c
 ## Names
 
 A launch has an id, which never changes and under which everything of it is filed, and a name, for people and commands (`host/names.py`):
-- **At launch** it's `--name`, or the worktree's branch in a name's shape (`feat/x` is `feat-x`), numbered while taken.
-- **It changes** with the session's `rename` tool or `lup-dev rename`. Nothing is filed by name, so a rename moves nothing: the first lup keyed sockets by name, and a rename moved them out from under every peer holding the old one.
+- **At launch** it's `--name` exactly, refused where another running launch holds it; otherwise the worktree's branch in a name's shape (`feat/x` is `feat-x`), numbered while taken.
+- **It changes** with the session's `rename` tool or `lup-dev rename`. Nothing is filed by name, so a rename moves nothing, and a name is looked up each time it's used: the first lup kept paths by name, and its sessions met an earlier session's stale socket.
 - **A subagent is named under its conversation** (`dev/explore-auth`), so its rename can't take its session's name. It keeps the name its parent gave at the spawn, where one did; otherwise it's asked to name itself.
 - **The container is `lup-<repository>-<name>`,** renamed with the launch, so `podman ps` says which session each runs.
-- **The runtime's own title follows** where the runtime has a way: Claude Code's through `SessionStart`'s `sessionTitle`. Codex sets a thread's name only through its app server, which nothing outside its process reaches, a gap its adapter declares.
+- **The runtime's own title follows** where the runtime has a way: Claude Code's through `SessionStart`'s `sessionTitle`. Codex sets a thread's name only through its app server, which nothing outside its process reaches, a gap its adapter declares with its evidence (`lup_dev/adapters/codex.py`).
 - **A resumed conversation takes its name back,** where no running launch holds it.
 
 ## The room
 
-**The image** (`launch/images.py`) is Arch Linux pinned to one day's snapshot of its archive (`RoomBase`, `catalog/room.py`), with the packages the selected modules ask for, each with its reason (`Packages`), so a build is reproducible and every package is at least as old as the pin. `Core`'s default is the standard machine (`StandardMachine`): the shell's tools, git, jq, ripgrep and fd, the editors Ctrl+G opens, and what lup and the runtimes need. Every agent meets the same machine, without the operator's own shell setup, which aliases `cp`, `grep` and `ls` on this host. The image is tagged by its definition's digest and built when the tag is missing; after a build, the project's older images that no container uses are removed. The first lup left 46 images of about 5 GB each, kept alive by readable tags.
+**The image** (`launch/images.py`) is Arch Linux pinned to one day's snapshot of its archive (`RoomBase`, `catalog/room.py`), with the packages the selected modules ask for, each with its reason (`Packages`), so a build is reproducible and every package is at least as old as the pin. `Core`'s default is the standard machine (`StandardMachine`): the shell's tools, git, jq, ripgrep and fd, the editors Ctrl+G opens, and what lup and the runtimes need. Every agent meets the same machine, without the operator's own shell setup, which aliases `cp`, `grep` and `ls` on this host. The image is tagged by a digest of its definition and project, and built when the tag is missing; after a build, the project's older images that no container uses are removed. The first lup left 46 tags of 4.5 to 5.5 GB each, kept alive by readable names.
 
-**The mounts** (`maintaining_room`, `launch/room.py`), each at its host path, since a linked worktree's `.git` file and the environment's links hold absolute paths, and the runtimes key their history on the working directory:
+**The mounts** (`maintaining_room`, `launch/room.py`). The repository, the environment and the operator's own directories are each at their host path, since a linked worktree's `.git` file and the environment's links hold absolute paths, and the runtimes key their history on the working directory:
 
 | What | Mode | Why |
 |---|---|---|
@@ -52,9 +52,9 @@ A launch has an id, which never changes and under which everything of it is file
 | What the runner needs: uv's interpreters and cache | as it says | *The project's environment, shared with the host* |
 | `~/.claude` or `~/.codex` | read-write | *Your login and history* |
 | The CLI; pyright's source in lup's cache | read-only; read-write | *The CLIs*; the gate builds the engine from it in the room |
-| The launch's directory, `bin/` and `gitconfig` | read-only | lup's settings, guidance and MCP bridge for this launch, and the room's programs |
+| The launch's directory on Claude Code; on Codex, its requirements file at `/etc/codex/requirements.toml` and the bridge; on both, its `bin/` and `gitconfig` | read-only | lup's settings, guidance and MCP bridge for this launch, and the room's programs |
 | The launch's sockets, at `/run/lup` | read-write | the host service (`docs/host.md`). The directory rather than each socket, since a socket mounted as a file pins the old one when the service restarts |
-| The data of each module the room mounts (past sessions, by default) | read-only | `docs/declaration.md`, *What a module is* |
+| The data of each module the room mounts (past sessions, by default) | read-only, unless the module says | `docs/declaration.md`, *What a module is* |
 | The editor's configuration, `/etc/localtime` | read-only | Ctrl+G opens the operator's editor as they know it, and the clock reads in their zone |
 | Each related repository, whole | read-only | *Related repositories* |
 | What's lent: `--mount`, `--mount-rw`, `/lent` | as lent | *The command* |
@@ -68,7 +68,7 @@ Not mounted: the SSH agent, `gh`'s login, `~/.gitconfig` (it holds the operator'
 - the operator's uid inside (`--userns=keep-id`), so what the agent writes is theirs on the host;
 - `--init`, since without it the first lup piled up 4,045 zombies against its pids limit;
 - every capability dropped, and `no-new-privileges`;
-- no pids limit by default: it counts threads, and the first lup's 4,096 broke a test run;
+- podman's own pids limit, which counts threads: 2048 on podman 6.1.3 (measured in a room), where the first lup's 4,096 broke a test run, so lup means to lift it (#162);
 - the host's network, shared both ways, so a server the agent starts opens in the operator's browser, and the sign-in's callback reaches the CLI. The cost is that code in the room reaches what listens on the host's loopback: the walls are there so nothing explodes, not to contain an agent (`DESIGN.md`, *Who it's for*);
 - a terminal with no detach keys, so Ctrl+P reaches the program, and the operator's `TERM`, `LANG`, `TZ` and `EDITOR`, without which the first lup's sessions lost their colour, locale, time zone and Ctrl+G.
 
@@ -92,10 +92,10 @@ lup's settings reach the runtime as flags and files of the launch's own, never w
 | lup's tools | `--mcp-config` and `--strict-mcp-config`; `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`, so a held call isn't moved to the background after two minutes | `mcp_servers.lup`, each of the operator's own servers turned off |
 | Guidance | `--append-system-prompt-file`, with `--system-prompt-snapshot off` | `additional_developer_instructions` in the requirements file |
 
-**Session settings** are `Core`'s `session` (`SessionDefaults`, `catalog/room.py`), in neutral words each adapter spells:
+**Session settings** are `Core`'s `session` (`SessionDefaults`, `catalog/room.py`), in neutral words each adapter spells where its runtime has the setting; Codex has none for the subagents' prompt cache, removing a built-in tool or idle compaction, gaps its adapter declares:
 - **idle compaction off,** so a session left waiting on the operator comes back to its conversation, not to a summary made meanwhile;
 - **the account's connectors off,** since they reach the operator's mail and files;
-- **built-in tools that weigh in every turn and go unused removed:** an interactive session carries 113 KB of built-in tool schemas, `Artifact` alone 55 KB;
+- **built-in tools removed:** those that weigh in every turn and go unused, since an interactive session carries 113 KB of built-in tool schemas, `Artifact` alone 55 KB; and the native worktree tools, since a worktree for another agent's work is lup's spawn's to make (#117);
 - **auto memory off,** and **the subagents' prompt cache** at an hour.
 
 They layer, lowest first: the runtime's default, lup's defaults, the person's own runtime settings, then the fields some layer of the declaration sets. What can't be imposed, such as Claude Code's connectors once a person turned them off, each adapter says.
@@ -109,8 +109,8 @@ One document, rendered at launch (`render`, `launch/guidance.py`, whose docstrin
 - **then lup's tools,** each by its name and summary, since the runtimes defer them behind their tool search, and agents told nothing of deferred tools concluded they didn't exist (`docs/host-tools.md`, *Found through tool search, listed in the guidance*); then the related repositories, and what's lent to this launch;
 - **then the person's own section, `AGENTS.local.md`,** last, so it holds where it differs. It's a protected path, since git ignores it and nothing else would show the operator a change to it.
 
-**Delivered at system level,** on both runtimes: Claude Code's `--append-system-prompt-file`, its documented route for instructions that must hold, where a `CLAUDE.md` arrives as a user message "with no guarantee of strict compliance"; Codex's managed developer instructions. The runtimes' own loading of `CLAUDE.md` and `AGENTS.md` is off, so nothing arrives twice, and Codex would cut an `AGENTS.md` past 32 KiB without a word.
+**Delivered at system level,** on both runtimes: Claude Code's `--append-system-prompt-file`, its documented route for instructions that must hold, where a `CLAUDE.md` arrives as a user message "with no guarantee of strict compliance"; Codex's managed developer instructions. The runtimes' own loading of the repository's `CLAUDE.md` and `AGENTS.md` is off, so nothing arrives twice, and Codex would cut an `AGENTS.md` past 32 KiB without a word.
 
 **A resumed conversation runs under this launch's guidance.** By default each runtime keeps a conversation's first instructions, so a path or a mount that moved would go stale without a word. Claude Code renders the prompt afresh at every request with `--system-prompt-snapshot off`; Codex sends its managed instructions again whole at a resume where they changed (`docs/field-notes.md`, *A conversation resumed in a later launch*). What the conversation's earlier turns saw still came from its earlier launch, so `Core`'s guidance says the room holds where they disagree; telling the conversation what changed is #73.
 
-**Codex's ceiling.** Codex refuses to start past 10,000 estimated tokens of managed instructions, at 4 bytes a token, counted with the markers it sends them between, so a render past it is refused at launch, naming its size and the limit. A workspace's own managed requirements outrank the system file, so a workspace setting managed instructions of its own drops lup's.
+**Codex's ceiling.** Codex refuses to start past 10,000 estimated tokens of managed instructions, at 4 bytes a token, counted with the markers it sends them between and the notice opening them at a resume, so a render past it is refused at launch, naming its size and the limit. A workspace's own managed requirements outrank the system file, so a workspace setting managed instructions of its own drops lup's.
