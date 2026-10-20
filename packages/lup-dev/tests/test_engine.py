@@ -64,8 +64,8 @@ class Bound:
         self.engine = engine
         self.runner = runner
 
-    def rules(self) -> list[Rule]:
-        return self.engine.rules()
+    def rules(self, selected: list[Selected] | None = None) -> list[Rule]:
+        return self.engine.rules(selected)
 
     def check(
         self, root: Path, sources: list[Source], selected: list[Selected]
@@ -436,6 +436,58 @@ def test_a_modules_own_default_cant_start_from_itself(project: Project) -> None:
     circular = Selected(module="mine", rules=Rules.default(), default=Rules.default())
     with pytest.raises(EngineError, match="which is that default itself"):
         ran(project, [circular])
+
+
+# Listing the rules a selection runs, as the launch and `lup-dev rules list` ask.
+
+
+def listing(selected: list[Selected]) -> list[str]:
+    """Return the ids of the rules the engine lists for `selected`, with no project loaded."""
+    engine = engine_for(Path("/nowhere"), Path("/nowhere"))
+    return [rule.id for rule in engine.rules(selected)]
+
+
+TABLE = [rule.id for rule in RULES]
+"""Every rule's id, in the table's order."""
+
+
+def test_the_rules_a_selection_runs_are_listed_in_the_tables_order() -> None:
+    assert listing(resolve(Declaration()).rules) == [
+        each for each in TABLE if each != "runtime-mention"
+    ]
+    assert listing(editing(Rules.all())) == TABLE
+    assert listing(editing(Rules.only("tuple-shape", "regex"))) == [
+        "regex",
+        "tuple-shape",
+    ]
+
+
+def test_the_selected_modules_rules_are_listed_together() -> None:
+    modules = (
+        Modules.default()
+        .edit(CodeRules(rules=Rules.only("regex")))
+        .add(Tuples(), Runtimes())
+    )
+    listed = listing(resolve(Declaration(modules=modules)).rules)
+    assert listed == [each for each in TABLE if each in FLAGGED]
+
+
+def test_no_module_holding_rules_lists_none() -> None:
+    assert listing([]) == []
+
+
+def test_a_selection_the_table_cant_resolve_is_refused_when_listed_without_a_stack() -> (
+    None
+):
+    refusal = "`Rules.drop` names `no-such-rule`, which isn't there"
+    with pytest.raises(EngineError, match=re.escape(refusal)) as refused:
+        listing(editing(Rules().drop("no-such-rule")))
+    assert "\n    at " not in str(refused.value)
+
+
+def test_rules_refuses_an_input_that_isnt_a_selection() -> None:
+    with pytest.raises(EngineError, match=r"`rules` reads nothing, or a JSON list"):
+        printed("node", Bundle(), "rules", stdin=b'[{"module": "mine"}]')
 
 
 # Would-be content, and keeping in step with the disk.

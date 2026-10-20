@@ -258,6 +258,50 @@ def test_rules_check_sends_the_worktrees_rule_selection(
     assert code_rules.default == lup_default()
 
 
+ONLY_TUPLES = (
+    "from lup_dev import CodeRules, Modules, Project, Rules\n"
+    "project = Project(\n"
+    '    modules=Modules.default().edit(CodeRules(rules=Rules.only("tuple-shape"))),\n'
+    ")\n"
+)
+"""A declaration whose code rules are `tuple-shape` alone."""
+
+
+def test_rules_list_lists_the_rules_the_worktrees_selection_runs(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "lup_project.py").write_text(ONLY_TUPLES)
+    fakes.engine.running = ["tuple-shape"]
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "list"])
+    assert result.exit_code == 0
+    assert result.output == (
+        "tuple-shape: The mistake tuple-shape prevents.\n"
+        "    steer: Where tuple-shape steers.\n"
+    )
+    [[code_rules]] = fakes.engine.listed_for
+    assert (code_rules.module, code_rules.rules) == (
+        "code-rules",
+        Rules.only("tuple-shape"),
+    )
+
+
+def test_rules_list_all_lists_the_table_marking_what_the_project_leaves_out(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "lup_project.py").write_text(ONLY_TUPLES)
+    fakes.engine.running = ["tuple-shape"]
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "list", "--all"])
+    assert result.exit_code == 0
+    assert result.output == (
+        "regex (left out): The mistake regex prevents.\n"
+        "    steer: Where regex steers.\n"
+        "tuple-shape: The mistake tuple-shape prevents.\n"
+        "    steer: Where tuple-shape steers.\n"
+    )
+
+
 class Closed(Issues):
     def state(self, issue: IssueRef) -> Literal["open", "closed"]:
         return "closed"

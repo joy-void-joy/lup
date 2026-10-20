@@ -907,7 +907,7 @@ def test_once_approved_the_declaration_approved_judges_the_zones_change(
 class Broken(Checker):
     """An engine that fails each request."""
 
-    def rules(self) -> list[Rule]:
+    def rules(self, selected: list[Selected] | None = None) -> list[Rule]:
         message = "the engine is gone"
         raise EngineError(message)
 

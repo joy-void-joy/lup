@@ -19,7 +19,8 @@ worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
 - the guidance, rendered from lup's sections in the installed package, the
   project's own read at the approved commit, and the person's own,
   `AGENTS.local.md`, from the worktree launched, with lup's tools and the other
-  repositories named for its sessions listed (`launch/guidance.py`);
+  repositories named for its sessions listed, and lup's code rules the
+  declaration runs for a section to list (`launch/guidance.py`);
 - the paths trusted: the worktree, and its repository's main worktree, which the
   runtimes ask about for a linked one;
 - the launch's own directory, where the compiled files are written.
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
     from lup.tools.tool import ToolSpec
+    from lup_dev.codescan.contract import Rule
     from lup_dev.launch.room import Lent, RelatedRepository
 
 
@@ -206,6 +208,7 @@ def terminal_settings(
     tools: list[ToolSpec],
     neighbours: list[RelatedRepository],
     shared: dict[str, Path],
+    rules: list[Rule],
     lent: list[Lent] | None = None,
 ) -> TerminalSettings:
     """Return what lup adds to the session launched in `worktree`, its files compiled into `directory`.
@@ -213,8 +216,10 @@ def terminal_settings(
     `tools` are lup's tools the host service serves it, `neighbours` the other
     repositories named for it, as the launch found them, and `lent` the
     directories lent to this launch, which its guidance lists, and `shared`
-    where each module whose data the room mounts has it. Raise `GuidanceError`
-    naming a section of guidance that can't be read, or doesn't render.
+    where each module whose data the room mounts has it. `rules` are lup's code
+    rules the declaration's selection runs, which a section of its guidance
+    lists with `rules()`. Raise `GuidanceError` naming a section of guidance
+    that can't be read, or doesn't render.
     """
     resolved = approved.resolved
     session = session_settings(resolved.session)
@@ -232,6 +237,7 @@ def terminal_settings(
             neighbours,
             shared=shared,
             lent=lent,
+            rules=rules,
         ),
         session=session.declared,
         defaults=session.defaults,

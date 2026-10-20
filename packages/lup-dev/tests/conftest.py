@@ -253,6 +253,10 @@ class FakeEngine(Checker):
         """The runner each check and importers pass was sent, in order."""
         self.importers_asked: list[list[Path]] = []
         self.importer_reports: list[FileReport] = []
+        self.listed_for: list[list[Selected]] = []
+        """The rule selections each listing was asked for, in order."""
+        self.running: list[str] = ["regex", "tuple-shape"]
+        """The rules any selection runs, by id: a fake resolves none."""
 
     def report(self, root: Path, source: Source) -> FileReport:
         content = source.content
@@ -268,12 +272,21 @@ class FakeEngine(Checker):
             surface=surface(source.path, content),
         )
 
-    def rules(self) -> list[Rule]:
-        """Two rules, for a declaration to hold or flag by name."""
-        return [
-            Rule(id=rule, mistake="", steer="", examples=Examples(flags=[]))
+    def rules(self, selected: list[Selected] | None = None) -> list[Rule]:
+        """Two rules, for a declaration to hold or flag by name; those of them `running` names, for a selection."""
+        table = [
+            Rule(
+                id=rule,
+                mistake=f"The mistake {rule} prevents.",
+                steer=f"Where {rule} steers.",
+                examples=Examples(flags=[]),
+            )
             for rule in ["regex", "tuple-shape"]
         ]
+        if selected is None:
+            return table
+        self.listed_for.append(selected)
+        return [rule for rule in table if rule.id in self.running]
 
     def check(
         self,

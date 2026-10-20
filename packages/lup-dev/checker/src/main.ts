@@ -7,7 +7,11 @@
 //   serve --root R --socket S --idle-seconds N --interpreter I --environment-files F
 //       Be that engine, in the foreground.
 //   rules
-//       Print lup's rules (id, mistake, steer, examples) as JSON.
+//       Print lup's rules (id, mistake, steer, examples) as JSON: every rule of the
+//       table, or, given each module's rule selection on its input (a JSON list of
+//       `Selected`, as a check request carries them), the rules their union runs,
+//       resolved as a check resolves them. Nothing on its input, or a terminal,
+//       gives the table.
 //   parse
 //       Read files from their parse alone, with no project loaded (`parsed.ts`): a
 //       JSON list of `{path, content}` on its input, and each file's report printed
@@ -27,10 +31,10 @@ import * as path from 'path';
 
 import { initializeDependencies } from 'pyright/common/asyncInitialization';
 
-import { ruleInfos } from './catalog';
+import { ruleInfos, SelectionError } from './catalog';
 import { Engine } from './engine';
 import { parsedReport } from './parsed';
-import { Environment, ParsedSource } from './protocol';
+import { Environment, ParsedSource, Selected, Selection } from './protocol';
 import { Server, ServeOptions } from './server';
 
 interface Arguments {
@@ -106,6 +110,46 @@ function sources(text: string): ParsedSource[] {
         throw refused();
     }
     return given;
+}
+
+// The rule selections `rules` resolves, as its input gives them: none where it's
+// given nothing, so it lists the table.
+function selections(text: string): Selected[] | undefined {
+    if (!text.trim()) {
+        return undefined;
+    }
+    const refused = () =>
+        new Error(
+            '`rules` reads nothing, or a JSON list of `{"module": …, "rules": …, "default": …}` rule selections, on its input'
+        );
+    let given: unknown;
+    try {
+        given = JSON.parse(text);
+    } catch {
+        throw refused();
+    }
+    const isSelection = (each: unknown): each is Selection =>
+        typeof each === 'object' &&
+        each !== null &&
+        typeof (each as Selection).start === 'object' &&
+        (each as Selection).start !== null &&
+        Array.isArray((each as Selection).operations);
+    const isSelected = (each: unknown): each is Selected =>
+        typeof each === 'object' &&
+        each !== null &&
+        typeof (each as Selected).module === 'string' &&
+        isSelection((each as Selected).rules) &&
+        isSelection((each as Selected).default);
+    if (!Array.isArray(given) || !given.every(isSelected)) {
+        throw refused();
+    }
+    return given;
+}
+
+// What the command was given on its input; nothing where its input is a terminal,
+// which would otherwise wait for it.
+function input(): string {
+    return process.stdin.isTTY ? '' : fs.readFileSync(0, 'utf8');
 }
 
 function build(): string {
@@ -193,7 +237,7 @@ async function main() {
             await serve(args);
             return;
         case 'rules':
-            process.stdout.write(JSON.stringify(ruleInfos()) + '\n');
+            process.stdout.write(JSON.stringify(ruleInfos(selections(input()))) + '\n');
             return;
         case 'parse':
             process.stdout.write(JSON.stringify(sources(fs.readFileSync(0, 'utf8')).map(parsedReport)) + '\n');
@@ -203,7 +247,13 @@ async function main() {
     }
 }
 
+// A selection the table can't resolve is said as the declaration's errors are, without
+// a stack, as the server says it; any other failure with its stack.
 main().catch((error) => {
-    process.stderr.write((error instanceof Error ? error.stack ?? error.message : String(error)) + '\n');
+    const said =
+        error instanceof SelectionError || !(error instanceof Error)
+            ? String(error instanceof Error ? error.message : error)
+            : error.stack ?? error.message;
+    process.stderr.write(said + '\n');
     process.exit(1);
 });

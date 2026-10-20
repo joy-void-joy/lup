@@ -30,8 +30,10 @@ from lup_dev import Core, Modules, Project, Session, cli
 from lup_dev.adapters import Adapter, claude, codex
 from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.catalog.room import SessionDefaults
+from lup_dev.codescan.contract import Examples, Rule
+from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.requirements import Printed, Tools
-from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.forge.github import GitHubError, Visibility
 from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.names import container_name
@@ -108,6 +110,16 @@ project = Project(
 '''
 
 runner = CliRunner()
+
+RUNNING = [
+    Rule(
+        id="elif",
+        mistake="A chain of conditions hides the value's structure.",
+        steer="Decide on a value's structure with `match`.",
+        examples=Examples(flags=[]),
+    )
+]
+"""The rules the stand-in engine says any selection runs."""
 
 
 @pytest.fixture(autouse=True)
@@ -317,6 +329,10 @@ class Machine:
         self.events = Events()
         self.unnamed = unnamed
         self.local = local
+        self.listed_for: list[list[Selected]] = []
+        """The rule selections the launch asked the engine to list, in order."""
+        self.refusing: str | None = None
+        """Why the stand-in engine refuses every selection, where it does."""
         record = self.events.record
         self.layout = Layout(
             state=tmp_path / "state",
@@ -355,6 +371,7 @@ class Machine:
             say=record,
             github=self.github,
             facts=Here(tmp_path / "home"),
+            rules=self.rules,
         )
         self.adapter = claude.adapter().model_copy(
             update={"channel": Offline(events=self.events)}
@@ -389,6 +406,13 @@ class Machine:
         )
         write_model(self.layout.approved(common), approval)
         return Unchanged(commit=commit, approval=approval)
+
+    def rules(self, selected: list[Selected]) -> list[Rule]:
+        """Stand in for the engine: `RUNNING` for any selection, or its refusal."""
+        self.listed_for.append(selected)
+        if self.refusing is not None:
+            raise EngineError(self.refusing)
+        return RUNNING
 
     def github(self, repository: Path) -> GitHubRepository:
         self.events.record(f"github {repository.name}")
@@ -581,6 +605,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
             tools=cli.served_tools(declared.resolved),
             neighbours=[],
             shared={"transcripts": tmp_path / "transcripts"},
+            rules=RUNNING,
         )
         exported = declared.root
         choices = declared.resolved.session
@@ -760,6 +785,36 @@ def test_a_codex_launch_refuses_guidance_past_what_codex_takes_before_registerin
         cli.launched(on_codex, [], project, machine.launcher)
 
     said = machine.events.said
+    assert not [each for each in said if each.startswith("register")]
+    assert "run" not in said
+
+
+def test_a_launch_lists_the_rules_the_approved_declaration_runs_where_a_section_asks(
+    project: Path, tmp_path: Path, clock: FakeClock, shell: Shell
+) -> None:
+    (project / "AGENTS.md").write_text("# The project\n\nWrite so:\n\n{{ rules() }}\n")
+    shell.commit(project, "the rules in the guidance")
+    machine = Machine(tmp_path, clock)
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    assert machine.listed_for == [resolve(Project()).rules]
+    guidance = machine.engine.guidance or ""
+    listed = "Write so:\n\n- `elif`: Decide on a value's structure with `match`.\n"
+    assert listed in guidance
+
+
+def test_a_selection_the_engine_refuses_stops_the_launch_after_its_declaration(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    machine.refusing = "`code-rules`'s rules: `Rules.drop` names `gone`"
+
+    with pytest.raises(EngineError, match=r"`Rules.drop` names `gone`"):
+        cli.launched(machine.adapter, [], project, machine.launcher)
+
+    said = machine.events.said
+    assert not [each for each in said if each.startswith("github")]
     assert not [each for each in said if each.startswith("register")]
     assert "run" not in said
 
