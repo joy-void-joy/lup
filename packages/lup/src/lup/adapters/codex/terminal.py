@@ -32,6 +32,7 @@ each runtime*):
 | lup's event | Codex's hook event |
 |---|---|
 | `session-started` | `SessionStart` |
+| `turn-started` | `UserPromptSubmit` |
 | `call-started` | `PreToolUse` |
 | `call-finished` | `PostToolUse` |
 | `turn-ended` | `Stop` |
@@ -82,11 +83,12 @@ to turn off: its compaction runs when the context passes
 `model_post_turn_compact_threshold_percent`, off unless set
 (`config/src/config_toml.rs`; the 0.162.1 binary names no other setting for
 it), both left to the operator. And nothing reaches a session idle between its
-turns, so `messages` has nothing to compile to: what a server sends unprompted
-is only logged (`rmcp-client/src/logging_client_handler.rs`), and the
-app-server that could start a turn (`turn/start`) runs inside the terminal's own
-process under `--no-daemon`, out of reach. A message waits for the session's
-next call; the operator typing in its terminal starts one.
+turns, so `messages` and a tool server's `pushes` have nothing to compile to:
+what a server sends unprompted is only logged
+(`rmcp-client/src/logging_client_handler.rs`), and the app-server that could
+start a turn (`turn/start`) runs inside the terminal's own process under
+`--no-daemon`, out of reach. A message waits for the session's next call; the
+operator typing in its terminal starts one, whose `UserPromptSubmit` tells it.
 
 **TOML.** Each `-c` value and the requirements file are TOML, written by
 `tomlkit`: a `-c` value on one line, its tables inline, and the requirements file
@@ -374,6 +376,8 @@ def spelled(event: Event) -> str:
     match event:
         case "session-started":
             return "SessionStart"
+        case "turn-started":
+            return "UserPromptSubmit"
         case "call-started":
             return "PreToolUse"
         case "call-finished":

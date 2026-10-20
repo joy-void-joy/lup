@@ -239,6 +239,26 @@ def test_claude_waits_on_a_server_with_no_timeout_as_it_would(
     }
 
 
+def test_claude_loads_each_server_that_pushes_as_a_channel_its_flag_before_strict(
+    tmp_path: Path, home: Path
+) -> None:
+    pushing = ToolServer(name="lup", socket=Path("/run/lup/mcp.sock"), pushes=True)
+    quiet = ToolServer(name="tools", socket=Path("/run/tools.sock"))
+    launch = tmp_path / "launch"
+    terminal = Claude().terminal(
+        TerminalSettings(directory=launch, cli=CLAUDE_CLI, servers=[pushing, quiet])
+    )
+
+    start = terminal.command.index("--mcp-config")
+    assert terminal.command[start : start + 5] == [
+        "--mcp-config",
+        str(launch / "mcp.json"),
+        "--dangerously-load-development-channels",
+        "server:lup",
+        "--strict-mcp-config",
+    ]
+
+
 def test_claude_replaces_its_prompt_only_when_the_declaration_gives_one(
     tmp_path: Path, home: Path
 ) -> None:
@@ -620,6 +640,25 @@ def test_codex_serves_lup_s_tools_where_the_operator_has_no_server(
         "project_doc_max_bytes=0",
     ]
     assert not [argument for argument in terminal.command if "messag" in argument]
+
+
+def test_codex_has_no_way_for_a_server_to_push_and_loads_it_as_any_other(
+    tmp_path: Path, codex_home: Path
+) -> None:
+    pushing = ToolServer(name="tools", socket=Path("/run/tools.sock"), pushes=True)
+    quiet = pushing.model_copy(update={"pushes": False})
+    directory = tmp_path / "launch"
+
+    assert (
+        Codex()
+        .terminal(
+            TerminalSettings(directory=directory, cli=CODEX_CLI, servers=[pushing])
+        )
+        .command
+        == Codex()
+        .terminal(TerminalSettings(directory=directory, cli=CODEX_CLI, servers=[quiet]))
+        .command
+    )
 
 
 def test_codex_refuses_a_server_of_the_operator_s_named_as_lup_s(

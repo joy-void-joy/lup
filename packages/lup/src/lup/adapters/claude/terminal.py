@@ -10,6 +10,9 @@ settings compiled for each runtime*):
 - `--permission-mode bypassPermissions`: the room is the wall;
 - lup's tool servers, where it gives any, with `--mcp-config <launch>/mcp.json`
   and `--strict-mcp-config`, so they're the session's only MCP servers (below);
+  each that pushes (`ToolServer.pushes`) named to
+  `--dangerously-load-development-channels` as `server:<name>`, so Claude Code
+  takes what it pushes as a channel's messages (below);
 - the session's messaging socket, where the settings place it, with
   `--messaging-socket-path`, and `crossSessionInbound: "accept"` in lup's file
   (below);
@@ -66,6 +69,15 @@ server out, managed ones included; where lup gives none, neither flag is passed.
 Their tools stay behind Claude Code's tool search, as it defers every MCP tool:
 no `alwaysLoad`.
 
+**A server that pushes** is loaded as a channel: Claude Code queues each
+`notifications/claude/channel` it sends as a prompt, `<channel source="<name>">`
+around its `content`, which starts a turn of the idle session and reaches a busy
+one after its running call (`docs/field-notes.md`, *Channels*). A server on no
+allowlist takes `--dangerously-load-development-channels`, which shows a warning
+the operator confirms at each start and is ignored under `-p`; the flag takes
+several entries, so it comes before `--strict-mcp-config`, never last, where it
+would take a prompt for one.
+
 **The messaging socket**, where the settings place it, is the session's own
 cross-session inbox, through which a message reaches it between calls, or
 starts a turn when it's idle. A session that bypasses permission prompts, as a
@@ -76,6 +88,7 @@ other Claude Code sessions can then start a turn in the room too.
 | lup's event | Claude Code's hook events |
 |---|---|
 | `session-started` | `SessionStart` |
+| `turn-started` | `UserPromptSubmit` |
 | `call-started` | `PreToolUse` |
 | `call-finished` | `PostToolUse`, `PostToolUseFailure` |
 | `turn-ended` | `Stop` |
@@ -134,6 +147,12 @@ its 2.1.294, 2.1.296 and 2.1.301 binaries:
   (`cross-session-messaging`). The binary skips the socket in a session it
   counts as restricted, or where a server-side gate is off, each said in its
   debug log; neither is checked in a room yet;
+- `--dangerously-load-development-channels <servers...>` is "Load channel
+  servers not on the approved allowlist. For local channel development only.
+  Shows a confirmation dialog at startup" (the 2.1.304 binary's help); a
+  `server:<name>` entry is a "manually configured MCP server", matched by name,
+  an `--mcp-config` server among them (`channels-reference`, *Test during the
+  research preview*; measured on 2.1.304, `docs/field-notes.md`, *Channels*);
 - a single file mounted into the room can't be replaced by a rename ("Device or
   resource busy"), and Claude Code's writer falls back to writing in place
   ("in-place fallback write", in the binary), so the mounted state file stays
@@ -307,6 +326,8 @@ def spelled(event: Event) -> list[str]:
     match event:
         case "session-started":
             return ["SessionStart"]
+        case "turn-started":
+            return ["UserPromptSubmit"]
         case "call-started":
             return ["PreToolUse"]
         case "call-finished":
@@ -374,6 +395,8 @@ def compiled(
             server.name: bridged(server, settings) for server in settings.servers
         }
     )
+    pushing = [f"server:{server.name}" for server in settings.servers if server.pushes]
+    channels = ["--dangerously-load-development-channels", *pushing] if pushing else []
     moved = {} if layout.configured is None else {CONFIG_DIR: str(layout.configured)}
     prompt = {} if system_prompt is None else {launch.system_prompt: system_prompt}
     guidance = {} if settings.guidance is None else {launch.guidance: settings.guidance}
@@ -406,7 +429,12 @@ def compiled(
             "--permission-mode",
             "bypassPermissions",
             *(
-                ["--mcp-config", str(launch.servers), "--strict-mcp-config"]
+                [
+                    "--mcp-config",
+                    str(launch.servers),
+                    *channels,
+                    "--strict-mcp-config",
+                ]
                 if settings.servers
                 else []
             ),
