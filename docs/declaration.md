@@ -1,6 +1,6 @@
 # The declaration: what a project declares in `lup_project.py`
 
-A project says what lup does for it in one file, `lup_project.py` at its root: a `Project` holding the modules it's made of. Every part lup has (path roles, code rules, gate steps, guidance, the room's packages, session settings, the limits on the operator's credentials, the tools a session gets, requirements) comes from a selected module, lup's own included, so a module brings what it needs and takes it away when it's dropped (`DESIGN.md`, *Modules*). The code is in `lup_dev/declaration/`.
+A project says what lup does for it in one file, `lup_project.py` at its root: a `Project` holding the modules it's made of. Every part a project can change (path roles, code rules, gate steps, guidance, the room's packages, session settings, the limits on the operator's credentials, a module's tools, requirements) comes from a selected module, lup's own included, so a module brings what it needs and takes it away when it's dropped (`DESIGN.md`, *Modules*). What every project gets alike, such as the inbox's and the judge's tools and the host's own requirements, is the host service's. The code is in `lup_dev/declaration/`.
 
 A word on words: a **module** here is a `Module` (`Core`, `Python`); a Python source file is a **file**.
 
@@ -35,12 +35,12 @@ project = Project(
 )
 ```
 
-- **Every name comes from `lup_dev`,** the front door (`lup_dev/__init__.py`).
+- **Every name comes from `lup_dev`,** the front door (`lup_dev/__init__.py`), but the library's own modules: `GitHub` and `Transcripts` are imported from `lup.github.module` and `lup.transcripts.module`.
 - **`Modules.default()` is lup's default modules** (*lup's modules*). `.edit` puts a layer on one of them naming only what it changes: `Python(tests=…)` changes `Python`'s test roots and leaves the rest. `.add` brings in a module that isn't there yet.
-- **A collection changes by operations on what's below it:** `Rules().add("runtime-mention")` is `CodeRules`' rules as they stand, plus one, so the second `.edit(CodeRules(…))` keeps what the first did, and no layer restates another.
+- **A collection changes by operations on what's below it:** `Rules().add("runtime-mention")` is `CodeRules`' rules as they stand, plus one. The second `.edit(CodeRules(…))` sets only `exempt`, so the rules the first set stay, and no layer restates another.
 - **`why`** is optional on `.edit`, `.drop` and `.replace`, and is kept with the change for whoever reads the project later. An `Exemption` always carries its own.
 - **A module of the project's own** is written the way lup's are: a `Module` subclass whose name is a class attribute, whose docstring is its one sentence, and whose parts are fields defaulting to its own values. `before="rules"` puts its step ahead of `Python`'s `rules` step, since names are shared across modules.
-- **`held` and `flagged`** are the fields of `Project` that aren't a module's: what a change asks that waits for the operator, and what lands flagged, named by a role, a kind of change or a rule's id (`docs/judging-writes.md`, *What each change gets*). A name in both, or in neither vocabulary, fails the load.
+- **`held` and `flagged`** are the fields of `Project` that aren't a module's: what a change asks that waits for the operator, and what lands flagged, named by a role, a kind of change or a rule's id (`docs/judging-writes.md`, *What each change gets*). A name in both, or one that's neither a role, a kind nor shaped like a rule's id, fails the load; whether a rule of that id exists is checked at the judge's first judgement.
 
 A project without a `lup_project.py` gets `Project()`, which is `Project(modules=Modules.default())`.
 
@@ -61,7 +61,7 @@ Everything a declaration writes is a layer on what's below it, naming only what 
 - **A `Layer`,** a model of settings holding several values (`Paths`, `Session`, `Credentials`), applies the fields it set, each selection inside composing over below's.
 - **Any other value replaces below's,** a runner among them: merging two runners field by field would surprise a reader expecting the later one to win.
 
-What it costs: a scalar can't be put back to lup's default above a base that changed it, short of a `.replace` with a fresh module.
+What it costs: a field a base set can't be unset. Writing lup's default back sets it again, so it's imposed as a set field is (a session setting over the person's own) and doesn't follow a later release's default; only a `.replace` with a fresh module unsets it.
 
 | Verb | Means |
 |---|---|
@@ -91,7 +91,7 @@ Every collection a module holds is a selection (`Selection`, `declaration/gramma
 | `.replace(name, entry, why=…)` | `entry` in place of the one named | `Guidance().replace("core", Section(…))` |
 
 - **Recorded, resolved at load:** `Rules.default().drop(…)` takes the rules a later release adds to the default, and `Rules.only(…)` doesn't.
-- **Names are per kind and shared across modules,** so a step can go `before="rules"` though `rules` is `Python`'s; one name from two modules fails the load, naming both. Some kinds merge instead: a path pattern, a package or a related repository given twice is one; two modules exempting one rule each keep theirs.
+- **Names are per kind and shared across modules,** so a step can go `before="rules"` though `rules` is `Python`'s; one name from two modules fails the load, naming both. Some kinds merge instead: a path pattern or a package given twice is one, and a related repository given twice with one path; two modules exempting one rule each keep theirs.
 - **Methods, not set arithmetic,** since the declaration is ruled code: `Rules.all() - {"regex"}` would meet lup's own `set-shape`.
 
 **The kinds** (`declaration/kinds.py`):
@@ -100,7 +100,7 @@ Every collection a module holds is a selection (`Selection`, `declaration/gramma
 |---|---|---|
 | `Rules` | rule ids | `CodeRules` |
 | `Paths` | a `Layer` of patterns per role (`protected`, `operator_documents`, `excluded`, `scratch`, `docs`, `data`, `source_trees`, `python`, `conftest`), the verbs taking roles as keywords | `Core`, `Python` |
-| `Gate` | `Step`s, by name | `Python` |
+| `Gate` | `Step`s, by name | `Python`, `Private` |
 | `Exemptions` | an `Exemption` per rule, listing every path it lifts the rule from | `CodeRules` |
 | `TestRoots` | `Pytest` roots | `Python` |
 | `Packages` | `Package`s of the room's image | `Core` |
@@ -158,7 +158,7 @@ A tool's name and a request's kind are shared across modules, so the same one fr
 
 ## The runner
 
-`Python.runner` says how the project runs its tools (`declaration/runner.py`), so uv is spelled once, in `Uv`:
+`Python.runner` says how the project runs its tools (`declaration/runner.py`), so uv is spelled once, in `Uv`, for everything run in the project's environment; a deferral's conditions asking uv for Pythons, and trust installing lup itself, ask uv for themselves:
 
 ```python
 class Runner(Model, ABC):
