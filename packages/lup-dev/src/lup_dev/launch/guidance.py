@@ -59,8 +59,9 @@ if TYPE_CHECKING:
     from lup_dev.launch.room import Lent, RelatedRepository
 
 OPENING = (
-    "This guidance adds to your runtime's own instructions and replaces none of "
-    "them; where two of its sections differ, the later one holds."
+    "lup is the environment this session runs in, set up by the operator for this "
+    "project, and this is its guidance. Where it differs from your runtime's own "
+    "instructions, it holds; where two of its sections differ, the later one holds."
 )
 """The document's first line: how its sections stand to each other and to the
 runtime's own instructions."""
