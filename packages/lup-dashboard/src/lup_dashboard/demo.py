@@ -192,9 +192,11 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             first,
             Path("/home/op/lup.git/tree/guidance-voice"),
         )
-        adlib = launch("c3d2", "main", second, Path("/home/op/adlib.git/tree/main"))
+        zoetrope = launch(
+            "c3d2", "main", second, Path("/home/op/zoetrope.git/tree/main")
+        )
         waiting = launch(
-            "d4c3", "nori-search", first, Path("/home/op/nori.git/tree/main")
+            "d4c3", "magpie-search", first, Path("/home/op/magpie.git/tree/main")
         )
         calling = Activity(state="calling", since=self.ago(0.4), tool="Bash")
         ended = [
@@ -271,7 +273,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ],
         }
         return Listed(
-            launches=[lup, voice, adlib, waiting],
+            launches=[lup, voice, zoetrope, waiting],
             sessions={"s1": "lup-impl", "s2": "guidance-voice", "s3": "main"},
             talkers={
                 launch: [
@@ -363,8 +365,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         session = Conversation(repository=lup, runtime=first, session="s1")
         survey = session.model_copy(update={"agent": "a04"})
         voice = Conversation(repository=lup, runtime=first, session="s2")
-        adlib = Conversation(
-            repository=Path("/home/op/adlib.git"), runtime=second, session="s3"
+        zoetrope = Conversation(
+            repository=Path("/home/op/zoetrope.git"), runtime=second, session="s3"
         )
         question = Question(
             text=(
@@ -415,7 +417,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         made = [
             (51, question, parser, "dev", 4),
             (52, note, voice, "guidance-voice", 12),
-            (53, problem, adlib, "main", 2),
+            (53, problem, zoetrope, "main", 2),
         ]
         dev = lup / "tree" / "dev"
         reader = Path("packages/lup/src/lup/transcripts/reader.py")

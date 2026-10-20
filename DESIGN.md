@@ -23,7 +23,7 @@ A module can declare:
 
 A module refers to its code by importing it, so pyright checks the reference and renames follow it. The declaration is loaded at every hook, so the gate checks that loading it imports nothing heavy, and names the import chain when it does.
 
-**Rooms.** A project declares named rooms, each a selection of modules on top of the project's own. A maintaining room, for working on the project's code, has the code rules and reviews. A playground room, where an agent makes things freely (adlib's art, tacocast's podcasts), leaves them out: the container is its only wall.
+**Rooms.** A project declares named rooms, each a selection of modules on top of the project's own. A maintaining room, for working on the project's code, has the code rules and reviews. A playground room, where an agent makes things freely (art, or podcasts), leaves them out: the container is its only wall.
 
 lup must be able to express every project that used the first lup, and everything the first lup did.
 
@@ -48,7 +48,7 @@ lup must be able to express every project that used the first lup, and everythin
 
 The dashboard is where the operator works: every agent, its batches, questions and messages, and each project's panels. Every view also has a CLI command, for the operator and for agents.
 
-A panel is JavaScript a module ships. From a panel, sending to the inbox and working with lup's concepts (runs, reviews, agents) is easy. adlib's panel previews the animation being made.
+A panel is JavaScript a module ships. From a panel, sending to the inbox and working with lup's concepts (runs, reviews, agents) is easy. A project making an animation can preview it in its panel.
 
 ## Defaults
 
