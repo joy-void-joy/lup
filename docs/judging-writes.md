@@ -54,13 +54,17 @@ lup judges every write in the worktrees an agent's session holds: it lets it lan
 
 ## What the agent is told
 
-**Findings** on the lines a change touched are told with the call, each with its steer (`information`, `policy/report.py`), in pyright's shape:
+**Findings** on the lines a change touched are told with the call, each with its steer (`information`, `policy/report.py`). The report, in pyright's shape:
 
 ```
 lup's findings on the lines changed (clear each, or keep it with `# lup: ignore("<rule>", why="<reason>")` on its line or the line above, which the operator is asked about; they fail the gate):
   /work/lup/src/lup/claude.py:41:12 - tuple-shape: a fixed-length tuple[str, int] hides what each position means
       steer: name the fields with a pydantic model
+  /work/lup/src/lup/claude.py:88:5 - regex: `import re` parses with a regular expression
+      steer: use the format's own parser (lup docs rules regex)
 ```
+
+`tests/test_report.py` checks that this block is what `information` writes for these two findings, whose messages are illustrative.
 
 Findings on lines no change touched, in the files a checkpoint judged, come in a block of their own. pyright's errors and warnings and ruff's findings are told the same way, and fail the gate; none ever holds a write. A write before it lands is checked in production and protected modules; a checkpoint checks tests too. **A finding ruff fixes safely is never told:** such a fix changes nothing a reader decides, and told one by one these findings spend an agent's turns, so the session landing the work applies them (`lup-dev check --fix`). The judge never rewrites a file under the agent.
 
