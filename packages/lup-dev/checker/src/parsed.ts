@@ -1,7 +1,7 @@
 // A file read from its parse alone, with no project loaded and no types: what an
 // approval's first reading needs, which comes before the type check that would
-// hold it up (`Trust.read`, `lup_dev/launch/trust.py`; `docs/launch.md`, *Trust on
-// launch*). It's the file's `# lup:` directives, read as a check reads them, and
+// hold it up (`Trust.read`, `lup_dev/launch/trust.py`; `docs/trust.md`). It's
+// the file's `# lup:` directives, read as a check reads them, and
 // its public surface, each annotation as written and a package root's names from
 // a binding of the file alone. No rule runs, and no import is resolved: an import
 // binds its names all the same, but a package root's `from x import *`, or an

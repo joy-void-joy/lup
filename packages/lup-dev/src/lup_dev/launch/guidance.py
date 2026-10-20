@@ -29,7 +29,7 @@ found that agents told nothing of deferred tools concluded they didn't exist
 After lup's tools come the other repositories named for the project's sessions
 to read (`repositories`): each by its name, what it is, its path in the room,
 whether it's mounted or missing on this machine, and its GitHub identity, which
-lup's GitHub tools take (`docs/related-repositories.md`).
+lup's GitHub tools take (`docs/launch.md`, *Related repositories*).
 
 The person's own section, `AGENTS.local.md` at the root of the worktree launched,
 which git ignores, is appended after every other where there's one, so it holds

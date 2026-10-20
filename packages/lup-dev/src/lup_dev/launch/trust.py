@@ -1,6 +1,6 @@
 """Trust on launch: the code the host runs for a repository, approved before it runs.
 
-`docs/launch.md`, *Trust on launch*. A repository's host zone is what the host runs
+`docs/trust.md`. A repository's host zone is what the host runs
 for it, read at the integration branch's tip, so what's approved is what the judge
 and the host service run, never a branch's own copy (`Zone`), with the person's own
 layer beside it:
@@ -19,7 +19,7 @@ layer beside it:
 - the person's own layer of the declaration, `lup_project.local.py` in the
   repository's main worktree (`person_layer`), which git ignores, so it's in the zone by its
   content (`Zone.local`), and what it imports of the commit with the rest
-  (`docs/related-repositories.md`, *Trusted by its content*). A room writes the worktree, so
+  (`docs/trust.md`, *Trusted by its content*). A room writes the worktree, so
   an edit made there runs nowhere until approved: the judge and a launch read
   the copy kept with the approval. Where it changed, its diff is in the summary
   itself (`compared`).
@@ -1735,7 +1735,7 @@ class Trust(Model, arbitrary_types_allowed=True):
         """Return an approval's `files` with the judge's whole reading of each, types and lup's rules included, in place of the reading of their parse they were asked with.
 
         What the host service reads once the approval is in the inbox, off its
-        event loop (`docs/launch.md`, *Trust on launch*), by the declaration
+        event loop (`docs/trust.md`), by the declaration
         approved for `repository` as it stands. Raise what the judge raises.
         """
         return self.read(

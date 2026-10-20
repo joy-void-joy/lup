@@ -20,7 +20,7 @@ follows such a hold. When judging itself fails at a turn's end, the turn ends,
 and the operator is warned once in `systemMessage`, which also carries what the
 session's turn's end tells without holding it.
 
-In a launched room (`docs/launch.md`, *The one hook and the host service*), Claude
+In a launched room (`docs/host.md`, *The one hook*), Claude
 Code runs the room's hook on `SessionStart`, `PreToolUse` for every call, `Stop`
 and `SubagentStop` (`hooks`), so the host service hears each conversation's start,
 calls and turn's ends (`docs/host-tools.md`, *How an agent is told*). The judge

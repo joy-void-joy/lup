@@ -1,6 +1,6 @@
 """An approval's types, read on the host once it's in the inbox, after the reading of its files' parse it was asked with.
 
-`docs/launch.md`, *Trust on launch*. Trust asks an approval with each file read
+`docs/trust.md`. Trust asks an approval with each file read
 from its parse alone, which costs a parse, so the question comes at once,
 before a type check that takes seconds (`Approval.typing`). The judgement with
 types follows here, on the host, whoever asked: a launch's terminal, which may be

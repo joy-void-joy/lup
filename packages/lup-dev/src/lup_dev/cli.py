@@ -8,7 +8,7 @@ adds to its answer with the courier built here, and answers a hook a launch's
 judge couldn't with the answerer (`docs/launch.md`); `hook` answers through it.
 
 `trust` approves what the host runs for a repository, the check a launch makes
-first (`docs/launch.md`, *Trust on launch*). `launch` opens a runtime's session in
+first (`docs/trust.md`). `launch` opens a runtime's session in
 a room for the worktree (*The command*). `host` runs the host service, handed
 the inbox as what each conversation is told at its hooks, its tools and its
 requests; `inbox` is the operator's face on it (`docs/host-tools.md`, *The

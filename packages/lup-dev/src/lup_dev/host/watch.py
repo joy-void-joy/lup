@@ -1,6 +1,6 @@
 """Watching what the host service holds: a request's reply, sent again each time it changes.
 
-`docs/host-tools.md`, *Watching*. What the service holds changes in a few places
+`docs/host.md`, *Watching*. What the service holds changes in a few places
 alone: a request answered on one of its sockets, a hook answered, an item of the
 inbox written. Each tells `Changes`. A watch is a connection on the service's
 watch socket carrying one control request (`Dispatcher.watching`): it's answered

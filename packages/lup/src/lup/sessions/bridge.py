@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """lup's MCP bridge: a runtime's stdio MCP server, carrying each message to lup's server on a Unix socket, across that server's restarts.
 
-`docs/host-tools.md`, *The server*. A runtime runs this as one of its MCP
+`docs/host.md`, *How a room reaches it*. A runtime runs this as one of its MCP
 servers, `python3 -I <launch>/mcp-bridge.py <socket>`, and speaks MCP to it on
 its standard input and output: newline-delimited JSON-RPC, one message a line,
 which is what lup's server reads on its socket too (`lup.tools.serving.serve`).

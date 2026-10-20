@@ -19,8 +19,8 @@ the selected modules name (`docs/launch.md`, *The image*):
 Building goes through the library's engine, podman, which tags the image by its
 definition's digest and labels it with its project. Each build is recorded with
 its duration and size, one JSON line in lup's state, and after it the project's
-older lup images that no container uses are removed (`docs/launch.md`,
-*Footprint*): the first lup left 46 images of about 5 GB behind.
+older lup images that no container uses are removed (`docs/launch.md`, *The
+image*): the first lup left 46 images of about 5 GB behind.
 """
 
 from datetime import datetime, timedelta

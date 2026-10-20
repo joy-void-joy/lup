@@ -45,7 +45,7 @@ any state, running included, freeing its old name (`podman-rename(1)`).
 
 import csv
 import io
-import subprocess  # lup: ignore("subprocess", why="the library runs podman through the standard library, since `sh` isn't one of its dependencies (`docs/launch.md`, *The library*)")
+import subprocess  # lup: ignore("subprocess", why="the library runs podman through the standard library, since `sh` isn't one of its dependencies")
 import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Callable

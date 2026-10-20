@@ -23,7 +23,7 @@ the "Working directory for the session", and `Bash` and `apply_patch` carry only
 `workspace-write` sandbox a write elsewhere lies outside the writable roots, so
 Codex's own approval decides it.
 
-In a launched room (`docs/launch.md`, *The one hook and the host service*), Codex
+In a launched room (`docs/host.md`, *The one hook*), Codex
 runs the room's hook on `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` and
 `SubagentStop` (`hooks`): the checkpoint after each call, the only place its
 hooks see a patch, and each conversation's turn's end, which clears the calls it
@@ -92,6 +92,14 @@ server sends unprompted is only logged (`rmcp-client/src/logging_client_handler.
 and the app-server that could start a turn (`turn/start`) runs inside the
 terminal's own process under `--no-daemon`, out of reach. An item for an idle
 session waits for its next call; the operator typing in its terminal starts one.
+
+Nor can lup's name for a session reach Codex's own title, a gap declared with
+its evidence: Codex names threads (`/rename`, its own generated titles, `codex
+resume <name>`), but sets a name only through its app server's
+`thread/name/set`, which runs inside the terminal's own process under
+`--no-daemon`, and its hooks neither carry a thread's name nor set one
+(`hooks/src/schema.rs`, `deny_unknown_fields`; read at `rust-v0.163.0`). lup's
+names work on Codex everywhere in lup; the title is Codex's own.
 
 What its judging relies on, from Codex's hooks documentation and its source at
 `rust-v0.162.1` (paths under `codex-rs/`), whose hook schemas

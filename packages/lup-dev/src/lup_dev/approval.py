@@ -1,7 +1,7 @@
 """What the operator approved for a repository: the host zone at a commit, and the `lup-dev` it runs.
 
-Trust on launch records it (`lup_dev.launch.trust`; `docs/launch.md`, *Trust on
-launch*), and the judge reads the declaration at its commit (`lup_dev.policy`;
+Trust on launch records it (`lup_dev.launch.trust`; `docs/trust.md`), and the
+judge reads the declaration at its commit (`lup_dev.policy`;
 `docs/judging-writes.md`, *The declaration, from the approved commit*), with the
 person's own layer approved beside it, so what runs on the host is what the
 operator approved. It's here, below both, since the judge can't import the

@@ -29,7 +29,7 @@ A `lup.rooms.Container` on the host's network, its image the declaration's
   read (`related`), whole and read-only, where it's on the host: a bare
   repository's git directory with its worktrees under it, or a clone's working
   tree with its `.git`, so a session reads its files, and its history through
-  git (`docs/related-repositories.md`). A relative path is from the directory
+  git (`docs/launch.md`, *Related repositories*). A relative path is from the directory
   holding the project's own repository. One that's missing is passed over, for
   the launch to say; one overlapping the room's own mounts, the project itself
   or a directory holding it, is refused, since mounted it would sit read-only

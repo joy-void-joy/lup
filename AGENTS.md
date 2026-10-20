@@ -29,4 +29,4 @@ Beside the code rules every project gets (`docs/conventions.md` has the reasons 
 
 ## docs/
 
-Each piece's doc describes it as built: what it's for, how to use it, and the reasons that aren't obvious, in a screen or two, kept true as the code changes. Details go in docstrings beside the code, future work in issues, and what was measured in `docs/field-notes.md`, with its version and date. No history: what was tried, when, and who decided stays out.
+`docs/README.md` lists the docs, a line each. Each piece's doc describes it as built: what it's for, how to use it, and the reasons that aren't obvious, each beside the fact it explains, in a screen or two, kept true as the code changes. Details go in docstrings beside the code, future work in issues, and what was measured in `docs/field-notes.md`, with its version and date. No history: what was tried, when, and who decided stays out. A doc is one piece's, so it can move with that piece's module once the core is split into modules (#113); a citation names a doc and its section, and a test checks it names ones that exist.
