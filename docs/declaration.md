@@ -214,7 +214,7 @@ At load, every module a selected module `requires` must be selected too, and no 
 lup's own `lup_project.py` (*A project is its modules*) uses only the surface any project uses. What only lup's repository needs lives in its module `LupDevelopment`:
 - **the engine's build step,** ahead of every other step. Trust on launch builds the copy it installs with the same step, through the same runner (`launch/trust.py`, `engine`);
 - **`catalog/**` protected,** since that's where lup's policy data lives;
-- **`AGENTS.md`** as the project's own section of the guidance, after the sections of lup's modules;
+- **`AGENTS.md`** as the project's own section of the guidance, after the sections of lup's modules, and those sections themselves among the operator's documents, since every project's sessions read them;
 - **Chromium in the room,** and npm as a requirement.
 
 `runtime-mention` fires on a runtime's name outside that runtime's adapter. That's a rule about lup's own architecture: in a project that picks its runtime by a setting, it would fire on every choice. So lup's default leaves it out, and lup's declaration adds it back. lup's import contracts stay in its `pyproject.toml`, as a project's own contracts do.
