@@ -639,6 +639,22 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
     assert guidance.endswith("Mine.\n")
 
 
+def test_a_launch_in_a_repository_holding_replace_refs_says_so(
+    project: Path, tmp_path: Path, clock: FakeClock, shell: Shell
+) -> None:
+    other = shell.git(project, "commit-tree", "HEAD^{tree}", "-m", "a room's own")
+    shell.git(project, "replace", shell.git(project, "rev-parse", "HEAD"), other)
+    machine = Machine(tmp_path, clock)
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+    assert [each for each in machine.events.said if "replace refs" in each] == [
+        (
+            "This repository holds replace refs (`refs/replace/`), which a room "
+            "can write to hand git other content for an object: lup's git ignores "
+            "them. `git replace -l` lists them, and `git replace -d` removes one."
+        )
+    ]
+
+
 def test_a_launch_says_once_that_desktop_notices_are_off_without_notify_send(
     project: Path, tmp_path: Path, clock: FakeClock
 ) -> None:
