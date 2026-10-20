@@ -23,7 +23,7 @@ the "Working directory for the session", and `Bash` and `apply_patch` carry only
 `workspace-write` sandbox a write elsewhere lies outside the writable roots, so
 Codex's own approval decides it.
 
-In a launched room (`docs/launch.md`, *The one hook and the host service*), Codex
+In a launched room (`docs/host.md`, *The one hook*), Codex
 runs the room's hook on `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` and
 `SubagentStop` (`hooks`): the checkpoint after each call, the only place its
 hooks see a patch, and each conversation's turn's end, which clears the calls it

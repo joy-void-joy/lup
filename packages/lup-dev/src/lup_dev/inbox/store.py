@@ -223,7 +223,7 @@ class Approval(Model):
     typing: bool = False
     """Whether the judge is reading the change's types in the background, its
     files carrying the reading of their parse alone until it's done
-    (`docs/launch.md`, *Trust on launch*); once it is, their whole reading
+    (`docs/trust.md`); once it is, their whole reading
     replaces it, or the summary's last line says why it couldn't."""
 
 

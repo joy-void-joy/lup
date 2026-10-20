@@ -8,7 +8,7 @@ worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
 - the hooks, each runtime's own (its adapter's `hooks`), every one running the
   room's pipe to the host service (`piped`), and waiting as long as a hold may;
 - lup's tool server, on the launch's `mcp.sock` in the room, which the host
-  service serves (`served`; `docs/host-tools.md`, *The server*), a call to it
+  service serves (`served`; `docs/host.md`, *How a room reaches it*), a call to it
   waiting as long as a hold may;
 - the session's own messaging socket, put in the launch's socket directory, so
   the host service reaches it to start a turn of the idle session where its

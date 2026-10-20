@@ -1,9 +1,10 @@
 """What the host reads of each runtime's hooks, and how it answers them; lup's own id for each conversation.
 
-`docs/host-tools.md`, *Who's calling* and *How an agent is told*. Every hook a
-launch's room sends reaches the host service, which hears it through the
-`Courier` (`heard`): its event, the runtime's own ids for the session and the
-conversation in it, its call and tool, and whether the launch's judge reads it.
+`docs/host.md`, *Who's calling*, and `docs/host-tools.md`, *How an agent is
+told*. Every hook a launch's room sends reaches the host service, which hears
+it through the `Courier` (`heard`): its event, the runtime's own ids for the
+session and the conversation in it, its call and tool, and whether the launch's
+judge reads it.
 A hook the judge doesn't read the service answers itself, without starting the
 judge's process. Every answer, the judge's or the service's own, goes out through
 the `Courier` again (`told`): with what the conversation is told added, and a call

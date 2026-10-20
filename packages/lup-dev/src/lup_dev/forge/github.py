@@ -11,7 +11,7 @@ through the operator's `gh` and its login:
   is the room's to write (#54), so reading the repository there would let a room
   choose which repository the operator's login acts on. Reading reaches another
   repository too, any the operator's login can read, where a call names it
-  (`docs/related-repositories.md`); writing stays on the launch's own.
+  (`docs/launch.md`, *Related repositories*); writing stays on the launch's own.
 - **Spawned, never forked.** `gh` runs through the host service's `judged`,
   awaited on its event loop as each judge is, in the repository's git directory.
 - **Its git pinned there.** `gh` runs with `GIT_DIR` and `GIT_COMMON_DIR` both

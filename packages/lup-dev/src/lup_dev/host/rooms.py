@@ -1,6 +1,6 @@
 """A launch's room sockets beside its hook: lup's tools on `mcp.sock`, the room's requests on `request.sock`.
 
-`docs/host-tools.md`, *The server* and *The room's requests*. Each launch the host
+`docs/host.md`, *How a room reaches it*. Each launch the host
 service serves has two more sockets in its socket directory, which its room
 mounts at `/run/lup`:
 - `mcp.sock` serves lup's tools to the launch's session, one MCP session per

@@ -1,6 +1,6 @@
 # lup's tools in a launched session: the inbox, and the operator's credentials on the host
 
-A launched session gets lup's tools from an MCP server the host service runs for its launch. Through them it asks and tells the operator, who answers with `lup-dev inbox` or the dashboard (`docs/dashboard.md`), reads what lup's judge made of its writes, and reaches GitHub with the operator's login; through git's remote helper it pushes and fetches with their credentials. Each is held to limits the project's declaration sets. The room, its one hook and the host service are `docs/launch.md`'s; this doc is what the service gives a session beside its judge, and the clipboard it lends rooms.
+A launched session gets lup's tools from an MCP server the host service runs for its launch. Through them it asks and tells the operator, who answers with `lup-dev inbox` or the dashboard (`docs/dashboard.md`), reads what lup's judge made of its writes, and reaches GitHub with the operator's login; through git's remote helper it pushes and fetches with their credentials. Each is held to limits the project's declaration sets. The room is `docs/launch.md`'s, and the host service, with its sockets, its one hook and who's calling, `docs/host.md`'s; this doc is what the service gives a session beside its judge, and the clipboard it lends rooms.
 
 ## What we have
 
@@ -40,7 +40,7 @@ Paths are under `packages/lup-dev/src/lup_dev/` unless they name another package
   - **A held write's answer is its hold's:** the log has an approval of a write its agent waited on only once the judge hears that call finish, which a launched Claude Code session's hooks never report, while the hold has the answer as soon as it's given.
   - **Read off the event loop,** in a thread, since a repository's log grows with every write judged.
 - **`wait_inbox` has no time limit of its own:** the runtime's limit on a call bounds it (*Holding a call*). It isn't called `wait`: on a Codex model in code mode, Codex has a `wait` tool of its own, which polls a running cell (`docs/library.md`, *No tools but lup's own*), and two tools of one name invite the model to call the wrong one.
-- **The GitHub tools** write to this repository alone (*GitHub through `gh`*); the two that read reach any repository the operator's login can read, named by `repository` (`docs/related-repositories.md`). None merges, or closes or edits an issue: closing one is the operator's judgement, which a comment can ask for. `draft_pull_request` targets the integration branch, `LUP_INTEGRATION_BRANCH` (`settings.py`, `dev` by default).
+- **The GitHub tools** write to this repository alone (*GitHub through `gh`*); the two that read reach any repository the operator's login can read, named by `repository` (`docs/launch.md`, *Related repositories*). None merges, or closes or edits an issue: closing one is the operator's judgement, which a comment can ask for. `draft_pull_request` targets the integration branch, `LUP_INTEGRATION_BRANCH` (`settings.py`, `dev` by default).
 
 ### Found through tool search, listed in the guidance
 
@@ -50,35 +50,6 @@ Paths are under `packages/lup-dev/src/lup_dev/` unless they name another package
 - **A tool's summary is its docstring's first line,** 50 characters at most, as a git commit's subject line is; the rest of the docstring is its full description. `@lup_tool` refuses a tool whose first line is longer, or that has none (`ToolSpec.summary`, `packages/lup/src/lup/tools/tool.py`), so the docstring is the one source.
 - **Results are `content` only,** one text block (`packages/lup/src/lup/tools/serving.py`): Codex shows the model only a result's `structuredContent` where it has one, and Claude Code reads `content`, so a result with both would read differently on each.
 - **A large result is the runtime's to keep:** Claude Code saves one past `MAX_MCP_OUTPUT_TOKENS` (25,000 by default) to a file and gives the path; Codex cuts one past about 10,000 bytes by default (`docs/field-notes.md`, *MCP in a launched session*).
-
-### Who's calling
-
-The launch is the socket's: the service hears a call on the launch's own `mcp.sock`, which nothing in the room names (`docs/launch.md`, *On the host: the service*). Within the launch, each conversation has an id of lup's own, which the hook writes into every call to lup's tools (`host/courier.py`, `host/rooms.py`):
-- **lup mints it** the first time a hook names a conversation: a session's start, a subagent's start, or its first call (`Conversations`). Each runtime's adapter reads its own ids from the hook's payload (`heard`), and the service keeps which runtime ids each of lup's stands for, so nothing past the adapter reads a runtime's ids: the first lup, wired to each runtime's own, found they didn't stay uniform.
-- **The hook stamps it.** The `call-started` hook on a call to one of lup's tools answers with the call's input rewritten to carry `caller`, the conversation's id, and `call`, the runtime's id for the call (`tool_use_id` on both runtimes), fields the model's schema doesn't show (`stamp`, `Stamped`). The server reads them, and takes them out before the tool sees the arguments. Claude Code takes the rewrite as `updatedInput` with no decision, so the call goes through the session's own permission mode; Codex applies it only beside `permissionDecision: "allow"`. Both reach the server (`docs/field-notes.md`, *Piece 2, live*).
-- **`call` anchors the item** the call makes (`Item.call`): the conversation's record keeps the same id beside the call (*An item's moment*).
-- **A call with no `caller`,** whose hook didn't run, is taken as the launch's main conversation's, and the service's log says so; one naming a conversation no hook of the launch named isn't run.
-- A process in the room could write another conversation's id into a call. It stays within its own launch, so it can only speak as another conversation of the same session.
-
-### The server
-
-- **A socket per launch, `mcp.sock`,** in the launch's socket directory beside `hook.sock`, which the room mounts at `/run/lup`. Each connection is one MCP session, served by the library's `serve` (`packages/lup/src/lup/tools/serving.py`) on `mcp`'s low-level `Server`, one message a line, each read up to 16 MiB (`HostService.line_limit`).
-- **In the room, the runtime's stdio server is lup's bridge** (`packages/lup/src/lup/sessions/bridge.py`), `python3 -I <launch>/mcp-bridge.py /run/lup/mcp.sock` on the room's Python, with the standard library alone, carrying each line across both ways. Each runtime's terminal compile gives it (`adapters/claude/terminal.py`, `adapters/codex/terminal.py` in `lup`, whose docstrings give what it rests on):
-  - **Claude Code:** `--mcp-config <launch>/mcp.json` with `--strict-mcp-config`, "Only use MCP servers from `--mcp-config`, ignoring all other MCP configurations", managed ones included.
-  - **Codex:** `mcp_servers.lup`, the bridge's file mounted read-only at its path, in the same `-c` inline table that turns off each of the operator's own servers, since a later `-c` override of the same key replaces the earlier. An operator's own server named `lup` is refused, the launch saying to rename it: Codex merges a `-c` table into theirs key by key, so its `env`, `cwd` or `enabled_tools` would carry into lup's, and a `url` makes Codex refuse the configuration.
-- **No approval is asked:** Claude Code under `bypassPermissions` prompts for an MCP tool only where it's marked as needing the user; Codex's entry says `default_tools_approval_mode = "approve"`.
-- **Across a restart of the host service,** which closes every `mcp.sock` connection: neither runtime starts a stdio server again, so the bridge keeps the runtime's side open.
-  - A call the service was answering is answered with an error saying its answer is lost and it may have been carried out (a held `ask` among them); its item stays waiting in the inbox.
-  - The bridge tries the socket again every half second; a call arriving meanwhile waits, and is answered with an error after a minute without the service.
-  - Once it's reached, the bridge replays the runtime's `initialize` under an id of its own, and counts the server back only once that's answered: a service going away can still take a connection and close it unanswered. Then it sends `notifications/initialized`, what waited, and `notifications/tools/list_changed`, which the server declares it may send (`listChanged`), so the runtime lists the restarted copy's tools mid-session.
-  - The room's programs are brought up to the service's copy when it serves a recorded launch again (`refreshed`, `launch/room.py`): git's remote helper, the clipboard's programs and the bridge, each rewritten in place where it differs, so a room mounting that one file sees the change. The room runs the helper anew at each push and fetch; a running bridge keeps its code until the next launch.
-  - The hook opens a connection per call, so it goes on once the service is back.
-
-### The room's requests
-
-- **A third socket per launch, `request.sock`,** for the room's programs rather than the agent's tools: one JSON request per connection, a pydantic model told apart by `kind`, and one JSON reply, as the control socket takes them. The service attaches the launch, which it knows by the socket (`host/rooms.py`).
-- **Its own routes.** A `RoomHandler` answers a request with the launch it came from, routed by `RoomRoute.to(handler)`, apart from the control socket's `Handler`s, so a room never reaches a control kind: registering or ending a launch, stopping the service, or answering the inbox. The first lup's sessions approved their own questions by writing the store they could reach.
-- **What uses it:** git's remote helper (*git through a remote helper*), the gate's issue states (*The gate in a room*), the clipboard (*The clipboard*), and a module's `ModuleHandler`s, answered in the launch's own process (`declaration/serving.py`, `host/workers.py`).
 
 ### The inbox
 
@@ -93,7 +64,7 @@ Every party has an inbox, kept by the host service (`inbox/`).
   - a question with its decisions (`Question`);
   - an answer (`Answer`);
   - the dashboard's review (`Review`);
-  - trust on launch's approval (`Approval`, `docs/launch.md`, *Trust on launch*), decided rather than answered, since no party's inbox waits for its answer. One a push to the integration branch asked names the session that pushed, its launch's main conversation as the service last heard it (`Approval.pushed_by`): a push comes from the room's git, not a call, so which of the session's conversations pushed isn't known. The operator's comment on their answer, given in the dashboard or with `lup-dev inbox answer <n> --approve --comment …`, reaches that conversation as a note from the operator saying which approval and the answer (`Delivery.decided`); one a launch asked at its terminal has no session to tell, and its comment is kept with its answer alone;
+  - trust on launch's approval (`Approval`, `docs/trust.md`), decided rather than answered, since no party's inbox waits for its answer. One a push to the integration branch asked names the session that pushed, its launch's main conversation as the service last heard it (`Approval.pushed_by`): a push comes from the room's git, not a call, so which of the session's conversations pushed isn't known. The operator's comment on their answer, given in the dashboard or with `lup-dev inbox answer <n> --approve --comment …`, reaches that conversation as a note from the operator saying which approval and the answer (`Delivery.decided`); one a launch asked at its terminal has no session to tell, and its comment is kept with its answer alone;
   - a change held for the operator (`HeldChange`, `docs/judging-writes.md`, *Asking the operator*), decided too, its answer and comment written back to the hold its agent waits on;
   - a write that landed flagged (`Flagged`, the same section), holding no one: replied to, marked read and reviewed as a message is, never withdrawn, and joined by the same conversation's later writes to its file while the operator hasn't read it, flagged or refreshing it (`Inbox.gathering`, `ShowGathering`, `AskFlag`).
 - **Its kind's rank** (`Rank`, `ranked`, `inbox/store.py`), the one place each kind's is said, carried with the item (`Item.rank`): what's waiting on the operator (a question, a held change, an approval, a problem, a disagreement, a question sent as a message) first, and raising a desktop notice; news (a note, whichever tool sent it, a turn's last words among them; a friction, how the work went, a stop) next; flags last; neither raising a notice. The dashboard's review orders by it.
@@ -165,14 +136,6 @@ An item an agent's call made keeps the runtime's id for that call (`Item.call`),
 - **`lup-dev inbox show N --context`** prints it after the item, each run of tool calls a line and the call marked; the dashboard's review folds it under the item (`docs/dashboard.md`, *The review*).
 - **An item without one** says why: no agent's call made it, lup can't read its runtime's records, its record isn't on this machine, or the record doesn't hold the call.
 
-### Watching
-
-A face that stays open, the dashboard first, sees what the operator's commands fetch as it changes, with nothing polled (`host/watch.py`):
-- **A watch is a connection on the host's watch socket** (`HostLayout.watch`, beside the control socket, on the host only), carrying one control request on its first line, any kind the control socket answers. The service answers it at once, then again each time what it holds may have changed, sending the reply, one JSON line, where it differs from the one it sent last. A refusal is the last line. The sender keeps its side open while it watches, so its closing is heard and the watch ends with it; the control socket's own protocol, a request read to its end and one reply, stays as it is.
-- **What it holds changes in three places alone,** each telling the service's `Changes`: a request answered on the control socket or a room's `request.sock`, a hook answered, and an item of the inbox written (`Inbox.kept`), which catches a question asked with `wait`, made while its call is still held.
-- **From an event loop,** `host/client.py`'s `requested` asks one request and `watching` yields a request's replies as they change, raising `HostError` once the service closes the watch, as a service stopping does.
-- **What each conversation is doing** comes with the launches listed (`Talker.activity`): running a call, its tool by the runtime's name and whether it's one of lup's, which may hold it until the operator answers; between calls; or ended, a subagent whose conversation is over; each since its hook, through `lup_dev.clock`. It's held in memory, so a service started again knows a conversation's from its next hook.
-
 ### Credentials on the host
 
 The room holds no SSH agent, key, token or `gh` login (`docs/launch.md`, *The mounts*). The host carries out a fixed set of actions with the operator's credentials for it, each held to the limits the project's declaration sets (`DESIGN.md`, *Defaults*: "The operator's credentials stay on the host, used on the agent's behalf within limits the project sets"). Lent into the room, credentials would answer to nothing: a forwarded SSH agent "can sign anything that key can sign, for every host it reaches", as the first lup found (its `2026479aa`).
@@ -211,9 +174,9 @@ Beyond the limits, an action is refused, saying the project's declaration doesn'
 - **It pushes by object id,** `git push <url> <oid>:<dst>`, one update at a time, or an `--atomic` batch as one push so none lands if any is refused. An update git didn't force is never forced, so the forge refuses a non-fast-forward too; a force the limits allow is pushed forced (`+`, or `--force-with-lease` where git sent a lease). Each update's `ok <dst>` or `error <dst> <why>` carries git's own words. The objects are in the repository's store already, which the room shares, so nothing crosses the socket but ids.
 - **`list`** is `git ls-remote <url>`. **`fetch`** is `git fetch --no-write-fetch-head <url> <name>`, after which the object asked for must be there; no ref is written on the host.
 - **The operator's credentials** are the service's environment: their SSH agent and git's credential helpers as the terminal had them when a launch started the service. A push failing on them says git's own error; `lup-dev host stop` and the next launch start the service from a terminal that has them.
-- **git is spawned through asyncio** and awaited on the service's event loop, as each judge is (`docs/launch.md`, *On the host: the service*).
+- **git is spawned through asyncio** and awaited on the service's event loop, as each judge is (`docs/host.md`).
 - **Every push and fetch is said in the service's log:** the launch, the remote, each ref and object, the outcome, and git's standard error once.
-- **A push to the integration branch asks trust's approval** of the zone at its tip, where it isn't the one approved (`proposed_after`, `cli.py`; `docs/launch.md`, *Trust on launch*).
+- **A push to the integration branch asks trust's approval** of the zone at its tip, where it isn't the one approved (`proposed_after`, `cli.py`; `docs/trust.md`).
 - **A push still moves the room's remote-tracking ref** where the repository has a fetch refspec, so the checkpoint can set a pushed write aside as pulled (#13). lup's own repository has no fetch refspec, so no remote-tracking refs.
 
 #### Running git on the host
@@ -294,7 +257,7 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 | `host/records.py` | Each runtime's session records, as its adapter finds and reads them (`Records`, `Reader`, `Called`) |
 | `inbox/store.py` | Items and parties, kept one file each: `Inbox`, `Item`, `Operator`, `Conversation`; `Message`, `Question` with each `Decision`, `Answer` with each `Ruling`, `Review` with each `Comment`, `Approval` and `HeldChange`, with their `Diff` and their `ChangedFiles`, each a `ChangedFile` of `Text` or `Binary` content (`content`); the states, `Waiting`, `Told`, `Answered`, `Done`, `Decided`, `Superseded`; `Draft`; `InboxError` |
 | `inbox/delivery.py` | Telling each conversation, once (`Delivery`, the service's `Post`), an idle session's doorbell (`doorbell`), and the operator's notices |
-| `inbox/typed.py` | An approval's types, read on the host once it's asked with the reading of its files' parse, its files kept again with their whole reading (`TypeReader`, a `Companion` of the service; `docs/launch.md`, *Trust on launch*) |
+| `inbox/typed.py` | An approval's types, read on the host once it's asked with the reading of its files' parse, its files kept again with their whole reading (`TypeReader`, a `Companion` of the service; `docs/trust.md`) |
 | `inbox/tools.py` | `blocked`, `stop`, `note`, `friction`, `how_it_went`, `ask`, `send`, `wait_inbox`, `inbox` and `withdraw` (`InboxTools`, a `RoomTools`; `Speaker`, `specs`) |
 | `policy/tools.py`, `policy/holds.py` | `judged` (`JudgeTools`, a `RoomTools`; `Onlooker`, its input `Scope`); a repository's holds, found by its verdict log (`logged`) |
 | `inbox/ends.py` | A turn's end held once per thing, across turns (`holding`) |

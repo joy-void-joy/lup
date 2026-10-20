@@ -1,6 +1,6 @@
 """Reaching the host service: finding it on its control socket, or starting it; and from a room, on its launch's request socket.
 
-`docs/launch.md`, *On the host: the service*: one service per user, started by the
+`docs/host.md`: one service per user, started by the
 first launch that finds none answering, and running until it's stopped, as the
 engine is found or started on demand. A client that finds no service starts
 `lup-dev host` as a detached process, and waits through `lup_dev.clock` until its
@@ -8,7 +8,7 @@ control socket answers, so tests drive the time.
 
 A program in a room reaches the service through `RoomClient`, one typed request
 on `/run/lup/request.sock`, which the service answers with the launch it knows by
-the socket (`docs/host-tools.md`, *The room's requests*).
+the socket (`docs/host.md`, *How a room reaches it*).
 
 A request whose reply comes only once something happens, such as an approval's
 answer, holds its connection open (`HostClient.held`, `Outstanding`), with no
