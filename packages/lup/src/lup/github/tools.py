@@ -1,10 +1,10 @@
 """lup's GitHub tools in a launched session: reading and finding issues, filing one, commenting, opening a draft pull request.
 
-`docs/host-tools.md`, *lup's tools*. Each acts on the launch's own repository on
+`docs/inbox.md`, *lup's tools*. Each acts on the launch's own repository on
 GitHub, named when the launch started (`Register.github`), but for the two that
 read, which reach another the operator's login can read where a call names it
-(`repository`, `docs/related-repositories.md`); each through the operator's `gh`
-on the host (`lup_dev.forge.github`), and only within the limits the project's
+(`repository`, `docs/launch.md`, *Related repositories*); each through the
+operator's `gh` on the host (`lup_dev.forge.github`), and only within the limits the project's
 declaration sets (`Register.limits`): a tool's action (`read-issues`,
 `file-issue`, `comment`, `draft-pull-request`) is checked before anything runs,
 and one beyond the limits is refused, saying the declaration doesn't allow it and

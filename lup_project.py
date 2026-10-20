@@ -48,6 +48,9 @@ class LupDevelopment(Module):
       operator reviews every change to it before it lands.
     - Working on lup is `AGENTS.md`, the project's own section of the guidance,
       after the sections of lup's modules.
+    - The guidance sections lup's modules ship are the operator's documents, as
+      `AGENTS.md` and `DESIGN.md` are: every project's sessions read them, so
+      each change waits for the operator, who sees how the guidance changes.
     - Chromium is in the room alone, for sessions to drive the dashboard's page
       headless with Playwright, looking at what they build; nothing on the host
       needs it, so it's a package of the room's image rather than a requirement.
@@ -66,7 +69,10 @@ class LupDevelopment(Module):
     packages: Packages = Packages.of(
         Package(name="chromium", why="Playwright drives it to look at the dashboard")
     )
-    paths: Paths = Paths.of(protected=["packages/lup-dev/src/lup_dev/catalog/**"])
+    paths: Paths = Paths.of(
+        protected=["packages/lup-dev/src/lup_dev/catalog/**"],
+        operator_documents=["packages/**/guidance.md", "packages/**/guidance/*.md"],
+    )
     gate: Gate = Gate.of(
         Step(
             name="engine",

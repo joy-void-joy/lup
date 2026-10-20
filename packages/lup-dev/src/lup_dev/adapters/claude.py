@@ -21,11 +21,11 @@ follows such a hold. When judging itself fails at a turn's end, the turn ends,
 and the operator is warned once in `systemMessage`, which also carries what the
 session's turn's end tells without holding it.
 
-In a launched room (`docs/launch.md`, *The one hook and the host service*), Claude
-Code runs the room's hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse` for
-every call, `Stop` and `SubagentStop` (`hooks`), so the host service hears each
+In a launched room (`docs/host.md`, *The one hook*), Claude Code runs the
+room's hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse` for every call,
+`Stop` and `SubagentStop` (`hooks`), so the host service hears each
 conversation's start, each turn's start and the prompt it starts on, its calls
-and its turn's ends (`docs/host-tools.md`, *How an agent is told*). The judge
+and its turn's ends (`docs/inbox.md`, *How an agent is told*). The judge
 reads only `SessionStart` and the file tools' writes, judged before they land
 (`heard`, `WRITING`): no checkpoint, as in lup's own repository, so the turn's ends
 hold back nothing of the judge's. Every other hook the service answers itself,
@@ -98,7 +98,7 @@ What the host's part relies on, from Claude Code's hooks reference
   alongside modified ones"; the reference pairs it with `allow` or `ask`, and is
   silent on it alone. The first lup measured on Claude Code 2.1.283 that "a
   rewrite with no decision reached the server even for a tool with
-  `additionalProperties: false`" (its `docs/platform-differentiation.md`); owed
+  `additionalProperties: false`" (`docs/platform-differentiation.md` in `lup-legacy`); owed
   live on the version a launch runs (`docs/field-notes.md`, *Piece 2, live*);
 - `PreToolUse`'s `additionalContext` is a "String added to Claude's context
   alongside the tool result", `SessionStart`'s one "added to Claude's context at

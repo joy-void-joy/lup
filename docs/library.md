@@ -1,6 +1,6 @@
 # The library: asking an agent from code
 
-`lup` (`packages/lup/src/lup/`) is what a project imports to ask Claude or Codex a question from code and get a typed answer back, and to test that code without reaching a real agent. The same package compiles a declaration for a terminal and runs it in a room (`docs/launch.md`), and holds the tools a launched session gets (`docs/host-tools.md`); this doc is the ask.
+`lup` (`packages/lup/src/lup/`) is what a project imports to ask Claude or Codex a question from code and get a typed answer back, and to test that code without reaching a real agent. The same package compiles a declaration for a terminal and runs it in a room (`docs/launch.md`), and holds the tools a launched session gets (`docs/inbox.md`); this doc is the ask.
 
 ## What we have
 
@@ -120,7 +120,7 @@ The tool is `submit`. Claude Code shows it as `mcp__lup__submit`, a tool of lup'
 
 `@lup_tool` (`tools/tool.py`) makes an async function taking one pydantic model a tool, returning a model (answered as JSON) or `str` (answered in those words); on a method, each instance's own tool (`Method`). Its name is the function's and its description the docstring, required since it's what the model reads. Its summary is the docstring's first line, standing alone, 50 characters at most, which a session finding tools through tool search lists (`ToolSpec.summary`); read with `pydoc.splitdoc`, so a first sentence wrapped onto a second line is refused rather than cut. Anything else raises `ToolError`, for a `Tool` or `ToolSpec` made directly too. Any tool can carry `before` hooks. A tool runs in the caller's process.
 
-**Serving tools over MCP** (`tools/serving.py`): what a server serves is a `Toolset`, an ABC (`specs()`, `call(name, arguments) -> Answer`). A turn's `Toolbox` is one; the tools a launch gives its session another (`docs/host-tools.md`).
+**Serving tools over MCP** (`tools/serving.py`): what a server serves is a `Toolset`, an ABC (`specs()`, `call(name, arguments) -> Answer`). A turn's `Toolbox` is one; the tools a launch gives its session another (`docs/inbox.md`).
 - `tool_server(toolset, name="lup")` is an MCP server on `mcp`'s low-level `Server`, handing each call over with its arguments as sent, so lup validates, refuses, counts and records a malformed call like any other; the SDK's `create_sdk_mcp_server` would refuse it before lup saw it.
 - `serve(toolset, reader, writer, name="lup")` serves one MCP session over a connection's streams, newline-delimited JSON-RPC as stdio carries it, so a stdio server that only bridges to a socket reaches a toolset served there.
 - Results are `content` only, one text block, never `structuredContent`, which Codex would show in its place (`docs/field-notes.md`, *MCP in a launched session*).
@@ -224,7 +224,7 @@ Each is the only module importing its SDK, and its docstring holds what it relie
 | `adapters/claude/runtime.py`, `adapters/codex/runtime.py` | `ClaudeAdapter`, `CodexAdapter` (with `LAUNCH`) |
 | `adapters/codex/layout.py`, `adapters/codex/settings.py` | `CodexLayout`, lup's Codex home and the login it links to; `CodexSettings`, the variables it reads |
 
-Beside the ask, in other docs: the terminal a declaration compiles to (`sessions/terminal.py`, each adapter's `terminal.py`, `adapters/claude/layout.py` and `settings.py`) and rooms (`rooms/`), in `docs/launch.md`; the bridge to lup's tool server (`sessions/bridge.py`) and the GitHub tools (`github/`), in `docs/host-tools.md`; transcripts (`transcripts/`), in `docs/resume-guidance.md`; `@lup_hook` (`tools/hook.py`), in `docs/declaration.md`; and running a program (`programs.py`).
+Beside the ask, in other docs: the terminal a declaration compiles to (`sessions/terminal.py`, each adapter's `terminal.py`, `adapters/claude/layout.py` and `settings.py`) and rooms (`rooms/`), in `docs/launch.md`; the bridge to lup's tool server (`sessions/bridge.py`), in `docs/host.md`; the GitHub tools (`github/`), in `docs/credentials.md`; transcripts (`transcripts/`), in `docs/launch.md`, *Guidance*; `@lup_hook` (`tools/hook.py`), in `docs/declaration.md`; and running a program (`programs.py`).
 
 Runtime-neutral code lives under `sessions/` and `tools/`; everything a runtime spells its own way lives in its adapter under `adapters/` (`docs/conventions.md`, *Imports and boundaries*), named so rather than `providers`, which also means a model provider or an endpoint. Import contracts in the root `pyproject.toml` keep each SDK in its adapter, and anything inside `lup` from importing its front door, which imports the adapters. The tests are in `packages/lup/tests/`.
 

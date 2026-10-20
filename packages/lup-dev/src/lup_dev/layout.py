@@ -224,7 +224,7 @@ class CheckoutLayout(Model):
         """The person's own layer of the declaration, which git ignores.
 
         Loaded after the project's declaration and layered on top of it, in the
-        same grammar (`docs/related-repositories.md`, *A person's own layer*); trust on
+        same grammar (`docs/declaration.md`, *A person's own layer*); trust on
         launch approves it by its content.
         """
         return self.root / f"{self.declaration.stem}.local.py"
@@ -336,7 +336,7 @@ class LaunchSockets(Model):
 
 
 class InboxLayout(Model):
-    """Where lup's inbox keeps its items and its parties, one JSON file each (`docs/host-tools.md`, *The inbox*).
+    """Where lup's inbox keeps its items and its parties, one JSON file each (`docs/inbox.md`).
 
     The host service is the only writer; no room mounts it.
     """
@@ -461,7 +461,7 @@ class JudgeLayout(Model):
 
     Trust on launch installs the copy the operator approved here, as a uv tool of
     its own (`UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`), so a second project's approval
-    doesn't replace the first's (`docs/launch.md`, *Trust on launch*).
+    doesn't replace the first's (`docs/trust.md`).
     """
 
     home: Path
@@ -700,6 +700,6 @@ class Layout(Model):
         """Say where a repository's host zone the operator approved last is kept.
 
         The commit approved, the zone's fingerprint there, its paths and the
-        `lup-dev` it runs (`docs/launch.md`, *Trust on launch*).
+        `lup-dev` it runs (`docs/trust.md`).
         """
         return self.repository(repository) / "approved.json"

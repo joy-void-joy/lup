@@ -1036,8 +1036,8 @@ def test_a_push_not_taken_in_time_is_put_back_and_its_launch_rung_through_the_so
         (
             "one: claude session s1 took nothing lup pushed within 0 seconds, so "
             "it's woken through its messaging socket from now on: its runtime may "
-            "not have loaded lup's server to push (docs/host-tools.md, *How an "
-            "agent is told*)"
+            "not have loaded lup's server to push (docs/inbox.md, *How an agent "
+            "is told*)"
         )
     ]
 

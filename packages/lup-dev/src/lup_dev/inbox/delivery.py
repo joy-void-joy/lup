@@ -1,6 +1,6 @@
 """Telling each conversation what waits in its inbox, once: at its hooks, by a held call, and by starting a turn of its idle session.
 
-`docs/host-tools.md`, *How an agent is told*. Every item waiting for a
+`docs/inbox.md`, *How an agent is told*. Every item waiting for a
 conversation is told together, oldest first, by whichever comes first:
 - **its next call,** beside it, as the hook's context (`telling`, which the host
   service asks at every hook, the `Post` it's handed); but not at the start of a
@@ -1170,7 +1170,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             f"{place.launch}: {who(party)} took nothing lup pushed within "
             f"{self.patience.total_seconds():g} seconds, so it's woken through its "
             "messaging socket from now on: its runtime may not have loaded lup's "
-            "server to push (docs/host-tools.md, *How an agent is told*)"
+            "server to push (docs/inbox.md, *How an agent is told*)"
         )
         await self.wake(party)
 

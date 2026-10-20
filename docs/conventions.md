@@ -260,9 +260,9 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 | `codescan/` | reading code: the engine's contract and client, the `# lup:` directives, conditions, ruff, and `docs/rules.md` compiled from the rule table |
 | `policy/` | judging every write: roles, the judgement, the checkpoint and its store, holds, verdicts, reports |
 | `adapters/` | each runtime's hooks, the only code naming a runtime |
-| `forge/` | GitHub from the host, through `gh` and the operator's login: lup's GitHub tools in a launched session, and the room's issue states (`docs/host-tools.md`, *GitHub through `gh`*) |
-| `inbox/` | the inbox in the host service: its store, telling each conversation, its tools in a launched session, the operator's requests, turns' ends held once per thing (`docs/host-tools.md`, *The inbox*) |
-| `remote/` | git through the host (`docs/host-tools.md`): the room's remote helper, on the standard library alone (`helper.py`), the room's git configuration (`config.py`), and the pushes and fetches the host carries out for it, within the limits (`protocol.py`) |
+| `forge/` | GitHub from the host, through `gh` and the operator's login: lup's GitHub tools in a launched session, and the room's issue states (`docs/credentials.md`, *GitHub through `gh`*) |
+| `inbox/` | the inbox in the host service: its store, telling each conversation, its tools in a launched session, the operator's requests, turns' ends held once per thing (`docs/inbox.md`) |
+| `remote/` | git through the host (`docs/credentials.md`): the room's remote helper, on the standard library alone (`helper.py`), the room's git configuration (`config.py`), and the pushes and fetches the host carries out for it, within the limits (`protocol.py`) |
 | `host/` | the host service, which rooms call, and its client (`docs/launch.md`); it imports none of the other subsystems |
 | `launch/` | launching a session (`docs/launch.md`): trust on launch (`trust.py`), the maintaining room and its image (`room.py`, `images.py`), each runtime's latest CLI (`clis.py`), the session's guidance (`guidance.py`) |
 

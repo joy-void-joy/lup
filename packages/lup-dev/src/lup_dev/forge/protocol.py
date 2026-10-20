@@ -1,6 +1,6 @@
 """The room's request for an issue's state, and the host's answer.
 
-`docs/host-tools.md`, *The gate in a room*. The gate checks each deferral's
+`docs/credentials.md`, *The gate in a room*. The gate checks each deferral's
 issue is still open, and a room holds no `gh` and no login, so the gate there
 asks the host on the launch's `request.sock` (`codescan/directives.py`,
 `HostIssues`). The request is the core's, since the gate asks it whatever modules

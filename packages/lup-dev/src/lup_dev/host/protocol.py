@@ -79,8 +79,8 @@ type Action = Literal[
 ]
 """What the host can do with the operator's credentials for a launch, by name.
 
-Each names a handler lup carries out on the host (`docs/host-tools.md`,
-*Credentials on the host*): fetching from one of the repository's remotes;
+Each names a handler lup carries out on the host (`docs/credentials.md`):
+fetching from one of the repository's remotes;
 pushing to one, a push that isn't a fast-forward being `force-push`, and one
 removing a branch or tag `delete-ref`; reading issues and pull requests, the
 repository's own or another's the operator's login can read; filing an issue;

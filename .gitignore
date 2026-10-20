@@ -6,7 +6,7 @@ __pycache__/
 # (`docs/launch.md`, *Guidance*).
 /AGENTS.local.md
 # The person's own layer of the declaration, never committed: the other
-# repositories they relate among it (`docs/related-repositories.md`).
+# repositories they relate among it (`docs/launch.md`, *Related repositories*).
 /lup_project.local.py
 # The engine's build: the link to pyright's source in a cache outside the
 # repository, the bundler, and the built engine with its stubs.

@@ -1,6 +1,6 @@
 """What a push would publish, commit by commit, and where a value never published is in it.
 
-`docs/private.md`, *A push*. What the remote holds is what its refs reach, as the
+`docs/private.md`, *The door*. What the remote holds is what its refs reach, as the
 host listed them; what a push publishes is every commit its updates reach
 beyond that (`git rev-list --ignore-missing`, so an object the store lacks, as a
 stale listing may name, is skipped and more is checked, never less), and the

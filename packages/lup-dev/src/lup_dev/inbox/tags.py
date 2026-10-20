@@ -1,8 +1,9 @@
 r"""What lup's inbox tells an agent, written as tags: each item one element, its attributes saying which item it is and whom it's from, each of its parts a tag of its own.
 
-`docs/host-tools.md`, *How an agent is told*. A quote, the operator's reply to
-it and their comment on a whole item each have a tag, so an agent can't take
-one for another, and an item says whom it's from before anything it says.
+`docs/inbox.md`, *How an agent is told*, *As tags*. A quote, the operator's
+reply to it and their comment on a whole item each have a tag, so an agent
+can't take one for another, and an item says whom it's from before anything it
+says.
 
 Text in a tag stays as its writer wrote it, so the operator's code reads as
 code, where XML's escaping would write each `<` as `&lt;`. Only `</` is written

@@ -1,6 +1,6 @@
 """The host service: one per user, on the host, which rooms call for what only it can do.
 
-`docs/launch.md`, *On the host: the service*. It listens on a control socket on the
+`docs/host.md`. It listens on a control socket on the
 host only, taking typed requests (`host/protocol.py`), each answered by the handler
 routed its kind: the service's own register a launch, end one, list those served,
 and stop the service; a module registers its own handlers with the service it

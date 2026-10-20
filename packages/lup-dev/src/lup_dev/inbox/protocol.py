@@ -1,6 +1,6 @@
 """The operator's requests to lup's inbox, on the host service's control socket, and their handlers.
 
-`docs/host-tools.md`, *The operator's face*. `lup-dev inbox` and its commands
+`docs/inbox.md`, *The operator's face*. `lup-dev inbox` and its commands
 send these, each a typed request on the control socket, starting the service
 where none runs, as a launch does: what waits for the operator (`ListInbox`), one
 item whole (`ShowItem`), a question's answer (`AnswerItem`), a message read
@@ -9,7 +9,7 @@ the inbox's own kinds, registered with the service by `cli.py`; a room can't
 send them, since it can't reach the control socket, and the store isn't
 mounted.
 
-Trust on launch sends the approval's (`docs/launch.md`, *Trust on launch*): the
+Trust on launch sends the approval's (`docs/trust.md`): the
 launch asks it (`AskApproval`, joining the one waiting about the same zone) and
 waits on its answer (`AwaitApproval`, whose reply comes once it's answered); the
 launching terminal, or `lup-dev inbox answer` at any other, answers it

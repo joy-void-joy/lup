@@ -1,6 +1,6 @@
 """git's pushes and fetches on the host for a launch's room: the remote helper's requests, and their handlers.
 
-`docs/host-tools.md`, *git through a remote helper*. The room's helper
+`docs/credentials.md`, *git through a remote helper*. The room's helper
 (`remote/helper.py`) sends one request per batch git hands it, on the launch's
 `request.sock`, and the service answers with the launch it knows by the socket
 (`host/rooms.py`). Where git runs, and to which remote, is the host's word:
@@ -557,7 +557,6 @@ class PushHandler(Model, RoomHandler[Pushing]):
                 ],
                 said=barred.said,
             )
-        await self.remotes.contained(launch)
         url = await self.remotes.url(launch, request.remote, push=True)
         batches = [allowed] if request.atomic else [[each] for each in allowed]
         errors = [
@@ -638,7 +637,12 @@ class PushHandler(Model, RoomHandler[Pushing]):
         leases: dict[str, Lease],
         batch: list[Update],
     ) -> str | None:
-        """Push `batch` in one `git push`, and return why it failed, or none where it didn't."""
+        """Push `batch` in one `git push`, and return why it failed, or none where it didn't.
+
+        The object store is checked just before, so nothing runs between the
+        check and the push; a store reading from elsewhere is the batch's
+        error, so each update's outcome is still said.
+        """
 
         def refspec(update: Update) -> str:
             forced = (
@@ -650,6 +654,10 @@ class PushHandler(Model, RoomHandler[Pushing]):
         held = [
             leases[each.destination] for each in batch if each.destination in leases
         ]
+        try:
+            await self.remotes.contained(launch)
+        except HostError as stray_store:
+            return str(stray_store)
         ran = await self.remotes.git(
             launch,
             "push",
@@ -686,8 +694,8 @@ class FetchHandler(Model, RoomHandler[Fetching]):
     @override
     async def answer(self, request: Fetching, launch: Register) -> Reply:
         require("fetch", launch)
-        await self.remotes.contained(launch)
         url = await self.remotes.url(launch, request.remote, push=False)
+        await self.remotes.contained(launch)
         names = list(dict.fromkeys(each.name for each in request.wanted))
         ran = await self.remotes.git(
             launch,

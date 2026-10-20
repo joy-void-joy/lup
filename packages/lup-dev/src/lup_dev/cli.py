@@ -8,11 +8,10 @@ adds to its answer with the courier built here, and answers a hook a launch's
 judge couldn't with the answerer (`docs/launch.md`); `hook` answers through it.
 
 `trust` approves what the host runs for a repository, the check a launch makes
-first (`docs/launch.md`, *Trust on launch*). `launch` opens a runtime's session in
+first (`docs/trust.md`). `launch` opens a runtime's session in
 a room for the worktree (*The command*). `host` runs the host service, handed
 the inbox as what each conversation is told at its hooks, its tools and its
-requests; `inbox` is the operator's face on it (`docs/host-tools.md`, *The
-operator's face*).
+requests; `inbox` is the operator's face on it (`docs/inbox.md`, *The operator's face*).
 """
 
 import asyncio
@@ -522,7 +521,7 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
     Trust reads the zone with git and asks the service itself, so it runs off
     the event loop. Its repository is the launch's git directory, found
     through git from its main worktree; one holding a `commondir`, which would
-    lead git elsewhere, isn't read (`docs/host-tools.md`, *Running git on the
+    lead git elsewhere, isn't read (`docs/credentials.md`, *Running git on the
     host*). The approval names the main conversation of the session the launch
     runs, as `delivery` last heard it, which the operator's comment on their
     answer is told to: a push comes from the room's git, not from a call, so
@@ -1400,7 +1399,8 @@ def launched(
     """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, and return its CLI's exit status.
 
     In the order `docs/launch.md` gives (*The command*): trust on launch, its
-    report said; the declaration at the commit approved, with the person's own
+    report said; replace refs in the repository said, which lup's git ignores
+    (`lup_dev.git`); the declaration at the commit approved, with the person's own
     layer approved beside it, and the rules its selection runs, which the
     engine resolves for the guidance; the host's requirements, each optional
     one off said; the repository named on GitHub, or why not said; the host
@@ -1420,6 +1420,12 @@ def launched(
             "rev-parse", "--path-format=absolute", "--git-common-dir"
         )
     )
+    if Git.pinned(repository).text("for-each-ref", "--count=1", "refs/replace/"):
+        launcher.say(
+            "This repository holds replace refs (`refs/replace/`), which a room "
+            "can write to hand git other content for an object: lup's git ignores "
+            "them. `git replace -l` lists them, and `git replace -d` removes one."
+        )
     approval = approved(launcher.layout, repository)
     if approval is None:
         message = f"nothing is approved for {repository}, so nothing launches"

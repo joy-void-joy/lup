@@ -1,6 +1,6 @@
 """Each launch's open connections to lup's tool server: where what's pushed to its session goes.
 
-`docs/host-tools.md`, *How an agent is told*. The host service keeps each
+`docs/inbox.md`, *How an agent is told*. The host service keeps each
 connection on a launch's `mcp.sock` here while it serves it (`tools_served`),
 and the inbox pushes to the newest of a launch's (`Delivery.wake`): a session
 holds one connection, and its bridge connects again once the service restarts,

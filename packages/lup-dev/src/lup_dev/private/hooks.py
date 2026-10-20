@@ -87,11 +87,7 @@ class PrivateHooks(ModuleHooks):
             held = made.withheld
         match moment.published:
             case Push(updates=updates, has=has):
-                repository = Git(
-                    cwd=self.launch.repository,
-                    common=self.launch.repository,
-                    arguments=["--no-replace-objects"],
-                )
+                repository = Git.pinned(self.launch.repository)
                 spots = await asyncio.to_thread(pushed, repository, updates, has, held)
                 return refused(spots)
             case Post(parts=parts):

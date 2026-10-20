@@ -1,9 +1,10 @@
 """What the host reads of each runtime's hooks, and how it answers them; lup's own id for each conversation.
 
-`docs/host-tools.md`, *Who's calling* and *How an agent is told*. Every hook a
-launch's room sends reaches the host service, which hears it through the
-`Courier` (`heard`): its event, the runtime's own ids for the session and the
-conversation in it, its call and tool, and whether the launch's judge reads it.
+`docs/host.md`, *Who's calling*, and `docs/inbox.md`, *How an agent is told*.
+Every hook a launch's room sends reaches the host service, which hears
+it through the `Courier` (`heard`): its event, the runtime's own ids for the
+session and the conversation in it, its call and tool, and whether the launch's
+judge reads it.
 A hook the judge doesn't read the service answers itself, without starting the
 judge's process. Every answer, the judge's or the service's own, goes out through
 the `Courier` again (`told`): with what the conversation is told added, and a call
@@ -22,10 +23,10 @@ couldn't be (`returned`).
 
 lup's own id for each conversation (`Conversations`) is minted the first time a
 hook names it (a session's start, a subagent's start, its first call), and kept
-with the runtime's ids it stands for, so nothing past the adapter reads a
-runtime's ids. A launch's ids live as long as the service serves it: a service
-started again mints its own, which its hooks stamp from then on, while every MCP
-connection the service before held closed with it.
+with the runtime's ids it stands for, so lup's tools and calls name a
+conversation by lup's id, never a runtime's. A launch's ids are kept with it,
+so a service started again reads them back and its hooks stamp the same ones,
+while every MCP connection the service before held closed with it.
 """
 
 import secrets
@@ -65,7 +66,7 @@ class Heard(Model):
     after_block: bool = False
     """At a turn's end, whether the turn went on because its end was held just
     before: an end that follows a hold is let through, whatever's still there
-    (`docs/host-tools.md`, *No turn that won't end*)."""
+    (`docs/inbox.md`, *No turn that won't end*)."""
     fits: int
     """The most this hook's answer tells the model whole, in bytes of UTF-8: past
     it, the runtime keeps the text in a file the model isn't asked to read."""
