@@ -1,6 +1,6 @@
 """Finding the values never published in a text: each literally, ignoring case, never inside a longer word.
 
-`docs/private.md`, *Matching*. A value is a string, never a pattern:
+`docs/private.md`, *Values are found*. A value is a string, never a pattern:
 - **ignoring case:** both sides are case-folded (`str.casefold`), so `Op`
   starting a sentence is `op`; a place is counted in the text as written, even
   where folding changes a character's length (`ß` folds to `ss`);

@@ -1,6 +1,6 @@
 """The gate's request for values never published, from a room, and the host's answer.
 
-`docs/private.md`, *The gate*. A room never sees the list, so the gate's
+`docs/private.md`, *The gate's `private` step*. A room never sees the list, so the gate's
 `private` step there sends the host each file it would check, whole, and the
 commit `HEAD` names, on the launch's request socket; the `Private` module's
 handler answers on the host (`lup_dev.private.scanning`) with each kind and

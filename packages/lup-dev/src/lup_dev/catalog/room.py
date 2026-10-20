@@ -181,8 +181,8 @@ type CacheLifetime = Literal["5m", "1h"]
 class SessionDefaults(Model):
     """How every session runs unless the person's own runtime settings or the project say otherwise: `Core`'s session.
 
-    In neutral terms, which each runtime's adapter spells (`DESIGN.md`,
-    *Sessions*). A person's own settings outrank these, and a field the
+    In neutral terms, which each runtime's adapter spells (`docs/launch.md`,
+    *The settings compiled for each runtime*). A person's own settings outrank these, and a field the
     project's declaration sets outranks theirs.
     """
 
@@ -215,8 +215,9 @@ class SessionDefaults(Model):
       `ReportFindings` weigh in every turn and go unused in lup's sessions: an
       interactive session carries 113 KB of built-in tool schemas, `Artifact`
       alone 55 KB;
-    - `EnterWorktree` and `ExitWorktree` are the native worktree tools, which
-      `DESIGN.md` denies in favour of lup's own (*Sessions*).
+    - `EnterWorktree` and `ExitWorktree` are the native worktree tools: a
+      worktree for another agent's work is lup's spawn's to make (#117), and a
+      session makes its own with git.
 
     The native messaging tools (`SendMessage`, `ListAgents`) stay until lup's
     spawn exists, with the native `Agent`: a session resumes a subagent it
