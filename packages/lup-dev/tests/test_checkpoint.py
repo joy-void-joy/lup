@@ -1,6 +1,8 @@
 """The checkpoint: when it runs, what it judges, and what it does about it."""
 
+import inspect
 import json
+from annotationlib import Format
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,17 +19,22 @@ from lup_dev.declaration.grammar import Drop
 from lup_dev.declaration.resolve import Declaration, Selected
 from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.inbox.store import Asked, ChangedFile, Reading, Text
+from lup_dev.launch.session import hooked
 from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
+    Call,
     CallFinished,
     CallStarted,
     ConversationEnded,
+    Pending,
     Reply,
+    Running,
     Session,
     SessionStarted,
     TurnEnded,
     TurnStarted,
     Worktree,
+    over,
 )
 from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
@@ -202,6 +209,58 @@ def test_a_call_that_never_finishes_is_cleared_when_the_turn_ends(
 
 def running(kit: Kit, repo: Path) -> list[str]:
     return [each.key for each in worktree(kit, repo).running().calls]
+
+
+def test_a_call_that_must_be_over_is_forgotten_when_the_calls_are_kept(
+    kit: Kit, repo: Path
+) -> None:
+    """A call no hook finished, from a session long gone or recorded by a judge
+    that kept no start time, is forgotten as the list is next kept; a call
+    started within a hook's longest wait stays."""
+    start(kit, repo, "gone")
+    call_for("gone", kit, repo, "stale")
+    store = worktree(kit, repo).store.layout.calls
+    kept = read_model(store, Running)
+    assert kept is not None
+    untimed = Call(key="untimed", session="gone", agent="", tool="Bash")
+    write_model(store, Running(calls=[*kept.calls, untimed]))
+    kit.clock.sleep(timedelta(hours=25).total_seconds())
+    start(kit, repo)
+    call(kit, repo, "c1")
+    assert running(kit, repo) == ["c1"]
+    kit.clock.sleep(timedelta(hours=24).total_seconds())
+    call(kit, repo, "c2")
+    assert running(kit, repo) == ["c1", "c2"]
+
+
+def test_a_pending_write_no_end_confirmed_is_forgotten_once_its_call_must_be_over(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+
+    def edit(key: str, old: str) -> None:
+        change = Replacement(
+            call=key, tool="Edit", path=repo / CORE, old=old, new=f"{old}_"
+        )
+        assert before(kit.bench, change, SESSION, repo).outcome == "allow"
+
+    edit("e1", "def helper")
+    record = session(kit, repo)
+    untimed = Pending(call="untimed", path=CORE, blob=record.pending[0].blob)
+    worktree(kit, repo).keep(
+        record.model_copy(update={"pending": [*record.pending, untimed]})
+    )
+    kit.clock.sleep(timedelta(hours=25).total_seconds())
+    edit("e2", "def ask")
+    assert [each.call for each in session(kit, repo).pending] == ["e2"]
+
+
+def test_a_call_lasts_no_longer_than_a_rooms_hook_waits() -> None:
+    def default(function: Callable[..., object], name: str) -> object:
+        signed = inspect.signature(function, annotation_format=Format.STRING)
+        return signed.parameters[name].default
+
+    assert default(over, "lifetime") == default(hooked, "hold")
 
 
 def test_a_turns_start_clears_the_calls_the_runtime_shows_over(

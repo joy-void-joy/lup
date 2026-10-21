@@ -47,6 +47,7 @@ import difflib
 import secrets
 import shutil
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 from functools import cached_property
 from pathlib import Path
 from typing import Literal, override
@@ -136,6 +137,21 @@ class Reply(Model):
     tells the agent keeps it going, so information that mustn't goes here."""
 
 
+def over(
+    started: datetime | None, now: datetime, lifetime: timedelta = timedelta(hours=25)
+) -> bool:
+    """Say whether what a call started at `started` must be over by `now`.
+
+    No call outlives its hooks, and none waits longer for its answer than a
+    room's hook does (`hooked`, `launch/session.py`), above a hold's day: what
+    started `lifetime` ago is over, though no hook reported its end. What has
+    no start recorded, kept by a judge that didn't record one, counts as over
+    too: a session running across the upgrade loses the count of a call once,
+    and its turn's start or end clears the rest.
+    """
+    return started is None or now - started >= lifetime
+
+
 class Call(Model):
     """A tool call in flight."""
 
@@ -148,6 +164,9 @@ class Call(Model):
     turn: str | None = None
     """The runtime's id for the turn it runs in, where the runtime names its
     turns: its conversation's next turn starting means it's over."""
+    started: datetime | None = None
+    """When it started, by the judge's clock; none where a judge didn't record
+    it, which counts it as over (`over`)."""
 
     def of(self, session: str, agent: str) -> bool:
         """Say whether conversation `agent` of `session` makes this call."""
@@ -155,9 +174,18 @@ class Call(Model):
 
 
 class Running(MutableModel):
-    """The calls running in one worktree, kept under a lock."""
+    """The calls running in one worktree, kept under a lock.
+
+    A call no hook reported finishing, from a session long gone, is forgotten
+    each time the list is kept, once it must be over (`over`): otherwise the
+    list would grow with each, and every call's hooks read and rewrite it.
+    """
 
     calls: list[Call] = []
+
+    def lasting(self, now: datetime) -> None:
+        """Forget each call that must be over by `now`."""
+        self.calls = [each for each in self.calls if not over(each.started, now)]
 
     def idle(self, session: str) -> bool:
         """Say whether no call of `session` runs: what a checkpoint of `session` waits on.
@@ -191,6 +219,10 @@ class Pending(Model):
     blob: str
     """The would-be content's object id in the store."""
     removed: list[RemovedNote] = []
+    judged: datetime | None = None
+    """When it was let through, by the judge's clock, its call starting then;
+    none where a judge didn't record it. Once its call must be over (`over`),
+    it's forgotten, though no end confirmed it."""
 
 
 class Judged(Model):
@@ -245,6 +277,10 @@ class Session(MutableModel):
     inbox may still gather its writes to them: a later write to one refreshes
     that item, whatever it flags, until the inbox says none gathers them
     (`policy/flags.py`). A write to any other file asks the inbox nothing."""
+
+    def waiting(self, now: datetime) -> None:
+        """Forget each pending write whose call must be over by `now`, no end having confirmed it."""
+        self.pending = [each for each in self.pending if not over(each.judged, now)]
 
     def files(self, agent: str) -> list[Path]:
         """Return the files conversation `agent` touched, and those it watches."""
@@ -506,8 +542,9 @@ class Worktree(Model):
         """Read the calls running; hold the calls lock."""
         return read_model(self.store.layout.calls, Running) or Running()
 
-    def ran(self, running: Running) -> None:
-        """Store the calls running; hold the calls lock."""
+    def ran(self, running: Running, now: datetime) -> None:
+        """Store the calls running, forgetting those that must be over by `now`; hold the calls lock."""
+        running.lasting(now)
         write_model(self.store.layout.calls, running)
 
     def recorded(self, key: str) -> Session | None:
@@ -587,24 +624,24 @@ class Worktree(Model):
             heads.worktrees = {**heads.worktrees, self.root: head}
             write_model(path, heads)
 
-    def finish(self, session: str, call: str) -> Finished:
-        """Note that `call` finished here; say whether it counted here, and whether no call of `session` is left running here."""
+    def finish(self, session: str, call: str, now: datetime) -> Finished:
+        """Note that `call` finished here by `now`; say whether it counted here, and whether no call of `session` is left running here."""
         with self.calls_lock():
             running = self.running()
             counted = any(each.key == call for each in running.calls)
             running.calls = [each for each in running.calls if each.key != call]
-            self.ran(running)
+            self.ran(running, now)
             return Finished(counted=counted, idle=running.idle(session))
 
-    def clear(self, session: str, agent: str) -> Finished:
-        """Forget the calls conversation `agent` left running; say whether one counted here, and whether none of its session's is left."""
+    def clear(self, session: str, agent: str, now: datetime) -> Finished:
+        """Forget the calls conversation `agent` left running, by `now`; say whether one counted here, and whether none of its session's is left."""
         with self.calls_lock():
             running = self.running()
             counted = any(each.of(session, agent) for each in running.calls)
             running.calls = [
                 each for each in running.calls if not each.of(session, agent)
             ]
-            self.ran(running)
+            self.ran(running, now)
             return Finished(counted=counted, idle=running.idle(session))
 
     def busy(self, session: str, agent: str) -> bool:
@@ -1646,6 +1683,7 @@ def confirm(bench: Bench, worktree: Worktree, key: str, agent: str, call: str) -
         session.pending = [
             pending for pending in session.pending if pending.call != call
         ]
+        session.waiting(bench.services.clock.now())
         session.judged = [
             *session.judged,
             *(
@@ -1926,13 +1964,18 @@ class TurnStarted(Event):
         held = holding(bench, self.session, self.cwd, agent=self.agent)
         if held is None:
             return Reply()
+        now = bench.services.clock.now()
         for worktree in worktrees(bench, held):
             with worktree.calls_lock():
                 running = worktree.running()
-                left = [each for each in running.calls if not self.ended(each)]
+                left = [
+                    each
+                    for each in running.calls
+                    if not self.ended(each) and not over(each.started, now)
+                ]
                 if left != running.calls:
                     running.calls = left
-                    worktree.ran(running)
+                    worktree.ran(running, now)
         return Reply()
 
 
@@ -1961,18 +2004,20 @@ class CallStarted(Event):
             record.opened(self.agent)
         if self.spawns:
             return Reply()
+        now = bench.services.clock.now()
         call = Call(
             key=self.call,
             session=self.session,
             agent=self.agent,
             tool=self.tool,
             turn=self.turn,
+            started=now,
         )
         for worktree in working(bench, held, self.agent):
             with worktree.calls_lock():
                 running = worktree.running()
                 running.calls = [*running.calls, call]
-                worktree.ran(running)
+                worktree.ran(running, now)
         return Reply()
 
 
@@ -1997,7 +2042,9 @@ class CallFinished(Event):
         opened = worktrees(bench, held)
         works = held.works(self.agent)
         left = {
-            worktree.root: worktree.finish(self.session, self.call)
+            worktree.root: worktree.finish(
+                self.session, self.call, bench.services.clock.now()
+            )
             for worktree in opened
         }
         ran = [
@@ -2041,7 +2088,7 @@ class TurnEnded(Event):
             return Reply()
         opened = worktrees(bench, held)
         for worktree in opened:
-            worktree.clear(self.session, self.agent)
+            worktree.clear(self.session, self.agent, bench.services.clock.now())
         judging = [
             worktree.root
             for worktree in opened
@@ -2074,7 +2121,9 @@ class ConversationEnded(Event):
         opened = worktrees(bench, held)
         works = held.works(self.agent)
         left = {
-            worktree.root: worktree.clear(self.session, self.agent)
+            worktree.root: worktree.clear(
+                self.session, self.agent, bench.services.clock.now()
+            )
             for worktree in opened
         }
         idle = [

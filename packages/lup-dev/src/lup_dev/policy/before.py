@@ -223,8 +223,10 @@ def before(
                 path=path,
                 blob=store.keep(after.encode()),
                 removed=judgement.removed,
+                judged=services.clock.now(),
             )
             record.pending = [*record.pending, pending]
+            record.waiting(services.clock.now())
             record.flagged(writer, [path] if judgement.flags else [])
             worktree.keep(record)
     if logged is None:
@@ -342,8 +344,10 @@ def held_write(
                 path=path,
                 blob=held.blob,
                 removed=judgement.removed,
+                judged=services.clock.now(),
             )
             record.pending = [*record.pending, pending]
+            record.waiting(services.clock.now())
             record.approved = list(dict.fromkeys([*record.approved, path]))
             worktree.keep(record)
         said = f"The operator approved it: {answer.comment}" if answer.comment else ""
