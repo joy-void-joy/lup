@@ -1307,7 +1307,7 @@ def test_a_worktree_the_session_moves_into_is_judged(
     assert f"{linked}/src/pkg/core.py:11:8 - regex" in told
 
 
-def test_a_call_counts_in_every_worktree_its_session_holds(
+def test_a_call_counts_in_every_worktree_its_conversation_works_in(
     kit: Kit, repo: Path, linked: Path
 ) -> None:
     start(kit, repo)
@@ -1320,6 +1320,71 @@ def test_a_call_counts_in_every_worktree_its_session_holds(
     assert finish(kit, repo, "c2").context.startswith(
         "lup's findings on the lines changed"
     )
+
+
+def edits_in(
+    kit: Kit, cwd: Path, root: Path, key: str, *, agent: str, old: str = "def helper"
+) -> None:
+    """Conversation `agent` edits `old` in `CORE` in the worktree at `root` with a file tool, its hooks reporting `cwd`, as a subagent's report the session's."""
+    edit = Replacement(call=key, tool="Edit", path=root / CORE, old=old, new=f"{old}_")
+    before(kit.bench, edit, SESSION, cwd, agent=agent)
+    call(kit, cwd, key, tool="Edit", agent=agent)
+    (root / CORE).write_text(edit.content((root / CORE).read_text()) or "")
+    finish(kit, cwd, key, agent=agent)
+
+
+def test_a_subagent_busy_in_its_worktree_holds_back_checkpoints_there_alone(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    """A worker's hooks report the session's worktree, where its calls start;
+    once its file tools wrote in its own, its calls count there alone."""
+    start(kit, repo)
+    edits_in(kit, repo, linked, "w1", agent="worker")
+    call(kit, repo, "w2", agent="worker")
+    assert running(kit, repo) == []
+    assert running(kit, linked) == ["w2"]
+    mine = shell_write(
+        kit, repo, "c1", CORE, (repo / CORE).read_text() + "y = 2  # BAD regex\n"
+    )
+    assert mine.context.startswith("lup's findings on the lines changed")
+    edits_in(kit, repo, linked, "r1", agent="reviewer", old="def ask")
+    call(kit, repo, "r2", agent="reviewer")
+    bad(linked)
+    assert finish(kit, repo, "r2", agent="reviewer").context == ""
+    worker = finish(kit, repo, "w2", agent="worker").context
+    assert f"{linked}/src/pkg/core.py:11:8 - regex" in worker
+
+
+def test_a_subagent_works_where_its_session_does_until_its_file_tools_write(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    call(kit, repo, "w1", agent="worker")
+    reply = shell_write(
+        kit, repo, "c1", CORE, (repo / CORE).read_text() + "y = 2  # BAD regex\n"
+    )
+    assert reply.context == ""
+    worker = finish(kit, repo, "w1", agent="worker").context
+    assert worker.startswith("lup's findings on the lines changed")
+
+
+def test_the_turns_end_judges_every_worktree_but_where_anothers_call_runs(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    """The session's turn's end leaves a worker's running call alone, and so
+    its worktree, whose checkpoint that call's finish runs; elsewhere it runs
+    its last checkpoint."""
+    start(kit, repo)
+    edits_in(kit, repo, linked, "w1", agent="worker")
+    call(kit, repo, "w2", agent="worker")
+    call(kit, repo, "lost")
+    bad(repo)
+    bad(linked)
+    block = end(kit, repo).block
+    assert f"{repo}/src/pkg/core.py:11:8 - regex" in block
+    assert str(linked) not in block
+    assert running(kit, linked) == ["w2"]
+    assert running(kit, repo) == []
 
 
 def test_a_shell_write_where_the_session_never_went_isnt_judged(

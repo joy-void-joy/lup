@@ -152,7 +152,7 @@ def before(
     repository come with launch and spawn.
     """
     here = place(proposal.path)
-    held = holding(bench, session, cwd, here)
+    held = holding(bench, session, cwd, here, agent=agent or "")
     if here is None or held is None or here.repository != held.repository:
         return Decision(outcome=None)
     disk = proposal.path

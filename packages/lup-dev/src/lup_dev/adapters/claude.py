@@ -152,6 +152,13 @@ What its judging relies on, from Claude Code's hooks reference
 - a subagent's hooks carry `agent_id`, "Present only when the hook fires inside a
   subagent call", beside its session's `session_id` (seen in #32), and
   `SubagentStop` "Runs when a Claude Code subagent has finished responding";
+- a hook's `cwd` is the "Current working directory when the hook is invoked",
+  and "Subagent sessions never carry over working directory changes" (the tools
+  reference, *Bash tool behavior*): a subagent's hooks report the directory its
+  session works in, whatever worktree the subagent works on. Seven of lup's own
+  subagents, each working in a worktree of its own, recorded the launch's
+  worktree as their `cwd` on every line (2.1.304, 2026-10-21), so a subagent
+  works where its file tools write (`Holding.works`, `policy/worktrees.py`);
 - `Stop`'s `stop_hook_active` "is `true` when Claude Code is already continuing as
   a result of a stop hook"; `SubagentStop` takes "the same decision control format
   as Stop hooks".

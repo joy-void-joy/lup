@@ -982,6 +982,36 @@ def test_codex_clears_a_failed_patchs_call_at_the_turns_end(
     assert (repo / "livecheck.py").exists()
 
 
+def with_fields(raw: str, **fields: object) -> str:
+    return json.dumps({**json.loads(raw), **fields})
+
+
+def test_codex_a_subagents_call_holds_back_the_main_conversations_checkpoint(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    """Codex's hooks carry the session's working directory for every
+    conversation, and no file tool says where it writes, so every conversation
+    of a Codex session works in its one worktree: a subagent's running call holds
+    back the main conversation's checkpoint there, as two conversations working
+    in one worktree should, and its own finish runs it."""
+    codex.hook(captured("1-session-start", repo), on_codex)
+    subagent = with_fields(
+        captured("6-pre-tool-use-bash", repo), agent_id="a1", tool_use_id="s1"
+    )
+    assert codex.hook(subagent, on_codex) == ""
+    codex.hook(captured("2-pre-tool-use-add", repo), on_codex)
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    assert codex.hook(captured("3-post-tool-use-add", repo), on_codex) == ""
+    assert running(kit, repo) == ["s1"]
+    finished = with_fields(
+        captured("7-post-tool-use-bash", repo), agent_id="a1", tool_use_id="s1"
+    )
+    output = json.loads(codex.hook(finished, on_codex))
+    assert output["hookSpecificOutput"]["additionalContext"].startswith(
+        "The operator approved the held change to"
+    )
+
+
 # In a launched room
 
 
@@ -1168,6 +1198,61 @@ def test_claude_reads_without_reaching_the_judge(
         pass
 
     assert " - regex: " in beside(shell(repo, on_claude, "b1", nothing))
+
+
+def regex_in(root: Path) -> None:
+    (root / CORE).write_text((root / CORE).read_text() + "y = 2  # BAD regex\n")
+
+
+def edits_in_room(
+    repo: Path, root: Path, bench: Bench, call: str, old: str, **subagent: str
+) -> None:
+    """An `Edit` of `old` in `CORE` in the worktree at `root`, its hooks reporting `repo`, as a subagent's report the session's worktree whatever it works on; `agent_id` makes it a subagent's."""
+    edit: dict[str, object] = {
+        "file_path": str(root / CORE),
+        "old_string": old,
+        "new_string": f"{old}_",
+    }
+    start = payload(
+        repo,
+        "PreToolUse",
+        tool_name="Edit",
+        tool_input=edit,
+        tool_use_id=call,
+        **subagent,
+    )
+    in_room(start, bench)
+    (root / CORE).write_text((root / CORE).read_text().replace(old, f"{old}_"))
+    end = payload(repo, "PostToolUse", tool_name="Edit", tool_use_id=call, **subagent)
+    in_room(end, bench)
+
+
+def test_claude_a_worker_busy_in_its_worktree_holds_back_checkpoints_there_alone(
+    on_claude: Bench, repo: Path, linked: Path
+) -> None:
+    """A worker's hooks report the session's worktree (`linked` is its own,
+    where its file tools write), as Claude Code's subagents' do: its running call
+    holds back no checkpoint of the main conversation's in `repo`, and holds
+    back one in `linked`, where the main conversation edits too."""
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+    edits_in_room(repo, linked, on_claude, "w1", "def helper", agent_id="w")
+    busy = payload(
+        repo,
+        "PreToolUse",
+        tool_name="Bash",
+        tool_input={"command": "uv run pytest"},
+        tool_use_id="w2",
+        agent_id="w",
+    )
+    assert in_room(busy, on_claude) == ""
+    told = beside(shell(repo, on_claude, "b1", lambda: regex_in(repo)))
+    assert f"{repo / CORE}:11:8 - regex" in told
+    edits_in_room(repo, linked, on_claude, "m1", "def ask")
+    assert shell(repo, on_claude, "b2", lambda: regex_in(linked)) == ""
+    done = payload(
+        repo, "PostToolUse", tool_name="Bash", tool_use_id="w2", agent_id="w"
+    )
+    assert f"{linked / CORE}:11:8 - regex" in beside(in_room(done, on_claude))
 
 
 def test_claude_hooks_every_call_and_each_turns_start_and_end_in_a_room() -> None:

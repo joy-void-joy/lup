@@ -22,7 +22,12 @@ A Codex session holds only the worktree it started in, a declared gap until room
 the "Working directory for the session", and `Bash` and `apply_patch` carry only
 `tool_input.command` (its hooks docs), which lup doesn't parse. Under its
 `workspace-write` sandbox a write elsewhere lies outside the writable roots, so
-Codex's own approval decides it.
+Codex's own approval decides it. For the same reason every conversation of a
+Codex session works in that one worktree (`Holding.works`, a subagent's hooks
+carrying the session's `cwd` too: `tool_hook_cwd`, below), so a subagent's
+running call holds back the main conversation's checkpoints there, where a
+runtime whose file tools say where they write lets a worker busy in a worktree
+of its own hold back none: a gap declared with its evidence.
 
 In a launched room (`docs/host.md`, *The one hook*), Codex
 runs the room's hook on `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` and

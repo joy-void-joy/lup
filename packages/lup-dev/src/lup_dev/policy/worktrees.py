@@ -10,7 +10,9 @@ another repository, as git says.
 
 The session index keeps each session's repository and the worktrees it holds:
 where it started, where its file tools wrote, and where its hooks reported its
-working directory.
+working directory. It keeps, too, the worktrees each of its conversations works
+in (`Holding.works`), which a call of that conversation holds checkpoints back
+in while it runs (`docs/judging-writes.md`, *After a call: the checkpoint*).
 """
 
 from pathlib import Path
@@ -68,11 +70,16 @@ def place(path: Path) -> Place | None:
 
 
 class Holding(MutableModel):
-    """A session's repository, and the worktrees of it the session holds."""
+    """A session's repository, the worktrees of it the session holds, and those each of its conversations works in."""
 
     repository: Path
     worktrees: list[Path] = []
     """Their roots, in the order the session reached them."""
+    started: dict[str, list[Path]] = {}
+    """By conversation, `""` for the session's own and a subagent's id else: the
+    worktrees its hooks reported its working directory in."""
+    wrote: dict[str, list[Path]] = {}
+    """By conversation: the worktrees its file tools wrote in."""
 
     def reach(self, root: Path) -> bool:
         """Hold the worktree at `root`; say whether the session hadn't reached it."""
@@ -80,6 +87,48 @@ class Holding(MutableModel):
             return False
         self.worktrees = [*self.worktrees, root]
         return True
+
+    def note(self, agent: str, *, started: Path | None, wrote: Path | None) -> bool:
+        """Note that conversation `agent` worked where its hook's working directory is (`started`) and where its file tool writes (`wrote`); say whether that's new."""
+
+        def added(
+            kept: dict[str, list[Path]], root: Path | None
+        ) -> dict[str, list[Path]]:
+            had = kept.get(agent, [])
+            return (
+                kept if root is None or root in had else {**kept, agent: [*had, root]}
+            )
+
+        now_started = added(self.started, started)
+        now_wrote = added(self.wrote, wrote)
+        new = now_started != self.started or now_wrote != self.wrote
+        self.started = now_started
+        self.wrote = now_wrote
+        return new
+
+    def works(self, agent: str) -> list[Path]:
+        """Return the worktrees conversation `agent` works in, of those the session holds.
+
+        The session's own conversation works where its hooks report its working
+        directory, which follows it, and where its file tools write. A
+        subagent's hooks report where its session works rather than where it
+        does (each adapter says so of its runtime), so a subagent works where
+        its file tools write, and only until they have, where its hooks report.
+
+        >>> held = Holding(repository=Path("/r/.git"), worktrees=[Path("/a"), Path("/b")])
+        >>> held.note("w", started=Path("/a"), wrote=None)
+        True
+        >>> held.works("w")
+        [PosixPath('/a')]
+        >>> held.note("w", started=Path("/a"), wrote=Path("/b"))
+        True
+        >>> held.works("w")
+        [PosixPath('/b')]
+        """
+        started = self.started.get(agent, [])
+        wrote = self.wrote.get(agent, [])
+        roots = [*started, *wrote] if not agent or not wrote else wrote
+        return [root for root in dict.fromkeys(roots) if root in self.worktrees]
 
     def release_removed(self) -> bool:
         """Stop holding each worktree whose root is gone; say whether one was.

@@ -12,15 +12,17 @@ events (`docs/judging-writes.md`, *After a call: the checkpoint*):
 | `ConversationEnded` | a subagent's conversation ends |
 
 A session holds one or more worktrees of its repository (`worktrees.py`), and a
-call counts as running in every worktree its session holds when it starts. A
-checkpoint runs in each worktree the session holds whenever a call finishes and
-no call of the session counted there is running, another session's calls there
-holding none of its checkpoints back, and again in each when the turn ends. It
-snapshots the worktree into the store, compares it with the accepted tree, sets
-aside what was committed elsewhere or merged from it, judges a move of `HEAD` once
-as its commits', judges the rest as an edit is judged, holds what asks in place
-until the operator answers, puts back what they decline with the agent's version
-saved, and moves the accepted tree on.
+call counts as running in each worktree its conversation works in when it starts
+(`Holding.works`), so a worker busy in its own worktree holds back no checkpoint
+in another's, and two conversations working in one wait on each other. A
+checkpoint runs in each of those worktrees whenever a call finishes and no call of
+the session counted there is running, another session's calls there holding none
+of its checkpoints back, and again in each worktree the session holds when its
+turn ends. It snapshots the worktree into the store, compares it with the accepted
+tree, sets aside what was committed elsewhere or merged from it, judges a move of
+`HEAD` once as its commits', judges the rest as an edit is judged, holds what asks
+in place until the operator answers, puts back what they decline with the agent's
+version saved, and moves the accepted tree on.
 
 A call that runs a subagent isn't counted as running: the subagent's own calls
 are, so its writes are judged as it makes them rather than when it ends. The
@@ -161,6 +163,15 @@ class Running(MutableModel):
         otherwise keep every session's checkpoints from running there.
         """
         return not any(each.session == session for each in self.calls)
+
+
+class Finished(Model):
+    """What a call's finish, or a conversation's end, leaves in one worktree."""
+
+    counted: bool
+    """Whether the call, or one of the conversation's, counted as running there."""
+    idle: bool
+    """Whether no call of its session is left running there."""
 
 
 class Pending(Model):
@@ -572,23 +583,25 @@ class Worktree(Model):
             heads.worktrees = {**heads.worktrees, self.root: head}
             write_model(path, heads)
 
-    def finish(self, session: str, call: str) -> bool:
-        """Note that `call` finished here; say whether no call of `session` runs here."""
+    def finish(self, session: str, call: str) -> Finished:
+        """Note that `call` finished here; say whether it counted here, and whether no call of `session` is left running here."""
         with self.calls_lock():
             running = self.running()
+            counted = any(each.key == call for each in running.calls)
             running.calls = [each for each in running.calls if each.key != call]
             self.ran(running)
-            return running.idle(session)
+            return Finished(counted=counted, idle=running.idle(session))
 
-    def clear(self, session: str, agent: str) -> bool:
-        """Forget the calls a conversation left running; say whether none of its session's is left."""
+    def clear(self, session: str, agent: str) -> Finished:
+        """Forget the calls conversation `agent` left running; say whether one counted here, and whether none of its session's is left."""
         with self.calls_lock():
             running = self.running()
+            counted = any(each.of(session, agent) for each in running.calls)
             running.calls = [
                 each for each in running.calls if not each.of(session, agent)
             ]
             self.ran(running)
-            return running.idle(session)
+            return Finished(counted=counted, idle=running.idle(session))
 
     def busy(self, session: str, agent: str) -> bool:
         """Say whether a call of another conversation of `session` runs here."""
@@ -641,16 +654,17 @@ def holding(
     cwd: Path,
     written: Place | None = None,
     *,
+    agent: str = "",
     starts: bool = False,
 ) -> Holding | None:
     """Return a session's repository and the worktrees it holds, reaching more.
 
     The worktree its working directory is in is reached, since a hook's working
     directory follows the session, and so is `written`'s, where a file tool
-    writes. Reaching a worktree begins the session there; a session that
-    `starts`, or resumes, begins again in every worktree it holds. A worktree
-    whose root is gone isn't held. A session first seen outside every
-    repository isn't judged.
+    writes; conversation `agent` is noted to work in each (`Holding.works`).
+    Reaching a worktree begins the session there; a session that `starts`, or
+    resumes, begins again in every worktree it holds. A worktree whose root is
+    gone isn't held. A session first seen outside every repository isn't judged.
     """
     index = SessionIndex(layout=bench.services.layout)
     here = place(cwd) if cwd.is_dir() else None
@@ -662,15 +676,19 @@ def holding(
                 return None
             held = Holding(repository=here.repository)
         released = held.release_removed()
+        repository = held.repository
+
+        def within(where: Place | None) -> Path | None:
+            if where is None or where.repository != repository:
+                return None
+            return where.worktree
+
         reaching = [
-            each.worktree
-            for each in [here, written]
-            if each is not None
-            and each.worktree is not None
-            and each.repository == held.repository
+            each for each in [within(here), within(written)] if each is not None
         ]
-        reached = [root for root in reaching if held.reach(root)]
-        if recorded is None or reached or released:
+        reached = [each for each in reaching if held.reach(each)]
+        noted = held.note(agent, started=within(here), wrote=within(written))
+        if recorded is None or reached or released or noted:
             index.write(session, held)
         for root in held.worktrees if starts else reached:
             begin(
@@ -685,6 +703,12 @@ def worktrees(bench: Bench, held: Holding) -> list[Worktree]:
     """Open each worktree a session holds."""
     services = bench.services
     return [Worktree.of(root, held.repository, services) for root in held.worktrees]
+
+
+def working(bench: Bench, held: Holding, agent: str) -> list[Worktree]:
+    """Open each worktree conversation `agent` of a session works in."""
+    services = bench.services
+    return [Worktree.of(root, held.repository, services) for root in held.works(agent)]
 
 
 class Planned(Model):
@@ -1835,7 +1859,7 @@ class SessionStarted(Event):
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd, starts=True)
+        held = holding(bench, self.session, self.cwd, agent=self.agent, starts=True)
         if held is None or self.agent:
             return Reply()
         record = ConversationRecord(layout=bench.services.layout, session=self.session)
@@ -1845,7 +1869,7 @@ class SessionStarted(Event):
 
 
 class CallStarted(Event):
-    """A tool call is about to run: it counts in every worktree its session holds.
+    """A tool call is about to run: it counts in every worktree its conversation works in (`Holding.works`).
 
     A subagent's call notes that the subagent is at work.
     """
@@ -1857,7 +1881,7 @@ class CallStarted(Event):
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd)
+        held = holding(bench, self.session, self.cwd, agent=self.agent)
         if held is None:
             return Reply()
         if self.agent:
@@ -1870,7 +1894,7 @@ class CallStarted(Event):
         call = Call(
             key=self.call, session=self.session, agent=self.agent, tool=self.tool
         )
-        for worktree in worktrees(bench, held):
+        for worktree in working(bench, held, self.agent):
             with worktree.calls_lock():
                 running = worktree.running()
                 running.calls = [*running.calls, call]
@@ -1881,29 +1905,38 @@ class CallStarted(Event):
 class CallFinished(Event):
     """A tool call finished, whether it succeeded or failed.
 
-    A checkpoint runs in each worktree the session holds where no call of the
-    session is still running, one after another, and the agent hears their
-    reports together; another session's calls there don't hold it back. One that
-    never started (a runtime can report a command's end on a later call) leaves
-    the calls running as they are, and a checkpoint still runs where none is.
+    It's confirmed in each worktree it counted in or its conversation works in,
+    and a checkpoint runs in each of those where no call of the session is still
+    running, one after another, the agent hearing their reports together;
+    another session's calls there don't hold it back. One that never started (a
+    runtime can report a command's end on a later call) leaves the calls running
+    as they are, and a checkpoint still runs where none is.
     """
 
     call: str
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd)
+        held = holding(bench, self.session, self.cwd, agent=self.agent)
         if held is None:
             return Reply()
         opened = worktrees(bench, held)
-        idle = [
-            worktree for worktree in opened if worktree.finish(self.session, self.call)
+        works = held.works(self.agent)
+        left = {
+            worktree.root: worktree.finish(self.session, self.call)
+            for worktree in opened
+        }
+        ran = [
+            worktree
+            for worktree in opened
+            if left[worktree.root].counted or worktree.root in works
         ]
-        for worktree in opened:
+        for worktree in ran:
             confirm(bench, worktree, self.session, self.agent, self.call)
         checked = [
             checkpoint(bench, worktree, self.session, self.agent, self.call)
-            for worktree in idle
+            for worktree in ran
+            if left[worktree.root].idle
         ]
         waiting = [
             mail_for(worktree, self.session, self.agent, bench.runtime)
@@ -1919,8 +1952,9 @@ class TurnEnded(Event):
     are cleared, a checkpoint runs, the importers pass is waited on, and the turn
     can't end while the files it touched have type errors or ruff's findings
     (`end_turn`). The notes present at the session's start and removed since are
-    listed once. A worktree where a subagent's call is running gets no
-    checkpoint: that call's finish runs it.
+    listed once. Another conversation's calls are left running, and a worktree
+    one counts in, one a subagent works in, gets no checkpoint: that call's
+    finish runs it.
     """
 
     after_block: bool = False
@@ -1928,7 +1962,7 @@ class TurnEnded(Event):
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd)
+        held = holding(bench, self.session, self.cwd, agent=self.agent)
         if held is None:
             return Reply()
         opened = worktrees(bench, held)
@@ -1948,7 +1982,9 @@ class ConversationEnded(Event):
     """A subagent's conversation ended its turn; the session's own goes on.
 
     Its calls are cleared in each worktree the session holds, and a checkpoint
-    runs in each where none of the session's is left running. Its end holds on
+    runs in each it works in or one of its calls counted in, where none of the
+    session's is left running: what it left elsewhere is the session's turn's
+    end's to judge. Its end holds on
     what it must be told, each told once (`end_turn`): a refusal, a move, a
     checkpoint's notice, mail. It never holds on the type errors and ruff's
     findings left in its files: every worker passes the gate before it hands
@@ -1958,14 +1994,19 @@ class ConversationEnded(Event):
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd)
+        held = holding(bench, self.session, self.cwd, agent=self.agent)
         if held is None:
             return Reply()
         opened = worktrees(bench, held)
-        idle = [
-            worktree.root
+        works = held.works(self.agent)
+        left = {
+            worktree.root: worktree.clear(self.session, self.agent)
             for worktree in opened
-            if worktree.clear(self.session, self.agent)
+        }
+        idle = [
+            root
+            for root, each in left.items()
+            if each.idle and (each.counted or root in works)
         ]
         reply = end_turn(bench, self, opened, idle, after_block=False, listing=False)
         if self.agent and not reply.block:
