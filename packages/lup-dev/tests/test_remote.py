@@ -29,7 +29,7 @@ from lup_dev import Project
 from lup_dev.declaration.resolve import resolve
 from lup_dev.errors import LupDevError
 from lup_dev.host.client import HostClient, RoomClient, Starter, asked
-from lup_dev.host.courier import Courier, Heard, Printed, Telling
+from lup_dev.host.courier import Courier, Heard, Telling
 from lup_dev.host.protocol import (
     Done,
     GitHubRepository,
@@ -103,10 +103,8 @@ class Deaf(Courier):
         message = "no hook reaches the service in these tests"
         raise AssertionError(message)
 
-    def told(
-        self, runtime: str, payload: str, answer: str, telling: Telling
-    ) -> Printed:
-        return Printed(text=answer)
+    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
+        return answer
 
 
 class NoJudge(LaunchJudge):

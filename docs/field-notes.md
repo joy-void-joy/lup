@@ -629,6 +629,12 @@ What each runtime records of a subagent's spawn, which lup reads to name it and 
 - **The next end carries `stop_hook_active: true`** after an `additionalContext` continue, as after a block: after a tool call in the continued turn too, and after each of two continues in a row.
 - **`SubagentStop` is the same:** the subagent goes on (`SubagentStop hook additional context: <text>` in its record), and its next `SubagentStop` carries `stop_hook_active: true`.
 
+## The end after a held end (Claude Code 2.1.293 to 2.1.306, read 2026-10-21)
+
+Read in this machine's Claude Code records, every session's own conversation, whose held ends ran from 2026-10-08 to 10-21: each `Stop` hook that held a turn's end (a `hook_blocking_error` or `hook_additional_context` attachment of `Stop`, 36 and 7), and the turn's next end. The records keep what the model said, not the hook's `last_assistant_message`, "Text content of the last assistant message before stopping".
+- **The next end says something new.** Each of the 42 held ends that ended again before the operator's next words ended with text other than the held end's; the other one had no later end. So a note made at each end that says something doesn't repeat one (`docs/inbox.md`, *A turn's last message*).
+- **An end with no text is rare:** 2 of the 2,507 ends in those records. What `last_assistant_message` holds then, and whether it can be an earlier message's words, wasn't checked. Codex's ends weren't read: none of the records were its.
+
 ## Channels (Claude Code 2.1.304, measured 2026-10-20)
 
 Interactive sessions on Haiku in tmux, with `--setting-sources user`, a spike's hooks in `--settings`, and `--mcp-config` holding one stdio server: lup's bridge (`lup.sessions.bridge`) to a test server on a Unix socket built on `lup.tools.serving`. What the model read was checked in the transcript's request blobs, and in the binary.

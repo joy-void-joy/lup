@@ -52,7 +52,7 @@ from lup_dev.host.client import (
     requested,
     watching,
 )
-from lup_dev.host.courier import Conversation, Courier, Heard, Printed, Telling
+from lup_dev.host.courier import Conversation, Courier, Heard, Telling
 from lup_dev.host.dashboard import (
     DashboardProcess,
     DashboardShown,
@@ -120,10 +120,8 @@ class Hears(Courier):
     def heard(self, runtime: str, payload: str) -> Heard:
         return Heard(event="call-started", session="s1", judged=True, fits=10_000)
 
-    def told(
-        self, runtime: str, payload: str, answer: str, telling: Telling
-    ) -> Printed:
-        return Printed(text=answer)
+    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
+        return answer
 
 
 class Judge(LaunchJudge):
@@ -1411,10 +1409,8 @@ class Reads(Courier):
     def heard(self, runtime: str, payload: str) -> Heard:
         return Heard.model_validate_json(payload)
 
-    def told(
-        self, runtime: str, payload: str, answer: str, telling: Telling
-    ) -> Printed:
-        return Printed(text=answer)
+    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
+        return answer
 
 
 def hook(event: Event, **fields: object) -> str:

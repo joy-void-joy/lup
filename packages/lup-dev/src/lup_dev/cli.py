@@ -71,7 +71,6 @@ from lup_dev.host.client import Detached, HostClient, RoomClient
 from lup_dev.host.courier import (
     Courier,
     Heard,
-    Printed,
     Spawned,
     Spawns,
     Telling,
@@ -325,14 +324,10 @@ class Couriers(Model, Courier):
         return self.adapters.named(runtime).heard(payload)
 
     @override
-    def told(
-        self, runtime: str, payload: str, answer: str, telling: Telling
-    ) -> Printed:
-        """Return what one of `runtime`'s hooks prints, its adapter's answer with `telling` added, on a line, or `answer` as it is; and whether it lets a turn end."""
-        adapter = self.adapters.named(runtime)
-        added = adapter.told(payload, answer, telling)
-        text = answer if added is None else f"{added}\n"
-        return Printed(text=text, ends=adapter.ends(text))
+    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
+        """Return what one of `runtime`'s hooks prints: its adapter's answer with `telling` added, on a line, or `answer` as it is."""
+        added = self.adapters.named(runtime).told(payload, answer, telling)
+        return answer if added is None else f"{added}\n"
 
 
 class Wakers(Model, Waker):

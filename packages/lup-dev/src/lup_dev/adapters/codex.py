@@ -820,16 +820,6 @@ def heard(raw: str, fits: int = 10_000) -> Heard:
     return TypeAdapter[Received](Received).validate_json(raw).heard(fits)
 
 
-def ends(printed: str) -> bool:
-    """Say whether what a turn's end hook prints lets the turn end: it holds the turn with `decision: "block"`.
-
-    >>> ends(""), ends('{"decision":"block","reason":"wait"}')
-    (True, False)
-    """
-    said = Said.model_validate_json(printed) if printed.strip() else Said()
-    return said.decision != "block"
-
-
 def told(raw: str, answer: str, telling: Telling) -> str | None:
     """Return what a Codex hook prints: `answer`, the judge's or none, with `telling` added; none where nothing is.
 
@@ -1225,7 +1215,6 @@ def adapter() -> Adapter:
         unanswered=unanswered,
         heard=heard,
         told=told,
-        ends=ends,
         spawned=spawned,
         woken=None,
         pushing=None,

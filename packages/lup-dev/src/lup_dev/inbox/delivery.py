@@ -626,7 +626,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     async def concluded(
         self, launch: Register, conversation: Caller, said: str
     ) -> None:
-        """Put a session's last message of a turn in the operator's inbox, as a note from it: they read what it ended its turn saying there, without it sending it again."""
+        """Put a session's last message of a turn in the operator's inbox, as a note from it: they read what it ended its turn saying there, without it sending it again.
+
+        An end held to tell what waits makes its note too, as its message
+        stands: the turn goes on to another end, with words of its own.
+        """
         party = Conversation(
             repository=launch.repository,
             runtime=launch.runtime,

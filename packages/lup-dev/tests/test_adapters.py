@@ -243,7 +243,6 @@ def test_claude_stop_holds_while_touched_files_have_type_errors(
     )
     printed = claude.hook(payload(repo, "Stop", stop_hook_active=False), on_claude)
     assert held_on(printed).startswith("lup won't end the turn yet")
-    assert not claude.ends(printed)
 
 
 def test_claude_subagent_stop(on_claude: Bench, repo: Path) -> None:
@@ -314,7 +313,7 @@ def test_claude_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
     assert held_on(first).startswith("lup won't end the turn yet")
     printed = claude.hook(payload(repo, "Stop", stop_hook_active=True), on_claude)
     again = json.loads(printed)
-    assert claude.ends(printed)
+    assert "decision" not in again
     assert "hookSpecificOutput" not in again
     assert again["systemMessage"].startswith(
         "lup held the turn's end once already, and lets it end"
@@ -1753,30 +1752,6 @@ def test_claude_adds_what_a_conversation_is_told_to_every_answer() -> None:
             "additionalContext": BOTH,
         }
     }
-
-
-def told_at(event: str) -> dict[str, object]:
-    return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": "x"}}
-
-
-@pytest.mark.parametrize(
-    ("printed", "ending"),
-    [
-        ({"systemMessage": "a note"}, True),
-        ({"decision": "block", "reason": "wait"}, False),
-        (told_at("Stop"), False),
-        (told_at("SubagentStop"), False),
-        (told_at("PreToolUse"), True),
-    ],
-)
-def test_claude_reads_whether_a_turns_end_is_held(
-    printed: dict[str, object], ending: bool
-) -> None:
-    """Claude Code 2.1.303 holds a turn's end on `Stop`'s or `SubagentStop`'s
-    `additionalContext` as on a block (`docs/field-notes.md`, *A turn's end
-    told through `additionalContext`*); context beside a call ends nothing."""
-    assert claude.ends("")
-    assert claude.ends(json.dumps(printed)) is ending
 
 
 def codex_lups(arguments: object) -> str:
