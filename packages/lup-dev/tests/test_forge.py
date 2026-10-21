@@ -1158,7 +1158,7 @@ def test_an_older_service_refuses_the_kind_by_its_name_and_the_issue_goes_unchec
     assert said == [
         (
             "Issue #50 went unchecked: the host service said no handler for "
-            "`issue-state`; a room's request socket answers no kind."
+            "`issue-state`; a room's request socket answers list, show-holding."
         )
     ]
 

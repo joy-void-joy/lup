@@ -84,6 +84,7 @@ from lup_dev.host.service import (
     Handler,
     HostService,
     Judged,
+    Reading,
     Route,
     judged,
 )
@@ -648,7 +649,7 @@ def test_a_failed_answer_is_said_and_the_hook_hears_nothing(
     assert "RuntimeError: the stub fails" in failed
 
 
-class Echo(Request):
+class Echo(Request, reads=False):
     kind: Literal["echo"] = "echo"
     text: str
 
@@ -688,6 +689,61 @@ def test_a_module_registers_the_handler_for_its_kind(
         service(layout, Judge(), said, [Route.to(Echoing()), Route.to(Echoing())])
     with pytest.raises(ValidationError, match="more than one handler for stop"):
         service(layout, Judge(), said, [Route.to(Stopping())])
+
+
+def test_a_request_model_that_doesnt_say_whether_it_reads_fails_as_it_is_declared() -> (
+    None
+):
+    with pytest.raises(TypeError, match="missing 1 required keyword-only argument"):
+
+        class Unmarked(Request):  # pyright: ignore[reportUnusedClass]
+            kind: Literal["unmarked"] = "unmarked"
+
+
+class Peek(Request, reads=True):
+    kind: Literal["peek"] = "peek"
+
+
+class Peeking(Reading[Peek]):
+    @override
+    def request(self) -> type[Peek]:
+        return Peek
+
+    @override
+    async def answer(self, request: Peek) -> Reply:
+        return Echoed(text="peeked")
+
+    @override
+    async def scoped(self, request: Peek, repository: Path) -> Reply:
+        return Echoed(text="peeked")
+
+
+class EchoReading(Reading[Echo]):
+    @override
+    def request(self) -> type[Echo]:
+        return Echo
+
+    @override
+    async def answer(self, request: Echo) -> Reply:
+        return Echoed(text=request.text)
+
+    @override
+    async def scoped(self, request: Echo, repository: Path) -> Reply:
+        return Echoed(text=request.text)
+
+
+def test_a_kind_routed_against_its_mark_is_refused() -> None:
+    with pytest.raises(TypeError) as reads:
+        Route.to(Peeking())
+    with pytest.raises(TypeError) as writes:
+        Route.reading(EchoReading())
+    assert str(reads.value) == (
+        "`peek` only reads, so it's routed with `Route.reading`, its handler saying "
+        "what a room is shown of it"
+    )
+    assert str(writes.value) == (
+        "`echo` writes, so it's routed with `Route.to`: a room never reaches it"
+    )
 
 
 # A launch's room sockets: lup's tools, and the room's requests
@@ -981,7 +1037,7 @@ def test_a_rooms_request_is_answered_with_its_launch(
             host.ask(Echo(text="hi"), Echoed)
 
 
-def test_a_control_kind_sent_from_a_room_is_refused(
+def test_a_control_kind_that_writes_sent_from_a_room_is_refused(
     layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
 ) -> None:
     host = client(layout, clock)
@@ -994,12 +1050,13 @@ def test_a_control_kind_sent_from_a_room_is_refused(
             with pytest.raises(HostError) as refused:
                 room.ask(request, Echoed)
             assert str(refused.value) == (
-                f"no handler for `{request.kind}`; a room's request socket answers echo"
+                f"no handler for `{request.kind}`; a room's request socket answers "
+                "echo, list, show-holding"
             )
         assert host.launches() == [launch(tmp_path, "one", "first")]
     assert (
         "one: refused a request: no handler for `stop`; a room's request "
-        "socket answers echo" in said
+        "socket answers echo, list, show-holding" in said
     )
 
 

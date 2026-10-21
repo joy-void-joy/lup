@@ -18,7 +18,7 @@ from lup_dev.host.protocol import Done, Register, Reply, Request
 from lup_dev.host.rooms import RoomHandler, RoomRoute
 
 
-class ListTypes(Request):
+class ListTypes(Request, reads=True):
     """List the types the clipboard offers, as MIME types (`image/png`, `text/plain`)."""
 
     kind: Literal["clipboard-types"] = "clipboard-types"
@@ -26,7 +26,7 @@ class ListTypes(Request):
     """The primary selection, the text last selected, rather than the clipboard."""
 
 
-class ReadClipboard(Request):
+class ReadClipboard(Request, reads=True):
     """Read what the clipboard holds, as one of its types; as text where none is named."""
 
     kind: Literal["clipboard-read"] = "clipboard-read"
@@ -34,7 +34,7 @@ class ReadClipboard(Request):
     primary: bool = False
 
 
-class WriteClipboard(Request):
+class WriteClipboard(Request, reads=False):
     """Put text on the clipboard."""
 
     kind: Literal["clipboard-write"] = "clipboard-write"

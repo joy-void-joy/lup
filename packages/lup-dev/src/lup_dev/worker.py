@@ -62,10 +62,10 @@ from lup_dev.declaration.serving import (
     listening,
 )
 from lup_dev.errors import LupDevError
-from lup_dev.host.protocol import Register, Reply
+from lup_dev.host.protocol import HostError, Register, Reply
 from lup_dev.host.publishing import Place, Published, Refusal
 from lup_dev.host.records import Records
-from lup_dev.host.service import Dispatcher, Handler, Route
+from lup_dev.host.service import Dispatcher, Handler, Reading, Route
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
     Called,
@@ -314,7 +314,7 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
         return happened.refusals
 
 
-class Listed(Model, Handler[Listing]):
+class Listed(Model, Reading[Listing]):
     """Answers `Listing`: what the modules serve, nothing where they couldn't be made."""
 
     modules: Serving | None
@@ -326,6 +326,11 @@ class Listed(Model, Handler[Listing]):
     @override
     async def answer(self, request: Listing) -> Reply:
         return Offered() if self.modules is None else self.modules.offered()
+
+    @override
+    async def scoped(self, request: Listing, repository: Path) -> Reply:
+        message = "a launch's process answers the host service, never a room"
+        raise HostError(message)
 
 
 class Calls(Model, Handler[Calling]):
@@ -418,7 +423,7 @@ class Judges(Model, Handler[JudgeHook], arbitrary_types_allowed=True):
 
 def routes(modules: Serving | None, judge: Callable[[str, str], str]) -> list[Route]:
     """Return what a launch's process answers: the judge's hooks, what its modules serve, and, where they were made, their tools, requests and hooks."""
-    listed = [Route.to(Judges(judge=judge)), Route.to(Listed(modules=modules))]
+    listed = [Route.to(Judges(judge=judge)), Route.reading(Listed(modules=modules))]
     if modules is None:
         return listed
     return [

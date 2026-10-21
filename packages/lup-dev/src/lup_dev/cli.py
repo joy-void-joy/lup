@@ -88,7 +88,10 @@ from lup_dev.host.protocol import (
     GitHubRepository,
     HostError,
     Listed,
+    ListLaunches,
     Register,
+    Reply,
+    Request,
     Talker,
 )
 from lup_dev.host.pushes import Pushes
@@ -439,6 +442,15 @@ def dashboard_shown(dashboard: DashboardProcess | None) -> Showing:
     )
 
 
+def control_routes(
+    delivery: Delivery,
+    recorded: dict[str, Recorded],
+    dashboard: DashboardProcess | None,
+) -> list[Route]:
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; and the dashboard's, `dashboard`'s address."""
+    return [*inbox_routes(delivery, recorded), Route.to(dashboard_shown(dashboard))]
+
+
 @host.callback(invoke_without_command=True)
 def host_serve(context: typer.Context) -> None:
     """Run the host service in the foreground, until it's stopped.
@@ -488,10 +500,7 @@ def host_serve(context: typer.Context) -> None:
         judge=WorkerJudge(modules=workers),
         spawns=SpawnRecords(adapters=known),
         post=delivery,
-        routes=[
-            *inbox_routes(delivery, recorded()),
-            Route.to(dashboard_shown(dashboard)),
-        ],
+        routes=control_routes(delivery, recorded(), dashboard),
         tools=room_tools(delivery, layout),
         room_routes=[
             *remote_routes(
@@ -627,18 +636,36 @@ def answering(what: str = "the inbox") -> HostClient:
     return client
 
 
-def reading() -> HostClient:
-    """Reach the host service for what only reads lup's state, from any terminal on the host, an agent's session's too; refuse in a room, which reaches it only on its request socket.
+class FromRoom(Model):
+    """Asks the host service from a room what only reads, on its launch's request socket: answered with what's of the launch's repository alone."""
+
+    room: RoomClient
+
+    def ask[R: Reply](self, request: Request, reply: type[R]) -> R:
+        """Send one request, and read its reply as `reply`; a service that doesn't know its kind is said to run a copy from before a room could ask it."""
+        try:
+            return self.room.ask(request, reply)
+        except HostError as refused:
+            # lup: ignore("error-text", why="a copy approved before refuses a kind it doesn't know only in words, which it can't be taught")
+            if not str(refused).startswith(f"no handler for `{request.kind}`"):
+                raise
+            message = (
+                f"the host service doesn't answer `{request.kind}` in a room yet: it "
+                "runs a copy of lup from before rooms could ask it, until the operator "
+                "approves a newer one"
+            )
+            raise HostError(message) from refused
+
+
+def reading() -> HostClient | FromRoom:
+    """Reach the host service for what only reads lup's state: from a room, on its launch's request socket, for its repository alone; on the host, from any terminal, an agent's session's too.
 
     The service is started only outside every agent's session: one started from
     an agent's shell would run on in that shell's environment.
     """
-    if RoomClient().socket.exists():
-        message = (
-            "a room doesn't serve this command yet: the room reaches the host service "
-            "only on its launch's request socket, which takes no reading requests"
-        )
-        raise HostError(message)
+    room = RoomClient()
+    if room.socket.exists():
+        return FromRoom(room=room)
     client = host_client()
     if not any(runtime.inside() for runtime in runtimes()):
         client.ensure()
@@ -874,17 +901,22 @@ def sessions(
     (`dev/explore-auth`) and its kind; an unnamed one by its kind and its id,
     until it names itself. The subagents that ended under a conversation are
     counted, as the dashboard folds them; `--all` lists them, each said ended.
-    It only reads, so an agent's session on the host runs it too, though a room
-    can't yet.
+    It only reads, so an agent's session runs it too: on the host, listing
+    every launch; in a room, its repository's alone, whose containers the host
+    service says run, since a room has no podman.
     """
-    listed = reading().listed()
+    listed = reading().ask(ListLaunches(), Listed)
     if not listed.launches:
         typer.echo("No session runs.")
         return
     podman = Podman()
     for launch in listed.launches:
         container = launch.container
-        running = container is not None and podman.exists(container)
+        running = (
+            listed.running.get(launch.launch, False)
+            if listed.running is not None
+            else container is not None and podman.exists(container)
+        )
         typer.echo(
             f"`{launch.name}`  {launch.runtime} in {launch.worktree}  "
             f"({launch.launch})  container {container}, "
@@ -954,8 +986,9 @@ def inbox_list(context: typer.Context) -> None:
     """List what waits for you from your agents, oldest first.
 
     Each item has a number, which `show`, `answer` and `done` take. Listing and
-    `show` only read, so an agent's session on the host runs them too, though a
-    room can't yet; answering is the operator's, in their own terminal.
+    `show` only read, so an agent's session runs them too: on the host, over
+    the whole inbox; in a room, over its repository's items alone. Answering is
+    the operator's, in their own terminal.
     """
     if context.invoked_subcommand is not None:
         return
@@ -964,7 +997,7 @@ def inbox_list(context: typer.Context) -> None:
     if not items:
         typer.echo("Nothing waits for you.")
         return
-    listed = client.listed()
+    listed = client.ask(ListLaunches(), Listed)
     for item in items:
         typer.echo(line(item, listed))
 

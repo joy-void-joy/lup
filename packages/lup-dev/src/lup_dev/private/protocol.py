@@ -36,7 +36,7 @@ class Sent(Model):
         return base64.b64decode(self.encoded, validate=True)
 
 
-class Scanning(Request):
+class Scanning(Request, reads=True):
     """Ask the host for every value never published in these files, and in the commits `head` reaches that the remotes lack."""
 
     kind: Literal["private-scan"] = "private-scan"

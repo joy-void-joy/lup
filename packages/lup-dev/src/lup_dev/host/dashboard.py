@@ -26,7 +26,7 @@ from lup_dev.host.protocol import HostError, Reply, Request
 from lup_dev.host.service import Companion, Handler
 
 
-class ShowDashboard(Request):
+class ShowDashboard(Request, reads=False):
     """Return the dashboard's address, its token in the fragment, starting it where it isn't running."""
 
     kind: Literal["dashboard"] = "dashboard"

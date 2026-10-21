@@ -16,7 +16,9 @@ mounts at `/run/lup`:
   programs rather than the agent's tools. Its routes are the modules'
   `RoomHandler`s, each answering with the launch the request came from, which the
   service knows by the socket; apart from the control socket's `Handler`s, so a
-  room never reaches a control kind.
+  room never reaches a control kind that writes. Those that only read are
+  routed there too, each answered for the launch's repository alone
+  (`Reading`, `host/service.py`).
 
 Both open and close with the launch, and are served again after a restart, as
 `hook.sock` is (`host/service.py`).
