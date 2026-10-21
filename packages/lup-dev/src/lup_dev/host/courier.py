@@ -195,7 +195,7 @@ class Post(ABC):
     async def concluded(
         self, launch: Register, conversation: Conversation, said: str
     ) -> None:
-        """Put the last message of a turn of `conversation` of `launch`, a session's own, before the operator, its turn having ended."""
+        """Put the last message of a turn of `conversation` of `launch`, a session's own, before the operator, at its turn's end, held or let through."""
 
 
 class Spawned(Model):

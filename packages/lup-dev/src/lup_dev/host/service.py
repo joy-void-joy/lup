@@ -863,10 +863,13 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
         The conversation the hook names gets lup's id here the first time, and
         is told what the post says waits for it, in what room the judge's answer
-        leaves. A payload the courier can't read goes to the judge as it is,
-        which answers it or says it couldn't; where the courier can't add to the
-        judge's answer, the answer goes out as the judge gave it, and what it
-        would have told is put back. Either is said.
+        leaves. A session's own turn's end puts its last message before the
+        operator (`Post.concluded`) before anything is told, so the message is
+        theirs to read whether the end is held or let through. A payload the
+        courier can't read goes to the judge as it is, which answers it or says
+        it couldn't; where the courier can't add to the judge's answer, the
+        answer goes out as the judge gave it, and what it would have told is put
+        back. Either is said.
         """
         try:
             heard = self.courier.heard(request.runtime, payload)
@@ -904,6 +907,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             - len(answer.encode())
             - sum(len(each.encode()) for each in naming)
         )
+        ended = (
+            heard.said if heard.event == "turn-ended" and heard.agent is None else None
+        )
+        if self.post is not None and ended is not None and ended.strip():
+            await self.post.concluded(request, conversation, ended)
         posted = (
             Posted()
             if self.post is None
@@ -921,14 +929,6 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             self.returned(posted)
             return Spoken(answer=answer)
-        concluding = (
-            heard.event == "turn-ended"
-            and heard.agent is None
-            and told.ends
-            and bool(heard.said and heard.said.strip())
-        )
-        if concluding and self.post is not None and heard.said is not None:
-            await self.post.concluded(request, conversation, heard.said)
         return Spoken(answer=told.text, posted=posted)
 
     async def judgement(self, request: Register, payload: str) -> str:

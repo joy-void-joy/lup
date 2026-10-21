@@ -93,7 +93,7 @@ What the operator said in the same reply on other agents' items and to other age
 - Text stays as written, the operator's code as code: only `</` becomes `<\/`, so no text closes a tag. The dashboard shows what's inside an item's tag (`Delivery.words`).
 - The comments an approval's note and a held change's answer carry stay prose (`remark`).
 
-**A turn's last message** becomes a note in the operator's inbox (`Delivery.concluded`), so what a session ends its turn saying reaches them without the agent sending it again. An end that's held makes none, since the turn goes on; a subagent's last message is its parent's, and makes none either.
+**A turn's last message** becomes a note in the operator's inbox (`Delivery.concluded`), so what a session ends its turn saying reaches them without the agent sending it again. An end that's held makes one too, before it tells what waits: the turn's next end carries only its own message, so the held one would never reach the operator, and their reply comes at a turn's end most of the time. Each end that says something is its own note, since the agent's next end carries new words (`docs/field-notes.md`, *The end after a held end*). A subagent's last message is its parent's, and makes none.
 
 **No turn that won't end.** An agent can always end its turn (`holding`, `inbox/ends.py`). Every hold at a turn's end, the inbox's and the judge's alike, holds once and then lets the turn end, holds once per thing across turns, and never starts a turn of its own: the idle doorbell is for an item the operator's act made.
 

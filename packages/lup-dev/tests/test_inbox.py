@@ -3566,16 +3566,9 @@ def test_a_sessions_last_message_of_a_turn_is_a_note_in_the_operators_inbox(
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
-        inbox("send", "one", "One more thing.")
-        held = send(
-            hook,
-            claude(
-                "Stop", stop_hook_active=False, last_assistant_message="Done, I think."
-            ),
-        )
         ended = send(
             hook,
-            claude("Stop", stop_hook_active=True, last_assistant_message="Done now."),
+            claude("Stop", stop_hook_active=False, last_assistant_message="Done now."),
         )
         send(
             hook,
@@ -3592,12 +3585,61 @@ def test_a_sessions_last_message_of_a_turn_is_a_note_in_the_operators_inbox(
             for each in delivery.inbox.waiting(Operator())
             if isinstance(each.sender, Conversation)
         ]
-    assert context(held) == first_note("One more thing.")
     assert ended == ""
     assert notes == [
         (Message(kind="note", text="Done now.", ending=True), None, tmp_path)
     ]
     assert notices.raised == []
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_a_turns_end_held_to_tell_an_item_still_puts_its_message_before_the_operator(
+    runtime: str,
+    *,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+) -> None:
+    """The end the operator's message holds makes its note, as the agent ended with it, after the message it's told; the turn's next end makes its own."""
+    payload = {"claude": claude, "codex": codex}[runtime]
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", runtime)
+        hook = machine.host.launch("one").hook
+        send(hook, payload("SessionStart", source="startup"))
+        inbox("send", "one", "One more thing.")
+        held = json.loads(
+            send(
+                hook,
+                payload(
+                    "Stop",
+                    stop_hook_active=False,
+                    last_assistant_message="Two decisions for you.",
+                ),
+            )
+        )
+        ended = send(
+            hook,
+            payload("Stop", stop_hook_active=True, last_assistant_message="Done now."),
+        )
+        told = delivery.inbox.item(1).state
+        notes = [
+            (each.number, each.reason)
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.sender, Conversation)
+        ]
+    holding = {
+        "claude": held.get("hookSpecificOutput", {}).get("additionalContext"),
+        "codex": held.get("reason") if held.get("decision") == "block" else None,
+    }[runtime]
+    assert holding == first_note("One more thing.")
+    assert told == Told(at=clock.now(), how="turn's end")
+    assert ended == ""
+    assert notes == [
+        (2, Message(kind="note", text="Two decisions for you.", ending=True)),
+        (3, Message(kind="note", text="Done now.", ending=True)),
+    ]
 
 
 def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
