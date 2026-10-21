@@ -118,6 +118,7 @@ def test_ask_relays_a_request_to_the_host_and_returns_its_reply(page: Path) -> N
         "launches": [],
         "sessions": {},
         "talkers": {},
+        "running": None,
     }
     assert host.asked == [ListLaunches()]
 
@@ -172,7 +173,13 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
     assert first == {
         "kind": "watched",
         "number": 1,
-        "reply": {"kind": "listed", "launches": [], "sessions": {}, "talkers": {}},
+        "reply": {
+            "kind": "listed",
+            "launches": [],
+            "sessions": {},
+            "talkers": {},
+            "running": None,
+        },
     }
     # Watch 1, stopped, sends nothing more: not even its end.
     assert second == {

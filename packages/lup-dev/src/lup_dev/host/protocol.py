@@ -11,9 +11,9 @@ socket (`host/watch.py`).
 
 from datetime import datetime
 from pathlib import Path, PurePath, PurePosixPath
-from typing import Annotated, Literal, get_args
+from typing import Annotated, ClassVar, Literal, Unpack, get_args
 
-from pydantic import AfterValidator
+from pydantic import AfterValidator, ConfigDict
 
 from lup.rooms.container import AbsolutePath
 from lup.types import Model
@@ -178,9 +178,24 @@ class GitHubRepository(Model):
 
 
 class Request(Model):
-    """A control request: its `kind` names it, and the handler that answers it."""
+    """A control request: its `kind` names it, and the handler that answers it.
+
+    Each kind says whether it only reads, a keyword of its class with no
+    default (`class ListLaunches(Request, reads=True)`), so a kind declared
+    without it fails as its module is imported. One that reads changes nothing
+    in answering, and a room is served it for its own repository alone
+    (`Reading`, `host/service.py`); one that writes never reaches a room from
+    the control socket.
+    """
 
     kind: str
+    reads: ClassVar[bool]
+    """Whether answering it changes nothing, as its class says."""
+
+    def __init_subclass__(cls, *, reads: bool, **kwargs: Unpack[ConfigDict]) -> None:
+        """Keep whether the kind only reads, as its class says, with pydantic's own keywords passed on."""
+        super().__init_subclass__(**kwargs)
+        cls.reads = reads
 
     @classmethod
     def named(cls) -> str:
@@ -192,7 +207,7 @@ class Request(Model):
         return cls.model_construct().kind
 
 
-class Register(Request):
+class Register(Request, reads=False):
     """Serve a launch: its socket directory, the hook socket inside, its record."""
 
     kind: Literal["register"] = "register"
@@ -233,7 +248,7 @@ class Register(Request):
     it's free."""
 
 
-class Rename(Request):
+class Rename(Request, reads=False):
     """Rename a launch the service serves, refused where another holds the name."""
 
     kind: Literal["rename"] = "rename"
@@ -241,7 +256,7 @@ class Rename(Request):
     name: Name
 
 
-class SetHolding(Request):
+class SetHolding(Request, reads=False):
     """Turn the operator's switch for one conversation on or off: whether each flagged write of it is held."""
 
     kind: Literal["set-holding"] = "set-holding"
@@ -253,7 +268,7 @@ class SetHolding(Request):
     on: bool
 
 
-class ShowHolding(Request):
+class ShowHolding(Request, reads=True):
     """Say whether the operator holds each flagged write of one conversation, as the judge asks."""
 
     kind: Literal["show-holding"] = "show-holding"
@@ -262,20 +277,20 @@ class ShowHolding(Request):
     agent: str | None = None
 
 
-class Unregister(Request):
+class Unregister(Request, reads=False):
     """End a launch: its sockets closed, its directory and record removed."""
 
     kind: Literal["unregister"] = "unregister"
     launch: LaunchId
 
 
-class ListLaunches(Request):
+class ListLaunches(Request, reads=True):
     """List the launches the service serves."""
 
     kind: Literal["list"] = "list"
 
 
-class Stop(Request):
+class Stop(Request, reads=False):
     """Stop the service; the launches it serves stay recorded, for the next to serve."""
 
     kind: Literal["stop"] = "stop"
@@ -361,6 +376,10 @@ class Listed(Reply):
     talkers: dict[str, list[Talker]] = {}
     """By launch id, its latest session's conversations: the session's own
     first, then each subagent under its parent."""
+    running: dict[str, bool] | None = None
+    """By launch id, whether its container runs, as the host's podman says: for
+    a room, which has no podman to ask; none for the operator's terminal, which
+    asks podman itself."""
 
 
 class Done(Reply):

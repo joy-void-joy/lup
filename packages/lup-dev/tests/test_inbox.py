@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Literal, override
 
 import pytest
 from mcp import Client
@@ -42,7 +42,16 @@ from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
-from lup_dev.host.protocol import HostError, Limits, Register, Stop
+from lup_dev.host.protocol import (
+    Holding,
+    HostError,
+    Limits,
+    Register,
+    Reply,
+    Request,
+    ShowHolding,
+    Stop,
+)
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded, Said
 from lup_dev.host.service import HostService, Naming
@@ -59,6 +68,7 @@ from lup_dev.inbox.protocol import (
     Drafted,
     Exchanged,
     Files,
+    FinishItem,
     Items,
     KeepDraft,
     KeepTalk,
@@ -72,11 +82,11 @@ from lup_dev.inbox.protocol import (
     ShowConversation,
     ShowDraft,
     ShowFiles,
+    ShowGathering,
     Shown,
     ShowTalk,
     Talked,
 )
-from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import (
     Answer,
     Answered,
@@ -334,8 +344,9 @@ def inboxed(
     told: Callable[[str], None] | None = None,
     spawns: Spawns | None = None,
     patience: timedelta = timedelta(seconds=30),
+    podman: Podman | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter."""
+    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     wakers = cli.Wakers(adapters=known)
@@ -363,13 +374,14 @@ def inboxed(
         courier=couriers,
         spawns=spawns or cli.SpawnRecords(adapters=known),
         post=delivery,
-        routes=inbox_routes(delivery, recorded or {}),
+        routes=cli.control_routes(delivery, recorded or {}, None),
         tools=cli.room_tools(delivery, judging or machine),
         judge=Quiet(),
         say=said.append,
         changes=changes,
         waker=wakers,
         pushes=pushes,
+        podman=podman,
         companions=(
             []
             if typed is None
@@ -1693,8 +1705,8 @@ def named_talkers(
     return [(each.path, each.parent, each.depth) for each in listed.talkers["one"]]
 
 
-def podman_having(monkeypatch: pytest.MonkeyPatch, *running: str) -> None:
-    """Stand podman in for the command line, having the containers `running` and no other."""
+def podman_of(*running: str) -> Podman:
+    """A podman having the containers `running` and no other, asked nothing but whether one is there."""
 
     def answered(process: Process) -> Exited:
         match process.arguments:
@@ -1704,7 +1716,12 @@ def podman_having(monkeypatch: pytest.MonkeyPatch, *running: str) -> None:
                 message = f"podman asked {process.arguments}"
                 raise AssertionError(message)
 
-    monkeypatch.setattr(cli, "Podman", lambda: Podman(execute=answered))
+    return Podman(execute=answered)
+
+
+def podman_having(monkeypatch: pytest.MonkeyPatch, *running: str) -> None:
+    """Stand podman in for the command line, having the containers `running` and no other."""
+    monkeypatch.setattr(cli, "Podman", lambda: podman_of(*running))
 
 
 def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_too(
@@ -2165,30 +2182,280 @@ def test_a_reading_command_in_the_operators_terminal_starts_the_service_where_no
     assert starter.starts == 1
 
 
-@pytest.mark.parametrize(("variable", "runtime"), SESSIONS)
-@pytest.mark.parametrize("arguments", READING)
-def test_a_reading_command_in_a_room_says_a_room_doesnt_serve_it_yet(
+def in_room(monkeypatch: pytest.MonkeyPatch, machine: Layout, launch: str) -> None:
+    """Run `lup-dev` as in the room of launch `launch`, on the request socket its room mounts."""
+    socket = machine.host.launch(launch).request
+    monkeypatch.setattr(cli, "RoomClient", lambda: RoomClient(socket=socket))
+
+
+def approval(repository: Path, worktree: Path, question: str) -> AskApproval:
+    """An approval of `repository`'s host zone, asked from `worktree`, its diff naming the question."""
+    return AskApproval(
+        question=question,
+        summary="One file.",
+        diff=f"diff for {question}\n",
+        files=[],
+        repository=repository,
+        fingerprint=question,
+        worktree=worktree,
+    )
+
+
+def recording(home: Path, session: str, ran: Path, call: str) -> None:
+    """Keep a Claude Code record of session `session` under `home`, run in `ran`: the operator's words, then a call to lup's `note` with the id `call`."""
+    folder = home / "projects" / "-w"
+    folder.mkdir(parents=True, exist_ok=True)
+    when: dict[str, JsonValue] = {
+        "timestamp": "2026-10-17T12:00:00.000Z",
+        "cwd": str(ran),
+    }
+    lines: list[dict[str, JsonValue]] = [
+        {
+            **when,
+            "type": "user",
+            "origin": {"kind": "human"},
+            "message": {"role": "user", "content": "Note it."},
+        },
+        {
+            **when,
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": call,
+                        "name": "mcp__lup__note",
+                        "input": {},
+                    }
+                ],
+            },
+        },
+    ]
+    (folder / f"{session}.jsonl").write_text(
+        "".join(f"{json.dumps(each)}\n" for each in lines)
+    )
+
+
+@pytest.mark.parametrize("variable", [variable for variable, _ in SESSIONS])
+def test_a_room_lists_and_shows_its_repositorys_sessions_and_items_alone(
     machine: Layout,
-    tmp_path: Path,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
     *,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     variable: str,
-    runtime: str,
-    arguments: list[str],
+) -> None:
+    home = tmp_path / "claude"
+    recording(home, "s1", repo, "n1")
+    recorded = {
+        "claude": Recorded(
+            records=ClaudeRecords(directory=home), reader=ClaudeTranscripts()
+        )
+    }
+    other = tmp_path / "other"
+    other.mkdir()
+    with inboxed(machine, clock, notices, said, recorded, podman=podman_of("lup-one")):
+        launched(machine, clock, repo, "one", "claude")
+        launched(machine, clock, other, "two", "codex")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(machine.host.launch("two").hook, codex("SessionStart", source="startup"))
+        stamped = json.loads(send(hook, lup_call("note", {"remark": "Mine."}, "n1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        call(machine.host.launch("one").mcp, "note", stamped)
+        call(machine.host.launch("two").mcp, "note", {"remark": "Theirs."})
+        host = client(machine.host, clock)
+        host.ask(approval(repo / ".git", repo, "Approve mine?"), Shown)
+        host.ask(approval(other / ".git", other, "Approve theirs?"), Shown)
+        everything = runner.invoke(cli.app, ["inbox"])
+        in_room(monkeypatch, machine, "one")
+        monkeypatch.setenv(variable, "1")
+        listing = runner.invoke(cli.app, ["sessions"])
+        listed = inbox()
+        shown = inbox("show", "1")
+        diff = inbox("show", "3", "--diff")
+        moment = inbox("show", "1", "--context")
+        theirs = [
+            refused("show", "2"),
+            refused("show", "2", "--context"),
+            refused("show", "4", "--diff"),
+        ]
+        done = runner.invoke(cli.app, ["inbox", "done", "1"])
+    assert everything.exit_code == 0, everything.output
+    assert [each.split()[0] for each in everything.output.splitlines()] == [
+        "1",
+        "2",
+        "3",
+        "4",
+    ]
+    assert listing.exit_code == 0, (listing.output, listing.exception)
+    assert listing.output == (
+        f"`work`  claude in {repo}  (one)  container lup-one, running\n  work\n"
+    )
+    assert [each.split()[0] for each in listed.splitlines()] == ["1", "3"]
+    assert "Theirs." not in listed
+    assert shown.endswith(":\nMine.\n")
+    assert diff.strip() == "diff for Approve mine?"
+    assert "→ called mcp__lup__note: this item" in moment
+    assert theirs == [
+        "item 2 isn't this repository's",
+        "item 2 isn't this repository's",
+        "item 4 isn't this repository's",
+    ]
+    assert isinstance(done.exception, InboxError)
+
+
+def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operators_drafts(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
+    *,
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "claude"
+    other = tmp_path / "other"
+    recording(home, "s1", repo, "n1")
+    recording(home, "s9", other, "n9")
+    recorded = {
+        "claude": Recorded(
+            records=ClaudeRecords(directory=home), reader=ClaudeTranscripts()
+        )
+    }
+    mine = Conversation(repository=repo / ".git", runtime="claude", session="s1")
+    elsewhere = Conversation(repository=other / ".git", runtime="claude", session="s9")
+    with inboxed(machine, clock, notices, said, recorded):
+        launched(machine, clock, repo, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        room = RoomClient(socket=machine.host.launch("one").request)
+        read = room.ask(ShowConversation(runtime="claude", session="s1"), Conversed)
+        items = room.ask(ListItems(conversation=mine), Exchanged)
+        holding = room.ask(ShowHolding(runtime="claude", session="s1"), Holding)
+        refusals: list[str] = []
+        for request in [
+            ShowConversation(runtime="claude", session="s9"),
+            ListItems(conversation=elsewhere),
+            ShowGathering(sender=elsewhere, worktree=other, path=Path("a.py")),
+            ShowDraft(),
+            ShowTalk(conversation=mine),
+        ]:
+            with pytest.raises(HostError) as refusal:
+                room.ask(request, Conversed)
+            refusals.append(str(refusal.value))
+    assert read.total == 2
+    assert items == Exchanged(sent=[], received=[])
+    assert holding == Holding(on=False)
+    assert refusals == [
+        "the conversation isn't one of this repository's",
+        "the conversation isn't one of this repository's",
+        "the conversation isn't one of this repository's",
+        "the operator's draft reply is theirs until they send it",
+        "what the operator writes on a conversation is theirs until they send it",
+    ]
+
+
+def test_a_room_is_told_when_the_operator_last_settled_its_repositorys_items_alone(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
+    *,
+    tmp_path: Path,
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, repo, "one", "claude")
+        launched(machine, clock, other, "two", "codex")
+        send(machine.host.launch("two").hook, codex("SessionStart", source="startup"))
+        call(machine.host.launch("two").mcp, "note", {"remark": "Theirs."})
+        host = client(machine.host, clock)
+        host.ask(FinishItem(number=1), Shown)
+        operator = host.ask(ListInbox(), Items)
+        room = RoomClient(socket=machine.host.launch("one").request).ask(
+            ListInbox(), Items
+        )
+    assert operator.reviewed is not None
+    assert room.reviewed is None
+
+
+class Unknown(Request, reads=True):
+    """A kind no handler answers, whose refusal names every kind the socket answers."""
+
+    kind: Literal["unknown"] = "unknown"
+
+
+def answered_kinds(refusal: HostError) -> set[str]:
+    """Return the kinds a socket answers, as its refusal of a kind it doesn't names them."""
+    _, known = str(refusal).split(" answers ")
+    return set(known.split(", "))
+
+
+def marks() -> dict[str, bool]:
+    """Return whether each request model's kind only reads, by its kind: every model with a kind of its own."""
+
+    def below(model: type[Request]) -> list[type[Request]]:
+        return [
+            each for child in model.__subclasses__() for each in [child, *below(child)]
+        ]
+
+    return {
+        model.named(): model.reads
+        for model in below(Request)
+        if isinstance(model.model_fields["kind"].default, str)
+    }
+
+
+def test_a_room_is_served_every_control_kind_that_reads_and_none_that_writes(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        with pytest.raises(HostError) as control:
+            client(machine.host, clock).ask(Unknown(), Shown)
+        with pytest.raises(HostError) as room:
+            RoomClient(socket=machine.host.launch("one").request).ask(Unknown(), Shown)
+    controls = answered_kinds(control.value)
+    rooms = answered_kinds(room.value)
+    marked = marks()
+    assert controls <= set(marked)
+    assert {kind for kind in controls if marked[kind]} <= rooms
+    assert {kind for kind in controls if not marked[kind]} & rooms == set()
+    assert {"inbox-list", "inbox-show", "list"} <= rooms
+    assert {"inbox-answer", "inbox-send", "dashboard", "stop"} <= controls - rooms
+
+
+class Older(RoomClient):
+    """A room's client whose service runs a copy from before rooms could ask what reads: it knows none of those kinds."""
+
+    @override
+    def ask[R: Reply](self, request: Request, reply: type[R]) -> R:
+        message = (
+            f"no handler for `{request.kind}`; a room's request socket answers "
+            "remote-list"
+        )
+        raise HostError(message)
+
+
+def test_a_room_whose_service_runs_an_older_copy_is_told_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     socket = tmp_path / "request.sock"
     socket.touch()
-    starter = Recording()
-    monkeypatch.setattr(cli, "RoomClient", lambda: RoomClient(socket=socket))
-    monkeypatch.setattr(cli, "Detached", lambda: starter)
-    monkeypatch.setenv(variable, "1")
-    result = runner.invoke(cli.app, arguments)
-    assert isinstance(result.exception, HostError), (result.output, runtime)
+    monkeypatch.setattr(cli, "RoomClient", lambda: Older(socket=socket))
+    result = runner.invoke(cli.app, ["inbox"])
+    assert isinstance(result.exception, HostError)
     assert str(result.exception) == (
-        "a room doesn't serve this command yet: the room reaches the host service "
-        "only on its launch's request socket, which takes no reading requests"
+        "the host service doesn't answer `inbox-list` in a room yet: it runs a copy "
+        "of lup from before rooms could ask it, until the operator approves a newer one"
     )
-    assert starter.starts == 0
 
 
 def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:

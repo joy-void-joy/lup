@@ -14,7 +14,7 @@ from pydantic import Field
 from lup_dev.host.protocol import Reply, Request
 
 
-class IssueState(Request):
+class IssueState(Request, reads=True):
     """Ask whether an issue is open, as the gate does of a deferral's issue."""
 
     kind: Literal["issue-state"] = "issue-state"

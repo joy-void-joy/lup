@@ -79,7 +79,7 @@ class EchoTools(ModuleTools):
         raise LupDevError(message)
 
 
-class Ping(Request):
+class Ping(Request, reads=True):
     """Ask the module to answer."""
 
     kind: Literal["ping"] = "ping"

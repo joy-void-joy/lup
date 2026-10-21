@@ -6,7 +6,7 @@ One program per user on the operator's machine, outside every room, which rooms 
 
 - **It starts on demand,** detached, from the first launch or command that finds none answering, and runs until it's stopped. A command that only reads, run in an agent's session, never starts it, since it would run on in that shell's environment (`reading`, `cli.py`). It holds a lock for its whole life, so a second refuses.
 - **`lup-dev host`** runs it in the foreground, to watch it, and **`lup-dev host stop`** stops it. A launch outlives a stop (*Restarts and the sweep*).
-- **`lup-dev sessions`** lists the launches it serves, each with its conversations as a tree and its container. It only reads, so an agent's session on the host runs it too, though a room can't yet.
+- **`lup-dev sessions`** lists the launches it serves, each with its conversations as a tree and its container. It only reads, so an agent's session runs it too: on the host, every launch; in a room, its repository's alone (*How a room reaches it*).
 - **What it prints,** started in the background, is appended to `service.log` in lup's state, which a client names when the service doesn't answer within 10 seconds; in the foreground, it prints to the terminal.
 
 ## How a room reaches it
@@ -14,12 +14,21 @@ One program per user on the operator's machine, outside every room, which rooms 
 Each launch has a socket directory of its own, mode 0700, mounted into its room at `/run/lup`. The service knows which launch speaks by the socket it hears on: under `--userns=keep-id` a room's processes have the operator's uid, so only the socket tells a room from the operator. One socket for every room would have each request name its launch, which the room would then say of itself, and HTTP on localhost would be reachable by every process on the machine.
 - **`hook.sock`, the one hook.** Every hook of every runtime is one command, which pipes the runtime's payload unchanged to the socket with `socat` and prints the answer, so nothing in the room parses it (`piped`, `launch/session.py`; *The one hook*).
 - **`mcp.sock`, lup's tool server.** In the room, the runtime's stdio server is lup's bridge (`packages/lup/src/lup/sessions/bridge.py`), on the room's Python and the standard library alone, carrying each line across. Each connection is one MCP session, kept while it's open so what's pushed to the session goes through it (`Pushes`, `host/pushes.py`). The server answers a probe for MCP's 2026-07-28 revision "method not found", so the runtime opens on the handshake: on that revision a server can send nothing unasked, which a push and the bridge's `list_changed` after a restart both need (`lup.tools.serving`; `docs/field-notes.md`, *Channels*).
-- **`request.sock`, the room's requests:** one typed request per connection from the room's programs: git's remote helper, the gate asking an issue's state, the clipboard, and modules' handlers. Its routes are apart from the control socket's, so a room never reaches a control kind, such as answering the inbox: the first lup's sessions approved their own questions by writing to a store they could reach.
+- **`request.sock`, the room's requests:** one typed request per connection from the room's programs: git's remote helper, the gate asking an issue's state, the clipboard, and modules' handlers. Its routes are apart from the control socket's, so a room never reaches a control kind that writes, such as answering the inbox: the first lup's sessions approved their own questions by writing to a store they could reach.
+- **The control kinds that only read** are served on `request.sock` too, so `lup-dev sessions`, `inbox` and `inbox show` work in a room (*Reading from a room*).
 - **`messages.sock`,** Claude Code's own messaging socket, through which the service rings an idle session's doorbell where nothing can be pushed to it (`docs/inbox.md`, *How an agent is told*).
 
 On the host alone:
 - **The control socket.** One JSON request per connection, a pydantic model told apart by its `kind`, and one reply (`host/protocol.py`). Modules register the handlers for their own kinds, so a kind is added without editing the service. What the service can't carry out is replied as `Refused`, saying why.
 - **Watching.** On the watch socket, a request is answered at once, then again each time its reply changes, with nothing polled (`host/watch.py`); the dashboard watches what the operator's commands fetch. A watch is asked again when the service answers a request or a hook, or writes an item of the inbox.
+
+## Reading from a room
+
+- **Every request model says whether it only reads,** a keyword of its class with no default (`class ShowItem(Request, reads=True)`, `host/protocol.py`), so a kind declared without it fails as its module is imported. A forgotten mark can neither leave a reading command refused in a room nor open one that acts to it.
+- **A kind that reads is answered by a `Reading`** (`host/service.py`), which also answers a room of one repository, and is routed with `Route.reading`; a kind that writes, with `Route.to`. Each refuses a kind of the other mark, so a mismatch fails as the service is built. Each launch's `request.sock` routes every control kind that reads to that answer, for the repository in the host's record of the launch, never one the room names.
+- **A room sees its repository alone:** its launches and their conversations, each session's name only for a session of theirs, and the items whose every conversation is of the repository, or an approval of it. An item of another repository is refused, and a list leaves it out, since the inbox and the launches are the operator's across every project, and a room's posts can be public. The operator's draft reply and what they write on a conversation before sending it are refused to every room.
+- **A room has no podman,** so the listing it's answered says whether each launch's container runs (`Listed.running`); the operator's terminal asks podman itself, which keeps the dashboard's watch from asking it at each change.
+- **A service on a copy from before** answers a room's reading request as a kind it doesn't know, which `lup-dev` says is a copy to approve (`FromRoom`, `cli.py`).
 
 ## The one hook
 

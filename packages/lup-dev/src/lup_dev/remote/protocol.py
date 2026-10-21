@@ -145,7 +145,7 @@ type RemoteName = Annotated[str, AfterValidator(remote_name)]
 """A remote, by its name in the repository's `config`."""
 
 
-class Listing(Request):
+class Listing(Request, reads=True):
     """List a remote's refs: what git asks a helper with `list`, or with `list for-push` before a push."""
 
     kind: Literal["remote-list"] = "remote-list"
@@ -187,7 +187,7 @@ class Lease(Model):
     """All zeros where the ref mustn't exist yet."""
 
 
-class Pushing(Request):
+class Pushing(Request, reads=False):
     """Push one batch of updates to a remote, with the options git set for it."""
 
     kind: Literal["remote-push"] = "remote-push"
@@ -258,7 +258,7 @@ class Wanted(Model):
     name: ListedName
 
 
-class Fetching(Request):
+class Fetching(Request, reads=False):
     """Fetch the objects git asked for into the repository's store, as the remote's refs name them."""
 
     kind: Literal["remote-fetch"] = "remote-fetch"

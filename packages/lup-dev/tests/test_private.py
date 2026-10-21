@@ -576,7 +576,7 @@ def test_the_gate_in_a_room_whose_host_doesn_t_answer_says_so_and_passes(
     assert result.exit_code == 0
     assert result.output == (
         "Values never published weren't read: the host said no handler for "
-        "`private-scan`; a room's request socket answers no kind.\n"
+        "`private-scan`; a room's request socket answers list, show-holding.\n"
     )
 
 

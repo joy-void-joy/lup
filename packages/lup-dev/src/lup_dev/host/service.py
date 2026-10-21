@@ -30,7 +30,9 @@ on. It holds three sockets:
 - `mcp.sock` serves lup's tools, and `request.sock` the room's requests, each
   routed to the core's own (`host/rooms.py`) or to the launch's modules, which
   run in the same process of the launch's own, started when the launch opens
-  and stopped when it ends (`host/workers.py`).
+  and stopped when it ends (`host/workers.py`). The control socket's kinds that
+  only read are routed there too, each answered for the launch's repository
+  alone (`Reading`); those that write never are.
 
 Each launch is recorded beside its directory, so a service started after one
 stopped serves the same launches, in the directories their rooms mounted. The
@@ -188,7 +190,11 @@ async def judged(asked: Asked) -> Judged:
 
 
 class Handler[R: Request](ABC):
-    """Answers one kind of control request; a module registers its own with the service."""
+    """Answers one kind of control request; a module registers its own with the service.
+
+    A kind that writes is routed to one with `Route.to`; a kind that reads, to a
+    `Reading`, which says what a room is shown of it, with `Route.reading`.
+    """
 
     @abstractmethod
     def request(self) -> type[R]:
@@ -202,21 +208,81 @@ class Handler[R: Request](ABC):
         """
 
 
+class Reading[R: Request](Handler[R], ABC):
+    """Answers one kind of control request that only reads: the operator with all the service holds, and a launch's room with what's of its repository alone."""
+
+    @abstractmethod
+    async def scoped(self, request: R, repository: Path) -> Reply:
+        """Answer one request from a room of the repository whose git directory is `repository`, with what's of it alone: no other repository's launches, items, names, worktrees or words.
+
+        `repository` is the host's record of the launch the room runs, never
+        what the room names. A `HostError` refuses the request with its
+        message, as for what's another repository's.
+        """
+
+
 class Route(Model, arbitrary_types_allowed=True):
-    """A handler as the service dispatches to it: its kind, and its answer to the JSON."""
+    """A handler as the service dispatches to it: its kind, its answer to the JSON, and, for a kind that only reads, its answer to a room."""
 
     kind: str
     answer: Callable[[str], Awaitable[Reply]]
+    scoped: Callable[[str, Path], Awaitable[Reply]] | None = None
+    """Its answer to a room of the repository whose git directory it's given,
+    where its kind only reads (`Reading.scoped`); none for one that writes,
+    which a room never reaches."""
 
     @classmethod
     def to[R: Request](cls, handler: Handler[R]) -> Route:
-        """Route the requests of `handler`'s kind to it, each read as its model."""
+        """Route the requests of `handler`'s kind to it, each read as its model: a kind that writes, which a room never reaches.
+
+        A kind that reads is refused: it's routed with `reading`, its handler
+        saying what a room is shown of it, so a room is never left without it.
+        """
         model = handler.request()
+        kind = model.named()
+        if model.reads:
+            message = (
+                f"`{kind}` only reads, so it's routed with `Route.reading`, its "
+                "handler saying what a room is shown of it"
+            )
+            raise TypeError(message)
 
         async def answered(raw: str) -> Reply:
             return await handler.answer(model.model_validate_json(raw))
 
-        return cls(kind=model.named(), answer=answered)
+        return cls(kind=kind, answer=answered)
+
+    @classmethod
+    def reading[R: Request](cls, handler: Reading[R]) -> Route:
+        """Route the requests of `handler`'s kind to it, each read as its model: a kind that only reads, which each launch's room is served for its repository alone.
+
+        A kind that writes is refused, since it would serve a room what acts.
+        """
+        model = handler.request()
+        kind = model.named()
+        if not model.reads:
+            message = f"`{kind}` writes, so it's routed with `Route.to`: a room never reaches it"
+            raise TypeError(message)
+
+        async def answered(raw: str) -> Reply:
+            return await handler.answer(model.model_validate_json(raw))
+
+        async def scoped(raw: str, repository: Path) -> Reply:
+            return await handler.scoped(model.model_validate_json(raw), repository)
+
+        return cls(kind=kind, answer=answered, scoped=scoped)
+
+
+def confined(route: Route, launch: Register) -> Route | None:
+    """Route a room's requests of `route`'s kind to its answer for `launch`'s repository alone; none where its kind writes."""
+    scoped = route.scoped
+    if scoped is None:
+        return None
+
+    async def answered(raw: str) -> Reply:
+        return await scoped(raw, launch.repository)
+
+    return Route(kind=route.kind, answer=answered)
 
 
 def bound(room: RoomRoute, launch: Register) -> Route:
@@ -477,6 +543,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     """Answers each launch's hooks its judge reads; a test gives a stub."""
     tools: list[RoomTools]
     room_routes: list[RoomRoute]
+    reading: list[Route] = []
+    """The control socket's routes whose kinds only read, which each launch's
+    room is served for its repository alone (`confined`): set once the
+    service's own handlers are made, since they're made over these launches."""
     modules: LaunchModules | None
     """Serves each launch's modules in a process of its own; none serves none."""
     line_limit: int
@@ -571,6 +641,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         try:
             offered = await self.offered(request)
             own = {room.kind: bound(room, request) for room in self.room_routes}
+            reading = {
+                route.kind: room
+                for route in self.reading
+                if (room := confined(route, request)) is not None
+            }
             modules = self.modules
             relaying = (
                 {}
@@ -578,7 +653,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 else {kind: relayed(modules, request, kind) for kind in offered.kinds}
             )
             requests = Dispatcher(
-                routes={**relaying, **own},
+                routes={**relaying, **reading, **own},
                 answering="a room's request socket",
                 say=said,
                 changes=self.changes,
@@ -707,7 +782,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             return Offered()
         names = [spec.name for tools in self.tools for spec in tools.specs()]
-        kinds = [room.kind for room in self.room_routes]
+        kinds = [room.kind for room in self.room_routes] + [
+            route.kind for route in self.reading
+        ]
         taken = [spec.name for spec in offered.tools if spec.name in names] + [
             kind for kind in offered.kinds if kind in kinds
         ]
@@ -1064,12 +1141,13 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         self.say(f"{request.launch}: the operator {said} each flagged write of {path}")
         return request.on
 
-    def holding(self, request: ShowHolding) -> bool:
-        """Say whether the operator holds each flagged write of a conversation of `request`'s runtime, in whichever launch serves it; not where none does."""
+    def holding(self, request: ShowHolding, repository: Path | None = None) -> bool:
+        """Say whether the operator holds each flagged write of a conversation of `request`'s runtime, in whichever launch serves it, of `repository` alone where one's given; not where none does."""
         return any(
             each.holding
             for served in self.served.values()
             if served.launch.runtime == request.runtime
+            and repository in (None, served.launch.repository)
             for each in served.conversations.known
             if each.session == request.session and each.agent == request.agent
         )
@@ -1286,8 +1364,8 @@ class HoldingSetting(Model, Handler[SetHolding]):
         return Holding(on=self.launches.held(request))
 
 
-class HoldingShowing(Model, Handler[ShowHolding]):
-    """Answers `ShowHolding`: whether the operator holds each flagged write of a conversation."""
+class HoldingShowing(Model, Reading[ShowHolding]):
+    """Answers `ShowHolding`: whether the operator holds each flagged write of a conversation; for a room, of a conversation of its repository's launches alone."""
 
     launches: Launches
 
@@ -1298,6 +1376,10 @@ class HoldingShowing(Model, Handler[ShowHolding]):
     @override
     async def answer(self, request: ShowHolding) -> Reply:
         return Holding(on=self.launches.holding(request))
+
+    @override
+    async def scoped(self, request: ShowHolding, repository: Path) -> Reply:
+        return Holding(on=self.launches.holding(request, repository))
 
 
 class Ending(Model, Handler[Unregister]):
@@ -1315,8 +1397,8 @@ class Ending(Model, Handler[Unregister]):
         return Done()
 
 
-class Listing(Model, Handler[ListLaunches]):
-    """Answers `ListLaunches`: each launch served, as it was registered."""
+class Listing(Model, Reading[ListLaunches]):
+    """Answers `ListLaunches`: each launch served, as it was registered; for a room, its repository's alone, with whether each one's container runs."""
 
     launches: Launches
 
@@ -1332,6 +1414,40 @@ class Listing(Model, Handler[ListLaunches]):
             sessions=self.launches.names.all(),
             talkers={
                 each.launch.launch: self.launches.talkers(each) for each in served
+            },
+        )
+
+    @override
+    async def scoped(self, request: ListLaunches, repository: Path) -> Reply:
+        """List the launches of `repository` alone, each session's name only for a session of theirs, and whether each one's container runs, which a room has no podman to ask."""
+        served = [
+            each
+            for each in self.launches.served.values()
+            if each.launch.repository == repository
+        ]
+        talkers = {each.launch.launch: self.launches.talkers(each) for each in served}
+        names = self.launches.names.all()
+        podman = self.launches.podman
+
+        def runs(container: str | None) -> bool:
+            return (
+                podman is not None
+                and container is not None
+                and podman.exists(container)
+            )
+
+        return Listed(
+            launches=[each.launch for each in served],
+            sessions={
+                talker.session: names[talker.session]
+                for each in talkers.values()
+                for talker in each
+                if talker.session in names
+            },
+            talkers=talkers,
+            running={
+                each.launch.launch: await asyncio.to_thread(runs, each.launch.container)
+                for each in served
             },
         )
 
@@ -1504,11 +1620,14 @@ class HostService(Model, arbitrary_types_allowed=True):
         own = [
             Route.to(Registering(launches=launches)),
             Route.to(Ending(launches=launches)),
-            Route.to(Listing(launches=launches)),
+            Route.reading(Listing(launches=launches)),
             Route.to(Renaming(launches=launches)),
             Route.to(HoldingSetting(launches=launches)),
-            Route.to(HoldingShowing(launches=launches)),
+            Route.reading(HoldingShowing(launches=launches)),
             Route.to(Stopping(stopped=stopped)),
+        ]
+        launches.reading = [
+            route for route in [*own, *self.routes] if route.scoped is not None
         ]
         control = Dispatcher(
             routes={route.kind: route for route in [*own, *self.routes]},

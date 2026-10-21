@@ -620,6 +620,16 @@ class Item(Model):
         """Its kind's rank (`ranked`), carried with it to the dashboard's page, whose review orders by it."""
         return ranked(self.reason)
 
+    def of(self, repository: Path) -> bool:
+        """Say whether it's of the repository whose git directory is `repository` alone: each conversation it's from, to or for is of it, and an approval is about it; one between the operator and themselves alone is of none."""
+        parties = [self.sender, self.recipient, self.addressed]
+        about = [self.reason.repository] if isinstance(self.reason, Approval) else []
+        found = [
+            *(each.repository for each in parties if isinstance(each, Conversation)),
+            *about,
+        ]
+        return bool(found) and all(each == repository for each in found)
+
 
 class Whereabouts(Model):
     """Where a conversation was last heard: the launch its session runs in, and whether it has ended."""
@@ -841,14 +851,15 @@ class Inbox(MutableModel):
             if conversation in (item.sender, item.recipient, item.addressed)
         ]
 
-    def reviewed(self) -> datetime | None:
-        """Return when the operator last settled an item of theirs, read, answered or decided, from the review or a terminal; none before they first did."""
+    def reviewed(self, repository: Path | None = None) -> datetime | None:
+        """Return when the operator last settled an item of theirs, read, answered or decided, from the review or a terminal, of `repository` alone where one's given (`Item.of`); none before they first did."""
         return max(
             (
                 item.state.at
                 for item in self.items.values()
                 if item.recipient == Operator()
                 and isinstance(item.state, Done | Answered | Decided)
+                and (repository is None or item.of(repository))
             ),
             default=None,
         )

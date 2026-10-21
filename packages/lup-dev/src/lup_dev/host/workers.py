@@ -60,7 +60,7 @@ async def exchanged(path: Path, request: Request) -> str:
         await writer.wait_closed()
 
 
-class Listing(Request):
+class Listing(Request, reads=True):
     """Ask what a launch's modules serve."""
 
     kind: Literal["module-listing"] = "module-listing"
@@ -81,7 +81,7 @@ class Offered(Reply):
     occasions: list[Occasion] = []
 
 
-class Happening(Request):
+class Happening(Request, reads=False):
     """Tell a launch's modules an occasion their hooks run at."""
 
     kind: Literal["module-happening"] = "module-happening"
@@ -103,7 +103,7 @@ class Happened(Reply):
     """Each hook's refusal at `publishing`, a hook that failed there among them."""
 
 
-class Calling(Request):
+class Calling(Request, reads=False):
     """Call one of a launch's modules' tools, for a conversation of the launch."""
 
     kind: Literal["module-call"] = "module-call"
@@ -120,7 +120,7 @@ class Called(Reply):
     answer: Answer
 
 
-class Relaying(Request):
+class Relaying(Request, reads=False):
     """Pass a room's request to the module answering its kind."""
 
     kind: Literal["module-request"] = "module-request"
@@ -135,7 +135,7 @@ class Relayed(Reply):
     reply: JsonObject
 
 
-class JudgeHook(Request):
+class JudgeHook(Request, reads=False):
     """Put one of a launch's hooks the judge reads to its judge."""
 
     kind: Literal["judge-hook"] = "judge-hook"
@@ -164,8 +164,8 @@ type Replied = Annotated[
 """A launch's process's reply, or its refusal, told apart by its `kind`."""
 
 
-class Sent(Request, extra="allow"):
-    """A room's request as it sent it: its kind, and the fields of its own model."""
+class Sent(Request, reads=False, extra="allow"):
+    """A room's request as it sent it: its kind, and the fields of its own model; said to write whatever its kind, since its own model isn't known here."""
 
 
 class Passed(Reply, extra="allow"):

@@ -5,9 +5,10 @@ send these, each a typed request on the control socket, starting the service
 where none runs, as a launch does: what waits for the operator (`ListInbox`), one
 item whole (`ShowItem`), a question's answer (`AnswerItem`), a message read
 (`FinishItem`), and a message to the session a launch runs (`SendItem`). They're
-the inbox's own kinds, registered with the service by `cli.py`; a room can't
-send them, since it can't reach the control socket, and the store isn't
-mounted.
+the inbox's own kinds, registered with the service by `cli.py`. A room reaches
+those that only read on its launch's request socket, each answered with what's of
+its repository alone (`Reading`): an item of another's is refused, and a list
+leaves it out. The rest a room never reaches, and the store isn't mounted.
 
 Trust on launch sends the approval's (`docs/trust.md`): the
 launch asks it (`AskApproval`, joining the one waiting about the same zone) and
@@ -30,9 +31,10 @@ from pathlib import Path
 from typing import Literal, override
 
 from lup.types import Model
+from lup_dev.git import Git
 from lup_dev.host.protocol import LaunchId, Reply, Request
-from lup_dev.host.records import Entry, Recorded
-from lup_dev.host.service import Handler, Route
+from lup_dev.host.records import Entry, Recorded, within
+from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.inbox import context
 from lup_dev.inbox.delivery import Delivery, body
 from lup_dev.inbox.store import (
@@ -42,6 +44,7 @@ from lup_dev.inbox.store import (
     Draft,
     Flagged,
     HeldChange,
+    InboxError,
     Item,
     Operator,
     Passage,
@@ -51,20 +54,20 @@ from lup_dev.inbox.store import (
 )
 
 
-class ListInbox(Request):
+class ListInbox(Request, reads=True):
     """List what waits in the operator's inbox, oldest first."""
 
     kind: Literal["inbox-list"] = "inbox-list"
 
 
-class ShowItem(Request):
+class ShowItem(Request, reads=True):
     """Show one item whole."""
 
     kind: Literal["inbox-show"] = "inbox-show"
     number: int
 
 
-class AnswerItem(Request):
+class AnswerItem(Request, reads=False):
     """Answer a question: a verdict on each of its decisions, and a comment on the whole, or a plain question's answer in words."""
 
     kind: Literal["inbox-answer"] = "inbox-answer"
@@ -73,14 +76,14 @@ class AnswerItem(Request):
     comment: str = ""
 
 
-class FinishItem(Request):
+class FinishItem(Request, reads=False):
     """Take a message the operator has read off their list."""
 
     kind: Literal["inbox-done"] = "inbox-done"
     number: int
 
 
-class SendItem(Request):
+class SendItem(Request, reads=False):
     """Send the operator's message to a conversation of the session a launch runs: its main one, or one of its subagents."""
 
     kind: Literal["inbox-send"] = "inbox-send"
@@ -93,27 +96,27 @@ class SendItem(Request):
     they send it from reading the conversation."""
 
 
-class ShowDraft(Request):
+class ShowDraft(Request, reads=True):
     """Show the operator's draft reply: what they've written on the items they're reading."""
 
     kind: Literal["inbox-draft"] = "inbox-draft"
 
 
-class KeepDraft(Request):
+class KeepDraft(Request, reads=False):
     """Keep the operator's draft reply as it stands, in place of the last."""
 
     kind: Literal["inbox-keep-draft"] = "inbox-keep-draft"
     draft: Draft
 
 
-class ShowTalk(Request):
+class ShowTalk(Request, reads=True):
     """Show what the operator writes on one conversation they read, and the messages they sent it from there."""
 
     kind: Literal["inbox-talk"] = "inbox-talk"
     conversation: Conversation
 
 
-class KeepTalk(Request):
+class KeepTalk(Request, reads=False):
     """Keep what the operator writes on one conversation as it stands, in place of the last."""
 
     kind: Literal["inbox-keep-talk"] = "inbox-keep-talk"
@@ -121,13 +124,13 @@ class KeepTalk(Request):
     talk: Talk
 
 
-class SendDraft(Request):
+class SendDraft(Request, reads=False):
     """Send the operator's draft reply: a review to each conversation whose items it covers or it writes to."""
 
     kind: Literal["inbox-send-draft"] = "inbox-send-draft"
 
 
-class AskApproval(Request):
+class AskApproval(Request, reads=False):
     """Ask the operator's approval, its whole diff and each file it changes kept beside it; or join the approval waiting about the same zone."""
 
     kind: Literal["inbox-ask-approval"] = "inbox-ask-approval"
@@ -164,14 +167,14 @@ class AskApproval(Request):
         )
 
 
-class AwaitApproval(Request):
+class AwaitApproval(Request, reads=True):
     """Wait for an approval's answer: the reply comes once it's answered, wherever it is."""
 
     kind: Literal["inbox-await-approval"] = "inbox-await-approval"
     number: int
 
 
-class AnswerApproval(Request):
+class AnswerApproval(Request, reads=False):
     """Answer an approval or a held change, yes or no, with what the operator adds."""
 
     kind: Literal["inbox-answer-approval"] = "inbox-answer-approval"
@@ -180,7 +183,7 @@ class AnswerApproval(Request):
     comment: str = ""
 
 
-class AskHold(Request):
+class AskHold(Request, reads=False):
     """Put a held change in the operator's inbox: what's held and why, its diff and each file held, and the session that made it."""
 
     kind: Literal["inbox-ask-hold"] = "inbox-ask-hold"
@@ -193,7 +196,7 @@ class AskHold(Request):
     """The runtime's id for the call that made the change, which the item keeps."""
 
 
-class ShowGathering(Request):
+class ShowGathering(Request, reads=True):
     """Find the item a write that landed flagged would join: the one gathering the same conversation's flagged writes to the same file, while the operator hasn't read it (`Inbox.gathering`)."""
 
     kind: Literal["inbox-show-gathering"] = "inbox-show-gathering"
@@ -203,7 +206,7 @@ class ShowGathering(Request):
     """The file, from the worktree's root."""
 
 
-class AskFlag(Request):
+class AskFlag(Request, reads=False):
     """Put a write that landed flagged in the operator's inbox: what its file's whole change flags, that change's diff and its file whole, and the conversation that made it."""
 
     kind: Literal["inbox-ask-flag"] = "inbox-ask-flag"
@@ -224,21 +227,21 @@ class AskFlag(Request):
     none."""
 
 
-class ShowDiff(Request):
+class ShowDiff(Request, reads=True):
     """Read the whole diff of an approval, a held change or a flagged write."""
 
     kind: Literal["inbox-show-diff"] = "inbox-show-diff"
     number: int
 
 
-class ShowFiles(Request):
+class ShowFiles(Request, reads=True):
     """Read each file an approval, a held change or a flagged write touches, whole before and after."""
 
     kind: Literal["inbox-show-files"] = "inbox-show-files"
     number: int
 
 
-class ShowConversation(Request):
+class ShowConversation(Request, reads=True):
     """Read one conversation as its runtime records it, from its step `since` on: the operator's words, the agent's, and the tools it called."""
 
     kind: Literal["inbox-show-conversation"] = "inbox-show-conversation"
@@ -251,14 +254,14 @@ class ShowConversation(Request):
     """How many of its steps the asker has already: only those after are sent."""
 
 
-class ShowContext(Request):
+class ShowContext(Request, reads=True):
     """Read an item's moment in the conversation that sent it: what led to the call that made it, and what came after."""
 
     kind: Literal["inbox-show-context"] = "inbox-show-context"
     number: int
 
 
-class ListItems(Request):
+class ListItems(Request, reads=True):
     """List the items one conversation sent and was sent, in every state, oldest first, each with its text whole."""
 
     kind: Literal["inbox-list-items"] = "inbox-list-items"
@@ -382,7 +385,15 @@ class Exchanged(Reply):
     conversation once it had."""
 
 
-class Listing(Model, Handler[ListInbox], arbitrary_types_allowed=True):
+def owned(item: Item, repository: Path) -> Item:
+    """Return `item` where it's of `repository` alone (`Item.of`); refuse it otherwise, saying nothing of it, as to a room of `repository`."""
+    if not item.of(repository):
+        message = f"item {item.number} isn't this repository's"
+        raise InboxError(message)
+    return item
+
+
+class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
     """Answers `ListInbox`: the items waiting for the operator."""
 
     delivery: Delivery
@@ -396,8 +407,14 @@ class Listing(Model, Handler[ListInbox], arbitrary_types_allowed=True):
         inbox = self.delivery.inbox
         return Items(items=inbox.waiting(Operator()), reviewed=inbox.reviewed())
 
+    @override
+    async def scoped(self, request: ListInbox, repository: Path) -> Reply:
+        inbox = self.delivery.inbox
+        waiting = [each for each in inbox.waiting(Operator()) if each.of(repository)]
+        return Items(items=waiting, reviewed=inbox.reviewed(repository))
 
-class Showing(Model, Handler[ShowItem], arbitrary_types_allowed=True):
+
+class Showing(Model, Reading[ShowItem], arbitrary_types_allowed=True):
     """Answers `ShowItem`: the item, whole."""
 
     delivery: Delivery
@@ -409,6 +426,10 @@ class Showing(Model, Handler[ShowItem], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: ShowItem) -> Reply:
         return Shown(item=self.delivery.inbox.item(request.number))
+
+    @override
+    async def scoped(self, request: ShowItem, repository: Path) -> Reply:
+        return Shown(item=owned(self.delivery.inbox.item(request.number), repository))
 
 
 class Answering(Model, Handler[AnswerItem], arbitrary_types_allowed=True):
@@ -476,7 +497,7 @@ class ApprovalAsking(Model, Handler[AskApproval], arbitrary_types_allowed=True):
         return Shown(item=item)
 
 
-class ApprovalAwaiting(Model, Handler[AwaitApproval], arbitrary_types_allowed=True):
+class ApprovalAwaiting(Model, Reading[AwaitApproval], arbitrary_types_allowed=True):
     """Answers `AwaitApproval` once the approval is answered, with the approval as it stands."""
 
     delivery: Delivery
@@ -488,6 +509,11 @@ class ApprovalAwaiting(Model, Handler[AwaitApproval], arbitrary_types_allowed=Tr
     @override
     async def answer(self, request: AwaitApproval) -> Reply:
         return Shown(item=await self.delivery.settled(request.number))
+
+    @override
+    async def scoped(self, request: AwaitApproval, repository: Path) -> Reply:
+        owned(self.delivery.inbox.item(request.number), repository)
+        return await self.answer(request)
 
 
 class ApprovalAnswering(Model, Handler[AnswerApproval], arbitrary_types_allowed=True):
@@ -529,7 +555,7 @@ class HoldAsking(Model, Handler[AskHold], arbitrary_types_allowed=True):
         return Shown(item=item)
 
 
-class GatheringShowing(Model, Handler[ShowGathering], arbitrary_types_allowed=True):
+class GatheringShowing(Model, Reading[ShowGathering], arbitrary_types_allowed=True):
     """Answers `ShowGathering`: the item gathering the conversation's flagged writes to the file, with its file as it's kept."""
 
     delivery: Delivery
@@ -547,6 +573,13 @@ class GatheringShowing(Model, Handler[ShowGathering], arbitrary_types_allowed=Tr
         files = await asyncio.to_thread(inbox.files, found.number)
         file = next((each for each in files if each.path == request.path), None)
         return Gathering(number=found.number, file=file)
+
+    @override
+    async def scoped(self, request: ShowGathering, repository: Path) -> Reply:
+        if request.sender.repository != repository:
+            message = "the conversation isn't one of this repository's"
+            raise InboxError(message)
+        return await self.answer(request)
 
 
 class FlagAsking(Model, Handler[AskFlag], arbitrary_types_allowed=True):
@@ -572,7 +605,7 @@ class FlagAsking(Model, Handler[AskFlag], arbitrary_types_allowed=True):
         return Shown(item=item)
 
 
-class ContextShowing(Model, Handler[ShowContext], arbitrary_types_allowed=True):
+class ContextShowing(Model, Reading[ShowContext], arbitrary_types_allowed=True):
     """Answers `ShowContext`: an item's moment, read from its sender's record as it stands (`inbox/context.py`)."""
 
     delivery: Delivery
@@ -585,7 +618,16 @@ class ContextShowing(Model, Handler[ShowContext], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: ShowContext) -> Reply:
-        item = self.delivery.inbox.item(request.number)
+        return await self.moment(self.delivery.inbox.item(request.number))
+
+    @override
+    async def scoped(self, request: ShowContext, repository: Path) -> Reply:
+        return await self.moment(
+            owned(self.delivery.inbox.item(request.number), repository)
+        )
+
+    async def moment(self, item: Item) -> Context:
+        """Read `item`'s moment from its sender's record, off the event loop."""
         found = await asyncio.to_thread(context.read, item, self.recorded)
         return Context(number=item.number, entries=found.entries, anchor=found.anchor)
 
@@ -601,7 +643,7 @@ def written(item: Item) -> str:
             return body(item)
 
 
-class ItemsListing(Model, Handler[ListItems], arbitrary_types_allowed=True):
+class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
     """Answers `ListItems`: the items the conversation sent, as it wrote them, and those it was sent, as it's told them."""
 
     delivery: Delivery
@@ -613,7 +655,19 @@ class ItemsListing(Model, Handler[ListItems], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: ListItems) -> Reply:
         party = request.conversation
+        return self.exchanged(party, self.delivery.inbox.exchanged(party))
+
+    @override
+    async def scoped(self, request: ListItems, repository: Path) -> Reply:
+        party = request.conversation
+        if party.repository != repository:
+            message = "the conversation isn't one of this repository's"
+            raise InboxError(message)
         items = self.delivery.inbox.exchanged(party)
+        return self.exchanged(party, [each for each in items if each.of(repository)])
+
+    def exchanged(self, party: Conversation, items: list[Item]) -> Exchanged:
+        """Return `items` as `party` sent them, as it wrote them, and as it was sent them, as it's told them."""
         return Exchanged(
             sent=[
                 Exchange(item=each, text=written(each))
@@ -629,9 +683,9 @@ class ItemsListing(Model, Handler[ListItems], arbitrary_types_allowed=True):
 
 
 class ConversationShowing(
-    Model, Handler[ShowConversation], arbitrary_types_allowed=True
+    Model, Reading[ShowConversation], arbitrary_types_allowed=True
 ):
-    """Answers `ShowConversation`: the steps of one conversation's record after those the asker has, each record read again only once it changed."""
+    """Answers `ShowConversation`: the steps of one conversation's record after those the asker has, each record read again only once it changed; for a room, only a record that ran in its repository."""
 
     recorded: dict[str, Recorded]
     """Each runtime's records on this machine, and how they're read, by its name."""
@@ -643,20 +697,38 @@ class ConversationShowing(
 
     @override
     async def answer(self, request: ShowConversation) -> Reply:
-        read = await asyncio.to_thread(
+        read = await self.read(request)
+        return self.conversed(read.transcript.entries, request.since)
+
+    @override
+    async def scoped(self, request: ShowConversation, repository: Path) -> Reply:
+        """Answer only where the record says it ran in the repository's git directory or one of its worktrees, as lup keeps a repository's sessions (`lup.transcripts`)."""
+        read = await self.read(request)
+        under = await asyncio.to_thread(
+            lambda: [repository, *Git.pinned(repository).worktrees()]
+        )
+        ran = read.transcript.directory
+        if ran is None or not within(ran, under):
+            message = "the conversation isn't one of this repository's"
+            raise InboxError(message)
+        return self.conversed(read.transcript.entries, request.since)
+
+    async def read(self, request: ShowConversation) -> context.Read:
+        """Read the conversation's record as it stands, off the event loop."""
+        return await asyncio.to_thread(
             self.recording.read,
             self.recorded,
             request.runtime,
             request.session,
             request.agent,
         )
-        steps = read.transcript.entries
-        return Conversed(
-            entries=steps[request.since :], since=request.since, total=len(steps)
-        )
+
+    def conversed(self, steps: list[Entry], since: int) -> Conversed:
+        """Return the conversation's steps after the first `since`."""
+        return Conversed(entries=steps[since:], since=since, total=len(steps))
 
 
-class DiffShowing(Model, Handler[ShowDiff], arbitrary_types_allowed=True):
+class DiffShowing(Model, Reading[ShowDiff], arbitrary_types_allowed=True):
     """Answers `ShowDiff`: the item's whole diff."""
 
     delivery: Delivery
@@ -670,8 +742,13 @@ class DiffShowing(Model, Handler[ShowDiff], arbitrary_types_allowed=True):
         self.delivery.changing(request.number)
         return Whole(text=self.delivery.inbox.diff(request.number))
 
+    @override
+    async def scoped(self, request: ShowDiff, repository: Path) -> Reply:
+        owned(self.delivery.inbox.item(request.number), repository)
+        return await self.answer(request)
 
-class FilesShowing(Model, Handler[ShowFiles], arbitrary_types_allowed=True):
+
+class FilesShowing(Model, Reading[ShowFiles], arbitrary_types_allowed=True):
     """Answers `ShowFiles`: each file the approval, held change or flagged write touches, whole, read off the event loop, since they can run to megabytes."""
 
     delivery: Delivery
@@ -686,9 +763,14 @@ class FilesShowing(Model, Handler[ShowFiles], arbitrary_types_allowed=True):
         files = await asyncio.to_thread(self.delivery.inbox.files, request.number)
         return Files(number=request.number, files=files)
 
+    @override
+    async def scoped(self, request: ShowFiles, repository: Path) -> Reply:
+        owned(self.delivery.inbox.item(request.number), repository)
+        return await self.answer(request)
 
-class DraftShowing(Model, Handler[ShowDraft], arbitrary_types_allowed=True):
-    """Answers `ShowDraft`: the draft as it stands."""
+
+class DraftShowing(Model, Reading[ShowDraft], arbitrary_types_allowed=True):
+    """Answers `ShowDraft`: the draft as it stands; never to a room, since the operator's unsent reply is theirs, of no repository."""
 
     delivery: Delivery
 
@@ -699,6 +781,11 @@ class DraftShowing(Model, Handler[ShowDraft], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: ShowDraft) -> Reply:
         return Drafted(draft=self.delivery.inbox.draft())
+
+    @override
+    async def scoped(self, request: ShowDraft, repository: Path) -> Reply:
+        message = "the operator's draft reply is theirs until they send it"
+        raise InboxError(message)
 
 
 class DraftKeeping(Model, Handler[KeepDraft], arbitrary_types_allowed=True):
@@ -715,8 +802,8 @@ class DraftKeeping(Model, Handler[KeepDraft], arbitrary_types_allowed=True):
         return Drafted(draft=self.delivery.drafted(request.draft))
 
 
-class TalkShowing(Model, Handler[ShowTalk], arbitrary_types_allowed=True):
-    """Answers `ShowTalk`: what the operator wrote on the conversation, as it stands."""
+class TalkShowing(Model, Reading[ShowTalk], arbitrary_types_allowed=True):
+    """Answers `ShowTalk`: what the operator wrote on the conversation, as it stands; never to a room, since what they haven't sent is theirs."""
 
     delivery: Delivery
 
@@ -727,6 +814,13 @@ class TalkShowing(Model, Handler[ShowTalk], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: ShowTalk) -> Reply:
         return Talked(talk=self.delivery.inbox.talk(request.conversation))
+
+    @override
+    async def scoped(self, request: ShowTalk, repository: Path) -> Reply:
+        message = (
+            "what the operator writes on a conversation is theirs until they send it"
+        )
+        raise InboxError(message)
 
 
 class TalkKeeping(Model, Handler[KeepTalk], arbitrary_types_allowed=True):
@@ -767,25 +861,25 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
 def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
     """Route each of the inbox's kinds to its handler, over one delivery; an item's moment read from the records `recorded`."""
     return [
-        Route.to(Listing(delivery=delivery)),
-        Route.to(Showing(delivery=delivery)),
+        Route.reading(Listing(delivery=delivery)),
+        Route.reading(Showing(delivery=delivery)),
         Route.to(Answering(delivery=delivery)),
         Route.to(Finishing(delivery=delivery)),
         Route.to(Sending(delivery=delivery)),
         Route.to(ApprovalAsking(delivery=delivery)),
-        Route.to(ApprovalAwaiting(delivery=delivery)),
+        Route.reading(ApprovalAwaiting(delivery=delivery)),
         Route.to(ApprovalAnswering(delivery=delivery)),
         Route.to(HoldAsking(delivery=delivery)),
-        Route.to(GatheringShowing(delivery=delivery)),
+        Route.reading(GatheringShowing(delivery=delivery)),
         Route.to(FlagAsking(delivery=delivery)),
-        Route.to(DiffShowing(delivery=delivery)),
-        Route.to(FilesShowing(delivery=delivery)),
-        Route.to(ContextShowing(delivery=delivery, recorded=recorded)),
-        Route.to(ConversationShowing(recorded=recorded)),
-        Route.to(ItemsListing(delivery=delivery)),
-        Route.to(DraftShowing(delivery=delivery)),
+        Route.reading(DiffShowing(delivery=delivery)),
+        Route.reading(FilesShowing(delivery=delivery)),
+        Route.reading(ContextShowing(delivery=delivery, recorded=recorded)),
+        Route.reading(ConversationShowing(recorded=recorded)),
+        Route.reading(ItemsListing(delivery=delivery)),
+        Route.reading(DraftShowing(delivery=delivery)),
         Route.to(DraftKeeping(delivery=delivery)),
         Route.to(DraftSending(delivery=delivery)),
-        Route.to(TalkShowing(delivery=delivery)),
+        Route.reading(TalkShowing(delivery=delivery)),
         Route.to(TalkKeeping(delivery=delivery)),
     ]
