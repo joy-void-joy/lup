@@ -25,6 +25,7 @@ from lup_dev import cli
 from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool
 from lup_dev.codescan.contract import Checker, FileReport, Parser, Rule, Source
 from lup_dev.codescan.engine import EngineError
+from lup_dev.copies import Copies
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import Detached, HostClient, Starter
@@ -74,7 +75,7 @@ from lup_dev.launch.trust import (
     UvToolchain,
     building,
 )
-from lup_dev.layout import JudgeLayout, Layout
+from lup_dev.layout import CopyLayout, JudgeLayout, Layout
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
@@ -371,7 +372,7 @@ class Installed(Model):
     tool: Tool
     root: Path
     commit: str
-    into: JudgeLayout
+    into: CopyLayout
     users: bool
 
 
@@ -382,7 +383,7 @@ class Recording(Toolchain):
         self.installed: list[Installed] = []
 
     def install(
-        self, tool: Tool, root: Path, commit: str, copy: JudgeLayout, *, users: bool
+        self, tool: Tool, root: Path, commit: str, copy: CopyLayout, *, users: bool
     ) -> None:
         self.installed.append(
             Installed(tool=tool, root=root, commit=commit, into=copy, users=users)
@@ -588,16 +589,13 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
     assert asking.worktree == lup
     assert "+++ b/lup_project.py" in Text.from_ansi(asking.diff).plain
     assert trust.approvals.answers == [True]
-    assert recording(trust).installed == [
-        Installed(
-            tool=zone.tool,
-            root=lup,
-            commit=head,
-            into=kit.layout.judge(common),
-            users=True,
-        )
-    ]
+    [install] = recording(trust).installed
+    assert install == Installed(
+        tool=zone.tool, root=lup, commit=head, into=install.into, users=True
+    )
+    assert install.into.home.parent == kit.layout.judge(common).copies
     assert kit.layout.judge(common).home.is_relative_to(kit.layout.data)
+    assert kit.layout.judge(common).bin.resolve() == install.into.bin.resolve()
     assert service(trust).calls == ["stop", "/tools/lup-dev host"]
     assert outcome.restarted
     assert approved(lup, kit, shell) == outcome.approval
@@ -637,9 +635,49 @@ def test_two_repositories_keep_their_own_copies(
     theirs.ensure()
     [mine] = recording(ours).installed
     [other] = recording(theirs).installed
-    assert mine.into != other.into
+    assert mine.into.home.parent.parent != other.into.home.parent.parent
     assert mine.into.command("lup-dev").is_file()
     assert other.into.command("lup-dev").is_file()
+
+
+class Watching(Recording):
+    """Records each install as `Recording` does, and what the repository's link named while it ran."""
+
+    def __init__(self, copies: JudgeLayout) -> None:
+        super().__init__()
+        self.copies = copies
+        self.linked: list[Path | None] = []
+
+    def install(
+        self, tool: Tool, root: Path, commit: str, copy: CopyLayout, *, users: bool
+    ) -> None:
+        assert not copy.home.exists()
+        self.linked.append(Copies(layout=self.copies).current())
+        super().install(tool, root, commit, copy, users=users)
+
+
+def test_an_approval_installs_beside_the_copy_that_judges_and_switches_once_its_whole(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
+    copies = kit.layout.judge(common)
+    watching = Watching(copies)
+    first = trusting(lup, kit, yes()).model_copy(update={"toolchain": watching})
+    first.ensure()
+    changed(lup, {"lup_project.py": DECLARED + "# changed\n"}, shell)
+    second = trusting(lup, kit, yes()).model_copy(update={"toolchain": watching})
+    second.ensure()
+    before, after = watching.installed
+    # While the second was installed, the first judged; once it was whole, the
+    # link named it, and the first stays for a process running it.
+    assert watching.linked == [None, before.into.home.resolve()]
+    assert Copies(layout=copies).current() == after.into.home.resolve()
+    assert before.into.home != after.into.home
+    assert before.into.command("lup-dev").is_file()
+    assert (
+        copies.command("lup-dev").read_text()
+        == after.into.command("lup-dev").read_text()
+    )
 
 
 def test_a_missing_copy_is_installed_again_from_the_approved_zone(
@@ -654,11 +692,12 @@ def test_a_missing_copy_is_installed_again_from_the_approved_zone(
     trust = trusting(lup, kit, unasked(), inside=["first"])
     outcome = trust.ensure()
     assert outcome == Unchanged(commit=head, approval=first.approval, again=True)
-    assert recording(trust).installed == [
-        Installed(
-            tool=first.approval.tool, root=lup, commit=head, into=copy, users=False
-        )
-    ]
+    [install] = recording(trust).installed
+    assert install == Installed(
+        tool=first.approval.tool, root=lup, commit=head, into=install.into, users=False
+    )
+    assert install.into.home.parent == copy.copies
+    assert copy.command("lup-dev").is_file()
     assert service(trust).calls == []
     assert outcome.report().endswith(
         f"This repository's copy of `lup-dev` from {first.approval.commit} was "
@@ -995,15 +1034,15 @@ def test_no_installs_the_copy_approved_before_where_its_missing(
     trust = trusting(lup, kit, no())
     outcome = trust.ensure()
     assert outcome == Kept(commit=head, approval=first.approval, again=True)
-    assert recording(trust).installed == [
-        Installed(
-            tool=first.approval.tool,
-            root=lup,
-            commit=first.approval.commit,
-            into=copy,
-            users=False,
-        )
-    ]
+    [install] = recording(trust).installed
+    assert install == Installed(
+        tool=first.approval.tool,
+        root=lup,
+        commit=first.approval.commit,
+        into=install.into,
+        users=False,
+    )
+    assert install.into.home.parent == copy.copies
     assert service(trust).calls == []
 
 
@@ -1704,7 +1743,7 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
         members=[Path("packages/lup-dev"), Path("packages/lup")],
         beside=[Path("packages/lup-dashboard")],
     )
-    copy = JudgeLayout(home=tmp_path / "judges" / "lup")
+    copy = CopyLayout(home=tmp_path / "judges" / "lup" / "copies" / "a1")
     UvToolchain(executable=str(fake)).install(tool, lup, head, copy, users=True)
     how, _, source = mark.read_text().partition(": ")
     ran, _, where = how.partition(" in ")
@@ -1739,7 +1778,7 @@ def test_uv_installs_a_release_from_its_index_held_to_its_pins(
         registry=PYPI,
         pins={"lup": "0.4.0", "pydantic": "2.12.0"},
     )
-    copy = JudgeLayout(home=tmp_path / "judges" / "audiobook")
+    copy = CopyLayout(home=tmp_path / "judges" / "audiobook" / "copies" / "a1")
     UvToolchain(executable=str(fake)).install(
         release, tmp_path, "unused", copy, users=False
     )

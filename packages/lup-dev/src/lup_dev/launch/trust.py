@@ -47,10 +47,13 @@ started where none runs), which the launching terminal answers as `lup-dev inbox
 answer` at any other does, whichever comes first; the terminal stops asking where
 another answered first (`Approving`, `Elsewhere`). Launches asking about the same
 zone at once wait on one approval. The answer:
-- yes: the tip's copy is installed as the repository's own (`Toolchain`, into
-  `Layout.judge`; for the workspace's source, the engine built first through the
-  declaration's own step and runner, as the gate builds it), which the host
-  service runs for each of the repository's hooks; and the approval recorded. On
+- yes: the tip's copy is installed as the repository's own (`Toolchain`), in a
+  directory of its own under `Layout.judge`, never over the copy a process
+  runs, and switched to in one rename once it's whole (`lup_dev/copies.py`;
+  for the workspace's source, the engine built first through the declaration's
+  own step and runner, as the gate builds it): the host service starts each of
+  the repository's launches' processes from it at their next request, and the
+  approval is recorded. On
   lup's own repository, whose copy is lup's own command, it's installed as the
   user's `lup-dev` too, the one a person runs and the host service runs from, and
   the service is restarted on it where one runs;
@@ -96,6 +99,7 @@ from lup_dev.codescan import conditions
 from lup_dev.codescan.contract import Checker, Parser
 from lup_dev.codescan.engine import EngineChecker, EngineParser
 from lup_dev.codescan.ruff import Linter, Ruff
+from lup_dev.copies import Copies
 from lup_dev.declaration.load import (
     Pyproject,
     import_roots,
@@ -127,7 +131,7 @@ from lup_dev.inbox.store import (
     Reading,
     Superseded,
 )
-from lup_dev.layout import CheckoutLayout, JudgeLayout, Layout
+from lup_dev.layout import CheckoutLayout, CopyLayout, JudgeLayout, Layout
 from lup_dev.policy.checkpoint import Judging, Worktree
 from lup_dev.policy.judge import Change as FileChange
 from lup_dev.policy.judge import Judge
@@ -862,12 +866,12 @@ class Toolchain(ABC):
 
     @abstractmethod
     def install(
-        self, tool: Tool, root: Path, commit: str, copy: JudgeLayout, *, users: bool
+        self, tool: Tool, root: Path, commit: str, copy: CopyLayout, *, users: bool
     ) -> None:
-        """Install `tool` at `commit`, in the repository at `root`, as the repository's `copy`.
+        """Install `tool` at `commit`, in the repository at `root`, as the repository's `copy`, a directory no process runs.
 
         With `users`, it's installed as the user's own `lup-dev` too, the one a
-        person runs and the host service runs from. Each replaces the copy there.
+        person runs and the host service runs from, replacing the one there.
         """
 
     @abstractmethod
@@ -895,16 +899,16 @@ def building(resolved: Resolved) -> list[Step]:
 class UvToolchain(Model, Toolchain):
     """uv: the engine built as the gate builds it, and each copy installed as a uv tool.
 
-    The repository's own copy is a uv tool of its own, in its own directories
-    (`UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`, set for that install alone); the user's
-    own is in uv's.
+    Each of the repository's copies is a uv tool of its own, in its own
+    directories (`UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`, set for that install
+    alone); the user's own is in uv's.
     """
 
     executable: str = "uv"
 
     @override
     def install(
-        self, tool: Tool, root: Path, commit: str, copy: JudgeLayout, *, users: bool
+        self, tool: Tool, root: Path, commit: str, copy: CopyLayout, *, users: bool
     ) -> None:
         """Install the commit's copy: built from its source, or the release it pins.
 
@@ -924,7 +928,7 @@ class UvToolchain(Model, Toolchain):
             case ReleaseTool():
                 self.released(tool, places)
 
-    def uv(self, place: JudgeLayout | None) -> list[str]:
+    def uv(self, place: CopyLayout | None) -> list[str]:
         """Return the command running uv's tools in `place`: a repository's own copy, or the user's where none."""
         if place is None:
             return [self.executable]
@@ -954,7 +958,7 @@ class UvToolchain(Model, Toolchain):
             run(program, *arguments, cwd=tree, shown=True)
 
     def built(
-        self, tool: WorkspaceTool, tree: Path, places: list[JudgeLayout | None]
+        self, tool: WorkspaceTool, tree: Path, places: list[CopyLayout | None]
     ) -> None:
         """Install the package from `tree` in each of `places`, its dependencies held to its `uv.lock`.
 
@@ -998,7 +1002,7 @@ class UvToolchain(Model, Toolchain):
                     shown=True,
                 )
 
-    def released(self, tool: ReleaseTool, places: list[JudgeLayout | None]) -> None:
+    def released(self, tool: ReleaseTool, places: list[CopyLayout | None]) -> None:
         """Install the release from its index in each of `places`, its dependencies held to the pins."""
         with tempfile.TemporaryDirectory() as scratch:
             constraints = Path(scratch) / "constraints.txt"
@@ -1949,7 +1953,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             write_model(kept, recorded)
             return Trusted(approval=recorded, restarted=False, installed=False)
         own = zone.tool.lups_own()
-        self.toolchain.install(zone.tool, self.root, zone.commit, copy, users=own)
+        self.installed(zone.tool, zone.commit, copy, users=own)
         restarted = own and self.restart()
         write_model(kept, recorded)
         return Trusted(approval=recorded, restarted=restarted)
@@ -1970,8 +1974,20 @@ class Trust(Model, arbitrary_types_allowed=True):
                 "approve the integration branch's tip once it changes the host zone"
             )
             raise TrustError(message)
-        self.toolchain.install(approval.tool, self.root, commit, copy, users=False)
+        self.installed(approval.tool, commit, copy, users=False)
         return True
+
+    def installed(
+        self, tool: Tool, commit: str, copies: JudgeLayout, *, users: bool
+    ) -> None:
+        """Install `tool` at `commit` as a copy of the repository's whose copies are `copies`, in a directory of its own, and switch to it once the install has finished, so no process ever runs a copy half installed (`Copies`).
+
+        With `users`, it's installed as the user's own `lup-dev` too.
+        """
+        held = Copies(layout=copies)
+        with held.installing() as copy:
+            self.toolchain.install(tool, self.root, commit, copy, users=users)
+            held.switch(copy)
 
     def restart(self) -> bool:
         """Restart the host service on the copy just installed, where one runs.

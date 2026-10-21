@@ -43,6 +43,7 @@ from lup_dev import (
     Toolsets,
     cli,
 )
+from lup_dev.copies import Copies
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import (
     HostClient,
@@ -87,7 +88,7 @@ from lup_dev.host.service import (
     judged,
 )
 from lup_dev.host.workers import LaunchJudge, LaunchModules, Offered
-from lup_dev.layout import HostLayout, Layout
+from lup_dev.layout import CopyLayout, HostLayout, Layout
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator
@@ -1618,7 +1619,7 @@ def test_the_service_ends_a_launch_whose_launcher_and_container_are_gone(
     clock: FakeClock,
 ) -> None:
     base = tmp_path_factory.mktemp("swept")
-    machine = Layout(state=base / "state", runtime=base / "run")
+    machine = Layout(state=base / "state", runtime=base / "run", data=base / "data")
     layout = machine.host
     own = client(layout, clock)
     containers = Containers("lup-live", "lup-stopping")
@@ -1628,6 +1629,7 @@ def test_the_service_ends_a_launch_whose_launcher_and_container_are_gone(
         host=own,
         podman=Podman(execute=containers),
         say=said.append,
+        running=list,
         pause=pauses,
     )
     with served(service(layout, Judge(), said)):
@@ -1662,13 +1664,14 @@ def test_a_sweep_podman_fails_is_said_and_the_service_goes_on(
     clock: FakeClock,
 ) -> None:
     base = tmp_path_factory.mktemp("swept")
-    machine = Layout(state=base / "state", runtime=base / "run")
+    machine = Layout(state=base / "state", runtime=base / "run", data=base / "data")
     own = client(machine.host, clock)
     sweeping = cli.Sweeping(
         layout=machine,
         host=own,
         podman=Podman(execute=Containers(broken=True)),
         say=said.append,
+        running=list,
         pause=Pauses(),
     )
     with served(service(machine.host, Judge(), said)):
@@ -1680,6 +1683,68 @@ def test_a_sweep_podman_fails_is_said_and_the_service_goes_on(
         "The sweep of launches whose launcher and container are gone failed: podman "
         "couldn't say whether the container lup-gone exists (status 125)"
     ) in said
+
+
+def copy_of(copies: Copies, name: str) -> CopyLayout:
+    """Install a stand-in copy named `name` among `copies`: its command, in its environment, linked from its commands as uv links them."""
+    copy = copies.layout.named(name)
+    command = copy.tools / "lup-dev" / "bin" / "lup-dev"
+    command.parent.mkdir(parents=True)
+    command.write_text("#!/bin/sh\n")
+    copy.bin.mkdir(parents=True)
+    copy.command("lup-dev").symlink_to(command)
+    return copy
+
+
+def test_the_sweep_removes_the_copies_nothing_runs_and_none_judges(
+    tmp_path_factory: pytest.TempPathFactory, said: list[str], clock: FakeClock
+) -> None:
+    base = tmp_path_factory.mktemp("swept")
+    machine = Layout(state=base / "state", runtime=base / "run", data=base / "data")
+    judging = Copies(layout=machine.judge(base / "repo.git"))
+    # A copy installed at the repository's home itself, as before copies had
+    # directories of their own: its environment, and its commands where the
+    # link goes.
+    in_place = judging.layout.in_place / "lup-dev" / "bin" / "lup-dev"
+    in_place.parent.mkdir(parents=True)
+    in_place.write_text("#!/bin/sh\n")
+    judging.layout.bin.mkdir()
+    judging.layout.command("lup-dev").symlink_to(in_place)
+    running = copy_of(judging, "running")
+    replaced = copy_of(judging, "replaced")
+    current = copy_of(judging, "current")
+    for each in [running, replaced, current]:
+        judging.switch(each)
+    elsewhere = Copies(layout=machine.judge(base / "other.git"))
+    installing = copy_of(elsewhere, "installing")
+    process = running.command("lup-dev").resolve()
+    sweeping = cli.Sweeping(
+        layout=machine,
+        host=client(machine.host, clock),
+        podman=Podman(execute=Containers()),
+        say=said.append,
+        running=lambda: [process],
+        pause=Pauses(),
+    )
+    with (
+        FileLock(elsewhere.layout.lock),
+        served(service(machine.host, Judge(), said, companions=[sweeping])),
+    ):
+        pass
+    assert running.home.is_dir()
+    assert current.home.is_dir()
+    assert installing.home.is_dir()
+    assert not replaced.home.exists()
+    assert not judging.layout.in_place.exists()
+    assert (
+        judging.layout.command("lup-dev").resolve()
+        == (current.tools / "lup-dev" / "bin" / "lup-dev").resolve()
+    )
+    for each in [replaced.home, judging.layout.in_place]:
+        assert (
+            f"Removed {each.resolve()}, a copy of `lup-dev` nothing runs or judges "
+            "with."
+        ) in said
 
 
 def test_what_a_conversation_is_doing_outlasts_a_restart_of_the_service(

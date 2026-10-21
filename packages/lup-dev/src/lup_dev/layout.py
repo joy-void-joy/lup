@@ -10,8 +10,8 @@ The homes:
   `$XDG_RUNTIME_DIR/lup/host/`, and its log under lup's state (`docs/launch.md`);
   each launch's compiled settings, its room's git configuration and lup's
   commands there, and the lock its launcher holds, under lup's state;
-- lup's data, under `$XDG_DATA_HOME/lup/`: each repository's own copy of
-  `lup-dev`, which trust on launch installs and its launches' hooks run;
+- lup's data, under `$XDG_DATA_HOME/lup/`: each repository's approved copies of
+  `lup-dev`, which trust on launch installs and its launches' processes run;
 - lup's cache, what can be fetched again, under `$XDG_CACHE_HOME/lup/`: pyright's
   source, kept for building the engine, the one part of the cache a room mounts;
   and each runtime's CLIs, as its release channel publishes them, under `clis/`
@@ -457,12 +457,48 @@ class HostLayout(Model):
 
 
 class JudgeLayout(Model):
-    """One repository's own copy of `lup-dev`, which judges its launches' hooks.
+    """One repository's approved copies of `lup-dev`, which judge its launches' hooks.
 
-    Trust on launch installs the copy the operator approved here, as a uv tool of
-    its own (`UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`), so a second project's approval
-    doesn't replace the first's (`docs/trust.md`).
+    Trust on launch installs each copy the operator approves in a directory of
+    its own (`CopyLayout`), never over one a process runs, and `bin` names the
+    one that judges: a link to its commands, switched to the next in one rename
+    (`lup_dev/copies.py`). Each repository's are its own, so a second
+    project's approval doesn't replace the first's (`docs/trust.md`).
     """
+
+    home: Path
+
+    @property
+    def copies(self) -> Path:
+        """Each copy installed, a directory of its own."""
+        return self.home / "copies"
+
+    def named(self, name: str) -> CopyLayout:
+        """Say where the copy named `name` is installed."""
+        return CopyLayout(home=self.copies / name)
+
+    @property
+    def bin(self) -> Path:
+        """The link to the commands of the copy that judges."""
+        return self.home / "bin"
+
+    def command(self, name: str) -> Path:
+        """Say where the command `name` of the copy that judges is found, through the link: `lup-dev`, by its package's name."""
+        return self.bin / name
+
+    @property
+    def lock(self) -> Path:
+        """Held while a copy is installed and switched to, and while the copies to remove are chosen."""
+        return self.home / "install.lock"
+
+    @property
+    def in_place(self) -> Path:
+        """The environment of a copy installed at the repository's home itself rather than in a directory of its own, which goes once the link names another and no process runs it."""
+        return self.home / "tools"
+
+
+class CopyLayout(Model):
+    """One copy of `lup-dev` approved for a repository, installed as a uv tool of its own (`UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`)."""
 
     home: Path
 
@@ -627,9 +663,14 @@ class Layout(Model):
         """Say where module `module` keeps its own data for the repository whose git directory is `repository`."""
         return self.data / "modules" / module / digest(repository)
 
+    @property
+    def judges(self) -> Path:
+        """Every repository's approved copies of `lup-dev`, a directory each."""
+        return self.data / "judges"
+
     def judge(self, repository: Path) -> JudgeLayout:
-        """Say where a repository's own copy of `lup-dev` is installed, by its git directory."""
-        return JudgeLayout(home=self.data / "judges" / digest(repository))
+        """Say where a repository's approved copies of `lup-dev` are installed, by its git directory."""
+        return JudgeLayout(home=self.judges / digest(repository))
 
     @property
     def launches(self) -> Path:

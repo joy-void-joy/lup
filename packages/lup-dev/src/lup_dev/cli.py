@@ -57,6 +57,7 @@ from lup_dev.codescan.directives import (
 from lup_dev.codescan.engine import EngineChecker, EngineError
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
+from lup_dev.copies import removable
 from lup_dev.declaration.load import load, person_layer
 from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
@@ -472,10 +473,14 @@ def host_serve(context: typer.Context) -> None:
     )
     types = TypeReader(delivery=delivery, read=typed_reading, say=typer.echo)
     podman = Podman()
-    sweeping = Sweeping(
-        layout=layout, host=host_client(), podman=podman, say=typer.echo
-    )
     workers = Workers(layout=layout.host, say=typer.echo)
+    sweeping = Sweeping(
+        layout=layout,
+        host=host_client(),
+        podman=podman,
+        say=typer.echo,
+        running=workers.commands,
+    )
     service = HostService(
         layout=layout.host,
         answerer=known,
@@ -1341,17 +1346,22 @@ def swept(
 
 
 class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
-    """The sweep beside the host service (`swept`): once it listens, then every `every`, so a launch whose launcher and container are gone is ended though no launch follows it.
+    """The sweep beside the host service: once it listens, then every `every`, so a launch whose launcher and container are gone is ended though no launch follows it (`swept`), and a repository's approved copy no process runs and none judges is removed (`lup_dev/copies.py`).
 
     It asks the service as a launch does, from a thread, so the service goes on
     answering meanwhile; its end waits for a sweep under way, so none outlives
-    the service's socket.
+    the service's socket. The copies to remove are chosen on the event loop,
+    beside the launches' processes starting, so none is chosen as one starts
+    from it, and removed from a thread.
     """
 
     layout: Layout
     host: HostClient
     podman: Podman
     say: Callable[[str], None]
+    running: Callable[[], list[Path]]
+    """The commands of the launches' processes, running or starting, their links
+    followed: the copies in use."""
     every: timedelta = timedelta(seconds=30)
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two sweeps; a test gives its own."""
@@ -1392,6 +1402,26 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
         except Exception as failed:
             told = "".join(traceback.format_exception(failed))
             self.say(f"{failing}:\n{told}")
+        await self.pruned()
+
+    async def pruned(self) -> None:
+        """Remove each repository's copies no process runs and none judges, saying each; where one can't be, say why, and the next sweep tries again."""
+        try:
+            unused = removable(self.layout.judges, self.running())
+        except OSError as failed:
+            self.say(
+                f"The copies of `lup-dev` nothing runs weren't looked for: {failed}"
+            )
+            return
+        for each in unused:
+            try:
+                await asyncio.to_thread(shutil.rmtree, each)
+            except OSError as failed:
+                self.say(f"{each}, a copy of `lup-dev` nothing runs, stays: {failed}")
+                continue
+            self.say(
+                f"Removed {each}, a copy of `lup-dev` nothing runs or judges with."
+            )
 
 
 def launched(
