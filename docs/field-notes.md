@@ -8,7 +8,6 @@ Measured or read from source, each with the version it holds for. When a runtime
   - Prompt-cache lifetimes are only 5 minutes or 1 hour (an API limit). The main conversation gets 1 hour on a subscription; everything else gets 5 minutes, unless `subagentPromptCacheTtl: "1h"` is set (or `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`). The setting is ignored while a subscription is in overage.
   - A cache read resets the timer, and the lifetime counts from the start of a request. Only a request resets it: a blocking hook or tool call makes none, so a hold past the hour rebuilds the context.
   - Every turn re-reads the whole context, so a long session's cost grows roughly with the square of its length.
-  - Opus 5.5 prices: input $4 per million tokens, 5-minute write $5, 1-hour write $8, read $0.20, output $20.
   - A built-in cache keepalive exists for the main conversation only, behind a server flag; it did not run in our probe.
 - **Tools.**
   - A bare tool name in `--disallowedTools` or `permissions.deny` removes the tool from context, subagents included.
@@ -68,16 +67,6 @@ From a spike: `claude -p --model haiku` with `PreToolUse` and `PostToolUse` hook
 - A hook's `allow` doesn't approve a write into a directory Claude Code protects (`.git`, `.claude`, `.vscode`, `.husky`, `.devcontainer` and others), at any depth of the redirected path; in `-p` the prompt is a refusal ("Claude requested permissions to edit … which is a sensitive file."). Allow rules can't pre-approve one either: "The safety check runs before Claude Code evaluates allow rules from settings". Protected files include `pyrightconfig.json`, `bunfig.toml`, `lefthook.yml` and the Gradle and Maven wrappers' `.properties`.
 - Unchecked: whether `PostToolBatch` can explain a refused Edit; whether protected file names match at any depth; whether a `PermissionRequest` hook's `allow` approves a protected-path prompt.
 
-## MCP servers, from the runtimes' docs
-
-- **Claude Code:**
-  - a project's server is declared in `.mcp.json` and approved with `enabledMcpjsonServers` in a trusted folder, read when the session starts;
-  - a call's time limit is the server's `timeout` (ms), else `MCP_TOOL_TIMEOUT`, else about 28 hours; a stdio call with no response and no progress notification for 30 minutes aborts, and a per-server timeout of at least 1000 ms floors that window (2.1.203 and later);
-  - a main conversation's MCP call still running after 2 minutes moves to the background unless `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`; a subagent's calls never move;
-  - the docs say the server learns only `CLAUDE_PROJECT_DIR`, not the session or the subagent; the 2.1.296 binary sends each call's `claudecode/toolUseId` in its `_meta` too (*MCP in a launched session*);
-  - `PreToolUse` and `PostToolUse` fire for MCP tools (`mcp__<server>__<tool>`), and `updatedInput` replaces the arguments.
-- **Codex:** servers go in `[mcp_servers.<name>]` in `.codex/config.toml`, trusted projects only; `tool_timeout_sec` defaults to 60 s per the docs but 300 s in the source (`codex-mcp/src/rmcp_client.rs:104`); `approval_mode` is `auto`, `prompt`, `writes` or `approve`; no idle limit or backgrounding is documented; `PreToolUse` fires for MCP tools, and `updatedInput` replaces the arguments.
-
 ## Codex 0.156.1: what a hook can do to a patch
 
 Read from its docs and its source at `rust-v0.156.1`; nothing run.
@@ -88,22 +77,12 @@ Read from its docs and its source at `rust-v0.156.1`; nothing run.
 - `PermissionRequest` can't rewrite: its `updatedInput` fails closed (`hooks/src/engine/output_parser.rs:401-414`).
 - `PostToolUse` can't undo side effects from a tool that already ran.
 
-## Codex 0.160.1
-
-- its own memories feature, off by default;
-- no prompt-cache lifetime setting;
-- no way to remove a built-in tool by name;
-- the spawn argument is `task_name`;
-- `turn/interrupt` responds in about 10 ms;
-- `write_stdin` fires no hook;
-- `outputSchema` is the shape of the final message, not a tool call.
-
 ## The Codex SDK, `openai-codex` 0.162 (bundling codex-cli 0.162)
 
 Read from its source and checked against the bundled binary with a local mock Responses endpoint; one typed ask has run live since (*The library's asks*).
 - Only the low-level `openai_codex.client.CodexClient` takes a server-request handler, and it runs synchronously on the client's one reader thread: a request through the same client from inside it deadlocks.
 - Dynamic tools are declared on `thread/start` only, fixed for the thread's life; a call arrives as the server request `item/tool/call` and is answered `{"contentItems": [...], "success": bool}`.
-- `thread/start` takes no `effort`; it goes on `turn/start`.
+- `thread/start` takes no `effort`; it goes on `turn/start`. `turn/interrupt` responds in about 10 ms (0.160.1).
 - `environments: []` disables environment access; `agents.enabled=false` in the thread's config removes the subagent tools; web search, skills, the built-in instructions and features are launch `-c` overrides (listed in `LAUNCH`, `lup/adapters/codex/runtime.py`).
 - The default model `gpt-6.1-sol` and about ten others are `code_mode_only`: every tool, lup's included, sits behind a JavaScript `exec` tool, with `wait` and `request_user_input_async`; no setting removed them. Other models, such as `gpt-5.4`, carry only the declared tools.
 - `exec` reaches nothing beyond the declared tools (probed on 0.162 against a mock endpoint): no `fetch`, `require`, `process`, `Deno`, `WebSocket`, `Worker` or `WebAssembly`; every import refused ("unsupported import in exec"); none of the built-in tools (`exec_command`, `shell`, `apply_patch`, `spawn_agent`, `web_search`, `view_image`). Its nested tools are the declared ones (called as `await tools.submit({...})`), `clock__curr_time`, and MCP resource readers that return nothing without servers. `request_user_input_async` answers `{"accepted": true}` and sends the client nothing. Turning `features.code_mode_host` off makes `exec` answer "code-mode host is disabled", so the declared tools become unreachable.
@@ -238,7 +217,7 @@ Read for `docs/inbox.md`: Claude Code's docs (code.claude.com, cited by page) an
   - **Who's calling:** every call's `_meta` carries `"claudecode/toolUseId"`, the call's id, which the hooks see as `tool_use_id` beside the session's and the subagent's (the binary: `{"claudecode/toolUseId":…}`); `claudecode/agentId` goes to one particular server only. Esc's `notifications/cancelled` is in the binary; whether Esc sends it isn't known.
   - **What the model reads:** a result's `content`; past `MAX_MCP_OUTPUT_TOKENS` (25,000) it's saved to a file and the path given; text past 50,000 characters is saved whatever the tokens, raised per tool by `_meta["anthropic/maxResultSizeChars"]` up to 500,000 (`mcp`, *MCP output limits and warnings*). `structuredContent` isn't documented; the binary has `structuredContentOmitted`.
   - **Tool search** is on by default: every MCP tool is deferred, only names and the server's instructions loaded at start; `alwaysLoad: true` on an entry, or `_meta["anthropic/alwaysLoad"]` on a tool (2.1.287 and later), loads them upfront. Descriptions are cut at 2,048 characters (`CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH`) (`mcp`, *Scale with MCP tool search*).
-  - **The session's messaging socket:** `--messaging-socket-path <path>`, "Cross-session messaging server path: a Unix domain socket on Mac/Linux" (the binary's help, not in `--help`'s list), exported to hooks and Bash as `CLAUDE_CODE_MESSAGING_SOCKET`. "When the receiving session is idle, Claude Code starts a new turn with the message"; a session bypassing permission prompts holds each message for approval unless `crossSessionInbound` is `"accept"`; at most 50 accepted messages wait, repeats are dropped and bursts refused; the auth line is optional on Linux (`cross-session-messaging`). The binary skips the socket in a session it counts as restricted, and where a server-side gate is off ("[uds-messaging] Skipped: restricted session (--messaging-socket-path ignored)"). The frame beyond the auth line is undocumented; the first lup measured `{"type":"user","message":{"role":"user","content":…}}` starting an idle session's turn on 2.1.278 to 2.1.285 (its `coordination/wake.py`, `195ff73f3`), and a frame whose `session_id` named another session dropped (`68eaa2e2e`); neither sent a `priority`. In the 2.1.296 binary (a byte search, 2026-10-14), a `user` frame's `message.content` must be a non-empty string ("Ignoring user message with missing or non-string content"), a `session_id` other than the session's own drops it ("Dropping … message: session_id mismatch"), and `priority` is optional, `next` where it's missing ("Routed user message to queue (priority=…)"). A connection that hasn't sent a complete line within 30 seconds is closed (`cross-session-messaging`). Owed live: the frame starting an idle room's turn.
+  - **The session's messaging socket:** `--messaging-socket-path <path>`, "Cross-session messaging server path: a Unix domain socket on Mac/Linux" (the binary's help, not in `--help`'s list), exported to hooks and Bash as `CLAUDE_CODE_MESSAGING_SOCKET`. "When the receiving session is idle, Claude Code starts a new turn with the message"; a session bypassing permission prompts holds each message for approval unless `crossSessionInbound` is `"accept"`; at most 50 accepted messages wait, repeats are dropped and bursts refused; the auth line is optional on Linux (`cross-session-messaging`). The binary skips the socket in a session it counts as restricted, and where a server-side gate is off ("[uds-messaging] Skipped: restricted session (--messaging-socket-path ignored)"). The frame beyond the auth line is undocumented; the first lup measured `{"type":"user","message":{"role":"user","content":…}}` starting an idle session's turn on 2.1.278 to 2.1.285 (its `coordination/wake.py`, `195ff73f3`), and a frame whose `session_id` named another session dropped (`68eaa2e2e`); neither sent a `priority`. In the 2.1.296 binary (a byte search, 2026-10-14), a `user` frame's `message.content` must be a non-empty string ("Ignoring user message with missing or non-string content"), a `session_id` other than the session's own drops it ("Dropping … message: session_id mismatch"), and `priority` is optional, `next` where it's missing ("Routed user message to queue (priority=…)"). A connection that hasn't sent a complete line within 30 seconds is closed (`cross-session-messaging`).
 - **Codex 0.162.1:**
   - **Its docs don't track a version:** developers.openai.com/codex/mcp redirects to learn.chatgpt.com, whose page says 10 s to start and 60 s per call, against the source's 30 s and 300 s. The source at the tag is the authority.
   - **A server's entry** (`config/src/mcp_types.rs`): stdio `command`, `args`, `env`, `env_vars`, `cwd`; HTTP `url` and its headers; both `enabled`, `startup_timeout_sec`, `tool_timeout_sec`, `default_tools_approval_mode`, `enabled_tools`, `disabled_tools`, `omit_tools_from`, `tools.<name>`. Unknown keys are refused, and so is a `url` beside a `command` ("url is not supported for stdio").
@@ -266,16 +245,14 @@ Read for `docs/inbox.md`: Claude Code's docs (code.claude.com, cited by page) an
   - A `Write` with a rule finding was refused through the room's hook (socat to the host service, the repository's judge copy), the agent's version saved.
   - A `PreToolUse` `ask` prompts under `bypassPermissions` ("Do you want to make this edit to pyproject.toml?"); declined, the tool result was "The user doesn't want to proceed with this tool use", the file unchanged.
   - The person's own `idleCompaction`, `autoMemoryEnabled` and `subagentPromptCacheTtl` kept those out of the launch's settings (`env` empty); `disableClaudeAiConnectors: true` went in, and `/mcp` answered "No MCP servers configured": none of the account's connectors (Gmail, Drive, Calendar, Docs) reached the room.
-  - A server on `127.0.0.1:8765` in the room answered `curl` on the host. Ctrl+G opened vim on `/tmp/claude-prompt-<uuid>.md`, and the edited text came back to the prompt.
-  - `/exit` with a background shell running asked "Exit and stop tasks / Move to background and exit / Stay"; exiting removed the container and ended the launch's registration. Claude Code's exit line names `claude --resume <id>`; `lup-dev launch claude --resume <id>` restored the conversation in a new room.
+  - A server on `127.0.0.1:8765` in the room answered `curl` on the host. `lup-dev launch claude --resume <id>` restored a conversation in a new room.
   - Two rooms at once on the shared `~/.claude` each ran a command and answered, with no lock or state errors.
-  - `uv run lup-dev check` in the room passed every step but `rules`, which crashed on `CommandNotFound: gh` (a room holds neither `gh` nor a GitHub login); since then, deferrals' issues go unchecked there, and the check says why.
 - **Codex 0.162.1:**
   - A first launch reached the prompt with no login, in full access ("YOLO mode"), on the person's own model (GPT-6-Astra), no `--model` passed. The managed hooks from the mounted requirements file ran: the service answered `SessionStart` and each call's `PreToolUse` and `PostToolUse`.
-  - A patch with a rule finding first landed unjudged: calls no hook would finish (Claude's writes judged before they land, 1,659 in `tree/dev`) kept every checkpoint there from running. Since a checkpoint waits only on its own session's calls, the patch was put back after its call, the finding told.
+  - A patch with a rule finding first landed unjudged: calls no hook would finish (Claude's writes judged before they land, 1,659 in `tree/dev`) kept every checkpoint there from running (*Judging writes*, *Calls no hook finishes*).
   - A patch to a protected path was held. The room's hook (`sh -c 'socat -t 90000 …'`) was still alive and waiting at 1 h 01 min, and the operator's decline reached it.
   - **A hold doesn't hold a code-mode agent.** GPT-6-Astra runs tools in code mode: the patch ran in a cell, and the model read "Script running with cell ID 4", polled it, said the call was still pending, and ended its turn after 7 min 49 s, the hook still waiting. A held call is visible to it as pending, not invisible.
-  - Two Claude sessions starting in the worktree while the patch was held accepted it as it stood, so the decline put back nothing (fixed on its own branch: a held file stays out of other sessions' accepted tree).
+  - Two Claude sessions starting in the worktree while the patch was held accepted it as it stood, so the decline put back nothing; a held file is kept out of other sessions' accepted tree since.
   - With the host service stopped, a shell call's hooks failed: Codex showed "Hook failed — hook exited with code 1", not what the hook wrote to standard error, and the call went on. Quitting then, the launcher's client started the service again, which served the recorded launch and ended it.
 - **Not seen live, as far as these notes record:**
   - Claude Code: the session settings' variables in the `env` of the launch's settings taking effect over the same in the operator's own `env`, as read in the 2.1.296 binary, and `idleCompaction: false` stopping idle compaction. lup's own variables (`CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS`, `DISABLE_AUTOUPDATER`) are in the room's environment, which a variable of the same name in the operator's own `env` would overwrite at start.
@@ -299,7 +276,6 @@ Read for `docs/inbox.md`: Claude Code's docs (code.claude.com, cited by page) an
 - **Not seen live, as far as these notes record:**
   - Claude Code: whether Esc on a held call sends `notifications/cancelled`; `--resume` keeping the session's id, so a resumed session finds what waited for it.
   - Codex: in code mode, what the model sees of a held call answered after its turn ended (the hold above stayed a direct call); resuming keeping the thread's id.
-  - Both: lup's MCP bridge carrying a session across a restart of the host service.
   - GitHub's write tools, `file_issue`, `comment` (on a pull request's number too) and `draft_pull_request`, at their first real use from a launched session.
   - A protected ref refused by lup's own check: the push to `main` above met git's own refusal first. lup's rule is tested, and was seen against a stand-in forge in a room.
 
@@ -308,7 +284,7 @@ Read for `docs/inbox.md`: Claude Code's docs (code.claude.com, cited by page) an
 The check behind `docs/credentials.md`, *Running git on the host*. On scratch repositories laid out like lup's (a bare `project.git` common dir with a linked worktree under `tree/`, a bare `forge.git` for GitHub, a bare unrelated `secret.git`), acting as a hostile room: each thing the room can write, the host command (`git push <url> <oid>:<dst>`, `git ls-remote <url>`, `git fetch --no-write-fetch-head <url> <name>` in the common dir, url from `git remote get-url --push <name>`), and whether the planned response closes it. Scripts in the session scratchpad.
 
 - **`objects/info/alternates`: exfiltrates without the response.** `objects/info/alternates` = `secret.git/objects` let the common dir read secret objects; `git push <url> <secret-oid>:refs/heads/x` copied the secret blob to the forge. The planned refusal (refuse while alternates name a directory outside the repository) closes it, but must be stronger than a single-line check: a **relative** entry (`../../mid.git/objects`) is resolved, and **nested** alternates are followed (project → mid → secret all read), so the check must resolve relative paths and recurse. `objects/info/http-alternates` is **not** consulted by the local transport (push/fetch), so it is inert for these commands — but refuse it too for safety.
-- **A symlink under `objects/` bypasses an alternates-only check (new).** With no alternates file at all, a room-planted symlink `objects/pack/pack-stolen.{pack,idx}` → `secret.git/objects/pack/…` made the common dir read secret objects, and the same push exfiltrated the blob. The alternates refusal does not see it. lup's own bare repo has no alternates and no symlink under `objects/`, so the robust rule measured to cover vector 1, nested/relative/symlinked alternates, and this one at once: **refuse unless the object store is self-contained** — no `objects/info/{,http-}alternates`, and no symlink anywhere under `objects/`. (Caveat: a working exfil also needs the room to know an oid in the outside repo; the defence shouldn't rest on oid secrecy, as alternates don't either.)
+- **A symlink under `objects/` bypasses an alternates-only check.** With no alternates file at all, a room-planted symlink `objects/pack/pack-stolen.{pack,idx}` → `secret.git/objects/pack/…` made the common dir read secret objects, and the same push exfiltrated the blob. The alternates refusal does not see it. lup's own bare repo has no alternates and no symlink under `objects/`, so the robust rule measured to cover vector 1, nested/relative/symlinked alternates, and this one at once: **refuse unless the object store is self-contained** — no `objects/info/{,http-}alternates`, and no symlink anywhere under `objects/`. (Caveat: a working exfil also needs the room to know an oid in the outside repo; the defence shouldn't rest on oid secrecy, as alternates don't either.)
 - **`refs/replace/`: `git push <oid>` was already immune; `GIT_NO_REPLACE_OBJECTS=1` is sound belt-and-suspenders.** A replace ref changed what `git show`/`rev-list --objects` read (it even dragged a secret parent into `rev-list`), but `git push <oid>:<dst>` transferred the **real** object graph both with and without `GIT_NO_REPLACE_OBJECTS=1`: the forge got the genuine object, no replacement content, no dragged-in secret. Push does not honour replacement in pack generation. The env var changes only the reading commands (which the host doesn't run for a push), so it closes the stated concern and costs nothing.
 - **refs and `packed-refs`: closed.** Room-written `refs/heads/evil` and a `packed-refs` entry never reached the forge: `git push <oid>:<dst>` reads no local ref, and `ls-remote <url>` reads the remote's refs. (Observed, consistent with #13: `git push <url>` where the url matches a configured remote still writes `refs/remotes/<name>/<dst>` in the shared common dir — a ref write on push, benign, no new room capability.)
 - **A worktree's directory and `config.worktree`: closed by running in the common dir, with a caveat.** The host runs in the common dir, so a room-written `worktrees/*/config.worktree`, `commondir` (redirecting to `secret.git`), `HEAD` or `index` is never consulted; a worktree `config.worktree` is also ignored even for a worktree-scoped command unless `extensions.worktreeConfig=true`, which lives only in the read-only `config`. **But** `config.worktree` is a *different file* from `config`: in the common bare dir it is **room-writable** (the read-only mount is on `config`, not `config.worktree`), and with `extensions.worktreeConfig=true` the common dir reads it (injected `foo.bar`, and by the same path `core.sshCommand`/`core.fsmonitor`/`core.hooksPath`). So if a project's committed `config` sets `extensions.worktreeConfig=true`, the room gains config injection into host git. lup's repo leaves it unset; the launch should refuse/flag a committed `extensions.worktreeConfig=true`, the same family as the includes check below.
@@ -319,8 +295,6 @@ The check behind `docs/credentials.md`, *Running git on the host*. On scratch re
 - **`GIT_DIR` discovery and `safe.directory`: run with an explicit git dir.** `safe.directory` is **not** a backstop here: it fires only on cross-UID ownership, and under `--userns=keep-id` the room's files are the operator's, so it never blocks. If the host ran `git` with a cwd inside a worktree and no explicit dir, it discovers the room-writable worktree gitdir; `git -C <common-dir>` (or `GIT_DIR`) resolves to the common dir with no discovery. State this explicitly: the host always names the common git dir. (Named alone, the common dir still follows a `commondir` the room plants at its top: below, git 2.55.0.)
 - **A garbage pack in `objects/pack/`: integrity holds, logs flood.** A malformed `pack-*.idx`/`.pack` could not substitute content for a valid oid (the push of a valid oid still delivered the genuine object), but it made host git repeat `error: index file … is too small` dozens of times to stderr, which the service logs per push/fetch — a log-noise/DoS nuisance, not a correctness break. The self-contained-store check doesn't catch a same-prefix garbage pack; left as low priority.
 - **`FETCH_HEAD`: inert.** `--no-write-fetch-head` left a room-written `FETCH_HEAD` unwritten, and none of push/`ls-remote`/fetch-by-name reads it.
-
-Responses the note should add: (1) replace the alternates refusal with a **self-contained object store** check — refuse any `objects/info/{,http-}alternates` and any symlink under `objects/` (covers the symlink bypass and the relative/nested cases); (2) extend the launch config check to refuse a committed `extensions.worktreeConfig=true`, since the common dir's `config.worktree` is room-writable; (3) have that config check resolve `include.path` **and** `includeIf` recursively; (4) state that the host runs git with an explicit common git dir and that `safe.directory` is no backstop under keep-id. Unsettled: whether to allow in-tree alternates for general projects (strict refusal fits lup's own repos, which use none) — an operator's call; and the garbage-pack stderr flood (left open, low priority).
 
 Found while building `remote` (git 2.56.0 on the host, podman 6.1.3 and the room's image with git 2.55.0), beyond the review above:
 - **A remote the room defines in a file git still reads.** A room-written `remotes/<name>` (`URL: …`) or `branches/<name>` in the common dir is a remote to host git: `git --git-dir=<common> remote get-url --push planted` printed the planted URL, with a deprecation warning. Taking the URL "from the repository's `config` by name" through `get-url` alone would let a room name any URL the operator's credentials reach, a fetch from another of their private repositories into the shared store among them. A remote the `config` names isn't read from those files (a planted `remotes/origin` beside a configured `origin` was ignored), so the host first asks `git config --local --get-all remote.<name>.url`, and refuses a name `config` doesn't hold.
@@ -366,7 +340,7 @@ Read-only, on the operator's machine, logged in as the operator, for `forge/` (`
 
 ## Rooms
 
-### podman 6.1.3, rootless: the CLIs in a container (measured)
+### podman 6.1.3, rootless: the CLIs in a container (measured 2026-10-12)
 
 - **The image.**
   - `archlinux` with its mirror set to the Arch Linux Archive's 2026-08-15 snapshot matched the base exactly.
@@ -395,7 +369,7 @@ Read-only, on the operator's machine, logged in as the operator, for `forge/` (`
 - **Terminals.** `-it` under a real terminal carries its size and `TERM` through.
 - A container starts in 0.55 to 0.9 s.
 
-### podman 6.1.3, rootless: the engine's command lines (measured for `lup.rooms`)
+### podman 6.1.3, rootless: the engine's command lines (measured for `lup.rooms`, 2026-10-13)
 
 - **Mounts.**
   - `--mount` takes one CSV record: a quoted field (`"source=/a,b"`) mounts a path holding a comma.
@@ -424,7 +398,7 @@ Read in each vendor's installer and docs, then fetched once each through `launch
   - The package is the layout the SDK's `codex_cli_bin` bundles: `codex-package.json` (`version`, `target`, `entrypoint` `bin/codex`, `resourcesDir`, `pathDir`), `bin/codex`, `bin/codex-code-mode-host`, `codex-path/rg`, `codex-resources/bwrap` and `zsh`, and `codex-resources/voice` (a 65 MB voice host and GStreamer's libraries): 432 MB unpacked. The binary finds them beside itself ("no bundled codex-resources/bwrap binary was found next to the Codex executable", in its binary).
   - Every package and binary also has a Sigstore bundle (`<file>.sigstore`).
 
-### From the first lup's rooms
+### From the first lup's rooms (read 2026-10-12)
 
 Read in its code and history (`lup-legacy`), with each commit there:
 - **Its image** was 4.5 GB: a 2 GB package layer (five editors, a virtual display, tooling) and a 1 GB layer of CLIs from npm, re-resolved at every launch and rebuilt whenever one released, most days. 46 tags of 4.5 to 5.5 GB were left on this machine.
@@ -441,7 +415,7 @@ Read in its code and history (`lup-legacy`), with each commit there:
 
 ### Waking a session (Claude Code, from the first lup, 2.1.285)
 
-- **A message to a busy session is queued, not lost.** Measured by the first lup in an interactive session (its `04f4d1594`, `482768107`): a frame written to the messaging socket while a tool call runs is taken right after the call; while the model generates, a frame without a `priority` (taken as `next`) lets the turn finish and is taken then, and a `now` frame ends the generating turn within milliseconds and is taken at once. An idle session starts a turn with it. The 2.1.296 binary still names the queue ("Routed user message to queue (priority=…)"). So lup writes the operator's items at once, unless a call is running, without tracking idleness (`inbox/delivery.py`, `wake`).
+- **A message to a busy session is queued, not lost.** Measured by the first lup in an interactive session (its `04f4d1594`, `482768107`): a frame written to the messaging socket while a tool call runs is taken right after the call; while the model generates, a frame without a `priority` (taken as `next`) lets the turn finish and is taken then, and a `now` frame ends the generating turn within milliseconds and is taken at once. An idle session starts a turn with it. The 2.1.296 binary still names the queue ("Routed user message to queue (priority=…)"). lup rings a doorbell through the socket where no channel is registered, never the items themselves (`docs/inbox.md`, *How an agent is told*).
 - **Sockets that collide.** The first lup's sessions met each other's sockets: the runtime's default `/tmp/cc-socks/<pid>.sock` names a live socket of another container's session wherever both are pid 7, and paths keyed by display names met an earlier session's stale socket; Claude Code refuses `--messaging-socket-path` at a live socket (its `06b544585`). lup's sockets are per launch, under a fresh id.
 
 ### The clipboard (Claude Code 2.1.302, read from its binary, 2026-10-18)
@@ -458,7 +432,7 @@ Probed on the operator's host with throwaway containers from the room's base ima
 - **A mount reaches a running container only under a mount that was shared when it started.** A directory bound to itself and made shared in podman's namespace (`podman unshare mount --bind D D`, `mount --make-shared D`), then mounted into the container with `bind-propagation=rslave` (or `rshared`): a directory mounted under it afterwards (`podman unshare mount --bind SRC D/data`) was visible in the running container, and unmounting it on the host removed it there. Without propagation, as rooms were mounted before, nothing mounted later reached the container.
 - **Read-only has to be set before the mount spreads.** Bound, then remounted read-only (`mount -o remount,bind,ro`), the mount was read-only on the host's side and writable in the container: a remount's flags don't propagate to a slave's copy. Two ways gave a read-only mount there: `mount --bind -o ro` in one step (util-linux 2.42 applies the flag before attaching the mount; older versions remount after, which would spread it writable), and binding into a private directory, remounting read-only there, then binding that into the shared one. lup uses the second (`lup.rooms.engine.Podman.lend`), whatever the host's util-linux.
 
-## Isolation and effects
+## Isolation and effects (2026-10-12)
 
 - An overlay mounts over 300k files in 13 ms and lists its changes in 12 ms, without root, in lup's container (kernel 7.2).
 - A git snapshot per command costs about 50 ms at lup's size, 0.4–0.8 s at 100k files, and 1.4–2.8 s at 300k.
@@ -467,7 +441,7 @@ Probed on the operator's host with throwaway containers from the room's base ima
   - files git ignores;
   - code that runs inside the same call (a planted `core.fsmonitor` ran).
 
-## Judging writes
+## Judging writes (2026-10-15 to 10-18)
 
 What the judge (`docs/judging-writes.md`) rests on, measured on the operator's machine; the spikes' evidence is under `tmp/spikes/` in the `main` checkout.
 - **A checkpoint's cost,** through the store's own code, for each worktree a session holds: 70 to 100 ms where nothing changed, about nine git processes, of which the snapshot is 5 ms at lup's size and 10 to 15 ms at a downstream project's 4,000 files; a worktree's first snapshot 40 to 50 ms at lup's size and 2.5 to 3.6 s at that project's. The downstream projects have 161 to 3,721 tracked files. With the tests' stub engine on a 97-file clone of lup, a call's start and finish where nothing changed took 52 ms and 8 git processes holding one worktree, 148 ms and 20 holding three; a checkpoint alone, 37 to 43 ms. Judging every worktree of a repository rather than those a session holds would cost about 80 ms each: 0.25 s for 3 worktrees, about 3.5 s for that project's 36. The target is under 300 ms per checkpoint, type check included, for a session holding one or two worktrees.
@@ -490,13 +464,13 @@ What the judge (`docs/judging-writes.md`) rests on, measured on the operator's m
 - **What the judge relies on from Codex** (its docs, and its source at `rust-v0.156.1`): its `PermissionRequest` for `apply_patch` carries the patch and no file list (`core/src/tools/approvals.rs`), and fires only for a patch needing approval: under `on-request`, one writing outside the writable roots or retried after a sandbox denial; under `never`, never. Its `PreToolUse` can't ask: "`permissionDecision: "ask"` … [is] parsed but not supported yet". Its hooks' `cwd` is the "Working directory for the session", and "`Bash` and `apply_patch` use `tool_input.command`". A hook's `timeout` defaults to 600 s with no maximum (`timeout_sec.unwrap_or(600).max(1)`, `hooks/src/engine/discovery.rs`), and a hook that times out fails open. Codex sets `CODEX_THREAD_ID` in every command its agent runs, after the shell environment policy so a profile can't strip it, with `CODEX_CI=1` (`core/src/unified_exec/process_manager.rs`); its hooks run without them. A `PostToolUse` hook's `additionalContext` "is added as extra developer context", where `decision: block` would replace the call's result; `Stop` takes no `additionalContext`, and a block's `reason` becomes "a new continuation prompt". A subagent's tool hooks carry its `agent_id`, and each of its turns ends with `SubagentStop` (`core/src/hook_runtime.rs`), whose input carries `stop_hook_active` (`subagent-stop.command.input`).
 - **Unchecked:** whether a `PreToolUse` hook's `allow` skips auto mode's classifier (Claude Code's permission docs say a mod's approval does, and nothing of a hook's); whether Claude Code's `cwd` follows a `cd` in a subagent's calls, whose shell starts each call in the project's directory; and whether either runtime reports `SubagentStop` for a subagent the operator stops, or one that fails. Claude Code's `Stop` input lists the session's `background_tasks`, subagents among them, "present when the task registry is reachable", which would tell there.
 
-## Package age gates
+## Package age gates (2026-10-12)
 
 - uv's `exclude-newer` accepts "3 days" (`UV_EXCLUDE_NEWER`);
 - bun 1.3.14 has `minimumReleaseAge`;
 - pacman holds to a dated Arch Linux Archive mirror (checked in a room: a snapshot's packages matched its date's base image), though some days are missing (*Rooms*).
 
-## Tools
+## Tools (ruff 0.16.10, pyright 1.1.414, 2026-10-07)
 
 - ruff 0.16.10 and pyright 1.1.414 resolve an extended base's relative paths from the base's own directory, so a base under `.lup/settings/` writes `../../`;
 - in an extending file, ruff's `select` and `per-file-ignores` replace the base's, while `ignore`, `extend-select` and `extend-per-file-ignores` add to it; pyright's settings replace the base's by name, lists included;
@@ -504,7 +478,7 @@ What the judge (`docs/judging-writes.md`) rests on, measured on the operator's m
 - pyright reads a TOML base's `[tool.pyright]`;
 - Node strips TypeScript types by default from 23.6.0 and 22.18.0, never under `node_modules`.
 
-## The declaration
+## The declaration (2026-10-12)
 
 For `docs/declaration.md`: what its code and its next pieces (a project's own rule tables, lup's settings for ruff and pyright, the command line) rest on.
 - **Node for rule tables in TypeScript** (Node's `api/typescript.html` and `api/module.html`):
@@ -538,7 +512,7 @@ For `docs/declaration.md`: what its code and its next pieces (a project's own ru
 - **grimp 3.17,** which import-linter 2.15 brings, answered `chain_exists(importer=…, imported="lup_dev", as_packages=True)` and `find_shortest_chain` on lup's packages.
 - **click's help listing** calls `get_command` for every entry (`click/core.py`, `format_commands`), so a lazy group has to list from its own data.
 
-## From the downstream projects
+## From the downstream projects (read 2026-10-12)
 
 - **aib:**
   - tool names in prompts must be exact (`mcp__x__y`);
@@ -629,4 +603,3 @@ For `docs/launch.md`, *Guidance*: Claude Code's docs (code.claude.com/docs/en: *
 - **Codex sends a resumed thread later `developer_instructions` only once it's compacted.** They're part of the initial context (`core/src/session/mod.rs`, `build_initial_context_with_world_state`), written only to a thread with no recorded turn context, and again at a compaction (`core/src/compact.rs`); a resumed thread has one from its rollout, and after it only changes to the world state are written (`record_context_updates_and_set_reference_context_item`; the test `record_initial_history_restores_world_state_baseline` writes nothing on resume). `additional_developer_instructions`, a managed requirement, are in the world state (`core/src/context/world_state/managed_developer_instructions.rs`): kept by their hash, and where they changed, sent again whole, opening "These managed developer instructions replace all previously provided managed developer instructions." The markers and that notice add 169 bytes to the text (`validate_managed_developer_instructions`).
 - **Both keep the conversation's id on resume, and say it's one.** Claude Code's `SessionStart` `source` is `resume` for "`--resume`, `--continue`, or `/resume`" (*hooks*), and `--fork-session` makes "a new session ID instead of reusing the original" (*cli-reference*). Codex's is `resume` too, run at the thread's first turn after it (`core/src/hook_runtime.rs`), its id the rollout's (`core/src/session/session.rs`). Each also has `startup`, `clear`, `compact` and `fork`; a fork's hook names no parent on either.
 - **What a `SessionStart` hook tells reaches the model, and stays.** Claude Code puts `additionalContext` in a system reminder "at the point where the hook fired", and `/resume` "waits for the hooks to finish"; it saves the text in the transcript and replays it (*hooks*, *Add context for Claude*). Codex adds it "as extra developer context", and its rollout keeps it. So what's told at one resume is still there, perhaps stale, at the next. Each hook's cap on what it tells whole: `docs/inbox.md`, *Told once*.
-- **Sizes:** on 2026-10-17 lup's own guidance's section files came to about 23 KB (`AGENTS.md` 10.9 KB, `Core`'s 8.6 KB), before lup's tools and other repositories are listed: past either hook's cap whole, and over half of Codex's 40,000 bytes of managed instructions.
