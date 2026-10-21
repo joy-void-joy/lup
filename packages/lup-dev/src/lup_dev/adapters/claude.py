@@ -180,7 +180,7 @@ Its release channel (`ClaudeChannel`) is the one its native installer reads
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Literal, get_args, override
+from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import Field, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
@@ -989,26 +989,6 @@ def heard(raw: str, fits: int = 10_000) -> Heard:
     return TypeAdapter[Received](Received).validate_json(raw).heard(fits)
 
 
-def ends(printed: str) -> bool:
-    """Say whether what a hook prints lets a turn end: a turn's end's `additionalContext`, or `decision: "block"`, holds it.
-
-    >>> ends(""), ends('{"decision":"block","reason":"wait"}')
-    (True, False)
-    >>> ends('{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"wait"}}')
-    False
-    >>> ends('{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"see"}}')
-    True
-    """
-    said = Said.model_validate_json(printed) if printed.strip() else Said()
-    given = said.hook_specific_output
-    told = (
-        given is not None
-        and given.hook_event_name in get_args(TurnEnd.__value__)
-        and bool(given.additional_context)
-    )
-    return said.decision != "block" and not told
-
-
 def told(raw: str, answer: str, telling: Telling) -> str | None:
     """Return what a Claude Code hook prints: `answer`, the judge's or none, with `telling` added; none where nothing is.
 
@@ -1491,7 +1471,6 @@ def adapter() -> Adapter:
         unanswered=unanswered,
         heard=heard,
         told=told,
-        ends=ends,
         spawned=spawned,
         woken=woken,
         pushing=Pushing(capabilities={CHANNEL: {}}, notice=pushed),

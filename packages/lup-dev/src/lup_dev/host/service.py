@@ -929,7 +929,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             self.returned(posted)
             return Spoken(answer=answer)
-        return Spoken(answer=told.text, posted=posted)
+        return Spoken(answer=told, posted=posted)
 
     async def judgement(self, request: Register, payload: str) -> str:
         """Return the judge's answer to one hook, or where it can't answer, the runtime's word that it couldn't, saying why.

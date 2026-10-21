@@ -47,9 +47,6 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """Adds to a hook's answer: the payload, the answer (the judge's, or none)
     and what to add in, what the hook prints out instead; none where nothing is
     added, so the answer goes out as it is."""
-    ends: Callable[[str], bool]
-    """Reads what a turn's end hook prints: whether it lets the turn end, holding
-    nothing."""
     spawned: Callable[[str], Spawned | None]
     """Reads how the subagent one of its hooks fires for was spawned, as the
     runtime recorded it: the payload in; none for the session's own

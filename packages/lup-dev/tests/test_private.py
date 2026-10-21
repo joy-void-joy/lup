@@ -23,7 +23,7 @@ from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.serving import Related, answering
 from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import RoomClient, asked
-from lup_dev.host.courier import Courier, Heard, Printed, Telling
+from lup_dev.host.courier import Courier, Heard, Telling
 from lup_dev.host.protocol import Action, Done, Limits, Register, Registered, Stop
 from lup_dev.host.service import Answerer, HostService
 from lup_dev.host.workers import LaunchJudge
@@ -480,10 +480,8 @@ class Deaf(Courier):
     def heard(self, runtime: str, payload: str) -> Heard:
         return Heard(event="call-started", session="s1", judged=False, fits=10_000)
 
-    def told(
-        self, runtime: str, payload: str, answer: str, telling: Telling
-    ) -> Printed:
-        return Printed(text=answer)
+    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
+        return answer
 
 
 class Unjudged(LaunchJudge):
