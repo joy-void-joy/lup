@@ -1882,7 +1882,9 @@ def counted(bench: Bench, session: str) -> list[Call]:
 
     def running(worktree: Worktree) -> list[Call]:
         with worktree.calls_lock():
-            return [each for each in worktree.running().calls if each.session == session]
+            return [
+                each for each in worktree.running().calls if each.session == session
+            ]
 
     calls = [each for worktree in worktrees(bench, held) for each in running(worktree)]
     return list({each.key: each for each in calls}.values())

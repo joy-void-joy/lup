@@ -1003,7 +1003,9 @@ def test_codex_clears_a_call_of_an_earlier_turn_at_the_next_turns_start(
     assert running(kit, repo) == [json.loads(lost)["tool_use_id"]]
     assert codex.hook(with_fields(same, turn_id="next"), on_codex) == ""
     assert running(kit, repo) == []
-    codex.hook(with_fields(captured("2-pre-tool-use-add", repo), turn_id="next"), on_codex)
+    codex.hook(
+        with_fields(captured("2-pre-tool-use-add", repo), turn_id="next"), on_codex
+    )
     output = json.loads(codex.hook(captured("3-post-tool-use-add", repo), on_codex))
     assert output["hookSpecificOutput"]["additionalContext"].startswith(
         "The operator approved the held change to"
