@@ -1079,7 +1079,10 @@ EVERY_BUT_LUP_S_WITHHELD: list[Action] = [
     "push",
     "read-issues",
     "file-issue",
+    "edit-issue",
+    "close-issue",
     "comment",
+    "edit-comment",
     "draft-pull-request",
 ]
 
@@ -1118,7 +1121,10 @@ def test_credentials_layer_across_a_base_and_a_project() -> None:
             "force-push",
             "read-issues",
             "file-issue",
+            "edit-issue",
+            "close-issue",
             "comment",
+            "edit-comment",
             "draft-pull-request",
         ],
         protected=["refs/heads/main", "refs/tags/*", "refs/heads/release/*"],
@@ -1191,7 +1197,8 @@ def test_a_name_that_isnt_an_action_is_refused_naming_those_that_are(
         match=(
             rf"^`Actions` has no action `{unknown}`; its actions are `fetch`, "
             r"`push`, `force-push`, `delete-ref`, `read-issues`, `file-issue`, "
-            r"`comment` and `draft-pull-request`$"
+            r"`edit-issue`, `close-issue`, `comment`, `edit-comment` and "
+            r"`draft-pull-request`$"
         ),
     ):
         written()

@@ -5,7 +5,8 @@ A room holds no SSH agent, key, token or `gh` login (`docs/launch.md`, *The moun
 ## What the declaration allows
 
 `Core`'s `credentials` (`Credentials`, `declaration/kinds.py`) holds three selections, each changed where it stands with its reason (`docs/declaration.md`, *What a launch reads*):
-- **`actions`,** from a fixed set: `fetch`, `push`, `force-push`, `delete-ref`, `read-issues`, `file-issue`, `comment`, `draft-pull-request`. lup's default is all but `force-push` and `delete-ref` (`catalog/credentials.py`), so an action a later release adds is allowed unless it's withheld too.
+- **`actions`,** from a fixed set: `fetch`, `push`, `force-push`, `delete-ref`, `read-issues`, `file-issue`, `edit-issue`, `close-issue` (closing and reopening), `comment`, `edit-comment`, `draft-pull-request`.
+ lup's default is all but `force-push` and `delete-ref` (`catalog/credentials.py`), so an action a later release adds is allowed unless it's withheld too.
 - **`protected`,** refs no push updates: `refs/heads/main`, since what reaches `main` is the operator's to merge, and `refs/tags/*`, since a tag marks a release.
 - **`gated`,** refs a push from a room updates only once the gate passed on the commit it would put there: `refs/heads/dev` by default, lup's integration branch.
 
@@ -42,7 +43,10 @@ A room can't write the git directory's `config` or `hooks/`, but it writes the r
 - **From the host, through `gh`** and the operator's login (`forge/github.py`), each answer read with `--json` into a pydantic model naming the fields asked for; filing, commenting and opening a pull request answer with the link `gh` prints (`docs/field-notes.md`, *GitHub through `gh` on the host*).
 - **The repository is named once,** by the launcher, from the repository's own remotes read in its git directory, and passed to every call as `--repo`, but for a reading call naming another. A worktree's `.git` file is the room's to write, so naming it from a worktree would let a room choose which repository the operator's login acts on.
 - **Each tool's action is checked against the limits** before `gh` runs, and what a tool that writes would post goes through the `publishing` moment first.
-- **What the tools do:** read and search any repository the operator's login can read; file an issue, comment, and open a draft pull request from a pushed branch into the integration branch, on the launch's own repository alone. None merges, closes or edits an issue: closing one is the operator's judgement, which a comment can ask for (#153).
+- **What the tools do:** read and search any repository the operator's login can read; on the launch's own repository alone, file an issue with labels, edit one's title, body and labels, close one for a reason or reopen it, comment and edit a comment, and open a draft pull request from a pushed branch into the integration branch. None merges: work lands on the integration branch through git, and `main` is the operator's.
+- **Closing comments first, then closes,** so a close that fails leaves the comment said, which the answer reports, rather than an issue closed without its reason. Closing and reopening check the number is an issue in the state they change, before anything is posted: a pull request is the operator's to close.
+- **A comment is edited by its link,** found on the thread `gh` reads from the launch's repository by the issue's number, then changed through GraphQL by its node id. A node id from the room could name a comment in any repository the operator's login can edit.
+- **An edit keeps GitHub's edit history,** which only the operator can clear, on the web, so an edit removing something that shouldn't be public doesn't unpublish it, and the tools' descriptions say to tell the operator.
 - **Bodies go on `gh`'s standard input,** and every value the model writes as `--flag=value` or after `--`, never through a shell.
 - **`gh` missing or logged out on the host:** each tool answers why, and the launch says it once; `gh` is an optional requirement of the host.
 
