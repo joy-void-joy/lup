@@ -27,9 +27,9 @@ On the host alone:
 |---|---|---|
 | The service's answer | the decision it holds | the decision it holds |
 | The service unreachable, status 1 | a non-blocking error in the transcript; the call goes ahead | the run marked failed; the call goes on |
-| The launch's judge can't answer | a file tool's write is denied, saying why; any other hook warns the operator | at `PostToolUse`, the agent is told beside the call's result; any other hook warns the operator |
+| The launch's judge can't answer | a file tool's write is denied, saying why; at `PostToolUse`, the agent is told beside the call's result; any other hook warns the operator | at `PostToolUse`, the agent is told beside the call's result; any other hook warns the operator |
 
-- **Which hooks the judge reads** is each adapter's word (`heard`): on Claude Code a session's start and the file tools' writes; on Codex every one but a turn's start (`UserPromptSubmit`). The service answers the rest itself, in 4.5 ms against 665 ms for one the judge's process answers (`docs/field-notes.md`, *A hook the judge doesn't read*).
+- **Which hooks the judge reads** is each adapter's word (`heard`): every one, but on Claude Code a call's start and finish to lup's own tools or to a tool that only reads (`READING`, `adapters/claude.py`). The service answers the rest itself, in 4.5 ms against 665 ms for one the judge's process answers (`docs/field-notes.md`, *A hook the judge doesn't read*).
 - **A hook the judge can't answer goes on,** since the judge steers and doesn't guard. Where the service is up, it refuses only a file tool's write on Claude Code, since let through unjudged it would land unseen; where the service can't be reached, even that write goes ahead, with the runtime's error shown.
 - **`socat` waits 25 hours** for the answer, above a hold's day, and the hook never ends with status 2, which would block the call on both runtimes.
 

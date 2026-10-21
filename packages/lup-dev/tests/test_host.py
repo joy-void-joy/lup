@@ -897,26 +897,33 @@ def test_a_hook_the_judge_doesnt_read_is_answered_without_it(
         tool_input={"file_path": "a.md", "content": "a"},
         tool_use_id="t1",
     )
+    shell = claude(
+        "PreToolUse", tool_name="Bash", tool_input={"command": "ls"}, tool_use_id="t2"
+    )
+    stop = claude("Stop", stop_hook_active=False)
+    read = {"file_path": "a.md"}
     unread = [
+        claude("PreToolUse", tool_name="Read", tool_input=read, tool_use_id="t4"),
         claude(
-            "PreToolUse",
-            tool_name="Bash",
-            tool_input={"command": "ls"},
-            tool_use_id="t2",
+            "PostToolUse",
+            tool_name="Read",
+            tool_input=read,
+            tool_use_id="t4",
+            tool_response={},
         ),
-        claude("Stop", stop_hook_active=False),
-        claude("SubagentStop", agent_id="a1"),
     ]
     with served(on_claude(layout, judge, said)):
         host.register(launch(tmp_path, "one", "claude"))
         hook = layout.launch("one").hook
-        answers = [send(hook, payload) for payload in [started, write, *unread]]
+        answers = [
+            send(hook, payload) for payload in [started, write, shell, stop, *unread]
+        ]
         lup_tool = json.loads(send(hook, lups("echo", "t3")))
-    assert answers[1:] == ["", "", "", ""]
+    assert answers[1:] == ["", "", "", "", ""]
     named = json.loads(answers[0])["hookSpecificOutput"]
     assert named["sessionTitle"] == "one"
     assert named["additionalContext"].startswith("lup: this session is `one`")
-    assert judge.payloads == [started, write]
+    assert judge.payloads == [started, write, shell, stop]
     assert lup_tool["hookSpecificOutput"].keys() == {"hookEventName", "updatedInput"}
 
 

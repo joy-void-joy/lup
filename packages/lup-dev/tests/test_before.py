@@ -71,9 +71,9 @@ def test_an_allowed_edit_is_remembered_until_its_call_finishes(
     assert decision.reason == ""
     session = read_model(kit.layout.store(repo).session("s1"), Session)
     assert session is not None
-    assert [
-        (pending.call, pending.path, pending.asked) for pending in session.pending
-    ] == [("e1", CORE, False)]
+    assert [(pending.call, pending.path) for pending in session.pending] == [
+        ("e1", CORE)
+    ]
 
 
 def test_an_edit_with_a_finding_is_allowed_its_finding_told_with_the_call(
@@ -121,7 +121,7 @@ def test_a_write_that_asks_is_held_for_the_operator_and_let_through_on_a_yes(
     assert (hold.call, hold.agent) == ("w1", None)
     session = read_model(kit.layout.store(repo).session("s1"), Session)
     assert session is not None
-    assert [(each.path, each.asked) for each in session.pending] == [(CORE, True)]
+    assert [(each.call, each.path) for each in session.pending] == [("w1", CORE)]
     assert session.approved == [CORE]
     *_, logged = VerdictLog(path=kit.layout.verdicts(repo / ".git")).read()
     assert (logged.outcome, logged.answer) == ("hold", "approved")

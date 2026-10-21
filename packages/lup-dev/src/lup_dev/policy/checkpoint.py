@@ -6,21 +6,24 @@ events (`docs/judging-writes.md`, *After a call: the checkpoint*):
 | Event | When |
 |---|---|
 | `SessionStarted` | a session starts or resumes |
+| `TurnStarted` | a conversation's turn starts, or a prompt arrives in it |
 | `CallStarted` | a tool call is about to run |
 | `CallFinished` | a tool call finished, or failed |
 | `TurnEnded` | the agent ends its turn |
 | `ConversationEnded` | a subagent's conversation ends |
 
 A session holds one or more worktrees of its repository (`worktrees.py`), and a
-call counts as running in every worktree its session holds when it starts. A
-checkpoint runs in each worktree the session holds whenever a call finishes and
-no call of the session counted there is running, another session's calls there
-holding none of its checkpoints back, and again in each when the turn ends. It
-snapshots the worktree into the store, compares it with the accepted tree, sets
-aside what was committed elsewhere or merged from it, judges a move of `HEAD` once
-as its commits', judges the rest as an edit is judged, puts back what's refused
-with the agent's version saved, holds what asks on a runtime that can't ask before
-a call, and moves the accepted tree on.
+call counts as running in each worktree its conversation works in when it starts
+(`Holding.works`), so a worker busy in its own worktree holds back no checkpoint
+in another's, and two conversations working in one wait on each other. A
+checkpoint runs in each of those worktrees whenever a call finishes and no call of
+the session counted there is running, another session's calls there holding none
+of its checkpoints back, and again in each worktree the session holds when its
+turn ends. It snapshots the worktree into the store, compares it with the accepted
+tree, sets aside what was committed elsewhere or merged from it, judges a move of
+`HEAD` once as its commits', judges the rest as an edit is judged, holds what asks
+in place until the operator answers, puts back what they decline with the agent's
+version saved, and moves the accepted tree on.
 
 A call that runs a subagent isn't counted as running: the subagent's own calls
 are, so its writes are judged as it makes them rather than when it ends. The
@@ -31,13 +34,12 @@ waits for.
 The session's turn's end holds only on what's left in the files its own
 conversation touched, and in the files importing them where the pass found errors
 (#41). A subagent's end never holds on what's left in its files: every worker
-passes the gate before it hands back, and one waiting on a review has files
-importing what hasn't landed, errors it can't fix. A file tool's write is the
-conversation's that made it; anything else a checkpoint lands is every
-conversation's whose calls finished since the last one, since the checkpoint sees
-files, not who wrote them. A subagent is at work from its first call to the end
-of its conversation, and while one is, the session's end doesn't hold on a file
-they both touched, which may be the subagent's in progress (#32).
+passes the gate before it hands back. A file tool's write is the conversation's
+that made it; anything else a checkpoint lands is every conversation's whose
+calls finished since the last one, since the checkpoint sees files, not who
+wrote them. A subagent is at work from its first call to the end of its
+conversation, and while one is, the session's end doesn't hold on a file they
+both touched, which may be the subagent's in progress (#32).
 """
 
 import asyncio
@@ -45,6 +47,7 @@ import difflib
 import secrets
 import shutil
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 from functools import cached_property
 from pathlib import Path
 from typing import Literal, override
@@ -134,15 +137,36 @@ class Reply(Model):
     tells the agent keeps it going, so information that mustn't goes here."""
 
 
+def over(
+    started: datetime | None, now: datetime, lifetime: timedelta = timedelta(hours=25)
+) -> bool:
+    """Say whether what a call started at `started` must be over by `now`.
+
+    No call outlives its hooks, and none waits longer for its answer than a
+    room's hook does (`hooked`, `launch/session.py`), above a hold's day: what
+    started `lifetime` ago is over, though no hook reported its end. What has
+    no start recorded, kept by a judge that didn't record one, counts as over
+    too: a session running across the upgrade loses the count of a call once,
+    and its turn's start or end clears the rest.
+    """
+    return started is None or now - started >= lifetime
+
+
 class Call(Model):
     """A tool call in flight."""
 
     key: str
     session: str
-    """The session making it, which counts it in every worktree it holds."""
+    """The session making it."""
     agent: str
     """The conversation making it: empty for the session's own, else a subagent's."""
     tool: str
+    turn: str | None = None
+    """The runtime's id for the turn it runs in, where the runtime names its
+    turns: its conversation's next turn starting means it's over."""
+    started: datetime | None = None
+    """When it started, by the judge's clock; none where a judge didn't record
+    it, which counts it as over (`over`)."""
 
     def of(self, session: str, agent: str) -> bool:
         """Say whether conversation `agent` of `session` makes this call."""
@@ -150,9 +174,18 @@ class Call(Model):
 
 
 class Running(MutableModel):
-    """The calls running in one worktree, kept under a lock."""
+    """The calls running in one worktree, kept under a lock.
+
+    A call no hook reported finishing, from a session long gone, is forgotten
+    each time the list is kept, once it must be over (`over`): otherwise the
+    list would grow with each, and every call's hooks read and rewrite it.
+    """
 
     calls: list[Call] = []
+
+    def lasting(self, now: datetime) -> None:
+        """Forget each call that must be over by `now`."""
+        self.calls = [each for each in self.calls if not over(each.started, now)]
 
     def idle(self, session: str) -> bool:
         """Say whether no call of `session` runs: what a checkpoint of `session` waits on.
@@ -164,17 +197,32 @@ class Running(MutableModel):
         return not any(each.session == session for each in self.calls)
 
 
+class Finished(Model):
+    """What a call's finish, or a conversation's end, leaves in one worktree."""
+
+    counted: bool
+    """Whether the call, or one of the conversation's, counted as running there."""
+    idle: bool
+    """Whether no call of its session is left running there."""
+
+
 class Pending(Model):
-    """A file tool's write judged before it lands, waiting for its call to finish."""
+    """A file tool's write judged before it lands, waiting for its call to finish.
+
+    What its judgement found was told beside the call, and an approval it
+    needed logged and covering its path, as the operator answered: its call's
+    finish only confirms it landed (`confirm`).
+    """
 
     call: str
     path: Path
     blob: str
     """The would-be content's object id in the store."""
-    asked: bool
-    """Whether the operator was asked: if the call runs, they approved."""
-    verdict: Verdict
     removed: list[RemovedNote] = []
+    judged: datetime | None = None
+    """When it was let through, by the judge's clock, its call starting then;
+    none where a judge didn't record it. Once its call must be over (`over`),
+    it's forgotten, though no end confirmed it."""
 
 
 class Judged(Model):
@@ -184,6 +232,11 @@ class Judged(Model):
     blob: str
     agent: str = ""
     """The conversation that wrote it: empty for the session's own, else a subagent's."""
+    told: bool = False
+    """Whether what its judgement found was told as it was judged, beside the
+    call that wrote it: a file tool's write, judged before it landed. The
+    checkpoint accepting it doesn't tell it again; a held change the operator
+    approved is told there, since its hold told only the answer."""
 
 
 class Mail(Model):
@@ -224,6 +277,10 @@ class Session(MutableModel):
     inbox may still gather its writes to them: a later write to one refreshes
     that item, whatever it flags, until the inbox says none gathers them
     (`policy/flags.py`). A write to any other file asks the inbox nothing."""
+
+    def waiting(self, now: datetime) -> None:
+        """Forget each pending write whose call must be over by `now`, no end having confirmed it."""
+        self.pending = [each for each in self.pending if not over(each.judged, now)]
 
     def files(self, agent: str) -> list[Path]:
         """Return the files conversation `agent` touched, and those it watches."""
@@ -485,8 +542,9 @@ class Worktree(Model):
         """Read the calls running; hold the calls lock."""
         return read_model(self.store.layout.calls, Running) or Running()
 
-    def ran(self, running: Running) -> None:
-        """Store the calls running; hold the calls lock."""
+    def ran(self, running: Running, now: datetime) -> None:
+        """Store the calls running, forgetting those that must be over by `now`; hold the calls lock."""
+        running.lasting(now)
         write_model(self.store.layout.calls, running)
 
     def recorded(self, key: str) -> Session | None:
@@ -566,23 +624,25 @@ class Worktree(Model):
             heads.worktrees = {**heads.worktrees, self.root: head}
             write_model(path, heads)
 
-    def finish(self, session: str, call: str) -> bool:
-        """Note that `call` finished here; say whether no call of `session` runs here."""
+    def finish(self, session: str, call: str, now: datetime) -> Finished:
+        """Note that `call` finished here by `now`; say whether it counted here, and whether no call of `session` is left running here."""
         with self.calls_lock():
             running = self.running()
+            counted = any(each.key == call for each in running.calls)
             running.calls = [each for each in running.calls if each.key != call]
-            self.ran(running)
-            return running.idle(session)
+            self.ran(running, now)
+            return Finished(counted=counted, idle=running.idle(session))
 
-    def clear(self, session: str, agent: str) -> bool:
-        """Forget the calls a conversation left running; say whether none of its session's is left."""
+    def clear(self, session: str, agent: str, now: datetime) -> Finished:
+        """Forget the calls conversation `agent` left running, by `now`; say whether one counted here, and whether none of its session's is left."""
         with self.calls_lock():
             running = self.running()
+            counted = any(each.of(session, agent) for each in running.calls)
             running.calls = [
                 each for each in running.calls if not each.of(session, agent)
             ]
-            self.ran(running)
-            return running.idle(session)
+            self.ran(running, now)
+            return Finished(counted=counted, idle=running.idle(session))
 
     def busy(self, session: str, agent: str) -> bool:
         """Say whether a call of another conversation of `session` runs here."""
@@ -635,16 +695,17 @@ def holding(
     cwd: Path,
     written: Place | None = None,
     *,
+    agent: str = "",
     starts: bool = False,
 ) -> Holding | None:
     """Return a session's repository and the worktrees it holds, reaching more.
 
     The worktree its working directory is in is reached, since a hook's working
     directory follows the session, and so is `written`'s, where a file tool
-    writes. Reaching a worktree begins the session there; a session that
-    `starts`, or resumes, begins again in every worktree it holds. A worktree
-    whose root is gone isn't held. A session first seen outside every
-    repository isn't judged.
+    writes; conversation `agent` is noted to work in each (`Holding.works`).
+    Reaching a worktree begins the session there; a session that `starts`, or
+    resumes, begins again in every worktree it holds. A worktree whose root is
+    gone isn't held. A session first seen outside every repository isn't judged.
     """
     index = SessionIndex(layout=bench.services.layout)
     here = place(cwd) if cwd.is_dir() else None
@@ -656,15 +717,19 @@ def holding(
                 return None
             held = Holding(repository=here.repository)
         released = held.release_removed()
+        repository = held.repository
+
+        def within(where: Place | None) -> Path | None:
+            if where is None or where.repository != repository:
+                return None
+            return where.worktree
+
         reaching = [
-            each.worktree
-            for each in [here, written]
-            if each is not None
-            and each.worktree is not None
-            and each.repository == held.repository
+            each for each in [within(here), within(written)] if each is not None
         ]
-        reached = [root for root in reaching if held.reach(root)]
-        if recorded is None or reached or released:
+        reached = [each for each in reaching if held.reach(each)]
+        noted = held.note(agent, started=within(here), wrote=within(written))
+        if recorded is None or reached or released or noted:
             index.write(session, held)
         for root in held.worktrees if starts else reached:
             begin(
@@ -681,6 +746,12 @@ def worktrees(bench: Bench, held: Holding) -> list[Worktree]:
     return [Worktree.of(root, held.repository, services) for root in held.worktrees]
 
 
+def working(bench: Bench, held: Holding, agent: str) -> list[Worktree]:
+    """Open each worktree conversation `agent` of a session works in."""
+    services = bench.services
+    return [Worktree.of(root, held.repository, services) for root in held.works(agent)]
+
+
 class Planned(Model):
     """A changed file and what the checkpoint does with it."""
 
@@ -689,6 +760,9 @@ class Planned(Model):
     """The session's change, judged as an edit is; none where it made none."""
     decide: bool = True
     """Whether its outcome decides what happens; else it was judged already."""
+    told: bool = False
+    """Whether what it was judged to hold was told as it was judged (`Judged.told`),
+    so the checkpoint doesn't tell it again."""
     moved: Change | None = None
     """What a move of `HEAD` brought that no checkpoint judged, judged once as its
     commits'; none where the move brought nothing unjudged."""
@@ -873,8 +947,8 @@ class Snapshot(Model):
     """The tree the session started from; none where nothing changed to judge."""
     elsewhere: Elsewhere
     """Content judged before, which isn't judged again."""
-    judged: dict[Path, str]
-    """Content already judged, by path: its object id."""
+    judged: dict[Path, Judged]
+    """Content already judged, by path: the last judged there."""
     move: Move | None = None
 
     def plan(self, path: Path) -> Planned:
@@ -885,14 +959,14 @@ class Snapshot(Model):
         after = decoded(store.content(self.taken, path))
         baseline = decoded(store.content(self.start, path))
         accepted = decoded(store.content(self.accepted, path))
-        if prior is not None and prior == blob:
+        if prior is not None and prior.blob == blob:
             change = Change(path=path, before=accepted, after=after, baseline=baseline)
-            return Planned(path=path, change=change, decide=False)
+            return Planned(path=path, change=change, decide=False, told=prior.told)
         if self.move is not None and path in self.move.paths:
             return self.moving(path, self.move)
         if self.elsewhere.holds(path, blob):
             return Planned(path=path)
-        before = accepted if prior is None else decoded(store.object(prior))
+        before = accepted if prior is None else decoded(store.object(prior.blob))
         change = Change(path=path, before=before, after=after, baseline=baseline)
         return Planned(path=path, change=change)
 
@@ -1179,7 +1253,7 @@ def checkpoint(
             head=head,
             start=store.started(key) if changed else None,
             elsewhere=Elsewhere(store=store, commits=[*state.tips, *others, *remote]),
-            judged={each.path: each.blob for each in session.judged},
+            judged={each.path: each for each in session.judged},
             move=moving(worktree, heads, head) if changed else None,
         )
         plans = [snapshot.plan(path) for path in changed]
@@ -1234,7 +1308,15 @@ def checkpoint(
             worktree.record(services.layout, head)
         notice = worktree.told() if plans else ""
         told = commits.told.then(Checked(notices=[notice] if notice else []))
-        checked = remember(worktree, session, agent, acted, told=told, wrote=wrote)
+        checked = remember(
+            worktree,
+            session,
+            agent,
+            acted,
+            told=told,
+            wrote=wrote,
+            heard=[plan.path for plan in plans if plan.told],
+        )
     runtime = bench.runtime.name()
     wrote_flagged = (
         flagged(
@@ -1352,6 +1434,7 @@ def remember(
     *,
     told: Checked,
     wrote: dict[Path, list[str]],
+    heard: list[Path],
 ) -> Checked:
     """Note in the session what a checkpoint did, and report it; hold the lock.
 
@@ -1359,15 +1442,17 @@ def remember(
     for the others whose calls finished since the last one: the checkpoint sees
     files, not who wrote them. Each file landed is touched by the conversations
     `wrote` names for it. `told` is what a move of `HEAD` brought, which is no
-    session's.
+    session's. The files in `heard` were told what was found in them as they
+    were judged, so only the notes their writes removed are reported.
     """
     root = worktree.root
     landed = acted.landed
+    fresh = [j for j in landed if j.path not in heard]
     importing = watch(worktree, session, worktree.importers().collect())
     checked = Checked(
-        findings=placed(root, [found for j in landed for found in j.findings]),
-        information=placed(root, [found for j in landed for found in j.information]),
-        untouched=placed(root, [found for j in landed for found in j.untouched]),
+        findings=placed(root, [found for j in fresh for found in j.findings]),
+        information=placed(root, [found for j in fresh for found in j.information]),
+        untouched=placed(root, [found for j in fresh for found in j.untouched]),
         importers=placed(root, importing),
         removed=noted(root, [note for j in landed for note in j.removed]),
         notices=late_answers(worktree, session),
@@ -1587,9 +1672,10 @@ def mail_for(worktree: Worktree, key: str, agent: str, runtime: Runtime) -> str:
 def confirm(bench: Bench, worktree: Worktree, key: str, agent: str, call: str) -> None:
     """Note that a call finished: a write judged before it landed has landed.
 
-    It's conversation `agent`'s. If the operator was asked about it, the call
-    running means they approved, and the approval covers the path for the rest of
-    the session.
+    It's conversation `agent`'s, and the content lup accepts from then on: a
+    later write to the file is judged against it, at its call's start or at a
+    checkpoint, and the checkpoint accepting it tells no more of what was told
+    as it was judged.
     """
     with worktree.lock():
         session = worktree.session(key, bench.runtime)
@@ -1597,28 +1683,20 @@ def confirm(bench: Bench, worktree: Worktree, key: str, agent: str, call: str) -
         session.pending = [
             pending for pending in session.pending if pending.call != call
         ]
+        session.waiting(bench.services.clock.now())
         session.judged = [
             *session.judged,
             *(
-                Judged(path=pending.path, blob=pending.blob, agent=agent)
+                Judged(path=pending.path, blob=pending.blob, agent=agent, told=True)
                 for pending in landed
             ),
         ]
-        asked = [pending.path for pending in landed if pending.asked]
-        session.approved = list(dict.fromkeys([*session.approved, *asked]))
         session.removed = {
             **session.removed,
             **{pending.path: pending.removed for pending in landed},
         }
         session.participants = list(dict.fromkeys([*session.participants, agent]))
         worktree.keep(session)
-    worktree.verdicts(bench.services.layout).append(
-        [
-            pending.verdict.model_copy(update={"answer": "approved"})
-            for pending in landed
-            if pending.asked
-        ]
-    )
 
 
 def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding]:
@@ -1683,12 +1761,11 @@ def ended(
     them. What's left in a file a subagent in `working` touched too doesn't hold
     the end. A subagent's end finds nothing, so runs no check and doesn't wait for
     the pass, which the next checkpoint or the session's end collects: every
-    worker passes the gate before it hands back, and one waiting on a review has
-    files importing what hasn't landed, errors it can't fix. A file under an open
-    hold isn't anyone's until the operator answers, so it holds no end. Without
-    `judging`, no checkpoint: another conversation's call is running there, whose
-    finish runs it, so its writes in progress aren't judged as this one's, put
-    back under it, or told to a conversation that didn't make them.
+    worker passes the gate before it hands back. A file under an open hold isn't
+    anyone's until the operator answers, so it holds no end. Without `judging`,
+    no checkpoint: another conversation's call is running there, whose finish
+    runs it, so its writes in progress aren't judged as this one's, put back
+    under it, or told to a conversation that didn't make them.
     """
     services = bench.services
     checked = checkpoint(bench, worktree, key, agent) if judging else Checked()
@@ -1824,7 +1901,7 @@ class SessionStarted(Event):
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd, starts=True)
+        held = holding(bench, self.session, self.cwd, agent=self.agent, starts=True)
         if held is None or self.agent:
             return Reply()
         record = ConversationRecord(layout=bench.services.layout, session=self.session)
@@ -1833,8 +1910,77 @@ class SessionStarted(Event):
         return Reply(context="" if due is None else due.told())
 
 
+def counted(bench: Bench, session: str) -> list[Call]:
+    """Return the calls of `session` counted as running in the worktrees it holds, each once."""
+    index = SessionIndex(layout=bench.services.layout)
+    with index.lock(session):
+        held = index.read(session)
+    if held is None:
+        return []
+
+    def running(worktree: Worktree) -> list[Call]:
+        with worktree.calls_lock():
+            return [
+                each for each in worktree.running().calls if each.session == session
+            ]
+
+    calls = [each for worktree in worktrees(bench, held) for each in running(worktree)]
+    return list({each.key: each for each in calls}.values())
+
+
+class TurnStarted(Event):
+    """A turn of conversation `agent` starts, or a prompt arrives in its turn: the calls of its session the runtime shows are over stop counting as running.
+
+    A call the runtime never reports finishing, one the operator interrupts
+    among them, holds back the checkpoints where it counts until its
+    conversation's turn ends, and a turn the operator interrupts may report no
+    end. A prompt can arrive while a call of the conversation still runs, so
+    the turn's start clears only what the runtime shows over: the calls in
+    `over`, whose results their conversations' records hold, and, where the
+    runtime names its turns (`turn`), the conversation's calls of another turn.
+    No checkpoint runs: what they wrote is judged at the next one.
+    """
+
+    turn: str | None = None
+    """The runtime's id for the turn the prompt starts or arrives in; none where
+    it names none."""
+    over: list[str] = []
+    """The runtime's ids for the session's calls it shows are over."""
+
+    def ended(self, call: Call) -> bool:
+        """Say whether `call`, counted as running, is over."""
+        if call.session != self.session:
+            return False
+        later = (
+            call.agent == self.agent
+            and self.turn is not None
+            and call.turn is not None
+            and call.turn != self.turn
+        )
+        return call.key in self.over or later
+
+    @override
+    def apply(self, bench: Bench) -> Reply:
+        held = holding(bench, self.session, self.cwd, agent=self.agent)
+        if held is None:
+            return Reply()
+        now = bench.services.clock.now()
+        for worktree in worktrees(bench, held):
+            with worktree.calls_lock():
+                running = worktree.running()
+                left = [
+                    each
+                    for each in running.calls
+                    if not self.ended(each) and not over(each.started, now)
+                ]
+                if left != running.calls:
+                    running.calls = left
+                    worktree.ran(running, now)
+        return Reply()
+
+
 class CallStarted(Event):
-    """A tool call is about to run: it counts in every worktree its session holds.
+    """A tool call is about to run: it counts in every worktree its conversation works in (`Holding.works`).
 
     A subagent's call notes that the subagent is at work.
     """
@@ -1843,10 +1989,12 @@ class CallStarted(Event):
     tool: str
     spawns: bool = False
     """Whether the call runs a subagent, whose own calls count instead."""
+    turn: str | None = None
+    """The runtime's id for the turn it runs in; none where it names none."""
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd)
+        held = holding(bench, self.session, self.cwd, agent=self.agent)
         if held is None:
             return Reply()
         if self.agent:
@@ -1856,43 +2004,60 @@ class CallStarted(Event):
             record.opened(self.agent)
         if self.spawns:
             return Reply()
+        now = bench.services.clock.now()
         call = Call(
-            key=self.call, session=self.session, agent=self.agent, tool=self.tool
+            key=self.call,
+            session=self.session,
+            agent=self.agent,
+            tool=self.tool,
+            turn=self.turn,
+            started=now,
         )
-        for worktree in worktrees(bench, held):
+        for worktree in working(bench, held, self.agent):
             with worktree.calls_lock():
                 running = worktree.running()
                 running.calls = [*running.calls, call]
-                worktree.ran(running)
+                worktree.ran(running, now)
         return Reply()
 
 
 class CallFinished(Event):
     """A tool call finished, whether it succeeded or failed.
 
-    A checkpoint runs in each worktree the session holds where no call of the
-    session is still running, one after another, and the agent hears their
-    reports together; another session's calls there don't hold it back. One that
-    never started (a runtime can report a command's end on a later call) leaves
-    the calls running as they are, and a checkpoint still runs where none is.
+    It's confirmed in each worktree it counted in or its conversation works in,
+    and a checkpoint runs in each of those where no call of the session is still
+    running, one after another, the agent hearing their reports together;
+    another session's calls there don't hold it back. One that never started (a
+    runtime can report a command's end on a later call) leaves the calls running
+    as they are, and a checkpoint still runs where none is.
     """
 
     call: str
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd)
+        held = holding(bench, self.session, self.cwd, agent=self.agent)
         if held is None:
             return Reply()
         opened = worktrees(bench, held)
-        idle = [
-            worktree for worktree in opened if worktree.finish(self.session, self.call)
+        works = held.works(self.agent)
+        left = {
+            worktree.root: worktree.finish(
+                self.session, self.call, bench.services.clock.now()
+            )
+            for worktree in opened
+        }
+        ran = [
+            worktree
+            for worktree in opened
+            if left[worktree.root].counted or worktree.root in works
         ]
-        for worktree in opened:
+        for worktree in ran:
             confirm(bench, worktree, self.session, self.agent, self.call)
         checked = [
             checkpoint(bench, worktree, self.session, self.agent, self.call)
-            for worktree in idle
+            for worktree in ran
+            if left[worktree.root].idle
         ]
         waiting = [
             mail_for(worktree, self.session, self.agent, bench.runtime)
@@ -1908,8 +2073,9 @@ class TurnEnded(Event):
     are cleared, a checkpoint runs, the importers pass is waited on, and the turn
     can't end while the files it touched have type errors or ruff's findings
     (`end_turn`). The notes present at the session's start and removed since are
-    listed once. A worktree where a subagent's call is running gets no
-    checkpoint: that call's finish runs it.
+    listed once. Another conversation's calls are left running, and a worktree
+    one counts in, one a subagent works in, gets no checkpoint: that call's
+    finish runs it.
     """
 
     after_block: bool = False
@@ -1917,12 +2083,12 @@ class TurnEnded(Event):
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd)
+        held = holding(bench, self.session, self.cwd, agent=self.agent)
         if held is None:
             return Reply()
         opened = worktrees(bench, held)
         for worktree in opened:
-            worktree.clear(self.session, self.agent)
+            worktree.clear(self.session, self.agent, bench.services.clock.now())
         judging = [
             worktree.root
             for worktree in opened
@@ -1937,25 +2103,33 @@ class ConversationEnded(Event):
     """A subagent's conversation ended its turn; the session's own goes on.
 
     Its calls are cleared in each worktree the session holds, and a checkpoint
-    runs in each where none of the session's is left running. Its end holds on
+    runs in each it works in or one of its calls counted in, where none of the
+    session's is left running: what it left elsewhere is the session's turn's
+    end's to judge. Its end holds on
     what it must be told, each told once (`end_turn`): a refusal, a move, a
     checkpoint's notice, mail. It never holds on the type errors and ruff's
     findings left in its files: every worker passes the gate before it hands
-    back, and one waiting on a review has files importing what hasn't landed,
-    errors it can't fix. Its end ends its time at work, unless it's blocked,
-    which keeps the subagent going.
+    back. Its end ends its time at work, unless it's blocked, which keeps the
+    subagent going.
     """
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd)
+        held = holding(bench, self.session, self.cwd, agent=self.agent)
         if held is None:
             return Reply()
         opened = worktrees(bench, held)
-        idle = [
-            worktree.root
+        works = held.works(self.agent)
+        left = {
+            worktree.root: worktree.clear(
+                self.session, self.agent, bench.services.clock.now()
+            )
             for worktree in opened
-            if worktree.clear(self.session, self.agent)
+        }
+        idle = [
+            root
+            for root, each in left.items()
+            if each.idle and (each.counted or root in works)
         ]
         reply = end_turn(bench, self, opened, idle, after_block=False, listing=False)
         if self.agent and not reply.block:

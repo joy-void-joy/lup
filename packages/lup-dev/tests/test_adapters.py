@@ -8,16 +8,19 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import TypeAdapter
 
+from lup.adapters.claude.terminal import spelled
 from lup.sessions.terminal import Hook
 from lup_dev.adapters import claude, codex
 from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
 from lup_dev.host.courier import Conversations, Heard, Spawned, Spawning, Telling
 from lup_dev.inbox.store import Text
-from lup_dev.policy.checkpoint import Bench, Running, Services
+from lup_dev.policy.checkpoint import Bench, Running, Services, Worktree
 from lup_dev.policy.holds import Holds, Response, waiting
 from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from conftest import Kit
 
     from lup_dev.declaration.resolve import Selected
@@ -912,9 +915,9 @@ def test_codex_0_162_1_patch_is_held_after_its_call_and_put_back_on_a_no(
 def test_codex_judges_a_patch_in_a_worktree_a_claude_write_was_allowed_in(
     on_codex: Bench, on_claude: Bench, repo: Path, kit: Kit
 ) -> None:
-    """A Claude Code session hooked only on `PreToolUse` for `Edit|Write` (lup's own
-    settings, a launched Claude Code room) leaves each write it allows counted, and
-    no hook finishes it: another session's checkpoints don't wait on it."""
+    """A Claude Code session hooked only on `PreToolUse` for `Edit|Write`, as a
+    configuration that hooks no call's finish would be, leaves each write it allows
+    counted, and no hook finishes it: another session's checkpoints don't wait on it."""
 
     def from_claude(event: str, **fields: object) -> str:
         sent = {"session_id": "c1", "cwd": str(repo), "hook_event_name": event}
@@ -979,25 +982,390 @@ def test_codex_clears_a_failed_patchs_call_at_the_turns_end(
     assert (repo / "livecheck.py").exists()
 
 
+def with_fields(raw: str, **fields: object) -> str:
+    return json.dumps({**json.loads(raw), **fields})
+
+
+def test_codex_clears_a_call_of_an_earlier_turn_at_the_next_turns_start(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    """A prompt carries its turn's id, as each call does: a call no hook
+    finished in an earlier turn is over, and the turn's first call's finish
+    judges what it wrote; a prompt arriving in the turn leaves its calls."""
+    codex.hook(captured("1-session-start", repo), on_codex)
+    lost = captured("6-pre-tool-use-bash", repo)
+    turn = json.loads(lost)["turn_id"]
+    codex.hook(lost, on_codex)
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    steered = with_fields(CODEX_PROMPT, session_id=json.loads(lost)["session_id"])
+    same = with_fields(steered, cwd=str(repo), turn_id=turn)
+    assert codex.hook(same, on_codex) == ""
+    assert running(kit, repo) == [json.loads(lost)["tool_use_id"]]
+    assert codex.hook(with_fields(same, turn_id="next"), on_codex) == ""
+    assert running(kit, repo) == []
+    codex.hook(
+        with_fields(captured("2-pre-tool-use-add", repo), turn_id="next"), on_codex
+    )
+    output = json.loads(codex.hook(captured("3-post-tool-use-add", repo), on_codex))
+    assert output["hookSpecificOutput"]["additionalContext"].startswith(
+        "The operator approved the held change to"
+    )
+
+
+def test_codex_a_subagents_call_holds_back_the_main_conversations_checkpoint(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    """Codex's hooks carry the session's working directory for every
+    conversation, and no file tool says where it writes, so every conversation
+    of a Codex session works in its one worktree: a subagent's running call holds
+    back the main conversation's checkpoint there, as two conversations working
+    in one worktree should, and its own finish runs it."""
+    codex.hook(captured("1-session-start", repo), on_codex)
+    subagent = with_fields(
+        captured("6-pre-tool-use-bash", repo), agent_id="a1", tool_use_id="s1"
+    )
+    assert codex.hook(subagent, on_codex) == ""
+    codex.hook(captured("2-pre-tool-use-add", repo), on_codex)
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    assert codex.hook(captured("3-post-tool-use-add", repo), on_codex) == ""
+    assert running(kit, repo) == ["s1"]
+    finished = with_fields(
+        captured("7-post-tool-use-bash", repo), agent_id="a1", tool_use_id="s1"
+    )
+    output = json.loads(codex.hook(finished, on_codex))
+    assert output["hookSpecificOutput"]["additionalContext"].startswith(
+        "The operator approved the held change to"
+    )
+
+
 # In a launched room
 
 
 HOOK = ["sh", "-c", "socat …"]
+HOLD = timedelta(hours=25)
 
 
-def test_claude_hooks_every_call_and_each_turns_start_and_end_in_a_room() -> None:
-    hold = timedelta(hours=25)
+def in_room(raw: str, bench: Bench) -> str:
+    """Answer a Claude Code hook as a launched room does: the judge answers a hook the room runs (`claude.hooks`) and the judge reads (`claude.heard`); the host service answers every other as no decision."""
+    hooked = [name for each in claude.hooks(HOOK, HOLD) for name in spelled(each.event)]
+    if json.loads(raw)["hook_event_name"] not in hooked:
+        return ""
+    return claude.hook(raw, bench) if claude.heard(raw).judged else ""
 
-    assert claude.hooks(HOOK, hold) == [
-        Hook(event="session-started", command=HOOK, timeout=hold),
-        Hook(event="turn-started", command=HOOK, timeout=hold),
-        Hook(event="call-started", command=HOOK, timeout=hold),
-        Hook(event="turn-ended", command=HOOK, timeout=hold),
-        Hook(event="conversation-ended", command=HOOK, timeout=hold),
+
+def finished(
+    repo: Path, tool: str, tool_input: dict[str, object], call: str = "t1"
+) -> str:
+    return payload(
+        repo,
+        "PostToolUse",
+        tool_name=tool,
+        tool_input=tool_input,
+        tool_use_id=call,
+        tool_response={},
+    )
+
+
+def test_claude_a_second_edit_to_a_file_it_created_isnt_flagged_again_in_a_room(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    """#171: the room hears a file tool's end, which confirms its write, so the
+    next edit to the file is judged against it rather than the session's start."""
+    kit.announced.holding_all = False
+    new = repo / "src" / "pkg" / "new.py"
+    created = '"""New."""\n\n\nclass Room:\n    pass\n'
+    write: dict[str, object] = {"file_path": str(new), "content": created}
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+    in_room(pre_tool_use(repo, "Write", write), on_claude)
+    new.write_text(created)
+    in_room(finished(repo, "Write", write), on_claude)
+    kit.flags.read = [1]
+    edit: dict[str, object] = {
+        "file_path": str(new),
+        "old_string": '"""New."""',
+        "new_string": '"""A room."""',
+    }
+    in_room(pre_tool_use(repo, "Edit", edit, "t2"), on_claude)
+    new.write_text(created.replace("New.", "A room."))
+    in_room(finished(repo, "Edit", edit, "t2"), on_claude)
+    assert list(kit.flags.items) == [1]
+    verdicts = Worktree.at(repo, kit.layout).verdicts(kit.layout).read()
+    assert [verdict.reasons for verdict in verdicts] == [
+        ["new-file", "public-api"],
+        ["rules-pass"],
     ]
 
 
-def test_claudes_judge_reads_the_tools_whose_writes_it_proposes(repo: Path) -> None:
+def shell(repo: Path, bench: Bench, call: str, wrote: Callable[[], None]) -> str:
+    """A `Bash` call in a room that runs `wrote`, its writes; return what the agent is told beside its result."""
+    command: dict[str, object] = {"command": "sed -i …"}
+    started = in_room(pre_tool_use(repo, "Bash", command, call), bench)
+    assert started == ""
+    wrote()
+    return in_room(finished(repo, "Bash", command, call), bench)
+
+
+def beside(printed: str) -> str:
+    """What a call's end tells the agent beside its result."""
+    told = json.loads(printed)["hookSpecificOutput"]
+    assert told["hookEventName"] == "PostToolUse"
+    return told["additionalContext"]
+
+
+MANIFEST = Path("pyproject.toml")
+ADDED = "\n[tool.added]\nx = 1\n"
+
+
+def test_claude_holds_a_shell_write_to_a_protected_file_and_keeps_it_on_a_yes(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    kit.announced.answering = Response(approved=True, comment="fine")
+    was = (repo / MANIFEST).read_text()
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+
+    def append() -> None:
+        (repo / MANIFEST).write_text(was + ADDED)
+
+    told = beside(shell(repo, on_claude, "b1", append))
+    [hold] = kit.announced.holds
+    assert (hold.call, [each.path for each in hold.files]) == ("b1", [MANIFEST])
+    assert told.startswith(
+        f"The operator approved the held change to {repo / MANIFEST}: fine"
+    )
+    assert (repo / MANIFEST).read_text() == was + ADDED
+    assert running(kit, repo) == []
+
+
+def test_claude_puts_back_a_declined_shell_write_saving_the_agents_version(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    kit.announced.answering = Response(approved=False, comment="not that tool")
+    was = (repo / MANIFEST).read_text()
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+
+    def append() -> None:
+        (repo / MANIFEST).write_text(was + ADDED)
+
+    told = beside(shell(repo, on_claude, "b1", append))
+    saved = repo / ".lup" / "saved" / "1" / MANIFEST
+    assert told == (
+        "lup refused 1 file. It is unchanged; your version is saved.\n\n"
+        f"{repo / MANIFEST} (saved at {saved})\n"
+        "  The operator declined it: not that tool"
+    )
+    assert (repo / MANIFEST).read_text() == was
+    assert saved.read_text() == was + ADDED
+
+
+def test_claude_tells_a_shell_writes_findings_beside_its_result(
+    on_claude: Bench, repo: Path
+) -> None:
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+
+    def regex() -> None:
+        (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
+
+    told = beside(shell(repo, on_claude, "b1", regex))
+    assert told.startswith("lup's findings on the lines changed")
+    assert f"{repo / CORE}:11:8 - regex: regex fires here" in told
+
+
+def test_claude_puts_a_flagged_shell_write_before_the_operator(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    kit.announced.holding_all = False
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+
+    def create() -> None:
+        (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+
+    assert shell(repo, on_claude, "b1", create) == ""
+    assert kit.announced.holds == []
+    [asked] = kit.flags.asked
+    assert (asked.sender.runtime, asked.call) == ("claude", "b1")
+    assert asked.flagged.path == Path("src/pkg/new.py")
+    assert (repo / "src" / "pkg" / "new.py").read_text() == '"""New."""\n'
+
+
+def test_claude_clears_an_interrupted_call_at_the_turns_end_and_judges_its_writes(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    """Claude Code reports no end of a call the operator interrupts (neither
+    `PostToolUse` nor `PostToolUseFailure`), and runs no `Stop` for the turn it
+    interrupted: where no record shows it over at the next turn's start, that
+    turn's end clears it."""
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+    in_room(pre_tool_use(repo, "Bash", {"command": "sed -i …"}, "lost"), on_claude)
+    (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
+    assert running(kit, repo) == ["lost"]
+
+    def nothing() -> None:
+        pass
+
+    assert shell(repo, on_claude, "b2", nothing) == ""
+    printed = in_room(payload(repo, "Stop", stop_hook_active=False), on_claude)
+    assert held_on(printed).startswith("lup won't end the turn yet")
+    assert "regex: regex fires here" in held_on(printed)
+    assert running(kit, repo) == []
+
+
+def results(record: Path, *calls: str) -> None:
+    """Write a Claude Code record holding a result for each of `calls`, as it records an interrupted call's."""
+    record.parent.mkdir(parents=True, exist_ok=True)
+    refused = "The user doesn't want to proceed with this tool use."
+    lines = [
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": call, "content": refused}
+                ],
+            },
+        }
+        for call in calls
+    ]
+    record.write_text("".join(f"{json.dumps(line)}\n" for line in lines))
+
+
+def test_claude_clears_an_interrupted_call_at_the_next_turns_start(
+    on_claude: Bench, repo: Path, kit: Kit, tmp_path: Path
+) -> None:
+    """The record holds an interrupted call's result, the session's own or a
+    subagent's, though no hook reported its end, so the next prompt clears it,
+    and the turn's first call's finish judges what it wrote."""
+    transcript = tmp_path / "records" / "s1.jsonl"
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+    sed: dict[str, object] = {"command": "sed -i …"}
+    in_room(pre_tool_use(repo, "Bash", sed, "lost"), on_claude)
+    subagent = payload(
+        repo,
+        "PreToolUse",
+        tool_name="Bash",
+        tool_input=sed,
+        tool_use_id="gone",
+        agent_id="a1",
+    )
+    in_room(subagent, on_claude)
+    regex_in(repo)
+    results(transcript, "lost")
+    results(transcript.with_suffix("") / "subagents" / "agent-a1.jsonl", "gone")
+    prompt = payload(
+        repo, "UserPromptSubmit", prompt="Go on.", transcript_path=str(transcript)
+    )
+    assert in_room(prompt, on_claude) == ""
+    assert running(kit, repo) == []
+    told = beside(shell(repo, on_claude, "b1", lambda: None))
+    assert f"{repo / CORE}:11:8 - regex" in told
+
+
+def test_claude_leaves_a_call_running_when_a_prompt_arrives_mid_turn(
+    on_claude: Bench, repo: Path, kit: Kit, tmp_path: Path
+) -> None:
+    """A channel's message fires `UserPromptSubmit` while the call it waits on
+    still runs (Claude Code 2.1.304, `docs/field-notes.md`, *Channels*): the
+    record holds no result for it, so it stays counted."""
+    transcript = tmp_path / "records" / "s1.jsonl"
+    results(transcript)
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+    in_room(pre_tool_use(repo, "Bash", {"command": "sleep 10"}, "c1"), on_claude)
+    channel = '<channel source="lup" wake="t1">\nHi.\n</channel>'
+    prompt = payload(
+        repo, "UserPromptSubmit", prompt=channel, transcript_path=str(transcript)
+    )
+    assert in_room(prompt, on_claude) == ""
+    assert running(kit, repo) == ["c1"]
+
+
+def test_claude_reads_without_reaching_the_judge(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+    read: dict[str, object] = {"file_path": str(repo / CORE)}
+    (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
+    assert in_room(pre_tool_use(repo, "Read", read, "r1"), on_claude) == ""
+    assert running(kit, repo) == []
+    assert in_room(finished(repo, "Read", read, "r1"), on_claude) == ""
+    store = Worktree.at(repo, kit.layout).store
+    assert b"BAD regex" not in (store.content(store.accepted(), CORE) or b"")
+
+    def nothing() -> None:
+        pass
+
+    assert " - regex: " in beside(shell(repo, on_claude, "b1", nothing))
+
+
+def regex_in(root: Path) -> None:
+    (root / CORE).write_text((root / CORE).read_text() + "y = 2  # BAD regex\n")
+
+
+def edits_in_room(
+    repo: Path, root: Path, bench: Bench, call: str, old: str, **subagent: str
+) -> None:
+    """An `Edit` of `old` in `CORE` in the worktree at `root`, its hooks reporting `repo`, as a subagent's report the session's worktree whatever it works on; `agent_id` makes it a subagent's."""
+    edit: dict[str, object] = {
+        "file_path": str(root / CORE),
+        "old_string": old,
+        "new_string": f"{old}_",
+    }
+    start = payload(
+        repo,
+        "PreToolUse",
+        tool_name="Edit",
+        tool_input=edit,
+        tool_use_id=call,
+        **subagent,
+    )
+    in_room(start, bench)
+    (root / CORE).write_text((root / CORE).read_text().replace(old, f"{old}_"))
+    end = payload(repo, "PostToolUse", tool_name="Edit", tool_use_id=call, **subagent)
+    in_room(end, bench)
+
+
+def test_claude_a_worker_busy_in_its_worktree_holds_back_checkpoints_there_alone(
+    on_claude: Bench, repo: Path, linked: Path
+) -> None:
+    """A worker's hooks report the session's worktree (`linked` is its own,
+    where its file tools write), as Claude Code's subagents' do: its running call
+    holds back no checkpoint of the main conversation's in `repo`, and holds
+    back one in `linked`, where the main conversation edits too."""
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+    edits_in_room(repo, linked, on_claude, "w1", "def helper", agent_id="w")
+    busy = payload(
+        repo,
+        "PreToolUse",
+        tool_name="Bash",
+        tool_input={"command": "uv run pytest"},
+        tool_use_id="w2",
+        agent_id="w",
+    )
+    assert in_room(busy, on_claude) == ""
+    told = beside(shell(repo, on_claude, "b1", lambda: regex_in(repo)))
+    assert f"{repo / CORE}:11:8 - regex" in told
+    edits_in_room(repo, linked, on_claude, "m1", "def ask")
+    assert shell(repo, on_claude, "b2", lambda: regex_in(linked)) == ""
+    done = payload(
+        repo, "PostToolUse", tool_name="Bash", tool_use_id="w2", agent_id="w"
+    )
+    assert f"{linked / CORE}:11:8 - regex" in beside(in_room(done, on_claude))
+
+
+def test_claude_hooks_every_call_and_each_turns_start_and_end_in_a_room() -> None:
+    """Every hook waits as long as a hold may: a call's start for a file tool's
+    write, its finish for the checkpoint's, a turn's end for its last checkpoint's."""
+    assert claude.hooks(HOOK, HOLD) == [
+        Hook(event="session-started", command=HOOK, timeout=HOLD),
+        Hook(event="turn-started", command=HOOK, timeout=HOLD),
+        Hook(event="call-started", command=HOOK, timeout=HOLD),
+        Hook(event="call-finished", command=HOOK, timeout=HOLD),
+        Hook(event="turn-ended", command=HOOK, timeout=HOLD),
+        Hook(event="conversation-ended", command=HOOK, timeout=HOLD),
+    ]
+
+
+def test_claudes_judge_proposes_the_file_tools_writes_and_reads_every_call(
+    repo: Path,
+) -> None:
     edit: dict[str, object] = {
         "file_path": "a.py",
         "old_string": "a",
@@ -1009,21 +1377,29 @@ def test_claudes_judge_reads_the_tools_whose_writes_it_proposes(repo: Path) -> N
         raw = pre_tool_use(repo, tool, inputs[tool])
         assert claude.PreToolUse.model_validate_json(raw).proposal() is not None
         assert claude.heard(raw).judged
-    bash = pre_tool_use(repo, "Bash", {"command": "ls"})
-    assert claude.PreToolUse.model_validate_json(bash).proposal() is None
-    assert not claude.heard(bash).judged
+    for tool in ["Bash", "NotebookEdit", "mcp__other__write", "SomeNewTool"]:
+        raw = pre_tool_use(repo, tool, {"command": "ls"})
+        assert claude.PreToolUse.model_validate_json(raw).proposal() is None
+        assert claude.heard(raw).judged
+        assert claude.heard(finished(repo, tool, {"command": "ls"})).judged
+
+
+def test_claudes_judge_reads_no_call_to_a_tool_that_only_reads_nor_to_lups(
+    repo: Path,
+) -> None:
+    for tool in [*claude.READING, "mcp__lup__ask"]:
+        assert not claude.heard(pre_tool_use(repo, tool, {})).judged
+        assert not claude.heard(finished(repo, tool, {})).judged
 
 
 def test_codex_hooks_each_turns_start_and_the_judges_events_in_a_room() -> None:
-    hold = timedelta(hours=25)
-
-    assert codex.hooks(HOOK, hold) == [
-        Hook(event="session-started", command=HOOK, timeout=hold),
-        Hook(event="turn-started", command=HOOK, timeout=hold),
-        Hook(event="call-started", command=HOOK, timeout=hold),
-        Hook(event="call-finished", command=HOOK, timeout=hold),
-        Hook(event="turn-ended", command=HOOK, timeout=hold),
-        Hook(event="conversation-ended", command=HOOK, timeout=hold),
+    assert codex.hooks(HOOK, HOLD) == [
+        Hook(event="session-started", command=HOOK, timeout=HOLD),
+        Hook(event="turn-started", command=HOOK, timeout=HOLD),
+        Hook(event="call-started", command=HOOK, timeout=HOLD),
+        Hook(event="call-finished", command=HOOK, timeout=HOLD),
+        Hook(event="turn-ended", command=HOOK, timeout=HOLD),
+        Hook(event="conversation-ended", command=HOOK, timeout=HOLD),
     ]
 
 
@@ -1060,6 +1436,22 @@ def test_claude_warns_the_operator_of_anything_else_its_judge_couldnt_answer(
     raw: str,
 ) -> None:
     assert json.loads(claude.unanswered(raw, WHY)) == {"systemMessage": SAID}
+
+
+@pytest.mark.parametrize("event", ["PostToolUse", "PostToolUseFailure"])
+def test_claude_tells_the_agent_of_a_checkpoint_its_judge_couldnt_answer(
+    repo: Path, event: str
+) -> None:
+    raw = payload(repo, event, tool_name="Bash", tool_use_id="t1")
+
+    answered = json.loads(claude.unanswered(raw, WHY))
+
+    assert answered == {
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "additionalContext": f"{SAID}. Tell the operator.",
+        }
+    }
 
 
 def test_codex_tells_the_agent_of_a_checkpoint_its_judge_couldnt_answer(
@@ -1141,6 +1533,17 @@ BOTH = "The operator answered.\n\nAnd again."
                 agent="a1",
                 call="t2",
                 tool="Bash",
+                judged=True,
+            ),
+        ),
+        (
+            pre_tool_use(Path("/w"), "Read", {"file_path": "/w/a.py"}, "t4"),
+            Heard(
+                fits=10_000,
+                event="call-started",
+                session="s1",
+                call="t4",
+                tool="Read",
                 judged=False,
             ),
         ),
@@ -1168,8 +1571,21 @@ BOTH = "The operator answered.\n\nAnd again."
             ),
         ),
         (
+            payload(
+                Path("/w"), "PostToolUse", tool_name="mcp__lup__ask", tool_use_id="t3"
+            ),
+            Heard(
+                fits=10_000,
+                event="call-finished",
+                session="s1",
+                call="t3",
+                tool="mcp__lup__ask",
+                judged=False,
+            ),
+        ),
+        (
             payload(Path("/w"), "Stop", stop_hook_active=False),
-            Heard(fits=10_000, event="turn-ended", session="s1", judged=False),
+            Heard(fits=10_000, event="turn-ended", session="s1", judged=True),
         ),
         (
             payload(Path("/w"), "SubagentStop", agent_id="a1"),
@@ -1178,7 +1594,7 @@ BOTH = "The operator answered.\n\nAnd again."
                 event="conversation-ended",
                 session="s1",
                 agent="a1",
-                judged=False,
+                judged=True,
             ),
         ),
     ],
@@ -1254,7 +1670,7 @@ def test_each_runtime_hears_a_turns_start_with_its_prompt_and_tells_beside_it() 
             fits=10_000,
             event="turn-started",
             session=session,
-            judged=False,
+            judged=True,
             prompt=prompt,
         )
         assert adapter.told(raw, "", TOLD) is None

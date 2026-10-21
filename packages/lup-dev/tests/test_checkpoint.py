@@ -1,6 +1,8 @@
 """The checkpoint: when it runs, what it judges, and what it does about it."""
 
+import inspect
 import json
+from annotationlib import Format
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,16 +19,22 @@ from lup_dev.declaration.grammar import Drop
 from lup_dev.declaration.resolve import Declaration, Selected
 from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.inbox.store import Asked, ChangedFile, Reading, Text
+from lup_dev.launch.session import hooked
 from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
+    Call,
     CallFinished,
     CallStarted,
     ConversationEnded,
+    Pending,
     Reply,
+    Running,
     Session,
     SessionStarted,
     TurnEnded,
+    TurnStarted,
     Worktree,
+    over,
 )
 from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
@@ -201,6 +209,88 @@ def test_a_call_that_never_finishes_is_cleared_when_the_turn_ends(
 
 def running(kit: Kit, repo: Path) -> list[str]:
     return [each.key for each in worktree(kit, repo).running().calls]
+
+
+def test_a_call_that_must_be_over_is_forgotten_when_the_calls_are_kept(
+    kit: Kit, repo: Path
+) -> None:
+    """A call no hook finished, from a session long gone or recorded by a judge
+    that kept no start time, is forgotten as the list is next kept; a call
+    started within a hook's longest wait stays."""
+    start(kit, repo, "gone")
+    call_for("gone", kit, repo, "stale")
+    store = worktree(kit, repo).store.layout.calls
+    kept = read_model(store, Running)
+    assert kept is not None
+    untimed = Call(key="untimed", session="gone", agent="", tool="Bash")
+    write_model(store, Running(calls=[*kept.calls, untimed]))
+    kit.clock.sleep(timedelta(hours=25).total_seconds())
+    start(kit, repo)
+    call(kit, repo, "c1")
+    assert running(kit, repo) == ["c1"]
+    kit.clock.sleep(timedelta(hours=24).total_seconds())
+    call(kit, repo, "c2")
+    assert running(kit, repo) == ["c1", "c2"]
+
+
+def test_a_pending_write_no_end_confirmed_is_forgotten_once_its_call_must_be_over(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+
+    def edit(key: str, old: str) -> None:
+        change = Replacement(
+            call=key, tool="Edit", path=repo / CORE, old=old, new=f"{old}_"
+        )
+        assert before(kit.bench, change, SESSION, repo).outcome == "allow"
+
+    edit("e1", "def helper")
+    record = session(kit, repo)
+    untimed = Pending(call="untimed", path=CORE, blob=record.pending[0].blob)
+    worktree(kit, repo).keep(
+        record.model_copy(update={"pending": [*record.pending, untimed]})
+    )
+    kit.clock.sleep(timedelta(hours=25).total_seconds())
+    edit("e2", "def ask")
+    assert [each.call for each in session(kit, repo).pending] == ["e2"]
+
+
+def test_a_call_lasts_no_longer_than_a_rooms_hook_waits() -> None:
+    def default(function: Callable[..., object], name: str) -> object:
+        signed = inspect.signature(function, annotation_format=Format.STRING)
+        return signed.parameters[name].default
+
+    assert default(over, "lifetime") == default(hooked, "hold")
+
+
+def test_a_turns_start_clears_the_calls_the_runtime_shows_over(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    call(kit, repo, "lost")
+    call(kit, repo, "gone", agent="worker")
+    call(kit, repo, "c1")
+    TurnStarted(session=SESSION, cwd=repo, over=["lost", "gone"]).apply(kit.bench)
+    assert running(kit, repo) == ["c1"]
+    bad(repo)
+    assert finish(kit, repo, "c1").context.startswith(
+        "lup's findings on the lines changed"
+    )
+
+
+def test_a_turns_start_clears_its_conversations_calls_of_another_turn(
+    kit: Kit, repo: Path
+) -> None:
+    """A prompt arriving in a turn carries that turn's id, and leaves its calls."""
+    start(kit, repo)
+    for key, agent in [("c1", ""), ("w1", "worker")]:
+        CallStarted(
+            session=SESSION, agent=agent, cwd=repo, call=key, tool="Bash", turn="t1"
+        ).apply(kit.bench)
+    TurnStarted(session=SESSION, cwd=repo, turn="t1").apply(kit.bench)
+    assert running(kit, repo) == ["c1", "w1"]
+    TurnStarted(session=SESSION, cwd=repo, turn="t2").apply(kit.bench)
+    assert running(kit, repo) == ["w1"]
 
 
 def test_a_turns_end_clears_only_its_own_sessions_calls(kit: Kit, repo: Path) -> None:
@@ -500,6 +590,44 @@ def test_an_edit_judged_before_it_lands_is_accepted_as_judged(
     )
 
 
+def test_a_file_tools_findings_are_told_with_the_call_and_not_again_at_its_finish(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    edit = Replacement(
+        call="e1",
+        tool="Edit",
+        path=repo / CORE,
+        old="    return x\n",
+        new="    return x  # BAD regex\n",
+    )
+    decision = before(kit.bench, edit, SESSION, repo)
+    assert decision.told.startswith("lup's findings on the lines changed")
+    call(kit, repo, "e1", tool="Edit")
+    (repo / CORE).write_text(edit.content((repo / CORE).read_text()) or "")
+    assert finish(kit, repo, "e1") == Reply()
+    store = worktree(kit, repo).store
+    assert store.content(store.accepted(), CORE) == (repo / CORE).read_bytes()
+
+
+def test_a_file_tools_write_to_a_test_is_told_its_type_errors_with_the_call(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    test = repo / "tests" / "test_core.py"
+    text = "def test_it():\n    x: int = 'a'  # TYPE\n"
+    write = Overwrite(call="w1", tool="Write", path=test, text=text)
+    decision = before(kit.bench, write, SESSION, repo)
+    assert decision.outcome == "allow"
+    assert decision.told.startswith(
+        "Type errors and ruff's findings in the files changed"
+    )
+    assert f"{test}:2:" in decision.told
+    call(kit, repo, "w1", tool="Write")
+    test.write_text(text)
+    assert finish(kit, repo, "w1") == Reply()
+
+
 def test_an_approval_covers_the_path_for_the_rest_of_the_session(
     kit: Kit, repo: Path
 ) -> None:
@@ -667,20 +795,22 @@ def test_a_shell_write_no_checkpoint_can_attribute_goes_to_every_participant(
 def test_a_file_tools_write_goes_to_the_conversation_that_made_it(
     kit: Kit, repo: Path
 ) -> None:
+    """Its findings are told to the writer with the call, so neither the
+    checkpoint after it nor the session's turn's end tells them again."""
     start(kit, repo)
     new = repo / "src" / "pkg" / "new.py"
     text = '"""New."""\nz: str = 1  # TYPE\n'
     write = Overwrite(call="w1", tool="Write", path=new, text=text)
-    assert held(kit, lambda: before(kit.bench, write, SESSION, repo))
+    decision = before(kit.bench, write, SESSION, repo, agent="worker")
+    assert decision.told.startswith(
+        "Type errors and ruff's findings in the files changed"
+    )
     call(kit, repo, "c1")
     call(kit, repo, "w1", tool="Write", agent="worker")
     new.write_text(text)
-    finish(kit, repo, "c1")
-    finish(kit, repo, "w1", agent="worker")
+    assert finish(kit, repo, "c1") == Reply()
+    assert finish(kit, repo, "w1", agent="worker") == Reply()
     assert session(kit, repo).touched == {"worker": [Path("src/pkg/new.py")]}
-    told = end(kit, repo).block
-    assert told.startswith("Type errors and ruff's findings in the files changed")
-    assert "lup won't end the turn yet" not in told
     assert end(kit, repo) == Reply()
     assert subagent_ends(kit, repo, "worker") == Reply()
     assert end(kit, repo) == Reply()
@@ -1267,7 +1397,7 @@ def test_a_worktree_the_session_moves_into_is_judged(
     assert f"{linked}/src/pkg/core.py:11:8 - regex" in told
 
 
-def test_a_call_counts_in_every_worktree_its_session_holds(
+def test_a_call_counts_in_every_worktree_its_conversation_works_in(
     kit: Kit, repo: Path, linked: Path
 ) -> None:
     start(kit, repo)
@@ -1280,6 +1410,71 @@ def test_a_call_counts_in_every_worktree_its_session_holds(
     assert finish(kit, repo, "c2").context.startswith(
         "lup's findings on the lines changed"
     )
+
+
+def edits_in(
+    kit: Kit, cwd: Path, root: Path, key: str, *, agent: str, old: str = "def helper"
+) -> None:
+    """Conversation `agent` edits `old` in `CORE` in the worktree at `root` with a file tool, its hooks reporting `cwd`, as a subagent's report the session's."""
+    edit = Replacement(call=key, tool="Edit", path=root / CORE, old=old, new=f"{old}_")
+    before(kit.bench, edit, SESSION, cwd, agent=agent)
+    call(kit, cwd, key, tool="Edit", agent=agent)
+    (root / CORE).write_text(edit.content((root / CORE).read_text()) or "")
+    finish(kit, cwd, key, agent=agent)
+
+
+def test_a_subagent_busy_in_its_worktree_holds_back_checkpoints_there_alone(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    """A worker's hooks report the session's worktree, where its calls start;
+    once its file tools wrote in its own, its calls count there alone."""
+    start(kit, repo)
+    edits_in(kit, repo, linked, "w1", agent="worker")
+    call(kit, repo, "w2", agent="worker")
+    assert running(kit, repo) == []
+    assert running(kit, linked) == ["w2"]
+    mine = shell_write(
+        kit, repo, "c1", CORE, (repo / CORE).read_text() + "y = 2  # BAD regex\n"
+    )
+    assert mine.context.startswith("lup's findings on the lines changed")
+    edits_in(kit, repo, linked, "r1", agent="reviewer", old="def ask")
+    call(kit, repo, "r2", agent="reviewer")
+    bad(linked)
+    assert finish(kit, repo, "r2", agent="reviewer").context == ""
+    worker = finish(kit, repo, "w2", agent="worker").context
+    assert f"{linked}/src/pkg/core.py:11:8 - regex" in worker
+
+
+def test_a_subagent_works_where_its_session_does_until_its_file_tools_write(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    call(kit, repo, "w1", agent="worker")
+    reply = shell_write(
+        kit, repo, "c1", CORE, (repo / CORE).read_text() + "y = 2  # BAD regex\n"
+    )
+    assert reply.context == ""
+    worker = finish(kit, repo, "w1", agent="worker").context
+    assert worker.startswith("lup's findings on the lines changed")
+
+
+def test_the_turns_end_judges_every_worktree_but_where_anothers_call_runs(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    """The session's turn's end leaves a worker's running call alone, and so
+    its worktree, whose checkpoint that call's finish runs; elsewhere it runs
+    its last checkpoint."""
+    start(kit, repo)
+    edits_in(kit, repo, linked, "w1", agent="worker")
+    call(kit, repo, "w2", agent="worker")
+    call(kit, repo, "lost")
+    bad(repo)
+    bad(linked)
+    block = end(kit, repo).block
+    assert f"{repo}/src/pkg/core.py:11:8 - regex" in block
+    assert str(linked) not in block
+    assert running(kit, linked) == ["w2"]
+    assert running(kit, repo) == []
 
 
 def test_a_shell_write_where_the_session_never_went_isnt_judged(

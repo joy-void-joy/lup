@@ -3,7 +3,7 @@
 | Codex hook | lup's event |
 |---|---|
 | `SessionStart` | `SessionStarted` |
-| `UserPromptSubmit` | `turn-started`, the host service's alone |
+| `UserPromptSubmit` | `TurnStarted` |
 | `PreToolUse` | `CallStarted` |
 | `PostToolUse` | `CallFinished` |
 | `Stop` | `TurnEnded` |
@@ -22,7 +22,12 @@ A Codex session holds only the worktree it started in, a declared gap until room
 the "Working directory for the session", and `Bash` and `apply_patch` carry only
 `tool_input.command` (its hooks docs), which lup doesn't parse. Under its
 `workspace-write` sandbox a write elsewhere lies outside the writable roots, so
-Codex's own approval decides it.
+Codex's own approval decides it. For the same reason every conversation of a
+Codex session works in that one worktree (`Holding.works`, a subagent's hooks
+carrying the session's `cwd` too: `tool_hook_cwd`, below), so a subagent's
+running call holds back the main conversation's checkpoints there, where a
+runtime whose file tools say where they write lets a worker busy in a worktree
+of its own hold back none: a gap declared with its evidence.
 
 In a launched room (`docs/host.md`, *The one hook*), Codex
 runs the room's hook on `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` and
@@ -44,8 +49,8 @@ goes on. Where the room's hook can't reach the service, it ends with status 1:
 Codex marks the hook's run failed, shows "hook exited with code 1" (not what the
 hook wrote to standard error), and the call goes on.
 
-The judge reads every hook a launched Codex session runs (`heard`) but
-`UserPromptSubmit`, a turn's start, which the host service answers itself. It adds to each answer through `told`: a call to
+The judge reads every hook a launched Codex session runs (`heard`). It adds to
+each answer through `told`: a call to
 lup's tools (`mcp__lup__<tool>`, `TOOL_PREFIX`) is rewritten to carry `caller`,
 lup's id for the conversation calling, as `updatedInput` beside
 `permissionDecision: "allow"`; and what the conversation is told goes in as
@@ -111,8 +116,9 @@ payloads 0.162.1 sent for a patch, a shell command and a turn's end are kept in
 `packages/lup-dev/tests/payloads/codex-0.162.1/`:
 - the inputs: `PreToolUse` and `PostToolUse` carry `tool_use_id`, `PostToolUse` its
   `tool_response`, `SubagentStop` its `agent_id`; a subagent's calls carry their
-  `agent_id`; each carries more than this adapter reads (`model`,
-  `permission_mode`, `transcript_path`, and on a turn's events `turn_id`);
+  `agent_id`; a turn's events carry its `turn_id`, which `PreToolUse` and
+  `UserPromptSubmit` are read for; each carries more than this adapter reads
+  (`model`, `permission_mode`, `transcript_path`);
 - a patch's hooks name the tool `apply_patch` (a matcher of `Write` or `Edit`
   selects them too, the payload still saying `apply_patch`:
   `core/src/tools/hook_names.rs`), carry the patch as `tool_input.command`, and
@@ -217,6 +223,7 @@ from lup_dev.policy.checkpoint import (
     ConversationEnded,
     SessionStarted,
     TurnEnded,
+    TurnStarted,
     first_warning,
 )
 from lup_dev.policy.report import judge_failed
@@ -408,23 +415,30 @@ class SessionStart(Payload):
 
 
 class UserPromptSubmit(Payload):
-    """`UserPromptSubmit`: a turn starts on a prompt, the operator's typed in its terminal.
+    """`UserPromptSubmit`: a turn starts on a prompt, the operator's typed in its terminal, or a prompt arrives in a turn.
 
-    Its input carries the `prompt` (`user-prompt-submit.command.input`), and its
-    output takes `hookSpecificOutput.additionalContext`, refusing any field it
-    doesn't name (`UserPromptSubmitCommandOutputWire`, `hooks/src/schema.rs`).
+    Its input carries the `prompt` and the `turn_id`
+    (`user-prompt-submit.command.input`), and its output takes
+    `hookSpecificOutput.additionalContext`, refusing any field it doesn't name
+    (`UserPromptSubmitCommandOutputWire`, `hooks/src/schema.rs`). It runs for
+    each input a turn takes (`inspect_pending_input`, `core/src/hook_runtime.rs`,
+    at `rust-v0.163.0`), a message typed while the model runs among them, which
+    the turn drains between its steps (`run_turn`, `core/src/session/turn.rs`),
+    with that turn's own id (`turn_context.sub_id`), as every hook of the turn
+    carries it.
     """
 
     hook_event_name: Literal["UserPromptSubmit"]
     prompt: str
+    turn_id: str | None = None
 
     def heard(self, fits: int) -> Heard:
-        """Read the turn's start, and the prompt it starts on: the judge doesn't read it."""
+        """Read the turn's start, and the prompt it starts on: the judge reads it."""
         return Heard(
             event="turn-started",
             session=self.session_id,
             agent=self.agent_id,
-            judged=False,
+            judged=True,
             fits=fits,
             prompt=self.prompt,
         )
@@ -435,11 +449,22 @@ class UserPromptSubmit(Payload):
 
     @override
     def answer(self, bench: Bench) -> Output | None:
+        """Stop counting the conversation's calls of an earlier turn: no `PostToolUse` reports the end of a call interrupted, and a prompt arriving in a turn carries that turn's id, so the turn's calls still running stay counted."""
+        TurnStarted(
+            session=self.session_id,
+            agent=self.agent_id or "",
+            cwd=self.cwd,
+            turn=self.turn_id,
+        ).apply(bench)
         return None
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
-        return None
+        """Let the turn start, and warn the operator once, as a turn's end does: a call left counted is cleared at its conversation's turn's end."""
+        warning = judge_failed(failure)
+        if not first_warning(bench.services.layout, self.session_id, warning):
+            return None
+        return OperatorWarning(system_message=warning)
 
     @override
     def unanswered(self, said: str) -> Output:
@@ -455,6 +480,8 @@ class PreToolUse(Payload):
     tool_input: JsonValue = None
     """The call's input: a command's or a patch's `command`, an MCP tool's
     arguments, or their text where that isn't JSON."""
+    turn_id: str | None = None
+    """The turn the call runs in, which a later turn's start says is over."""
 
     def heard(self, fits: int) -> Heard:
         """Read the call's start: the judge reads every one.
@@ -516,6 +543,7 @@ class PreToolUse(Payload):
             call=self.tool_use_id,
             tool=self.tool_name,
             spawns=self.tool_name == "spawn_agent",
+            turn=self.turn_id,
         ).apply(bench)
         return None
 
@@ -827,9 +855,9 @@ def told(raw: str, answer: str, telling: Telling) -> str | None:
 def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
     """Return the hooks a launched Codex session runs `command` at: the events the host service hears.
 
-    `SessionStart`; `UserPromptSubmit`, each turn's start, which the host
-    service answers itself; `PreToolUse` and `PostToolUse` on every tool: Codex
-    is judged after each call. `Stop` and `SubagentStop`: a conversation's
+    `SessionStart`; `UserPromptSubmit`, each turn's start, which clears the
+    calls the conversation left in an earlier turn; `PreToolUse` and
+    `PostToolUse` on every tool: Codex is judged after each call. `Stop` and `SubagentStop`: a conversation's
     turn's end clears the calls it left that no `PostToolUse` finishes (a patch
     that failed to apply, a call interrupted), and judges what the turn left.
     Each waits up to `timeout`, which a hold's wait for the operator needs.
