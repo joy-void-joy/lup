@@ -14,16 +14,19 @@
 // marked in the margin beside its summary line, with a bar for each fold the
 // cursor is in (`margin.ts`); the context, each run of unchanged lines and each
 // automatic file fold, folded until opened, and `zr`, `zm`, `zR`, `zM` and Space
-// `f` act on the item the cursor is in (`docs/dashboard.md`, *The review*).
+// `f` act on the item the cursor is in. The header over the review says where
+// the cursor is: the group, the item, the file and the folds it's in, and,
+// while a comment is being written, whom it goes to (`docs/dashboard.md`, *The
+// review*).
 import { RangeSetBuilder, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./code";
 import { changes, moved, type Block, type Change, type Folding } from "./comments";
 import { closedAs, folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import { levelled, ofKind } from "./folds";
-import type { ReviewPlace } from "./keys";
+import { FOLD_KINDS, type ReviewPlace } from "./keys";
 import {
     aboutAt,
     answering,
@@ -36,6 +39,7 @@ import {
     foldsOf,
     fresh,
     groupAt,
+    heading,
     isLetter,
     laid,
     news,
@@ -54,9 +58,12 @@ import {
     type Aside,
     type Conversation,
     type Draft,
+    type Group,
     type Head,
     type Item,
     type Laid,
+    type Region,
+    type Where,
     type Written,
 } from "./review";
 
@@ -68,6 +75,8 @@ interface Props {
     change: (draft: Draft) => void;
     /** Name a group: the agent that sent its items, or the one it's of, and where. */
     banner: (head: Head) => string;
+    /** Name a conversation as the tree calls it, as whom a comment goes to. */
+    called: (party: Conversation) => string;
     /** What the host has answered of each item beyond its own text: its context, and each file it changes, an approval's, a held change's or a flagged write's. */
     around: Around;
     send: () => void;
@@ -253,6 +262,44 @@ function when(made: string): string {
     return at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+/** Return what names an item in the header over the review: the first part of its header, before its first ` · `, without the rule around it. */
+function itemNamed(header: string): string {
+    const inner = header.slice("── ".length, header.length - " ──".length);
+    return inner.split(" · ")[0] ?? inner;
+}
+
+/** The header over the review: where the cursor is, each part marked by its kind, and whom what's being written goes to. */
+function Heading({ parts }: { parts: Where[] }) {
+    const letter = (kind: Where["kind"]) => FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? null;
+    // A body around another, which a narrow screen leaves out for the innermost.
+    const inner = parts.findLast((each) => each.kind === "body");
+    const shown = (part: Where) => (
+        <span
+            key={`${part.kind} ${part.text}`}
+            className={`where-part where-${part.kind}${part.kind === "body" && part !== inner ? " where-outer" : ""}`}
+            title={part.text}
+        >
+            {letter(part.kind) === null ? null : <span className="where-mark">{letter(part.kind)}</span>}
+            {/* A path keeps its end in view where it's cut, the file's name. */}
+            {part.kind === "file" ? <bdi className="where-text">{part.text}</bdi> : <span className="where-text">{part.text}</span>}
+        </span>
+    );
+    const who = parts.filter((each) => each.kind === "to" || each.kind === "group");
+    const path = parts.filter((each) => each.kind !== "to" && each.kind !== "group");
+    return (
+        <div className="where">
+            {parts.length === 0 ? (
+                <span className="where-who muted">nothing waiting</span>
+            ) : (
+                <>
+                    <span className="where-who">{who.map(shown)}</span>
+                    <span className="where-path">{path.map(shown)}</span>
+                </>
+            )}
+        </div>
+    );
+}
+
 /** Return where the cursor goes in the comment or message being written at `head` once the text is laid out again: as far into the same one as it was, wherever an item arriving moved it; none where it isn't in one. */
 function writtenAt(before: Laid | null, after: Laid, head: number): number | undefined {
     const was = before === null ? undefined : blockAt(before, head);
@@ -294,6 +341,7 @@ export function Review({
     draft,
     change,
     banner,
+    called,
     around,
     send,
     approve,
@@ -307,6 +355,9 @@ export function Review({
     reviewed,
     now,
 }: Props) {
+    // Where the cursor is, and whether a comment is being written: what the header says.
+    const [head, setHead] = useState(0);
+    const [commenting, setCommenting] = useState(false);
     // Where the groups were laid out this sitting, which ends once nothing's left to read: each keeps its place.
     const places = useRef<string[]>([]);
     const laidOut = useMemo(
@@ -355,11 +406,17 @@ export function Review({
         comments: written,
         withComments: withWritten,
         change,
-        inserting,
+        inserting: (yes) => {
+            setCommenting(yes);
+            inserting(yes);
+        },
         epoch,
         shownNow: shown,
         tree,
-        moved: (head) => placed(placeAt(laidOut, head)),
+        moved: (at) => {
+            setHead(at);
+            placed(placeAt(laidOut, at));
+        },
         list,
         margin: true,
     });
@@ -553,5 +610,15 @@ export function Review({
         return laidFor.folds.filter((each) => keys.has(each.key));
     }
 
-    return <div className="buffer review-buffer" ref={editor.parent} />;
+    const naming = {
+        group: (group: Group) => banner(group.head),
+        item: (region: Region) => itemNamed(laidOut.text.slice(region.header.from, region.header.to)),
+        party: called,
+    };
+    return (
+        <>
+            <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, written(draft), naming)} />
+            <div className="buffer review-buffer" ref={editor.parent} />
+        </>
+    );
 }

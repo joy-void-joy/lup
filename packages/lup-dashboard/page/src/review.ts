@@ -11,7 +11,8 @@
 // unchanged lines away from its changes and the lines that matter, an automatic
 // file whole under its header, and an item marked read or left for later; a body
 // is open. Each fold is named by what it hides, so an item laid out again keeps
-// the folds the operator left. Pure: the editor
+// the folds the operator left; and where the cursor is, said in the header over
+// the review, is the group, the item and the folds it's in. Pure: the editor
 // (`Review.tsx`) draws it, folds it and lets the comments and messages be
 // edited, and the host keeps the draft (`docs/dashboard.md`, *The review*). What
 // it shares with a conversation's text is in `comments.ts`.
@@ -97,6 +98,11 @@ export interface Fold extends Span {
     summary: Span;
 }
 
+/** Where a changed file is under its item: from its header to its last line and the comments under it. */
+export interface FileSpan extends Span {
+    file: ChangedFile;
+}
+
 /** What names a group in its banner: its first item, or, for a group with none, the agent's conversation. */
 export type Head = { item: Item } | { conversation: Conversation };
 
@@ -107,6 +113,8 @@ export type Head = { item: Item } | { conversation: Conversation };
 export interface Group {
     /** The agent it's of; none for lup's approvals, which no message goes to. */
     conversation: Conversation | null;
+    /** What its banner names it by. */
+    head: Head;
     later: boolean;
     /** What names its place across layouts: whose it is, and whether it's of what's left for later. */
     place: string;
@@ -125,6 +133,8 @@ export interface Region {
     blocks: Block[];
     /** Its lines that are its files', each with its file and row. */
     code: Coded[];
+    /** Where each file it changes is, from its header to its last line and the comments under it. */
+    filed: FileSpan[];
     asides: Aside[];
     folds: Fold[];
     /** Where its lines that matter start, in order: a file's header where what it asks is about the file whole, then the first row of each thing a line triggered. */
@@ -523,6 +533,7 @@ export function laid(
         }
         groups.push({
             conversation: group.conversation,
+            head: group.head,
             later: isParked,
             place: placeOf(group.key, isParked),
             banner: opening,
@@ -582,6 +593,7 @@ export function laid(
             writeBlocks(at);
         });
         const stops: number[] = [];
+        const filedSpans: FileSpan[] = [];
         // What each fold under the item opened is, until the line ending it: the run, the file, each body by its name.
         let run: { summary: Aside; name: string } | null = null;
         let whole: { summary: Span; from: number; closed: boolean } | null = null;
@@ -626,6 +638,14 @@ export function laid(
             for (const body of each.declares) {
                 bodies.set(body.name, { summary: span, from: text.length - 1 });
             }
+            if (each.row === null) {
+                filedSpans.push({ file: each.file, from: written.from, to: text.length - 1 });
+            } else {
+                const last = filedSpans.at(-1);
+                if (last !== undefined) {
+                    last.to = text.length - 1;
+                }
+            }
         });
         const refused = around.files.get(item.number);
         if (refused !== undefined && "refused" in refused) {
@@ -651,6 +671,7 @@ export function laid(
             lines,
             blocks,
             code,
+            filed: filedSpans,
             asides,
             folds,
             stops,
@@ -741,6 +762,67 @@ export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "inse
         return reason === "flagged" ? "flagged" : "file";
     }
     return reason === "approval" || reason === "held" ? "change" : "item";
+}
+
+/** One part of what the header over the review says: whom what's being written goes to, the group, or a fold the cursor is in, by its kind. */
+export interface Where {
+    kind: "to" | "group" | FoldKind;
+    text: string;
+}
+
+/** How the header names what it says: a group, by its banner; an item, by its header; a conversation, as the tree calls it. */
+export interface Naming {
+    group: (group: Group) => string;
+    item: (region: Region) => string;
+    party: (conversation: Conversation) => string;
+}
+
+/** Return the conversation a comment on `item` goes to: the session whose push asked an approval, none where none did; the agent that sent any other. */
+export function recipient(item: Item): Conversation | null {
+    if (item.reason.reason === "approval") {
+        return item.reason.pushed_by ?? null;
+    }
+    return item.sender.party === "conversation" ? item.sender : null;
+}
+
+/**
+ * Return what the header over the review says with the cursor at `head`: while a comment or a message is being written
+ * (`writing`; `wrote`, what's written as the editor holds it), whom it goes to; then the group the cursor is in, the
+ * item, the file, and each fold it's in within them, a body, a run of lines, or the item's context. Nothing before the
+ * first group, as where nothing's waiting.
+ */
+export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Written[], naming: Naming): Where[] {
+    const group = lastFrom(laidOut.groups, (each) => each.banner.from, head);
+    if (group === undefined) {
+        return [];
+    }
+    const block = writing ? blockAt(laidOut, head) : undefined;
+    const being = block === undefined ? undefined : wrote[block.comment];
+    const goesTo = (written: Written): Conversation | null => {
+        if (isLetter(written)) {
+            return written.to;
+        }
+        const item = laidOut.regions.find((each) => each.item.number === written.item)?.item;
+        return item === undefined ? null : recipient(item);
+    };
+    const party = being === undefined ? undefined : goesTo(being);
+    const going: Where[] =
+        party === undefined
+            ? []
+            : [{ kind: "to", text: party === null ? "to no agent: no session's push asked it" : `to ${naming.party(party)}` }];
+    const region = regionAt(laidOut, head);
+    if (region === undefined) {
+        return [...going, { kind: "group", text: naming.group(group) }];
+    }
+    const file = region.filed.find((each) => head >= each.from && head <= each.to);
+    const inner = around(region.folds, head).filter((each) => each.kind !== "item" && each.kind !== "file");
+    return [
+        ...going,
+        { kind: "group", text: naming.group(group) },
+        { kind: "item", text: naming.item(region) },
+        ...(file === undefined ? [] : [{ kind: "file" as const, text: file.file.path }]),
+        ...inner.map((each) => ({ kind: each.kind, text: each.label })),
+    ];
 }
 
 /** Return every comment and message shown, as blocks of the editor's list of what's written. */

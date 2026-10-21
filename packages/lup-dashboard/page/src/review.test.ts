@@ -19,6 +19,7 @@ import {
     foldsOf,
     fresh,
     groupAt,
+    heading,
     isLetter,
     laid,
     messages,
@@ -28,6 +29,7 @@ import {
     plain,
     pruned,
     quoted,
+    recipient,
     regionAt,
     shownAt,
     stepped,
@@ -47,6 +49,7 @@ import {
     type Fold,
     type Head,
     type Item,
+    type Naming,
     type Written,
 } from "./review";
 
@@ -669,6 +672,43 @@ describe("typed folds", () => {
         expect(step(false)).toEqual(["file", "file"]);
         expect(step(false)).toEqual([]);
         expect([...closed].every((each) => each.item === 56)).toBe(true);
+    });
+
+    it("says in the header where the cursor is: the group, the item, the file and the folds it's in", () => {
+        const draft: Draft = { ...EMPTY, comments: [{ item: 56, quote: null, text: "Why?" }], letters: [{ to: from("s1", "a1"), text: "Hi." }] };
+        const wrote = laid([HELD, QUESTION], [], banner, header, draft, around(clock(30, true)));
+        const naming: Naming = {
+            group: (group) => `group ${group.conversation?.session ?? "lup"}`,
+            item: (each) => `#${each.item.number}`,
+            party: (party) => `agent ${party.session}${party.agent === null ? "" : `/${party.agent}`}`,
+        };
+        const at = (text: string) => wrote.text.indexOf(text);
+        const says = (position: number, writing = false) =>
+            heading(wrote, position, writing, written(draft), naming).map((each) => `${each.kind}: ${each.text}`);
+        expect(says(at("━━ s1"))).toEqual(["group: group s1"]);
+        expect(says(at("Let it land?"))).toEqual(["group: group s1", "item: #56"]);
+        expect(says(at("t.py · changed"))).toEqual(["group: group s1", "item: #56", "file: t.py"]);
+        expect(says(at("step3()"))).toEqual([
+            "group: group s1",
+            "item: #56",
+            "file: clock.py",
+            "body: Clock",
+            "body: run",
+            "lines: 6 unchanged lines, 6–11",
+        ]);
+        expect(says(at("changed()"))).toEqual(["group: group s1", "item: #56", "file: clock.py", "body: Clock", "body: run"]);
+        expect(says(at("→ called"))).toEqual(["group: group s1", "item: #56", "context: context"]);
+        // While a comment is written, whom it goes to; a message, the agent it's to.
+        expect(says(at("Why?"), true)).toEqual(["to: to agent s1", "group: group s1", "item: #56"]);
+        expect(says(at("Hi."), true)).toEqual(["to: to agent s1/a1", "group: group s1"]);
+        expect(says(0, true)).toEqual(["group: group s1"]);
+        expect(heading(laid([], [], banner, header, EMPTY, NOTHING), 0, false, [], naming)).toEqual([]);
+    });
+
+    it("sends a comment on an approval to the session whose push asked it, and none where none did", () => {
+        expect(recipient(APPROVAL)).toBeNull();
+        expect(recipient({ ...APPROVAL, reason: { ...APPROVAL.reason, pushed_by: from("s9") } as Item["reason"] })).toEqual(from("s9"));
+        expect(recipient(NOTE)).toEqual(from("s2"));
     });
 });
 

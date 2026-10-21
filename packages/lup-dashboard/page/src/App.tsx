@@ -436,6 +436,7 @@ export function App() {
                         draft={draft}
                         change={change}
                         banner={banner}
+                        called={called}
                         around={around}
                         send={() => {
                             if (replying) {
