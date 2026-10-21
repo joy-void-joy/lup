@@ -43,8 +43,8 @@ from lup_dev.host.protocol import (
     actions,
 )
 from lup_dev.host.records import Record, Records
-from lup_dev.host.service import Answerer, Asked, HostService, Judged
-from lup_dev.host.workers import Calling
+from lup_dev.host.service import Answerer, HostService
+from lup_dev.host.workers import Calling, LaunchJudge
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.private import hooks
 from lup_dev.private.withheld import Held, Withheld, kept
@@ -745,9 +745,12 @@ class Deaf(Courier):
         return Printed(text=answer)
 
 
-async def unjudged(asked: Asked) -> Judged:
-    message = f"no hook reaches a judge here: {asked}"
-    raise AssertionError(message)
+class Unjudged(LaunchJudge):
+    """A launch's judge no hook reaches."""
+
+    async def judged(self, launch: Register, payload: str) -> str:
+        message = f"no hook reaches a judge here: {payload}"
+        raise AssertionError(message)
 
 
 @contextmanager
@@ -763,7 +766,7 @@ def hosting(
         layout=layout,
         answerer=Nobody(),
         courier=Deaf(),
-        judge=unjudged,
+        judge=Unjudged(),
         say=lambda line: None,
         modules=modules,
     )

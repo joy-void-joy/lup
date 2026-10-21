@@ -1,4 +1,4 @@
-"""A launch's own process, serving its modules: their tools, their answers to its room's requests, and their hooks.
+"""A launch's own process: its judge, and its modules' tools, answers to its room's requests, and hooks.
 
 The host service starts it from the launch's repository's approved copy,
 `<judge> worker <socket>` (`lup_dev.host.workers`), the launch's registration on
@@ -6,7 +6,17 @@ its input's first line. It loads the declaration the launch's hooks are judged
 by, at the commit the operator approved with the person's own layer approved
 beside it, makes each module's tools, handlers and hooks from it, says it's ready
 on its output's first line, and answers one request per connection on `<socket>`
-until its input closes, which it does when the service ends it or dies.
+until its input closes, which it does when the service ends it or dies. Where
+the modules can't be made, it says why and answers the judge's hooks alone, as
+the judge has a stand-in for a declaration that can't load.
+
+Each hook the judge reads is answered as `lup-dev hook <runtime>` answers it,
+in a thread of its own (`threaded`), so hooks fired together are judged
+together, and a hold waiting a day for the operator delays no other. Judging
+holds up in threads of one process: what it keeps between hooks is on disk,
+under locks that exclude a thread as they do a process, and what it reaches
+(the engine, ruff, the clock, the inbox) is made once for the process and
+kept, since none of it holds state of its own.
 
 Each call makes the tools' class afresh, with its module, the launch, the
 conversation calling and the door what it would publish goes through (this
@@ -25,7 +35,11 @@ at doesn't leave.
 
 import asyncio
 import sys
+import threading
 import traceback
+from collections.abc import Callable
+from concurrent.futures import Future
+from functools import partial
 from typing import TYPE_CHECKING, override
 
 from pydantic import TypeAdapter, ValidationError
@@ -58,6 +72,8 @@ from lup_dev.host.workers import (
     Calling,
     Happened,
     Happening,
+    HookJudged,
+    JudgeHook,
     Listing,
     Occasion,
     Offered,
@@ -70,7 +86,7 @@ from lup_dev.policy.checkpoint import Services, Worktree
 from lup_dev.private.withheld import related_of
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable
     from pathlib import Path
 
     from lup_dev.host.courier import Conversation
@@ -299,9 +315,9 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
 
 
 class Listed(Model, Handler[Listing]):
-    """Answers `Listing`: what the modules serve."""
+    """Answers `Listing`: what the modules serve, nothing where they couldn't be made."""
 
-    modules: Serving
+    modules: Serving | None
 
     @override
     def request(self) -> type[Listing]:
@@ -309,7 +325,7 @@ class Listed(Model, Handler[Listing]):
 
     @override
     async def answer(self, request: Listing) -> Reply:
-        return self.modules.offered()
+        return Offered() if self.modules is None else self.modules.offered()
 
 
 class Calls(Model, Handler[Calling]):
@@ -356,19 +372,74 @@ class Happens(Model, Handler[Happening]):
         return await self.modules.happen(request)
 
 
-async def serve(modules: Serving, socket: Path, say: Callable[[str], None]) -> None:
-    """Answer on `socket` until standard input closes, having said on standard output that it's ready."""
+async def threaded[T](work: Callable[[], T]) -> T:
+    """Run `work` in a thread of its own, and return what it returns, or raise what it raises.
+
+    A thread of its own rather than a pool's: a hold waits a day inside its hook,
+    and a pool whose threads all waited would queue the hooks after them. The
+    thread is a daemon, so a hold waiting in it doesn't keep the process from
+    ending when the service ends it. `SystemExit`, which ends a thread silently
+    (a declaration's import raising it, say), is raised here as a `LupDevError`,
+    so it fails its hook rather than leaving it unanswered.
+    """
+    finished: Future[T] = Future()
+
+    def run() -> None:
+        if not finished.set_running_or_notify_cancel():
+            return
+        try:
+            finished.set_result(work())
+        except Exception as failure:
+            finished.set_exception(failure)
+        except SystemExit as exited:
+            message = f"judging ended its thread: {exited!r}"
+            finished.set_exception(LupDevError(message))
+
+    threading.Thread(target=run, daemon=True).start()
+    return await asyncio.wrap_future(finished)
+
+
+class Judges(Model, Handler[JudgeHook], arbitrary_types_allowed=True):
+    """Answers `JudgeHook`: one hook put to the judge, in a thread of its own."""
+
+    judge: Callable[[str, str], str]
+    """Answers one of a runtime's hooks as `lup-dev hook` does: the runtime's
+    name and the payload in, what the hook prints out."""
+
+    @override
+    def request(self) -> type[JudgeHook]:
+        return JudgeHook
+
+    @override
+    async def answer(self, request: JudgeHook) -> Reply:
+        printed = await threaded(partial(self.judge, request.runtime, request.payload))
+        return HookJudged(printed=printed)
+
+
+def routes(modules: Serving | None, judge: Callable[[str, str], str]) -> list[Route]:
+    """Return what a launch's process answers: the judge's hooks, what its modules serve, and, where they were made, their tools, requests and hooks."""
+    listed = [Route.to(Judges(judge=judge)), Route.to(Listed(modules=modules))]
+    if modules is None:
+        return listed
+    return [
+        *listed,
+        Route.to(Calls(modules=modules)),
+        Route.to(Relays(modules=modules)),
+        Route.to(Happens(modules=modules)),
+    ]
+
+
+async def serve(
+    handlers: list[Route], socket: Path, launch: Register, say: Callable[[str], None]
+) -> None:
+    """Answer `launch`'s requests on `socket` with `handlers` until standard input closes, having said on standard output that it's ready.
+
+    Its input closing ends it at once: the connections it's answering are
+    closed, so a hold waiting in its thread doesn't keep it running.
+    """
     dispatcher = Dispatcher(
-        routes={
-            route.kind: route
-            for route in [
-                Route.to(Listed(modules=modules)),
-                Route.to(Calls(modules=modules)),
-                Route.to(Relays(modules=modules)),
-                Route.to(Happens(modules=modules)),
-            ]
-        },
-        answering=f"launch {modules.launch.launch}'s modules",
+        routes={route.kind: route for route in handlers},
+        answering=f"launch {launch.launch}'s process",
         say=say,
         changes=Changes(),
     )
@@ -379,22 +450,36 @@ async def serve(modules: Serving, socket: Path, say: Callable[[str], None]) -> N
         await asyncio.to_thread(sys.stdin.read)
     finally:
         server.close()
+        server.close_clients()
         await server.wait_closed()
 
 
-def worked(socket: Path, services: Services, records: dict[str, Records]) -> None:
-    """Serve the modules of the launch whose registration is standard input's first line, on `socket`.
+def worked(
+    socket: Path,
+    services: Services,
+    records: dict[str, Records],
+    judge: Callable[[str, str], str],
+) -> None:
+    """Serve the launch whose registration is standard input's first line, on `socket`: its judge's hooks with `judge`, and its modules.
 
     `records` is where each runtime keeps its records, by the runtime's name: the
-    launch's is its runtime's.
+    launch's is its runtime's. Where its modules can't be made, the judge's hooks
+    are answered alone, and why is said.
     """
 
     def said(line: str) -> None:
         sys.stderr.write(f"{line}\n")
 
     launch = Register.model_validate_json(sys.stdin.readline())
-    serving = Serving.loaded(launch, services, records[launch.runtime])
     try:
-        asyncio.run(serve(serving, socket, said))
+        serving = Serving.loaded(launch, services, records[launch.runtime])
+    except LupDevError as failed:
+        said(
+            f"{launch.launch}: its modules aren't served, and its judge answers its "
+            f"hooks alone: {failed}"
+        )
+        serving = None
+    try:
+        asyncio.run(serve(routes(serving, judge), socket, launch, said))
     finally:
         socket.unlink(missing_ok=True)

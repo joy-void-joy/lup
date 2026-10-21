@@ -5,8 +5,8 @@ Every hook a launch's room sends reaches the host service, which hears
 it through the `Courier` (`heard`): its event, the runtime's own ids for the
 session and the conversation in it, its call and tool, and whether the launch's
 judge reads it.
-A hook the judge doesn't read the service answers itself, without starting the
-judge's process. Every answer, the judge's or the service's own, goes out through
+A hook the judge doesn't read the service answers itself, without asking the
+launch's judge. Every answer, the judge's or the service's own, goes out through
 the `Courier` again (`told`): with what the conversation is told added, and a call
 to lup's tools rewritten to carry its `caller`, lup's id for the conversation.
 Each runtime's adapter fills both, since only it knows its runtime's spelling;

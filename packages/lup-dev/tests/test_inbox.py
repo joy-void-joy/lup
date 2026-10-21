@@ -45,8 +45,9 @@ from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
 from lup_dev.host.protocol import HostError, Limits, Register, Stop
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded, Said
-from lup_dev.host.service import Asked, HostService, Judged, Naming
+from lup_dev.host.service import HostService, Naming
 from lup_dev.host.watch import Changes
+from lup_dev.host.workers import LaunchJudge
 from lup_dev.inbox.delivery import Delivery, clocked, opening
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.protocol import (
@@ -142,11 +143,11 @@ runner = CliRunner()
 # as `test_host.py` drives them.
 
 
-class Quiet:
+class Quiet(LaunchJudge):
     """A launch's judge that answers every hook with nothing."""
 
-    async def __call__(self, asked: Asked) -> Judged:
-        return Judged(status=0, output="", error="")
+    async def judged(self, launch: Register, payload: str) -> str:
+        return ""
 
 
 class Background:

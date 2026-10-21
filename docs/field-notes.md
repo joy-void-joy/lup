@@ -310,9 +310,11 @@ Found since, on the room's git 2.55.0 (2026-10-16), on scratch repositories laid
 - **A `gitdir` file there alone** (`<git dir>/gitdir` reading `<theirs>`) redirected neither `--git-dir` nor git run inside `<git dir>`.
 - **The host's git 2.56.0 answers the same** (checked 2026-10-21): `--git-dir`, `-C` and `GIT_DIR` alone each follow a planted `commondir`, and `GIT_DIR` with `GIT_COMMON_DIR` resists it.
 
-## A hook the judge doesn't read (measured, 2026-10-14)
+## A hook the judge doesn't read, and one it does (measured 2026-10-14 and 2026-10-21)
 
-Behind `docs/inbox.md`, *How an agent is told*: the cost of a hook the host service answers itself, without starting the judge. On the operator's machine (32 cores, Linux 7.2.6, Python 3.14.0, socat 1.8.1.3), `feat-room-sockets`' `lup-dev host` ran in the background with its XDG directories in a scratch directory, one launch registered for Claude Code, its judge the branch's own `lup-dev`. Each hook was the room's exact command (`launch/session.py`, `piped`: `sh -c 'socat -t 90000 - UNIX-CONNECT:<hook.sock> || …'`), its payload on standard input, timed from spawning `sh` to its exit, 300 runs each from a Python loop on the host. Script in the session's scratchpad.
+Behind `docs/inbox.md`, *How an agent is told*, and `docs/host.md`, *Each launch's judge and modules*: the cost of a hook the host service answers itself, and of one the judge reads. On the operator's machine (32 cores, Linux 7.2.6, Python 3.14.0, socat 1.8.1.3, git 2.56.0), `lup-dev host` ran in the background with its XDG directories in a scratch directory, a launch registered per runtime, its judge the branch's own `lup-dev`. Each hook was the room's exact command (`launch/session.py`, `piped`: `sh -c 'socat -t 90000 - UNIX-CONNECT:<hook.sock> || …'`), its payload on standard input, timed from spawning `sh` to its exit, from a Python loop on the host. Scripts in the sessions' scratchpads.
+
+On 2026-10-14, `feat-room-sockets`, one launch for Claude Code, 300 runs each:
 
 | Hook | Median | p90 | Min | Max |
 |---|---|---|---|---|
@@ -322,8 +324,22 @@ Behind `docs/inbox.md`, *How an agent is told*: the cost of a hook the host serv
 | `SessionStart`, the judge's process started for it (30 runs) | 665 ms | 722 ms | 620 ms | 782 ms |
 | The same `sh` and `socat` against a bare asyncio server that reads to the end and closes | 3.75 ms | 4.86 ms | 3.07 ms | |
 
+On 2026-10-21, before and after the judge stayed running (#204): `dev` at 11247d3, where each hook the judge reads starts `<judge> hook <runtime>`, against `feat-warm-judge` at e8cc02a, where the launch's own process answers it in a thread. One launch per runtime on a clone of lup at 11247d3 (313 files), its session started first; a call's start and end paired, the end finding nothing changed, so its checkpoint snapshots the worktree and judges nothing. Claude Code's call's end is sent as #203 hooks it, since on `dev` only its session's start and the file tools' writes reach the judge. 30 runs each before, 300 after:
+
+| Hook | Before: median | p90 | After: median | p90 |
+|---|---|---|---|---|
+| Claude Code, a `Bash` call's start, unjudged | 4.34 ms | 5.09 ms | 4.32 ms | 5.04 ms |
+| Claude Code, `SessionStart`, judged | 801 ms | 1391 ms | 21.2 ms | 22.3 ms |
+| Claude Code, a `Bash` call's end, judged, nothing changed | 735 ms | 766 ms | 18.8 ms | 20.2 ms |
+| Codex, a `Bash` call's start, judged | 703 ms | 740 ms | 7.75 ms | 9.06 ms |
+| Codex, a `Bash` call's end, judged, nothing changed | 711 ms | 748 ms | 19.0 ms | 20.4 ms |
+
 - **The service's own part is under a millisecond** (4.54 against 3.75 ms): reading the payload, the courier's parse, minting or finding the conversation's id, and its answer. Most of a hook is spawning `sh` and `socat`, which a room pays for every hook already.
-- **A hook the judge reads costs about 150 times as much,** almost all of it the judge's process starting (Python and `lup-dev`'s imports), so hooking every call on Claude Code adds about 5 ms a call, where judging every call would add two-thirds of a second. The first lup's guard in the same place took 7.85 ms against its dispatcher's 107 ms (its `17321798b`).
+- **A process per hook cost about 0.7 s a judged hook,** almost all of it the process starting: importing `lup_dev.cli` took 625 ms in one process. A call on Codex, its start and its end, cost about 1.4 s.
+- **With the judge running, a hook costs the judgement:** the service's 4.3 ms, under a millisecond to the launch's process and back, then judging: about 3 ms to count a call as running, and about 15 ms for a checkpoint where nothing changed or a session's start, mostly the git commands snapshotting the worktree. A call on Codex costs about 27 ms.
+- **A judged change costs more:** a call's end whose checkpoint judged a changed doc took 72 ms, about half of it its git commands (23) and 35 to 40 ms importing the approved declaration from its export and resolving it again, which each such hook does, as a process per hook did.
+- **The process doesn't grow:** its memory went from 85 to 94 MB over its first 200 checkpoints judging a change, then stayed there over 800 more.
+- **A Claude Code room's writes pile up in judging's state while no call's end reaches the judge:** each write is counted running and its verdict kept pending until its call ends, read and written again at each hook; 2000 writes took a write's hook from 46 to 85 ms. It's the state on disk, as with a process per hook; a call's end, where the judge reads it, ends the call and settles its write.
 - Not measured: what Claude Code itself spends around a hook (spawning it, and parsing its answer), the same for a judged hook and an unjudged one; and the room's own overhead, the hook running inside a container whose `sh` and `socat` are the image's.
 
 ## GitHub through `gh` on the host (gh 2.102.0, 2026-10-14)

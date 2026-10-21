@@ -3,12 +3,13 @@
 import inspect
 import json
 from annotationlib import Format
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 from lup.programs import run
 from lup_dev import Project
@@ -39,6 +40,7 @@ from lup_dev.policy.checkpoint import (
 from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.withheld import Held, Withheld, kept
 from lup_dev.stored import read_model, write_model
 
@@ -180,6 +182,70 @@ def test_parallel_calls_are_judged_together(kit: Kit, repo: Path) -> None:
     reply = finish(kit, repo, "c1")
     assert reply.context.startswith("lup's findings on the lines changed")
     assert (repo / "README.md").read_text() == "# Changed\n"
+
+
+def taken_elsewhere(made: Callable[[], FileLock]) -> bool:
+    """Say whether a thread of its own finds the lock `made` gives taken, trying once."""
+
+    def tried() -> bool:
+        lock = made()
+        try:
+            lock.acquire(timeout=0)
+        except Timeout:
+            return True
+        lock.release()
+        return False
+
+    with ThreadPoolExecutor(max_workers=1) as other:
+        return other.submit(tried).result(timeout=60)
+
+
+def waited_for(made: Callable[[], FileLock]) -> bool:
+    """Take the lock `made` gives, waiting for it as a hook does, and let it go."""
+    with made():
+        return True
+
+
+def test_the_judge_s_locks_exclude_hooks_answered_in_threads_of_one_process(
+    kit: Kit, repo: Path
+) -> None:
+    # The launch's process answers each hook in a thread of its own, where each
+    # was a process of its own: a lock one hook holds keeps every other out.
+    start(kit, repo)
+    opened = worktree(kit, repo)
+    index = SessionIndex(layout=kit.layout)
+
+    def sessions() -> FileLock:
+        return index.lock(SESSION)
+
+    for made in [opened.lock, opened.calls_lock, sessions]:
+        assert not taken_elsewhere(made)
+        held = made()
+        with ThreadPoolExecutor(max_workers=1) as other:
+            with held:
+                assert taken_elsewhere(made)
+                # A hook waiting for it in another thread isn't refused as a
+                # deadlock: it gets the lock once the first lets it go.
+                waiting = other.submit(waited_for, made)
+            assert waiting.result(timeout=60)
+        assert not taken_elsewhere(made)
+
+
+def test_parallel_hooks_in_threads_of_one_process_are_judged_together(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+
+    def started(key: str) -> None:
+        call(kit, repo, key)
+
+    with ThreadPoolExecutor(max_workers=2) as hooks:
+        list(hooks.map(started, ["c1", "c2"]))
+    (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
+    assert finish(kit, repo, "c1").context == ""
+    assert finish(kit, repo, "c2").context.startswith(
+        "lup's findings on the lines changed"
+    )
 
 
 def test_a_finish_with_no_start_leaves_the_running_calls_alone(

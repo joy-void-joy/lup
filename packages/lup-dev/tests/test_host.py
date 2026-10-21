@@ -43,6 +43,7 @@ from lup_dev import (
     Toolsets,
     cli,
 )
+from lup_dev.copies import Copies
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import (
     HostClient,
@@ -86,11 +87,11 @@ from lup_dev.host.service import (
     Route,
     judged,
 )
-from lup_dev.host.workers import LaunchModules, Offered
-from lup_dev.layout import HostLayout, Layout
+from lup_dev.host.workers import LaunchJudge, LaunchModules, Offered
+from lup_dev.layout import CopyLayout, HostLayout, Layout
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
+    from collections.abc import AsyncGenerator, Callable, Generator
     from pathlib import Path
 
     from conftest import FakeClock, InProcess, Kit
@@ -124,37 +125,38 @@ class Hears(Courier):
         return Printed(text=answer)
 
 
-class Judge:
+class Judge(LaunchJudge):
     """A launch's judge, answering each hook with its runtime and payload.
 
-    `hold` waits until released, `fail` ends with status 1, `boom` raises, and
-    every answer waits at a barrier for `together` answers in all. The test's
-    thread releases it, so each wait runs in a thread, leaving the service's
-    event loop free, as a judge's process does.
+    `hold` waits until released, `fail` can't answer, `boom` raises, and every
+    answer waits at a barrier for `together` answers in all. The test's thread
+    releases it, so each wait runs in a thread, leaving the service's event loop
+    free, as the launch's process does.
     """
 
     def __init__(self, together: int = 1) -> None:
         self.together = threading.Barrier(together, timeout=60)
         self.arrived = threading.Event()
         self.released = threading.Event()
-        self.asked: list[Asked] = []
+        self.asked: list[tuple[str, str]] = []
+        """Each hook asked, by its launch's id, and its payload."""
 
-    async def __call__(self, asked: Asked) -> Judged:
-        self.asked.append(asked)
+    async def judged(self, launch: Register, payload: str) -> str:
+        self.asked.append((launch.launch, payload))
         self.arrived.set()
-        *_, runtime = asked.command
-        match asked.payload:
+        match payload:
             case "boom":
                 message = "the stub fails"
                 raise RuntimeError(message)
             case "fail":
-                return Judged(status=1, output="", error="Traceback: it broke\n")
+                message = "the launch's process ended before it answered"
+                raise HostError(message)
             case "hold":
                 await asyncio.to_thread(self.released.wait)
             case _:
                 pass
         await asyncio.to_thread(self.together.wait)
-        return Judged(status=0, output=f"{runtime} answers {asked.payload}\n", error="")
+        return f"{launch.runtime} answers {payload}\n"
 
 
 class Background:
@@ -248,7 +250,7 @@ def said() -> list[str]:
 
 def service(
     layout: HostLayout,
-    judge: Callable[[Asked], Awaitable[Judged]],
+    judge: LaunchJudge,
     said: list[str],
     routes: list[Route] | None = None,
     answerer: Answerer | None = None,
@@ -610,10 +612,7 @@ def test_a_launch_is_answered_by_its_own_judge(
         assert host.launches() == [one, two]
         send(layout.launch("one").hook, "x")
         send(layout.launch("two").hook, "y")
-    assert judge.asked == [
-        Asked(command=[str(one.judge), "hook", "first"], payload="x"),
-        Asked(command=[str(two.judge), "hook", "second"], payload="y"),
-    ]
+    assert judge.asked == [("one", "x"), ("two", "y")]
 
 
 def test_a_hook_its_judge_cant_answer_is_answered_in_the_runtimes_terms(
@@ -623,14 +622,14 @@ def test_a_hook_its_judge_cant_answer_is_answered_in_the_runtimes_terms(
     with served(service(layout, Judge(), said)):
         registered = host.register(launch(tmp_path, "one", "first"))
         heard = send(layout.launch("one").hook, "fail")
-    command = f"{tmp_path}/judges/bin/lup-dev hook first"
     assert heard == (
-        f"first unanswered fail: `{command}` ended with status 1; what it said is "
-        f"in the host service's output, {layout.log} when it runs in the background\n"
+        "first unanswered fail: the launch's process ended before it answered; the "
+        f"host service's output says more, {layout.log} when it runs in the "
+        "background\n"
     )
     assert (
-        f"one: `{command}` couldn't answer a hook (status 1). What it said:\n"
-        "Traceback: it broke\n"
+        "one: its judge couldn't answer a hook: the launch's process ended before "
+        "it answered"
     ) in said
     assert registered.directory.is_dir()
 
@@ -694,15 +693,15 @@ def test_a_module_registers_the_handler_for_its_kind(
 # A launch's room sockets: lup's tools, and the room's requests
 
 
-class Quiet:
+class Quiet(LaunchJudge):
     """A launch's judge that answers every hook with nothing, keeping each payload it was asked."""
 
     def __init__(self) -> None:
         self.payloads: list[str] = []
 
-    async def __call__(self, asked: Asked) -> Judged:
-        self.payloads.append(asked.payload)
-        return Judged(status=0, output="", error="")
+    async def judged(self, launch: Register, payload: str) -> str:
+        self.payloads.append(payload)
+        return ""
 
 
 ECHO = ToolSpec(
@@ -822,7 +821,7 @@ def caller(answer: str) -> str:
 
 def on_claude(
     layout: HostLayout,
-    judge: Callable[[Asked], Awaitable[Judged]],
+    judge: LaunchJudge,
     said: list[str],
     tools: list[RoomTools] | None = None,
     modules: LaunchModules | None = None,
@@ -1089,13 +1088,17 @@ PAYLOAD = {
 }
 
 
-async def lup_dev_hook(asked: Asked) -> Judged:
-    """A launch's copy of `lup-dev`, run in this process, in a thread: its own `hook` command."""
-    _, *arguments = asked.command
-    ran = await asyncio.to_thread(
-        runner.invoke, cli.app, arguments, input=asked.payload
-    )
-    return Judged(status=ran.exit_code, output=ran.output, error="")
+class Adapting(LaunchJudge):
+    """A launch's judge answering in this process, in a thread, as the launch's own process does: through each runtime's adapter, with the command line's services."""
+
+    async def judged(self, launch: Register, payload: str) -> str:
+        known = cli.Adapters(known=cli.adapters())
+        try:
+            return await asyncio.to_thread(
+                known.answer, launch.runtime, payload, cli.services()
+            )
+        except ValidationError as unread:
+            raise HostError(str(unread)) from unread
 
 
 def test_the_service_answers_a_hook_as_the_hook_command_does(
@@ -1110,7 +1113,7 @@ def test_the_service_answers_a_hook_as_the_hook_command_does(
     raw = json.dumps({**PAYLOAD, "cwd": str(repo)})
     answerer = cli.Adapters(known=cli.adapters())
     one = launch(tmp_path, "one", "claude").model_copy(update={"worktree": repo})
-    with served(service(layout, lup_dev_hook, said, answerer=answerer)):
+    with served(service(layout, Adapting(), said, answerer=answerer)):
         client(layout, clock).register(one)
         heard = send(layout.launch("one").hook, raw)
         unread = send(layout.launch("one").hook, "not a payload")
@@ -1121,34 +1124,34 @@ def test_the_service_answers_a_hook_as_the_hook_command_does(
     assert warned.startswith("lup's judge couldn't answer this hook")
 
 
-def test_a_judge_runs_as_a_process_of_its_own(tmp_path: Path) -> None:
-    judge = tmp_path / "lup-dev"
-    judge.write_text('#!/bin/sh\necho "$@"\ncat\necho said >&2\nexit 3\n')
-    judge.chmod(0o755)
+def test_a_program_the_service_runs_is_a_process_of_its_own(tmp_path: Path) -> None:
+    program = tmp_path / "gh"
+    program.write_text('#!/bin/sh\necho "$@"\ncat\necho said >&2\nexit 3\n')
+    program.chmod(0o755)
 
     ran = asyncio.run(
-        judged(Asked(command=[str(judge), "hook", "first"], payload="the payload"))
+        judged(Asked(command=[str(program), "api", "user"], payload="the body"))
     )
 
-    assert ran == Judged(status=3, output="hook first\nthe payload", error="said\n")
+    assert ran == Judged(status=3, output="api user\nthe body", error="said\n")
     missing = asyncio.run(
-        judged(Asked(command=[str(tmp_path / "gone"), "hook"], payload=""))
+        judged(Asked(command=[str(tmp_path / "gone"), "api"], payload=""))
     )
     assert missing.status == 127
     assert "gone" in missing.error
 
 
-def test_a_judge_whose_wait_is_cancelled_is_killed(tmp_path: Path) -> None:
-    judge = tmp_path / "lup-dev"
+def test_a_program_whose_wait_is_cancelled_is_killed(tmp_path: Path) -> None:
+    program = tmp_path / "gh"
     started = tmp_path / "started"
-    # A pipe: the judge's write blocks until the test reads, so nothing polls.
+    # A pipe: the program's write blocks until the test reads, so nothing polls.
     os.mkfifo(started)
-    judge.write_text(f"#!/bin/sh\necho $$ > {started}\nexec sleep 3600\n")
-    judge.chmod(0o755)
+    program.write_text(f"#!/bin/sh\necho $$ > {started}\nexec sleep 3600\n")
+    program.chmod(0o755)
 
     async def cancelled() -> int:
         waiting = asyncio.create_task(
-            judged(Asked(command=[str(judge), "hook"], payload=""))
+            judged(Asked(command=[str(program), "api"], payload=""))
         )
         pid = int(await asyncio.to_thread(started.read_text))
         waiting.cancel()
@@ -1269,7 +1272,10 @@ def test_a_launch_whose_modules_cant_be_served_gets_the_core_s_tools_alone(
     with served(service(layout, Judge(), said, tools=[Recording()], modules=Broken())):
         host.register(launch(tmp_path, "one", "first"))
         assert listed(layout.launch("one").mcp) == ["echo", "rename"]
-    assert "one: its modules aren't served: its copy predates `worker`" in said
+    assert (
+        "one: its process didn't start, so its modules aren't served, and its "
+        "judge's next hook starts it again: its copy predates `worker`"
+    ) in said
 
 
 def test_a_module_s_tool_named_like_a_core_tool_is_left_to_the_core(
@@ -1623,7 +1629,7 @@ def test_the_service_ends_a_launch_whose_launcher_and_container_are_gone(
     clock: FakeClock,
 ) -> None:
     base = tmp_path_factory.mktemp("swept")
-    machine = Layout(state=base / "state", runtime=base / "run")
+    machine = Layout(state=base / "state", runtime=base / "run", data=base / "data")
     layout = machine.host
     own = client(layout, clock)
     containers = Containers("lup-live", "lup-stopping")
@@ -1633,6 +1639,7 @@ def test_the_service_ends_a_launch_whose_launcher_and_container_are_gone(
         host=own,
         podman=Podman(execute=containers),
         say=said.append,
+        running=list,
         pause=pauses,
     )
     with served(service(layout, Judge(), said)):
@@ -1667,13 +1674,14 @@ def test_a_sweep_podman_fails_is_said_and_the_service_goes_on(
     clock: FakeClock,
 ) -> None:
     base = tmp_path_factory.mktemp("swept")
-    machine = Layout(state=base / "state", runtime=base / "run")
+    machine = Layout(state=base / "state", runtime=base / "run", data=base / "data")
     own = client(machine.host, clock)
     sweeping = cli.Sweeping(
         layout=machine,
         host=own,
         podman=Podman(execute=Containers(broken=True)),
         say=said.append,
+        running=list,
         pause=Pauses(),
     )
     with served(service(machine.host, Judge(), said)):
@@ -1685,6 +1693,68 @@ def test_a_sweep_podman_fails_is_said_and_the_service_goes_on(
         "The sweep of launches whose launcher and container are gone failed: podman "
         "couldn't say whether the container lup-gone exists (status 125)"
     ) in said
+
+
+def copy_of(copies: Copies, name: str) -> CopyLayout:
+    """Install a stand-in copy named `name` among `copies`: its command, in its environment, linked from its commands as uv links them."""
+    copy = copies.layout.named(name)
+    command = copy.tools / "lup-dev" / "bin" / "lup-dev"
+    command.parent.mkdir(parents=True)
+    command.write_text("#!/bin/sh\n")
+    copy.bin.mkdir(parents=True)
+    copy.command("lup-dev").symlink_to(command)
+    return copy
+
+
+def test_the_sweep_removes_the_copies_nothing_runs_and_none_judges(
+    tmp_path_factory: pytest.TempPathFactory, said: list[str], clock: FakeClock
+) -> None:
+    base = tmp_path_factory.mktemp("swept")
+    machine = Layout(state=base / "state", runtime=base / "run", data=base / "data")
+    judging = Copies(layout=machine.judge(base / "repo.git"))
+    # A copy installed at the repository's home itself, as before copies had
+    # directories of their own: its environment, and its commands where the
+    # link goes.
+    in_place = judging.layout.in_place / "lup-dev" / "bin" / "lup-dev"
+    in_place.parent.mkdir(parents=True)
+    in_place.write_text("#!/bin/sh\n")
+    judging.layout.bin.mkdir()
+    judging.layout.command("lup-dev").symlink_to(in_place)
+    running = copy_of(judging, "running")
+    replaced = copy_of(judging, "replaced")
+    current = copy_of(judging, "current")
+    for each in [running, replaced, current]:
+        judging.switch(each)
+    elsewhere = Copies(layout=machine.judge(base / "other.git"))
+    installing = copy_of(elsewhere, "installing")
+    process = running.command("lup-dev").resolve()
+    sweeping = cli.Sweeping(
+        layout=machine,
+        host=client(machine.host, clock),
+        podman=Podman(execute=Containers()),
+        say=said.append,
+        running=lambda: [process],
+        pause=Pauses(),
+    )
+    with (
+        FileLock(elsewhere.layout.lock),
+        served(service(machine.host, Judge(), said, companions=[sweeping])),
+    ):
+        pass
+    assert running.home.is_dir()
+    assert current.home.is_dir()
+    assert installing.home.is_dir()
+    assert not replaced.home.exists()
+    assert not judging.layout.in_place.exists()
+    assert (
+        judging.layout.command("lup-dev").resolve()
+        == (current.tools / "lup-dev" / "bin" / "lup-dev").resolve()
+    )
+    for each in [replaced.home, judging.layout.in_place]:
+        assert (
+            f"Removed {each.resolve()}, a copy of `lup-dev` nothing runs or judges "
+            "with."
+        ) in said
 
 
 def test_what_a_conversation_is_doing_outlasts_a_restart_of_the_service(

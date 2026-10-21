@@ -321,7 +321,7 @@ def test_a_launch_s_own_process_serves_its_committed_declaration_s_modules(
     assert first.answer.text == "HI from loud"
     assert again.answer == first.answer
     assert gone
-    assert not host.modules("one").exists()
+    assert not list(host.launches.glob("one.modules.*"))
     assert any("starting it again" in line for line in said)
 
 

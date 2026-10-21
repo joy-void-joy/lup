@@ -57,6 +57,7 @@ from lup_dev.codescan.directives import (
 from lup_dev.codescan.engine import EngineChecker, EngineError
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
+from lup_dev.copies import removable
 from lup_dev.declaration.load import load, person_layer
 from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
@@ -94,7 +95,7 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.watch import Changes
-from lup_dev.host.workers import Workers
+from lup_dev.host.workers import WorkerJudge, Workers
 from lup_dev.inbox.delivery import (
     Delivery,
     clocked,
@@ -285,13 +286,13 @@ class Adapters(Model, Answerer):
         [adapter] = chosen
         return adapter
 
-    def answer(self, runtime: str, payload: str) -> str:
-        """Answer one of `runtime`'s hooks, judging with this machine's services.
+    def answer(self, runtime: str, payload: str, services: Services) -> str:
+        """Answer one of `runtime`'s hooks, judging with `services`.
 
         What the hook prints is its adapter's output on a line, or nothing.
         """
         adapter = self.named(runtime)
-        bench = Bench(runtime=adapter.runtime, services=services())
+        bench = Bench(runtime=adapter.runtime, services=services)
         output = adapter.hook(payload, bench)
         return f"{output}\n" if output else ""
 
@@ -399,11 +400,11 @@ def hook(
         str, typer.Argument(help="The runtime whose hook this is, by its name.")
     ],
 ) -> None:
-    """Answer one of a runtime's hooks, its payload on stdin."""
+    """Answer one of a runtime's hooks, its payload on stdin, as a launch's process answers each hook its judge reads."""
     known = Adapters(known=adapters())
     # An unknown runtime is refused before standard input is read.
     known.named(runtime)
-    typer.echo(known.answer(runtime, sys.stdin.read()), nl=False)
+    typer.echo(known.answer(runtime, sys.stdin.read(), services()), nl=False)
 
 
 def host_client() -> HostClient:
@@ -443,7 +444,8 @@ def host_serve(context: typer.Context) -> None:
     """Run the host service in the foreground, until it's stopped.
 
     It answers each launch's hooks as `lup-dev hook` does, on the launch's own
-    socket, and ends each launch whose launcher and container are both gone
+    socket, through the launch's own process of its repository's approved copy,
+    and ends each launch whose launcher and container are both gone
     (`Sweeping`). `lup-dev host stop` or Ctrl-C stops it; the launches it serves
     stay recorded, and the next service serves them.
     """
@@ -471,14 +473,19 @@ def host_serve(context: typer.Context) -> None:
     )
     types = TypeReader(delivery=delivery, read=typed_reading, say=typer.echo)
     podman = Podman()
-    sweeping = Sweeping(
-        layout=layout, host=host_client(), podman=podman, say=typer.echo
-    )
     workers = Workers(layout=layout.host, say=typer.echo)
+    sweeping = Sweeping(
+        layout=layout,
+        host=host_client(),
+        podman=podman,
+        say=typer.echo,
+        running=workers.commands,
+    )
     service = HostService(
         layout=layout.host,
         answerer=known,
         courier=couriers,
+        judge=WorkerJudge(modules=workers),
         spawns=SpawnRecords(adapters=known),
         post=delivery,
         routes=[
@@ -586,9 +593,15 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
 def worker(
     socket: Annotated[Path, typer.Argument(help="Where to answer the host service.")],
 ) -> None:
-    """Serve a launch's modules on `socket`, its registration on standard input's first line: for the host service."""
-    records = {adapter.runtime.name(): adapter.records for adapter in adapters()}
-    worked(socket, services(), records)
+    """Serve a launch's judge and modules on `socket`, its registration on standard input's first line: for the host service.
+
+    Its hooks are answered as `hook` answers them, with this machine's services
+    made once for the process: none of them keeps state of its own.
+    """
+    known = Adapters(known=adapters())
+    records = {adapter.runtime.name(): adapter.records for adapter in known.known}
+    made = services()
+    worked(socket, made, records, partial(known.answer, services=made))
 
 
 @host.command("stop")
@@ -1333,17 +1346,22 @@ def swept(
 
 
 class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
-    """The sweep beside the host service (`swept`): once it listens, then every `every`, so a launch whose launcher and container are gone is ended though no launch follows it.
+    """The sweep beside the host service: once it listens, then every `every`, so a launch whose launcher and container are gone is ended though no launch follows it (`swept`), and a repository's approved copy no process runs and none judges is removed (`lup_dev/copies.py`).
 
     It asks the service as a launch does, from a thread, so the service goes on
     answering meanwhile; its end waits for a sweep under way, so none outlives
-    the service's socket.
+    the service's socket. The copies to remove are chosen on the event loop,
+    beside the launches' processes starting, so none is chosen as one starts
+    from it, and removed from a thread.
     """
 
     layout: Layout
     host: HostClient
     podman: Podman
     say: Callable[[str], None]
+    running: Callable[[], list[Path]]
+    """The commands of the launches' processes, running or starting, their links
+    followed: the copies in use."""
     every: timedelta = timedelta(seconds=30)
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two sweeps; a test gives its own."""
@@ -1384,6 +1402,26 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
         except Exception as failed:
             told = "".join(traceback.format_exception(failed))
             self.say(f"{failing}:\n{told}")
+        await self.pruned()
+
+    async def pruned(self) -> None:
+        """Remove each repository's copies no process runs and none judges, saying each; where one can't be, say why, and the next sweep tries again."""
+        try:
+            unused = removable(self.layout.judges, self.running())
+        except OSError as failed:
+            self.say(
+                f"The copies of `lup-dev` nothing runs weren't looked for: {failed}"
+            )
+            return
+        for each in unused:
+            try:
+                await asyncio.to_thread(shutil.rmtree, each)
+            except OSError as failed:
+                self.say(f"{each}, a copy of `lup-dev` nothing runs, stays: {failed}")
+                continue
+            self.say(
+                f"Removed {each}, a copy of `lup-dev` nothing runs or judges with."
+            )
 
 
 def launched(

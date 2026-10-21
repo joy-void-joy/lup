@@ -38,7 +38,8 @@ from lup_dev.host.protocol import (
     Reply,
     Stop,
 )
-from lup_dev.host.service import Answerer, Asked, HostService, Judged
+from lup_dev.host.service import Answerer, HostService
+from lup_dev.host.workers import LaunchJudge
 from lup_dev.launch.room import RoomError, RoomGit, programs, refreshed, room_git
 from lup_dev.layout import ROOM_PATH, HostLayout, LaunchLayout, LaunchSockets, Layout
 from lup_dev.private import hooks
@@ -107,9 +108,12 @@ class Deaf(Courier):
         return Printed(text=answer)
 
 
-async def no_judge(asked: Asked) -> Judged:
-    message = f"no judge runs in these tests: {asked.command}"
-    raise AssertionError(message)
+class NoJudge(LaunchJudge):
+    """A launch's judge no hook reaches."""
+
+    async def judged(self, launch: Register, payload: str) -> str:
+        message = f"no judge runs in these tests: {payload}"
+        raise AssertionError(message)
 
 
 class Nothing(Starter):
@@ -247,7 +251,7 @@ class World:
             layout=self.layout,
             answerer=Stub(),
             courier=Deaf(),
-            judge=no_judge,
+            judge=NoJudge(),
             say=self.said.append,
             room_routes=routes(remotes),
             modules=modules,
