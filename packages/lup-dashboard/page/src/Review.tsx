@@ -18,7 +18,7 @@ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef } from "react";
 
 import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./code";
-import { changes, moved, type Block, type Change } from "./comments";
+import { changes, cited, moved, type Block, type Change } from "./comments";
 import { folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import type { ReviewPlace } from "./keys";
 import {
@@ -316,7 +316,7 @@ export function Review({
                     const counted = files !== undefined && "shown" in files ? tally(files.shown) : "";
                     const typing = item.reason.reason === "approval" && item.reason.typing;
                     const told = [
-                        `#${item.number} ${what(item)}`,
+                        `${cited(item.number)} ${what(item)}`,
                         ...(counted === "" ? [] : [counted]),
                         ...(typing ? ["reading types"] : []),
                         ...(fresh(item, reviewed) ? ["new"] : []),

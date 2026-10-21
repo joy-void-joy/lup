@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { everyone, launches, running, type Agent, type Launch } from "./agents";
 import { AgentTree } from "./AgentTree";
 import { ask, type Asked, type Replied } from "./api";
+import { cited } from "./comments";
 import { Conversation } from "./Conversation";
 import { Details } from "./Details";
 import { useNow, useWatched } from "./hooks";
@@ -282,7 +283,7 @@ export function App() {
                     setSaid(answer.error);
                     return;
                 }
-                setSaid(`#${number} ${approved ? "approved" : "declined"}.`);
+                setSaid(`${cited(number)} ${approved ? "approved" : "declined"}.`);
                 change({ ...now, comments: (now.comments ?? []).filter((each) => each.item !== number) });
             });
         },
@@ -305,15 +306,15 @@ export function App() {
             return;
         }
         if (answer.kind === "inbox-reviewed") {
-            const list = (items: { number: number }[]) => items.map((each) => `#${each.number}`).join(", ");
+            const list = (items: { number: number }[]) => items.map((each) => cited(each.number)).join(", ");
             const approved = answer.approved ?? [];
             const noted = answer.noted ?? [];
             const kept = answer.kept ?? [];
             const done = [
-                ...answer.items.map((each) => `#${each.number} to ${called(each.recipient)}`),
+                ...answer.items.map((each) => `${cited(each.number)} to ${called(each.recipient)}`),
                 ...(approved.length === 0 ? [] : [`approved ${list(approved)}`]),
-                ...noted.map((each) => `comments to ${called(each.recipient)} as #${each.number}`),
-                ...(kept.length === 0 ? [] : [`comments on ${kept.map((each) => `#${each}`).join(", ")} kept: no session's push asked it`]),
+                ...noted.map((each) => `comments to ${called(each.recipient)} as ${cited(each.number)}`),
+                ...(kept.length === 0 ? [] : [`comments on ${kept.map(cited).join(", ")} kept: no session's push asked it`]),
             ];
             setSaid(`Sent: ${done.join("; ") || "nothing new"}.`);
         }
@@ -349,14 +350,14 @@ export function App() {
     const reached = [...new Set([...writtenTo, ...told.map(named), ...pushers])];
     const onMessages = commented.filter((number) => told.some((each) => each.number === number));
     const read = coveredItems.filter((each) => !yesOrNo(each) && !commented.includes(each.number)).map((each) => each.number);
-    const hashed = (list: number[]) => list.map((each) => `#${each}`).join(", ");
+    const citing = (list: number[]) => list.map(cited).join(", ");
     const replying = numbers.length > 0 || letters.length > 0;
     const covering = [
         ...(writtenTo.length === 0 ? [] : [`${letters.length === 1 ? "a message" : "messages"} to ${writtenTo.join(", ")}`]),
-        ...(onMessages.length === 0 ? [] : [`comments on ${hashed(onMessages)}`]),
-        ...(read.length === 0 ? [] : [`read ${hashed(read)}`]),
-        ...(approving.length === 0 ? [] : [`approving ${hashed(approving.map((each) => each.number))}`]),
-        ...(unanswered.length === 0 ? [] : [`comments on ${hashed(unanswered.map((each) => each.number))}, left unanswered`]),
+        ...(onMessages.length === 0 ? [] : [`comments on ${citing(onMessages)}`]),
+        ...(read.length === 0 ? [] : [`read ${citing(read)}`]),
+        ...(approving.length === 0 ? [] : [`approving ${citing(approving.map((each) => each.number))}`]),
+        ...(unanswered.length === 0 ? [] : [`comments on ${citing(unanswered.map((each) => each.number))}, left unanswered`]),
     ];
     return (
         <div className="layout">
@@ -467,7 +468,7 @@ export function App() {
                             </span>
                         )}
                         {(draft.parked ?? []).length === 0 ? null : (
-                            <span className="muted"> Later: {(draft.parked ?? []).map((each) => `#${each}`).join(", ")}.</span>
+                            <span className="muted"> Later: {(draft.parked ?? []).map(cited).join(", ")}.</span>
                         )}
                     </div>
                     <Keys

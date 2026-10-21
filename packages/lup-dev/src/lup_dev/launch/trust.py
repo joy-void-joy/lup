@@ -130,6 +130,7 @@ from lup_dev.inbox.store import (
     Item,
     Reading,
     Superseded,
+    cited,
 )
 from lup_dev.layout import CheckoutLayout, CopyLayout, JudgeLayout, Layout
 from lup_dev.policy.checkpoint import Judging, Worktree
@@ -763,7 +764,7 @@ class Approving(Model, arbitrary_types_allowed=True):
             )
         if not given.here:
             said = "approved" if given.approved else "declined"
-            self.asker.say(f"Item {self.number} was {said} elsewhere.")
+            self.asker.say(f"{cited(self.number)} was {said} elsewhere.")
         return given
 
     def elsewhere(self, elsewhere: Elsewhere) -> Given:
@@ -771,7 +772,7 @@ class Approving(Model, arbitrary_types_allowed=True):
         approved = elsewhere.given()
         if approved is None:
             message = (
-                f"the terminal stopped asking about item {self.number} with no "
+                f"the terminal stopped asking about {cited(self.number)} with no "
                 "answer given here or elsewhere"
             )
             raise TrustError(message)
@@ -785,12 +786,12 @@ def decision(item: Item) -> bool:
             return approved
         case Superseded(by=by):
             message = (
-                f"Item {item.number} was superseded by item {by}, an approval of "
+                f"{cited(item.number)} was superseded by {cited(by)}, an approval of "
                 "the host zone at the integration branch's tip."
             )
             raise SupersededError(message)
         case _:
-            message = f"item {item.number} has no answer, yes or no"
+            message = f"{cited(item.number)} has no answer, yes or no"
             raise TrustError(message)
 
 
@@ -1845,7 +1846,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                 )
             )
         inboxed = (
-            f"It's item {number} in your inbox too: `lup-dev inbox answer {number}` "
+            f"It's {cited(number)} in your inbox too: `lup-dev inbox answer {number}` "
             "answers it from any terminal."
         )
         try:

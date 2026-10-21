@@ -54,6 +54,11 @@ export function calls(tools: string[]): string {
     return `· called ${runs.map(({ tool, times }) => (times === 1 ? tool : `${tool} ×${times}`)).join(", ")}`;
 }
 
+/** Name an inbox item as the operator reads it named, `@270`, as the host's `cited` does: nobody takes it for a GitHub issue or pull request's `#270`. */
+export function cited(number: number): string {
+    return `@${number}`;
+}
+
 /** Return the lines of `text` kept to show it: each without its trailing space; blank ones dropped, or, where `blanks`, kept one between paragraphs. */
 export function kept(text: string, blanks: boolean): string[] {
     const lines = text.split("\n").map((line) => line.trimEnd());

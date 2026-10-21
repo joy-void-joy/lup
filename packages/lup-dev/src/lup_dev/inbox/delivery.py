@@ -127,6 +127,7 @@ from lup_dev.inbox.store import (
     Waiting,
     Whereabouts,
     Withdrawn,
+    cited,
 )
 from lup_dev.inbox.tags import Tag, inside
 from lup_dev.layout import HostLayout
@@ -248,13 +249,13 @@ def standing(item: Item) -> str:
         case Told(at=at, how=how):
             return f"told at {clocked(at)} ({how})"
         case Answered(at=at, answer=answer):
-            return f"answered at {clocked(at)}, item {answer}"
+            return f"answered at {clocked(at)}, {cited(answer)}"
         case Done(at=at):
             return f"done at {clocked(at)}"
         case Decided(at=at, approved=approved):
             return f"{'approved' if approved else 'declined'} at {clocked(at)}"
         case Superseded(at=at, by=by):
-            return f"superseded at {clocked(at)} by item {by}"
+            return f"superseded at {clocked(at)} by {cited(by)}"
         case Withdrawn(at=at, why=why):
             return f"withdrawn at {clocked(at)} by its sender: {why}"
 
@@ -362,7 +363,7 @@ def reviewable(item: Item) -> None:
             return
         case _:
             message = (
-                f"item {item.number} is {what(item)} from {who(item.sender)}, which "
+                f"{cited(item.number)} is {what(item)} from {who(item.sender)}, which "
                 "a review doesn't answer"
             )
             raise InboxError(message)
@@ -397,7 +398,7 @@ def commented(item: Item, comment: str) -> str:
     ...     made=datetime(2026, 1, 1, tzinfo=UTC),
     ...     state=Decided(at=datetime(2026, 1, 1, tzinfo=UTC), approved=False))
     >>> print(commented(item, "Split the reader out first."))
-    The operator declined item 7, the approval your push asked ("Approve the host zone at abc?"), and commented:
+    The operator declined @7, the approval your push asked ("Approve the host zone at abc?"), and commented:
     Split the reader out first.
     """
     answer = (
@@ -406,7 +407,7 @@ def commented(item: Item, comment: str) -> str:
         else "declined"
     )
     return (
-        f"The operator {answer} item {item.number}, the approval your push asked "
+        f"The operator {answer} {cited(item.number)}, the approval your push asked "
         f'("{opening(item)}"), and commented:\n{comment}'
     )
 
@@ -421,11 +422,11 @@ def unanswered(item: Item, comments: str) -> str:
     >>> item = Item(number=7, reason=asked, sender=Operator(), recipient=Operator(),
     ...     made=datetime(2026, 1, 1, tzinfo=UTC))
     >>> print(unanswered(item, "  Split the reader out first."))
-    The operator commented on item 7, the approval your push asked ("Approve the host zone at abc?"), and hasn't answered it:
+    The operator commented on @7, the approval your push asked ("Approve the host zone at abc?"), and hasn't answered it:
       Split the reader out first.
     """
     return (
-        f"The operator commented on item {item.number}, the approval your push "
+        f"The operator commented on {cited(item.number)}, the approval your push "
         f'asked ("{opening(item)}"), and hasn\'t answered it:\n{comments}'
     )
 
@@ -957,7 +958,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case Question(text=text, decisions=decisions):
                 pass
             case _:
-                message = f"item {answer.question} isn't a question"
+                message = f"{cited(answer.question)} isn't a question"
                 raise InboxError(message)
 
         def decided(ruling: Ruling) -> Tag:
@@ -1144,8 +1145,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         presence.pushed = pushed
         task = asyncio.create_task(self.unless_taken(party, place, pushed))
         self.waits = [*(each for each in self.waits if not each.done()), task]
-        numbers = ", ".join(str(number) for number in pushed.numbers)
-        self.say(f"{place.launch}: pushed items {numbers} to {who(party)}")
+        numbers = ", ".join(cited(number) for number in pushed.numbers)
+        self.say(f"{place.launch}: pushed {numbers} to {who(party)}")
         return True
 
     def taken(self, party: Conversation, pushed: Pushed) -> None:
@@ -1206,8 +1207,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 f"what waits for it is told at its next call: {unreached}"
             )
             return
-        numbers = ", ".join(str(item.number) for item in waiting)
-        self.say(f"{place.launch}: woke {who(party)} for items {numbers}")
+        numbers = ", ".join(cited(item.number) for item in waiting)
+        self.say(f"{place.launch}: woke {who(party)} for {numbers}")
 
     def running(self, launch: str) -> Conversation | None:
         """Return the main conversation of the session `launch` runs, the latest heard there; none where no session of it has reached lup."""
@@ -1255,7 +1256,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 pass
             case _:
                 message = (
-                    f"item {number} is {what(item)} from {who(item.sender)}: neither "
+                    f"{cited(number)} is {what(item)} from {who(item.sender)}: neither "
                     "a question waiting for an answer nor a conversation's message to "
                     "reply to"
                 )
@@ -1263,7 +1264,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         given = sorted(each.decision for each in rulings)
         if given != list(range(1, len(decisions) + 1)):
             message = (
-                f"item {number} asks {len(decisions)} decisions, each taking one "
+                f"{cited(number)} asks {len(decisions)} decisions, each taking one "
                 "answer (`leaning`, `undecided`, `leave open`, or words); these were "
                 f"given for {given or 'none'}"
             )
@@ -1275,12 +1276,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         ]
         if unsaid:
             message = (
-                f"item {number}'s decisions {unsaid} have neither a verdict nor "
+                f"{cited(number)}'s decisions {unsaid} have neither a verdict nor "
                 "words: give one"
             )
             raise InboxError(message)
         if not decisions and not comment.strip():
-            message = f"item {number} is a question answered in words: give them"
+            message = f"{cited(number)} is a question answered in words: give them"
             raise InboxError(message)
         answer = self.inbox.made(
             Answer(question=number, rulings=rulings, comment=comment),
@@ -1304,12 +1305,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         """
         if rulings:
             message = (
-                f"item {item.number} is {what(item)}, which takes a reply in words, "
+                f"{cited(item.number)} is {what(item)}, which takes a reply in words, "
                 "not verdicts"
             )
             raise InboxError(message)
         if not comment.strip():
-            message = f"item {item.number} is {what(item)}: give your reply in words"
+            message = f"{cited(item.number)} is {what(item)}: give your reply in words"
             raise InboxError(message)
         reply = self.inbox.made(
             Message(kind="note", text=comment, of=item.number),
@@ -1342,12 +1343,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return self.inbox.kept(item.model_copy(update={"state": done}))
             case Item(reason=Question() | Approval() | HeldChange(), state=Waiting()):
                 message = (
-                    f"item {number} is {what(item)}: answer it, `lup-dev inbox answer "
+                    f"{cited(number)} is {what(item)}: answer it, `lup-dev inbox answer "
                     f"{number}`"
                 )
                 raise InboxError(message)
             case _:
-                message = f"item {number} isn't a message waiting in your inbox"
+                message = f"{cited(number)} isn't a message waiting in your inbox"
                 raise InboxError(message)
 
     def withdrawn(self, number: int, party: Conversation, why: str) -> Item:
@@ -1364,29 +1365,29 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 state=Waiting(),
             ) if item.sender == party:
                 taken = Withdrawn(at=self.clock.now(), why=why)
-                self.say(f"item {number}, {what(item)}, was withdrawn by its sender")
+                self.say(f"{cited(number)}, {what(item)}, was withdrawn by its sender")
                 return self.inbox.kept(item.model_copy(update={"state": taken}))
             case Item(sender=sender) if sender != party:
                 message = (
-                    f"item {number} is {what(item)} from {who(sender)}: only its "
+                    f"{cited(number)} is {what(item)} from {who(sender)}: only its "
                     "sender withdraws it"
                 )
                 raise InboxError(message)
             case Item(reason=Approval() | HeldChange()):
                 message = (
-                    f"item {number} is {what(item)}, which the operator answers: it "
+                    f"{cited(number)} is {what(item)}, which the operator answers: it "
                     "isn't withdrawn"
                 )
                 raise InboxError(message)
             case Item(reason=Flagged()):
                 message = (
-                    f"item {number} is {what(item)}, which lup put before the "
+                    f"{cited(number)} is {what(item)}, which lup put before the "
                     "operator for their review: it isn't withdrawn"
                 )
                 raise InboxError(message)
             case _:
                 message = (
-                    f"item {number} no longer waits for the operator: it's "
+                    f"{cited(number)} no longer waits for the operator: it's "
                     f"{standing(item)}"
                 )
                 raise InboxError(message)
@@ -1441,7 +1442,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         for each in replaced:
             self.inbox.kept(each.model_copy(update={"state": superseded}))
             self.settle(each.number)
-            self.say(f"item {each.number}, an approval, is superseded by {item.number}")
+            self.say(
+                f"{cited(each.number)}, an approval, is superseded by {cited(item.number)}"
+            )
         await self.noticed(item)
         return item
 
@@ -1459,7 +1462,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         item = self.inbox.item(number)
         if not isinstance(item.reason, Approval | HeldChange):
             message = (
-                f"item {number} isn't an approval or a held change, but {what(item)}"
+                f"{cited(number)} isn't an approval or a held change, but {what(item)}"
             )
             raise InboxError(message)
         return item
@@ -1487,7 +1490,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         if isinstance(item.reason, HeldChange):
             if self.settle_hold is None:
                 message = (
-                    f"item {number} is a held change, which this service can't answer"
+                    f"{cited(number)} is a held change, which this service can't answer"
                 )
                 raise InboxError(message)
             self.settle_hold(item.reason, approved, comment)
@@ -1495,7 +1498,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         answered = self.inbox.kept(item.model_copy(update={"state": decided}))
         self.settle(number)
         said = "approved" if approved else "declined"
-        self.say(f"item {number}, {what(item)}, was {said}")
+        self.say(f"{cited(number)}, {what(item)}, was {said}")
         match item.reason:
             case Approval(pushed_by=Conversation() as pusher) if comment.strip():
                 await self.posted(
@@ -1569,7 +1572,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         item = self.inbox.item(number)
         if not isinstance(item.reason, Approval | HeldChange | Flagged):
             message = (
-                f"item {number} is {what(item)}, which changes no file: an approval, "
+                f"{cited(number)} is {what(item)}, which changes no file: an approval, "
                 "a held change or a flagged write does"
             )
             raise InboxError(message)

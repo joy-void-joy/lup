@@ -22,7 +22,7 @@ import {
     type Talk,
     type Whose,
 } from "./conversation";
-import { changes, moved } from "./comments";
+import { changes, cited, moved } from "./comments";
 
 const at = (minute: number) => `2026-10-18T10:${String(minute).padStart(2, "0")}:00Z`;
 
@@ -230,7 +230,7 @@ describe("the conversation growing", () => {
         const out = laid(later, { ...ALONE, sent }, UNSAID, folded);
         expect(out.fold).toEqual(laid(STEPS, ALONE, UNSAID, folded).fold);
         expect(out.text.slice(out.text.indexOf("· called Grep"))).toBe(
-            ["· called Grep", "← #101 your message, from here", "  > JSONL", "", "  Even for codex?", "Yes, both.", "you: Good."].join("\n"),
+            ["· called Grep", "← @101 your message, from here", "  > JSONL", "", "  Even for codex?", "Yes, both.", "you: Good."].join("\n"),
         );
         // Its text folds under its line.
         const [item] = out.items;
@@ -327,18 +327,18 @@ describe("the items of lup's inbox in a conversation", () => {
                 "you: Look into reading transcripts.",
                 "Each session is a JSONL file.",
                 "· called Bash, mcp__lup__ask",
-                "→ #51 question to you · answered by #53",
+                "→ @51 question to you · answered by @53",
                 "  Which parser?",
                 "  1. A model per kind (lean: yes)",
                 "· called Read",
-                "← #53 your answer to #51",
+                "← @53 your answer to @51",
                 "  Asked: Which parser?",
                 "  1. A model per kind (lean: yes): leaning: they go with the lean.",
                 "Reading the second runtime's.",
-                "→ #52 note to you · answered by #54",
+                "→ @52 note to you · answered by @54",
                 "  I assumed UTF-8.",
                 "· called Grep",
-                "← #54 your reply to #52 · not told yet",
+                "← @54 your reply to @52 · not told yet",
                 "  Good.",
             ].join("\n"),
         );
@@ -353,12 +353,18 @@ describe("the items of lup's inbox in a conversation", () => {
             expect(opened(out, line(number).fold!.to - 1)).toBeUndefined();
         }
         expect(out.asides.filter((each) => each.kind === "item-from").map(shown)).toEqual([
-            "→ #51 question to you · answered by #53",
-            "→ #52 note to you · answered by #54",
+            "→ @51 question to you · answered by @53",
+            "→ @52 note to you · answered by @54",
         ]);
         // `]]` and `[[` stop at each, and the reader on the last one follows what arrives.
         expect(out.turns).toContain(line(52).line.from);
         expect(out.last).toEqual(line(54).line);
+    });
+
+    it("cites each item by `@` and its number, which nobody takes for a GitHub issue's `#`", () => {
+        expect(cited(270)).toBe("@270");
+        const out = laid(CALLED, EXCHANGED, UNSAID, history(CALLED, []));
+        expect(out.text).not.toMatch(/#\d/);
     });
 
     it("leaves out a turn's last words lup made a note, which are the agent's words already shown", () => {
@@ -369,7 +375,7 @@ describe("the items of lup's inbox in a conversation", () => {
         };
         const out = laid(CALLED, beside, UNSAID, history(CALLED, []));
         expect(out.items.map((each) => each.number)).toEqual([51, 53, 52, 54]);
-        expect(out.text).not.toContain("#55");
+        expect(out.text).not.toContain("@55");
     });
 
     it("says where each it sent stands: waiting on you, unread, read, withdrawn, approved or declined with your comment", () => {
@@ -391,22 +397,22 @@ describe("the items of lup's inbox in a conversation", () => {
             UNSAID,
             "nothing",
         );
-        expect(out.text.slice(out.text.indexOf("→ #55"))).toBe(
+        expect(out.text.slice(out.text.indexOf("→ @55"))).toBe(
             [
-                "→ #55 held change to you · declined",
+                "→ @55 held change to you · declined",
                 "  Let the change land?",
                 "  AGENTS.md: the operator's",
                 "",
                 "  your comment: Not this file.",
-                "→ #56 problem to you · waiting on you",
+                "→ @56 problem to you · waiting on you",
                 "  …",
-                "→ #57 note to you · read",
+                "→ @57 note to you · read",
                 "  …",
-                "→ #58 question to you · withdrawn: Found it.",
+                "→ @58 question to you · withdrawn: Found it.",
                 "  …",
-                "→ #59 flagged write to you · unread",
+                "→ @59 flagged write to you · unread",
                 "  …",
-                "→ #60 note to you · unread",
+                "→ @60 note to you · unread",
                 "  …",
             ].join("\n"),
         );
@@ -428,11 +434,11 @@ describe("the items of lup's inbox in a conversation", () => {
             "nothing",
         );
         expect(session.text.split("\n").filter((each) => each.startsWith("←") || each.startsWith("→"))).toEqual([
-            "← #46 your reply to #44, for lup-impl/a04, which had ended",
+            "← @46 your reply to @44, for lup-impl/a04, which had ended",
         ]);
         expect(subagent.text.split("\n").filter((each) => each.startsWith("←") || each.startsWith("→"))).toEqual([
-            "→ #44 note to you · answered by #46",
-            "← #46 your reply to #44 · passed on to lup-impl, this one having ended",
+            "→ @44 note to you · answered by @46",
+            "← @46 your reply to @44 · passed on to lup-impl, this one having ended",
         ]);
     });
 
@@ -454,11 +460,11 @@ describe("the items of lup's inbox in a conversation", () => {
         expect(lines(untimed)).toEqual([
             "you: Go.",
             "· called Bash",
-            "→ #60 note to you · unread",
+            "→ @60 note to you · unread",
             "Ran it.",
             "· called Read",
             "Read it.",
-            "→ #61 note to you · unread",
+            "→ @61 note to you · unread",
         ]);
         expect(lines(untimed.map(({ at: _, ...each }) => each))).toEqual([
             "you: Go.",
@@ -466,8 +472,8 @@ describe("the items of lup's inbox in a conversation", () => {
             "Ran it.",
             "· called Read",
             "Read it.",
-            "→ #60 note to you · unread",
-            "→ #61 note to you · unread",
+            "→ @60 note to you · unread",
+            "→ @61 note to you · unread",
         ]);
     });
 
@@ -483,11 +489,11 @@ describe("the items of lup's inbox in a conversation", () => {
         });
         const out = laid(STEPS, { ...ALONE, sent, exchanged: { sent: [], received: [exchange(told, "Go on.")] } }, UNSAID, "nothing");
         expect(out.text.split("\n").filter((each) => each.startsWith("←"))).toEqual([
-            "← #101 your message, from here",
-            "← #102 your message, from here",
+            "← @101 your message, from here",
+            "← @102 your message, from here",
         ]);
-        expect(out.text).toContain("· called Bash\n← #101 your message, from here\n  Go on.\n· called Bash, Read");
-        expect(out.text.endsWith("· called Grep\n← #102 your message, from here\n  And then?")).toBe(true);
+        expect(out.text).toContain("· called Bash\n← @101 your message, from here\n  Go on.\n· called Bash, Read");
+        expect(out.text.endsWith("· called Grep\n← @102 your message, from here\n  And then?")).toBe(true);
     });
 
     it("folds the items before the operator's last words with what came before, counting them", () => {
@@ -505,8 +511,8 @@ describe("the items of lup's inbox in a conversation", () => {
         const before = laid(CALLED, asked, UNSAID, history(CALLED, []));
         const after = laid(CALLED, { ...asked, exchanged: { sent: [exchange(ASKED, "Which parser?")], received: [exchange(ANSWERED, "Asked.")] } }, UNSAID, history(CALLED, []));
         const made = changes(before.text, after.text);
-        expect(before.text).toContain("→ #51 question to you · waiting on you");
-        expect(after.text).toContain("→ #51 question to you · answered by #53\n  Which parser?\n· called Read\n← #53 your answer to #51\n  Asked.\nReading the second runtime");
+        expect(before.text).toContain("→ @51 question to you · waiting on you");
+        expect(after.text).toContain("→ @51 question to you · answered by @53\n  Which parser?\n· called Read\n← @53 your answer to @51\n  Asked.\nReading the second runtime");
         const reader = before.text.indexOf("Reading");
         expect(after.text.slice(moved(reader, made, before.text)).startsWith("Reading")).toBe(true);
     });
@@ -555,8 +561,8 @@ describe("the changes between two texts", () => {
 
     it("keep a cursor on its line and column where the line is replaced, to a change's start where it's removed", () => {
         // A header's wait said anew, the cursor on its `w`.
-        const before = "── #51 · waiting 9m ──\nx";
-        const after = "── #51 · waiting 10m ──\nx";
+        const before = "── @51 · waiting 9m ──\nx";
+        const after = "── @51 · waiting 10m ──\nx";
         const made = changes(before, after);
         expect(after.slice(moved(before.indexOf("waiting"), made, before))).toMatch(/^waiting 10m/);
         // A comment's line shortened under the cursor: on its last character.
@@ -581,7 +587,7 @@ describe("a review it was sent", () => {
             },
         };
         const out = laid(CALLED, beside, UNSAID, history(CALLED, []));
-        expect(out.text).toContain("← #60 your message, from the review\n  The operator's message to you:\n  Rename it.");
-        expect(out.text).toContain("← #61 your review of #52\n  Fine.");
+        expect(out.text).toContain("← @60 your message, from the review\n  The operator's message to you:\n  Rename it.");
+        expect(out.text).toContain("← @61 your review of @52\n  Fine.");
     });
 });

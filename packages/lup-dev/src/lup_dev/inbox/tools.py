@@ -59,6 +59,7 @@ from lup_dev.inbox.store import (
     Question,
     Stop,
     Waiting,
+    cited,
 )
 
 if TYPE_CHECKING:
@@ -126,8 +127,8 @@ class Reading(Model):
     number: int | None = Field(
         default=None,
         description=(
-            "An item to read whole: one you sent, or that was sent to you. Left "
-            "out, the items are listed, a line each."
+            "An item to read whole, by its number (270 for `@270`): one you sent, "
+            "or that was sent to you. Left out, the items are listed, a line each."
         ),
     )
     every: bool = Field(
@@ -142,7 +143,9 @@ class Reading(Model):
 class Withdrawing(Model):
     """An item of yours to take back."""
 
-    number: int = Field(description="The item's number, as its tool's answer said it.")
+    number: int = Field(
+        description="The item's number, as its tool's answer cited it: 270 for `@270`."
+    )
     why: str = Field(
         description="Why it no longer needs the operator, in a line: they read it."
     )
@@ -177,7 +180,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         number = await self.said(Message(kind="problem", text=said.problem))
         return Said(
-            text=f"Your problem is with the operator, item {number}. End your turn."
+            text=f"Your problem is with the operator, {cited(number)}. End your turn."
         )
 
     async def stop(self, said: speaking.Stop) -> Said:
@@ -190,7 +193,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         number = await self.said(Stop.model_validate(said.model_dump()))
         return Said(
-            text=f"Your stop is with the operator, item {number}. End your turn."
+            text=f"Your stop is with the operator, {cited(number)}. End your turn."
         )
 
     async def note(self, said: Remark) -> Said:
@@ -204,7 +207,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         notifies them.
         """
         number = await self.said(Message(kind="note", text=said.remark))
-        return Said(text=f"Your note is with the operator, item {number}. Carry on.")
+        return Said(text=f"Your note is with the operator, {cited(number)}. Carry on.")
 
     async def friction(self, said: results.Friction) -> Said:
         """Say what got in your way, and carry on.
@@ -218,7 +221,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """
         number = await self.said(Friction.model_validate(said.model_dump()))
         return Said(
-            text=f"Your friction is with the operator, item {number}. Carry on."
+            text=f"Your friction is with the operator, {cited(number)}. Carry on."
         )
 
     async def how_it_went(self, said: results.HowItWent) -> Said:
@@ -231,7 +234,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         work goes on.
         """
         number = await self.said(HowItWent.model_validate(said.model_dump()))
-        return Said(text=f"How it went is with the operator, item {number}.")
+        return Said(text=f"How it went is with the operator, {cited(number)}.")
 
     async def ask(self, asked: Asking) -> Said:
         """Ask the operator, with numbered decisions.
@@ -256,7 +259,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         if not asked.wait:
             return Said(
                 text=(
-                    f"Your question is with the operator, item {number}. Their "
+                    f"Your question is with the operator, {cited(number)}. Their "
                     "answer reaches you at a later call; `wait_inbox` waits for it."
                 )
             )
@@ -268,7 +271,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         return Said(
             text=told
             or (
-                f"The operator answered item {number}; their answer was told to you "
+                f"The operator answered {cited(number)}; their answer was told to you "
                 "beside another call."
             )
         )
@@ -283,7 +286,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         inbox is the one there is; it never holds.
         """
         number = await self.said(Message(kind=sending.kind, text=sending.text))
-        return Said(text=f"Your message is with the {sending.to}, item {number}.")
+        return Said(text=f"Your message is with the {sending.to}, {cited(number)}.")
 
     async def wait_inbox(self, nothing: Nothing) -> Said:
         """Wait until something reaches your inbox.
@@ -339,7 +342,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         except InboxError as kept:
             return Said(text=f"Not withdrawn: {kept}")
         return Said(
-            text=f"Item {withdrawing.number} is withdrawn, off the operator's list."
+            text=f"{cited(withdrawing.number)} is withdrawn, off the operator's list."
         )
 
     def named(self, party: Party) -> str:
@@ -349,7 +352,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
     def line(self, item: Item) -> str:
         """Say an item in a line, as `inbox` lists it."""
         return (
-            f"{item.number}  {clocked(item.made)}  {what(item)} from "
+            f"{cited(item.number)}  {clocked(item.made)}  {what(item)} from "
             f"{self.named(item.sender)} to {self.named(item.recipient)}, "
             f"{standing(item)}: {opening(item)}"
         )
@@ -359,18 +362,18 @@ class Speaker(Model, arbitrary_types_allowed=True):
         item = next((each for each in items if each.number == number), None)
         if item is None:
             return (
-                f"Item {number} isn't among this repository's: `inbox` reads this "
+                f"{cited(number)} isn't among this repository's: `inbox` reads this "
                 "repository's items alone."
             )
         if self.party in (item.recipient, item.addressed):
             return f"{self.delivery.said(item)}\n\nIt's {standing(item)}."
         if item.sender == self.party:
             return (
-                f"Item {number}, {what(item)} you sent to {who(item.recipient)} at "
+                f"{cited(number)}, {what(item)} you sent to {who(item.recipient)} at "
                 f"{clocked(item.made)}, {standing(item)}:\n{body(item)}"
             )
         return (
-            f"Item {number} is {what(item)} from {who(item.sender)} to "
+            f"{cited(number)} is {what(item)} from {who(item.sender)} to "
             f"{who(item.recipient)}, which isn't yours: only your own items are read "
             f"whole. Its first line: {opening(item)}"
         )

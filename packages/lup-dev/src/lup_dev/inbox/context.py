@@ -16,7 +16,7 @@ from pathlib import Path
 
 from lup.types import Model, MutableModel
 from lup_dev.host.records import Called, Entry, Recorded, Said, Transcript
-from lup_dev.inbox.store import Conversation, InboxError, Item
+from lup_dev.inbox.store import Conversation, InboxError, Item, cited
 
 
 class Moment(Model):
@@ -60,13 +60,13 @@ def read(item: Item, recorded: dict[str, Recorded]) -> Moment:
         case Item(sender=Conversation() as sender, call=str() as call):
             pass
         case _:
-            message = f"item {item.number} was made by no agent's call"
+            message = f"{cited(item.number)} was made by no agent's call"
             raise InboxError(message)
     read = Recording().read(recorded, sender.runtime, sender.session, sender.agent)
     found = moment(read.transcript, call)
     if found is None:
         message = (
-            f"{read.record} doesn't hold call {call}, which made item {item.number}"
+            f"{read.record} doesn't hold call {call}, which made {cited(item.number)}"
         )
         raise InboxError(message)
     return found
