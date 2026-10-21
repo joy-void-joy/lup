@@ -502,6 +502,18 @@ What the judge (`docs/judging-writes.md`) rests on, measured on the operator's m
   - Codex runs `UserPromptSubmit` for each input a turn takes, a message typed while the model runs included, which the turn drains between its steps, with that turn's own `turn_id` (`inspect_pending_input`, `core/src/hook_runtime.rs`; `run_turn`, `core/src/session/turn.rs`); every hook of a turn carries the same id. A root turn's interrupt runs an `Interrupt` hook (`run_turn_interrupt_hooks`), which lup doesn't hook.
 - **Unchecked:** whether a `PreToolUse` hook's `allow` skips auto mode's classifier (Claude Code's permission docs say a mod's approval does, and nothing of a hook's); and whether either runtime reports `SubagentStop` for a subagent the operator stops, or one that fails. Claude Code's `Stop` input lists the session's `background_tasks`, subagents among them, "present when the task registry is reachable", which would tell there.
 
+## Judging every write, live in a Claude Code room (Claude Code 2.1.306, 2026-10-21)
+
+#90 and #171 checked by hand in a room launched after the operator approved `cb7ce22`. Two of the session's background subagents were running calls throughout, as they usually are.
+- **A shell write that asks is held, and its answer is carried out:**
+  - A Python script writing `AGENTS.md` and a guidance file made one hold for both files, which was approved and kept.
+  - A `sed` adding a line to `pyproject.toml` was held as protected and declined. The file went back, and the agent's version was saved as `.lup/saved/6/pyproject.toml`.
+- **Neither call waited for its hold.** Each returned in about a quarter of a second, and the writer was never told the answers. The operator's comment on the decline was read only through `judged` (#211). The likely cause is that the subagents' running calls deferred the writer's checkpoint to another call's end.
+- **A second `Edit` to a file the session made with `Write`** was judged `allow (rules-pass)`, not asked `new-file` again (#171).
+- **Esc on a running `Bash` call, then a new prompt:** a shell write in the next turn was judged at its own call's end, so the interrupted call held nothing back.
+- **The operator saw only `AGENTS.md` held in the review,** though the hold's item covers both files. This is unexplained so far.
+- **`git worktree remove` of a landed worker's worktree, from the room,** asked nothing. `git branch -d` warned that it couldn't write git's config, which is read-only in a room, and deleted the branch anyway.
+
 ## Package age gates (2026-10-12)
 
 - uv's `exclude-newer` accepts "3 days" (`UV_EXCLUDE_NEWER`);
