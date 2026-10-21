@@ -1,6 +1,6 @@
 """Where `lup_dev` keeps what it stores, as models whose fields are the places.
 
-The homes (`docs/judging-writes.md`, *Where things live*):
+The homes:
 - lup's own state, under `$XDG_STATE_HOME/lup/`: each worktree's store, outside the
   worktree so the restore source is out of the agent's reach, and each
   repository's verdict log and the host zone its operator approved;
