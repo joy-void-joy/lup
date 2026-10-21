@@ -22,11 +22,14 @@ would commit the worktree's files as, tracked and untracked but not ignored, wit
 the person's own layer of the declaration beside them where the worktree has one,
 in the repository's own git directory. A later run on the same files finds it and
 runs nothing, so the gate run again on unchanged files costs nothing, and neither
-does a push of them (`--again` runs it anyway). A pass is recorded only where the
-files after the steps are those the steps checked. `--at` runs the gate on a
-commit, in a worktree made at it and removed after (`at_commit`), unless a pass is
-recorded for its files: lup's remote helper runs it before a push updates the
-integration branch (`lup_dev.remote.helper`).
+does a push of them (`--again` runs it anyway); nothing but the steps that build a
+file, which still run where it's stale (`Check.answered`): git ignores what they
+build, so it isn't part of the files a pass is found by, and a worktree just made
+from a branch that passed has none of it. A pass is recorded only where the files
+after the steps are those the steps checked. `--at` runs the gate on a commit, in
+a worktree made at it and removed after (`at_commit`), unless a pass is recorded
+for its files: lup's remote helper runs it before a push updates the integration
+branch (`lup_dev.remote.helper`).
 
 This is the gate's first shape (`DESIGN.md`, *Keeping the operator in the loop*): comparing against a
 branch's base (`--changed`), nested projects' own environments and bounds in time
@@ -171,17 +174,25 @@ class Passed(Model):
     recorded nothing itself (`at_commit`)."""
 
     def said(self) -> str:
-        """Say this pass, as the gate answers with it.
+        """Say this pass, as the gate answers with it where nothing ran.
 
         >>> from datetime import UTC
         >>> print(Passed(files=Standing(tree="4b825dc642cb6eb9a060e54bf8d69288fbee4904"), at=datetime(2026, 10, 17, 9, 30, tzinfo=UTC)).said())
         The gate passed on these files already, at 2026-10-17 09:30 UTC (tree `4b825dc642cb6eb9a060e54bf8d69288fbee4904`): nothing ran. `--again` runs it anyway.
         """
         return (
-            f"The gate passed on these files already, at "
-            f"{self.at:%Y-%m-%d %H:%M %Z} (tree `{self.files.tree}`): nothing "
+            f"The gate passed on these files already, {self.when()}: nothing "
             "ran. `--again` runs it anyway."
         )
+
+    def when(self) -> str:
+        """Say when this pass was, and on which files.
+
+        >>> from datetime import UTC
+        >>> print(Passed(files=Standing(tree="4b825dc"), at=datetime(2026, 10, 17, 9, 30, tzinfo=UTC)).when())
+        at 2026-10-17 09:30 UTC (tree `4b825dc`)
+        """
+        return f"at {self.at:%Y-%m-%d %H:%M %Z} (tree `{self.files.tree}`)"
 
 
 class Passes(Model, arbitrary_types_allowed=True):
@@ -232,7 +243,7 @@ class Gated(Model):
     outcomes: list[Outcome]
     found: Passed | None = None
     """The pass recorded for the worktree's files as they stood, where it
-    answered and nothing ran."""
+    answered: only the steps building a file stale here ran, in `outcomes`."""
     recorded: Passed | None = None
     """The pass this run recorded, where it passed."""
     moved: bool = False
@@ -314,6 +325,12 @@ class Check(Model, arbitrary_types_allowed=True):
             for source in self.root.glob(pattern)
         )
 
+    def building(self) -> list[Step]:
+        """Return the steps that build a file where it's stale, in the gate's order."""
+        return [
+            step for step in self.steps if step.builds is not None and self.stale(step)
+        ]
+
     def one(self, step: Step) -> Outcome:
         """Run one step, or skip it where what it builds is up to date."""
         if not self.stale(step):
@@ -333,23 +350,19 @@ class Check(Model, arbitrary_types_allowed=True):
         and again in their place only where a fix made it stale again.
 
         With `passes`, a pass recorded for the worktree's files as they stand
-        answers, and nothing runs, unless `again`: the fixes too, since on files
-        the gate passed they change nothing. A run that passes is recorded for
-        the files its steps checked, those after the fixes, where they're the
-        same after the steps.
+        answers unless `again`, and only the steps that build a file run, where
+        it's stale (`answered`); the fixes don't, since on files the gate passed
+        they change nothing. A run that passes is recorded for the files its
+        steps checked, those after the fixes, where they're the same after the
+        steps.
         """
         passes = self.passes
         if passes is not None and not again:
             found = passes.found(standing(self.root))
             if found is not None:
-                return Gated(outcomes=[], found=found)
+                return self.answered(found)
         report = check(self.requirements, self.tools).require()
-        building = [
-            step
-            for step in self.steps
-            if self.fixes and step.builds is not None and self.stale(step)
-        ]
-        built = [self.one(step) for step in building]
+        built = [self.one(step) for step in self.building()] if self.fixes else []
         fixed = [self.one(step) for step in self.fixes]
         checked = None if passes is None else standing(self.root)
         outcomes = [self.one(step) for step in self.steps]
@@ -361,6 +374,23 @@ class Check(Model, arbitrary_types_allowed=True):
         recorded = passes.record(checked, [outcome.step for outcome in outcomes])
         return gated.model_copy(update={"recorded": recorded})
 
+    def answered(self, found: Passed) -> Gated:
+        """Answer with the pass `found`, running only the steps that build a file where it's stale here.
+
+        git ignores what they build, so it isn't part of the files the pass was
+        found by: a worktree just made from a branch that passed has the same
+        files and none of what's built from them, which its tests and tools
+        read (lup's engine). Where one runs, the requirements are checked first,
+        as before any step; a build that fails fails the gate. Where none is
+        stale, nothing runs, and nothing is checked.
+        """
+        building = self.building()
+        if not building:
+            return Gated(outcomes=[], found=found)
+        required = check(self.requirements, self.tools).require()
+        outcomes = [self.one(step) for step in building]
+        return Gated(off=required.off, outcomes=outcomes, found=found)
+
 
 def failed(outcomes: list[Outcome]) -> list[str]:
     """Name the steps that failed."""
@@ -370,15 +400,17 @@ def failed(outcomes: list[Outcome]) -> list[str]:
 def report(gated: Gated) -> str:
     """Report what's off, each step's outcome, each failure's output, the verdict, and whether the pass is recorded.
 
-    A pass found, where nothing ran, is said alone.
+    A pass found is said alone where nothing ran, and after the outcomes of the
+    builds that ran beside it where some did.
 
     >>> print(report(Gated(outcomes=[Outcome(step="ruff", result="passed", code=0)])))
     passed   ruff
     <BLANKLINE>
     The gate passed.
     """
-    if gated.found is not None:
-        return gated.found.said()
+    found = gated.found
+    if found is not None and not gated.outcomes:
+        return found.said()
 
     def line(outcome: Outcome) -> str:
         detail = (
@@ -402,7 +434,10 @@ def report(gated: Gated) -> str:
     names = failed(outcomes)
     verdict = f"The gate failed: {', '.join(names)}." if names else "The gate passed."
     kept = (
-        f" It's recorded for these files (tree `{gated.recorded.files.tree}`), so "
+        f" These files passed already, {found.when()}, so only the builds stale "
+        "in this worktree ran. `--again` runs every step."
+        if found is not None
+        else f" It's recorded for these files (tree `{gated.recorded.files.tree}`), so "
         "running it again on them, or pushing them, runs nothing."
         if gated.recorded is not None
         else " The worktree's files changed while it ran, so it isn't recorded."
