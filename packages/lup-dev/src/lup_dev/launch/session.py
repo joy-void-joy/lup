@@ -146,10 +146,11 @@ def served(hold: timedelta = timedelta(hours=25)) -> list[ToolServer]:
     """Return the tool servers a launched session loads: lup's, on the launch's `mcp.sock` in the room.
 
     A call to it may wait for the operator, so the runtime waits on one as long as
-    the hook does: `hold`, above a hold's day.
+    the hook does: `hold`, above a hold's day. It pushes what waits for an idle
+    session, starting its turn, where the runtime takes a push.
     """
     socket = LaunchSockets(directory=ROOM_SOCKETS).mcp
-    return [ToolServer(name=SERVER, socket=socket, timeout=hold)]
+    return [ToolServer(name=SERVER, socket=socket, timeout=hold, pushes=True)]
 
 
 class SessionParts(Model):

@@ -621,6 +621,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
             name="lup",
             socket=Path("/run/lup/mcp.sock"),
             timeout=timedelta(hours=25),
+            pushes=True,
         )
     ]
     assert settings.messages == Path("/run/lup/messages.sock")

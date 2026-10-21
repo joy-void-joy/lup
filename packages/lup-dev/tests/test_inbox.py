@@ -21,7 +21,13 @@ import pytest
 from mcp import Client
 from mcp.shared.memory import create_client_server_memory_streams
 from mcp.shared.message import SessionMessage
-from mcp.types import TextContent, jsonrpc_message_adapter
+from mcp.types import (
+    InitializeResult,
+    JSONRPCNotification,
+    JSONRPCResponse,
+    TextContent,
+    jsonrpc_message_adapter,
+)
 from pydantic import Field
 from typer.testing import CliRunner
 
@@ -30,13 +36,14 @@ from lup.rooms import Podman
 from lup.rooms.engine import Exited, Process
 from lup.tools.speaking import SPEAKING
 from lup_dev import Modules, Project, cli
-from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts
+from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
 from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
 from lup_dev.host.protocol import HostError, Limits, Register, Stop
+from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded, Said
 from lup_dev.host.service import Asked, HostService, Judged, Naming
 from lup_dev.host.watch import Changes
@@ -325,18 +332,23 @@ def inboxed(
     | None = None,
     told: Callable[[str], None] | None = None,
     spawns: Spawns | None = None,
+    patience: timedelta = timedelta(seconds=30),
 ) -> Generator[Watched]:
     """A host service with lup's inbox, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
+    wakers = cli.Wakers(adapters=known)
     changes = Changes()
+    pushes = Pushes()
     delivery = Watched(
         inbox=Inbox.opened(machine.inbox, changes),
-        courier=couriers,
+        waker=wakers,
+        pushes=pushes,
         layout=machine.host,
         notices=notices,
         clock=clock,
         say=said.append,
+        patience=patience,
     )
 
     def saying(line: str) -> None:
@@ -355,6 +367,8 @@ def inboxed(
         judge=Quiet(),
         say=said.append,
         changes=changes,
+        waker=wakers,
+        pushes=pushes,
         companions=(
             []
             if typed is None
@@ -709,6 +723,7 @@ class Socket:
 
     def __init__(self, path: Path) -> None:
         self.frames: list[str] = []
+        self.rang = threading.Event()
         self.listening = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.listening.bind(str(path))
         self.listening.listen()
@@ -723,6 +738,12 @@ class Socket:
                 return
             with connection, connection.makefile("rb") as stream:
                 self.frames.append(stream.read().decode())
+            self.rang.set()
+
+    def ringing(self) -> list[str]:
+        """Wait for a frame, and return every frame written so far."""
+        assert self.rang.wait(timeout=60)
+        return self.frames
 
     def close(self) -> list[str]:
         """Stop listening, and return every frame written."""
@@ -891,6 +912,159 @@ def test_an_idle_session_whose_socket_is_gone_is_told_at_its_next_call(
         told = send(hook, bash("b1"))
     assert context(told) == first_note("Nobody's there.")
     assert any("claude session s1 wasn't woken through" in each for each in said)
+
+
+class Session:
+    """A stand-in for a session's connection to lup's tool server, held open as its bridge holds it: what the server declared, and each notice it pushes."""
+
+    def __init__(self, path: Path) -> None:
+        self.connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.connection.settimeout(60)
+        self.connection.connect(str(path))
+        self.lines = self.connection.makefile("rb")
+        self.said(INITIALIZE)
+        answer = jsonrpc_message_adapter.validate_json(self.lines.readline())
+        assert isinstance(answer, JSONRPCResponse)
+        self.introduced = InitializeResult.model_validate(answer.result)
+        self.said({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    def said(self, message: dict[str, JsonValue]) -> None:
+        self.connection.sendall(f"{json.dumps(message)}\n".encode())
+
+    def pushed(self) -> JSONRPCNotification:
+        """Read the next notice the server pushes."""
+        notice = jsonrpc_message_adapter.validate_json(self.lines.readline())
+        assert isinstance(notice, JSONRPCNotification)
+        return notice
+
+    def quiet(self) -> bool:
+        """Say whether nothing more is pushed for a moment."""
+        self.connection.settimeout(0.2)
+        try:
+            return self.lines.readline() == b""
+        except TimeoutError:
+            return True
+        finally:
+            self.connection.settimeout(60)
+
+    def close(self) -> None:
+        self.lines.close()
+        self.connection.close()
+
+
+INITIALIZE: dict[str, JsonValue] = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {},
+        "clientInfo": {"name": "claude-code", "version": "2.1.304"},
+    },
+}
+"""A session introducing itself to lup's tool server, on the handshake revision."""
+
+
+def channel(content: str, token: str) -> str:
+    """The prompt a Claude Code session's turn starts on when it takes a channel's message (`docs/field-notes.md`, *Channels*)."""
+    return f'<channel source="lup" wake="{token}">\n{content}\n</channel>'
+
+
+def test_an_idle_claude_session_is_pushed_what_waits_and_takes_it_at_its_turns_start(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        session = Session(machine.host.launch("one").mcp)
+        send(hook, claude("SessionStart", source="startup"))
+        assert send(hook, claude("Stop", stop_hook_active=False)) == ""
+        inbox("send", "one", "Wake up.")
+        notice = session.pushed()
+        pushed = ChannelMessage.model_validate(notice.params)
+        pending = delivery.inbox.item(1).state
+        # A hook while the push is pending tells nothing of it.
+        between = send(hook, claude("UserPromptSubmit", prompt="Typed meanwhile."))
+        token = pushed.meta["wake"]
+        taken = send(
+            hook, claude("UserPromptSubmit", prompt=channel(pushed.content, token))
+        )
+        state = delivery.inbox.item(1).state
+        after = send(hook, bash("b1"))
+        session.close()
+        frames = messages.close()
+    assert session.introduced.capabilities.experimental == {"claude/channel": {}}
+    assert notice.method == "notifications/claude/channel"
+    # The items themselves, told once: no `wait_inbox`, and no doorbell.
+    assert pushed.content == first_note("Wake up.")
+    assert pending == Waiting()
+    assert between == ""
+    assert state == Told(at=clock.now(), how="wake")
+    assert taken == ""
+    assert after == ""
+    assert frames == []
+    assert "one: pushed items 1 to claude session s1" in said
+
+
+def test_a_push_not_taken_in_time_is_put_back_and_its_launch_rung_through_the_socket_from_then_on(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said, patience=timedelta(0)) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        session = Session(machine.host.launch("one").mcp)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Anyone?")
+        session.pushed()
+        rung = list(messages.ringing())
+        put_back = delivery.inbox.item(1).state
+        told = send(hook, bash("b1"))
+        send(hook, claude("Stop", stop_hook_active=False))
+        inbox("send", "one", "Again.")
+        quiet = session.quiet()
+        session.close()
+        frames = messages.close()
+    assert frames_of(rung) == [bell(1)]
+    assert put_back == Waiting()
+    assert context(told) == first_note("Anyone?")
+    assert quiet
+    assert frames_of(frames) == [bell(1), bell(2)]
+    assert [line for line in said if "took nothing lup pushed" in line] == [
+        (
+            "one: claude session s1 took nothing lup pushed within 0 seconds, so "
+            "it's woken through its messaging socket from now on: its runtime may "
+            "not have loaded lup's server to push (docs/inbox.md, *How an agent "
+            "is told*)"
+        )
+    ]
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_a_turns_start_tells_what_waits_beside_its_prompt(
+    runtime: str,
+    *,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+) -> None:
+    payload = {"claude": claude, "codex": codex}[runtime]
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", runtime)
+        hook = machine.host.launch("one").hook
+        send(hook, payload("SessionStart", source="startup"))
+        inbox("send", "one", "Read this first.")
+        told = send(hook, payload("UserPromptSubmit", prompt="Go on."))
+        again = send(hook, payload("UserPromptSubmit", prompt="And then?"))
+        state = delivery.inbox.item(1).state
+    assert json.loads(told)["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert context(told) == first_note("Read this first.")
+    assert again == ""
+    assert state == Told(at=clock.now(), how="turn's start")
 
 
 def test_a_codex_session_is_never_woken_and_told_at_its_next_call(
@@ -1952,7 +2126,8 @@ def alone(tmp_path: Path, clock: FakeClock) -> Delivery:
     known = cli.Adapters(known=cli.adapters())
     return Delivery(
         inbox=Inbox.opened(InboxLayout(home=tmp_path / "inbox")),
-        courier=cli.Couriers(adapters=known),
+        waker=cli.Wakers(adapters=known),
+        pushes=Pushes(),
         layout=Layout(state=tmp_path / "state", runtime=tmp_path / "run").host,
         notices=Silent(),
         clock=clock,

@@ -64,6 +64,7 @@ class Cli(Model):
 
 type Event = Literal[
     "session-started",
+    "turn-started",
     "call-started",
     "call-finished",
     "turn-ended",
@@ -71,7 +72,8 @@ type Event = Literal[
 ]
 """When a hook runs, in lup's own words, which each adapter spells as its runtime's events.
 
-A session started, resumed or cleared; a tool call about to run; a tool call
+A session started, resumed or cleared; a turn starting on a prompt, the
+operator's or one a tool server pushed; a tool call about to run; a tool call
 finished, whether it succeeded or failed; the session's turn ending; a subagent's
 conversation ending.
 """
@@ -113,6 +115,10 @@ class ToolServer(Model):
     timeout: Annotated[timedelta, AfterValidator(whole_seconds)] | None = None
     """How long the runtime waits on one call, a call held for the operator
     among them; none keeps the runtime's own limit."""
+    pushes: bool = False
+    """Whether it pushes messages to the session unasked, each starting a turn
+    of an idle session, where the runtime takes them; one that doesn't says so
+    in its adapter."""
 
 
 def cache_lifetime(lifetime: timedelta) -> timedelta:

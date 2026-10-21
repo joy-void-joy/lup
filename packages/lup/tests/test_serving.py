@@ -20,7 +20,7 @@ from pydantic import BaseModel, JsonValue
 
 from lup.sessions.submission import Toolbox
 from lup.tools import lup_tool
-from lup.tools.serving import Answer, Toolset, serve
+from lup.tools.serving import Answer, Notice, Outbox, Toolset, serve
 from lup.tools.tool import ToolSpec
 
 if TYPE_CHECKING:
@@ -272,3 +272,76 @@ def test_a_call_still_held_when_the_connection_closes_is_cancelled() -> None:
     asyncio.run(held())
 
     assert toolset.cancelled
+
+
+def test_a_probe_for_the_newer_revision_is_refused_and_the_handshake_declares_what_s_given() -> (
+    None
+):
+    async def raw() -> tuple[JsonValue, JsonValue]:
+        served, client_end = socket.socketpair()
+        reader, writer = await asyncio.open_unix_connection(sock=served)
+        serving = asyncio.create_task(
+            serve(
+                Recording(),
+                reader,
+                writer,
+                experimental={"example/pushes": {}},
+            )
+        )
+        theirs, ours = await asyncio.open_unix_connection(sock=client_end)
+        probe: dict[str, JsonValue] = {
+            "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28"}
+        }
+        await said(
+            ours,
+            {"jsonrpc": "2.0", "id": "p", "method": "server/discover", "params": probe},
+        )
+        refused = json.loads(await theirs.readline())
+        await said(ours, INITIALIZE)
+        answer = json.loads(await theirs.readline())
+        ours.close()
+        await serving
+        writer.close()
+        return refused, answer
+
+    refused, answer = asyncio.run(raw())
+
+    assert refused == {
+        "jsonrpc": "2.0",
+        "id": "p",
+        "error": {
+            "code": -32601,
+            "message": "lup's server speaks the handshake revisions",
+        },
+    }
+    assert isinstance(answer, dict)
+    result = answer["result"]
+    assert isinstance(result, dict)
+    assert result["protocolVersion"] == "2025-06-18"
+    capabilities = result["capabilities"]
+    assert isinstance(capabilities, dict)
+    assert capabilities["experimental"] == {"example/pushes": {}}
+
+
+def test_a_notice_put_in_the_outbox_reaches_the_client_as_one_notification() -> None:
+    outbox = Outbox()
+
+    async def raw() -> JsonValue:
+        served, client_end = socket.socketpair()
+        reader, writer = await asyncio.open_unix_connection(sock=served)
+        serving = asyncio.create_task(serve(Recording(), reader, writer, outbox=outbox))
+        theirs, ours = await asyncio.open_unix_connection(sock=client_end)
+        await said(ours, INITIALIZE)
+        await theirs.readline()
+        outbox.put(Notice(method="example/said", params={"content": "Wake up."}))
+        notified = json.loads(await theirs.readline())
+        ours.close()
+        await serving
+        writer.close()
+        return notified
+
+    assert asyncio.run(raw()) == {
+        "jsonrpc": "2.0",
+        "method": "example/said",
+        "params": {"content": "Wake up."},
+    }

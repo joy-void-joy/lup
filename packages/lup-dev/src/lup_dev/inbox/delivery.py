@@ -12,21 +12,27 @@ conversation is told together, oldest first, by whichever comes first:
 - **`wait_inbox`,** or `ask` with `wait`, a call held until something arrives,
   whose result is the items (`held`);
 - **its session's start or resumption,** in the start's answer;
-- **its turn started through its session's own messaging socket,** where its
-  runtime's adapter spells a way (the courier's `woken`), for an item the
-  operator's own act made to an idle session: one whose turn ended, one just
-  started, or one the service hasn't heard since it started. A session in its
-  turn is told at its next call, or its turn's end, instead. What's written is
-  a doorbell, what waits and that `wait_inbox` reads it (`doorbell`), never the
-  items: the socket takes any local session's message, and the runtime says so
-  of each, so what's in an agent's inbox comes through lup's own tools alone.
-  An idle session starts a turn with it; one the service misjudged as idle
-  takes it at its next boundary. It rings once until the session's next hook.
-  Where a runtime has no way, the item waits for the session's next call, a
+- **its turn's start,** beside the prompt it starts on (`turn-started`);
+- **its idle session starting a turn,** for an item the operator's own act made
+  to an idle session: one whose turn ended, one just started, or one the
+  service hasn't heard since it started. A session in its turn is told at its
+  next call, or its turn's end, instead. Where its runtime takes a push (the
+  waker's `pushed`), the items themselves are pushed through lup's tool
+  server on the session's own connection (`pushed`, `Pushes`), held back from
+  every other way while the push is pending (`tellable`); its turn's start
+  carrying the push's token takes it, counting them told (`taken`), and where
+  none does within `patience`, they're told as anything waiting is, said once,
+  its launch woken through its messaging socket from then on (`unless_taken`). Through the
+  socket (the waker's `woken`, `rung`) what's written is a doorbell, what
+  waits and that `wait_inbox` reads it (`doorbell`), never the items: the
+  socket takes any local session's message, and the runtime says so of each.
+  An idle session starts a turn with either; one the service misjudged as idle
+  takes it at its next boundary. It wakes once until the session's next hook.
+  Where a runtime has no way, the item waits for the session's next turn, a
   gap its adapter declares.
 
 **Told once.** An item is told when it's written into a hook's answer or a held
-call's result, and never again:
+call's result, or when a push carrying it is taken, and never again:
 - one past what a hook tells the model whole (`Heard.fits`) is announced there
   instead, who sent it and its size, with a line saying `wait_inbox` returns it
   whole; it waits until then, and isn't announced again. Nothing is cut;
@@ -76,14 +82,16 @@ no call running, and wakes.
 """
 
 import asyncio
+import secrets
 import textwrap
 from collections.abc import Callable, Generator
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, override
 
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
-from lup_dev.host.courier import Courier, Heard, Post, Posted
+from lup_dev.host.courier import Heard, Post, Posted, Waker
+from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.ends import holding
 from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.store import (
@@ -506,19 +514,40 @@ class Presence(MutableModel):
     """Whether it was woken since its last hook: the turn the wake starts tells
     what arrives meanwhile at its first call."""
     held: list[Held] = []
+    pushed: Pushed | None = None
+    """What was last pushed to its session, until a turn's start carries its
+    token, or its wait runs out."""
+
+
+class Pushed(Model):
+    """What was pushed to an idle session through lup's tool server: the token its turn's prompt carries, and the items it told."""
+
+    token: str
+    numbers: list[int]
 
 
 class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     """Each conversation's inbox, told once; and the operator's, noticed on their desktop."""
 
     inbox: Inbox
-    courier: Courier
+    waker: Waker
     """Spells how an idle session is woken, where its runtime has a way."""
+    pushes: Pushes
+    """Each launch's open connections to lup's tool server, which a push to its
+    session goes through."""
     layout: HostLayout
     """Where each launch's sockets are, its session's messaging socket among them."""
     notices: Notices
     clock: Clock
     say: Callable[[str], None]
+    patience: timedelta = timedelta(seconds=30)
+    """How long a push waits for the turn's start carrying its token, after
+    which what it told is put back and the session's messaging socket rings."""
+    unpushed: list[str] = []
+    """The launches whose session took no push in time: said once, and woken
+    through the messaging socket from then on."""
+    waits: list[asyncio.Task[None]] = []
+    """Each push's wait to be taken, kept until it's done."""
     presences: dict[str, Presence] = {}
     """By conversation's key, in memory."""
     settling: dict[int, asyncio.Event] = {}
@@ -535,6 +564,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             self.presences = {**self.presences, key: Presence()}
         return self.presences[key]
 
+    def tellable(self, party: Conversation) -> list[Item]:
+        """Return what waits for `party` that a hook or a held call may tell: all of it but what's pushed to its session and not yet taken."""
+        pushed = self.presence(party).pushed
+        pending = [] if pushed is None else pushed.numbers
+        return [
+            item for item in self.inbox.waiting(party) if item.number not in pending
+        ]
+
     @override
     async def telling(
         self, launch: Register, conversation: Caller, heard: Heard, room: int
@@ -544,7 +581,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         At its turn's end, what waits holds the end once (`holding`), and a call
         it holds learns its turn ended; an end let through leaves its main
         conversation idle, and a subagent's ended, its waiting items passed to
-        its session's main conversation.
+        its session's main conversation. A turn's start whose prompt carries
+        the token of what was pushed to it takes the push.
         """
         party = Conversation(
             repository=launch.repository,
@@ -559,9 +597,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case "turn-ended" | "conversation-ended":
                 for each in presence.held:
                     each.ended = True
-                fresh = [
-                    item for item in self.inbox.waiting(party) if not announced(item)
-                ]
+                fresh = [item for item in self.tellable(party) if not announced(item)]
                 if holding(fresh, [], after_block=heard.after_block):
                     posted = self.told(party, room, heard.fits, "turn's end")
                     if posted.items:
@@ -573,6 +609,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case "session-started":
                 presence.turning = False
                 return self.told(party, room, heard.fits, "start")
+            case "turn-started":
+                presence.turning = True
+                taken = presence.pushed
+                if taken is not None and taken.token in (heard.prompt or ""):
+                    self.taken(party, taken)
+                return self.told(party, room, heard.fits, "turn's start")
             case "call-started" if heard.served:
                 presence.turning = True
                 return Posted()
@@ -951,7 +993,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         def chosen() -> Generator[Choice]:
             left = room
-            for item in self.inbox.waiting(party):
+            for item in self.tellable(party):
                 if announced(item):
                     continue
                 text = self.said(item)
@@ -979,7 +1021,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
     def whole(self, party: Conversation, how: How) -> str:
         """Tell `party` everything waiting for it, each whole, oldest first; empty where nothing is."""
-        waiting = self.inbox.waiting(party)
+        waiting = self.tellable(party)
         told = Told(at=self.clock.now(), how=how)
         for item in waiting:
             self.inbox.kept(item.model_copy(update={"state": told}))
@@ -1049,7 +1091,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.notices.notify(summary, body)
 
     async def wake(self, party: Conversation) -> None:
-        """Ring an idle `party`'s session's doorbell through its messaging socket: what waits, for `wait_inbox` to read, where its runtime has a way.
+        """Start a turn of an idle `party`'s session on what waits for it: pushed through lup's tool server, where its runtime takes a push, else its doorbell rung through its messaging socket.
 
         Only a session's main conversation is woken, and only while it's idle.
         One in its turn (`Presence.turning`) is told at its next call, or its
@@ -1059,9 +1101,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         service took for idle, unknown since the service started again or since
         the operator interrupted it, takes it at its next boundary, as measured
         on the runtime that has a way (`docs/field-notes.md`, *Waking a
-        session*). The items stay waiting, told once by whichever reaches the
-        agent first: `wait_inbox`, its next call's hook, or its turn's end;
-        where the session's messaging socket can't be reached, that's said.
+        session*, *Channels*).
         """
         presence = self.presence(party)
         place = self.inbox.whereabouts.get(party.key())
@@ -1069,9 +1109,84 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         quiet = presence.turning or presence.woken or presence.held
         if party.agent is not None or quiet or place is None or not waiting:
             return
-        line = self.courier.woken(party.runtime, party.session, doorbell(waiting))
+        if self.pushed(party, place, waiting):
+            return
+        await self.rung(party, place, waiting)
+
+    def pushed(
+        self, party: Conversation, place: Whereabouts, waiting: list[Item]
+    ) -> bool:
+        """Push what waits for idle `party` to its session through lup's tool server, each item whole, and say whether it was pushed.
+
+        What's pushed stays waiting, which no hook or held call tells while the
+        push is pending (`tellable`), and is counted told once a turn's start
+        carries the push's token (`taken`); where none does within `patience`,
+        it's told as anything waiting is (`unless_taken`). The pending push is
+        held in memory alone, so a service started again tells what it pushed
+        at the next hook, at worst a second time, never not at all. Nothing's
+        pushed where the runtime takes no push, the launch has no open
+        connection to lup's tool server, or its session took no push before.
+        """
+        if place.launch in self.unpushed:
+            return False
+        token = secrets.token_hex(8)
+        text = SEPARATOR.join(self.said(item) for item in waiting)
+        notice = self.waker.pushed(party.runtime, text, token)
+        if notice is None or not self.pushes.push(place.launch, notice):
+            return False
+        presence = self.presence(party)
+        presence.woken = True
+        pushed = Pushed(token=token, numbers=[item.number for item in waiting])
+        presence.pushed = pushed
+        task = asyncio.create_task(self.unless_taken(party, place, pushed))
+        self.waits = [*(each for each in self.waits if not each.done()), task]
+        numbers = ", ".join(str(number) for number in pushed.numbers)
+        self.say(f"{place.launch}: pushed items {numbers} to {who(party)}")
+        return True
+
+    def taken(self, party: Conversation, pushed: Pushed) -> None:
+        """Count what `pushed` told `party` as told, its session having started a turn on it."""
+        self.presence(party).pushed = None
+        told = Told(at=self.clock.now(), how="wake")
+        for number in pushed.numbers:
+            match self.inbox.item(number):
+                case Item(state=Waiting()) as item:
+                    self.inbox.kept(item.model_copy(update={"state": told}))
+                case _:
+                    pass
+
+    async def unless_taken(
+        self, party: Conversation, place: Whereabouts, pushed: Pushed
+    ) -> None:
+        """Wait `patience` for `party`'s session to take `pushed`; where it doesn't, leave what it told to be told as anything waiting is, say so once, and wake the session through its messaging socket from then on."""
+        await asyncio.sleep(self.patience.total_seconds())
+        presence = self.presence(party)
+        if presence.pushed != pushed:
+            return
+        presence.pushed = None
+        presence.woken = False
+        self.unpushed = [*self.unpushed, place.launch]
+        self.say(
+            f"{place.launch}: {who(party)} took nothing lup pushed within "
+            f"{self.patience.total_seconds():g} seconds, so it's woken through its "
+            "messaging socket from now on: its runtime may not have loaded lup's "
+            "server to push (docs/inbox.md, *How an agent is told*)"
+        )
+        await self.wake(party)
+
+    async def rung(
+        self, party: Conversation, place: Whereabouts, waiting: list[Item]
+    ) -> None:
+        """Ring idle `party`'s session's doorbell through its messaging socket: what waits, for `wait_inbox` to read, where its runtime has a way.
+
+        The items stay waiting, told once by whichever reaches the agent first:
+        `wait_inbox`, its next call's hook, or its turn's end; where the
+        session's messaging socket can't be reached, that's said.
+        """
+        line = self.waker.woken(party.runtime, party.session, doorbell(waiting))
         if line is None:
             return
+        presence = self.presence(party)
         presence.woken = True
         socket = self.layout.launch(place.launch).messages
         try:

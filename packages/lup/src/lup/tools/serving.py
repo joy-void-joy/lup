@@ -19,6 +19,23 @@ runtime that shows the model a result's structured content where there is one
 drops its content blocks, so a result with both would read differently from one
 runtime to the next.
 
+**What a server sends unasked** goes through the connection's `Outbox`: each
+`Notice` put is written as a JSON-RPC notification, in order, beside the
+session's own messages. A runtime that takes such a notice as a message for its
+session says so through the capability it reads, which `serve` declares as
+it's given (`experimental`); the host's adapters say which.
+
+**The handshake revisions only.** A client probing for MCP's 2026-07-28
+revision first sends `server/discover`, which `serve` answers "method not
+found" before `mcp` reads it, so the client falls back to `initialize`. On that
+revision a server can't send anything unasked (a runtime's MCP client "doesn't
+register a channel server that negotiates protocol revision 2026-07-28":
+`docs/field-notes.md`, *Channels*), and `mcp` settles a connection's revision
+once, on its first request (`serve_dual_era_loop`), so a handler of its own
+couldn't refuse it: an `initialize` after it would be refused in turn. The
+bridge's own `initialize` replayed after a restart (`lup.sessions.bridge`) is
+on the handshake too.
+
 **`mcp` is imported when a server is first made,** not with this module. A
 toolset is named wherever a turn's tools are, the judge's process for each hook
 among them, and importing `mcp`'s server took `lup_dev.cli`'s imports from about
@@ -30,9 +47,9 @@ from abc import ABC, abstractmethod
 from importlib.metadata import version
 from typing import TYPE_CHECKING
 
-from pydantic import JsonValue, ValidationError
+from pydantic import Field, JsonValue, ValidationError
 
-from lup.types import Model
+from lup.types import JsonObject, Model, MutableModel
 
 if TYPE_CHECKING:
     from mcp.server import Server, ServerRequestContext
@@ -53,6 +70,23 @@ class Answer(Model):
 
     text: str
     error: bool = False
+
+
+class Notice(Model):
+    """A notification a server sends unasked: its JSON-RPC method and params."""
+
+    method: str
+    params: JsonObject
+
+
+class Outbox(MutableModel, arbitrary_types_allowed=True):
+    """What a server sends unasked on one connection, each notice in the order it's put."""
+
+    notices: asyncio.Queue[Notice] = Field(default_factory=asyncio.Queue[Notice])
+
+    def put(self, notice: Notice) -> None:
+        """Send `notice` on the connection, after those put before it."""
+        self.notices.put_nowait(notice)
 
 
 class Toolset(ABC):
@@ -121,12 +155,53 @@ def received(line: bytes) -> SessionMessage | ValidationError:
 
 
 async def listened(
-    reader: asyncio.StreamReader, incoming: WriteStream[SessionMessage | Exception]
+    reader: asyncio.StreamReader,
+    incoming: WriteStream[SessionMessage | Exception],
+    writer: asyncio.StreamWriter,
 ) -> None:
-    """Hand the session each message read off the connection, until its end."""
+    """Hand the session each message read off the connection, until its end; answer a probe for the 2026-07-28 revision "method not found" instead, so the client opens on the handshake."""
+    from mcp.shared.message import SessionMessage
+    from mcp.types import METHOD_NOT_FOUND, ErrorData, JSONRPCError, JSONRPCRequest
+
     async with incoming:
         while line := await reader.readline():
-            await incoming.send(received(line))
+            message = received(line)
+            match message:
+                case SessionMessage(
+                    message=JSONRPCRequest(method="server/discover", id=ident)
+                ):
+                    refusal = JSONRPCError(
+                        jsonrpc="2.0",
+                        id=ident,
+                        error=ErrorData(
+                            code=METHOD_NOT_FOUND,
+                            message="lup's server speaks the handshake revisions",
+                        ),
+                    )
+                    writer.write(
+                        f"{refusal.model_dump_json(by_alias=True, exclude_none=True)}\n".encode()
+                    )
+                    await writer.drain()
+                case _:
+                    await incoming.send(message)
+
+
+async def pushed(outbox: Outbox, writer: asyncio.StreamWriter) -> None:
+    """Write each notice put in `outbox` to the connection, one a line, until the other side goes."""
+    from mcp.types import JSONRPCNotification
+
+    while True:
+        notice = await outbox.notices.get()
+        notified = JSONRPCNotification(
+            jsonrpc="2.0", method=notice.method, params=notice.params
+        )
+        writer.write(
+            f"{notified.model_dump_json(by_alias=True, exclude_none=True)}\n".encode()
+        )
+        try:
+            await writer.drain()
+        except ConnectionError:
+            return
 
 
 async def answered(
@@ -160,6 +235,9 @@ async def serve(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     name: str = "lup",
+    *,
+    experimental: dict[str, JsonObject] | None = None,
+    outbox: Outbox | None = None,
 ) -> None:
     """Serve one MCP session of the toolset over a connection's streams, until the connection closes.
 
@@ -172,20 +250,22 @@ async def serve(
     The server says its tools may change (`listChanged`): the bridge a room
     reaches it through tells the runtime they did once it reaches a restarted
     server (`lup.sessions.bridge`), and a runtime acts on that only for a server
-    that said so.
+    that said so. It declares each of `experimental`'s capabilities, and writes
+    each notice put in `outbox` as it comes.
     """
     from mcp.server.lowlevel.server import NotificationOptions
     from mcp.shared.memory import create_client_server_memory_streams
 
     server = tool_server(toolset, name)
     options = server.create_initialization_options(
-        NotificationOptions(tools_changed=True)
+        NotificationOptions(tools_changed=True), experimental_capabilities=experimental
     )
     async with create_client_server_memory_streams() as (ours, theirs):
         outgoing, incoming = ours
         requests, answers = theirs
-        listening = asyncio.create_task(listened(reader, incoming))
+        listening = asyncio.create_task(listened(reader, incoming, writer))
         answering = asyncio.create_task(answered(outgoing, writer))
+        pushing = asyncio.create_task(pushed(outbox or Outbox(), writer))
         try:
             await server.run(requests, answers, options)
             await listening
@@ -193,4 +273,5 @@ async def serve(
         finally:
             listening.cancel()
             answering.cancel()
-            await asyncio.wait([listening, answering])
+            pushing.cancel()
+            await asyncio.wait([listening, answering, pushing])

@@ -3,6 +3,7 @@
 | Codex hook | lup's event |
 |---|---|
 | `SessionStart` | `SessionStarted` |
+| `UserPromptSubmit` | `turn-started`, the host service's alone |
 | `PreToolUse` | `CallStarted` |
 | `PostToolUse` | `CallFinished` |
 | `Stop` | `TurnEnded` |
@@ -43,8 +44,8 @@ goes on. Where the room's hook can't reach the service, it ends with status 1:
 Codex marks the hook's run failed, shows "hook exited with code 1" (not what the
 hook wrote to standard error), and the call goes on.
 
-The judge reads every hook a launched Codex session runs (`heard`), so the host
-service answers none itself. It adds to each answer through `told`: a call to
+The judge reads every hook a launched Codex session runs (`heard`) but
+`UserPromptSubmit`, a turn's start, which the host service answers itself. It adds to each answer through `told`: a call to
 lup's tools (`mcp__lup__<tool>`, `TOOL_PREFIX`) is rewritten to carry `caller`,
 lup's id for the conversation calling, as `updatedInput` beside
 `permissionDecision: "allow"`; and what the conversation is told goes in as
@@ -87,11 +88,13 @@ end is held (`decision: "block"`). From the source at `rust-v0.162.1`:
   (`subagent-stop.command.input`), so an end following a hold is let through.
 
 Nothing reaches a Codex session idle between its turns, so the adapter has no
-way to wake one (`woken` is none), a gap declared with its evidence: what an MCP
-server sends unprompted is only logged (`rmcp-client/src/logging_client_handler.rs`),
-and the app-server that could start a turn (`turn/start`) runs inside the
-terminal's own process under `--no-daemon`, out of reach. An item for an idle
-session waits for its next call; the operator typing in its terminal starts one.
+way to wake one (`woken` and `pushing` are none), a gap declared with its
+evidence: what an MCP server sends unprompted is only logged
+(`rmcp-client/src/logging_client_handler.rs`), and the app-server that could
+start a turn (`turn/start`) runs inside the terminal's own process under
+`--no-daemon`, out of reach. An item for an idle session waits for its next
+turn: the operator typing in its terminal starts one, told it at
+`UserPromptSubmit`.
 
 Nor can lup's name for a session reach Codex's own title, a gap declared with
 its evidence: Codex names threads (`/rename`, its own generated titles, `codex
@@ -404,6 +407,45 @@ class SessionStart(Payload):
         return OperatorWarning(system_message=said)
 
 
+class UserPromptSubmit(Payload):
+    """`UserPromptSubmit`: a turn starts on a prompt, the operator's typed in its terminal.
+
+    Its input carries the `prompt` (`user-prompt-submit.command.input`), and its
+    output takes `hookSpecificOutput.additionalContext`, refusing any field it
+    doesn't name (`UserPromptSubmitCommandOutputWire`, `hooks/src/schema.rs`).
+    """
+
+    hook_event_name: Literal["UserPromptSubmit"]
+    prompt: str
+
+    def heard(self, fits: int) -> Heard:
+        """Read the turn's start, and the prompt it starts on: the judge doesn't read it."""
+        return Heard(
+            event="turn-started",
+            session=self.session_id,
+            agent=self.agent_id,
+            judged=False,
+            fits=fits,
+            prompt=self.prompt,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Tell the conversation its items beside the prompt."""
+        return context(said, self.hook_event_name, telling.items)
+
+    @override
+    def answer(self, bench: Bench) -> Output | None:
+        return None
+
+    @override
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
+        return None
+
+    @override
+    def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
+
+
 class PreToolUse(Payload):
     """`PreToolUse`: a tool call about to run."""
 
@@ -641,7 +683,7 @@ class SubagentStop(Payload):
 
 
 type Received = Annotated[
-    SessionStart | PreToolUse | PostToolUse | Stop | SubagentStop,
+    SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Stop | SubagentStop,
     Field(discriminator="hook_event_name"),
 ]
 """Any hook payload this adapter answers, told apart by its event's name."""
@@ -783,16 +825,18 @@ def told(raw: str, answer: str, telling: Telling) -> str | None:
 
 
 def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
-    """Return the hooks a launched Codex session runs `command` at: the events the judge reads.
+    """Return the hooks a launched Codex session runs `command` at: the events the host service hears.
 
-    `SessionStart`, `PreToolUse` and `PostToolUse` on every tool: Codex is judged
-    after each call. `Stop` and `SubagentStop`: a conversation's turn's end clears
-    the calls it left that no `PostToolUse` finishes (a patch that failed to
-    apply, a call interrupted), and judges what the turn left. Each waits up to
-    `timeout`, which a hold's wait for the operator needs.
+    `SessionStart`; `UserPromptSubmit`, each turn's start, which the host
+    service answers itself; `PreToolUse` and `PostToolUse` on every tool: Codex
+    is judged after each call. `Stop` and `SubagentStop`: a conversation's
+    turn's end clears the calls it left that no `PostToolUse` finishes (a patch
+    that failed to apply, a call interrupted), and judges what the turn left.
+    Each waits up to `timeout`, which a hold's wait for the operator needs.
     """
     events: list[Event] = [
         "session-started",
+        "turn-started",
         "call-started",
         "call-finished",
         "turn-ended",
@@ -1164,6 +1208,7 @@ def adapter() -> Adapter:
         ends=ends,
         spawned=spawned,
         woken=None,
+        pushing=None,
         hooks=hooks,
         channel=CodexChannel(),
         agent=agent,

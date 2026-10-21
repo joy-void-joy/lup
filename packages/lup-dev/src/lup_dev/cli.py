@@ -35,7 +35,7 @@ from lup.errors import LupError
 from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.transcripts import views
 from lup.transcripts.module import Transcripts
-from lup.types import Model, MutableModel
+from lup.types import JsonObject, Model, MutableModel
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import Adapter, claude, codex
@@ -74,6 +74,7 @@ from lup_dev.host.courier import (
     Spawned,
     Spawns,
     Telling,
+    Waker,
 )
 from lup_dev.host.dashboard import (
     DashboardProcess,
@@ -89,6 +90,7 @@ from lup_dev.host.protocol import (
     Register,
     Talker,
 )
+from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.watch import Changes
@@ -204,6 +206,7 @@ from lup_dev.stored import read_model, write_model
 from lup_dev.worker import worked
 
 if TYPE_CHECKING:
+    from lup.tools.serving import Notice
     from lup.tools.tool import ToolSpec
     from lup_dev.declaration.resolve import Resolved
     from lup_dev.declaration.runner import Runner
@@ -327,10 +330,26 @@ class Couriers(Model, Courier):
         text = answer if added is None else f"{added}\n"
         return Printed(text=text, ends=adapter.ends(text))
 
+
+class Wakers(Model, Waker):
+    """Every runtime lup knows, as its idle sessions are woken."""
+
+    adapters: Adapters
+
     @override
     def woken(self, runtime: str, session: str, text: str) -> str | None:
         spelled = self.adapters.named(runtime).woken
         return None if spelled is None else spelled(session, text)
+
+    @override
+    def pushed(self, runtime: str, text: str, token: str) -> Notice | None:
+        pushing = self.adapters.named(runtime).pushing
+        return None if pushing is None else pushing.notice(text, token)
+
+    @override
+    def capabilities(self, runtime: str) -> dict[str, JsonObject]:
+        pushing = self.adapters.named(runtime).pushing
+        return {} if pushing is None else pushing.capabilities
 
 
 def services() -> Services:
@@ -432,13 +451,16 @@ def host_serve(context: typer.Context) -> None:
         return
     known = Adapters(known=adapters())
     couriers = Couriers(adapters=known)
+    wakers = Wakers(adapters=known)
     settings = LupDevSettings()
     layout = Layout.of(settings)
     changes = Changes()
+    pushes = Pushes()
     dashboard = installed_dashboard(settings, layout.host)
     delivery = Delivery(
         inbox=Inbox.opened(layout.inbox, changes),
-        courier=couriers,
+        waker=wakers,
+        pushes=pushes,
         layout=layout.host,
         notices=NotifySend(),
         clock=SystemClock(),
@@ -479,6 +501,8 @@ def host_serve(context: typer.Context) -> None:
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
         podman=podman,
         changes=changes,
+        waker=wakers,
+        pushes=pushes,
         companions=[types, sweeping, *([] if dashboard is None else [dashboard])],
     )
     asyncio.run(service.serve())

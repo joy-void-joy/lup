@@ -106,9 +106,6 @@ class Deaf(Courier):
     ) -> Printed:
         return Printed(text=answer)
 
-    def woken(self, runtime: str, session: str, text: str) -> str | None:
-        return None
-
 
 async def no_judge(asked: Asked) -> Judged:
     message = f"no judge runs in these tests: {asked.command}"

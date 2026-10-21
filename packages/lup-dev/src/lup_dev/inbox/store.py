@@ -60,10 +60,10 @@ type Kind = Literal["note", "problem", "disagreement", "question"]
 """What a message is: a remark, a problem that stops the work, a disagreement,
 or a question that asks for no answer waited on."""
 
-type How = Literal["call", "start", "turn's end", "held call", "wake"]
-"""How an item was told: beside a call, as its session started, as the reason
-its turn's end was held, as a held call's result, or as a turn started in its
-idle session."""
+type How = Literal["call", "start", "turn's start", "turn's end", "held call", "wake"]
+"""How an item was told: beside a call, as its session started, beside the
+prompt its turn started on, as the reason its turn's end was held, as a held
+call's result, or pushed to its idle session, starting a turn."""
 
 
 class Operator(Model):
