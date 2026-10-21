@@ -94,7 +94,7 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.watch import Changes
-from lup_dev.host.workers import Workers
+from lup_dev.host.workers import WorkerJudge, Workers
 from lup_dev.inbox.delivery import (
     Delivery,
     clocked,
@@ -285,13 +285,13 @@ class Adapters(Model, Answerer):
         [adapter] = chosen
         return adapter
 
-    def answer(self, runtime: str, payload: str) -> str:
-        """Answer one of `runtime`'s hooks, judging with this machine's services.
+    def answer(self, runtime: str, payload: str, services: Services) -> str:
+        """Answer one of `runtime`'s hooks, judging with `services`.
 
         What the hook prints is its adapter's output on a line, or nothing.
         """
         adapter = self.named(runtime)
-        bench = Bench(runtime=adapter.runtime, services=services())
+        bench = Bench(runtime=adapter.runtime, services=services)
         output = adapter.hook(payload, bench)
         return f"{output}\n" if output else ""
 
@@ -399,11 +399,11 @@ def hook(
         str, typer.Argument(help="The runtime whose hook this is, by its name.")
     ],
 ) -> None:
-    """Answer one of a runtime's hooks, its payload on stdin."""
+    """Answer one of a runtime's hooks, its payload on stdin, as a launch's process answers each hook its judge reads."""
     known = Adapters(known=adapters())
     # An unknown runtime is refused before standard input is read.
     known.named(runtime)
-    typer.echo(known.answer(runtime, sys.stdin.read()), nl=False)
+    typer.echo(known.answer(runtime, sys.stdin.read(), services()), nl=False)
 
 
 def host_client() -> HostClient:
@@ -443,7 +443,8 @@ def host_serve(context: typer.Context) -> None:
     """Run the host service in the foreground, until it's stopped.
 
     It answers each launch's hooks as `lup-dev hook` does, on the launch's own
-    socket, and ends each launch whose launcher and container are both gone
+    socket, through the launch's own process of its repository's approved copy,
+    and ends each launch whose launcher and container are both gone
     (`Sweeping`). `lup-dev host stop` or Ctrl-C stops it; the launches it serves
     stay recorded, and the next service serves them.
     """
@@ -479,6 +480,7 @@ def host_serve(context: typer.Context) -> None:
         layout=layout.host,
         answerer=known,
         courier=couriers,
+        judge=WorkerJudge(modules=workers),
         spawns=SpawnRecords(adapters=known),
         post=delivery,
         routes=[
@@ -586,9 +588,15 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
 def worker(
     socket: Annotated[Path, typer.Argument(help="Where to answer the host service.")],
 ) -> None:
-    """Serve a launch's modules on `socket`, its registration on standard input's first line: for the host service."""
-    records = {adapter.runtime.name(): adapter.records for adapter in adapters()}
-    worked(socket, services(), records)
+    """Serve a launch's judge and modules on `socket`, its registration on standard input's first line: for the host service.
+
+    Its hooks are answered as `hook` answers them, with this machine's services
+    made once for the process: none of them keeps state of its own.
+    """
+    known = Adapters(known=adapters())
+    records = {adapter.runtime.name(): adapter.records for adapter in known.known}
+    made = services()
+    worked(socket, made, records, partial(known.answer, services=made))
 
 
 @host.command("stop")

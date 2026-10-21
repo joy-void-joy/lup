@@ -25,7 +25,8 @@ from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import RoomClient, asked
 from lup_dev.host.courier import Courier, Heard, Printed, Telling
 from lup_dev.host.protocol import Action, Done, Limits, Register, Registered, Stop
-from lup_dev.host.service import Answerer, Asked, HostService, Judged
+from lup_dev.host.service import Answerer, HostService
+from lup_dev.host.workers import LaunchJudge
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.private import scanning
 from lup_dev.private.found import added_lines, counted, found, textual
@@ -441,7 +442,7 @@ def hosted(
         layout=layout,
         answerer=Nobody(),
         courier=Deaf(),
-        judge=unjudged,
+        judge=Unjudged(),
         say=lambda line: None,
         modules=modules,
     )
@@ -485,9 +486,12 @@ class Deaf(Courier):
         return Printed(text=answer)
 
 
-async def unjudged(asked: Asked) -> Judged:
-    message = f"no hook reaches a judge here: {asked}"
-    raise AssertionError(message)
+class Unjudged(LaunchJudge):
+    """A launch's judge no hook reaches."""
+
+    async def judged(self, launch: Register, payload: str) -> str:
+        message = f"no hook reaches a judge here: {payload}"
+        raise AssertionError(message)
 
 
 def registered(worktree: Path, actions: list[Action] | None = None) -> Register:

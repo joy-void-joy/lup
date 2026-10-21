@@ -28,9 +28,10 @@ from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import Detached, HostClient, Starter
-from lup_dev.host.protocol import Stop
+from lup_dev.host.protocol import HostError, Register, Stop
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.service import HostService
+from lup_dev.host.workers import LaunchJudge
 from lup_dev.inbox import store
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.notices import Notices
@@ -1820,6 +1821,14 @@ class Raised(Notices):
         self.raised.append(f"{summary}\n{body}")
 
 
+class NoJudge(LaunchJudge):
+    """A launch's judge that answers nothing: these tests serve no launch."""
+
+    async def judged(self, launch: Register, payload: str) -> str:
+        message = "no judge runs in these tests"
+        raise HostError(message)
+
+
 class Background:
     """A host service with lup's inbox, serving in a thread of its own."""
 
@@ -1847,6 +1856,7 @@ class Background:
             courier=couriers,
             post=self.delivery,
             routes=inbox_routes(self.delivery, {}) if inboxed else [],
+            judge=NoJudge(),
             say=self.said.append,
             waker=wakers,
             pushes=pushes,

@@ -451,9 +451,9 @@ class HostLayout(Model):
         """Say where launch `launch`'s conversations are kept, their names, their parents and the spawns not yet linked, so a restarted service knows them."""
         return self.launches / f"{launch}.conversations.json"
 
-    def modules(self, launch: str) -> Path:
-        """Say where launch `launch`'s modules are served: beside its record, outside the directory its room mounts."""
-        return self.launches / f"{launch}.modules.sock"
+    def modules(self, launch: str, process: str) -> Path:
+        """Say where process `process` of launch `launch`'s answers, its judge and its modules: beside its record, outside the directory its room mounts, a socket for each process, so one ending removes no other's."""
+        return self.launches / f"{launch}.modules.{process}.sock"
 
 
 class JudgeLayout(Model):

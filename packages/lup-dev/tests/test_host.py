@@ -86,11 +86,11 @@ from lup_dev.host.service import (
     Route,
     judged,
 )
-from lup_dev.host.workers import LaunchModules, Offered
+from lup_dev.host.workers import LaunchJudge, LaunchModules, Offered
 from lup_dev.layout import HostLayout, Layout
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
+    from collections.abc import AsyncGenerator, Callable, Generator
     from pathlib import Path
 
     from conftest import FakeClock, InProcess, Kit
@@ -124,37 +124,38 @@ class Hears(Courier):
         return Printed(text=answer)
 
 
-class Judge:
+class Judge(LaunchJudge):
     """A launch's judge, answering each hook with its runtime and payload.
 
-    `hold` waits until released, `fail` ends with status 1, `boom` raises, and
-    every answer waits at a barrier for `together` answers in all. The test's
-    thread releases it, so each wait runs in a thread, leaving the service's
-    event loop free, as a judge's process does.
+    `hold` waits until released, `fail` can't answer, `boom` raises, and every
+    answer waits at a barrier for `together` answers in all. The test's thread
+    releases it, so each wait runs in a thread, leaving the service's event loop
+    free, as the launch's process does.
     """
 
     def __init__(self, together: int = 1) -> None:
         self.together = threading.Barrier(together, timeout=60)
         self.arrived = threading.Event()
         self.released = threading.Event()
-        self.asked: list[Asked] = []
+        self.asked: list[tuple[str, str]] = []
+        """Each hook asked, by its launch's id, and its payload."""
 
-    async def __call__(self, asked: Asked) -> Judged:
-        self.asked.append(asked)
+    async def judged(self, launch: Register, payload: str) -> str:
+        self.asked.append((launch.launch, payload))
         self.arrived.set()
-        *_, runtime = asked.command
-        match asked.payload:
+        match payload:
             case "boom":
                 message = "the stub fails"
                 raise RuntimeError(message)
             case "fail":
-                return Judged(status=1, output="", error="Traceback: it broke\n")
+                message = "the launch's process ended before it answered"
+                raise HostError(message)
             case "hold":
                 await asyncio.to_thread(self.released.wait)
             case _:
                 pass
         await asyncio.to_thread(self.together.wait)
-        return Judged(status=0, output=f"{runtime} answers {asked.payload}\n", error="")
+        return f"{launch.runtime} answers {payload}\n"
 
 
 class Background:
@@ -248,7 +249,7 @@ def said() -> list[str]:
 
 def service(
     layout: HostLayout,
-    judge: Callable[[Asked], Awaitable[Judged]],
+    judge: LaunchJudge,
     said: list[str],
     routes: list[Route] | None = None,
     answerer: Answerer | None = None,
@@ -610,10 +611,7 @@ def test_a_launch_is_answered_by_its_own_judge(
         assert host.launches() == [one, two]
         send(layout.launch("one").hook, "x")
         send(layout.launch("two").hook, "y")
-    assert judge.asked == [
-        Asked(command=[str(one.judge), "hook", "first"], payload="x"),
-        Asked(command=[str(two.judge), "hook", "second"], payload="y"),
-    ]
+    assert judge.asked == [("one", "x"), ("two", "y")]
 
 
 def test_a_hook_its_judge_cant_answer_is_answered_in_the_runtimes_terms(
@@ -623,14 +621,14 @@ def test_a_hook_its_judge_cant_answer_is_answered_in_the_runtimes_terms(
     with served(service(layout, Judge(), said)):
         registered = host.register(launch(tmp_path, "one", "first"))
         heard = send(layout.launch("one").hook, "fail")
-    command = f"{tmp_path}/judges/bin/lup-dev hook first"
     assert heard == (
-        f"first unanswered fail: `{command}` ended with status 1; what it said is "
-        f"in the host service's output, {layout.log} when it runs in the background\n"
+        "first unanswered fail: the launch's process ended before it answered; the "
+        f"host service's output says more, {layout.log} when it runs in the "
+        "background\n"
     )
     assert (
-        f"one: `{command}` couldn't answer a hook (status 1). What it said:\n"
-        "Traceback: it broke\n"
+        "one: its judge couldn't answer a hook: the launch's process ended before "
+        "it answered"
     ) in said
     assert registered.directory.is_dir()
 
@@ -694,15 +692,15 @@ def test_a_module_registers_the_handler_for_its_kind(
 # A launch's room sockets: lup's tools, and the room's requests
 
 
-class Quiet:
+class Quiet(LaunchJudge):
     """A launch's judge that answers every hook with nothing, keeping each payload it was asked."""
 
     def __init__(self) -> None:
         self.payloads: list[str] = []
 
-    async def __call__(self, asked: Asked) -> Judged:
-        self.payloads.append(asked.payload)
-        return Judged(status=0, output="", error="")
+    async def judged(self, launch: Register, payload: str) -> str:
+        self.payloads.append(payload)
+        return ""
 
 
 ECHO = ToolSpec(
@@ -822,7 +820,7 @@ def caller(answer: str) -> str:
 
 def on_claude(
     layout: HostLayout,
-    judge: Callable[[Asked], Awaitable[Judged]],
+    judge: LaunchJudge,
     said: list[str],
     tools: list[RoomTools] | None = None,
     modules: LaunchModules | None = None,
@@ -1082,13 +1080,17 @@ PAYLOAD = {
 }
 
 
-async def lup_dev_hook(asked: Asked) -> Judged:
-    """A launch's copy of `lup-dev`, run in this process, in a thread: its own `hook` command."""
-    _, *arguments = asked.command
-    ran = await asyncio.to_thread(
-        runner.invoke, cli.app, arguments, input=asked.payload
-    )
-    return Judged(status=ran.exit_code, output=ran.output, error="")
+class Adapting(LaunchJudge):
+    """A launch's judge answering in this process, in a thread, as the launch's own process does: through each runtime's adapter, with the command line's services."""
+
+    async def judged(self, launch: Register, payload: str) -> str:
+        known = cli.Adapters(known=cli.adapters())
+        try:
+            return await asyncio.to_thread(
+                known.answer, launch.runtime, payload, cli.services()
+            )
+        except ValidationError as unread:
+            raise HostError(str(unread)) from unread
 
 
 def test_the_service_answers_a_hook_as_the_hook_command_does(
@@ -1103,7 +1105,7 @@ def test_the_service_answers_a_hook_as_the_hook_command_does(
     raw = json.dumps({**PAYLOAD, "cwd": str(repo)})
     answerer = cli.Adapters(known=cli.adapters())
     one = launch(tmp_path, "one", "claude").model_copy(update={"worktree": repo})
-    with served(service(layout, lup_dev_hook, said, answerer=answerer)):
+    with served(service(layout, Adapting(), said, answerer=answerer)):
         client(layout, clock).register(one)
         heard = send(layout.launch("one").hook, raw)
         unread = send(layout.launch("one").hook, "not a payload")
@@ -1114,34 +1116,34 @@ def test_the_service_answers_a_hook_as_the_hook_command_does(
     assert warned.startswith("lup's judge couldn't answer this hook")
 
 
-def test_a_judge_runs_as_a_process_of_its_own(tmp_path: Path) -> None:
-    judge = tmp_path / "lup-dev"
-    judge.write_text('#!/bin/sh\necho "$@"\ncat\necho said >&2\nexit 3\n')
-    judge.chmod(0o755)
+def test_a_program_the_service_runs_is_a_process_of_its_own(tmp_path: Path) -> None:
+    program = tmp_path / "gh"
+    program.write_text('#!/bin/sh\necho "$@"\ncat\necho said >&2\nexit 3\n')
+    program.chmod(0o755)
 
     ran = asyncio.run(
-        judged(Asked(command=[str(judge), "hook", "first"], payload="the payload"))
+        judged(Asked(command=[str(program), "api", "user"], payload="the body"))
     )
 
-    assert ran == Judged(status=3, output="hook first\nthe payload", error="said\n")
+    assert ran == Judged(status=3, output="api user\nthe body", error="said\n")
     missing = asyncio.run(
-        judged(Asked(command=[str(tmp_path / "gone"), "hook"], payload=""))
+        judged(Asked(command=[str(tmp_path / "gone"), "api"], payload=""))
     )
     assert missing.status == 127
     assert "gone" in missing.error
 
 
-def test_a_judge_whose_wait_is_cancelled_is_killed(tmp_path: Path) -> None:
-    judge = tmp_path / "lup-dev"
+def test_a_program_whose_wait_is_cancelled_is_killed(tmp_path: Path) -> None:
+    program = tmp_path / "gh"
     started = tmp_path / "started"
-    # A pipe: the judge's write blocks until the test reads, so nothing polls.
+    # A pipe: the program's write blocks until the test reads, so nothing polls.
     os.mkfifo(started)
-    judge.write_text(f"#!/bin/sh\necho $$ > {started}\nexec sleep 3600\n")
-    judge.chmod(0o755)
+    program.write_text(f"#!/bin/sh\necho $$ > {started}\nexec sleep 3600\n")
+    program.chmod(0o755)
 
     async def cancelled() -> int:
         waiting = asyncio.create_task(
-            judged(Asked(command=[str(judge), "hook"], payload=""))
+            judged(Asked(command=[str(program), "api"], payload=""))
         )
         pid = int(await asyncio.to_thread(started.read_text))
         waiting.cancel()

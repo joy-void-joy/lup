@@ -11,34 +11,34 @@ at `/run/lup`, so the service knows which launch speaks by the socket it hears i
 on. It holds three sockets:
 - `hook.sock` takes a runtime's raw payload, read to the end. The service reads
   it through the `Courier` (`host/courier.py`), which says whether the launch's
-  judge reads it. One it reads is answered by running the judge, its
-  repository's approved copy of `lup-dev`, as a process of its own (`<judge>
-  hook <runtime>`, the payload on its input, its answer what it prints), so each
-  session is judged by the code approved for its repository; one it doesn't is
-  answered by the service itself, without starting the judge, as no decision.
-  Every answer goes out through the `Courier` again, a call to lup's tools
-  rewritten to carry lup's id for the conversation calling, and what the `Post`
-  says waits for the conversation added: counted told once the answer is
-  written, and put back where the hook was gone first. Hooks for parallel
-  calls arrive at once and a hold waits for hours, so each judge is spawned
-  through asyncio and awaited on the event loop, which goes on serving meanwhile.
-  Where the judge can't answer (its command missing, or ending with a failure, a
-  payload it can't read among them), the service answers in the runtime's own
-  terms through the `Answerer`, rather than closing empty, which the runtime
-  would take as no decision.
+  judge reads it. One it reads is put to the launch's judge (`LaunchJudge`): its
+  repository's approved copy of `lup-dev`, in the launch's own process, which
+  stays running and answers each hook as `lup-dev hook <runtime>` would, so each
+  session is judged by the code approved for its repository without paying a
+  start of Python and an import of `lup-dev` at each hook (`host/workers.py`).
+  One it doesn't read is answered by the service itself, without asking the
+  judge, as no decision. Every answer goes out through the `Courier` again, a
+  call to lup's tools rewritten to carry lup's id for the conversation calling,
+  and what the `Post` says waits for the conversation added: counted told once
+  the answer is written, and put back where the hook was gone first. Hooks for
+  parallel calls arrive at once and a hold waits for hours, so each is awaited
+  on the event loop, which goes on serving meanwhile, and answered in a thread
+  of its own in the launch's process. Where the judge can't answer (its process
+  unable to start, ending as it answers, or failing on a payload it can't read),
+  the service answers in the runtime's own terms through the `Answerer`, rather
+  than closing empty, which the runtime would take as no decision.
 - `mcp.sock` serves lup's tools, and `request.sock` the room's requests, each
   routed to the core's own (`host/rooms.py`) or to the launch's modules, which
-  run in a process of the launch's own, of its repository's approved copy,
-  started when the launch opens and stopped when it ends (`host/workers.py`).
+  run in the same process of the launch's own, started when the launch opens
+  and stopped when it ends (`host/workers.py`).
 
 Each launch is recorded beside its directory, so a service started after one
 stopped serves the same launches, in the directories their rooms mounted. The
-service stops without waiting for the answers in flight: their judges are
-killed, and their hooks hear nothing.
+service stops without waiting for the answers in flight: the launches'
+processes are ended, and their hooks hear nothing.
 """
 
 import asyncio
-import shlex
 import shutil
 import traceback
 from abc import ABC, abstractmethod
@@ -99,6 +99,7 @@ from lup_dev.host.workers import (
     Calling,
     Happened,
     Happening,
+    LaunchJudge,
     LaunchModules,
     Offered,
     Passed,
@@ -130,11 +131,11 @@ class Answerer(ABC):
 
 
 class Asked(Model):
-    """One program the service runs: a hook put to a launch's judge, `gh` for a launch, or git for its room; its command, and what goes on its input."""
+    """One program the service runs: `gh` for a launch, or git for its room; its command, and what goes on its input."""
 
     command: list[str]
     payload: str
-    """What goes on its standard input: a hook's payload, or a body for `gh`."""
+    """What goes on its standard input: a body for `gh`, or what git reads."""
     directory: Path | None = None
     """Where it runs; none for the service's own directory."""
 
@@ -144,7 +145,7 @@ class Judged(Model):
 
     status: int
     output: str
-    """What it printed: the hook's answer, where `status` is 0."""
+    """What it printed."""
     error: str
     """What it wrote to its standard error, or why it couldn't run."""
 
@@ -155,12 +156,12 @@ async def judged(asked: Asked) -> Judged:
     Spawned rather than forked: `sh` forks from the service's process and runs
     Python in the child before the program starts, which can deadlock in a
     process with threads, and it would hold a thread per program for as long as
-    it runs: a judge for a hold's hours, `gh` for GitHub's answer, git for a
-    room's push (`remote/protocol.py`).
+    it runs: `gh` for GitHub's answer, git for a room's push
+    (`remote/protocol.py`).
     """
     program, *arguments = asked.command
     try:
-        # lup: ignore("subprocess", why="the host service awaits each judge, each gh and git for a room on its event loop, which sh can't: it forks, and holds a thread per program")
+        # lup: ignore("subprocess", why="the host service awaits each gh and git for a room on its event loop, which sh can't: it forks, and holds a thread per program")
         process = await asyncio.create_subprocess_exec(
             program,
             *arguments,
@@ -472,8 +473,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     answerer: Answerer
     courier: Courier
     post: Post | None
-    judge: Callable[[Asked], Awaitable[Judged]]
-    """Runs a launch's judge for one hook; a test gives a stub."""
+    judge: LaunchJudge
+    """Answers each launch's hooks its judge reads; a test gives a stub."""
     tools: list[RoomTools]
     room_routes: list[RoomRoute]
     modules: LaunchModules | None
@@ -860,29 +861,21 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         return Spoken(answer=told.text, posted=posted)
 
     async def judgement(self, request: Register, payload: str) -> str:
-        """Return the judge's answer to one hook, or where it can't answer, the runtime's word that it couldn't.
+        """Return the judge's answer to one hook, or where it can't answer, the runtime's word that it couldn't, saying why.
 
-        What the judge said is the service's to tell, in full; the hook's answer
-        points there. It waits for as long as judging does, a hold's wait for the
-        operator included.
+        What the judge said beside is the service's to tell, in full; the hook's
+        answer points there. It waits for as long as judging does, a hold's wait
+        for the operator included.
         """
-        asked = Asked(
-            command=[str(request.judge), "hook", request.runtime], payload=payload
-        )
-        ran = await self.judge(asked)
-        if ran.status == 0:
-            return ran.output
-        command = shlex.join(asked.command)
-        self.say(
-            f"{request.launch}: `{command}` couldn't answer a hook (status "
-            f"{ran.status}). What it said:\n{ran.error}"
-        )
-        failure = (
-            f"`{command}` ended with status {ran.status}; what it said is in the "
-            f"host service's output, {self.layout.log} when it runs in the "
-            "background"
-        )
-        return self.answerer.unanswered(request.runtime, payload, failure)
+        try:
+            return await self.judge.judged(request, payload)
+        except HostError as failed:
+            self.say(f"{request.launch}: its judge couldn't answer a hook: {failed}")
+            failure = (
+                f"{failed}; the host service's output says more, {self.layout.log} "
+                "when it runs in the background"
+            )
+            return self.answerer.unanswered(request.runtime, payload, failure)
 
     async def tools_served(
         self,
@@ -1385,8 +1378,9 @@ class HostService(Model, arbitrary_types_allowed=True):
     nothing."""
     say: Callable[[str], None]
     """Where the service tells what it does: the terminal, or its log."""
-    judge: Callable[[Asked], Awaitable[Judged]] = judged
-    """Runs a launch's judge for one hook, as a process of its own; a test gives a stub."""
+    judge: LaunchJudge
+    """Answers each launch's hooks its judge reads: in the launch's own process,
+    which serves its modules too (`WorkerJudge`); a test gives a stub."""
     routes: list[Route] = []
     """The handlers modules register on the control socket, beside the service's own."""
     room_routes: list[RoomRoute] = []
