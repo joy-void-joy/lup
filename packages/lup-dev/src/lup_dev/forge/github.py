@@ -22,9 +22,12 @@ through the operator's `gh` and its login:
 - **Typed answers.** Each command asks for `--json` where `gh` gives it, read
   into a model here, which names the fields asked for. A command that answers
   with a link alone, as filing an issue does, is passed on as `gh` printed it.
-- **Bodies on standard input** (`--body-file=-`), and every value the model
-  writes given as `--flag=value` or after `--`, so none is read as a flag, and no
-  shell reads any.
+- **Bodies on standard input** (`--body-file=-`, or a GraphQL request whole
+  with `--input=-`), and every value the model writes given as `--flag=value`
+  or after `--`, so none is read as a flag, and no shell reads any.
+- **A comment edited is found on its own thread:** read from the launch's
+  repository by its issue's number, so a comment of another repository the
+  operator's login could edit is never reached.
 
 `gh` missing, without a login (its status 4: "If a command requires
 authentication, the exit code will be 4", `gh help exit-codes`), or failing
@@ -47,6 +50,14 @@ from lup_dev.host.service import Asked, judged
 
 PROGRAM = "gh"
 """The program lup reaches GitHub through, as the `PATH` finds it."""
+
+COMMENT_EDIT = """
+mutation($id: ID!, $body: String!) {
+  updateIssueComment(input: {id: $id, body: $body}) { issueComment { url } }
+}
+"""
+"""GitHub's GraphQL mutation replacing a comment's text, by the comment's node
+id, answering with its link."""
 
 BRANCH_QUERY = """
 query($owner: String!, $name: String!, $qualified: String!) {
@@ -174,13 +185,19 @@ class Label(Answered):
 class Comment(Answered):
     """A comment on an issue or pull request."""
 
+    id: str
+    """Its node id in GitHub's GraphQL API, which editing it names."""
     author: Login | None
     created_at: datetime
+    url: str
     body: str
 
     def text(self) -> str:
-        """Say the comment whole, under who wrote it and when."""
-        return f"{written_by(self.author)}, {self.created_at:%Y-%m-%d %H:%M %Z}:\n{self.body}"
+        """Say the comment whole, under who wrote it, when, and its link."""
+        return (
+            f"{written_by(self.author)}, {self.created_at:%Y-%m-%d %H:%M %Z}, "
+            f"{self.url}:\n{self.body}"
+        )
 
 
 class CheckRun(Answered):
@@ -365,6 +382,49 @@ class State(Answered):
     state: Literal["OPEN", "CLOSED"]
 
 
+class Edited(Model):
+    """What a comment's edit sets: the comment, by its node id, and its whole new text."""
+
+    id: str
+    body: str
+
+
+class CommentEdit(Model):
+    """The GraphQL request editing a comment, given whole on `gh api graphql`'s standard input."""
+
+    query: str = COMMENT_EDIT
+    variables: Edited
+
+
+class EditedComment(Answered):
+    """A comment, as the edit's answer names it."""
+
+    url: str
+
+
+class CommentUpdate(Answered):
+    """The edit's payload."""
+
+    issue_comment: EditedComment
+
+
+class CommentUpdated(Answered):
+    """The edit's data."""
+
+    update_issue_comment: CommentUpdate
+
+
+class CommentAnswer(Answered):
+    """The edit's answer."""
+
+    data: CommentUpdated
+
+
+type Closing = Literal["completed", "not planned", "duplicate"]
+"""Why an issue closes, as `gh issue close --reason` spells it: its work done,
+not to be done, or another issue's repeat."""
+
+
 def terms(query: str) -> list[str]:
     """Return a search query's terms as `gh search` takes them: each word and qualifier apart, a phrase in double quotes whole.
 
@@ -466,14 +526,70 @@ class GitHub(Model):
         ]
         return Search(found=here, elsewhere=len(found) - len(here), limit=limit)
 
-    async def file(self, title: str, body: str) -> str:
-        """File an issue, and return what `gh` printed: its link."""
+    async def file(self, title: str, body: str, labels: list[str]) -> str:
+        """File an issue with `labels`, and return what `gh` printed: its link."""
         printed = await ran(
-            ["issue", "create", self.repo(), f"--title={title}", "--body-file=-"],
+            [
+                "issue",
+                "create",
+                self.repo(),
+                f"--title={title}",
+                "--body-file=-",
+                *(f"--label={label}" for label in labels),
+            ],
             self.directory,
             body,
         )
         return printed.strip()
+
+    async def edit(
+        self,
+        number: PositiveInt,
+        *,
+        title: str | None,
+        body: str | None,
+        added: list[str],
+        removed: list[str],
+    ) -> None:
+        """Edit the issue `number`: its title and body where given, the labels `added`, and those `removed`."""
+        await ran(
+            [
+                "issue",
+                "edit",
+                str(number),
+                self.repo(),
+                *([f"--title={title}"] if title is not None else []),
+                *(["--body-file=-"] if body is not None else []),
+                *(f"--add-label={label}" for label in added),
+                *(f"--remove-label={label}" for label in removed),
+            ],
+            self.directory,
+            body or "",
+        )
+
+    async def close(
+        self, number: PositiveInt, reason: Closing, duplicate_of: PositiveInt | None
+    ) -> None:
+        """Close the issue `number` for `reason`, naming the issue it repeats where it's a duplicate."""
+        await ran(
+            [
+                "issue",
+                "close",
+                str(number),
+                self.repo(),
+                f"--reason={reason}",
+                *(
+                    [f"--duplicate-of={duplicate_of}"]
+                    if duplicate_of is not None
+                    else []
+                ),
+            ],
+            self.directory,
+        )
+
+    async def reopen(self, number: PositiveInt) -> None:
+        """Reopen the issue `number`."""
+        await ran(["issue", "reopen", str(number), self.repo()], self.directory)
 
     async def comment(self, number: PositiveInt, body: str) -> str:
         """Comment on the issue or pull request `number`, and return what `gh` printed: the comment's link."""
@@ -483,6 +599,29 @@ class GitHub(Model):
             body,
         )
         return printed.strip()
+
+    async def edit_comment(self, number: PositiveInt, link: str, body: str) -> str:
+        """Replace the text of the comment at `link` on the issue or pull request `number` with `body`, and return its link.
+
+        The comment is found on its thread, read from this repository, so only
+        a comment of this repository is edited. Raise `GitHubError` where the
+        thread has no comment at `link`.
+        """
+        thread = await self.thread(number)
+        found = [each for each in thread.comments if each.url == link]
+        if not found:
+            message = (
+                f"#{number} has no comment at {link}: `read_issue` gives each "
+                "comment's link"
+            )
+            raise GitHubError(message)
+        [comment] = found
+        request = CommentEdit(variables=Edited(id=comment.id, body=body))
+        printed = await ran(
+            ["api", "graphql", "--input=-"], self.directory, request.model_dump_json()
+        )
+        answer = CommentAnswer.model_validate_json(printed)
+        return answer.data.update_issue_comment.issue_comment.url
 
     async def pushed(self, branch: str) -> bool:
         """Say whether the repository on GitHub has the branch `branch`."""

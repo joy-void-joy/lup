@@ -62,6 +62,8 @@ if TYPE_CHECKING:
 RECORDED = Path(__file__).parent / "payloads" / "gh-2.102.0"
 LUP = GitHubRepository(owner="joy-void-joy", name="lup")
 CALLER = Conversation(id="c1", session="s1")
+SETTLED = "https://github.com/joy-void-joy/lup/issues/50#issuecomment-6121797670"
+"""The link of the one comment in the recorded issue and pull request."""
 
 
 class Nothing(Records):
@@ -220,7 +222,11 @@ def test_each_tool_is_summarized_in_fifty_characters_at_most() -> None:
         "read_issue": "Read an issue or pull request, with its comments.",
         "find_issues": "Search a repository's issues and pull requests.",
         "file_issue": "File an issue in this repository.",
+        "edit_issue": "Edit an issue's title, body or labels.",
+        "close_issue": "Close an issue in this repository, saying why.",
+        "reopen_issue": "Reopen a closed issue in this repository.",
         "comment": "Comment on an issue or pull request.",
+        "edit_comment": "Edit a comment on an issue or pull request.",
         "draft_pull_request": "Open a draft pull request from a pushed branch.",
     }
     assert all(len(spec.summary) <= 50 for spec in specs)
@@ -257,7 +263,7 @@ def test_read_issue_reads_a_pull_request_with_its_comments_and_checks(
         "rests on in `docs/field-notes.md` and the `DESIGN.md` changes agreed while "
         "scoping #56. No code.\n\n"
         "Comments (1):\n\n"
-        "joy-void-joy, 2026-10-12 09:48 UTC:\n"
+        f"joy-void-joy, 2026-10-12 09:48 UTC, {SETTLED}:\n"
         "Settled in docs/library.md with the library's first slice (merged on dev)."
     )
     [call] = gh.calls()
@@ -294,9 +300,9 @@ def test_read_issue_reads_an_issue_where_the_number_is_no_pull_request(
         "Opened by joy-void-joy, 2026-10-12 08:33 UTC.\n\n"
     )
     assert answer.text.endswith(
-        "Comments (1):\n\njoy-void-joy, 2026-10-12 09:48 UTC:\nSettled in "
-        "docs/library.md with the library's first slice (merged on dev): the output "
-        "tool is `submit`."
+        f"Comments (1):\n\njoy-void-joy, 2026-10-12 09:48 UTC, {SETTLED}:\nSettled "
+        "in docs/library.md with the library's first slice (merged on dev): the "
+        "output tool is `submit`."
     )
     assert [arguments[:4] for arguments in gh.arguments()] == [
         ["pr", "view", "50", "--repo=joy-void-joy/lup"],
@@ -427,7 +433,22 @@ def test_a_repository_that_isnt_owner_and_name_is_refused_before_gh_runs(
     ("name", "arguments"),
     [
         ("file_issue", {"title": "t", "body": "b", "repository": "cli/cli"}),
+        ("edit_issue", {"number": 1, "title": "t", "repository": "cli/cli"}),
+        (
+            "close_issue",
+            {
+                "number": 1,
+                "reason": "completed",
+                "comment": "c",
+                "repository": "cli/cli",
+            },
+        ),
+        ("reopen_issue", {"number": 1, "comment": "c", "repository": "cli/cli"}),
         ("comment", {"number": 1, "body": "b", "repository": "cli/cli"}),
+        (
+            "edit_comment",
+            {"number": 1, "link": SETTLED, "body": "b", "repository": "cli/cli"},
+        ),
         (
             "draft_pull_request",
             {"branch": "b", "title": "t", "body": "b", "repository": "cli/cli"},
@@ -456,7 +477,11 @@ def test_only_the_tools_that_read_offer_another_repository() -> None:
         "read_issue": True,
         "find_issues": True,
         "file_issue": False,
+        "edit_issue": False,
+        "close_issue": False,
+        "reopen_issue": False,
         "comment": False,
+        "edit_comment": False,
         "draft_pull_request": False,
     }
 
@@ -578,13 +603,290 @@ def test_draft_pull_request_says_a_branch_must_be_pushed_first(
     assert [arguments[:2] for arguments in gh.arguments()] == [["api", "graphql"]]
 
 
+def no_pull_request(gh: Gh) -> None:
+    """Script `gh pr view` to fail, as it does on an issue's number."""
+    gh.answer("pr view", status=1, error="no pull request\n")
+
+
+def an_open_issue(gh: Gh) -> None:
+    """Script `gh issue view` to answer with the recorded issue, open."""
+    recorded = (RECORDED / "issue-view.json").read_text()
+    gh.answer("issue view", recorded.replace('"state":"CLOSED"', '"state":"OPEN"'))
+
+
+def test_file_issue_adds_the_labels_it_s_given(gh: Gh, tmp_path: Path) -> None:
+    gh.answer("issue create", "https://github.com/joy-void-joy/lup/issues/68\n")
+    answer = called(
+        "file_issue",
+        {"title": "t", "body": "b", "labels": ["bug", "--help"]},
+        launch(tmp_path),
+    )
+    assert not answer.error
+    [call] = gh.calls()
+    assert call.arguments[-2:] == ["--label=bug", "--label=--help"]
+
+
+def test_edit_issue_replaces_what_it_s_given_its_body_on_standard_input(
+    gh: Gh, tmp_path: Path
+) -> None:
+    gh.answer("issue edit")
+    answer = called(
+        "edit_issue",
+        {
+            "number": 123,
+            "title": "Roadmap",
+            "body": "- [x] #101\n",
+            "add_labels": ["documentation"],
+            "remove_labels": ["question"],
+        },
+        launch(tmp_path),
+    )
+    assert answer == Answer(text="Edited #123.")
+    [call] = gh.calls()
+    assert call.arguments == [
+        "issue",
+        "edit",
+        "123",
+        "--repo=joy-void-joy/lup",
+        "--title=Roadmap",
+        "--body-file=-",
+        "--add-label=documentation",
+        "--remove-label=question",
+    ]
+    assert call.input == "- [x] #101\n"
+
+
+def test_edit_issue_given_labels_alone_leaves_the_title_and_body(
+    gh: Gh, tmp_path: Path
+) -> None:
+    gh.answer("issue edit")
+    answer = called(
+        "edit_issue", {"number": 7, "add_labels": ["bug"]}, launch(tmp_path)
+    )
+    assert not answer.error
+    [call] = gh.calls()
+    assert call.arguments == [
+        "issue",
+        "edit",
+        "7",
+        "--repo=joy-void-joy/lup",
+        "--add-label=bug",
+    ]
+    assert call.input == ""
+
+
+def test_an_edit_that_changes_nothing_is_refused(gh: Gh, tmp_path: Path) -> None:
+    answer = called("edit_issue", {"number": 7}, launch(tmp_path))
+    assert answer.error
+    assert answer.text.startswith("`edit_issue` refused the call:")
+    assert "an edit changes the title, the body or the labels" in answer.text
+    assert gh.calls() == []
+
+
+def test_close_issue_comments_then_closes_it_for_its_reason(
+    gh: Gh, tmp_path: Path
+) -> None:
+    link = "https://github.com/joy-void-joy/lup/issues/50#issuecomment-2"
+    no_pull_request(gh)
+    an_open_issue(gh)
+    gh.answer("issue comment", f"{link}\n")
+    gh.answer("issue close")
+    comment = "Landed in edd2ac2. What's left is #201."
+    answer = called(
+        "close_issue",
+        {"number": 50, "reason": "not planned", "comment": comment},
+        launch(tmp_path),
+    )
+    assert answer == Answer(text=f"Closed #50 as not planned, after the comment {link}")
+    _, _, commented, closed = gh.calls()
+    assert commented.arguments[:4] == [
+        "issue",
+        "comment",
+        "50",
+        "--repo=joy-void-joy/lup",
+    ]
+    assert commented.input == comment
+    assert closed.arguments == [
+        "issue",
+        "close",
+        "50",
+        "--repo=joy-void-joy/lup",
+        "--reason=not planned",
+    ]
+
+
+def test_close_issue_as_a_duplicate_names_the_issue_it_repeats(
+    gh: Gh, tmp_path: Path
+) -> None:
+    no_pull_request(gh)
+    an_open_issue(gh)
+    gh.answer("issue comment", "https://github.com/joy-void-joy/lup/issues/50#c\n")
+    gh.answer("issue close")
+    answer = called(
+        "close_issue",
+        {"number": 50, "reason": "duplicate", "duplicate_of": 12, "comment": "As #12."},
+        launch(tmp_path),
+    )
+    assert not answer.error
+    assert gh.arguments()[-1][-2:] == ["--reason=duplicate", "--duplicate-of=12"]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"number": 50, "reason": "duplicate", "comment": "c"},
+        {"number": 50, "reason": "completed", "duplicate_of": 12, "comment": "c"},
+    ],
+)
+def test_the_issue_repeated_comes_with_a_duplicate_alone(
+    gh: Gh, tmp_path: Path, arguments: JsonValue
+) -> None:
+    answer = called("close_issue", arguments, launch(tmp_path))
+    assert answer.error
+    assert "`duplicate_of` names the issue repeated" in answer.text
+    assert gh.calls() == []
+
+
+def test_close_issue_posts_nothing_on_a_closed_issue_or_a_pull_request(
+    gh: Gh, tmp_path: Path
+) -> None:
+    asked: JsonValue = {"number": 50, "reason": "completed", "comment": "c"}
+    no_pull_request(gh)
+    gh.recorded("issue view", "issue-view.json")
+    closed = called("close_issue", asked, launch(tmp_path))
+    gh.recorded("pr view", "pr-view.json")
+    pull = called("close_issue", asked, launch(tmp_path))
+    assert closed == Answer(
+        text="`close_issue` didn't run: #50 is already closed", error=True
+    )
+    assert pull == Answer(
+        text=(
+            "`close_issue` didn't run: #50 is a pull request: closing or reopening "
+            "one is the operator's"
+        ),
+        error=True,
+    )
+    assert [arguments[:2] for arguments in gh.arguments()] == [
+        ["pr", "view"],
+        ["issue", "view"],
+        ["pr", "view"],
+    ]
+
+
+def test_a_close_that_fails_after_its_comment_says_the_comment_went(
+    gh: Gh, tmp_path: Path
+) -> None:
+    link = "https://github.com/joy-void-joy/lup/issues/50#issuecomment-3"
+    no_pull_request(gh)
+    an_open_issue(gh)
+    gh.answer("issue comment", f"{link}\n")
+    gh.answer("issue close", status=1, error="HTTP 502\n")
+    answer = called(
+        "close_issue",
+        {"number": 50, "reason": "completed", "comment": "Done."},
+        launch(tmp_path),
+    )
+    assert answer.error
+    assert answer.text.startswith(
+        f"`close_issue` didn't run: commented ({link}), but #50 didn't close: "
+    )
+    assert answer.text.endswith("HTTP 502")
+
+
+def test_reopen_issue_comments_then_reopens_a_closed_issue(
+    gh: Gh, tmp_path: Path
+) -> None:
+    link = "https://github.com/joy-void-joy/lup/issues/50#issuecomment-4"
+    no_pull_request(gh)
+    gh.recorded("issue view", "issue-view.json")
+    gh.answer("issue comment", f"{link}\n")
+    gh.answer("issue reopen")
+    answer = called(
+        "reopen_issue",
+        {"number": 50, "comment": "The fix didn't hold."},
+        launch(tmp_path),
+    )
+    assert answer == Answer(text=f"Reopened #50, after the comment {link}")
+    *_, commented, reopened = gh.calls()
+    assert commented.input == "The fix didn't hold."
+    assert reopened.arguments == ["issue", "reopen", "50", "--repo=joy-void-joy/lup"]
+
+
+def test_reopen_issue_posts_nothing_on_an_open_issue(gh: Gh, tmp_path: Path) -> None:
+    no_pull_request(gh)
+    an_open_issue(gh)
+    answer = called("reopen_issue", {"number": 50, "comment": "c"}, launch(tmp_path))
+    assert answer == Answer(
+        text="`reopen_issue` didn't run: #50 is already open", error=True
+    )
+    assert len(gh.calls()) == 2
+
+
+def test_edit_comment_finds_the_comment_on_its_thread_and_sends_the_edit_whole(
+    gh: Gh, tmp_path: Path
+) -> None:
+    no_pull_request(gh)
+    gh.recorded("issue view", "issue-view.json")
+    gh.answer(
+        "api graphql",
+        json.dumps(
+            {"data": {"updateIssueComment": {"issueComment": {"url": SETTLED}}}}
+        ),
+    )
+    body = 'Settled in `docs/library.md`, "submit" and --all.'
+    answer = called(
+        "edit_comment", {"number": 50, "link": SETTLED, "body": body}, launch(tmp_path)
+    )
+    assert answer == Answer(text=f"Edited: {SETTLED}")
+    *_, viewed, edited = gh.calls()
+    assert viewed.arguments[:4] == ["issue", "view", "50", "--repo=joy-void-joy/lup"]
+    assert edited.arguments == ["api", "graphql", "--input=-"]
+    request = json.loads(edited.input)
+    assert "updateIssueComment" in request["query"]
+    assert request["variables"] == {"id": "IC_kwDOU_MGQM8AAAABbOM4Jg", "body": body}
+
+
+def test_edit_comment_reaches_no_comment_its_thread_here_doesnt_have(
+    gh: Gh, tmp_path: Path
+) -> None:
+    elsewhere = "https://github.com/someone/else/issues/50#issuecomment-6121797670"
+    no_pull_request(gh)
+    gh.recorded("issue view", "issue-view.json")
+    answer = called(
+        "edit_comment", {"number": 50, "link": elsewhere, "body": "b"}, launch(tmp_path)
+    )
+    assert answer == Answer(
+        text=(
+            f"`edit_comment` didn't run: #50 has no comment at {elsewhere}: "
+            "`read_issue` gives each comment's link"
+        ),
+        error=True,
+    )
+    assert [arguments[:2] for arguments in gh.arguments()] == [
+        ["pr", "view"],
+        ["issue", "view"],
+    ]
+
+
 @pytest.mark.parametrize(
     ("name", "arguments", "action"),
     [
         ("read_issue", {"number": 1}, "read-issues"),
         ("find_issues", {"query": "x"}, "read-issues"),
         ("file_issue", {"title": "t", "body": "b"}, "file-issue"),
+        ("edit_issue", {"number": 1, "title": "t"}, "edit-issue"),
+        (
+            "close_issue",
+            {"number": 1, "reason": "completed", "comment": "c"},
+            "close-issue",
+        ),
+        ("reopen_issue", {"number": 1, "comment": "c"}, "close-issue"),
         ("comment", {"number": 1, "body": "b"}, "comment"),
+        (
+            "edit_comment",
+            {"number": 50, "link": SETTLED, "body": "b"},
+            "edit-comment",
+        ),
         (
             "draft_pull_request",
             {"branch": "b", "title": "t", "body": "b"},
@@ -659,18 +961,20 @@ def test_every_call_names_the_registered_repository(gh: Gh, tmp_path: Path) -> N
     gh.answer("issue comment", "https://github.com/x/y/issues/1#c\n")
     gh.answer("api graphql", '{"data":{"repository":{"ref":{"name":"b"}}}}')
     gh.answer("pr create", "https://github.com/x/y/pull/2\n")
+    gh.answer("issue edit")
     registered = launch(tmp_path)
     cases: list[tuple[str, JsonValue]] = [
         ("read_issue", {"number": 1}),
         ("find_issues", {"query": "repo:someone/private"}),
         ("file_issue", {"title": "t", "body": "--repo=someone/private"}),
+        ("edit_issue", {"number": 1, "body": "--repo=someone/private"}),
         ("comment", {"number": 1, "body": "b"}),
         ("draft_pull_request", {"branch": "b", "title": "t", "body": "b"}),
     ]
     for name, arguments in cases:
         assert not called(name, arguments, registered).error
     calls = gh.calls()
-    assert len(calls) == 6
+    assert len(calls) == 7
     for call in calls:
         arguments = call.arguments
         named_repository = [each for each in arguments if each.startswith("--repo=")]
@@ -908,6 +1212,39 @@ def test_a_comment_and_a_draft_carrying_a_value_are_refused_before_gh_runs(
     assert "  the body:1:12 - an SSH alias in the repository's remote" in commented.text
     assert drafted.error
     assert "  the branch:1:1 - an SSH alias" in drafted.text
+    assert gh.calls() == []
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments", "place"),
+    [
+        ("edit_issue", {"number": 7, "title": "From Kestrel Labs"}, "the title:1:6"),
+        ("edit_issue", {"number": 7, "add_labels": ["forge-op"]}, "the label:1:1"),
+        (
+            "file_issue",
+            {"title": "t", "body": "b", "labels": ["forge-op"]},
+            "the label",
+        ),
+        (
+            "close_issue",
+            {"number": 7, "reason": "completed", "comment": "See /home/op/x."},
+            "the body:1:5",
+        ),
+        ("reopen_issue", {"number": 7, "comment": "Kestrel Labs asks."}, "the body"),
+        (
+            "edit_comment",
+            {"number": 7, "link": SETTLED, "body": "Via forge-op."},
+            "the body:1:5",
+        ),
+    ],
+)
+def test_an_edit_or_a_closing_comment_carrying_a_value_is_refused_before_gh_runs(
+    gh: Gh, tmp_path: Path, name: str, arguments: JsonValue, place: str
+) -> None:
+    answer = called(name, arguments, launch(tmp_path))
+    assert answer.error
+    assert "lup refused to publish this " in answer.text
+    assert f"  {place}" in answer.text
     assert gh.calls() == []
 
 

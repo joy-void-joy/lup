@@ -16,7 +16,7 @@ Everything between a session and the operator goes through the inbox, which the 
 | `withdraw` | Takes back a message or question the agent sent that no longer needs the operator, with its reason |
 | `judged` | Reads what the judge made of the repository's writes, and its holds, changing nothing (`docs/judging-writes.md`, *The verdict log*) |
 | `rename` | Names the session's launch, or a subagent, after its task (`docs/launch.md`, *Names*) |
-| `read_issue`, `find_issues`, `file_issue`, `comment`, `draft_pull_request` | GitHub, through the operator's login on the host (`docs/credentials.md`, *GitHub through `gh`*) |
+| `read_issue`, `find_issues`, `file_issue`, `edit_issue`, `close_issue`, `reopen_issue`, `comment`, `edit_comment`, `draft_pull_request` | GitHub, through the operator's login on the host (`docs/credentials.md`, *GitHub through `gh`*) |
 
 - **Who serves which:** the inbox's tools are the core's (`InboxTools`, `inbox/tools.py`), and so is `judged` (`JudgeTools`, `policy/tools.py`), which the inbox, below the judge in `lup_dev`'s layers, can't import; `rename` is the host service's own; the GitHub tools are the `GitHub` module's, served from the launch's process of its repository's approved copy (`docs/host.md`, *Each launch's judge and modules*).
 - **The speaking tools are the library's** (`lup.tools.speaking`): `blocked`, `stop`, `note`, `friction` and `how_it_went` have the same names and inputs on an ask from code, so an agent's habit carries between the two. In a launched session whoever asked is the operator.

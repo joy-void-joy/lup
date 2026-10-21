@@ -14,7 +14,7 @@ class GitHub(Module):
     limit: int = 100
     """The most matches `find_issues` asks GitHub for."""
     tools: Toolsets = Toolsets.of(GitHubTools)
-    """Reading and finding issues, filing one, commenting, opening a draft pull
-    request."""
+    """Reading and finding issues; filing, editing, closing and reopening one;
+    commenting and editing a comment; opening a draft pull request."""
     handlers: Handlers = Handlers.of(Stating)
     """Whether an issue is open, which the gate asks from a room."""
