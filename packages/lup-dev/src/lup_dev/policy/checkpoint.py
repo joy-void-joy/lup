@@ -31,13 +31,12 @@ waits for.
 The session's turn's end holds only on what's left in the files its own
 conversation touched, and in the files importing them where the pass found errors
 (#41). A subagent's end never holds on what's left in its files: every worker
-passes the gate before it hands back, and one waiting on a review has files
-importing what hasn't landed, errors it can't fix. A file tool's write is the
-conversation's that made it; anything else a checkpoint lands is every
-conversation's whose calls finished since the last one, since the checkpoint sees
-files, not who wrote them. A subagent is at work from its first call to the end
-of its conversation, and while one is, the session's end doesn't hold on a file
-they both touched, which may be the subagent's in progress (#32).
+passes the gate before it hands back. A file tool's write is the conversation's
+that made it; anything else a checkpoint lands is every conversation's whose
+calls finished since the last one, since the checkpoint sees files, not who
+wrote them. A subagent is at work from its first call to the end of its
+conversation, and while one is, the session's end doesn't hold on a file they
+both touched, which may be the subagent's in progress (#32).
 """
 
 import asyncio
@@ -1696,12 +1695,11 @@ def ended(
     them. What's left in a file a subagent in `working` touched too doesn't hold
     the end. A subagent's end finds nothing, so runs no check and doesn't wait for
     the pass, which the next checkpoint or the session's end collects: every
-    worker passes the gate before it hands back, and one waiting on a review has
-    files importing what hasn't landed, errors it can't fix. A file under an open
-    hold isn't anyone's until the operator answers, so it holds no end. Without
-    `judging`, no checkpoint: another conversation's call is running there, whose
-    finish runs it, so its writes in progress aren't judged as this one's, put
-    back under it, or told to a conversation that didn't make them.
+    worker passes the gate before it hands back. A file under an open hold isn't
+    anyone's until the operator answers, so it holds no end. Without `judging`,
+    no checkpoint: another conversation's call is running there, whose finish
+    runs it, so its writes in progress aren't judged as this one's, put back
+    under it, or told to a conversation that didn't make them.
     """
     services = bench.services
     checked = checkpoint(bench, worktree, key, agent) if judging else Checked()
@@ -1954,9 +1952,8 @@ class ConversationEnded(Event):
     what it must be told, each told once (`end_turn`): a refusal, a move, a
     checkpoint's notice, mail. It never holds on the type errors and ruff's
     findings left in its files: every worker passes the gate before it hands
-    back, and one waiting on a review has files importing what hasn't landed,
-    errors it can't fix. Its end ends its time at work, unless it's blocked,
-    which keeps the subagent going.
+    back. Its end ends its time at work, unless it's blocked, which keeps the
+    subagent going.
     """
 
     @override
