@@ -1077,6 +1077,7 @@ def test_a_misspelled_session_setting_is_refused() -> None:
 EVERY_BUT_LUP_S_WITHHELD: list[Action] = [
     "fetch",
     "push",
+    "delete-merged",
     "read-issues",
     "file-issue",
     "edit-issue",
@@ -1119,6 +1120,7 @@ def test_credentials_layer_across_a_base_and_a_project() -> None:
             "fetch",
             "push",
             "force-push",
+            "delete-merged",
             "read-issues",
             "file-issue",
             "edit-issue",
@@ -1196,9 +1198,9 @@ def test_a_name_that_isnt_an_action_is_refused_naming_those_that_are(
         ProjectError,
         match=(
             rf"^`Actions` has no action `{unknown}`; its actions are `fetch`, "
-            r"`push`, `force-push`, `delete-ref`, `read-issues`, `file-issue`, "
-            r"`edit-issue`, `close-issue`, `comment`, `edit-comment` and "
-            r"`draft-pull-request`$"
+            r"`push`, `force-push`, `delete-merged`, `delete-ref`, `read-issues`, "
+            r"`file-issue`, `edit-issue`, `close-issue`, `comment`, `edit-comment` "
+            r"and `draft-pull-request`$"
         ),
     ):
         written()

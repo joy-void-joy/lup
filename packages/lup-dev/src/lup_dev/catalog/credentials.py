@@ -51,4 +51,6 @@ class CredentialDefaults(Model):
     `dev`, so it never takes a commit the gate fails on. A project whose
     integration branch is another names that one. The gate runs in the room,
     before the host is asked: it steers, and guards nothing
-    (`docs/credentials.md`, *git through a remote helper*)."""
+    (`docs/credentials.md`, *git through a remote helper*). A branch whose
+    commits are all in a gated one on the remote has landed, so `delete-merged`
+    deletes it (`docs/credentials.md`, *Deleting a branch that has landed*)."""

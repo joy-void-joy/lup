@@ -71,6 +71,7 @@ type Action = Literal[
     "fetch",
     "push",
     "force-push",
+    "delete-merged",
     "delete-ref",
     "read-issues",
     "file-issue",
@@ -84,12 +85,13 @@ type Action = Literal[
 
 Each names a handler lup carries out on the host (`docs/credentials.md`):
 fetching from one of the repository's remotes;
-pushing to one, a push that isn't a fast-forward being `force-push`, and one
-removing a branch or tag `delete-ref`; reading issues and pull requests, the
-repository's own or another's the operator's login can read; filing an issue,
-editing its title, body and labels, and closing or reopening it; commenting on
-an issue or pull request, and editing a comment; and opening a draft pull
-request.
+pushing to one, a push that isn't a fast-forward being `force-push`, one
+removing a branch whose commits are all in a gated branch on the remote
+`delete-merged`, and one removing any branch or tag `delete-ref`; reading
+issues and pull requests, the repository's own or another's the operator's
+login can read; filing an issue, editing its title, body and labels, and
+closing or reopening it; commenting on an issue or pull request, and editing a
+comment; and opening a draft pull request.
 The handlers arrive with GitHub's tools and git's remote helper.
 """
 
@@ -119,7 +121,9 @@ class Limits(Model):
     gated: list[str] = []
     """Patterns over full ref names: the refs a push from the room updates only
     once the gate passed on its commit, which the room's git helper runs first
-    (`remote/helper.py`); the host checks nothing of it."""
+    (`remote/helper.py`), the host checking nothing of it. Branches land there:
+    `delete-merged` deletes a branch whose commits are all in a gated one on
+    the remote, and never a gated one (`remote/protocol.py`)."""
 
     def refusal(self, action: Action) -> str | None:
         """Say why the host doesn't do `action` for the launch, where these limits leave it out; none where they allow it.

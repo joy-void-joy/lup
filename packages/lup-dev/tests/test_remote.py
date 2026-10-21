@@ -9,6 +9,7 @@ Nothing reaches the network, and no test sleeps or reads the clock.
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import socketserver
@@ -38,7 +39,7 @@ from lup_dev.host.protocol import (
     Reply,
     Stop,
 )
-from lup_dev.host.service import Answerer, HostService
+from lup_dev.host.service import Answerer, Asked, HostService, Judged, judged
 from lup_dev.host.workers import LaunchJudge
 from lup_dev.launch.room import RoomError, RoomGit, programs, refreshed, room_git
 from lup_dev.layout import ROOM_PATH, HostLayout, LaunchLayout, LaunchSockets, Layout
@@ -64,7 +65,7 @@ from lup_dev.remote.protocol import (
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Awaitable, Callable, Generator
 
     from conftest import FakeClock, InProcess, StubFacts
 
@@ -245,8 +246,11 @@ class World:
         clock: FakeClock,
         limits: Limits = DEFAULT,
         modules: LaunchModules | None = None,
+        run: Callable[[Asked], Awaitable[Judged]] = judged,
     ) -> Generator[None]:
-        remotes = Remotes(say=self.said.append, landed=self.landing, modules=modules)
+        remotes = Remotes(
+            say=self.said.append, landed=self.landing, modules=modules, run=run
+        )
         service = HostService(
             layout=self.layout,
             answerer=Stub(),
@@ -822,6 +826,364 @@ def test_a_protected_pattern_is_git_s_glob_its_star_spanning_slashes(
     assert why("refs/heads/release/2/hotfix") is not None
     assert why("refs/heads/releases") is None
     assert why("refs/heads/Release/2") is None
+
+
+# Deleting a branch that has landed
+
+
+MERGING = Limits(
+    actions=["fetch", "push", "delete-merged"],
+    protected=["refs/heads/main", "refs/tags/*"],
+    gated=["refs/heads/dev"],
+)
+"""lup's default for deletions: a branch whose commits are all in `dev` on the
+remote is deleted, and nothing else."""
+
+UNLANDED = (
+    "deleting `refs/heads/feat`: its commits on `origin` aren't all in "
+    "`refs/heads/dev` there, so deleting it would lose them; deleting it anyway "
+    "is `delete-ref`, which the project's declaration doesn't allow with the "
+    "operator's credentials (`Core.credentials`), and allowing it is the "
+    "operator's call"
+)
+
+
+def elsewhere(world: World, tmp_path: Path) -> Path:
+    """Return a clone of the forge, as another machine pushing to it has."""
+    other = tmp_path / "other"
+    git(tmp_path, "clone", "-q", str(world.forge), str(other))
+    git(other, "config", "user.name", "Other")
+    git(other, "config", "user.email", "other@example.com")
+    return other
+
+
+def test_a_branch_whose_commits_are_in_the_integration_branch_is_deleted(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("first")
+
+    with world.served(clock, MERGING):
+        assert world.room_git("push", "origin", "HEAD:refs/heads/feat").exit_code == 0
+        assert world.room_git("push", "origin", "HEAD:refs/heads/dev").exit_code == 0
+        deleted = world.room_git("push", "origin", "--delete", "feat")
+
+    assert deleted.exit_code == 0, stderr(deleted)
+    assert world.on_forge("refs/heads/feat") is None
+    assert world.on_forge("refs/heads/dev") is not None
+    assert world.landed[-1] == ["refs/heads/feat"]
+
+
+def test_a_branch_landed_in_the_room_but_not_on_the_remote_is_kept(
+    world: World, clock: FakeClock, tmp_path: Path
+) -> None:
+    landed = world.commit("landed")
+
+    with world.served(clock, MERGING):
+        assert world.room_git("push", "origin", "HEAD:refs/heads/feat").exit_code == 0
+        assert world.room_git("push", "origin", "HEAD:refs/heads/dev").exit_code == 0
+        other = elsewhere(world, tmp_path)
+        git(other, "switch", "-q", "feat")
+        git(other, "commit", "-q", "--allow-empty", "-m", "on feat, not landed")
+        git(other, "push", "-q", "origin", "HEAD:refs/heads/feat")
+        kept = world.room_git("push", "origin", "--delete", "feat")
+
+    assert git(world.worktree, "rev-parse", "HEAD") == landed
+    assert kept.exit_code != 0
+    assert UNLANDED in stderr(kept)
+    assert world.on_forge("refs/heads/feat") == git(other, "rev-parse", "HEAD")
+
+
+def test_a_branch_landed_on_the_remote_is_deleted_though_the_room_never_held_it(
+    world: World, clock: FakeClock, tmp_path: Path
+) -> None:
+    other = elsewhere(world, tmp_path)
+    git(other, "commit", "-q", "--allow-empty", "-m", "theirs")
+    git(other, "push", "-q", "origin", "HEAD:refs/heads/theirs", "HEAD:refs/heads/dev")
+    theirs = git(other, "rev-parse", "HEAD")
+    refs = git(world.project, "for-each-ref")
+
+    with world.served(clock, MERGING):
+        deleted = world.room_git("push", "origin", "--delete", "theirs")
+
+    assert deleted.exit_code == 0, stderr(deleted)
+    assert world.on_forge("refs/heads/theirs") is None
+    assert git(world.project, "cat-file", "-t", theirs) == "commit"
+    assert git(world.project, "for-each-ref") == refs
+
+
+def test_a_branch_with_commits_the_integration_branch_lacks_is_kept(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("landed")
+    tip = world.commit("not landed")
+
+    with world.served(clock, MERGING):
+        assert world.room_git("push", "origin", "HEAD:refs/heads/feat").exit_code == 0
+        assert world.room_git("push", "origin", "HEAD~1:refs/heads/dev").exit_code == 0
+        kept = world.room_git("push", "origin", "--delete", "feat")
+        atomic = world.room_git(
+            "push", "--atomic", "origin", ":refs/heads/feat", "HEAD:refs/heads/other"
+        )
+
+    assert kept.exit_code != 0
+    assert UNLANDED in stderr(kept)
+    assert atomic.exit_code != 0
+    assert "the push is atomic, and `refs/heads/feat` was refused" in stderr(atomic)
+    assert world.on_forge("refs/heads/feat") == tip
+    assert world.on_forge("refs/heads/other") is None
+    assert any(
+        f"one: refused a push to `refs/heads/feat` on `origin`: {UNLANDED}" in line
+        for line in world.said
+    )
+
+
+def test_the_integration_branch_a_protected_ref_a_tag_and_what_isnt_a_branch_are_kept(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("first")
+    git(
+        world.worktree,
+        "push",
+        "-q",
+        "origin",
+        "HEAD:refs/heads/dev",
+        "HEAD:refs/heads/release/1",
+        "HEAD:refs/tags/v1",
+        "HEAD:refs/review/1",
+    )
+    gating = MERGING.model_copy(
+        update={"gated": ["refs/heads/dev", "refs/heads/release/*"]}
+    )
+    anyway = (
+        "deleting it anyway is `delete-ref`, which the project's declaration "
+        "doesn't allow"
+    )
+
+    with world.served(clock, gating):
+        dev = world.room_git("push", "origin", "--delete", "dev")
+        release = world.room_git("push", "origin", ":refs/heads/release/1")
+        main = world.room_git("push", "origin", ":refs/heads/main")
+        tag = world.room_git("push", "origin", ":refs/tags/v1")
+        review = world.room_git("push", "origin", ":refs/review/1")
+
+    for refused in [dev, release, main, tag, review]:
+        assert refused.exit_code != 0
+    assert (
+        "deleting `refs/heads/dev`: branches land there, since it's gated "
+        "(`Core.credentials`, `refs/heads/dev`), so `delete-merged` doesn't delete "
+        f"it; {anyway}"
+    ) in stderr(dev)
+    assert "(`Core.credentials`, `refs/heads/release/*`)" in stderr(release)
+    assert (
+        "`refs/heads/main` is protected by the project's declaration "
+        "(`Core.credentials`, `refs/heads/main`)" in stderr(main)
+    )
+    assert "(`Core.credentials`, `refs/tags/*`)" in stderr(tag)
+    assert (
+        "deleting `refs/review/1`: `delete-merged` deletes only a branch, "
+        f"`refs/heads/…`, once it has landed; {anyway}" in stderr(review)
+    )
+    for ref in [
+        "refs/heads/dev",
+        "refs/heads/release/1",
+        "refs/heads/main",
+        "refs/tags/v1",
+        "refs/review/1",
+    ]:
+        assert world.on_forge(ref) is not None
+
+
+def test_a_branch_where_the_remote_has_no_integration_branch_is_kept(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("first")
+
+    with world.served(clock, MERGING):
+        assert world.room_git("push", "origin", "HEAD:refs/heads/feat").exit_code == 0
+        kept = world.room_git("push", "origin", "--delete", "feat")
+
+    assert kept.exit_code != 0
+    assert (
+        "deleting `refs/heads/feat`: `origin` holds no branch the project's "
+        "declaration gates (`Core.credentials`), where branches land, so nothing "
+        "there says it has landed" in stderr(kept)
+    )
+    assert world.on_forge("refs/heads/feat") is not None
+
+
+def test_a_branch_that_moves_after_its_check_isnt_deleted(
+    world: World, clock: FakeClock
+) -> None:
+    landed = world.commit("landed")
+    ahead = world.commit("not landed")
+    pushes: list[list[str]] = []
+
+    async def moving(asked: Asked) -> Judged:
+        """Move `feat` on the forge just before its deletion is pushed, as another push between the check and it would."""
+        if ":refs/heads/feat" in asked.command:
+            pushes.append(asked.command)
+            git(world.forge, "update-ref", "refs/heads/feat", ahead)
+        return await judged(asked)
+
+    with world.served(clock, MERGING, run=moving):
+        assert world.room_git("push", "origin", "HEAD:refs/heads/ahead").exit_code == 0
+        assert world.room_git("push", "origin", "HEAD~1:refs/heads/feat").exit_code == 0
+        assert world.room_git("push", "origin", "HEAD~1:refs/heads/dev").exit_code == 0
+        deleted = world.room_git("push", "origin", "--delete", "feat")
+
+    assert deleted.exit_code != 0
+    assert "stale info" in stderr(deleted)
+    assert world.on_forge("refs/heads/feat") == ahead
+    [push] = pushes
+    assert f"--force-with-lease=refs/heads/feat:{landed}" in push
+
+
+def forged_graph(graph: Path, commit: str, parent: str) -> None:
+    """Rewrite the commit-graph at `graph` so that `commit`'s first parent is `parent`, its checksum made again, as a room can under `objects/info/`.
+
+    The format is `gitformat-commit-graph(5)`: a table of chunks after an
+    8-byte header, the sorted object ids in `OIDL`, and in `CDAT` a 36-byte row
+    for each, its first parent's position after the tree's id.
+    """
+    data = bytearray(graph.read_bytes())
+    chunks = data[6]
+    offsets = {
+        bytes(data[8 + 12 * each : 12 + 12 * each]): int.from_bytes(
+            data[12 + 12 * each : 20 + 12 * each]
+        )
+        for each in range(chunks + 1)
+    }
+    listed = data[offsets[b"OIDL"] : offsets[b"CDAT"]]
+    ids = [bytes(listed[at : at + 20]).hex() for at in range(0, len(listed), 20)]
+    row = offsets[b"CDAT"] + 36 * ids.index(commit)
+    data[row + 20 : row + 24] = ids.index(parent).to_bytes(4)
+    data[-20:] = hashlib.sha1(data[:-20], usedforsecurity=False).digest()
+    graph.unlink()
+    graph.write_bytes(bytes(data))
+
+
+def is_ancestor(repository: Path, ancestor: str, tip: str) -> bool:
+    """Whether git, as it runs by default, calls `ancestor` an ancestor of `tip`."""
+    ran = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, tip],
+        cwd=repository,
+        capture_output=True,
+        check=False,
+    )
+    return ran.returncode == 0
+
+
+@pytest.mark.parametrize("planted", ["graft", "commit-graph"])
+def test_a_graft_or_a_commit_graph_the_room_writes_doesnt_land_a_branch(
+    world: World, clock: FakeClock, planted: str
+) -> None:
+    base = world.commit("base")
+    landed = world.commit("on dev")
+    assert world.room_git("switch", "-q", "-c", "feat", base).exit_code == 0
+    unlanded = world.commit("on feat, not landed")
+
+    with world.served(clock, MERGING):
+        assert world.room_git("push", "origin", "main:refs/heads/dev").exit_code == 0
+        assert world.room_git("push", "origin", "feat:refs/heads/feat").exit_code == 0
+        if planted == "graft":
+            (world.project / "info" / "grafts").write_text(
+                f"{landed} {base} {unlanded}\n"
+            )
+        else:
+            git(world.project, "commit-graph", "write", "--reachable")
+            graph = world.project / "objects" / "info" / "commit-graph"
+            forged_graph(graph, landed, unlanded)
+        assert is_ancestor(world.project, unlanded, landed), (
+            f"git no longer reads a {planted} for a commit's parents: "
+            "docs/field-notes.md, *What git reads a commit's parents from*, is stale"
+        )
+        kept = world.room_git("push", "origin", "--delete", "feat")
+
+    assert kept.exit_code != 0
+    assert UNLANDED in stderr(kept)
+    assert world.on_forge("refs/heads/feat") == unlanded
+
+
+def test_delete_ref_deletes_any_branch_unchecked(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("landed")
+    world.commit("not landed")
+    anything = MERGING.model_copy(
+        update={"actions": ["fetch", "push", "delete-merged", "delete-ref"]}
+    )
+
+    with world.served(clock, anything):
+        assert world.room_git("push", "origin", "HEAD:refs/heads/feat").exit_code == 0
+        assert world.room_git("push", "origin", "HEAD~1:refs/heads/dev").exit_code == 0
+        feat = world.room_git("push", "origin", "--delete", "feat")
+        dev = world.room_git("push", "origin", "--delete", "dev")
+
+    assert feat.exit_code == 0, stderr(feat)
+    assert dev.exit_code == 0, stderr(dev)
+    assert world.on_forge("refs/heads/feat") is None
+    assert world.on_forge("refs/heads/dev") is None
+    assert not any("fetching" in line for line in world.said)
+
+
+def test_a_landed_branch_is_kept_where_delete_merged_is_withheld(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("first")
+    withheld = MERGING.model_copy(update={"actions": ["fetch", "push"]})
+
+    with world.served(clock, withheld):
+        assert world.room_git("push", "origin", "HEAD:refs/heads/feat").exit_code == 0
+        assert world.room_git("push", "origin", "HEAD:refs/heads/dev").exit_code == 0
+        kept = world.room_git("push", "origin", "--delete", "feat")
+
+    assert kept.exit_code != 0
+    assert (
+        "deleting `refs/heads/feat`: the project's declaration doesn't allow "
+        "`delete-ref` with the operator's credentials (`Core.credentials`), and "
+        "allowing it is the operator's call" in stderr(kept)
+    )
+    assert world.on_forge("refs/heads/feat") is not None
+
+
+def test_a_deletion_the_room_leases_at_another_tip_is_refused(
+    world: World, clock: FakeClock
+) -> None:
+    first = world.commit("first")
+    room = RoomClient(socket=world.layout.launch("one").request)
+
+    with world.served(clock, MERGING):
+        assert world.room_git("push", "origin", "HEAD:refs/heads/feat").exit_code == 0
+        assert world.room_git("push", "origin", "HEAD:refs/heads/dev").exit_code == 0
+        stale = room.ask(
+            Pushing(
+                remote="origin",
+                updates=[Update(source=None, destination="refs/heads/feat")],
+                leases=[Lease(ref="refs/heads/feat", expected="1" * 40)],
+            ),
+            Pushed,
+        )
+        leased = room.ask(
+            Pushing(
+                remote="origin",
+                updates=[Update(source=None, destination="refs/heads/feat")],
+                leases=[Lease(ref="refs/heads/feat", expected=first)],
+                force=True,
+            ),
+            Pushed,
+        )
+
+    assert stale.updates == [
+        Updated(
+            destination="refs/heads/feat",
+            error=(
+                f"deleting `refs/heads/feat`: `origin` holds it at {first}, not "
+                f"{'1' * 40} as leased"
+            ),
+        )
+    ]
+    assert leased.updates == [Updated(destination="refs/heads/feat")]
+    assert world.on_forge("refs/heads/feat") is None
 
 
 # The room's configuration
