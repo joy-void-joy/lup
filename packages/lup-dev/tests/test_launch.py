@@ -518,6 +518,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
                 "fetch",
                 "push",
                 "force-push",
+                "delete-merged",
                 "read-issues",
                 "file-issue",
                 "edit-issue",

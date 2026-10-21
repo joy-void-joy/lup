@@ -322,7 +322,7 @@ class Actions(Named[str]):
     >>> Actions().add("forse-push")
     Traceback (most recent call last):
     ...
-    lup_dev.declaration.errors.ProjectError: `Actions` has no action `forse-push`; its actions are `fetch`, `push`, `force-push`, `delete-ref`, `read-issues`, `file-issue`, `edit-issue`, `close-issue`, `comment`, `edit-comment` and `draft-pull-request`
+    lup_dev.declaration.errors.ProjectError: `Actions` has no action `forse-push`; its actions are `fetch`, `push`, `force-push`, `delete-merged`, `delete-ref`, `read-issues`, `file-issue`, `edit-issue`, `close-issue`, `comment`, `edit-comment` and `draft-pull-request`
     """
 
     @model_validator(mode="after")

@@ -17,6 +17,10 @@
 - each update is held to the launch's limits (`Register.limits`) before git
   runs: a forced one (`+`, `option force`, a lease), a deletion, or one to a
   protected ref is refused where the declaration doesn't allow it, saying why;
+- a deletion `delete-merged` allows, and `delete-ref` doesn't, goes ahead only
+  where the branch's tip on the remote is in the history of a gated branch's
+  tip there, both fetched into the store, and is pushed with a lease on the tip
+  checked (`Remotes.merged`);
 - what each update would publish is put to the launch's modules' hooks at the
   `publishing` moment before git runs (`lup_dev.host.publishing`), with what the
   remote holds already: the listing git asked for before the push
@@ -56,7 +60,7 @@ from pydantic import AfterValidator
 
 from lup.types import Model, MutableModel
 from lup_dev.git import pinning
-from lup_dev.host.protocol import Action, HostError, Register, Reply, Request
+from lup_dev.host.protocol import Action, HostError, Limits, Register, Reply, Request
 from lup_dev.host.publishing import Place, Push, Refusal, Updating, told
 from lup_dev.host.rooms import RoomHandler, RoomRoute
 from lup_dev.host.service import Asked, Judged, judged
@@ -226,6 +230,13 @@ class Barred(Model):
     said: str = ""
 
 
+class Merging(Model):
+    """The deletions resting on `delete-merged`, checked: those refused, each by its branch with its one line, and the lease each of the others is pushed with."""
+
+    refused: dict[str, str] = {}
+    leases: dict[str, Lease] = {}
+
+
 BARRED = (
     "refused by lup: it would publish what isn't published, at the places listed above"
 )
@@ -293,27 +304,74 @@ def require(action: Action, launch: Register) -> None:
         raise HostError(denial)
 
 
+ANYWAY = (
+    "deleting it anyway is `delete-ref`, which the project's declaration doesn't "
+    "allow with the operator's credentials (`Core.credentials`), and allowing it "
+    "is the operator's call"
+)
+"""What a deletion `delete-merged` doesn't make is told after why: the rest is
+the operator's call."""
+
+
+def matching(ref: str, patterns: list[str]) -> list[str]:
+    """Return the patterns among `patterns` that match `ref`, each read as git's own glob, `*` spanning `/`, case and all.
+
+    >>> matching("refs/heads/release/2/hotfix", ["refs/heads/release/*", "refs/heads/dev"])
+    ['refs/heads/release/*']
+    """
+    return [pattern for pattern in patterns if fnmatchcase(ref, pattern)]
+
+
+def deleting(destination: str, limits: Limits) -> str | None:
+    """Say why `limits` refuse deleting `destination` whatever its branch holds, or none where they allow it.
+
+    `delete-ref` deletes anything; `delete-merged` a branch, `refs/heads/…`,
+    once it has landed (`Remotes.merged`), so never a gated one, since branches
+    land there.
+
+    >>> merging = Limits(actions=["delete-merged"], protected=[], gated=["refs/heads/dev"])
+    >>> deleting("refs/heads/feat", merging) is None
+    True
+    >>> print(deleting("refs/heads/dev", merging))
+    deleting `refs/heads/dev`: branches land there, since it's gated (`Core.credentials`, `refs/heads/dev`), so `delete-merged` doesn't delete it; deleting it anyway is `delete-ref`, which the project's declaration doesn't allow with the operator's credentials (`Core.credentials`), and allowing it is the operator's call
+    """
+    denial = limits.refusal("delete-ref")
+    if denial is None:
+        return None
+    if limits.refusal("delete-merged") is not None:
+        return f"deleting `{destination}`: {denial}"
+    if not destination.startswith("refs/heads/"):
+        return (
+            f"deleting `{destination}`: `delete-merged` deletes only a branch, "
+            f"`refs/heads/…`, once it has landed; {ANYWAY}"
+        )
+    gated = matching(destination, limits.gated)
+    if gated:
+        return (
+            f"deleting `{destination}`: branches land there, since it's gated "
+            f"(`Core.credentials`, `{gated[0]}`), so `delete-merged` doesn't "
+            f"delete it; {ANYWAY}"
+        )
+    return None
+
+
 def refusal(update: Update, *, forced: bool, launch: Register) -> str | None:
     """Say why `launch`'s limits refuse `update`, or none where they allow it.
 
     `forced` is whether it's forced: its own `+`, git's `option force`, or a
-    lease on its ref. A protected ref's pattern is read as git's own glob, `*`
-    spanning `/`, case and all. An action beyond the limits is said as
-    `Limits.refusal` says it.
+    lease on its ref. A protected ref's pattern is read as git's own glob
+    (`matching`). An action beyond the limits is said as `Limits.refusal` says
+    it. A deletion `delete-merged` allows and `delete-ref` doesn't is allowed
+    here, and goes ahead once its branch has landed (`Remotes.merged`).
     """
-    protected = [
-        pattern
-        for pattern in launch.limits.protected
-        if fnmatchcase(update.destination, pattern)
-    ]
+    protected = matching(update.destination, launch.limits.protected)
     if protected:
         return (
             f"`{update.destination}` is protected by the project's declaration "
             f"(`Core.credentials`, `{protected[0]}`): updating it is the operator's"
         )
     if update.source is None:
-        denial = launch.limits.refusal("delete-ref")
-        return None if denial is None else f"deleting `{update.destination}`: {denial}"
+        return deleting(update.destination, launch.limits)
     if forced:
         denial = launch.limits.refusal("force-push")
         return (
@@ -409,13 +467,31 @@ class Remotes(Model, arbitrary_types_allowed=True):
             return kept
         return [ref.object for ref in await self.listed(launch, remote, push=True)]
 
-    async def git(self, launch: Register, *arguments: str) -> Judged:
-        """Run git in `launch`'s repository's own git directory, pinned there (`pinning`), with what it could be led into turned off."""
+    async def git(
+        self, launch: Register, *arguments: str, own_parents: bool = False
+    ) -> Judged:
+        """Run git in `launch`'s repository's own git directory, pinned there (`pinning`), with what it could be led into turned off.
+
+        `own_parents` has git read each commit's parents from the commit alone:
+        a room writes `info/grafts` and `objects/info/commit-graph`, which git
+        reads a commit's parents from first, so either could make any commit
+        another's ancestor (`docs/field-notes.md`, *What git reads a commit's
+        parents from*). Grafts are read from an empty file instead
+        (`GIT_GRAFT_FILE`), and the commit-graph not at all.
+        """
+        ungrafted = ["env", f"GIT_GRAFT_FILE={os.devnull}"] if own_parents else []
+        graphless = (
+            ["-c", "core.commitGraph=false", "-c", "advice.graftFileDeprecated=false"]
+            if own_parents
+            else []
+        )
         return await self.run(
             Asked(
                 command=[
                     *pinning(launch.repository),
+                    *ungrafted,
                     "git",
+                    *graphless,
                     "--no-replace-objects",
                     "-c",
                     "gc.auto=0",
@@ -431,6 +507,88 @@ class Remotes(Model, arbitrary_types_allowed=True):
                 directory=launch.repository,
             )
         )
+
+    async def descends(self, launch: Register, tip: str, ancestor: str) -> bool:
+        """Whether the commit `ancestor` is in the history of the commit `tip`, each commit's parents read from the commit alone (`git`, `own_parents`).
+
+        Raise `HostError` where git can't say, one of them missing from the
+        store among others.
+        """
+        ran = await self.git(
+            launch, "merge-base", "--is-ancestor", ancestor, tip, own_parents=True
+        )
+        match ran.status:
+            case 0:
+                return True
+            case 1:
+                return False
+            case _:
+                message = (
+                    f"git couldn't say whether {ancestor} is in {tip}'s history: "
+                    f"{oneline(ran.error)}"
+                )
+                raise HostError(message)
+
+    async def merged(
+        self, launch: Register, remote: str, branch: str, leased: Lease | None
+    ) -> Lease | str:
+        """Check that deleting `branch` on `launch`'s `remote` loses nothing, and return the lease to push its deletion with, on its tip there; or say why it isn't deleted.
+
+        What a deletion loses is the remote's commits, so the remote's refs are
+        read, never the room's: the branch's tip there must be in the history
+        of a gated branch's tip there (`Limits.gated`), where branches land and
+        which `delete-merged` never deletes, both fetched into the store first
+        (`descends`). A pull request the branch heads isn't looked for: with its
+        tip in a gated branch, nothing is left in it to merge, whatever the
+        forge. The lease fails the deletion where the branch moved since it was
+        checked; `leased` is the room's own lease on it, where it gave one,
+        which the tip must match too.
+
+        Raise `HostError` where the remote can't be listed or fetched from.
+        """
+        refs = await self.listed(launch, remote, push=True)
+        tip = next((ref.object for ref in refs if ref.name == branch), None)
+        if tip is None:
+            return f"deleting `{branch}`: `{remote}` doesn't hold it"
+        if leased is not None and leased.expected != tip:
+            return (
+                f"deleting `{branch}`: `{remote}` holds it at {tip}, not "
+                f"{leased.expected} as leased"
+            )
+        landing = [
+            ref
+            for ref in refs
+            if ref.name.startswith("refs/heads/")
+            and matching(ref.name, launch.limits.gated)
+        ]
+        if not landing:
+            return (
+                f"deleting `{branch}`: `{remote}` holds no branch the project's "
+                "declaration gates (`Core.credentials`), where branches land, so "
+                f"nothing there says it has landed; {ANYWAY}"
+            )
+        wanted = [
+            Wanted(object=tip, name=branch),
+            *(Wanted(object=ref.object, name=ref.name) for ref in landing),
+        ]
+        moved = await self.fetched(launch, remote, wanted, push=True)
+        if moved:
+            names = ", ".join(f"`{each.name}`" for each in moved)
+            return (
+                f"deleting `{branch}`: {names} moved on `{remote}` while lup "
+                "checked it: delete it again"
+            )
+        holding = [
+            ref for ref in landing if await self.descends(launch, ref.object, tip)
+        ]
+        if not holding:
+            named = ", ".join(f"`{ref.name}`" for ref in landing)
+            where = named if len(landing) == 1 else f"any one of {named}"
+            return (
+                f"deleting `{branch}`: its commits on `{remote}` aren't all in "
+                f"{where} there, so deleting it would lose them; {ANYWAY}"
+            )
+        return Lease(ref=branch, expected=tip)
 
     async def url(self, launch: Register, remote: str, *, push: bool) -> str:
         """Return the URL of the remote named `remote` in `launch`'s repository, as git reads it there for a push or a fetch.
@@ -454,6 +612,38 @@ class Remotes(Model, arbitrary_types_allowed=True):
             message = f"git couldn't say `{remote}`'s URL: {oneline(found.error)}"
             raise HostError(message)
         return found.output.strip()
+
+    async def fetched(
+        self, launch: Register, remote: str, wanted: list[Wanted], *, push: bool
+    ) -> list[Wanted]:
+        """Fetch the refs `wanted` names from `launch`'s `remote` into the repository's store, writing no ref, and return those whose object still isn't there: the remote moved them since it listed them.
+
+        From its URL for a push or a fetch, as `push` says. Raise `HostError`
+        where the store reads objects from elsewhere, or git can't fetch.
+        """
+        url = await self.url(launch, remote, push=push)
+        await self.contained(launch)
+        names = list(dict.fromkeys(each.name for each in wanted))
+        ran = await self.git(
+            launch,
+            "fetch",
+            "--no-write-fetch-head",
+            "--no-tags",
+            "--no-recurse-submodules",
+            "--end-of-options",
+            url,
+            *names,
+        )
+        asked = ", ".join(f"{each.object} as {each.name}" for each in wanted)
+        self.told(launch, f"fetching {asked} from `{remote}` ({url})", ran)
+        if ran.status != 0:
+            message = f"git couldn't fetch from `{remote}`: {oneline(ran.error)}"
+            raise HostError(message)
+        return [
+            each
+            for each in wanted
+            if (await self.git(launch, "cat-file", "-e", each.object)).status != 0
+        ]
 
     async def contained(self, launch: Register) -> None:
         """Refuse to go on, with `HostError`, unless `launch`'s repository's object store is self-contained."""
@@ -531,13 +721,23 @@ class PushHandler(Model, RoomHandler[Pushing]):
             for update, reason in zip(request.updates, reasons, strict=True)
             if reason is not None
         }
-        within = [each for each in request.updates if each.destination not in limited]
+        merging = (
+            Merging()
+            if limited and request.atomic
+            else await self.merging(
+                request,
+                launch,
+                [each for each in request.updates if each.destination not in limited],
+            )
+        )
+        unmerged = {**limited, **merging.refused}
+        within = [each for each in request.updates if each.destination not in unmerged]
         barred = (
             Barred()
-            if limited and request.atomic
+            if unmerged and request.atomic
             else await self.barred(request, launch, within)
         )
-        refused = {**limited, **barred.refused}
+        refused = {**unmerged, **barred.refused}
         for destination, reason in refused.items():
             self.remotes.say(
                 f"{launch.launch}: refused a push to `{destination}` on "
@@ -559,8 +759,9 @@ class PushHandler(Model, RoomHandler[Pushing]):
             )
         url = await self.remotes.url(launch, request.remote, push=True)
         batches = [allowed] if request.atomic else [[each] for each in allowed]
+        leased = {**leases, **merging.leases}
         errors = [
-            await self.pushed(request, launch, url, leases, batch) for batch in batches
+            await self.pushed(request, launch, url, leased, batch) for batch in batches
         ]
         pushed = {
             each.destination: error
@@ -581,6 +782,38 @@ class PushHandler(Model, RoomHandler[Pushing]):
         if self.remotes.landed is not None and updated and not request.dry_run:
             await self.remotes.landed(launch, updated)
         return outcome
+
+    async def merging(
+        self, request: Pushing, launch: Register, allowed: list[Update]
+    ) -> Merging:
+        """Check each deletion among `allowed` that rests on `delete-merged`, and return those refused and the lease each of the others is pushed with (`Remotes.merged`).
+
+        A deletion the limits allow rests on `delete-merged` where they don't
+        allow `delete-ref`. Its lease takes the place of any the room gave, so
+        it isn't forced.
+        """
+        if launch.limits.refusal("delete-ref") is None:
+            return Merging()
+        leases = {lease.ref: lease for lease in request.leases}
+        checked = {
+            each.destination: await self.remotes.merged(
+                launch, request.remote, each.destination, leases.get(each.destination)
+            )
+            for each in allowed
+            if each.source is None
+        }
+        return Merging(
+            refused={
+                branch: said
+                for branch, said in checked.items()
+                if isinstance(said, str)
+            },
+            leases={
+                branch: lease
+                for branch, lease in checked.items()
+                if isinstance(lease, Lease)
+            },
+        )
 
     async def barred(
         self, request: Pushing, launch: Register, allowed: list[Update]
@@ -694,34 +927,9 @@ class FetchHandler(Model, RoomHandler[Fetching]):
     @override
     async def answer(self, request: Fetching, launch: Register) -> Reply:
         require("fetch", launch)
-        url = await self.remotes.url(launch, request.remote, push=False)
-        await self.remotes.contained(launch)
-        names = list(dict.fromkeys(each.name for each in request.wanted))
-        ran = await self.remotes.git(
-            launch,
-            "fetch",
-            "--no-write-fetch-head",
-            "--no-tags",
-            "--no-recurse-submodules",
-            "--end-of-options",
-            url,
-            *names,
+        missing = await self.remotes.fetched(
+            launch, request.remote, request.wanted, push=False
         )
-        wanted = ", ".join(f"{each.object} as {each.name}" for each in request.wanted)
-        self.remotes.told(
-            launch, f"fetching {wanted} from `{request.remote}` ({url})", ran
-        )
-        if ran.status != 0:
-            message = (
-                f"git couldn't fetch from `{request.remote}`: {oneline(ran.error)}"
-            )
-            raise HostError(message)
-        missing = [
-            each
-            for each in request.wanted
-            if (await self.remotes.git(launch, "cat-file", "-e", each.object)).status
-            != 0
-        ]
         if missing:
             moved = ", ".join(each.name for each in missing)
             message = (
