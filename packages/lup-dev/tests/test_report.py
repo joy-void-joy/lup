@@ -72,40 +72,20 @@ def test_a_refusal_lists_each_file_put_back_with_its_saved_copy() -> None:
         path=PATH,
         saved=ROOT / ".lup/saved/4/src/lup/claude.py",
         new=False,
-        bypassed=[Ask(kind="public-api", reason="claude.py adds `run`")],
+        declined="not this way",
     )
     second = Refused(
         path=ROOT / "src/lup/new.py",
         saved=ROOT / ".lup/saved/4/src/lup/new.py",
         new=True,
-        bypassed=[Ask(kind="new-file", reason="new.py is a production file")],
+        unanswered=True,
     )
-    report = refusal([first, second])
-    assert report.startswith(
-        "lup refused 2 files. They are unchanged; your versions are saved."
-    )
-    assert (
-        "Make these changes with your file tools, which ask the operator, not "
-        "through the shell:\n"
-        "  /work/lup/src/lup/claude.py (from /work/lup/.lup/saved/4/src/lup/claude.py)\n"
-        "  /work/lup/src/lup/new.py (from /work/lup/.lup/saved/4/src/lup/new.py)"
-        in report
-    )
-
-
-def test_an_ask_made_through_the_shell_points_back_at_the_file_tools() -> None:
-    refused = Refused(
-        path=PATH,
-        saved=Path(".lup/saved/1/x"),
-        new=True,
-        bypassed=[
-            Ask(kind="new-file", reason="src/lup/claude.py is a new production file")
-        ],
-    )
-    report = refusal([refused])
-    assert (
-        "  Made through the shell, so it comes back through your file tools: "
-        "src/lup/claude.py is a new production file" in report
+    assert refusal([first, second]) == (
+        "lup refused 2 files. They are unchanged; your versions are saved.\n\n"
+        "/work/lup/src/lup/claude.py (saved at /work/lup/.lup/saved/4/src/lup/claude.py)\n"
+        "  The operator declined it: not this way\n\n"
+        "/work/lup/src/lup/new.py (saved at /work/lup/.lup/saved/4/src/lup/new.py)\n"
+        "  Nobody answered in time; the hold stays open in the operator's inbox."
     )
 
 

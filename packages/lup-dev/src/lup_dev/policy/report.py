@@ -2,11 +2,10 @@
 
 lup's findings on the lines a call changed are told after it, each with its
 steer, beside the type errors and ruff's findings, and those on lines no change
-touched apart; none refuses (`docs/judging-writes.md`, *Findings*). A refusal is
-a change put back that the operator had to see first: one made through the
-shell where the runtime asks before a call, or a hold declined or unanswered,
-with where the agent's version is saved. A move of `HEAD` is told as its
-commits', never put back.
+touched apart; none refuses (`docs/judging-writes.md`, *Findings*). A refusal
+is a held change the operator declined or left unanswered, put back or never
+written, with where the agent's version is saved. A move of `HEAD` is told as
+its commits', never put back.
 
 A session hears about several worktrees, from any working directory, so every
 report names each file by its absolute path, as pyright's command line does.
@@ -35,7 +34,7 @@ def placed(root: Path, findings: list[Finding]) -> list[Finding]:
 
 
 class Refused(Model):
-    """One file put back before the operator saw it, its version saved: changed through the shell where they'd be asked, or held and declined or unanswered."""
+    """One held file the operator declined or left unanswered, put back or never written, its version saved."""
 
     path: Path
     """The file, by its absolute path."""
@@ -43,8 +42,6 @@ class Refused(Model):
     """Where the agent's version is saved, by its absolute path."""
     new: bool
     """Whether the file didn't exist before the change."""
-    bypassed: list[Ask] = []
-    """Asks made through the shell, which come back through the file tools."""
     declined: str | None = None
     """The operator's comment on a declined hold; empty when they gave none."""
     unanswered: bool = False
@@ -74,7 +71,7 @@ def sections(parts: list[str]) -> str:
 
 
 def refusal(refused: list[Refused]) -> str:
-    """Report the files put back before the operator saw them, and how to bring each back."""
+    """Report the held files the operator declined or left unanswered, each with where the agent's version is saved."""
     if not refused:
         return ""
     count = len(refused)
@@ -85,8 +82,6 @@ def refusal(refused: list[Refused]) -> str:
     )
 
     def block(one: Refused) -> str:
-        through = "  Made through the shell, so it comes back through your file tools"
-        bypassed = [f"{through}: {ask.reason}" for ask in one.bypassed]
         comment = f": {one.declined}" if one.declined else "."
         declined = (
             [f"  The operator declined it{comment}"] if one.declined is not None else []
@@ -96,27 +91,10 @@ def refusal(refused: list[Refused]) -> str:
             if one.unanswered
             else []
         )
-        lines = [
-            f"{one.path} (saved at {one.saved})",
-            *bypassed,
-            *declined,
-            *unanswered,
-        ]
+        lines = [f"{one.path} (saved at {one.saved})", *declined, *unanswered]
         return "\n".join(lines)
 
-    through_tools = [one for one in refused if one.bypassed]
-    tools = (
-        [
-            (
-                "Make these changes with your file tools, which ask the operator, "
-                "not through the shell:"
-            ),
-            *(f"  {one.path} (from {one.saved})" for one in through_tools),
-        ]
-        if through_tools
-        else []
-    )
-    return sections([header, *(block(one) for one in refused), "\n".join(tools)])
+    return sections([header, *(block(one) for one in refused)])
 
 
 def information(
