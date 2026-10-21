@@ -12,7 +12,7 @@ from lup.adapters.claude.terminal import spelled
 from lup.sessions.terminal import Hook
 from lup_dev.adapters import claude, codex
 from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
-from lup_dev.host.courier import Conversations, Heard, Spawned, Spawning, Telling
+from lup_dev.host.courier import Conversations, Heard, Spawned, Telling
 from lup_dev.inbox.store import Text
 from lup_dev.policy.checkpoint import Bench, Running, Services, Worktree
 from lup_dev.policy.holds import Holds, Response, waiting
@@ -1966,29 +1966,6 @@ def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
     assert claude.spawned(pre_tool_use(Path("/w"), "Bash", {"command": "ls"})) is None
 
 
-def test_claude_hears_the_sessions_own_agent_call_with_the_name_it_gives() -> None:
-    def spawning(
-        tool: str, given: dict[str, object], **fields: object
-    ) -> Spawning | None:
-        raw = payload(
-            Path("/w"),
-            "PreToolUse",
-            tool_name=tool,
-            tool_input=given,
-            tool_use_id="t1",
-            **fields,
-        )
-        return claude.heard(raw).spawning
-
-    naming = "`name` on `Agent`, which it takes though its schema doesn't list it"
-    assert spawning("Agent", {"prompt": "look", "name": "explore-auth"}) == Spawning(
-        name="explore-auth", naming=naming
-    )
-    assert spawning("Task", {"prompt": "look"}) == Spawning(naming=naming)
-    assert spawning("Bash", {"command": "ls", "name": "x"}) is None
-    assert spawning("Agent", {"prompt": "look"}, agent_id="a1") is None
-
-
 def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
     tmp_path: Path,
 ) -> None:
@@ -2043,17 +2020,3 @@ def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
     assert codex.spawned(subagent("th-a4", None)) == explorer
     assert codex.spawned(subagent("th-a1", roots)) == explorer
     assert codex.spawned((CAPTURED / "6-pre-tool-use-bash.json").read_text()) is None
-
-
-def test_codex_hears_no_spawn_since_no_caller_could_name_one() -> None:
-    sent = json.loads((CAPTURED / "6-pre-tool-use-bash.json").read_text())
-
-    def spawning(tool: str, given: dict[str, object]) -> Spawning | None:
-        raw = json.dumps({**sent, "tool_name": tool, "tool_input": given})
-        return codex.heard(raw).spawning
-
-    assert spawning("spawn_agent", {"message": "look"}) is None
-    assert (
-        spawning("collaborationspawn_agent", {"task_name": "x", "message": "look"})
-        is None
-    )

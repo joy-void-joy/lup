@@ -74,9 +74,6 @@ class Heard(Model):
     """At a session's start, the name the runtime has for it, where the operator
     gave one in the runtime (a rename there), and the runtime says so; none
     otherwise."""
-    spawning: Spawning | None = None
-    """At the start of a call spawning a subagent that could have been given a
-    name, the name it gives; none for any other hook."""
     said: str | None = None
     """At a turn's end, the agent's last message before it, as the runtime hands
     it to the hook; none for any other hook, or where it has none."""
@@ -201,14 +198,6 @@ class Post(ABC):
         """Put the last message of a turn of `conversation` of `launch`, a session's own, before the operator, its turn having ended."""
 
 
-class Spawning(Model):
-    """A call spawning a subagent, as it starts: the name its caller gives the subagent, where it gives one."""
-
-    name: str | None = None
-    naming: str
-    """How such a call gives its subagent a name, in the runtime's own terms, for a caller told to."""
-
-
 class Spawned(Model):
     """How a subagent was spawned, as its runtime recorded it, read at its first hook."""
 
@@ -244,8 +233,6 @@ class Conversation(Model):
     """What kind of subagent it is (`Explore`)."""
     linked: bool = False
     """Whether what its runtime recorded of its spawn was read."""
-    nudged: bool = False
-    """Whether it was told, once, to name the subagents it spawns."""
     introduced: bool = False
     """Whether a subagent knows the tools lup serves it: told them once, or
     reading the guidance that lists them to its session (`Spawned.guided`)."""

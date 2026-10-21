@@ -450,15 +450,6 @@ class Noted(Model):
     said: list[str] = []
 
 
-def name_spawns(naming: str) -> str:
-    """Tell a conversation spawning a subagent without a name to give names, `naming` saying how."""
-    return (
-        "lup: that subagent goes without a name, so you and the operator can't "
-        f"call it by one: give each subagent you spawn a name after its task "
-        f"({naming}). It's asked to name itself meanwhile."
-    )
-
-
 def unnamed(path: str) -> str:
     """Ask a subagent spawned without a name to name itself: it knows its task."""
     return (
@@ -1054,9 +1045,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         guidance lists (`introduction`). Not at its end, which would hold it to
         read them: the internal agents a runtime runs for its own features are
         heard only there.
-        A conversation spawning one without a name, where it could have given
-        one, is told once to give names. Its launch's conversations are kept, so
-        a service started again knows them.
+        The conversation spawning one isn't asked to name it: the subagent
+        knows its task, and what a spawning call is told comes beside its
+        result, once the subagent has started. Its launch's conversations are
+        kept, so a service started again knows them.
         """
         naming: list[str] = []
         if heard.agent is not None and not conversation.linked:
@@ -1079,12 +1071,6 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             tools = [spec for each in self.toolsets(request) for spec in each.specs()]
             introducing.append(introduction(tools))
-        spawning = heard.spawning
-        if spawning is not None and spawning.name is None and not conversation.nudged:
-            conversation = conversations.kept(
-                conversation.model_copy(update={"nudged": True})
-            )
-            naming.append(name_spawns(spawning.naming))
         write_model(self.layout.conversations(request.launch), conversations)
         return Noted(conversation=conversation, said=[*introducing, *naming])
 

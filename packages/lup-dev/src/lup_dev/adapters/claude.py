@@ -192,7 +192,7 @@ from lup.sessions.terminal import Cli, Hook
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter, Pushing
-from lup_dev.host.courier import Heard, Spawned, Spawning, Telling
+from lup_dev.host.courier import Heard, Spawned, Telling
 from lup_dev.host.records import (
     Called,
     Entry,
@@ -613,14 +613,6 @@ class PreToolUse(Payload):
             served=self.tool_name.startswith(TOOL_PREFIX),
             judged=judging(self.tool_name),
             fits=fits,
-            spawning=(
-                Spawning(
-                    name=AgentCall.model_validate(self.tool_input).name,
-                    naming="`name` on `Agent`, which it takes though its schema doesn't list it",
-                )
-                if self.tool_name in SPAWNING and not self.agent_id
-                else None
-            ),
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -888,20 +880,6 @@ class SubagentStop(Payload):
     @override
     def unanswered(self, said: str) -> Output:
         return OperatorWarning(system_message=said)
-
-
-SPAWNING = ["Agent", "Task"]
-"""The tool spawning a subagent, by its name and its earlier name."""
-
-
-class AgentCall(Model, extra="ignore"):
-    """The part of a call to `Agent` lup reads: the name the caller gives the subagent (the `sub-agents` docs: "Claude can give a subagent a name by passing a `name` parameter").
-
-    Only the session's own conversation has it: a subagent's `Agent` takes no
-    `name` (measured on 2.1.302, `docs/field-notes.md`, *Subagents' records*).
-    """
-
-    name: str | None = None
 
 
 class SubagentRecord(Model, extra="ignore", alias_generator=to_camel):
