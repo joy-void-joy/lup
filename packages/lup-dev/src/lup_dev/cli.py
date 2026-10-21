@@ -627,6 +627,31 @@ def answering(what: str = "the inbox") -> HostClient:
     return client
 
 
+def reading() -> HostClient:
+    """Reach the host service for what only reads lup's state, from any terminal on the host, an agent's session's too; refuse in a room, which reaches it only on its request socket.
+
+    The service is started only outside every agent's session: one started from
+    an agent's shell would run on in that shell's environment.
+    """
+    if RoomClient().socket.exists():
+        message = (
+            "a room doesn't serve this command yet: the room reaches the host service "
+            "only on its launch's request socket, which takes no reading requests"
+        )
+        raise HostError(message)
+    client = host_client()
+    if not any(runtime.inside() for runtime in runtimes()):
+        client.ensure()
+        return client
+    if not client.answers():
+        message = (
+            "no host service runs, and none is started from an agent's session: a "
+            "launch starts it, or the operator's own `lup-dev` in their terminal"
+        )
+        raise HostError(message)
+    return client
+
+
 def line(item: Item, listed: Listed | None = None) -> str:
     """Say an item in a line: its number, when it was made, what it is, from whom (as it's called, where `listed` knows it), and its first line; for an approval, how to read it whole and answer it."""
     where = "" if item.worktree is None else f" in {item.worktree}"
@@ -843,15 +868,16 @@ def sessions(
 ) -> None:
     """List the sessions the host service serves, each with its subagents under it.
 
-    Run it yourself, in your own terminal. Each launch by its name, its runtime,
-    its worktree, its id, and its container, running or not as podman has it;
-    under it, its session and each subagent beneath the conversation that
-    spawned it, by its path (`dev/explore-auth`) and its kind; an unnamed one by
-    its kind and its id, until it names itself. The subagents that ended under
-    a conversation are counted, as the dashboard folds them; `--all` lists
-    them, each said ended.
+    Each launch by its name, its runtime, its worktree, its id, and its
+    container, running or not as podman has it; under it, its session and each
+    subagent beneath the conversation that spawned it, by its path
+    (`dev/explore-auth`) and its kind; an unnamed one by its kind and its id,
+    until it names itself. The subagents that ended under a conversation are
+    counted, as the dashboard folds them; `--all` lists them, each said ended.
+    It only reads, so an agent's session on the host runs it too, though a room
+    can't yet.
     """
-    listed = answering().listed()
+    listed = reading().listed()
     if not listed.launches:
         typer.echo("No session runs.")
         return
@@ -927,12 +953,13 @@ def dashboard_open(
 def inbox_list(context: typer.Context) -> None:
     """List what waits for you from your agents, oldest first.
 
-    Run it yourself, in your own terminal. Each item has a number, which `show`,
-    `answer` and `done` take.
+    Each item has a number, which `show`, `answer` and `done` take. Listing and
+    `show` only read, so an agent's session on the host runs them too, though a
+    room can't yet; answering is the operator's, in their own terminal.
     """
     if context.invoked_subcommand is not None:
         return
-    client = answering()
+    client = reading()
     items = client.ask(ListInbox(), Items).items
     if not items:
         typer.echo("Nothing waits for you.")
@@ -965,7 +992,7 @@ def inbox_show(
     ] = False,
 ) -> None:
     """Show one item whole: an approval by its summary, its whole diff with `--diff`; with `--context`, its moment in its sender's conversation."""
-    client = answering()
+    client = reading()
     if diff:
         Terminal().show(client.ask(ShowDiff(number=number), Whole).text)
         return

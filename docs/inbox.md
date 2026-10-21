@@ -41,7 +41,7 @@ lup-dev inbox send <to> <text>        a message to a launch's session, or to a s
 - **A review** is the dashboard's reply covering several items at once, sent whole to each conversation with a comment on its items, a question among them, or a message to it; one whose items were only marked read hears nothing (`docs/dashboard.md`, *The review*).
 - **Replying** to a conversation's message, or to a write of its that landed flagged, is a note for that conversation, naming the item it replies to with its first line.
 - **A desktop notice** comes with an item waiting on the operator, through `notify-send`, an optional requirement of the host; news and flags raise none.
-- **Each command is a request on the host's control socket,** and refuses inside an agent's session, as `trust` does. The room can't reach the control socket, and the store isn't mounted.
+- **Each command is a request on the host's control socket.** Listing and `show` only read, so an agent's session on the host runs them too, though it never starts the service there (`docs/host.md`, *Using it*). The rest act for the operator, so they refuse inside an agent's session, as `trust` does. None runs in a room yet: the room can't reach the control socket, and the store isn't mounted (#102).
 
 ## Parties and items
 
