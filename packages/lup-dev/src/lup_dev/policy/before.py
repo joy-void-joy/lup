@@ -14,8 +14,8 @@ A replacement whose string isn't there exactly as the tool requires is allowed:
 the tool fails on its own. A write let through is told what its judgement found
 beside the call, as a checkpoint tells a command's, and remembered until its
 call finishes, so the checkpoint after it accepts that content as already
-judged, telling it no more; one flagged is put before the operator as it's let through,
-holding no one, as is one to a file whose item may still gather the
+judged, telling it no more; one flagged is put before the operator as it's let
+through, holding no one, as is one to a file whose item may still gather the
 conversation's writes, refreshing it (`flags.py`); one declined, or left
 unanswered, never lands, and the agent's version is saved.
 
