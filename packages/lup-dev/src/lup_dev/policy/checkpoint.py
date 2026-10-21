@@ -18,9 +18,9 @@ no call of the session counted there is running, another session's calls there
 holding none of its checkpoints back, and again in each when the turn ends. It
 snapshots the worktree into the store, compares it with the accepted tree, sets
 aside what was committed elsewhere or merged from it, judges a move of `HEAD` once
-as its commits', judges the rest as an edit is judged, puts back what's refused
-with the agent's version saved, holds what asks on a runtime that can't ask before
-a call, and moves the accepted tree on.
+as its commits', judges the rest as an edit is judged, holds what asks in place
+until the operator answers, puts back what they decline with the agent's version
+saved, and moves the accepted tree on.
 
 A call that runs a subagent isn't counted as running: the subagent's own calls
 are, so its writes are judged as it makes them rather than when it ends. The
