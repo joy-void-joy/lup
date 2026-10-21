@@ -1,12 +1,12 @@
 # Conventions: how code in lup is written
 
-Every convention lup's code follows is written once, here, with its reason and what enforces it, so no session has to pick between two ways of doing the same thing. Many are a pick between two good ways, made so sessions don't split between them, rather than a claim that the other way is wrong: where one gets in your way, say so, since a convention that costs more than the divergence it prevents is worth changing. They apply to production code, in lup and in every project that takes lup's rules; tests are exempt (*Tests*). Each rule, with the code it flags and leaves alone, is in `docs/rules.md`, generated from the engine's table.
+Every convention lup's code follows is written once, here, with its reason and what enforces it, so no session has to pick between two ways of doing the same thing. Many are a pick between two good ways, made so sessions don't split between them, rather than a claim that the other way is wrong: where one gets in your way, say so, since a convention that costs more than the divergence it prevents is worth changing. They apply to production code, in lup and in every project that takes lup's rules, but for `runtime-mention`, which only lup's own declaration runs; tests are exempt (*Tests*). Each rule, with the code it flags and leaves alone, is in `docs/rules.md`, generated from the engine's table.
 
 ## Who owns each concern
 
 Every concern has one owner, so two tools never report the same thing in two ways or steer in opposite directions.
 - **lup's rules** own the conventions below, in lup's typed engine (`docs/judging-writes.md`, *The engine: one typed tree*), rather than as ruff `banned-api` entries beside a syntax checker, which would split where they live. Each names the mistake it prevents and where it steers. The rules that pick an approach other code is built on are meant to be told at the edit, and those about spelling at the gate; that timing is #49, and until it's built every rule's findings are told at the edit.
-- **ruff** owns generic Python hygiene: `select = ["ALL"]`, minus every rule that overlaps or contradicts another owner. A finding it fixes safely isn't told to the agent; the session landing the work applies it.
+- **ruff** owns generic Python hygiene: `select = ["ALL"]`, minus every rule that overlaps or contradicts another owner, and a few left to review (*ruff's selection*). A finding it fixes safely isn't told to the agent; the session landing the work applies it.
 - **pyright,** in strict mode, owns types.
 - **import-linter** owns the import boundaries, over the whole import graph at the gate.
 - **The formatter,** ruff's, runs when work lands.
@@ -21,7 +21,7 @@ Every concern has one owner, so two tools never report the same thing in two way
 
 ## Data shapes
 
-**Decision.** pydantic models for every shape we declare: no `dataclass`, no `NamedTuple`, no `TypedDict` of our own (one appears only where a third-party API is typed with it, and then it's theirs). Configuration as class keywords (`class Turn(Model, extra="forbid")`), never a `model_config =` assignment, which reads like a field. A list default is a literal (`steps: list[Step] = []`, which pydantic copies per instance). Every model derives from `lup.types.Model`, which is frozen; one that must change derives from `MutableModel`, so mutability is a choice written in the header; settings from `lup.types.Settings`. No model writes `frozen` itself: `Model`'s metaclass tells pyright its subclasses are frozen by default (PEP 681's `frozen_default`), so silence means frozen and pyright still refuses `point.x = 2`.
+**Decision.** pydantic models for every shape we declare: no `dataclass`, no `NamedTuple`, no `TypedDict` of our own (one appears only where a third-party API is typed with it, and then it's theirs). Configuration as class keywords (`class Turn(Model, extra="forbid")`), never a `model_config =` assignment, which reads like a field. A list default is a literal (`steps: list[Step] = []`, which pydantic copies per instance). Every model derives from `lup.types.Model`, which is frozen; one that must change derives from `MutableModel`, so mutability is a choice written in the header; settings from `lup.types.Settings`. No model writes `frozen` itself: `Model`'s metaclass tells pyright its subclasses are frozen by default (PEP 681's `frozen_default`), so silence means frozen and pyright still refuses `point.x = 2`. The one exception to both is `lup.types.Settings`, which freezes through `model_config`, since pyright refuses a frozen class over pydantic-settings' base.
 
 **Why.** One way to declare a shape, validated where it's declared, its configuration read with the class.
 
@@ -52,9 +52,9 @@ Every concern has one owner, so two tools never report the same thing in two way
 | A number or a duration: a retry count, a timeout, a size limit | an overridable default: a parameter's or a field's |
 | An environment variable's name | the package's `settings.py`, whose pydantic-settings model's fields are the variables |
 | A path or a file name | the package's `layout.py`, which says where everything is stored |
-| A runtime's wire spelling: a tool name, a hook event, a protocol field | that adapter's `Spellings` |
+| A runtime's wire spelling: a tool name, a hook event, a protocol field | its runtime's adapter |
 
-A `Spellings` ABC has one abstract member per word of lup's own vocabulary, which each adapter implements with its runtime's spelling, so adding a word forces every adapter to answer it, where a dict would miss an entry until something broke. A constant held in a `str` isn't read by the rule.
+The rule reads a constant's type: a number or a duration is a finding anywhere, and a path outside the package's `layout.py`. A constant held in a `str`, such as a variable's name or a wire spelling, isn't read, so those two homes are review's. The direction for wire spellings is a `Spellings` ABC each adapter implements, one member per word of lup's own vocabulary, so adding a word forces every adapter to answer it, where a dict would miss an entry until something broke (#52); today each adapter holds its own.
 
 **Why.** A number is a judgement a caller may want to change, which a module constant would freeze; names and paths spread across files leave nobody able to find where things are stored or which variables are read. One home per kind answers both.
 
@@ -96,7 +96,7 @@ A `Spellings` ABC has one abstract member per word of lup's own vocabulary, whic
 
 **Why.** A message gets reworded without notice, so a decision read from its text breaks quietly.
 
-**Enforced by:** `error-root` (typed: an exception class not descending from its package's root), `suppress`, `bare-except`, `except-baseexception`; names by ruff's `N818`. `error-text` refuses deciding on an exception's message (`"x" in str(exc)`). ruff's `SIM105` (which steers *to* `contextlib.suppress`), `E722` and `BLE001` are off: the first overlaps and contradicts `suppress`, the other two overlap lup's rules and `BLE001` contradicts the steer to `Exception`.
+**Enforced by:** `error-root` (typed: an exception class not descending from its package's root), `suppress`, `bare-except`, `except-baseexception`; names by ruff's `N818`. `error-text` refuses deciding on an exception's message (`"x" in str(exc)`). ruff's `SIM105` (which steers *to* `contextlib.suppress`), `B022`, `E722` and `BLE001` are off: the first contradicts `suppress` and the second overlaps it, the other two overlap lup's rules and `BLE001` contradicts the steer to `Exception`.
 
 ## Libraries per job
 
@@ -104,7 +104,7 @@ A `Spellings` ABC has one abstract member per word of lup's own vocabulary, whic
 
 | Job | Use | Not |
 |---|---|---|
-| Running a program | `lup.programs` (`run`, `detached`), which spawns rather than forks, so it's safe beside threads | `sh`, `subprocess`, `os.system`, `os.popen`, `os.exec*` |
+| Running a program | `lup.programs` (`run`, `detached`), which starts a program from C, as `subprocess` does, never by forking Python, so it's safe beside threads | `sh`, `subprocess`, `os.system`, `os.popen`, `os.exec*` |
 | A command line | `typer` | `argparse` |
 | Paths and files | `pathlib` | `os.path`, `os`'s file functions |
 | Configuration and environment | `pydantic-settings` | `os.environ`, `os.getenv`, `dotenv` for reading |
@@ -125,7 +125,7 @@ A `Spellings` ABC has one abstract member per word of lup's own vocabulary, whic
 
 ## Suppressions and directives
 
-**Decision.** One suppression, for every finding from every owner: `# lup: ignore("tuple-shape", why="…")`, on the finding's line or alone above it, which asks the operator. `# noqa`, `# ruff: noqa`, `# type: ignore`, `# pyright: ignore` and pyright's file-level comments are refused, and ruff runs with `--ignore-noqa` and pyright with `enableTypeIgnoreComments = false`, so lup filters their findings through its own `ignore`. The rest of the `# lup:` grammar is `docs/judging-writes.md`'s (*The `# lup:` directives*).
+**Decision.** One suppression, for every finding from every owner: `# lup: ignore("tuple-shape", why="…")`, on the finding's line or alone above it, which asks the operator. `# noqa`, `# ruff: noqa`, `# type: ignore`, `# pyright: ignore` and pyright's file-level comments are refused. ruff runs with `--ignore-noqa` and pyright with `enableTypeIgnoreComments = false`, so a `# noqa` or a `# type: ignore` hides nothing; pyright's setting doesn't reach `# pyright: ignore` or a file-level `# pyright: basic`, which the refusal alone keeps out. lup filters every owner's findings through its own `ignore`. The rest of the `# lup:` grammar is `docs/judging-writes.md`'s (*The `# lup:` directives*).
 
 **Why.** Several suppression syntaxes, read in several places, disagree on what's suppressed, and a misplaced one sits silently inert.
 
@@ -133,11 +133,11 @@ A `Spellings` ABC has one abstract member per word of lup's own vocabulary, whic
 
 ## Imports and boundaries
 
-**Decision.** Declared as import-linter contracts in `pyproject.toml`: the library never imports the environment (`lup` never `lup_dev`, `lup_dev` never `lup_dashboard`); a runtime's SDK is imported only in its adapter, and its adapter only where the adapters are listed; nothing inside `lup` imports its front door; git's remote helper, which runs on a room's own Python, imports the standard library alone, each module it uses listed. **A runtime is named only in its adapter:** the rest of lup speaks its own words and sees a runtime through an interface (`Runtime`), in capabilities ("a runtime that can't ask before a call holds at the checkpoint"), the evidence behind each in the adapter that declares it. That's how features stay on both runtimes by construction: built per runtime above the adapter, a feature rots on the other one (`AGENTS.md`, *lup's code*). An import contract can't see a name in a string or a comment, so a rule does, in prose too. These contracts are lup's; a project declares its own.
+**Decision.** Declared as import-linter contracts in `pyproject.toml`: the library never imports the environment (`lup` never `lup_dev`, but for the environment sides kept in its directory, `lup.github` and `lup.transcripts`; `lup_dev` never `lup_dashboard`); a runtime's SDK is imported only in its adapter; the hook adapters (`lup_dev.adapters`) only by `lup_dev.cli`, which lists them; nothing inside `lup` imports its front door; git's remote helper, which runs on a room's own Python, imports the standard library alone, each module it uses listed. **In lup's own code, a runtime is named only in its adapter:** the rest of lup speaks its own words and sees a runtime through an interface (`Runtime`), in capabilities ("a runtime that can't ask before a call holds at the checkpoint"), the evidence behind each in the adapter that declares it. That's how features stay on both runtimes by construction: built per runtime above the adapter, a feature rots on the other one (`AGENTS.md`, *lup's code*). An import contract can't see a name in a string or a comment, so a rule does, in prose too. These contracts are lup's; a project declares its own.
 
 **Why.** Import rules hand-written over a syntax scanner let a library layer reach into the environment unnoticed; import-linter checks the whole graph.
 
-**Enforced by:** import-linter at the gate; `runtime-mention` for names.
+**Enforced by:** import-linter at the gate; `runtime-mention` for names, in lup's own declaration.
 
 ## Package layout
 
@@ -149,7 +149,7 @@ A `Spellings` ABC has one abstract member per word of lup's own vocabulary, whic
 
 ## ruff's selection
 
-`select = ["ALL"]`, minus each rule that overlaps or contradicts an owner above. The list is in the root `pyproject.toml`, each rule beside a comment naming the owner of its concern, so it isn't repeated here. Beyond the rules the sections above name: return types are ruff's (`ANN201`–`ANN206` stay); layout is the formatter's (`E501` and the trailing-comma rules off); rules firing only on what a lup rule refuses are off, so a finding comes once; rules steering against a convention are off (`PLR5501` to `elif`, `ASYNC109` against a `timeout` parameter, `TD` against `defer`); size thresholds are off, since they measure size rather than mistakes and spend an agent's turns (#33); `TC003` keeps a model's field types out of a `TYPE_CHECKING` block, which would break the model at runtime.
+`select = ["ALL"]`, minus each rule that overlaps or contradicts an owner above. The list is in the root `pyproject.toml`, each rule beside a comment naming the owner of its concern, so it isn't repeated here. Beyond the rules the sections above name: return types are ruff's (`ANN201`–`ANN206` stay); layout is the formatter's (`E501` and the trailing-comma rules off); rules firing only on what a lup rule refuses are off, so a finding comes once; rules steering against a convention are off (`PLR5501` to `elif`, `ASYNC109` against a `timeout` parameter, `TD` against `defer`); size thresholds are off, since they measure size rather than mistakes and spend an agent's turns (#33); `CPY001` is off until a copyright header is chosen, and `PLC0415` and `INP001` are left to review. ruff's flake8-type-checking configuration names lup's model bases and FastAPI's decorators as evaluated at runtime, so `TC001`–`TC003` never move a model's field types into a `TYPE_CHECKING` block, which would break the model.
 
 ## Tests
 
@@ -160,4 +160,4 @@ Tests are exempt from lup's rules, though not from ruff and pyright (with ruff's
 - **Each rule's suggested fix passes every other rule,** and ruff and pyright: the rules' tests run each rule's rewritten example through the whole catalog.
 - **Every rule names the mistake it prevents and where it steers;** a rule that can't name one goes.
 - **A rule that misfires is that rule's bug,** rewritten until it fires only where a design choice is at stake.
-- **Every rule named under *Enforced by:* is in the engine's table,** which a test checks (`tests/test_reference.py`).
+- **Every rule named under *Enforced by:* is in the engine's table,** which a test checks (`packages/lup-dev/tests/test_reference.py`).
