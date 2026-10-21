@@ -617,6 +617,98 @@ def test_every_worktree_of_a_repository_finds_its_passes(
     assert found == recorded
 
 
+# A pass found, beside the builds a worktree lacks.
+
+BUILT = [ENGINE.model_copy(update={"sources": ["table.ts"]}), *STEPS]
+"""The engine built from its table alone, then lup's three scripted steps: the
+repository's own `src/` is newer than any bundle `Building` writes."""
+
+
+def ignoring_the_bundle(root: Path) -> None:
+    """Give `root` the engine's table, git ignoring the bundle built from it, as lup's repository does."""
+    (root / ".gitignore").write_text(".venv/\n.lup/\nbundle/\n")
+    touch(root / "table.ts", 1_000)
+
+
+def test_a_pass_found_in_a_fresh_worktree_still_builds_what_it_lacks(
+    repo: Path, shell: Git, clock: FakeClock, tmp_path: Path
+) -> None:
+    ignoring_the_bundle(repo)
+    shell.commit(repo, "the engine's table, its bundle ignored")
+    recorded = kept(repo, Building(repo), clock, steps=BUILT).run().recorded
+    fresh = tmp_path / "fresh"
+    shell.git(repo, "worktree", "add", "-q", "-b", "fresh", str(fresh))
+    processes = Building(fresh)
+
+    gated = kept(fresh, processes, clock, steps=BUILT).run()
+
+    assert recorded is not None
+    assert gated.found == recorded
+    assert processes.ran == [["build"]]
+    assert (fresh / "bundle" / "engine.js").is_file()
+    assert report(gated) == (
+        "passed   engine\n\nThe gate passed. These files passed already, at "
+        f"2026-10-01 12:00 UTC (tree `{recorded.files.tree}`), so only the builds "
+        "stale in this worktree ran. `--again` runs every step."
+    )
+
+
+def test_a_pass_found_where_each_build_is_up_to_date_runs_nothing(
+    repo: Path, clock: FakeClock
+) -> None:
+    ignoring_the_bundle(repo)
+    processes = Building(repo)
+    kept(repo, processes, clock, steps=BUILT).run()
+    again = kept(repo, processes, clock, steps=BUILT).run()
+
+    assert again.found is not None
+    assert again.outcomes == []
+    assert processes.ran == [
+        ["build"],
+        ["lint", "--strict"],
+        ["types"],
+        ["tests", "-q"],
+    ]
+    assert report(again) == again.found.said()
+
+
+def test_a_build_failing_beside_a_pass_found_fails_the_gate(
+    repo: Path, clock: FakeClock
+) -> None:
+    ignoring_the_bundle(repo)
+    kept(repo, Building(repo), clock, steps=BUILT).run()
+    touch(repo / "table.ts", 20_000)
+    processes = Scripted({"build": Ran(code=2, output="no bundler\n")})
+
+    gated = kept(repo, processes, clock, steps=BUILT).run()
+
+    assert gated.found is not None
+    assert processes.ran == [["build"]]
+    assert failed(gated.outcomes) == ["engine"]
+    text = report(gated)
+    assert text.startswith(
+        "failed   engine (exit 2)\n\n--- engine (exit 2) ---\nno bundler\n\n"
+    )
+    assert text.endswith(
+        "The gate failed: engine. These files passed already, at 2026-10-01 12:00 "
+        f"UTC (tree `{gated.found.files.tree}`), so only the builds stale in this "
+        "worktree ran. `--again` runs every step."
+    )
+
+
+def test_a_build_beside_a_pass_found_checks_the_requirements_first(
+    repo: Path, clock: FakeClock
+) -> None:
+    ignoring_the_bundle(repo)
+    kept(repo, Building(repo), clock, steps=BUILT).run()
+    (repo / "bundle" / "engine.js").unlink()
+    processes = Scripted({})
+    check = kept(repo, processes, clock, steps=BUILT, requirements=NEEDED)
+    with pytest.raises(RequirementError):
+        check.run()
+    assert processes.ran == []
+
+
 # The gate on a commit, in a worktree made at it.
 
 
@@ -939,6 +1031,37 @@ def test_lup_dev_check_twice_on_the_same_files_runs_the_steps_once(
     assert [result.exit_code for result in [first, second, again]] == [0, 0, 0]
     assert second.output.startswith("The gate passed on these files already, at ")
     assert [command[0] for command in scripted.ran] == 2 * ["lint", "types", "tests"]
+
+
+BUILDS = """\
+from lup_dev import Gate, Modules, Plain, Project, Python, Step
+
+project = Project(
+    modules=Modules.default().drop("private", why="these read Python's steps alone").edit(
+        Python(
+            runner=Plain(),
+            gate=Gate.of(
+                Step(name="engine", command=["build"], builds="bundle/engine.js"),
+                Step(name="tests", command=["tests", "-q"]),
+            ),
+        )
+    )
+)
+"""
+"""A declaration whose `Python` builds a file its scripted step never writes,
+then tests, each as the `PATH` finds it."""
+
+
+def test_lup_dev_check_exits_non_zero_when_a_build_beside_a_pass_found_fails(
+    scripted: Scripted, tmp_path: Path
+) -> None:
+    (tmp_path / "lup_project.py").write_text(BUILDS)
+    first = CliRunner().invoke(cli.app, ["check"])
+    scripted.answers = {"build": Ran(code=1, output="no bundler\n")}
+    second = CliRunner().invoke(cli.app, ["check"])
+    assert [result.exit_code for result in [first, second]] == [0, 1]
+    assert second.output.startswith("failed   engine (exit 1)\n")
+    assert [command[0] for command in scripted.ran] == ["build", "tests", "build"]
 
 
 def test_lup_dev_check_at_a_commit_runs_its_gate_in_a_worktree_made_at_it(

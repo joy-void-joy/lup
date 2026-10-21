@@ -2193,10 +2193,11 @@ def check(
     worktree first.
 
     A pass is recorded for the worktree's files, in the repository's git
-    directory, and a later run on the same files finds it and runs nothing,
-    unless `--again`. With `--at`, the gate runs on a commit, in a worktree made
-    at it and removed after, unless it passed on the commit's files already: a
-    push to the integration branch from a room runs it so.
+    directory, and a later run on the same files finds it and runs nothing but
+    the builds stale in its worktree, unless `--again`. With `--at`, the gate
+    runs on a commit, in a worktree made at it and removed after, unless it
+    passed on the commit's files already: a push to the integration branch
+    from a room runs it so.
     """
     root = toplevel(Path.cwd())
     passes = Passes.of(root, SystemClock())
