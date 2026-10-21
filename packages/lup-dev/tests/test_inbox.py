@@ -68,6 +68,7 @@ from lup_dev.inbox.protocol import (
     Drafted,
     Exchanged,
     Files,
+    FinishItem,
     Items,
     KeepDraft,
     KeepTalk,
@@ -2357,6 +2358,32 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
         "the operator's draft reply is theirs until they send it",
         "what the operator writes on a conversation is theirs until they send it",
     ]
+
+
+def test_a_room_is_told_when_the_operator_last_settled_its_repositorys_items_alone(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
+    *,
+    tmp_path: Path,
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, repo, "one", "claude")
+        launched(machine, clock, other, "two", "codex")
+        send(machine.host.launch("two").hook, codex("SessionStart", source="startup"))
+        call(machine.host.launch("two").mcp, "note", {"remark": "Theirs."})
+        host = client(machine.host, clock)
+        host.ask(FinishItem(number=1), Shown)
+        operator = host.ask(ListInbox(), Items)
+        room = RoomClient(socket=machine.host.launch("one").request).ask(
+            ListInbox(), Items
+        )
+    assert operator.reviewed is not None
+    assert room.reviewed is None
 
 
 class Unknown(Request, reads=True):

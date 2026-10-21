@@ -411,7 +411,7 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
     async def scoped(self, request: ListInbox, repository: Path) -> Reply:
         inbox = self.delivery.inbox
         waiting = [each for each in inbox.waiting(Operator()) if each.of(repository)]
-        return Items(items=waiting, reviewed=inbox.reviewed())
+        return Items(items=waiting, reviewed=inbox.reviewed(repository))
 
 
 class Showing(Model, Reading[ShowItem], arbitrary_types_allowed=True):
