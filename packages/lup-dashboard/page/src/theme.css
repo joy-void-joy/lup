@@ -1049,6 +1049,58 @@ kbd {
     }
 }
 
+/* What may follow a chord begun, as Space: over the line of keys, at its start,
+   each key beside what it does. */
+.review {
+    position: relative;
+}
+
+.chords {
+    position: absolute;
+    left: 1ch;
+    bottom: calc(var(--lh) + 2px);
+    z-index: 10;
+    max-width: min(72ch, calc(100% - 2ch));
+    background: var(--bg);
+    border: 1px solid var(--border);
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+    padding: 0 1ch;
+}
+
+.chords-title {
+    color: var(--info);
+    white-space: normal;
+}
+
+.chords dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0 2ch;
+    margin: 0;
+}
+
+.chords dl > div {
+    display: contents;
+}
+
+.chords dt {
+    display: flex;
+    gap: 0 1ch;
+}
+
+.chords dd {
+    margin: 0;
+    color: var(--muted);
+}
+
+.chords kbd {
+    border: 0;
+    padding: 0;
+    color: var(--fg);
+    font-weight: 700;
+}
+
 /* Highlighting, by the classes CodeMirror's class highlighter gives each token,
    in the palette's colours. */
 .tok-keyword,

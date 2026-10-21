@@ -1,8 +1,10 @@
-// What each view's keys do, said two ways: in the one line of keys under it,
-// those that apply where the cursor is (`barOf`), and whole in the list `?`
-// opens, in parts (`Keys.tsx`). One table a view, so the two never disagree;
-// the kinds of fold and their letters are one table too, read by the keys and
-// the review's marks. Pure (`docs/dashboard.md`, *The review*).
+// What each view's keys do, said three ways: in the one line of keys under it,
+// those that apply where the cursor is (`barOf`); whole in the list `?` opens,
+// in parts; and, once a key leading a chord is pressed, as Space is, in a panel
+// listing the keys that may follow (`chords`; `Keys.tsx`). One table a view, so
+// the three never disagree; the kinds of fold and their letters are one table
+// too, read by the keys, the review's marks and its header. Pure
+// (`docs/dashboard.md`, *The review*).
 
 /** One key, or a few doing alike: how it's pressed, what it does, and where the line of keys shows it. */
 export interface Key<P extends string> {
@@ -244,3 +246,38 @@ export function barOf<P extends string>(parts: Part<P>[], place: P): Key<P>[] {
     return parts.flatMap((part) => part.keys.filter((key) => key.at.includes(place)));
 }
 
+/** A key that may follow those of a chord pressed so far: the keys, each the next one alone, and what it does, short and whole. */
+export interface Following {
+    keys: string[];
+    short: string;
+    does: string;
+}
+
+/**
+ * Return the keys that may follow `pressed`, the keys of a chord pressed so far as the list writes them (`␣`, `␣f`),
+ * with the cursor at `place`, in the list's order: each key of `parts` that `pressed` begins and one more key ends,
+ * once by that key; of two that share it, as `␣c` on an item and on a banner, the one the line of keys shows at `place`,
+ * else the first. A key leading further, as `␣f`, shows by its own line of the list. None before a chord is begun.
+ */
+export function chords<P extends string>(parts: Part<P>[], pressed: string, place: P): Following[] {
+    if (pressed === "") {
+        return [];
+    }
+    const found = new Map<string, { following: Following; here: boolean }>();
+    for (const key of parts.flatMap((part) => part.keys)) {
+        const next = key.keys
+            .split(" ")
+            .filter((each) => each.startsWith(pressed) && [...each].length === [...pressed].length + 1)
+            .map((each) => each.slice(pressed.length));
+        const first = next[0];
+        if (first === undefined) {
+            continue;
+        }
+        const here = key.at.includes(place);
+        const kept = found.get(first);
+        if (kept === undefined || (here && !kept.here)) {
+            found.set(first, { following: { keys: next, short: key.short, does: key.does }, here });
+        }
+    }
+    return [...found.values()].map((each) => each.following);
+}

@@ -21,7 +21,8 @@
 // fold's start and the previous one's end, `[z` and `]z` to the start and the end
 // of the open fold the cursor is in (`folds.ts`). Space `h`, or Space `w` `h`,
 // goes to the agents' tree; `?` opens the list of every key, in place of vim's
-// search backward. Each view says what else its keys do, lays
+// search backward; once a chord is begun, as with Space, the view is told what's
+// pressed, to show what may follow. Each view says what else its keys do, lays
 // its own text out and draws it, and may paint the lines in view as well, as the
 // review paints a changed file's, and draw its folds' marks and bars in the
 // margin (`margin.ts`; `Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
@@ -69,6 +70,7 @@ interface Actions {
     undo: (way: "undo" | "redo" | "earlier" | "later") => void;
     send: () => void;
     blocks: () => Block[];
+    chord: (keys: string) => void;
     edited: (update: ViewUpdate) => void;
     paint: (from: number, to: number) => Range<Decoration>[];
 }
@@ -406,6 +408,8 @@ const keys = Prec.highest(
                 return false;
             }
             const bound = boundOf(view.state);
+            // Once vim has the key: the chord begun, if any, for the view to show what may follow.
+            queueMicrotask(() => bound.actions?.chord(chordOf(cm)));
             if (!cm.state.vim.insertMode) {
                 const step = deadPressed(bound.keyed.dead, { key: event.key, composing: event.isComposing });
                 bound.keyed.dead = step.dead;
@@ -435,6 +439,16 @@ const keys = Prec.highest(
         },
     }),
 );
+
+/**
+ * Return the keys of a chord begun with Space, as the list of keys writes them (`␣`, `␣f`): what vim holds of a mapping
+ * typed but not done, in normal mode; none for any other.
+ */
+export function chordOf(cm: CodeMirrorV): string {
+    const vim = cm.state.vim;
+    const held = vim.insertMode || vim.visualMode ? [] : vim.inputState.keyBuffer;
+    return held[0] === "<Space>" ? held.map((key) => (key === "<Space>" ? "␣" : key)).join("") : "";
+}
 
 /** Give vim each character of `text`, as typed. */
 function give(cm: CodeMirrorV, text: string): void {
@@ -671,6 +685,8 @@ interface Config<D, C> {
     tree: () => void;
     /** Open the list of every key (`?`). */
     list: () => void;
+    /** Told the keys of a chord begun, as the list writes them (`␣`, `␣f`), each time they change: none once it's done. */
+    pending?: (keys: string) => void;
     /** Whether the margin shows each fold's mark and the bars of those the cursor is in (`margin.ts`). */
     margin?: boolean;
 }
@@ -741,6 +757,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     telling.current = config.inserting;
     const following = useRef(config.moved);
     following.current = config.moved;
+    const chording = useRef(config.pending);
+    chording.current = config.pending;
     // The draft's history, for `u`, Ctrl+R, `g-` and `g+`; and whether the comment being written has its step
     // already, so it's undone whole.
     const history = useRef<History<D>>(begun(config.draft));
@@ -1039,6 +1057,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 kept.current = keptFolds(shown.folds, update.startState, update.state, kept.current);
             },
             folds: () => shown.folds,
+            chord: (keys) => chording.current?.(keys),
             undo: (way) => {
                 const now = rewritten(history.current, latest.current);
                 const gone = went(now, way);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CONVERSATION_KEYS, REVIEW_KEYS, barOf, type ReviewPlace } from "./keys";
+import { CONVERSATION_KEYS, FOLD_KINDS, REVIEW_KEYS, barOf, chords, type ReviewPlace } from "./keys";
 
 const shown = (place: ReviewPlace) => barOf(REVIEW_KEYS, place).map((key) => key.keys);
 
@@ -36,5 +36,32 @@ describe("the line of keys", () => {
                 expect(part.keys.every((key) => key.does !== "" && key.short !== "")).toBe(true);
             }
         }
+    });
+});
+
+describe("what may follow a chord", () => {
+    const following = (pressed: string, place: ReviewPlace) =>
+        chords(REVIEW_KEYS, pressed, place).map((each) => `${each.keys.join(" ")} ${each.short}`);
+
+    it("lists the keys after Space, from the same table as the line of keys and the list, once each", () => {
+        expect(following("␣", "item")).toEqual(["a approve", "x decline", "d read", "z later", "c on the item", "h agents", "f by kind"]);
+        // Of two keys alike, the one that applies where the cursor is: on a banner, Space c writes to its agent.
+        expect(following("␣", "banner")).toContain("c message");
+        expect(chords(CONVERSATION_KEYS, "␣", "normal").map((each) => each.keys.join(" "))).toEqual(["c", "r", "h"]);
+    });
+
+    it("lists the keys after Space f, each kind of fold's letter opening it and Shift and the letter closing it", () => {
+        expect(following("␣f", "file")).toEqual(["f F files", "b B bodies", "u U unchanged lines", "c C context"]);
+        expect(following("␣x", "file")).toEqual([]);
+        expect(following("", "file")).toEqual([]);
+    });
+
+    it("names each kind of fold by a letter of its own, Space f's beside every one but the item's own", () => {
+        const letters = FOLD_KINDS.map((each) => each.letter);
+        expect(new Set(letters).size).toBe(letters.length);
+        const spaced = following("␣f", "file").map((each) => each.split(" ")[0]);
+        expect(spaced).toEqual(FOLD_KINDS.filter((each) => each.chord).map((each) => each.letter));
+        // No chord of Space was there before Space f: f follows Space once.
+        expect(following("␣", "file").filter((each) => each.startsWith("f "))).toEqual(["f by kind"]);
     });
 });

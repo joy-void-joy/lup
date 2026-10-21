@@ -93,6 +93,8 @@ interface Props {
     tree: () => void;
     /** Told where the cursor is, outside insert mode, so the line of keys says what applies there. */
     placed: (place: Exclude<ReviewPlace, "insert">) => void;
+    /** Told the keys of a chord begun, so what may follow is shown. */
+    pending: (keys: string) => void;
     /** Open the list of every key. */
     list: () => void;
     /** When the operator last settled an item of theirs: what came after is new to them. */
@@ -351,6 +353,7 @@ export function Review({
     shown,
     tree,
     placed,
+    pending,
     list,
     reviewed,
     now,
@@ -418,6 +421,7 @@ export function Review({
             placed(placeAt(laidOut, at));
         },
         list,
+        pending,
         margin: true,
     });
     const { view, landing, kept } = editor;

@@ -1,10 +1,12 @@
 import { foldEffect, foldState, unfoldEffect } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
+import type { CodeMirrorV } from "@replit/codemirror-vim";
 import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
 import {
     begun,
+    chordOf,
     closedAs,
     deadPressed,
     deadTyped,
@@ -154,5 +156,20 @@ describe("folds kept as the operator left them", () => {
     it("folds each as the operator left it, else as it's laid out", () => {
         expect([closedAs(folded, new Map()), closedAs(open, new Map())]).toEqual([true, false]);
         expect([closedAs(folded, new Map([["folded", false]])), closedAs(open, new Map([["open", true]]))]).toEqual([false, true]);
+    });
+});
+
+describe("a chord begun", () => {
+    const held = (keys: string[], mode: { insertMode?: boolean; visualMode?: boolean } = {}) =>
+        chordOf({
+            state: { vim: { insertMode: false, visualMode: false, ...mode, inputState: { keyBuffer: keys } } },
+        } as unknown as CodeMirrorV);
+
+    it("says what vim holds of a chord begun with Space, as the list writes it, and nothing of any other", () => {
+        expect(held(["<Space>"])).toBe("␣");
+        expect(held(["<Space>", "f"])).toBe("␣f");
+        expect(held([])).toBe("");
+        expect(held(["z"])).toBe("");
+        expect(held(["<Space>"], { insertMode: true })).toBe("");
     });
 });
