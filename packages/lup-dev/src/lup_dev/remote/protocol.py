@@ -455,6 +455,38 @@ class Remotes(Model, arbitrary_types_allowed=True):
             raise HostError(message)
         return found.output.strip()
 
+    async def fetched(
+        self, launch: Register, remote: str, wanted: list[Wanted], *, push: bool
+    ) -> list[Wanted]:
+        """Fetch the refs `wanted` names from `launch`'s `remote` into the repository's store, writing no ref, and return those whose object still isn't there: the remote moved them since it listed them.
+
+        From its URL for a push or a fetch, as `push` says. Raise `HostError`
+        where the store reads objects from elsewhere, or git can't fetch.
+        """
+        url = await self.url(launch, remote, push=push)
+        await self.contained(launch)
+        names = list(dict.fromkeys(each.name for each in wanted))
+        ran = await self.git(
+            launch,
+            "fetch",
+            "--no-write-fetch-head",
+            "--no-tags",
+            "--no-recurse-submodules",
+            "--end-of-options",
+            url,
+            *names,
+        )
+        asked = ", ".join(f"{each.object} as {each.name}" for each in wanted)
+        self.told(launch, f"fetching {asked} from `{remote}` ({url})", ran)
+        if ran.status != 0:
+            message = f"git couldn't fetch from `{remote}`: {oneline(ran.error)}"
+            raise HostError(message)
+        return [
+            each
+            for each in wanted
+            if (await self.git(launch, "cat-file", "-e", each.object)).status != 0
+        ]
+
     async def contained(self, launch: Register) -> None:
         """Refuse to go on, with `HostError`, unless `launch`'s repository's object store is self-contained."""
         found = await asyncio.to_thread(stray, launch.repository / "objects")
@@ -694,34 +726,9 @@ class FetchHandler(Model, RoomHandler[Fetching]):
     @override
     async def answer(self, request: Fetching, launch: Register) -> Reply:
         require("fetch", launch)
-        url = await self.remotes.url(launch, request.remote, push=False)
-        await self.remotes.contained(launch)
-        names = list(dict.fromkeys(each.name for each in request.wanted))
-        ran = await self.remotes.git(
-            launch,
-            "fetch",
-            "--no-write-fetch-head",
-            "--no-tags",
-            "--no-recurse-submodules",
-            "--end-of-options",
-            url,
-            *names,
+        missing = await self.remotes.fetched(
+            launch, request.remote, request.wanted, push=False
         )
-        wanted = ", ".join(f"{each.object} as {each.name}" for each in request.wanted)
-        self.remotes.told(
-            launch, f"fetching {wanted} from `{request.remote}` ({url})", ran
-        )
-        if ran.status != 0:
-            message = (
-                f"git couldn't fetch from `{request.remote}`: {oneline(ran.error)}"
-            )
-            raise HostError(message)
-        missing = [
-            each
-            for each in request.wanted
-            if (await self.remotes.git(launch, "cat-file", "-e", each.object)).status
-            != 0
-        ]
         if missing:
             moved = ", ".join(each.name for each in missing)
             message = (
