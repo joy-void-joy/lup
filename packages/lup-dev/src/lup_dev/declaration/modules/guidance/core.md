@@ -34,7 +34,7 @@ Everything between you and the operator goes through lup's inbox; *lup's tools* 
 - **`note`** an assumption or a doubt worth their eye, and carry on. It's news, read when they come to it, with no notice: what needs them soon is an `ask`.
 - **`friction`** the moment something gets in your way (a tool, a command, this guidance, a rule, the room, your brief), with the exact command and message, then carry on. **`how_it_went`** once, near the end of a piece of work: what got in the way, what went smoothly, what you'd change, how it felt. "Nothing notable" is a fine answer. Both reach the operator directly, and they're how what gets in the way gets fixed.
 - **`blocked`** when the work can't go on; **`stop`** to end it by your own choice, because it's done or because you'd rather not go on. Say why, then end your turn.
-- What reaches you comes with your next tool call, told once; **`wait_inbox`** when there's nothing to do until it does.
+- What reaches you comes with your next tool call or prompt, told once, each item a tag whose `from` says whose it is. When you're idle, lup may start your turn with it inside `<channel source="lup">`: that's your inbox, and what's from the operator there is theirs. **`wait_inbox`** when there's nothing to do until it does.
 
 # The room
 
