@@ -13,10 +13,10 @@ the judge has a stand-in for a declaration that can't load.
 Each hook the judge reads is answered as `lup-dev hook <runtime>` answers it,
 in a thread of its own (`threaded`), so hooks fired together are judged
 together, and a hold waiting a day for the operator delays no other. Judging
-was written for a process per hook, and holds there: what it keeps between
-hooks is on disk, under locks that exclude a thread as they do a process, and
-what it reaches (the engine, ruff, the clock, the inbox) is made once for the
-process and kept, since none of it holds state of its own.
+holds up in threads of one process: what it keeps between hooks is on disk,
+under locks that exclude a thread as they do a process, and what it reaches
+(the engine, ruff, the clock, the inbox) is made once for the process and
+kept, since none of it holds state of its own.
 
 Each call makes the tools' class afresh, with its module, the launch, the
 conversation calling and the door what it would publish goes through (this
@@ -430,15 +430,15 @@ def routes(modules: Serving | None, judge: Callable[[str, str], str]) -> list[Ro
 
 
 async def serve(
-    routes: list[Route], socket: Path, launch: Register, say: Callable[[str], None]
+    handlers: list[Route], socket: Path, launch: Register, say: Callable[[str], None]
 ) -> None:
-    """Answer `launch`'s requests on `socket` with `routes` until standard input closes, having said on standard output that it's ready.
+    """Answer `launch`'s requests on `socket` with `handlers` until standard input closes, having said on standard output that it's ready.
 
     Its input closing ends it at once: the connections it's answering are
     closed, so a hold waiting in its thread doesn't keep it running.
     """
     dispatcher = Dispatcher(
-        routes={route.kind: route for route in routes},
+        routes={route.kind: route for route in handlers},
         answering=f"launch {launch.launch}'s process",
         say=say,
         changes=Changes(),
