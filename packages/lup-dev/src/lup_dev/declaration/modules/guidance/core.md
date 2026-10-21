@@ -59,7 +59,7 @@ Everything between you and the operator goes through lup's inbox; *lup's tools* 
 
 # Your writes
 
-lup's judge reads your writes and tells you what it found right after the call, beside its result, as type errors are told. On Codex it reads every write, after its call. On Claude Code it reads what your file tools write, before it lands; what the shell writes it sees only at the gate (#90), which holds and flags nothing, so a write the operator would be asked about goes through a file tool. Most writes just land. Two kinds involve the operator:
+lup's judge reads every write, whatever tool makes it, and tells you what it found right after the call, beside its result, as type errors are told. Most writes just land. Two kinds involve the operator:
 - **Held:** your call waits for their answer. These are writes to a protected path (the project's declaration, dependency manifests and lockfiles, the tools' configuration, and what runs outside the room, such as CI, git's hooks, and editor and runtime settings), to the operator's documents (`DESIGN.md`, `AGENTS.md`), and an added `ignore`. The wait doesn't show from your side: an approval returns like any other write, however long they took. A declined write doesn't land, and their comment reaches you.
 - **Flagged:** a new production file, a file written whole, and a change to the public API land as usual, and reach the operator's inbox for them to comment on. They can choose to hold every flagged write of your conversation instead.
 
