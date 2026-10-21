@@ -308,7 +308,7 @@ Found since, on the room's git 2.55.0 (2026-10-16), on scratch repositories laid
 - **A `commondir` at the top of the common git directory redirects git that names it.** A bare common directory never has a `commondir` (a linked worktree's `worktrees/<name>/` does); a room can write one beside `config`, since only `config` and `hooks/` are mounted read-only. With `<git dir>/commondir` reading `<theirs>`, git read `<theirs>/config` however `<git dir>` was named: `git --git-dir=<git dir> config lup.probe`, `git -C <git dir> config lup.probe`, `GIT_DIR=<git dir> git config lup.probe` and the same run inside `<git dir>` all printed the planted value, and `git --git-dir=<git dir> remote get-url origin` the planted URL. With `GIT_DIR` and `GIT_COMMON_DIR` both set to `<git dir>`, each printed the repository's own, `config --local --get-all remote.origin.url` included. Seen in three separate checks, each with a harmless value.
 - **What it reaches unpinned:** a push the host made for the room, `Remotes.git` run with `--git-dir=<git dir>` alone, listed and pushed to the planted `origin`'s URL (it failed only for want of the objects, which git then read from `<theirs>`'s store too); and `git config --file <git dir>/config` run inside `<git dir>`, as the launch reads `config` for the room's git, read `<theirs>/config` first, so a circular include there failed it. A planted `core.sshCommand` or `url.*.insteadOf` sits in the same `config`, so it would be read the same way; none was planted to run.
 - **A `gitdir` file there alone** (`<git dir>/gitdir` reading `<theirs>`) redirected neither `--git-dir` nor git run inside `<git dir>`.
-- Not checked: the host's git 2.56.0.
+- **The host's git 2.56.0 answers the same** (checked 2026-10-21): `--git-dir`, `-C` and `GIT_DIR` alone each follow a planted `commondir`, and `GIT_DIR` with `GIT_COMMON_DIR` resists it.
 
 ## A hook the judge doesn't read (measured, 2026-10-14)
 
@@ -382,6 +382,7 @@ Read-only, on the operator's machine, logged in as the operator, for `forge/` (`
   - `--log-driver=none` keeps `-it` and the exit status. On this host the default log driver is journald, which would keep a terminal session's output in the journal.
   - `--detach-keys=` (empty) is accepted with `-it`; its manual says an empty sequence turns off detaching, whose default is Ctrl+P then Ctrl+Q.
   - `--network=private` ran; its manual says it makes a namespace of the container's own, through pasta for rootless podman.
+- **Renaming.** `podman rename` renamed a launch's running `--rm` container, and its hooks were answered after (seen in the host's log, 2026-10-19).
 
 ### The CLIs' release channels (2026-10-13)
 
@@ -406,7 +407,7 @@ Read in its code and history (`lup-legacy`), with each commit there:
   - editors for `$EDITOR`: vim, neovim, nano, emacs-nox, helix, with tzdata; a virtual display for the clipboard (xorg-server-xvfb, xorg-xauth, python-xlib);
   - lup's own: github-cli, diffutils, which, tree, lsof, inetutils, go-yq, and poppler in every project's template;
   - an animation project's own: ffmpeg, the Noto fonts (CJK and emoji among them), and the libraries headless Chromium links (alsa-lib, at-spi2-core, libglvnd, libx11 and its kin, libxkbcommon).
-- **Its environments** were one per project root, outside the checkout (`.venv-contained`), synced at each start: 25 GB across 31 directories. Their scripts went stale when a repository moved, and a uv-managed interpreter was downloaded again at every start.
+- **Its environments** were one per project root, outside the checkout (`.venv-contained`), synced at each start: 25 GB across 31 directories. Their scripts went stale when a repository moved, and a uv-managed interpreter was downloaded again at every start. Its `worktree create` gave each new worktree a full copy rather than links into uv's cache: a fresh worktree was 6.4 GB, 5.9 GB of it `.venv-contained`, and one holding a `.venv` too 12 GB; ten made in one session added 65 GB and left the disk with 0.2 to 1.4 GB free.
 - **Logins** were copied into a volume per repository and kept in step by a companion every 30 s: a read-only mount at the login's own path broke renewal, and Claude Code 2.1.285 renames over its credentials file, which broke symbolic links.
 - **Its sessions' terminals** lost colour, their locale and their time zone until `TERM`, `COLORTERM`, `LANG` and `TZ` were passed. Without `--init`, 4,045 zombies piled up against the pids limit, which counts threads.
 - **Concurrent starts** on one config volume left NUL-prefixed `.claude.json` files, and 16 starts ended on `{"autoUpdates": false}`; Codex's `config.toml` raced the same way.
@@ -431,6 +432,12 @@ Read in its code and history (`lup-legacy`), with each commit there:
 Probed on the operator's host with throwaway containers from the room's base image, run as lup runs a room (`--userns=keep-id`):
 - **A mount reaches a running container only under a mount that was shared when it started.** A directory bound to itself and made shared in podman's namespace (`podman unshare mount --bind D D`, `mount --make-shared D`), then mounted into the container with `bind-propagation=rslave` (or `rshared`): a directory mounted under it afterwards (`podman unshare mount --bind SRC D/data`) was visible in the running container, and unmounting it on the host removed it there. Without propagation, as rooms were mounted before, nothing mounted later reached the container.
 - **Read-only has to be set before the mount spreads.** Bound, then remounted read-only (`mount -o remount,bind,ro`), the mount was read-only on the host's side and writable in the container: a remount's flags don't propagate to a slave's copy. Two ways gave a read-only mount there: `mount --bind -o ro` in one step (util-linux 2.42 applies the flag before attaching the mount; older versions remount after, which would spread it writable), and binding into a private directory, remounting read-only there, then binding that into the shared one. lup uses the second (`lup.rooms.engine.Podman.lend`), whatever the host's util-linux.
+
+### uv's environments across a room's mounts (uv 0.12.23, kernel 7.2.6, measured 2026-10-21)
+
+- **On the host, a worktree's `.venv` is links into uv's cache:** lup's `dev` worktree's holds 709 MB, 688 MB of it hardlinked from uv's cache on the same filesystem and 21 MB its own, mostly bytecode; a downstream project's, 5.9 GB linked and 101 MB its own.
+- **No hardlink crosses two mounts,** even of one filesystem: `ln` from one bind mount to another failed with "Invalid cross-device link". With its cache a bind mount of its own, `uv pip install` warned "Failed to hardlink files; falling back to full copy" and installed copies.
+- So a `.venv` made inside a room, which mounts the repository and uv's cache apart (`docs/launch.md`, *The mounts*), likely copies every package: a worktree an agent adds and syncs there would cost its environment's whole size, where made on the host it costs tens of MB. Measured with bind mounts in a namespace, not yet in a live room.
 
 ## Isolation and effects (2026-10-12)
 
@@ -457,6 +464,7 @@ What the judge (`docs/judging-writes.md`) rests on, measured on the operator's m
 - **Loading lup's project** in the engine takes 1.4 s, which an engine per hook would pay at every hook. The importers pass run whole, rather than a file at a time, would hold a check behind 27 s of re-checking on the first lup's library.
 - **Rules in Python over `ast`,** asking the warm engine by position (`tmp/spikes/rule-shape/`): the same findings as the table on 739 files, but their checks cost 10 to 20 times more, and they miss types pyright reads in strings outside annotations (`cast("tuple[int, str]", value)`) unless the engine lists them.
 - **uv in the judge's path:** `uv run` adds about 12 ms to a ruff call (26 ms against 14 ms for one file's check), and `--no-sync` saves about 3 ms of it; asking uv for the interpreter costs about 28 ms a program, against 1.4 s for the program; making lup's environment from uv's cache took 0.7 s. Plain `uv run` relocks a stale or missing lock: a `pyproject.toml` holding only `[tool.pyright]` got a `.venv` and a `uv.lock`.
+- **Held against flagged** (2026-10-18, lup's own sessions): 3 writes were held while about 50 landed flagged, seen by no one while a flag was only a line in the verdict log; so a flagged write became an inbox item, ranked last and raising no notice.
 - **The gate on lup,** with pytest on one worker: pytest was 75 of the gate's 85 s, lup's rules 8 s warm. Over 66 files, the rules step took 1.3 s warm and 5.6 s with the engine cold.
 - **Reading lup's host zone for an approval** (2026-10-18, in a room, the engine and ruff run as `Trust.read` runs them, lup's defaults judging): the zone whole at `dev`'s tip, as a first approval, 212 files and 54,465 lines, took 10.8 to 10.9 s, the engine cold or warm; the 40 commits before the tip, 70 files, 5.8 s. What it folds is little, lup's zone being nearly all production code, which opens wherever a line changed: every production file of a first approval is new and asks `new-file`, so 204 of the 212 stay open, 51,304 lines shown of 54,465; over the 40 commits, 15,293 lines shown against 16,379 with every file open; over the last 10, 3,107 against 3,114. A first approval's new files ask `public-api` too, once for each class they define: 932 such asks.
 - **An approval's reading, from the parse alone and whole** (2026-10-18, on the operator's machine, lup's own declaration judging): over the 40 commits before `dev`'s tip, 60 files, 33 of them Python, 64 versions of those read, the whole judgement took 8.3 s with the engine warm (checking the versions after the change 3.3 s, those before it 3.0 s, ruff 1.3 s, a process a file), 11.5 s cold. The same versions read from their parse alone took 0.35 s through the engine's one-shot `parse` command, 0.15 s of it Node's start, whatever the worktree's engine was doing; 0.21 s asked of a warm engine on its socket, 0.94 s of a cold one, whose start loads a project the parse never reads; and through the program, each file bound and each annotation's type printed but nothing checked, 1.0 to 3.2 s. Over the whole zone, 212 files and 1.46 MB of Python, the whole judgement took 5.7 s warm, 5.1 s of it ruff, and 13.2 s cold, the parse 0.35 s. Judged from the parse, the asks were the whole judgement's exactly, over the last 10 and 40 commits and the whole zone (938 public-API asks, 196 new files, 24 `ignore`s added, 15 protected paths): what types add to an approval's reading is lup's findings.
@@ -476,7 +484,8 @@ What the judge (`docs/judging-writes.md`) rests on, measured on the operator's m
 - in an extending file, ruff's `select` and `per-file-ignores` replace the base's, while `ignore`, `extend-select` and `extend-per-file-ignores` add to it; pyright's settings replace the base's by name, lists included;
 - a workspace member with its own `[tool.ruff]` and no `extend` is cut off from the root's settings;
 - pyright reads a TOML base's `[tool.pyright]`;
-- Node strips TypeScript types by default from 23.6.0 and 22.18.0, never under `node_modules`.
+- Node strips TypeScript types by default from 23.6.0 and 22.18.0, never under `node_modules`;
+- ruff applies `exclude`, `extend-exclude` and `--exclude` to a file named on its command line only with `--force-exclude` (checked 2026-10-21): `ruff check` and `ruff format --check` reported a file named under an excluded directory, and with `--force-exclude` found "No Python files found under the given path(s)". The judge's ruff passes it (`codescan/ruff.py`); a gate scoped to the changed files must too, or it checks files the whole gate leaves out.
 
 ## The declaration (2026-10-12)
 
@@ -531,6 +540,7 @@ For `docs/declaration.md`: what its code and its next pieces (a project's own ru
   - a pytest test root gave its files no test role;
   - xdist was looked up in the wrong environment.
 - **harmon** (a Discord agent that waited inside a tool, woken by events): the waiting held up; timing rules loaded onto the agent through its prompt starved its replies, and a reply took 21–68 s.
+- **A pipeline on the first lup's runs** (2026-10-17): after a failed pipeline was resumed with changed sources, `run monitor` exited at once on the earlier attempt's failed summary (18 s elapsed, 141 modules skipped) while the resumed runner went on checking units (3 of 142 checked, 4 running), in two pipelines. A run's summary has to say which attempt it closes, and a monitor follow the live runner rather than the last summary on disk.
 
 ## Where each runtime keeps its sessions' records (2026-10-17)
 
