@@ -4,6 +4,7 @@
 // own text out with these (`review.ts`, `conversation.ts`), and the editor they
 // share (`editor.ts`) lets the comments be written.
 import type { components } from "./generated/api";
+import type { FoldKind } from "./keys";
 
 export type Quote = components["schemas"]["Quote"];
 
@@ -23,12 +24,19 @@ export interface Block extends Span {
     comment: number;
 }
 
-/** What folds, folded by default: it hides `from` to `to`, from the end of its summary line to the end of its last; `key` names it across layouts. */
+/**
+ * What folds: it hides `from` to `to`, from the end of its summary line to the end of its last; `key` names it across
+ * layouts. Folds nest, each whole inside another or beside it.
+ */
 export interface Folding extends Span {
     key: string;
     summary: Span;
-    /** Whether it hides a change, which `zr` opens and `zm` folds again: a file folded whole, a run holding changed lines. */
-    diff?: boolean;
+    /** Whether it's folded until the operator opens it. */
+    closed: boolean;
+    /** What it holds, which its mark, its bar and the header show; none in a view whose folds have no kinds, as a conversation's. */
+    kind?: FoldKind;
+    /** What the header calls it. */
+    label?: string;
 }
 
 /** One row of a thing said: its text, where its words start in it, and where they start in the words kept. */

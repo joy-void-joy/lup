@@ -444,7 +444,7 @@ export function laid(entries: Entry[], beside: Beside, talk: Talk, earlier: Earl
             starts.push(line.from);
             last = line;
             const end = item.text.map((row) => aside("item-text", row)).at(-1);
-            const fold = end === undefined ? null : { key: `item ${item.number}`, summary: line, from: line.to, to: end.to };
+            const fold = end === undefined ? null : { key: `item ${item.number}`, summary: line, from: line.to, to: end.to, closed: true };
             items.push({ number: item.number, line, fold });
             return;
         }
@@ -496,7 +496,7 @@ export function laid(entries: Entry[], beside: Beside, talk: Talk, earlier: Earl
     const fold =
         summary === null || foldTo === null || foldTo <= summary.to
             ? null
-            : { key: "earlier", summary, from: summary.to, to: foldTo };
+            : { key: "earlier", summary, from: summary.to, to: foldTo, closed: true };
 
     // The message on the whole, and any comment on words no longer laid out, last, under the message's line.
     const closing = comments.filter(({ comment }) => comment.step === null || !said.has(comment.step));

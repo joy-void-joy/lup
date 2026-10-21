@@ -1,7 +1,8 @@
 // What each view's keys do, said two ways: in the one line of keys under it,
 // those that apply where the cursor is (`barOf`), and whole in the list `?`
-// opens, in parts (`Keys.tsx`). One table a view, so the two never disagree.
-// Pure (`docs/dashboard.md`, *The review*).
+// opens, in parts (`Keys.tsx`). One table a view, so the two never disagree;
+// the kinds of fold and their letters are one table too, read by the keys and
+// the review's marks. Pure (`docs/dashboard.md`, *The review*).
 
 /** One key, or a few doing alike: how it's pressed, what it does, and where the line of keys shows it. */
 export interface Key<P extends string> {
@@ -28,6 +29,34 @@ export interface Part<P extends string> {
  * a fold's summary; or on nothing, the review empty.
  */
 export type ReviewPlace = "insert" | "written" | "banner" | "approvals" | "item" | "change" | "file" | "flagged" | "aside" | "nothing";
+
+/** A kind of fold in the review: an item whole, a file, a function's or a class's body, a run of unchanged lines, an item's context. */
+export type FoldKind = "item" | "file" | "body" | "lines" | "context";
+
+/**
+ * One kind of fold: the letter naming it, what its folds are called together, whether Space `f` and its letter open
+ * them, and the level `zr` and `zm` open and close them at, the item's own first.
+ */
+export interface FoldKindKeys {
+    kind: FoldKind;
+    letter: string;
+    called: string;
+    chord: boolean;
+    level: number;
+}
+
+/**
+ * Each kind of fold, outermost first, by the letter naming it: the mark beside its summary line, and, but for an
+ * item's own, which its header's `za` folds, the key after Space `f` that opens every fold of that kind in the item, as
+ * Shift and the letter closes them.
+ */
+export const FOLD_KINDS: FoldKindKeys[] = [
+    { kind: "item", letter: "i", called: "the item", chord: false, level: 0 },
+    { kind: "file", letter: "f", called: "files", chord: true, level: 1 },
+    { kind: "body", letter: "b", called: "bodies", chord: true, level: 2 },
+    { kind: "lines", letter: "u", called: "unchanged lines", chord: true, level: 2 },
+    { kind: "context", letter: "c", called: "context", chord: true, level: 3 },
+];
 
 /** Where the cursor is in a conversation, for the line of keys: writing a comment, or not. */
 export type ConversationPlace = "insert" | "normal";
@@ -132,10 +161,44 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
     {
         title: "Folds",
         keys: [
-            { keys: "za", does: "open or close the fold the cursor is on", short: "fold", at: ["file", "flagged", "aside"] },
+            {
+                keys: "za",
+                does: "open or close the innermost fold the cursor is in: on an item's header or its own text, the item whole",
+                short: "fold",
+                at: ["item", "change", "file", "flagged", "aside"],
+            },
             { keys: "zo zc", does: "open or close it", short: "open close", at: [] },
-            { keys: "zr zm", does: "open or close those hiding a change", short: "changes", at: ["file", "flagged", "aside"] },
-            { keys: "zR zM", does: "open or close them all", short: "all", at: ["aside"] },
+            {
+                keys: "zr zm",
+                does: "open or close one more level of the item the cursor is in: its files, then their bodies and unchanged lines, then its context",
+                short: "a level",
+                at: ["file", "flagged", "aside"],
+            },
+            { keys: "zR zM", does: "open or close every fold in the item the cursor is in", short: "all of it", at: ["aside"] },
+            {
+                keys: "␣f",
+                does: "and a letter: open every fold of its kind in the item the cursor is in; Shift and the letter closes them",
+                short: "by kind",
+                at: ["file", "flagged", "aside"],
+            },
+            ...FOLD_KINDS.filter((each) => each.chord).map((each) => ({
+                keys: `␣f${each.letter} ␣f${each.letter.toUpperCase()}`,
+                does: `open or close the item's ${each.called}`,
+                short: each.called,
+                at: [],
+            })),
+            {
+                keys: "zj zk",
+                does: "to the start of the next fold, or the end of the one before, a folded one counting as its summary line",
+                short: "next fold",
+                at: ["aside"],
+            },
+            {
+                keys: "[z ]z",
+                does: "to the start or the end of the open fold the cursor is in; again, of the one around it",
+                short: "its ends",
+                at: [],
+            },
         ],
     },
     ...LIST,
@@ -180,3 +243,4 @@ export const CONVERSATION_KEYS: Part<ConversationPlace>[] = [
 export function barOf<P extends string>(parts: Part<P>[], place: P): Key<P>[] {
     return parts.flatMap((part) => part.keys.filter((key) => key.at.includes(place)));
 }
+

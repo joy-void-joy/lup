@@ -10,16 +10,19 @@
 // a held change, each file it changes, whole, its lines numbered, marked and
 // highlighted as they come into view, each line that matters by the judge's
 // reading barred and saying what it triggered; the item's header counts its files
-// by why each is open; under each item, its context. The context, each run of
-// unchanged lines and each automatic file fold, folded until opened
-// (`docs/dashboard.md`, *The review*).
+// by why each is open; under each item, its context. Each fold has a kind,
+// marked in the margin beside its summary line, with a bar for each fold the
+// cursor is in (`margin.ts`); the context, each run of unchanged lines and each
+// automatic file fold, folded until opened, and `zr`, `zm`, `zR`, `zM` and Space
+// `f` act on the item the cursor is in (`docs/dashboard.md`, *The review*).
 import { RangeSetBuilder, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef } from "react";
 
 import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./code";
-import { changes, moved, type Block, type Change } from "./comments";
-import { folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import { changes, moved, type Block, type Change, type Folding } from "./comments";
+import { closedAs, folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import { levelled, ofKind } from "./folds";
 import type { ReviewPlace } from "./keys";
 import {
     aboutAt,
@@ -30,6 +33,7 @@ import {
     codeFrom,
     flag,
     foldKey,
+    foldsOf,
     fresh,
     groupAt,
     isLetter,
@@ -189,7 +193,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
             (draft.parked ?? []).includes(number) ? "is-parked" : "",
         ].join(" ");
         marks.push({ from: region.header.from, to: region.header.from, value: Decoration.line({ class: states }) });
-        const runs = new Set(region.folds.filter((each) => each.kind === "code").map((each) => each.summary.from));
+        const runs = new Set(region.folds.filter((each) => each.kind === "lines").map((each) => each.summary.from));
         for (const aside of region.asides) {
             const classes = asideClasses(aside, runs.has(aside.from));
             marks.push({ from: aside.from, to: aside.from, value: Decoration.line({ class: classes }) });
@@ -357,8 +361,9 @@ export function Review({
         tree,
         moved: (head) => placed(placeAt(laidOut, head)),
         list,
+        margin: true,
     });
-    const { view, landing, unfolded } = editor;
+    const { view, landing, kept } = editor;
     const before = useRef<Laid | null>(null);
     // What was written as it was last laid out.
     const wrote = useRef<Written[]>([]);
@@ -388,26 +393,26 @@ export function Review({
                 away ??
                 (arriving === null ? moved(head, made, doc) : followed(before.current, laidOut, head, made, doc, arriving));
             const landed = arriving !== null || away !== undefined;
-            const closed = laidFor.folds.filter((each) => !unfolded.current.has(each.key));
+            const closed = laidFor.folds.filter((each) => closedAs(each, kept.current));
             // Where the view is, anchored to the text at its top and mapped through the changes.
             const changing = current.state.changes(made);
-            const kept = current.scrollSnapshot().map(changing);
+            const scrolled = current.scrollSnapshot().map(changing);
             current.dispatch({
                 changes: changing,
                 selection: { anchor: uncovered(closed, anchor) },
                 scrollIntoView: landed,
                 annotations: rebuilt.of(true),
             });
-            refold(current, laidFor.folds, unfolded.current);
-            if (!landed && kept !== undefined) {
-                current.dispatch({ effects: kept });
+            refold(current, laidFor.folds, kept.current);
+            if (!landed && scrolled !== undefined) {
+                current.dispatch({ effects: scrolled });
             }
             if (writing !== undefined) {
                 current.dispatch({ effects: EditorView.scrollIntoView(writing, { y: "nearest" }) });
             }
         } else {
             // What folds can change with the text the same, as an item marked read folds.
-            refold(current, laidFor.folds, unfolded.current);
+            refold(current, laidFor.folds, kept.current);
         }
         before.current = laidOut;
         wrote.current = written(draft);
@@ -433,10 +438,8 @@ export function Review({
             const at = laidOut.regions.indexOf(region);
             landing.current = { item: (laidOut.regions[at + 1] ?? region).item.number };
         }
-        // Marked again, it folds again, however it was left open before.
-        for (const name of ["read", "later"]) {
-            unfolded.current.delete(foldKey({ item: region.item.number, kind: "whole", name }));
-        }
+        // Marked or unmarked, it folds as that says, however it was left before.
+        kept.current.delete(foldKey({ item: region.item.number, kind: "item", name: "" }));
         editor.record(toggled(editor.latest.current, list, region.item.number));
     }
 
@@ -501,7 +504,7 @@ export function Review({
             const walked = laidOut.regions.filter(
                 (region) =>
                     !laidFor.folds.some(
-                        (fold) => fold.kind === "whole" && fold.item === region.item.number && isFolded(current.state, fold),
+                        (fold) => fold.kind === "item" && fold.item === region.item.number && isFolded(current.state, fold),
                     ),
             );
             const target = stepped(
@@ -540,7 +543,15 @@ export function Review({
         },
         send,
         paint: (from, to) => painted(laidOut, from, to),
+        level: (position, opening, all, closed) => levelled(itemFolds(position), closed, opening, all),
+        kind: (position, kind, closing, closed) => ofKind(itemFolds(position), closed, kind, closing),
     });
+
+    /** Return the folds of the item `position` is in, as the editor holds them: those the fold keys of an item reach. */
+    function itemFolds(position: number): Folding[] {
+        const keys = new Set(foldsOf(laidOut, position).map(foldKey));
+        return laidFor.folds.filter((each) => keys.has(each.key));
+    }
 
     return <div className="buffer review-buffer" ref={editor.parent} />;
 }

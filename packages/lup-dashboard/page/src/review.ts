@@ -5,14 +5,18 @@
 // write that landed flagged, each file it changes, whole (`code.ts`), its lines
 // commented on as the item's own are, the lines that matter in it, by the judge's
 // reading, kept in order for the keys to walk; under each item its context. Its
-// items by their kind's rank, which the host gives. What's folded by default: the
-// context, each run of a file's unchanged lines away from its changes and the
-// lines that matter, and an automatic file whole under its header. Pure: the
-// editor (`Review.tsx`) draws it, folds it and lets the comments and messages be
+// items by their kind's rank, which the host gives. Each fold has a kind: the
+// item whole, a file, a function's or a class's body, a run of unchanged lines,
+// the context. What's folded by default: the context, each run of a file's
+// unchanged lines away from its changes and the lines that matter, an automatic
+// file whole under its header, and an item marked read or left for later; a body
+// is open. Each fold is named by what it hides, so an item laid out again keeps
+// the folds the operator left. Pure: the editor
+// (`Review.tsx`) draws it, folds it and lets the comments and messages be
 // edited, and the host keeps the draft (`docs/dashboard.md`, *The review*). What
 // it shares with a conversation's text is in `comments.ts`.
 import { since } from "./agents";
-import { shownOnce, type ChangedFile, type Matter, type Row } from "./code";
+import { shownOnce, type Body, type ChangedFile, type Matter, type Row } from "./code";
 import {
     calls,
     lastOf,
@@ -26,8 +30,9 @@ import {
     type Line,
     type Span,
 } from "./comments";
+import { around } from "./folds";
 import type { components } from "./generated/api";
-import type { ReviewPlace } from "./keys";
+import type { FoldKind, ReviewPlace } from "./keys";
 
 export { calls, type Block, type ChangedFile, type Line, type Span };
 
@@ -70,18 +75,25 @@ export interface Coded extends Span {
 }
 
 /**
- * What folds under an item, folded by default: its context, a run of a file's unchanged lines, an automatic file under
- * its header, or, where it's marked read or left for later, all of it under its header (`whole`). It hides `from` to
- * `to`, from the end of its summary line to the end of its last; an automatic file's from the end of the comments on its
- * header, which stay in view.
+ * What folds in an item, by its kind (`FoldKind`): the item whole under its header, folded where it's marked read or
+ * left for later; each file it changes under its header, folded where it's automatic; a function's or a class's body
+ * under the line declaring it, open; a run of a file's unchanged lines under a summary line, folded; and its context,
+ * folded. Each sits whole inside another or beside it. It hides `from` to `to`, from the end of its summary line to the
+ * end of its last; a file's and a body's from the end of the comments on their first line, which stay in view.
  */
 export interface Fold extends Span {
     item: number;
-    kind: "context" | "code" | "file" | "whole";
-    /** Whether it hides a change: a file folded whole, or a run holding changed lines; unchanged lines, an item's context and an item folded whole hide none. */
-    diff: boolean;
-    /** What names it among its item's folds of its kind: a run of code by its file and its first row, a file by its path, an item folded whole by why, `read` or `later`. */
+    kind: FoldKind;
+    /**
+     * What names it among its item's folds of its kind, by what it hides rather than the row it's laid out on, so an
+     * item laid out again keeps each fold as the operator left it: a file by its path; a body by its file and the
+     * bodies it's in; a run by its file and what it hides (`Run.name`); an item's own and its context by nothing more.
+     */
     name: string;
+    /** What the header calls it: the item's own by its header, a file by its path, a body by its name, a run by its summary. */
+    label: string;
+    /** Whether it's folded until the operator opens it. */
+    closed: boolean;
     summary: Span;
 }
 
@@ -274,18 +286,20 @@ function beneath(item: Item, around: Around): Under | null {
 /**
  * One line under an item's own text that comments may be on, of a changed file: its header, or one of its rows, the
  * run of unchanged rows it opens, if any, before it, and whether it ends one; what it triggered, where it's a line that
- * matters, and whether it's a stop, the first line of what triggered; and, for an automatic file, the fold its header
- * opens and its last row ends.
+ * matters, and whether it's a stop, the first line of what triggered; the bodies it declares and those it ends; and, for
+ * a file with rows, the fold its header opens, folded where the file is automatic, and its last row ends.
  */
 interface Filed {
     file: ChangedFile;
     row: Row | null;
     text: string;
-    opens: { summary: string; name: string; diff: boolean } | null;
+    opens: { summary: string; name: string } | null;
     closes: boolean;
     matter: Matter | null;
     stop: boolean;
-    folds: string | null;
+    declares: Body[];
+    finishes: Body[];
+    folds: { closed: boolean } | null;
     ends: boolean;
 }
 
@@ -297,8 +311,9 @@ export function changing(item: Item): boolean {
 
 /**
  * Return the lines of each file an item changes (`changing`), as the host answered them: each file's header, then its
- * rows, its runs of unchanged ones folding, and the whole of an automatic one folding under its header; none for any
- * other item, or before the host has answered.
+ * rows, its runs of unchanged ones folding, each body able to fold under the row declaring it, and the whole of each
+ * file able to fold under its header, an automatic one folded; none for any other item, or before the host has
+ * answered.
  */
 function filed(item: Item, around: Around): Filed[] {
     const files = around.files.get(item.number);
@@ -307,7 +322,6 @@ function filed(item: Item, around: Around): Filed[] {
     }
     return files.shown.flatMap((file) => {
         const laidOut = shownOnce(file);
-        const folding = laidOut.automatic && laidOut.rows.length > 0;
         const header: Filed = {
             file,
             row: null,
@@ -316,7 +330,9 @@ function filed(item: Item, around: Around): Filed[] {
             closes: false,
             matter: null,
             stop: laidOut.whole,
-            folds: folding ? file.path : null,
+            declares: [],
+            finishes: [],
+            folds: laidOut.rows.length > 0 ? { closed: laidOut.automatic } : null,
             ends: false,
         };
         const matters = new Map(laidOut.matters.map((each) => [each.row, each]));
@@ -327,13 +343,14 @@ function filed(item: Item, around: Around): Filed[] {
                 file,
                 row,
                 text: row.text,
-                opens:
-                    run === undefined ? null : { summary: run.summary, name: `${file.path}:${at}`, diff: run.changed > 0 },
+                opens: run === undefined ? null : { summary: run.summary, name: run.name },
                 closes: laidOut.runs.some((each) => each.to === at + 1),
                 matter,
                 stop: (matter?.notes.length ?? 0) > 0,
+                declares: laidOut.bodies.filter((each) => each.from === at),
+                finishes: laidOut.bodies.filter((each) => each.to === at),
                 folds: null,
-                ends: folding && at === laidOut.rows.length - 1,
+                ends: at === laidOut.rows.length - 1,
             };
         });
         return [header, ...rows];
@@ -504,7 +521,13 @@ export function laid(
         if (group.items.length === 0 && blocks.length > 0) {
             text += "\n";
         }
-        groups.push({ conversation: group.conversation, later: isParked, place: placeOf(group.key, isParked), banner: opening, blocks });
+        groups.push({
+            conversation: group.conversation,
+            later: isParked,
+            place: placeOf(group.key, isParked),
+            banner: opening,
+            blocks,
+        });
         for (const item of group.items) {
             layItem(item, isParked);
         }
@@ -559,38 +582,49 @@ export function laid(
             writeBlocks(at);
         });
         const stops: number[] = [];
-        let opened: { summary: Aside; name: string; diff: boolean } | null = null;
-        let whole: { summary: Span; name: string; from: number } | null = null;
+        // What each fold under the item opened is, until the line ending it: the run, the file, each body by its name.
+        let run: { summary: Aside; name: string } | null = null;
+        let whole: { summary: Span; from: number; closed: boolean } | null = null;
+        const bodies = new Map<string, { summary: Span; from: number }>();
         files.forEach((each, index) => {
+            const path = each.file.path;
             if (each.opens !== null) {
-                opened = {
-                    summary: writeAside({ kind: "summary", text: each.opens.summary }),
-                    name: each.opens.name,
-                    diff: each.opens.diff,
-                };
+                run = { summary: writeAside({ kind: "summary", text: each.opens.summary }), name: each.opens.name };
             }
             const at = ownCount + index;
             const written = writeLine(each.text, at);
-            code.push({ from: written.from, to: written.to, file: each.file, row: each.row, matter: each.matter });
+            const span = { from: written.from, to: written.to };
+            code.push({ ...span, file: each.file, row: each.row, matter: each.matter });
             if (each.stop) {
                 stops.push(written.from);
             }
-            const run: { summary: Aside; name: string; diff: boolean } | null = opened;
-            if (each.closes && run !== null) {
-                const summary = { from: run.summary.from, to: run.summary.to };
-                folds.push({ item: item.number, kind: "code", name: run.name, diff: run.diff, summary, from: summary.to, to: written.to });
-                opened = null;
+            const fold = (kind: FoldKind, name: string, label: string, closed: boolean, summary: Span, from: number) =>
+                folds.push({ item: item.number, kind, name: name === "" ? path : `${path} ${name}`, label, closed, summary, from, to: written.to });
+            const ran: { summary: Aside; name: string } | null = run;
+            if (each.closes && ran !== null) {
+                const summary = { from: ran.summary.from, to: ran.summary.to };
+                fold("lines", ran.name, text.slice(summary.from, summary.to), true, summary, summary.to);
+                run = null;
             }
-            const automatic: { summary: Span; name: string; from: number } | null = whole;
-            if (each.ends && automatic !== null) {
-                const { summary, name, from } = automatic;
-                folds.push({ item: item.number, kind: "file", name, diff: true, summary, from, to: written.to });
+            for (const body of each.finishes) {
+                const declared = bodies.get(body.name);
+                if (declared !== undefined) {
+                    fold("body", body.name, body.names.at(-1) ?? "", false, declared.summary, declared.from);
+                    bodies.delete(body.name);
+                }
+            }
+            const opening: { summary: Span; from: number; closed: boolean } | null = whole;
+            if (each.ends && opening !== null) {
+                fold("file", "", path, opening.closed, opening.summary, opening.from);
                 whole = null;
             }
             writeBlocks(at);
+            // A file and a body fold under their first line and the comments on it, which stay in view.
             if (each.folds !== null) {
-                // The file folds under its header and the comments on it, which stay in view.
-                whole = { summary: { from: written.from, to: written.to }, name: each.folds, from: text.length - 1 };
+                whole = { summary: span, from: text.length - 1, closed: each.folds.closed };
+            }
+            for (const body of each.declares) {
+                bodies.set(body.name, { summary: span, from: text.length - 1 });
             }
         });
         const refused = around.files.get(item.number);
@@ -603,15 +637,13 @@ export function laid(
             const last = context.lines.map(writeAside).at(-1);
             if (last !== undefined) {
                 const shown = { from: summary.from, to: summary.to };
-                folds.push({ item: item.number, kind: "context", name: "", diff: false, summary: shown, from: summary.to, to: last.to });
+                folds.push({ item: item.number, kind: "context", name: "", label: "context", closed: true, summary: shown, from: summary.to, to: last.to });
             }
         }
-        if (isParked || done.includes(item.number)) {
-            // Marked read, or left for later, it folds whole under its header, what folds within it inside.
-            const header = { from: headFrom, to: headFrom + head.length };
-            const name = isParked ? "later" : "read";
-            folds.push({ item: item.number, kind: "whole", name, diff: false, summary: header, from: header.to, to: text.length - 1 });
-        }
+        // The item whole folds under its header, what folds within it inside: folded once it's marked read, or left for later.
+        const headed = { from: headFrom, to: headFrom + head.length };
+        const closed = isParked || done.includes(item.number);
+        folds.push({ item: item.number, kind: "item", name: "", label: head, closed, summary: headed, from: headed.to, to: text.length - 1 });
         text += "\n";
         regions.push({
             item,
@@ -628,7 +660,7 @@ export function laid(
 
 /** Return where going to an item lands: on its first line that matters, as the judge read its files, unless it's folded whole, marked read or left for later; else on its header. */
 export function arrival(region: Region): number {
-    const whole = region.folds.some((each) => each.kind === "whole");
+    const whole = region.folds.some((each) => each.kind === "item" && each.closed);
     return (whole ? undefined : region.stops[0]) ?? region.header.from;
 }
 
@@ -736,11 +768,17 @@ export function asideAt(region: Region, position: number): Aside | undefined {
     return region.asides.find((each) => position >= each.from && position <= each.to);
 }
 
-/** Return the fold `position` is on: on its summary line or the lines it hides. */
+/** Return the folds of the item `position` is in, which `zr`, `zm`, `zR`, `zM` and Space `f` reach: none on a group's banner or the messages under it. */
+export function foldsOf(laidOut: Laid, position: number): Fold[] {
+    return regionAt(laidOut, position)?.folds ?? [];
+}
+
+/** Return the innermost fold `position` is in: on its summary line or the lines it hides. */
 export function foldAt(laidOut: Laid, position: number): Fold | undefined {
-    return laidOut.regions
-        .flatMap((each) => each.folds)
-        .find((each) => position >= each.summary.from && position <= each.to);
+    return around(
+        laidOut.regions.flatMap((each) => each.folds),
+        position,
+    ).at(-1);
 }
 
 /** Return what names a fold across layouts: its item's number, what it holds, and which of those it is. */

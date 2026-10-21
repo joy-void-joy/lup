@@ -25,6 +25,16 @@
     --add-bg: #001b29;
     --del-bg: #3d0100;
 
+    /* Each kind of fold's colour, in its mark, its bar, its placeholder and the header. */
+    --fold-item: var(--orange);
+    --fold-file: var(--info);
+    --fold-body: var(--purple);
+    --fold-lines: var(--muted);
+    --fold-context: var(--cyan);
+    /* How far apart the margin's bars are, one a fold the cursor is in, and how many fit. */
+    --bar-step: 4px;
+    --bars: 6;
+
     --mono: "JetBrains Mono", "Iosevka Term", "Iosevka", "Fira Code", "Cascadia Mono",
         "Source Code Pro", "DejaVu Sans Mono", ui-monospace, monospace;
     --fs: 13px;
@@ -646,17 +656,18 @@ kbd {
 }
 
 /* What's under an item that isn't its own text: its context and an approval's
-   whole diff, each folded under its summary line, which reads ▸ while folded
-   and ▾ while open; the lines it holds set in under it. */
+   whole diff, each folded under its summary line, the lines it holds set in
+   under it. In a conversation, a summary line reads ▸ while folded and ▾ while
+   open; in the review, its mark in the margin says so. */
 .buffer .cm-line.aside-summary {
     color: var(--muted);
 }
 
-.buffer .cm-line.aside-summary::before {
+.conversation-buffer .cm-line.aside-summary::before {
     content: "▾ ";
 }
 
-.buffer .cm-line.aside-summary:has(.cm-foldPlaceholder)::before {
+.conversation-buffer .cm-line.aside-summary:has(.cm-foldPlaceholder)::before {
     content: "▸ ";
 }
 
@@ -788,12 +799,106 @@ kbd {
     font-weight: 400;
 }
 
-.buffer .cm-line.code-file.code-automatic::before {
-    content: "▾ ";
+/* Each kind of fold in its colour: its mark, its bar, its placeholder, its part of the header. */
+.fold-item {
+    color: var(--fold-item);
 }
 
-.buffer .cm-line.code-file.code-automatic:has(.cm-foldPlaceholder)::before {
-    content: "▸ ";
+.fold-file {
+    color: var(--fold-file);
+}
+
+.fold-body {
+    color: var(--fold-body);
+}
+
+.fold-lines {
+    color: var(--fold-lines);
+}
+
+.fold-context {
+    color: var(--fold-context);
+}
+
+/* The review's margin: a row a line, as tall as the line beside it. The bars of
+   the folds the cursor is in, outermost leftmost, each from its summary line to
+   its last, set in a little at both ends so two folds one after another show
+   apart; then the mark of the fold a line is the summary line of. */
+.buffer .cm-gutters {
+    background: var(--bg);
+    border: 0;
+}
+
+.buffer .fold-margin {
+    width: calc(3px + var(--bars) * var(--bar-step) + 2ch + 2px);
+}
+
+.buffer .fold-margin .cm-gutterElement {
+    position: relative;
+    padding: 0;
+}
+
+.fold-cell {
+    position: absolute;
+    inset: 0;
+}
+
+.fold-bar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(3px + var(--depth) * var(--bar-step));
+    width: 2px;
+    background: currentColor;
+}
+
+.fold-bar.is-first {
+    top: 3px;
+}
+
+.fold-bar.is-last {
+    bottom: 3px;
+}
+
+.fold-mark {
+    position: absolute;
+    top: 0;
+    right: 2px;
+    line-height: var(--lh);
+    font-weight: 700;
+}
+
+/* A folded fold's placeholder: outlined in its kind's colour. */
+.buffer .cm-editor .cm-foldPlaceholder.fold-placeholder {
+    border: 1px solid currentColor;
+    padding: 0 0.5ch;
+    color: inherit;
+}
+
+.buffer .cm-editor .cm-foldPlaceholder.fold-item {
+    color: var(--fold-item);
+}
+
+.buffer .cm-editor .cm-foldPlaceholder.fold-file {
+    color: var(--fold-file);
+}
+
+.buffer .cm-editor .cm-foldPlaceholder.fold-body {
+    color: var(--fold-body);
+}
+
+.buffer .cm-editor .cm-foldPlaceholder.fold-lines {
+    color: var(--fold-lines);
+}
+
+.buffer .cm-editor .cm-foldPlaceholder.fold-context {
+    color: var(--fold-context);
+}
+
+@media (max-width: 640px) {
+    :root {
+        --bar-step: 3px;
+    }
 }
 
 /* Highlighting, by the classes CodeMirror's class highlighter gives each token,

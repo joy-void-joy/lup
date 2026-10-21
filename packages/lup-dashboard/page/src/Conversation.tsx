@@ -374,7 +374,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         } else if (anchor !== undefined) {
             view.dispatch({ selection: { anchor }, scrollIntoView: true });
         }
-        refold(view, folding, editor.unfolded.current);
+        refold(view, folding, editor.kept.current);
         before.current = laidOut;
         editor.landing.current = null;
         editor.draw(decorations(laidOut, talk));
