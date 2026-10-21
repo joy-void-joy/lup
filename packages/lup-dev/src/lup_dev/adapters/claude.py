@@ -5,7 +5,7 @@
 | `SessionStart` | `SessionStarted` |
 | `UserPromptSubmit` | `turn-started`, the host service's alone |
 | `PreToolUse` | `CallStarted`; for `Edit` and `Write`, judged before it lands first |
-| `PostToolUse`, `PostToolUseFailure` | `CallFinished` |
+| `PostToolUse`, `PostToolUseFailure` | `CallFinished`: the checkpoint |
 | `Stop` | `TurnEnded` |
 | `SubagentStop` | `ConversationEnded` |
 
@@ -21,21 +21,29 @@ follows such a hold. When judging itself fails at a turn's end, the turn ends,
 and the operator is warned once in `systemMessage`, which also carries what the
 session's turn's end tells without holding it.
 
-In a launched room (`docs/host.md`, *The one hook*), Claude Code runs the
-room's hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse` for every call,
-`Stop` and `SubagentStop` (`hooks`), so the host service hears each
-conversation's start, each turn's start and the prompt it starts on, its calls
-and its turn's ends (`docs/inbox.md`, *How an agent is told*). The judge
-reads only `SessionStart` and the file tools' writes, judged before they land
-(`heard`, `WRITING`): no checkpoint, as in lup's own repository, so the turn's ends
-hold back nothing of the judge's. Every other hook the service answers itself,
-without starting the judge, as no decision. Where the launch's judge can't answer
-a hook, the host service answers it through `unanswered`: a file tool's write is
-denied, naming why, since a write let through unjudged would land unseen; any
-other hook warns the operator in `systemMessage`, and the call goes on. Where the
-room's hook can't reach the service, it ends with status 1 and says why on
-standard error: a non-blocking error, which Claude Code shows, and the call goes
-on.
+In a launched room (`docs/host.md`, *The one hook*), Claude Code runs the room's
+hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and
+`PostToolUseFailure` for every call, `Stop` and `SubagentStop` (`hooks`), so the
+host service hears each conversation's start, each turn's start and the prompt
+it starts on, its calls' starts and finishes, and its turn's ends
+(`docs/inbox.md`, *How an agent is told*). The judge reads every one of them but
+a turn's start (`heard`) and the calls `judging` leaves out: those to lup's own
+tools, and to a tool on the list of those that only read (`READING`). So every
+write is judged: a file tool's before it lands, and anything else, a command's,
+a script's, a notebook's, at the checkpoint after its call, which holds what
+asks there until the operator answers, put back on a decline
+(`docs/judging-writes.md`, *After a call: the checkpoint*). A turn's end clears
+the calls its conversation left that no finish reported, runs a last checkpoint,
+and holds the session's turn while the files it touched have findings
+(`docs/judging-writes.md`, *The turn's end*). Every other hook the service
+answers itself, without starting the judge, as no decision. Where the launch's
+judge can't answer a hook, the host service answers it through `unanswered`: a
+file tool's write is denied, naming why, since a write let through unjudged
+would land unseen; at a call's finish the agent is told beside its result, as
+when judging fails; any other hook warns the operator in `systemMessage`, and
+the call goes on. Where the room's hook can't reach the service, it ends with
+status 1 and says why on standard error: a non-blocking error, which Claude Code
+shows, and the call goes on.
 
 The service adds to each answer through `told`: a call to lup's tools
 (`mcp__lup__<tool>`, `TOOL_PREFIX`) is rewritten to carry `caller`, lup's id for
@@ -132,6 +140,13 @@ What its judging relies on, from Claude Code's hooks reference
 - `PreToolUse` "runs before a tool call executes", `PostToolUse` "after a tool call
   succeeds": a call never finishes before it starts, so the calls running stay
   right when calls run in parallel, whose hooks "run in parallel";
+- `PostToolUse`'s and `PostToolUseFailure`'s `additionalContext` is added "next
+  to the tool result"; `PostToolUseFailure` "Runs when a tool that started
+  executing fails", but "Cancelling a running tool does not fire this hook", and
+  `Stop` "Does not run if the stoppage occurred due to a user interrupt" (read
+  2026-10-21): a call the operator interrupts stays counted as running until its
+  conversation's next turn ends, holding back its session's checkpoints until
+  then;
 - a `command` hook's timeout defaults to 600 seconds, and "a timed-out command
   ... hook doesn't block the tool call", so a judgement must answer within it;
 - a subagent's hooks carry `agent_id`, "Present only when the hook fires inside a
@@ -216,10 +231,52 @@ if TYPE_CHECKING:
 
 WRITING = ["Edit", "Write"]
 """The file tools whose writes are judged before they land: `PreToolUse.proposal`
-reads each, and in a launched session the judge reads their calls alone."""
+reads each."""
+
+READING = [
+    "Read",  # reads a file, an image, a PDF or a notebook into the model's context
+    "Glob",  # lists the paths matching a pattern
+    "Grep",  # searches files' contents with ripgrep
+    "LSP",  # asks a language server for definitions, references, symbols and types
+    "WebFetch",  # fetches a page for a small model to answer about
+    "WebSearch",  # searches the web
+    "ToolSearch",  # loads the schemas of tools Claude Code deferred
+    "ListMcpResourcesTool",  # lists the resources MCP servers expose
+    "ReadMcpResourceTool",  # reads one resource of an MCP server
+    "AskUserQuestion",  # asks the operator multiple-choice questions, and waits
+    "TaskGet",  # reads one task of Claude Code's own task list
+    "TaskList",  # reads Claude Code's own task list
+    "CronList",  # lists the session's scheduled prompts
+    "ListAgents",  # lists the agents `SendMessage` can reach
+    "WaitForMcpServers",  # waits for MCP servers still connecting
+]
+"""The tools that only read or wait, which change no file: the judge reads
+neither the start nor the finish of a call to one, so it costs no judgement, and
+one that waits (`AskUserQuestion`) holds back no checkpoint. Every tool nobody
+listed is judged, a new tool or another MCP server's among them, so a tool
+missing here costs a judgement, never a write unjudged; a tool that changes only
+Claude Code's own state (`TaskCreate`, `TodoWrite`) is judged too. Named as
+Claude Code's tools reference names them (code.claude.com/docs/en/tools-reference,
+read 2026-10-21), with what each does beside it. On Linux, `Glob` and `Grep`
+are absent by default, and Claude searches with `find` and `grep` through
+`Bash`, which is judged."""
 
 TOOL_PREFIX = f"mcp__{SERVER}__"
 """What Claude Code names each of lup's tools by in a hook: `mcp__lup__blocked`."""
+
+
+def judging(tool: str) -> bool:
+    """Say whether the judge reads a call to `tool`, at its start and its finish alike: every call but one to lup's own tools, served on the host, and one to a tool that only reads.
+
+    The same answer at both ends, since a call whose start counts it as running
+    holds back its session's checkpoints until its finish is read.
+
+    >>> judging("Bash"), judging("mcp__other__write"), judging("Read")
+    (True, True, False)
+    >>> judging("mcp__lup__ask")
+    False
+    """
+    return not tool.startswith(TOOL_PREFIX) and tool not in READING
 
 
 class Variables(Settings):
@@ -508,7 +565,7 @@ class PreToolUse(Payload):
                 return None
 
     def heard(self, fits: int) -> Heard:
-        """Read the call's start: the judge reads a file tool's write alone."""
+        """Read the call's start: the judge reads it unless it's to lup's tools or one that only reads (`judging`)."""
         return Heard(
             event="call-started",
             session=self.session_id,
@@ -516,7 +573,7 @@ class PreToolUse(Payload):
             call=self.tool_use_id,
             tool=self.tool_name,
             served=self.tool_name.startswith(TOOL_PREFIX),
-            judged=self.tool_name in WRITING,
+            judged=judging(self.tool_name),
             fits=fits,
             spawning=(
                 Spawning(
@@ -637,14 +694,14 @@ class PostToolUse(Payload):
     tool_use_id: str
 
     def heard(self, fits: int) -> Heard:
-        """Read the call's finish: the judge reads it, where it's hooked."""
+        """Read the call's finish: the judge reads it where it read the call's start (`judging`)."""
         return Heard(
             event="call-finished",
             session=self.session_id,
             agent=self.agent_id or None,
             call=self.tool_use_id,
             tool=self.tool_name,
-            judged=True,
+            judged=judging(self.tool_name),
             fits=fits,
         )
 
@@ -678,7 +735,12 @@ class PostToolUse(Payload):
 
     @override
     def unanswered(self, said: str) -> Output:
-        return OperatorWarning(system_message=said)
+        """Tell the agent beside the call's result, as when judging fails: the checkpoint judged nothing."""
+        told = PostToolUseAnswer(
+            hook_event_name=self.hook_event_name,
+            additional_context=f"{said}. Tell the operator.",
+        )
+        return Specific(hook_specific_output=told)
 
 
 class Stop(Payload):
@@ -698,12 +760,12 @@ class Stop(Payload):
     hook input schema)."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the turn's end: in a room, with no checkpoint, the judge doesn't read it."""
+        """Read the turn's end: the judge reads it."""
         return Heard(
             event="turn-ended",
             session=self.session_id,
             agent=self.agent_id or None,
-            judged=False,
+            judged=True,
             after_block=self.stop_hook_active,
             fits=fits,
             said=self.last_assistant_message,
@@ -755,12 +817,12 @@ class SubagentStop(Payload):
     """Whether the subagent goes on because a `SubagentStop` hook blocked it already."""
 
     def heard(self, fits: int) -> Heard:
-        """Read a subagent's turn's end: in a room, with no checkpoint, the judge doesn't read it."""
+        """Read a subagent's turn's end: the judge reads it."""
         return Heard(
             event="conversation-ended",
             session=self.session_id,
             agent=self.agent_id or None,
-            judged=False,
+            judged=True,
             after_block=self.stop_hook_active,
             fits=fits,
         )
@@ -999,14 +1061,18 @@ def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
     `SessionStart`; `UserPromptSubmit`, each turn's start, a channel's message
     among them; `PreToolUse` on every call, the file tools' writes judged
     before they land, every call told what waits for its conversation, and a
-    call to lup's tools stamped with its caller; `Stop` and `SubagentStop`, each
-    conversation's turn's end. Each waits up to `timeout`, which a hold's wait
-    for the operator needs.
+    call to lup's tools stamped with its caller; `PostToolUse` and
+    `PostToolUseFailure` on every call, the checkpoint after it; `Stop` and
+    `SubagentStop`, each conversation's turn's end, which clears the calls it
+    left that no finish reported (one interrupted) and judges what the turn
+    left. Each waits up to `timeout`, which a hold's wait for the operator
+    needs, at a call's start, its finish or a turn's end.
     """
     events: list[Event] = [
         "session-started",
         "turn-started",
         "call-started",
+        "call-finished",
         "turn-ended",
         "conversation-ended",
     ]
