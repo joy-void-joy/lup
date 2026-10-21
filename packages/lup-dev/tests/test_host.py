@@ -1265,7 +1265,10 @@ def test_a_launch_whose_modules_cant_be_served_gets_the_core_s_tools_alone(
     with served(service(layout, Judge(), said, tools=[Recording()], modules=Broken())):
         host.register(launch(tmp_path, "one", "first"))
         assert listed(layout.launch("one").mcp) == ["echo", "rename"]
-    assert "one: its modules aren't served: its copy predates `worker`" in said
+    assert (
+        "one: its process didn't start, so its modules aren't served, and its "
+        "judge's next hook starts it again: its copy predates `worker`"
+    ) in said
 
 
 def test_a_module_s_tool_named_like_a_core_tool_is_left_to_the_core(

@@ -396,5 +396,9 @@ def test_a_launch_ending_ends_its_processes_a_replaced_one_holding_among_them(
             assert not list(isolated.launches.glob("one.modules.*"))
             with pytest.raises(HostError):
                 await asyncio.wait_for(held, timeout=PATIENCE)
+            # A hook still on its way as the launch ends starts no process.
+            with pytest.raises(HostError, match="launch one has ended"):
+                await judge.judged(launch, "late")
+            assert workers.commands() == []
 
     asyncio.run(exercised())

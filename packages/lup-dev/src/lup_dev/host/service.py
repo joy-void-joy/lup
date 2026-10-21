@@ -690,18 +690,21 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         return name
 
     async def offered(self, request: Register) -> Offered:
-        """Start serving the launch's modules, and return what they serve that the core doesn't.
+        """Start the launch's process, its judge and its modules, and return what the modules serve that the core doesn't.
 
-        Where they can't be served, it's said and the launch goes on with the
-        core's tools alone; a tool or a kind of request the core serves already is
-        said and left to the core.
+        Where it can't start, it's said and the launch goes on with the core's
+        tools alone, its judge's next hook starting the process again; a tool or
+        a kind of request the core serves already is said and left to the core.
         """
         if self.modules is None:
             return Offered()
         try:
             offered = await self.modules.open(request)
         except HostError as failed:
-            self.say(f"{request.launch}: its modules aren't served: {failed}")
+            self.say(
+                f"{request.launch}: its process didn't start, so its modules aren't "
+                f"served, and its judge's next hook starts it again: {failed}"
+            )
             return Offered()
         names = [spec.name for tools in self.tools for spec in tools.specs()]
         kinds = [room.kind for room in self.room_routes]

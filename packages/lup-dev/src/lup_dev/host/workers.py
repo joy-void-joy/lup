@@ -281,6 +281,9 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     """The command of each launch's process being started."""
     turns: dict[str, asyncio.Lock] = {}
     """Held while a launch's process is found or started, so one starts at a time."""
+    closed: list[str] = []
+    """The launches it stopped serving: a request of theirs still on its way
+    starts no process."""
     retiring: list[asyncio.Task[None]] = []
 
     @override
@@ -296,6 +299,7 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     @override
     async def close(self, launch: Register) -> None:
         async with self.turn(launch.launch):
+            self.closed = [*self.closed, launch.launch]
             current = self.running.pop(launch.launch, None)
             ended = [
                 *([] if current is None else [current]),
@@ -332,12 +336,16 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
         """Return the process answering `launch`'s requests, counted as answering one more.
 
         It's the one running the copy the launch's approved command names as
-        it's asked, its links followed. Where none runs it, because none was started, the
-        one started died, or the repository's approved copy changed, one is
-        started; a process of the copy replaced goes on answering what it was
-        asked, then ends (`retired`). Raise `HostError` where none can start.
+        it's asked, its links followed. Where none runs it, because none was
+        started, the one started died, or the repository's approved copy
+        changed, one is started; a process of the copy replaced goes on
+        answering what it was asked, then ends (`retired`). Raise `HostError`
+        where none can start, or the launch has ended.
         """
         async with self.turn(launch.launch):
+            if launch.launch in self.closed:
+                message = f"launch {launch.launch} has ended"
+                raise HostError(message)
             command = launch.judge.resolve()
             found = self.running.get(launch.launch)
             alive = found is not None and found.process.returncode is None
