@@ -500,6 +500,44 @@ def test_an_edit_judged_before_it_lands_is_accepted_as_judged(
     )
 
 
+def test_a_file_tools_findings_are_told_with_the_call_and_not_again_at_its_finish(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    edit = Replacement(
+        call="e1",
+        tool="Edit",
+        path=repo / CORE,
+        old="    return x\n",
+        new="    return x  # BAD regex\n",
+    )
+    decision = before(kit.bench, edit, SESSION, repo)
+    assert decision.told.startswith("lup's findings on the lines changed")
+    call(kit, repo, "e1", tool="Edit")
+    (repo / CORE).write_text(edit.content((repo / CORE).read_text()) or "")
+    assert finish(kit, repo, "e1") == Reply()
+    store = worktree(kit, repo).store
+    assert store.content(store.accepted(), CORE) == (repo / CORE).read_bytes()
+
+
+def test_a_file_tools_write_to_a_test_is_told_its_type_errors_with_the_call(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    test = repo / "tests" / "test_core.py"
+    text = "def test_it():\n    x: int = 'a'  # TYPE\n"
+    write = Overwrite(call="w1", tool="Write", path=test, text=text)
+    decision = before(kit.bench, write, SESSION, repo)
+    assert decision.outcome == "allow"
+    assert decision.told.startswith(
+        "Type errors and ruff's findings in the files changed"
+    )
+    assert f"{test}:2:" in decision.told
+    call(kit, repo, "w1", tool="Write")
+    test.write_text(text)
+    assert finish(kit, repo, "w1") == Reply()
+
+
 def test_an_approval_covers_the_path_for_the_rest_of_the_session(
     kit: Kit, repo: Path
 ) -> None:
@@ -667,20 +705,22 @@ def test_a_shell_write_no_checkpoint_can_attribute_goes_to_every_participant(
 def test_a_file_tools_write_goes_to_the_conversation_that_made_it(
     kit: Kit, repo: Path
 ) -> None:
+    """Its findings are told to the writer with the call, so neither the
+    checkpoint after it nor the session's turn's end tells them again."""
     start(kit, repo)
     new = repo / "src" / "pkg" / "new.py"
     text = '"""New."""\nz: str = 1  # TYPE\n'
     write = Overwrite(call="w1", tool="Write", path=new, text=text)
-    assert held(kit, lambda: before(kit.bench, write, SESSION, repo))
+    decision = before(kit.bench, write, SESSION, repo, agent="worker")
+    assert decision.told.startswith(
+        "Type errors and ruff's findings in the files changed"
+    )
     call(kit, repo, "c1")
     call(kit, repo, "w1", tool="Write", agent="worker")
     new.write_text(text)
-    finish(kit, repo, "c1")
-    finish(kit, repo, "w1", agent="worker")
+    assert finish(kit, repo, "c1") == Reply()
+    assert finish(kit, repo, "w1", agent="worker") == Reply()
     assert session(kit, repo).touched == {"worker": [Path("src/pkg/new.py")]}
-    told = end(kit, repo).block
-    assert told.startswith("Type errors and ruff's findings in the files changed")
-    assert "lup won't end the turn yet" not in told
     assert end(kit, repo) == Reply()
     assert subagent_ends(kit, repo, "worker") == Reply()
     assert end(kit, repo) == Reply()

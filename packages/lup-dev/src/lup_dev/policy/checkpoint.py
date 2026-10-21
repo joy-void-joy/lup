@@ -165,15 +165,17 @@ class Running(MutableModel):
 
 
 class Pending(Model):
-    """A file tool's write judged before it lands, waiting for its call to finish."""
+    """A file tool's write judged before it lands, waiting for its call to finish.
+
+    What its judgement found was told beside the call, and an approval it
+    needed logged and covering its path, as the operator answered: its call's
+    finish only confirms it landed (`confirm`).
+    """
 
     call: str
     path: Path
     blob: str
     """The would-be content's object id in the store."""
-    asked: bool
-    """Whether the operator was asked: if the call runs, they approved."""
-    verdict: Verdict
     removed: list[RemovedNote] = []
 
 
@@ -184,6 +186,11 @@ class Judged(Model):
     blob: str
     agent: str = ""
     """The conversation that wrote it: empty for the session's own, else a subagent's."""
+    told: bool = False
+    """Whether what its judgement found was told as it was judged, beside the
+    call that wrote it: a file tool's write, judged before it landed. The
+    checkpoint accepting it doesn't tell it again; a held change the operator
+    approved is told there, since its hold told only the answer."""
 
 
 class Mail(Model):
@@ -689,6 +696,9 @@ class Planned(Model):
     """The session's change, judged as an edit is; none where it made none."""
     decide: bool = True
     """Whether its outcome decides what happens; else it was judged already."""
+    told: bool = False
+    """Whether what it was judged to hold was told as it was judged (`Judged.told`),
+    so the checkpoint doesn't tell it again."""
     moved: Change | None = None
     """What a move of `HEAD` brought that no checkpoint judged, judged once as its
     commits'; none where the move brought nothing unjudged."""
@@ -873,8 +883,8 @@ class Snapshot(Model):
     """The tree the session started from; none where nothing changed to judge."""
     elsewhere: Elsewhere
     """Content judged before, which isn't judged again."""
-    judged: dict[Path, str]
-    """Content already judged, by path: its object id."""
+    judged: dict[Path, Judged]
+    """Content already judged, by path: the last judged there."""
     move: Move | None = None
 
     def plan(self, path: Path) -> Planned:
@@ -885,14 +895,14 @@ class Snapshot(Model):
         after = decoded(store.content(self.taken, path))
         baseline = decoded(store.content(self.start, path))
         accepted = decoded(store.content(self.accepted, path))
-        if prior is not None and prior == blob:
+        if prior is not None and prior.blob == blob:
             change = Change(path=path, before=accepted, after=after, baseline=baseline)
-            return Planned(path=path, change=change, decide=False)
+            return Planned(path=path, change=change, decide=False, told=prior.told)
         if self.move is not None and path in self.move.paths:
             return self.moving(path, self.move)
         if self.elsewhere.holds(path, blob):
             return Planned(path=path)
-        before = accepted if prior is None else decoded(store.object(prior))
+        before = accepted if prior is None else decoded(store.object(prior.blob))
         change = Change(path=path, before=before, after=after, baseline=baseline)
         return Planned(path=path, change=change)
 
@@ -1179,7 +1189,7 @@ def checkpoint(
             head=head,
             start=store.started(key) if changed else None,
             elsewhere=Elsewhere(store=store, commits=[*state.tips, *others, *remote]),
-            judged={each.path: each.blob for each in session.judged},
+            judged={each.path: each for each in session.judged},
             move=moving(worktree, heads, head) if changed else None,
         )
         plans = [snapshot.plan(path) for path in changed]
@@ -1234,7 +1244,15 @@ def checkpoint(
             worktree.record(services.layout, head)
         notice = worktree.told() if plans else ""
         told = commits.told.then(Checked(notices=[notice] if notice else []))
-        checked = remember(worktree, session, agent, acted, told=told, wrote=wrote)
+        checked = remember(
+            worktree,
+            session,
+            agent,
+            acted,
+            told=told,
+            wrote=wrote,
+            heard=[plan.path for plan in plans if plan.told],
+        )
     runtime = bench.runtime.name()
     wrote_flagged = (
         flagged(
@@ -1352,6 +1370,7 @@ def remember(
     *,
     told: Checked,
     wrote: dict[Path, list[str]],
+    heard: list[Path],
 ) -> Checked:
     """Note in the session what a checkpoint did, and report it; hold the lock.
 
@@ -1359,15 +1378,17 @@ def remember(
     for the others whose calls finished since the last one: the checkpoint sees
     files, not who wrote them. Each file landed is touched by the conversations
     `wrote` names for it. `told` is what a move of `HEAD` brought, which is no
-    session's.
+    session's. The files in `heard` were told what was found in them as they
+    were judged, so only the notes their writes removed are reported.
     """
     root = worktree.root
     landed = acted.landed
+    fresh = [j for j in landed if j.path not in heard]
     importing = watch(worktree, session, worktree.importers().collect())
     checked = Checked(
-        findings=placed(root, [found for j in landed for found in j.findings]),
-        information=placed(root, [found for j in landed for found in j.information]),
-        untouched=placed(root, [found for j in landed for found in j.untouched]),
+        findings=placed(root, [found for j in fresh for found in j.findings]),
+        information=placed(root, [found for j in fresh for found in j.information]),
+        untouched=placed(root, [found for j in fresh for found in j.untouched]),
         importers=placed(root, importing),
         removed=noted(root, [note for j in landed for note in j.removed]),
         notices=late_answers(worktree, session),
@@ -1587,9 +1608,10 @@ def mail_for(worktree: Worktree, key: str, agent: str, runtime: Runtime) -> str:
 def confirm(bench: Bench, worktree: Worktree, key: str, agent: str, call: str) -> None:
     """Note that a call finished: a write judged before it landed has landed.
 
-    It's conversation `agent`'s. If the operator was asked about it, the call
-    running means they approved, and the approval covers the path for the rest of
-    the session.
+    It's conversation `agent`'s, and the content lup accepts from then on: a
+    later write to the file is judged against it, at its call's start or at a
+    checkpoint, and the checkpoint accepting it tells no more of what was told
+    as it was judged.
     """
     with worktree.lock():
         session = worktree.session(key, bench.runtime)
@@ -1600,25 +1622,16 @@ def confirm(bench: Bench, worktree: Worktree, key: str, agent: str, call: str) -
         session.judged = [
             *session.judged,
             *(
-                Judged(path=pending.path, blob=pending.blob, agent=agent)
+                Judged(path=pending.path, blob=pending.blob, agent=agent, told=True)
                 for pending in landed
             ),
         ]
-        asked = [pending.path for pending in landed if pending.asked]
-        session.approved = list(dict.fromkeys([*session.approved, *asked]))
         session.removed = {
             **session.removed,
             **{pending.path: pending.removed for pending in landed},
         }
         session.participants = list(dict.fromkeys([*session.participants, agent]))
         worktree.keep(session)
-    worktree.verdicts(bench.services.layout).append(
-        [
-            pending.verdict.model_copy(update={"answer": "approved"})
-            for pending in landed
-            if pending.asked
-        ]
-    )
 
 
 def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding]:

@@ -11,9 +11,10 @@ words:
 - a whole write: the content it carries.
 
 A replacement whose string isn't there exactly as the tool requires is allowed:
-the tool fails on its own. A write let through is remembered until its call
-finishes, so the checkpoint after it accepts that content as already judged, and
-tells its findings; one flagged is put before the operator as it's let through,
+the tool fails on its own. A write let through is told what its judgement found
+beside the call, as a checkpoint tells a command's, and remembered until its
+call finishes, so the checkpoint after it accepts that content as already
+judged, telling it no more; one flagged is put before the operator as it's let through,
 holding no one, as is one to a file whose item may still gather the
 conversation's writes, refreshing it (`flags.py`); one declined, or left
 unanswered, never lands, and the agent's version is saved.
@@ -123,9 +124,9 @@ class Decision(Model):
     empty for a plain allow."""
     told: str = ""
     """What the agent is told beside a write let through: lup's findings in it,
-    its type errors and ruff's, as a checkpoint reports them. A runtime whose
-    file tools are judged before they land runs no checkpoint after the call to
-    tell them, so they're told with the call, before the agent's next line."""
+    its type errors and ruff's, as a checkpoint reports them. They're told with
+    the call, as it's judged, since the checkpoint after it waits while another
+    call of the session runs (#86); that checkpoint tells them no more."""
 
 
 def told(root: Path, judgement: Judgement) -> str:
@@ -211,7 +212,7 @@ def before(
         )
         each_held = services.announcing.holding(bench.runtime.name(), session, agent)
         judge = worktree.judge(services, record.approved, holding=each_held)
-        judgement = judge.judge([change], inform=False)[0]
+        judgement = judge.judge([change])[0]
         to = Attributed(worktree=worktree.root, session=session, tool=proposal.tool)
         logged = None if judgement.outcome == "ask" else verdict(bench, to, judgement)
         writer = agent or ""
@@ -221,8 +222,6 @@ def before(
                 call=proposal.call,
                 path=path,
                 blob=store.keep(after.encode()),
-                asked=False,
-                verdict=logged,
                 removed=judgement.removed,
             )
             record.pending = [*record.pending, pending]
@@ -283,8 +282,8 @@ def held_write(
     worktree, in its repository's git directory, is kept in the store of the
     worktree the session works in, its verdict the git directory's, and is no
     write of that worktree's once let through. Approved, the write is let
-    through, the approval covering the path for the rest of the session as an
-    asked call that ran does (`confirm`), and their comment told; declined, or
+    through, logged approved and covering the path for the rest of the session
+    as the operator answers, and their comment told; declined, or
     left unanswered within the patience, it's denied, and the agent's version
     saved, the hold staying open where nobody answered.
     """
@@ -331,7 +330,6 @@ def held_write(
     )
     answer = holds.wait(key, services.clock)
     if answer is not None and answer.approved:
-        # Logged as it's given: no hook may report the call's finish, which would.
         log.append(answered(hold, "approved"))
     if answer is not None and answer.approved and outside is not None:
         said = f"The operator approved it: {answer.comment}" if answer.comment else ""
@@ -343,12 +341,9 @@ def held_write(
                 call=proposal.call,
                 path=path,
                 blob=held.blob,
-                asked=True,
-                verdict=logged,
                 removed=judgement.removed,
             )
             record.pending = [*record.pending, pending]
-            # The approval covers the path from now: no hook may report the call's finish (`confirm`).
             record.approved = list(dict.fromkeys([*record.approved, path]))
             worktree.keep(record)
         said = f"The operator approved it: {answer.comment}" if answer.comment else ""
