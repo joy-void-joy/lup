@@ -1816,7 +1816,7 @@ def test_lup_dev_sessions_counts_the_subagents_that_ended_and_lists_them_with_al
     ]
 
 
-def test_a_subagent_spawned_without_a_name_is_asked_and_its_parent_told_once(
+def test_a_subagent_spawned_without_a_name_is_asked_to_name_itself_its_parent_never(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     records = Subagents(tmp_path)
@@ -1824,8 +1824,7 @@ def test_a_subagent_spawned_without_a_name_is_asked_and_its_parent_told_once(
         launched(machine, clock, tmp_path / "w", "one", "claude")
         hook = machine.host.launch("one").hook
         send(hook, claude("SessionStart", source="startup"))
-        first_spawn = context(send(hook, records.spawn("t1")))
-        second_spawn = send(hook, records.spawn("t2"))
+        spawns = [send(hook, records.spawn(call)) for call in ["t1", "t2"]]
         records.recorded("a1", "Explore", "t1")
         records.recorded("a2", "Explore", "t2")
         asked = context(send(hook, records.call("a1", "Explore", "c1")))
@@ -1838,13 +1837,7 @@ def test_a_subagent_spawned_without_a_name_is_asked_and_its_parent_told_once(
         launches = HostClient(
             layout=machine.host, clock=clock, starter=Unstarted()
         ).launches()
-    assert first_spawn == (
-        "lup: that subagent goes without a name, so you and the operator can't call "
-        "it by one: give each subagent you spawn a name after its task (`name` on "
-        "`Agent`, which it takes though its schema doesn't list it). It's asked to "
-        "name itself meanwhile."
-    )
-    assert second_spawn == ""
+    assert spawns == ["", ""]
     assert asked.startswith(
         f"{introduction()}\n\n"
         "lup: this subagent is `w/Explore·a1` for now, with no name of its own"
@@ -1869,6 +1862,29 @@ def test_a_subagents_name_and_place_outlast_a_restart_of_lups_host(
         send(hook, records.call("a1", "Explore", "c1"))
         sockets = (hook, machine.host.launch("one").mcp)
         records.lup(sockets, "rename", {"name": "parser"}, "a1", "Explore")
+    with inboxed(machine, clock, notices, said):
+        told = send(hook, records.call("a1", "Explore", "c2"))
+        shown = named_talkers(machine, clock)
+    assert told == ""
+    assert shown == [("w", None, 0), ("w/parser", "w", 1)]
+
+
+def test_conversations_kept_with_a_field_lup_since_dropped_load_at_a_restart(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+    kept = machine.host.conversations("one")
+    stored = json.loads(kept.read_text())
+    for each in stored["known"]:
+        each["nudged"] = True
+    kept.write_text(json.dumps(stored))
     with inboxed(machine, clock, notices, said):
         told = send(hook, records.call("a1", "Explore", "c2"))
         shown = named_talkers(machine, clock)

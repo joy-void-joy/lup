@@ -484,15 +484,7 @@ class PreToolUse(Payload):
     """The turn the call runs in, which a later turn's start says is over."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the call's start: the judge reads every one.
-
-        A call spawning a subagent isn't heard as one, since its caller can't
-        be asked to name what it spawns: the first version of `spawn_agent`
-        takes no name (`create_spawn_agent_tool_v1`,
-        `core/src/tools/handlers/multi_agents_spec.rs`, at `rust-v0.163.0`),
-        and the second requires `task_name`. A subagent the first spawns is
-        asked to name itself (`spawned`).
-        """
+        """Read the call's start: the judge reads every one."""
         return Heard(
             event="call-started",
             session=self.session_id,
