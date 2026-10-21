@@ -4,9 +4,9 @@ One program per user on the operator's machine, outside every room, which rooms 
 
 ## Using it
 
-- **It starts on demand,** detached, from the first launch or command that finds none answering, and runs until it's stopped. It holds a lock for its whole life, so a second refuses.
+- **It starts on demand,** detached, from the first launch or command that finds none answering, and runs until it's stopped. A command that only reads, run in an agent's session, never starts it, since it would run on in that shell's environment (`reading`, `cli.py`). It holds a lock for its whole life, so a second refuses.
 - **`lup-dev host`** runs it in the foreground, to watch it, and **`lup-dev host stop`** stops it. A launch outlives a stop (*Restarts and the sweep*).
-- **`lup-dev sessions`** lists the launches it serves, each with its conversations as a tree and its container.
+- **`lup-dev sessions`** lists the launches it serves, each with its conversations as a tree and its container. It only reads, so an agent's session on the host runs it too, though a room can't yet.
 - **What it prints,** started in the background, is appended to `service.log` in lup's state, which a client names when the service doesn't answer within 10 seconds; in the foreground, it prints to the terminal.
 
 ## How a room reaches it

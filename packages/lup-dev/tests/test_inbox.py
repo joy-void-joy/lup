@@ -39,7 +39,7 @@ from lup_dev import Modules, Project, cli
 from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
 from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.resolve import resolve
-from lup_dev.host.client import HostClient, Starter
+from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
 from lup_dev.host.protocol import HostError, Limits, Register, Stop
@@ -2048,27 +2048,147 @@ def test_lup_dev_mount_refuses_a_room_that_started_before_it_could_receive(
     )
 
 
+SESSIONS = [("CLAUDE_CODE_CHILD_SESSION", "claude"), ("CODEX_THREAD_ID", "codex")]
+"""Each runtime's variable saying a command runs inside one of its sessions, and the runtime's name."""
+
+READING = [
+    ["sessions"],
+    ["inbox"],
+    ["inbox", "show", "1"],
+    ["inbox", "show", "1", "--diff"],
+    ["inbox", "show", "1", "--context"],
+]
+"""The commands that only read lup's state, which an agent's session on the host runs."""
+
+
+class Recording(Starter):
+    """Starts nothing, and counts each time it's asked to."""
+
+    def __init__(self) -> None:
+        self.starts = 0
+
+    @override
+    def start(self, log: Path) -> None:
+        self.starts += 1
+
+
+@pytest.mark.parametrize(("variable", "runtime"), SESSIONS)
 @pytest.mark.parametrize(
     "arguments",
-    [
-        [],
-        ["show", "1"],
-        ["answer", "1", "--comment", "x"],
-        ["done", "1"],
-        ["send", "one", "x"],
-    ],
+    [["answer", "1", "--comment", "x"], ["done", "1"], ["send", "one", "x"]],
 )
-def test_lup_dev_inbox_refuses_inside_an_agents_session(
-    machine: Layout, monkeypatch: pytest.MonkeyPatch, arguments: list[str]
+def test_lup_dev_inbox_refuses_to_act_inside_an_agents_session(
+    machine: Layout,
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    runtime: str,
+    arguments: list[str],
 ) -> None:
-    monkeypatch.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+    monkeypatch.setenv(variable, "1")
     result = runner.invoke(cli.app, ["inbox", *arguments])
     assert isinstance(result.exception, InboxError)
     assert str(result.exception) == (
-        "this runs inside a claude session, and the inbox is the operator's: run it "
-        "in your own terminal"
+        f"this runs inside a {runtime} session, and the inbox is the operator's: run "
+        "it in your own terminal"
     )
     assert not machine.host.control.exists()
+
+
+@pytest.mark.parametrize("variable", [variable for variable, _ in SESSIONS])
+def test_an_agents_session_on_the_host_lists_the_sessions_and_the_inbox_and_shows_an_item(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+) -> None:
+    podman_having(monkeypatch, "lup-one")
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        stamped = json.loads(send(hook, lup_call("note", {"remark": "Mine."}, "n1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        call(machine.host.launch("one").mcp, "note", stamped)
+        monkeypatch.setenv(variable, "1")
+        listing = runner.invoke(cli.app, ["sessions"])
+        listed = inbox()
+        shown = inbox("show", "1")
+    assert listing.exit_code == 0, (listing.output, listing.exception)
+    assert listing.output.splitlines()[0] == (
+        f"`w`  claude in {tmp_path / 'w'}  (one)  container lup-one, running"
+    )
+    assert listed == (
+        "   1  2026-10-01 12:00  a note from `w` (claude session s1) in "
+        f"{tmp_path / 'w'}: Mine.\n"
+    )
+    assert shown == (
+        f"Item 1, a note from claude session s1 in {tmp_path / 'w'} to the operator, "
+        "made 2026-10-01 12:00, waiting:\nMine.\n"
+    )
+
+
+@pytest.mark.parametrize(("variable", "runtime"), SESSIONS)
+@pytest.mark.parametrize("arguments", READING)
+def test_a_reading_command_in_an_agents_session_says_no_service_runs_and_starts_none(
+    machine: Layout,
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    runtime: str,
+    arguments: list[str],
+) -> None:
+    starter = Recording()
+    monkeypatch.setattr(cli, "Detached", lambda: starter)
+    monkeypatch.setenv(variable, "1")
+    result = runner.invoke(cli.app, arguments)
+    assert isinstance(result.exception, HostError), (result.output, runtime)
+    assert str(result.exception) == (
+        "no host service runs, and none is started from an agent's session: a launch "
+        "starts it, or the operator's own `lup-dev` in their terminal"
+    )
+    assert starter.starts == 0
+
+
+@pytest.mark.parametrize("arguments", READING)
+def test_a_reading_command_in_the_operators_terminal_starts_the_service_where_none_runs(
+    machine: Layout, monkeypatch: pytest.MonkeyPatch, arguments: list[str]
+) -> None:
+    starter = Recording()
+    monkeypatch.setattr(cli, "Detached", lambda: starter)
+    result = runner.invoke(cli.app, arguments)
+    assert isinstance(result.exception, HostError)
+    assert "the host service didn't answer" in str(result.exception)
+    assert starter.starts == 1
+
+
+@pytest.mark.parametrize(("variable", "runtime"), SESSIONS)
+@pytest.mark.parametrize("arguments", READING)
+def test_a_reading_command_in_a_room_says_a_room_doesnt_serve_it_yet(
+    machine: Layout,
+    tmp_path: Path,
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    runtime: str,
+    arguments: list[str],
+) -> None:
+    socket = tmp_path / "request.sock"
+    socket.touch()
+    starter = Recording()
+    monkeypatch.setattr(cli, "RoomClient", lambda: RoomClient(socket=socket))
+    monkeypatch.setattr(cli, "Detached", lambda: starter)
+    monkeypatch.setenv(variable, "1")
+    result = runner.invoke(cli.app, arguments)
+    assert isinstance(result.exception, HostError), (result.output, runtime)
+    assert str(result.exception) == (
+        "a room doesn't serve this command yet: the room reaches the host service "
+        "only on its launch's request socket, which takes no reading requests"
+    )
+    assert starter.starts == 0
 
 
 def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
