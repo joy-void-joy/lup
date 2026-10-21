@@ -12,7 +12,8 @@ The session index keeps each session's repository and the worktrees it holds:
 where it started, where its file tools wrote, and where its hooks reported its
 working directory. It keeps, too, the worktrees each of its conversations works
 in (`Holding.works`), which a call of that conversation holds checkpoints back
-in while it runs (`docs/judging-writes.md`, *After a call: the checkpoint*).
+in while it runs (`docs/judging-writes.md`, *Which calls hold a checkpoint
+back*).
 """
 
 from pathlib import Path
