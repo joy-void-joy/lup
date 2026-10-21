@@ -3,7 +3,7 @@
 | Claude Code hook | lup's event |
 |---|---|
 | `SessionStart` | `SessionStarted` |
-| `UserPromptSubmit` | `turn-started`, the host service's alone |
+| `UserPromptSubmit` | `TurnStarted` |
 | `PreToolUse` | `CallStarted`; for `Edit` and `Write`, judged before it lands first |
 | `PostToolUse`, `PostToolUseFailure` | `CallFinished`: the checkpoint |
 | `Stop` | `TurnEnded` |
@@ -26,9 +26,9 @@ hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and
 `PostToolUseFailure` for every call, `Stop` and `SubagentStop` (`hooks`), so the
 host service hears each conversation's start, each turn's start and the prompt
 it starts on, its calls' starts and finishes, and its turn's ends
-(`docs/inbox.md`, *How an agent is told*). The judge reads every one of them but
-a turn's start (`heard`) and the calls `judging` leaves out: those to lup's own
-tools, and to a tool on the list of those that only read (`READING`). So every
+(`docs/inbox.md`, *How an agent is told*). The judge reads every one of them
+(`heard`) but the calls `judging` leaves out: those to lup's own tools, and to a
+tool on the list of those that only read (`READING`). So every
 write is judged: a file tool's before it lands, and anything else, a command's,
 a script's, a notebook's, at the checkpoint after its call, which holds what
 asks there until the operator answers, put back on a decline
@@ -64,7 +64,8 @@ a channel's `notifications/claude/channel` as a prompt, `<channel source="lup"
 wake="…">` around its `content`, with no line saying it came from another
 session, at priority `next`: an idle session starts a turn on it, a busy one
 takes it after its running call, and it fires `UserPromptSubmit` with the whole
-tag as `prompt` either way, its `wake` attribute the push's token. It registers
+tag as `prompt` either way, as it arrives, its `wake` attribute the push's
+token. It registers
 a server as a channel only where the server declares
 `capabilities.experimental["claude/channel"]`, is named in the flag, connected
 on the handshake revisions (lup's server refuses `server/discover`:
@@ -155,10 +156,9 @@ What its judging relies on, from Claude Code's hooks reference
 - a hook's `cwd` is the "Current working directory when the hook is invoked",
   and "Subagent sessions never carry over working directory changes" (the tools
   reference, *Bash tool behavior*): a subagent's hooks report the directory its
-  session works in, whatever worktree the subagent works on. Seven of lup's own
-  subagents, each working in a worktree of its own, recorded the launch's
-  worktree as their `cwd` on every line (2.1.304, 2026-10-21), so a subagent
-  works where its file tools write (`Holding.works`, `policy/worktrees.py`);
+  session works in, whatever worktree the subagent works on, as its records do
+  (`docs/field-notes.md`, *Judging writes*), so a subagent works where its file
+  tools write (`Holding.works`, `policy/worktrees.py`);
 - `Stop`'s `stop_hook_active` "is `true` when Claude Code is already continuing as
   a result of a stop hook"; `SubagentStop` takes "the same decision control format
   as Stop hooks".
@@ -222,6 +222,8 @@ from lup_dev.policy.checkpoint import (
     ConversationEnded,
     SessionStarted,
     TurnEnded,
+    TurnStarted,
+    counted,
     first_warning,
 )
 from lup_dev.policy.report import judge_failed
@@ -485,23 +487,25 @@ class SessionStart(Payload):
 
 
 class UserPromptSubmit(Payload):
-    """`UserPromptSubmit`: a turn starts on a prompt, the operator's or a channel's.
+    """`UserPromptSubmit`: a turn starts on a prompt, the operator's or a channel's, or a prompt arrives in a turn.
 
     Measured on 2.1.304 (`docs/field-notes.md`, *Channels*): a channel's message
     fires it with the whole `<channel …>` text as its `prompt`, when an idle
-    session starts a turn on it and when a busy one takes it after a call.
+    session starts a turn on it, and about 30 ms after the push when a busy one
+    is running a call, which takes the message after that call. So it can fire
+    while a call of the session's own conversation still runs.
     """
 
     hook_event_name: Literal["UserPromptSubmit"]
     prompt: str
 
     def heard(self, fits: int) -> Heard:
-        """Read the turn's start, and the prompt it starts on: the judge doesn't read it."""
+        """Read the turn's start, and the prompt it starts on: the judge reads it."""
         return Heard(
             event="turn-started",
             session=self.session_id,
             agent=self.agent_id or None,
-            judged=False,
+            judged=True,
             fits=fits,
             prompt=self.prompt,
         )
@@ -512,11 +516,38 @@ class UserPromptSubmit(Payload):
 
     @override
     def answer(self, bench: Bench) -> Output | None:
+        """Stop counting the session's calls whose results their conversations' records hold: no hook reports the end of a call the operator interrupts, and Claude Code records its result at once.
+
+        A call still running has no result recorded, so a prompt arriving
+        mid-turn leaves it counted. A record that lags leaves a call counted
+        until its conversation's turn ends, as before.
+        """
+        transcript = self.transcript_path
+        left = [] if transcript is None else counted(bench, self.session_id)
+        over = (
+            []
+            if transcript is None
+            else [
+                key
+                for agent in dict.fromkeys(call.agent for call in left)
+                for key in resulted(
+                    recorded(transcript, agent),
+                    [call.key for call in left if call.agent == agent],
+                )
+            ]
+        )
+        TurnStarted(
+            session=self.session_id, agent=self.agent_id, cwd=self.cwd, over=over
+        ).apply(bench)
         return None
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
-        return None
+        """Let the turn start, and warn the operator once, as a turn's end does: a call left counted is cleared at its conversation's turn's end."""
+        warning = judge_failed(failure)
+        if not first_warning(bench.services.layout, self.session_id, warning):
+            return None
+        return OperatorWarning(system_message=warning)
 
     @override
     def unanswered(self, said: str) -> Output:
@@ -1066,13 +1097,13 @@ def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
     """Return the hooks a launched Claude Code session runs `command` at: the events the host service hears.
 
     `SessionStart`; `UserPromptSubmit`, each turn's start, a channel's message
-    among them; `PreToolUse` on every call, the file tools' writes judged
+    among them, which clears the calls the session's records show over (one
+    interrupted); `PreToolUse` on every call, the file tools' writes judged
     before they land, every call told what waits for its conversation, and a
     call to lup's tools stamped with its caller; `PostToolUse` and
     `PostToolUseFailure` on every call, the checkpoint after it; `Stop` and
     `SubagentStop`, each conversation's turn's end, which clears the calls it
-    left that no finish reported (one interrupted) and judges what the turn
-    left. Each waits up to `timeout`, which a hold's wait for the operator
+    left that no finish reported and judges what the turn left. Each waits up to `timeout`, which a hold's wait for the operator
     needs, at a call's start, its finish or a turn's end.
     """
     events: list[Event] = [
@@ -1238,14 +1269,21 @@ class ToolUse(Model, extra="ignore"):
     id: str | None = None
 
 
+class ToolResult(Model, extra="ignore"):
+    """A call's result, by the id of the call it answers."""
+
+    type: Literal["tool_result"]
+    tool_use_id: str
+
+
 class OtherBlock(Model, extra="ignore"):
-    """Any other part of a message: a tool's result, thinking, an image."""
+    """Any other part of a message: thinking, an image."""
 
     type: str
 
 
 type Block = Annotated[
-    TextBlock | ToolUse | OtherBlock, Field(union_mode="left_to_right")
+    TextBlock | ToolUse | ToolResult | OtherBlock, Field(union_mode="left_to_right")
 ]
 
 
@@ -1393,6 +1431,33 @@ def parsed(record: Path) -> Iterator[Line]:
                 yield reading.validate_json(raw)
             except ValidationError:
                 continue
+
+
+def recorded(transcript: Path, agent: str) -> Path:
+    """Return where Claude Code records conversation `agent` of the session whose transcript is `transcript`: the transcript for the session's own, `<session>/subagents/agent-<id>.jsonl` beside it for a subagent's (`docs/field-notes.md`, *Subagents' records*)."""
+    if not agent:
+        return transcript
+    return transcript.with_suffix("") / "subagents" / f"agent-{agent}.jsonl"
+
+
+def resulted(record: Path, calls: list[str]) -> list[str]:
+    """Return those of `calls` whose result `record` holds; none where there's no record.
+
+    Claude Code records a result for every call, an interrupted one's or one the
+    operator refused at its prompt among them ("The user doesn't want to proceed
+    with this tool use"), though no hook reports its end (`docs/field-notes.md`,
+    *Judging writes*).
+    """
+    if not calls or not record.is_file():
+        return []
+    found = [
+        block.tool_use_id
+        for line in parsed(record)
+        if isinstance(line, UserLine) and not isinstance(line.message.content, str)
+        for block in line.message.content
+        if isinstance(block, ToolResult)
+    ]
+    return [call for call in calls if call in found]
 
 
 def named(lines: list[Line]) -> str | None:

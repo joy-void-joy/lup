@@ -26,6 +26,7 @@ from lup_dev.policy.checkpoint import (
     Session,
     SessionStarted,
     TurnEnded,
+    TurnStarted,
     Worktree,
 )
 from lup_dev.policy.holds import Holds, Response, answer, waiting
@@ -201,6 +202,36 @@ def test_a_call_that_never_finishes_is_cleared_when_the_turn_ends(
 
 def running(kit: Kit, repo: Path) -> list[str]:
     return [each.key for each in worktree(kit, repo).running().calls]
+
+
+def test_a_turns_start_clears_the_calls_the_runtime_shows_over(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    call(kit, repo, "lost")
+    call(kit, repo, "gone", agent="worker")
+    call(kit, repo, "c1")
+    TurnStarted(session=SESSION, cwd=repo, over=["lost", "gone"]).apply(kit.bench)
+    assert running(kit, repo) == ["c1"]
+    bad(repo)
+    assert finish(kit, repo, "c1").context.startswith(
+        "lup's findings on the lines changed"
+    )
+
+
+def test_a_turns_start_clears_its_conversations_calls_of_another_turn(
+    kit: Kit, repo: Path
+) -> None:
+    """A prompt arriving in a turn carries that turn's id, and leaves its calls."""
+    start(kit, repo)
+    for key, agent in [("c1", ""), ("w1", "worker")]:
+        CallStarted(
+            session=SESSION, agent=agent, cwd=repo, call=key, tool="Bash", turn="t1"
+        ).apply(kit.bench)
+    TurnStarted(session=SESSION, cwd=repo, turn="t1").apply(kit.bench)
+    assert running(kit, repo) == ["c1", "w1"]
+    TurnStarted(session=SESSION, cwd=repo, turn="t2").apply(kit.bench)
+    assert running(kit, repo) == ["w1"]
 
 
 def test_a_turns_end_clears_only_its_own_sessions_calls(kit: Kit, repo: Path) -> None:

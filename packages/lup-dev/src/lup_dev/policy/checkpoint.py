@@ -6,6 +6,7 @@ events (`docs/judging-writes.md`, *After a call: the checkpoint*):
 | Event | When |
 |---|---|
 | `SessionStarted` | a session starts or resumes |
+| `TurnStarted` | a conversation's turn starts, or a prompt arrives in it |
 | `CallStarted` | a tool call is about to run |
 | `CallFinished` | a tool call finished, or failed |
 | `TurnEnded` | the agent ends its turn |
@@ -140,10 +141,13 @@ class Call(Model):
 
     key: str
     session: str
-    """The session making it, which counts it in every worktree it holds."""
+    """The session making it."""
     agent: str
     """The conversation making it: empty for the session's own, else a subagent's."""
     tool: str
+    turn: str | None = None
+    """The runtime's id for the turn it runs in, where the runtime names its
+    turns: its conversation's next turn starting means it's over."""
 
     def of(self, session: str, agent: str) -> bool:
         """Say whether conversation `agent` of `session` makes this call."""
@@ -1868,6 +1872,68 @@ class SessionStarted(Event):
         return Reply(context="" if due is None else due.told())
 
 
+def counted(bench: Bench, session: str) -> list[Call]:
+    """Return the calls of `session` counted as running in the worktrees it holds, each once."""
+    index = SessionIndex(layout=bench.services.layout)
+    with index.lock(session):
+        held = index.read(session)
+    if held is None:
+        return []
+
+    def running(worktree: Worktree) -> list[Call]:
+        with worktree.calls_lock():
+            return [each for each in worktree.running().calls if each.session == session]
+
+    calls = [each for worktree in worktrees(bench, held) for each in running(worktree)]
+    return list({each.key: each for each in calls}.values())
+
+
+class TurnStarted(Event):
+    """A turn of conversation `agent` starts, or a prompt arrives in its turn: the calls of its session the runtime shows are over stop counting as running.
+
+    A call the runtime never reports finishing, one the operator interrupts
+    among them, holds back the checkpoints where it counts until its
+    conversation's turn ends, and a turn the operator interrupts may report no
+    end. A prompt can arrive while a call of the conversation still runs, so
+    the turn's start clears only what the runtime shows over: the calls in
+    `over`, whose results their conversations' records hold, and, where the
+    runtime names its turns (`turn`), the conversation's calls of another turn.
+    No checkpoint runs: what they wrote is judged at the next one.
+    """
+
+    turn: str | None = None
+    """The runtime's id for the turn the prompt starts or arrives in; none where
+    it names none."""
+    over: list[str] = []
+    """The runtime's ids for the session's calls it shows are over."""
+
+    def ended(self, call: Call) -> bool:
+        """Say whether `call`, counted as running, is over."""
+        if call.session != self.session:
+            return False
+        later = (
+            call.agent == self.agent
+            and self.turn is not None
+            and call.turn is not None
+            and call.turn != self.turn
+        )
+        return call.key in self.over or later
+
+    @override
+    def apply(self, bench: Bench) -> Reply:
+        held = holding(bench, self.session, self.cwd, agent=self.agent)
+        if held is None:
+            return Reply()
+        for worktree in worktrees(bench, held):
+            with worktree.calls_lock():
+                running = worktree.running()
+                left = [each for each in running.calls if not self.ended(each)]
+                if left != running.calls:
+                    running.calls = left
+                    worktree.ran(running)
+        return Reply()
+
+
 class CallStarted(Event):
     """A tool call is about to run: it counts in every worktree its conversation works in (`Holding.works`).
 
@@ -1878,6 +1944,8 @@ class CallStarted(Event):
     tool: str
     spawns: bool = False
     """Whether the call runs a subagent, whose own calls count instead."""
+    turn: str | None = None
+    """The runtime's id for the turn it runs in; none where it names none."""
 
     @override
     def apply(self, bench: Bench) -> Reply:
@@ -1892,7 +1960,11 @@ class CallStarted(Event):
         if self.spawns:
             return Reply()
         call = Call(
-            key=self.call, session=self.session, agent=self.agent, tool=self.tool
+            key=self.call,
+            session=self.session,
+            agent=self.agent,
+            tool=self.tool,
+            turn=self.turn,
         )
         for worktree in working(bench, held, self.agent):
             with worktree.calls_lock():

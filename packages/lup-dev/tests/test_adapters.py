@@ -986,6 +986,30 @@ def with_fields(raw: str, **fields: object) -> str:
     return json.dumps({**json.loads(raw), **fields})
 
 
+def test_codex_clears_a_call_of_an_earlier_turn_at_the_next_turns_start(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    """A prompt carries its turn's id, as each call does: a call no hook
+    finished in an earlier turn is over, and the turn's first call's finish
+    judges what it wrote; a prompt arriving in the turn leaves its calls."""
+    codex.hook(captured("1-session-start", repo), on_codex)
+    lost = captured("6-pre-tool-use-bash", repo)
+    turn = json.loads(lost)["turn_id"]
+    codex.hook(lost, on_codex)
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    steered = with_fields(CODEX_PROMPT, session_id=json.loads(lost)["session_id"])
+    same = with_fields(steered, cwd=str(repo), turn_id=turn)
+    assert codex.hook(same, on_codex) == ""
+    assert running(kit, repo) == [json.loads(lost)["tool_use_id"]]
+    assert codex.hook(with_fields(same, turn_id="next"), on_codex) == ""
+    assert running(kit, repo) == []
+    codex.hook(with_fields(captured("2-pre-tool-use-add", repo), turn_id="next"), on_codex)
+    output = json.loads(codex.hook(captured("3-post-tool-use-add", repo), on_codex))
+    assert output["hookSpecificOutput"]["additionalContext"].startswith(
+        "The operator approved the held change to"
+    )
+
+
 def test_codex_a_subagents_call_holds_back_the_main_conversations_checkpoint(
     on_codex: Bench, repo: Path, kit: Kit
 ) -> None:
@@ -1166,7 +1190,8 @@ def test_claude_clears_an_interrupted_call_at_the_turns_end_and_judges_its_write
 ) -> None:
     """Claude Code reports no end of a call the operator interrupts (neither
     `PostToolUse` nor `PostToolUseFailure`), and runs no `Stop` for the turn it
-    interrupted: the conversation's next turn's end clears it."""
+    interrupted: where no record shows it over at the next turn's start, that
+    turn's end clears it."""
     in_room(payload(repo, "SessionStart", source="startup"), on_claude)
     in_room(pre_tool_use(repo, "Bash", {"command": "sed -i …"}, "lost"), on_claude)
     (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
@@ -1180,6 +1205,74 @@ def test_claude_clears_an_interrupted_call_at_the_turns_end_and_judges_its_write
     assert held_on(printed).startswith("lup won't end the turn yet")
     assert "regex: regex fires here" in held_on(printed)
     assert running(kit, repo) == []
+
+
+def results(record: Path, *calls: str) -> None:
+    """Write a Claude Code record holding a result for each of `calls`, as it records an interrupted call's."""
+    record.parent.mkdir(parents=True, exist_ok=True)
+    refused = "The user doesn't want to proceed with this tool use."
+    lines = [
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": call, "content": refused}
+                ],
+            },
+        }
+        for call in calls
+    ]
+    record.write_text("".join(f"{json.dumps(line)}\n" for line in lines))
+
+
+def test_claude_clears_an_interrupted_call_at_the_next_turns_start(
+    on_claude: Bench, repo: Path, kit: Kit, tmp_path: Path
+) -> None:
+    """The record holds an interrupted call's result, the session's own or a
+    subagent's, though no hook reported its end, so the next prompt clears it,
+    and the turn's first call's finish judges what it wrote."""
+    transcript = tmp_path / "records" / "s1.jsonl"
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+    sed: dict[str, object] = {"command": "sed -i …"}
+    in_room(pre_tool_use(repo, "Bash", sed, "lost"), on_claude)
+    subagent = payload(
+        repo,
+        "PreToolUse",
+        tool_name="Bash",
+        tool_input=sed,
+        tool_use_id="gone",
+        agent_id="a1",
+    )
+    in_room(subagent, on_claude)
+    regex_in(repo)
+    results(transcript, "lost")
+    results(transcript.with_suffix("") / "subagents" / "agent-a1.jsonl", "gone")
+    prompt = payload(
+        repo, "UserPromptSubmit", prompt="Go on.", transcript_path=str(transcript)
+    )
+    assert in_room(prompt, on_claude) == ""
+    assert running(kit, repo) == []
+    told = beside(shell(repo, on_claude, "b1", lambda: None))
+    assert f"{repo / CORE}:11:8 - regex" in told
+
+
+def test_claude_leaves_a_call_running_when_a_prompt_arrives_mid_turn(
+    on_claude: Bench, repo: Path, kit: Kit, tmp_path: Path
+) -> None:
+    """A channel's message fires `UserPromptSubmit` while the call it waits on
+    still runs (Claude Code 2.1.304, `docs/field-notes.md`, *Channels*): the
+    record holds no result for it, so it stays counted."""
+    transcript = tmp_path / "records" / "s1.jsonl"
+    results(transcript)
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+    in_room(pre_tool_use(repo, "Bash", {"command": "sleep 10"}, "c1"), on_claude)
+    channel = '<channel source="lup" wake="t1">\nHi.\n</channel>'
+    prompt = payload(
+        repo, "UserPromptSubmit", prompt=channel, transcript_path=str(transcript)
+    )
+    assert in_room(prompt, on_claude) == ""
+    assert running(kit, repo) == ["c1"]
 
 
 def test_claude_reads_without_reaching_the_judge(
@@ -1575,7 +1668,7 @@ def test_each_runtime_hears_a_turns_start_with_its_prompt_and_tells_beside_it() 
             fits=10_000,
             event="turn-started",
             session=session,
-            judged=False,
+            judged=True,
             prompt=prompt,
         )
         assert adapter.told(raw, "", TOLD) is None
