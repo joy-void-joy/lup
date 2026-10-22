@@ -37,6 +37,9 @@ import {
     steps,
     stranded,
     tallied,
+    threadAt,
+    threaded,
+    threadsOf,
     toAnswer,
     toggled,
     waited,
@@ -78,6 +81,7 @@ const QUESTION: Item = {
     },
     sender: from("s1", "a1"),
     recipient: { party: "operator" },
+    replies: [],
     quiet: false,
     made: AT,
     state: { state: "waiting" },
@@ -89,6 +93,7 @@ const NOTE: Item = {
     reason: { reason: "message", passages: [], ending: false, kind: "note", text: "I assumed UTF-8." },
     sender: from("s2"),
     recipient: { party: "operator" },
+    replies: [],
     quiet: false,
     made: AT,
     state: { state: "waiting" },
@@ -107,6 +112,7 @@ const APPROVAL: Item = {
     },
     sender: { party: "operator" },
     recipient: { party: "operator" },
+    replies: [],
     quiet: false,
     made: AT,
     state: { state: "waiting" },
@@ -125,6 +131,7 @@ const FLAGGED: Item = {
     },
     sender: from("s2"),
     recipient: { party: "operator" },
+    replies: [],
     quiet: false,
     made: AT,
     state: { state: "waiting" },
@@ -146,7 +153,7 @@ const CONTEXT: Context = {
     ],
 };
 
-const NOTHING: Around = { contexts: new Map(), files: new Map() };
+const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [] };
 
 const header = (item: Item, parked: boolean) => `── #${item.number}${parked ? " · later" : ""} ──`;
 const banner = (head: Head, parked: boolean) => {
@@ -422,7 +429,7 @@ describe("laid", () => {
 
     it("says where the cursor is, for the line of keys", () => {
         const draft: Draft = { ...EMPTY, comments: [{ item: 51, quote: null, text: "Fine." }] };
-        const files: Around = { contexts: new Map([[51, { shown: CONTEXT }]]), files: new Map([[54, { shown: [CHANGED] }]]) };
+        const files: Around = { contexts: new Map([[51, { shown: CONTEXT }]]), files: new Map([[54, { shown: [CHANGED] }]]), answers: [] };
         const out = laid([QUESTION, APPROVAL], [from("s3")], banner, header, draft, files);
         const at = (text: string) => out.text.indexOf(text);
         expect(placeAt(out, at("Fine."))).toBe("written");
@@ -454,6 +461,7 @@ describe("what folds under an item", () => {
             [54, { refused: "item 54 was made by no agent's call" }],
         ]),
         files: new Map([[54, { shown: [CHANGED] }]]),
+        answers: [],
     };
 
     it("says each step of a context in a line, its words' own lines kept, a run of calls in one, the call that made the item marked", () => {
@@ -549,6 +557,7 @@ describe("what folds under an item", () => {
                     },
                 ],
             ]),
+            answers: [],
         };
         const out = laid([APPROVAL, NOTE], [], banner, header, EMPTY, read);
         const [note, approval] = out.regions;
@@ -613,7 +622,7 @@ describe("what folds under an item", () => {
         };
         const untimed: Context = { ...agents, entries: [{ kind: "called", tool: "blocked", id: "call-51" }], anchor: 0 };
         const summary = (context: Context) => {
-            const out = laid([QUESTION], [], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map() });
+            const out = laid([QUESTION], [], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map(), answers: [] });
             const [fold] = out.regions[0]!.folds.filter((each) => each.kind === "context");
             return out.text.slice(fold!.summary.from, fold!.summary.to);
         };
@@ -637,6 +646,7 @@ describe("typed folds", () => {
         reason: { reason: "held", text: "Let it land?", summary: "", worktree: "/w", key: "k" },
         sender: from("s1"),
         recipient: { party: "operator" },
+        replies: [],
         quiet: false,
         made: AT,
         state: { state: "waiting" },
@@ -657,6 +667,7 @@ describe("typed folds", () => {
     const around = (after: string): Around => ({
         contexts: new Map([[56, { shown: { ...CONTEXT, number: 56 } }]]),
         files: new Map([[56, { shown: [AUTOMATIC, held(after)] }]]),
+        answers: [],
     });
     const out = laid([HELD, QUESTION], [], banner, header, EMPTY, around(clock(30, true)));
     const region = out.regions.find((each) => each.item.number === 56)!;
@@ -795,6 +806,7 @@ describe("what a change shows open, as it's laid out", () => {
         reason: { reason: "held", text: "Let it land?", summary: "", worktree: "/w", key: "k" },
         sender: from("s1"),
         recipient: { party: "operator" },
+        replies: [],
         quiet: false,
         made: AT,
         state: { state: "waiting" },
@@ -802,7 +814,7 @@ describe("what a change shows open, as it's laid out", () => {
     };
     /** The runs of lines folded under `item`, changing `signed`, as it's laid out, and whether its change on line 10 is among what they hide. */
     const folded = (item: Item) => {
-        const around: Around = { contexts: new Map(), files: new Map([[item.number, { shown: [signed] }]]) };
+        const around: Around = { contexts: new Map(), files: new Map([[item.number, { shown: [signed] }]]), answers: [] };
         const out = laid([item], [], banner, header, EMPTY, around);
         const runs = out.regions[0]!.folds.filter((each) => each.kind === "lines" && each.closed);
         const ten = out.text.indexOf("\nten\n") + 1;
@@ -830,13 +842,14 @@ describe("comments on a changed file's lines", () => {
         reason: { reason: "held", text: "Let the change to 2 files land?", summary: "a.py: asks", worktree: "/w", key: "k" },
         sender: from("s1"),
         recipient: { party: "operator" },
+        replies: [],
         quiet: false,
         made: AT,
         state: { state: "waiting" },
         rank: WAITING,
     };
     const CREATED: ChangedFile = { path: "b.md", before: null, after: { kind: "text", text: "# B\n\nNew.\n" } };
-    const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]) };
+    const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]), answers: [] };
     const out = laid([HELD], [], banner, header, EMPTY, around);
     const at = (line: string) => out.text.indexOf(`\n${line}\n`) + 1;
 
@@ -860,7 +873,7 @@ describe("comments on a changed file's lines", () => {
     });
 
     it("shows a flagged write's file under it as a held change's, its lines quoted the same", () => {
-        const flagged = laid([FLAGGED], [], banner, header, EMPTY, { contexts: new Map(), files: new Map([[70, { shown: [CHANGED] }]]) });
+        const flagged = laid([FLAGGED], [], banner, header, EMPTY, { contexts: new Map(), files: new Map([[70, { shown: [CHANGED] }]]), answers: [] });
         const line = (text: string) => flagged.text.indexOf(`\n${text}\n`) + 1;
         expect([changing(FLAGGED), changing(HELD), changing(NOTE)]).toEqual([true, true, false]);
         expect(flagged.text.startsWith("━━ s2 ━━\n── #70 ──\na.py landed, flagged for the operator's review.\n")).toBe(true);
@@ -1021,6 +1034,105 @@ describe("every agent's group, and the messages under its banner", () => {
         expect(isLetter(letter)).toBe(true);
         expect(isLetter(comment)).toBe(false);
         expect(whose(from("s1", "a1"))).not.toBe(whose(from("s1")));
+    });
+});
+
+describe("the thread under an item", () => {
+    /** The operator's review that answered the note: a comment on its passage, and the agent's reply to it, kept on the review after its one part. */
+    const REVIEW: Item = {
+        number: 60,
+        reason: {
+            reason: "review",
+            covers: [52],
+            comments: [{ item: 52, quote: { text: "UTF-8", start: 10, end: 15 }, on: null, text: "Every one?" }],
+            letters: [],
+        },
+        sender: { party: "operator" },
+        recipient: from("s2"),
+        replies: [{ number: 2, to: { item: 60, part: 1 }, text: "Every one I read.\nA stray byte is replaced.", at: AT }],
+        quiet: false,
+        made: AT,
+        state: { state: "told", at: AT, how: "call" },
+        rank: WAITING,
+    };
+    /** The operator's answer to the question: a ruling on each decision, and a comment on the whole, the second ruling replied to. */
+    const ANSWER: Item = {
+        number: 61,
+        reason: {
+            reason: "answer",
+            question: 51,
+            rulings: [
+                { decision: 1, verdict: "leaning", comment: "" },
+                { decision: 2, verdict: null, comment: "Drop it." },
+            ],
+            comment: "Go.",
+        },
+        sender: { party: "operator" },
+        recipient: from("s1", "a1"),
+        replies: [{ number: 4, to: { item: 61, part: 2 }, text: "Dropped.", at: AT }],
+        quiet: false,
+        made: AT,
+        state: { state: "told", at: AT, how: "call" },
+        rank: WAITING,
+    };
+    const around: Around = { contexts: new Map(), files: new Map(), answers: [REVIEW, ANSWER] };
+
+    it("reads the thread from the operator's items answering the item: each comment by its part's id, and the replies to them", () => {
+        expect(threadsOf([REVIEW, ANSWER], 52)).toEqual({
+            said: [{ id: { item: 60, part: 1 }, text: "Every one?", quote: { text: "UTF-8", start: 10, end: 15 }, on: null, decision: null }],
+            replies: [{ id: { item: 60, part: 2 }, to: { item: 60, part: 1 }, text: "Every one I read.\nA stray byte is replaced." }],
+        });
+        expect(threadsOf([REVIEW, ANSWER], 51).said.map((each) => [each.id.part, each.text, each.decision])).toEqual([
+            [1, "leaning", 1],
+            [2, "Drop it.", 2],
+            [3, "Go.", null],
+        ]);
+        expect([threaded([REVIEW, ANSWER], NOTE), threaded([REVIEW], QUESTION), threaded([], NOTE)]).toEqual([true, false, false]);
+    });
+
+    it("lays each comment under the line it's on, the agent's reply under it, a ruling under its decision, and a comment on the whole under the header", () => {
+        const out = laid([QUESTION, NOTE], [], banner, header, EMPTY, around);
+        expect(out.text).toBe(
+            "━━ s1 ━━\n── #51 ──\nyou: Go.\nWhich parser?\n1. Use lark\n   lean: yes\nyou: leaning\n2. Keep the cache\n   lean: no\nyou: Drop it.\n↳ Dropped.\n\n" +
+                "━━ s2 ━━\n── #52 ──\nI assumed UTF-8.\nyou: Every one?\n↳ Every one I read.\n  A stray byte is replaced.\n\n",
+        );
+        const [question, note] = out.regions;
+        // The operator's own comments are read, never commented; the reply's lines take comments, each knowing its reply.
+        expect(question!.asides.map((each) => [each.kind, out.text.slice(each.from, each.to)])).toEqual([
+            ["you", "you: Go."],
+            ["you", "you: leaning"],
+            ["you", "you: Drop it."],
+        ]);
+        expect(note!.threads.map((each) => [out.text.slice(each.from, each.to), each.own, each.reply.id])).toEqual([
+            ["Every one I read.", 0, { item: 60, part: 2 }],
+            ["A stray byte is replaced.", 18, { item: 60, part: 2 }],
+        ]);
+        expect(opened(out, out.text.indexOf("you: Every"))).toBeUndefined();
+        expect(placeAt(out, out.text.indexOf("you: Every"))).toBe("aside");
+        expect(placeAt(out, out.text.indexOf("stray byte"))).toBe("item");
+    });
+
+    it("opens a comment on a reply's line, or on a passage of the reply, carrying the reply's id, and lays it under that line", () => {
+        const out = laid([NOTE], [], banner, header, EMPTY, around);
+        const stray = out.text.indexOf("A stray byte is replaced.");
+        expect(opened(out, stray)).toEqual({
+            item: 52,
+            quote: { text: "A stray byte is replaced.", start: 18, end: 43 },
+            on: { item: 60, part: 2 },
+            text: "",
+        });
+        expect(quoted(out, stray + 2, stray + 7)).toEqual({ item: 52, quote: { text: "stray", start: 20, end: 25 }, on: { item: 60, part: 2 }, text: "" });
+        // Across a reply and the item's own text: nothing.
+        expect(quoted(out, out.text.indexOf("UTF-8"), stray + 7)).toBeUndefined();
+        const comment: Comment = { item: 52, quote: { text: "stray", start: 20, end: 25 }, on: { item: 60, part: 2 }, text: "Fine." };
+        const written = laid([NOTE], [], banner, header, { ...EMPTY, comments: [comment] }, around);
+        expect(written.text).toBe("━━ s2 ━━\n── #52 ──\nI assumed UTF-8.\nyou: Every one?\n↳ Every one I read.\n  A stray byte is replaced.\nFine.\n\n");
+        const [region] = written.regions;
+        const [block] = region!.blocks;
+        expect(written.text.slice(block!.from, block!.to)).toBe("Fine.");
+        // Ctrl+Enter goes back to the passage's last character, in the reply.
+        expect(aboutAt(written, comment, block!)).toBe(written.text.indexOf("stray") + 4);
+        expect(threadAt(region!, written.text.indexOf("stray"))?.reply.id).toEqual({ item: 60, part: 2 });
     });
 });
 

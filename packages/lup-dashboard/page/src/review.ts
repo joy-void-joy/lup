@@ -33,6 +33,7 @@ import {
     under,
     type Block,
     type Line,
+    type Quote,
     type Span,
 } from "./comments";
 import { around } from "./folds";
@@ -46,6 +47,8 @@ export type Draft = components["schemas"]["Draft"];
 export type Comment = components["schemas"]["Comment"];
 export type Letter = components["schemas"]["Letter"];
 export type Conversation = components["schemas"]["Conversation"];
+export type PartId = components["schemas"]["PartId"];
+export type Reply = components["schemas"]["Reply"];
 export type { Quote } from "./comments";
 export type Context = components["schemas"]["Context"];
 
@@ -55,11 +58,110 @@ export type Written = Comment | Letter;
 /** What the host answered, asked for more of an item than its own text: what it showed, or why it refused. */
 export type Answered<T> = { shown: T } | { refused: string };
 
-/** What the review shows of each item beyond its own text, by the item's number, once the host has answered: its context, and each file it changes (`changing`). */
+/**
+ * What the review shows of each item beyond its own text, by the item's number, once the host has answered: its
+ * context, and each file it changes (`changing`); and the operator's own items answering those listed, with the
+ * replies the agents made on them, which the threads under each item are read from (`threadsOf`).
+ */
 export interface Around {
     contexts: Map<number, Answered<Context>>;
     files: Map<number, Answered<ChangedFile[]>>;
+    answers: Item[];
 }
+
+/** One of the operator's own comments on an item, as an item of theirs that answered it carried it: its part's id in that item, and what it's on. */
+export interface Remark {
+    id: PartId;
+    text: string;
+    /** The passage of the item's text it's on; of the reply `on`'s text, where it continues a thread. */
+    quote: Quote | null;
+    /** The agent's reply it answers, where it continues a thread. */
+    on: PartId | null;
+    /** The decision it rules on, from 1, for an answer's ruling. */
+    decision: number | null;
+}
+
+/** One reply of the agent's, as the operator's item keeps it: its own id, the part it answers, and its words. */
+export interface Replied {
+    id: PartId;
+    to: PartId;
+    text: string;
+}
+
+/** The thread under an item: the operator's earlier comments on it, and the agent's replies to them (`docs/dashboard.md`, *The review*). */
+export interface Thread {
+    said: Remark[];
+    replies: Replied[];
+}
+
+/** A line of the agent's reply shown under an item, which comments may be on: `own` is where it starts in the reply's text. */
+export interface Threaded extends Span {
+    own: number;
+    reply: Replied;
+}
+
+/** Return whether two ids name the same part. */
+export function sameId(a: PartId | null | undefined, b: PartId | null | undefined): boolean {
+    return a != null && b != null && a.item === b.item && a.part === b.part;
+}
+
+/** Say a part's id as lup cites it, `546.2`. */
+export function idOf(id: PartId): string {
+    return `${id.item}.${id.part}`;
+}
+
+/** Say a ruling as the operator's words: its verdict, then its comment. */
+function ruled(verdict: string | null | undefined, comment: string): string {
+    return [verdict ?? null, comment === "" ? null : comment].filter((each) => each !== null).join(" · ");
+}
+
+/**
+ * Return the thread under item `number`: the operator's comments on it as their items `answers` carry them (a review's
+ * comments in its order, each numbered as the host numbers its parts; a reply's comment; an answer's rulings, then its
+ * comment), and the replies the agent made on those items.
+ */
+export function threadsOf(answers: Item[], number: number): Thread {
+    const said: Remark[] = [];
+    const replies: Replied[] = [];
+    for (const answer of answers) {
+        const reason = answer.reason;
+        const at = (part: number): PartId => ({ item: answer.number, part });
+        if (reason.reason === "review") {
+            reason.comments.forEach((comment, index) => {
+                if (comment.item === number) {
+                    said.push({ id: at(index + 1), text: comment.text, quote: comment.quote ?? null, on: comment.on ?? null, decision: null });
+                }
+            });
+        } else if (reason.reason === "message" && reason.of === number) {
+            said.push({ id: at(1), text: reason.text, quote: null, on: null, decision: null });
+        } else if (reason.reason === "answer" && reason.question === number) {
+            const rulings = reason.rulings ?? [];
+            rulings.forEach((ruling, index) => {
+                said.push({ id: at(index + 1), text: ruled(ruling.verdict, ruling.comment ?? ""), quote: null, on: null, decision: ruling.decision });
+            });
+            if ((reason.comment ?? "") !== "") {
+                said.push({ id: at(rulings.length + 1), text: reason.comment ?? "", quote: null, on: null, decision: null });
+            }
+        } else {
+            continue;
+        }
+        // A reply is kept on the item of the part it answers: those on this item's comments.
+        for (const reply of answer.replies ?? []) {
+            if (said.some((each) => sameId(each.id, reply.to))) {
+                replies.push({ id: at(reply.number), to: reply.to, text: reply.text });
+            }
+        }
+    }
+    return { said, replies };
+}
+
+/** Whether an item has a thread under it: a reply of the agent's on one of the operator's comments on it. */
+export function threaded(answers: Item[], item: Item): boolean {
+    return threadsOf(answers, item.number).replies.length > 0;
+}
+
+/** How a reply's first line is marked under the comment it answers, the others set in under it. */
+export const REPLY_MARK = "↳ ";
 
 /**
  * What a line under an item that isn't its own text shows: a fold's summary; a step of its context, the operator's
@@ -71,6 +173,9 @@ export type Kind = "summary" | "you" | "agent" | "calls" | "anchor" | "refused";
 export interface Aside extends Span {
     kind: Kind;
 }
+
+/** The thread's lines under an item: the operator's earlier comment, read, and the agent's reply, which comments may be on. */
+export type ThreadKind = "you" | "reply";
 
 /** A line of a changed file under an item, which comments may be on: the file's header, where `row` is none, or one of its rows, and what it triggered where it's a line that matters. */
 export interface Coded extends Span {
@@ -137,6 +242,8 @@ export interface Region {
     blocks: Block[];
     /** Its lines that are its files', each with its file and row. */
     code: Coded[];
+    /** The lines of the agent's replies in the thread under it, which comments may be on, each with its reply. */
+    threads: Threaded[];
     /** Where each file it changes is, from its header to its last line and the comments under it. */
     filed: FileSpan[];
     asides: Aside[];
@@ -468,6 +575,11 @@ export function fresh(item: Item, reviewed: string | null | undefined): boolean 
  * unchanged ones folding under a summary line; then the item's context, a summary line with the lines that fold under
  * it. Where the host showed none, a line says why.
  *
+ * Under the line each of the operator's earlier comments on an item is on (`threadsOf`), the thread: their comment
+ * after `you:`, each reply of the agent's to it marked `↳` and set in, and their comments on that reply under it, in
+ * turn; a ruling under its decision's lines, a comment on the whole under the header. A reply's lines take comments as
+ * the item's own do, each placed under the line of the reply its passage ends on (`Comment.on`).
+ *
  * `places` are where the groups were laid out before in this sitting (`Group.place`, in order): each among them keeps
  * its place, items coming and going, and any other comes after them, in the order above. So a group appears where its
  * first item puts it, or after every group with items as its conversation is first seen, and stays there while
@@ -546,24 +658,37 @@ export function laid(
         const own = [...body(item).split("\n"), ...files.map((each) => each.text)];
         const starts = startsOf(own);
         const ownCount = own.length - files.length;
-        // Each comment on the item, by the line it's under, once.
+        const thread = threadsOf(around.answers, item.number);
+        // Each comment on the item, by the line it's under, once; one on a reply by the reply and its line.
         const placed = new Map<number | null, { comment: Comment; at: number }[]>();
+        const onReplies = new Map<string, { comment: Comment; at: number }[]>();
         comments.forEach((comment, at) => {
-            if (comment.item === item.number) {
-                const line = under(starts, comment.quote);
-                placed.set(line, [...(placed.get(line) ?? []), { comment, at }]);
+            if (comment.item !== item.number) {
+                return;
             }
+            const reply = comment.on == null ? undefined : thread.replies.find((each) => sameId(each.id, comment.on));
+            if (reply !== undefined) {
+                const key = `${idOf(reply.id)}:${under(startsOf(reply.text.split("\n")), comment.quote) ?? 0}`;
+                onReplies.set(key, [...(onReplies.get(key) ?? []), { comment, at }]);
+                return;
+            }
+            const line = under(starts, comment.quote);
+            placed.set(line, [...(placed.get(line) ?? []), { comment, at }]);
         });
         const blocks: Block[] = [];
         const lines: Line[] = [];
         const code: Coded[] = [];
         const asides: Aside[] = [];
         const folds: Fold[] = [];
+        const threads: Threaded[] = [];
+        const writeBlock = ({ comment, at }: { comment: Comment; at: number }) => {
+            const from = text.length;
+            text += `${comment.text}\n`;
+            blocks.push({ comment: at, from, to: from + comment.text.length });
+        };
         const writeBlocks = (line: number | null) => {
-            for (const { comment, at } of placed.get(line) ?? []) {
-                const from = text.length;
-                text += `${comment.text}\n`;
-                blocks.push({ comment: at, from, to: from + comment.text.length });
+            for (const each of placed.get(line) ?? []) {
+                writeBlock(each);
             }
         };
         const writeLine = (line: string, at: number): Line => {
@@ -580,12 +705,58 @@ export function laid(
             asides.push(aside);
             return aside;
         };
+        // The thread under a line: the operator's comment, the replies to it, and their comments on each reply, in turn.
+        const writeSaid = (each: Remark) => {
+            for (const row of spoken("you", each.text, false)) {
+                writeAside({ kind: "you", text: row.text });
+            }
+            for (const reply of thread.replies.filter((candidate) => sameId(candidate.to, each.id))) {
+                writeReply(reply);
+            }
+        };
+        const writeReply = (reply: Replied) => {
+            const rows = reply.text.split("\n");
+            const owns = startsOf(rows);
+            rows.forEach((row, index) => {
+                const mark = index === 0 ? REPLY_MARK : " ".repeat(REPLY_MARK.length);
+                const from = text.length + mark.length;
+                text += `${mark}${row}\n`;
+                threads.push({ from, to: from + row.length, own: owns[index] ?? 0, reply });
+                for (const each of onReplies.get(`${idOf(reply.id)}:${index}`) ?? []) {
+                    writeBlock(each);
+                }
+            });
+            for (const each of thread.said.filter((candidate) => sameId(candidate.on, reply.id))) {
+                writeSaid(each);
+            }
+        };
+        const roots = thread.said.filter((each) => each.on === null);
+        const decisionLine = (decision: number): number | null => {
+            const first = own.findIndex((line, at) => at < ownCount && line.startsWith(`${decision}. `));
+            if (first < 0) {
+                return null;
+            }
+            let last = first;
+            while (last + 1 < ownCount && (own[last + 1] ?? "").startsWith("   ")) {
+                last += 1;
+            }
+            return last;
+        };
+        const anchored = (line: number | null) =>
+            roots.filter((each) => (each.quote !== null ? under(starts, each.quote) : each.decision !== null ? decisionLine(each.decision) : null) === line);
+        const writeThread = (line: number | null) => {
+            for (const each of anchored(line)) {
+                writeSaid(each);
+            }
+        };
         const head = header(item, isParked);
         const headFrom = text.length;
         text += `${head}\n`;
+        writeThread(null);
         writeBlocks(null);
         own.slice(0, ownCount).forEach((line, at) => {
             writeLine(line, at);
+            writeThread(at);
             writeBlocks(at);
         });
         const stops: number[] = [];
@@ -667,6 +838,7 @@ export function laid(
             lines,
             blocks,
             code,
+            threads,
             filed: filedSpans,
             asides,
             folds,
@@ -752,12 +924,13 @@ export function groupAt(laidOut: Laid, position: number): Group | undefined {
     return group !== undefined && (region === undefined || group.banner.from > region.header.from) ? group : undefined;
 }
 
-/** Return whether two of what's written are the same one, whatever it says: a comment on the same passage of the same item, or a message to the same agent. */
+/** Return whether two of what's written are the same one, whatever it says: a comment on the same passage of the same item, or of the same reply, or a message to the same agent. */
 function same(a: Written, b: Written): boolean {
     if (isLetter(a) || isLetter(b)) {
         return isLetter(a) && isLetter(b) && whose(a.to) === whose(b.to);
     }
-    return a.item === b.item && a.quote?.start === b.quote?.start && a.quote?.end === b.quote?.end;
+    const onSame = (a.on == null && b.on == null) || sameId(a.on, b.on);
+    return a.item === b.item && onSame && a.quote?.start === b.quote?.start && a.quote?.end === b.quote?.end;
 }
 
 /**
@@ -799,6 +972,9 @@ export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "inse
     const region = regionAt(laidOut, head);
     if (region === undefined || asideAt(region, head) !== undefined) {
         return "aside";
+    }
+    if (threadAt(region, head) !== undefined) {
+        return "item";
     }
     const reason = region.item.reason.reason;
     if (codeAt(region, head) !== undefined) {
@@ -891,6 +1067,20 @@ export function lineAt(region: Region, position: number): Line | undefined {
 /** Return the line under an item that isn't its own text shown at `position`, where it's on one. */
 export function asideAt(region: Region, position: number): Aside | undefined {
     return region.asides.find((each) => position >= each.from && position <= each.to);
+}
+
+/** Return the line of an agent's reply in the thread under an item shown at `position`, where it's on one. */
+export function threadAt(region: Region, position: number): Threaded | undefined {
+    return region.threads.find((each) => position >= each.from && position <= each.to);
+}
+
+/** Return where in the text an offset of the reply `on`'s text is shown under `region`'s item; its header's end where the reply isn't shown. */
+export function shownInReply(region: Region, on: PartId, offset: number): number {
+    return shownIn(
+        region.threads.filter((each) => sameId(each.reply.id, on)),
+        offset,
+        region.header.to,
+    );
 }
 
 /** Return the folds of the item `position` is in, which `zr`, `zm`, `zR`, `zM` and Space `z` reach: none on a group's banner or the messages under it. */
@@ -997,6 +1187,16 @@ export function opened(laidOut: Laid, position: number): Written | undefined {
     if (region === undefined || asideAt(region, position) !== undefined) {
         return undefined;
     }
+    const threaded = threadAt(region, position);
+    if (threaded !== undefined) {
+        const said = laidOut.text.slice(threaded.from, threaded.to);
+        return {
+            item: region.item.number,
+            quote: { text: said, start: threaded.own, end: threaded.own + said.length },
+            on: threaded.reply.id,
+            text: "",
+        };
+    }
     const line = lineAt(region, position);
     const shown = line === undefined ? "" : laidOut.text.slice(line.from, line.to);
     if (line === undefined || (shown === "" && codeAt(region, line.from) === undefined)) {
@@ -1020,9 +1220,23 @@ export function quoted(laidOut: Laid, from: number, to: number): Written | undef
         return group === groupAt(laidOut, Math.max(to - 1, from)) ? letterTo(group) : undefined;
     }
     const region = regionAt(laidOut, from);
-    const first = region === undefined ? undefined : lineAt(region, from);
-    const last = region === undefined ? undefined : lineAt(region, Math.max(to - 1, from));
-    if (region === undefined || first === undefined || last === undefined || to <= from) {
+    if (region === undefined || to <= from) {
+        return undefined;
+    }
+    // Within one reply of the thread: a comment on that passage of it.
+    const firstReply = threadAt(region, from);
+    const lastReply = threadAt(region, Math.max(to - 1, from));
+    if (firstReply !== undefined && lastReply !== undefined && sameId(firstReply.reply.id, lastReply.reply.id)) {
+        return {
+            item: region.item.number,
+            quote: passage(firstReply.reply.text, firstReply, lastReply, from, to),
+            on: firstReply.reply.id,
+            text: "",
+        };
+    }
+    const first = lineAt(region, from);
+    const last = lineAt(region, Math.max(to - 1, from));
+    if (first === undefined || last === undefined) {
         return undefined;
     }
     const own = region.lines.map((each) => laidOut.text.slice(each.from, each.to)).join("\n");
@@ -1064,9 +1278,12 @@ export function aboutAt(laidOut: Laid, written: Written, block: Block): number |
     return region === undefined ? undefined : commentedAt(region, written);
 }
 
-/** Return where a comment on `region`'s item is about: the last character of the passage it quotes, or the item's header for one on the item whole. */
+/** Return where a comment on `region`'s item is about: the last character of the passage it quotes, of the item's text or of the reply it's on, or the item's header for one on the item whole. */
 function commentedAt(region: Region, comment: Comment): number {
-    return comment.quote == null ? region.header.from : shownAt(region, lastOf(comment.quote));
+    if (comment.quote == null) {
+        return region.header.from;
+    }
+    return comment.on == null ? shownAt(region, lastOf(comment.quote)) : shownInReply(region, comment.on, lastOf(comment.quote));
 }
 
 /** Return `draft` with `number` in `list` if it wasn't, and out of it if it was. */

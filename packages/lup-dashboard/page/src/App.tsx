@@ -54,7 +54,9 @@ export function App() {
     const [draft, setDraft] = useState<Draft>(EMPTY);
     const [contexts, setContexts] = useState<Map<number, Answered<Context>>>(new Map());
     const [files, setFiles] = useState<Map<number, Answered<ChangedFile[]>>>(new Map());
-    const around = useMemo(() => ({ contexts, files }), [contexts, files]);
+    // The operator's own items answering those waiting, with the agents' replies on them: the threads under each item.
+    const answers = useMemo(() => (inbox.reply?.kind === "inbox-items" ? (inbox.reply.answers ?? []) : []), [inbox.reply]);
+    const around = useMemo(() => ({ contexts, files, answers }), [contexts, files, answers]);
     // The items whose context, and whose files, were asked for, so each is asked once: an approval's files once
     // more when the judge has read their types (`typing`), a flagged write's as another joins it (`writes`), each
     // asking keyed by its number and how far along it was.
