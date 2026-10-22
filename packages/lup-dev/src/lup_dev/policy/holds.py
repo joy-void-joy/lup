@@ -14,7 +14,9 @@ the OS frees where its process ends, so a hold whose call is gone is told from
 one still waited on (`Holds.waited_on`). The host service stopping, or the
 launch's process ending, takes the call's wait with it: such a hold is settled
 at a later checkpoint in its worktree, as its call would have settled it, and
-its session told (`docs/judging-writes.md`, *Asking the operator*).
+its session told (`docs/judging-writes.md`, *Asking the operator*). A call its
+runtime ends while it waits, the operator interrupting it, gives up on the
+hold as on one unanswered in time, telling its conversation at its next call.
 
 What a move of `HEAD` asks is already committed, and isn't put back, so on every
 runtime it's kept as a hold no agent waits on, with the commit it came from
@@ -51,7 +53,7 @@ from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator
+    from collections.abc import Callable, Generator, Iterator
 
     from lup_dev.policy.runtime import Runtime
 
@@ -117,8 +119,11 @@ class Hold(Model):
     until it's let through; a checkpoint's change is there already."""
     answer: Answer | None = None
     abandoned: bool = False
-    """Whether the wait ran out: the change was put back, or never landed, and
-    the hold stays open."""
+    """Whether the wait ran out, or its call was interrupted: the change was put
+    back, or never landed, and the hold stays open."""
+    interrupted: bool = False
+    """Whether its call was interrupted while it waited, its runtime ending the
+    hook."""
     orphaned: bool = False
     """Whether the call waiting on it was gone when its answer came, as when the
     host service restarted mid-wait: a later checkpoint acted on the answer."""
@@ -271,10 +276,13 @@ class Holds(Model):
         key: str,
         clock: Clock,
         poll: timedelta = timedelta(seconds=2),
+        ended: Callable[[], bool] | None = None,
     ) -> Answer | None:
-        """Wait for the operator to answer hold `key`; none if the patience runs out."""
+        """Wait for the operator to answer hold `key`; none if the patience runs out, or once `ended` says the call waiting was interrupted, whether or not they answered meanwhile: nothing would hear it."""
         deadline = clock.now() + self.patience
         while True:
+            if ended is not None and ended():
+                return None
             hold = self.get(key)
             if hold is None:
                 message = f"hold {key} vanished while waiting for its answer"
@@ -291,9 +299,10 @@ class Holds(Model):
         *,
         abandoned: bool = False,
         delivered: bool = False,
+        interrupted: bool = False,
         orphaned: bool = False,
     ) -> None:
-        """Note that hold `key` was given up on, or settled with no call waiting, or that its late answer was told."""
+        """Note that hold `key` was given up on, its call interrupted, or settled with no call waiting, or that its late answer was told."""
         hold = self.get(key)
         if hold is None:
             return
@@ -301,6 +310,7 @@ class Holds(Model):
             update={
                 "abandoned": hold.abandoned or abandoned,
                 "delivered": hold.delivered or delivered,
+                "interrupted": hold.interrupted or interrupted,
                 "orphaned": hold.orphaned or orphaned,
             }
         )
@@ -309,8 +319,8 @@ class Holds(Model):
     def late(self) -> list[Hold]:
         """Return the holds answered while no agent waited, not yet told.
 
-        Those whose wait ran out, those settled with no call waiting, and a
-        move's, which nobody waits on.
+        Those whose wait ran out or whose call was interrupted, those settled
+        with no call waiting, and a move's, which nobody waits on.
         """
         return [
             hold
@@ -338,6 +348,19 @@ class Holds(Model):
         )
         write_model(self.layout.hold(key), answered)
         return answered
+
+
+def outcome(
+    holds: Holds, key: str, answer: Answer | None
+) -> Literal["approved", "declined", "unanswered"]:
+    """Say how hold `key` was answered, as its log records it: as its call heard it, or where its call gave up, interrupted, as the operator answered it meanwhile, if they did."""
+    given = answer
+    if given is None:
+        kept = holds.get(key)
+        given = None if kept is None else kept.answer
+    if given is None:
+        return "unanswered"
+    return "approved" if given.approved else "declined"
 
 
 def stores(layout: Layout) -> list[Holds]:

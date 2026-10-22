@@ -76,6 +76,7 @@ from lup_dev.policy.holds import (
     Hold,
     Holds,
     answered,
+    outcome,
 )
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
 from lup_dev.policy.judge import Change, Judge, Judgement, RemovedNote
@@ -129,6 +130,14 @@ class Bench(Model, arbitrary_types_allowed=True):
 
     runtime: Runtime
     services: Services
+    ended: Path | None = None
+    """Where the host service marks the hook ended, its runtime having ended it
+    before its answer, as when the operator interrupts its call
+    (`HostLayout.ended`); none where nothing marks it, as for `lup-dev hook`."""
+
+    def interrupted(self) -> bool:
+        """Say whether the hook's runtime ended it before its answer, as the host service marks it: a hold its call waits on gives up."""
+        return self.ended is not None and self.ended.exists()
 
 
 class Reply(Model):
@@ -1473,11 +1482,12 @@ PUT_BACK = "It was put back, or never landed, and your version saved."
 def late_answers(worktree: Worktree, session: Session) -> list[str]:
     """Tell the answers given to holds no agent waited on; hold the lock.
 
-    For a hold whose wait ran out, an approval covers the paths for the rest of
-    the session, so the saved version can go back into place; so it does for
-    one whose call's process ended, settled at a checkpoint (`orphans`), told
-    with whether the change is in place. For a move's, the session that found
-    the move hears the answer, and a decline changes no file.
+    For a hold whose wait ran out or whose call was interrupted, an approval
+    covers the paths for the rest of the session, so the saved version can go
+    back into place; so it does for one whose call's process ended, settled at
+    a checkpoint (`orphans`), told with whether the change is in place. For a
+    move's, the session that found the move hears the answer, and a decline
+    changes no file.
     """
     holds = worktree.holds()
 
@@ -1509,8 +1519,11 @@ def late_answers(worktree: Worktree, session: Session) -> list[str]:
                 f"operator's answer to the change to {named}, which they have since "
                 f"{verb}{comment} {placed(hold) if approved else PUT_BACK}"
             )
+        after = (
+            "your call was interrupted" if hold.interrupted else "the hold timed out"
+        )
         return (
-            f"After the hold timed out, the operator {verb} the change to {named}"
+            f"After {after}, the operator {verb} the change to {named}"
             f"{comment} Your version was saved when it was put back."
         )
 
@@ -1538,9 +1551,11 @@ def settle(
 
     An approval accepts the held content as it is, the agent told it was held
     and approved (`approval`); a decline, or no answer in time, puts it back
-    with the agent's version saved. The call holds its lock while it waits
-    (`Holds.waiting`); a hold settled meanwhile with no call waiting on it
-    (`orphans`) is a later checkpoint's to tell.
+    with the agent's version saved. A call its runtime ended while it waited
+    (`Bench.interrupted`) gives up as on no answer, its conversation told at
+    its next call, since nothing hears this one's answer. The call holds its
+    lock while it waits (`Holds.waiting`); a hold settled meanwhile with no
+    call waiting on it (`orphans`) is a later checkpoint's to tell.
     """
     services = bench.services
     store = worktree.store
@@ -1549,7 +1564,8 @@ def settle(
     paths = [held.path for held in hold.files]
     log = worktree.verdicts(services.layout)
     with holds.waiting(hold.key):
-        answer = holds.wait(hold.key, services.clock)
+        answer = holds.wait(hold.key, services.clock, ended=bench.interrupted)
+        interrupted = answer is None and bench.interrupted()
         with worktree.lock():
             state = store.state()
             if all(each.hold != hold.key for each in state.holding):
@@ -1566,7 +1582,8 @@ def settle(
                         ),
                         new=store.content(accepted, held.path) is None,
                         declined=None if answer is None else answer.comment,
-                        unanswered=answer is None,
+                        unanswered=answer is None and not interrupted,
+                        interrupted=interrupted,
                     )
                     for held in hold.files
                 ]
@@ -1574,9 +1591,13 @@ def settle(
                 state.saved = number
                 store.remember(state)
                 if answer is None:
-                    holds.mark(hold.key, abandoned=True)
-                outcome = "unanswered" if answer is None else "declined"
-                log.append(answered(hold, outcome))
+                    holds.mark(hold.key, abandoned=True, interrupted=interrupted)
+                if interrupted:
+                    session = worktree.session(key, bench.runtime)
+                    told = Checked(refused=refused).text()
+                    session.mail = [*session.mail, Mail(agent=agent, text=told)]
+                    worktree.keep(session)
+                log.append(answered(hold, outcome(holds, hold.key, answer)))
                 return Checked(refused=refused)
             session = worktree.session(key, bench.runtime)
             session.judged = [
@@ -1773,7 +1794,11 @@ class ConversationRecord(Model):
 
 
 def mail_for(worktree: Worktree, key: str, agent: str, runtime: Runtime) -> str:
-    """Take the reports waiting for conversation `agent`."""
+    """Take the reports waiting for conversation `agent`.
+
+    A hook its runtime ended takes none (`Bench.interrupted`): nothing hears its
+    answer, so they wait for the next.
+    """
     with worktree.lock():
         session = worktree.session(key, runtime)
         waiting = [mail.text for mail in session.mail if mail.agent == agent]
@@ -1961,7 +1986,11 @@ def end_turn(
         if listing
         else []
     )
-    waiting = [mail_for(worktree, session, agent, bench.runtime) for worktree in opened]
+    waiting = [
+        mail_for(worktree, session, agent, bench.runtime)
+        for worktree in opened
+        if not bench.interrupted()
+    ]
     left = [found for end in endings for found in end.remaining]
     told = [
         refusal([found for end in endings for found in end.checked.refused]),
@@ -2164,6 +2193,7 @@ class CallFinished(Event):
         waiting = [
             mail_for(worktree, self.session, self.agent, bench.runtime)
             for worktree in opened
+            if not bench.interrupted()
         ]
         return Reply(context=sections([*(each.text() for each in checked), *waiting]))
 

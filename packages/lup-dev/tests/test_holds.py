@@ -85,6 +85,24 @@ def test_a_hold_is_waited_on_while_its_call_holds_its_lock(
     assert not store.waited_on(hold.key)
 
 
+def test_a_wait_whose_call_was_interrupted_gives_up_at_once(
+    kit: Kit, tmp_path: Path
+) -> None:
+    store = holds(kit, tmp_path)
+    hold = held(kit, tmp_path)
+    ended: list[bool] = []
+
+    def interrupted() -> bool:
+        return bool(ended)
+
+    kit.clock.on_sleep.append(lambda: ended.append(True))
+    assert store.wait(hold.key, kit.clock, ended=interrupted) is None
+    assert kit.clock.slept == 2
+    # An answer given as the call was interrupted is the session's next call's.
+    store.answer(hold.key, Response(approved=True), kit.clock)
+    assert store.wait(hold.key, kit.clock, ended=interrupted) is None
+
+
 def test_a_hold_nobody_answers_gives_up_after_its_patience(
     kit: Kit, tmp_path: Path
 ) -> None:

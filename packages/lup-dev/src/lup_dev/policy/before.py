@@ -37,6 +37,7 @@ from lup_dev.inbox.store import ChangedFile
 from lup_dev.policy.checkpoint import (
     Attributed,
     Bench,
+    Mail,
     Pending,
     Worktree,
     decoded,
@@ -45,7 +46,7 @@ from lup_dev.policy.checkpoint import (
     verdict,
 )
 from lup_dev.policy.flags import Landed, Put, flagged
-from lup_dev.policy.holds import HeldFile, Hold, answered, unified
+from lup_dev.policy.holds import HeldFile, Hold, answered, outcome, unified
 from lup_dev.policy.judge import Ask, Change, Judgement
 from lup_dev.policy.report import (
     Refused,
@@ -316,9 +317,10 @@ def held_write(
     operator answers, and the agent told it was held and approved, with their
     comment (`approval`); declined, or left unanswered within the patience, it's
     denied, and the agent's version saved, the hold staying open where nobody
-    answered. A hold settled meanwhile with no call waiting on it, as a later
-    checkpoint settles one whose call's process ended, is the checkpoint's to
-    tell.
+    answered. A call its runtime ended while it waited (`Bench.interrupted`)
+    gives up as on no answer, its conversation told at its next call. A hold
+    settled meanwhile with no call waiting on it, as a later checkpoint settles
+    one whose call's process ended, is the checkpoint's to tell.
     """
     services = bench.services
     store = worktree.store
@@ -367,7 +369,8 @@ def held_write(
         hold, bench.runtime.name(), worktree.repository, [whole]
     )
     with holds.waiting(key):
-        answer = holds.wait(key, services.clock)
+        answer = holds.wait(key, services.clock, ended=bench.interrupted)
+        interrupted = answer is None and bench.interrupted()
         with worktree.lock():
             state = store.state()
             if outside is None and all(each.hold != key for each in state.holding):
@@ -402,20 +405,17 @@ def held_write(
                     saved=store.save(number, path, after.encode()),
                     new=earlier is None,
                     declined=None if answer is None else answer.comment,
-                    unanswered=answer is None,
+                    unanswered=answer is None and not interrupted,
+                    interrupted=interrupted,
                 )
                 state.saved = number
+                if interrupted:
+                    mail = Mail(agent=agent or "", text=refusal([refused]))
+                    record.mail = [*record.mail, mail]
                 decision = Decision(outcome="deny", reason=refusal([refused]))
             store.remember(state)
             worktree.keep(record)
     if answer is None:
-        holds.mark(key, abandoned=True)
-    outcome = (
-        "unanswered"
-        if answer is None
-        else "approved"
-        if answer.approved
-        else "declined"
-    )
-    log.append(answered(hold, outcome))
+        holds.mark(key, abandoned=True, interrupted=interrupted)
+    log.append(answered(hold, outcome(holds, key, answer)))
     return decision

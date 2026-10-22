@@ -46,6 +46,8 @@ class Refused(Model):
     """The operator's comment on a declined hold; empty when they gave none."""
     unanswered: bool = False
     """Whether it was held and nobody answered in time."""
+    interrupted: bool = False
+    """Whether its call was interrupted while it waited for the operator."""
 
 
 def finding_lines(finding: Finding, indent: str = "  ") -> list[str]:
@@ -91,7 +93,23 @@ def refusal(refused: list[Refused]) -> str:
             if one.unanswered
             else []
         )
-        lines = [f"{one.path} (saved at {one.saved})", *declined, *unanswered]
+        interrupted = (
+            [
+                (
+                    "  Its call was interrupted while it waited for the operator; the "
+                    "hold stays open in their inbox, and their answer reaches you at "
+                    "a later call."
+                )
+            ]
+            if one.interrupted
+            else []
+        )
+        lines = [
+            f"{one.path} (saved at {one.saved})",
+            *declined,
+            *unanswered,
+            *interrupted,
+        ]
         return "\n".join(lines)
 
     return sections([header, *(block(one) for one in refused)])

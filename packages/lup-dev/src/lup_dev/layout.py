@@ -447,6 +447,10 @@ class HostLayout(Model):
         """Say where launch `launch`'s sockets are."""
         return LaunchSockets(directory=self.launches / launch)
 
+    def ended(self, payload: str) -> Path:
+        """Say where the service marks a hook its runtime ended before its answer, by its payload's digest, for a hold its call waits on to give up (`hung_up`, `host/service.py`)."""
+        return self.sockets / "ended" / hashlib.sha256(payload.encode()).hexdigest()
+
     def record(self, launch: str) -> Path:
         """Say where launch `launch` is recorded, so a restarted service serves it."""
         return self.launches / f"{launch}.json"

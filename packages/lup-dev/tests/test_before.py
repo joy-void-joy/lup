@@ -557,6 +557,31 @@ def test_a_write_landing_under_its_open_hold_is_left_to_the_holds_answer(
     assert (repo / CORE).read_text() == original
 
 
+def test_a_held_write_whose_call_is_interrupted_is_denied_and_told_at_the_next_call(
+    kit: Kit, repo: Path, tmp_path: Path
+) -> None:
+    kit.announced.answering = None
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    original = (repo / CORE).read_text()
+    mark = tmp_path / "ended"
+    bench = kit.bench.model_copy(update={"ended": mark})
+    kit.clock.on_sleep.append(mark.touch)
+    assert before(bench, rewrite(repo), "s1", repo).outcome == "deny"
+    assert (repo / CORE).read_text() == original
+    [hold] = kit.announced.holds
+    kept = Holds(layout=kit.layout.store(repo)).get(hold.key)
+    assert kept is not None
+    assert (kept.abandoned, kept.interrupted) == (True, True)
+    saved = repo / ".lup/saved/1/src/pkg/core.py"
+    assert ran(kit, repo, "c1") == (
+        "lup refused 1 file. It is unchanged; your version is saved.\n\n"
+        f"{repo}/src/pkg/core.py (saved at {saved})\n"
+        "  Its call was interrupted while it waited for the operator; the hold "
+        "stays open in their inbox, and their answer reaches you at a later call."
+    )
+    assert ran(kit, repo, "c2") == ""
+
+
 def test_writes_outside_the_repository_arent_judged(
     kit: Kit, repo: Path, tmp_path: Path
 ) -> None:

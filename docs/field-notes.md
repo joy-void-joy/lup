@@ -356,6 +356,8 @@ On 2026-10-21, before and after the judge stayed running (#204): `dev` at 11247d
 
 Behind `docs/host.md`, *The one hook*. A stand-in service, a process of its own on a Unix socket, read a hook's payload to its end, then closed the connection, exited with it open, or was killed with `SIGKILL` while the hook waited; the hook was the room's command of the time (`sh -c 'socat -t 600 - UNIX-CONNECT:<socket>,retry=120,interval=0.5 || …'`). In all three, `socat` ended with status 0 and printed nothing, as for an empty answer: only a reset ends it with status 1. The host service's own stop closes each hook's connection cleanly (`close_clients`). With the service answering every hook with something and the command telling an empty answer apart, the same three ended with status 2 and lup's line, and a socket nobody listened on with status 1.
 
+On the service's side, `socat` shuts its write side once the payload is sent, and the connection then reads as ended: an epoll asking for no event reports nothing for that half close, and `EPOLLHUP` once `socat` is killed, which is how the service sees a hook its runtime ended.
+
 ## GitHub through `gh` on the host (gh 2.102.0, 2026-10-14)
 
 Read-only, on the operator's machine, logged in as the operator, for `forge/` (`docs/credentials.md`, *GitHub through `gh`*). Nothing was created, commented or filed: the one `gh pr create` ran with `--dry-run`. `GH_DEBUG=1` shows the git commands `gh` runs and its API requests; a logging `ssh` on the `PATH` showed what it ran of ssh.

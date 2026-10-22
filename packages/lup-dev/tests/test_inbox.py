@@ -5139,10 +5139,12 @@ def test_judged_says_where_an_open_hold_stands_and_what_waits_with_it(
         files=[],
         diff="",
     )
+    interrupted = {"abandoned": True, "interrupted": True}
     assert [
         stands(hold, waited=True),
         stands(hold, waited=False),
         stands(hold.model_copy(update={"abandoned": True}), waited=False),
+        stands(hold.model_copy(update=interrupted), waited=False),
         stands(hold.model_copy(update={"commit": "c0ffee"}), waited=False),
     ] == [
         "waiting for the operator, its call waiting on their answer",
@@ -5153,6 +5155,10 @@ def test_judged_says_where_an_open_hold_stands_and_what_waits_with_it(
         ),
         (
             "waiting for the operator: nobody answered in time, so the change was "
+            "put back and its version saved"
+        ),
+        (
+            "waiting for the operator: its call was interrupted, so the change was "
             "put back and its version saved"
         ),
         "waiting for the operator, no call waiting on it",

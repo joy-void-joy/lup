@@ -686,6 +686,65 @@ def test_a_service_stopping_while_a_hook_waits_leaves_it_unanswered(
             judge.released.set()
 
 
+def hung_up(path: Path, payload: str) -> None:
+    """Send `payload` on the socket at `path` as the room's hook does, then close the connection whole before any answer, as its runtime ending it does."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.connect(str(path))
+        connection.sendall(payload.encode())
+        connection.shutdown(socket.SHUT_WR)
+
+
+class Saying(list[str]):
+    """What the service says, which a test's thread waits on for a line (`heard`)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.changed = threading.Condition()
+
+    @override
+    def append(self, line: str) -> None:
+        with self.changed:
+            super().append(line)
+            self.changed.notify_all()
+
+    def heard(self, fragment: str) -> None:
+        """Wait until the service has said a line holding `fragment`."""
+        with self.changed:
+            self.changed.wait_for(lambda: any(fragment in line for line in self), 60)
+
+
+class Marked(LaunchJudge):
+    """A launch's judge whose answer waits until the service says it marked its hook ended, as a hold's wait gives up, noting whether the mark is there."""
+
+    def __init__(self, layout: HostLayout, said: Saying) -> None:
+        self.layout = layout
+        self.said = said
+        self.marked: list[bool] = []
+
+    async def judged(self, launch: Register, payload: str) -> str:
+        await asyncio.to_thread(self.said.heard, "its runtime ended a hook")
+        self.marked.append(self.layout.ended(payload).exists())
+        return "given up\n"
+
+
+def test_a_hook_its_runtime_ends_while_its_judge_answers_is_marked_ended(
+    layout: HostLayout, clock: FakeClock, tmp_path: Path
+) -> None:
+    """The operator interrupting a call whose hook waits on a hold: its runtime
+    closes the connection, the service marks the hook ended for the judge, whose
+    hold gives up, and the mark goes once the judge has answered."""
+    host = client(layout, clock)
+    said = Saying()
+    judge = Marked(layout, said)
+    with served(service(layout, judge, said)):
+        host.register(launch(tmp_path, "one", "first"))
+        hung_up(layout.launch("one").hook, "hold")
+        said.heard("the hook was gone before its answer")
+    assert judge.marked == [True]
+    assert not layout.ended("hold").exists()
+    assert "one: the hook was gone before its answer" in "\n".join(said)
+
+
 class Echo(Request, reads=False):
     kind: Literal["echo"] = "echo"
     text: str

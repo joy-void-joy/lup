@@ -40,10 +40,12 @@ stopped serves the same launches, in the directories their rooms mounted. The
 service stops without waiting for the answers in flight: the launches'
 processes are ended, and their hooks hear nothing, which the room's hook tells
 from an answer: it fails rather than letting the call go on unjudged (`lost`,
-`launch/session.py`).
+`launch/session.py`), and a hold left with no call waiting on it is settled at a
+later checkpoint (`docs/judging-writes.md`, *Asking the operator*).
 """
 
 import asyncio
+import select
 import shutil
 import traceback
 from abc import ABC, abstractmethod
@@ -566,6 +568,40 @@ before one, which `socat` ends as it ends an empty answer (`piped`,
 `launch/session.py`)."""
 
 
+@asynccontextmanager
+async def hung_up(writer: asyncio.StreamWriter) -> AsyncGenerator[asyncio.Future[None]]:
+    """Watch the connection `writer` writes to while the context is open: the future given is done once its peer has closed it whole.
+
+    A room's hook has sent all it will before it waits for its answer, so the
+    connection reads as ended from then on, and asyncio watches it no more. Its
+    runtime ending the hook, as when the operator interrupts the call, is the
+    peer closing it whole, which Linux reports as `EPOLLHUP`, never for a half
+    closed: an epoll of the connection's own, asking for nothing else, wakes the
+    loop on that alone. The service's own close of the connection takes it out
+    of that epoll unheard.
+    """
+    loop = asyncio.get_running_loop()
+    gone: asyncio.Future[None] = loop.create_future()
+    connection = writer.get_extra_info("socket")
+    if connection is None:
+        yield gone
+        return
+    watch = select.epoll()
+
+    def heard() -> None:
+        loop.remove_reader(watch.fileno())
+        if not gone.done():
+            gone.set_result(None)
+
+    try:
+        watch.register(connection.fileno(), 0)
+        loop.add_reader(watch.fileno(), heard)
+        yield gone
+    finally:
+        loop.remove_reader(watch.fileno())
+        watch.close()
+
+
 type Answering = Callable[
     [asyncio.StreamReader, asyncio.StreamWriter], Coroutine[None, None, None]
 ]
@@ -937,7 +973,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         """
         payload = (await reader.read()).decode()
         try:
-            spoken = await self.answered(request, conversations, payload)
+            spoken = await self.answered(request, conversations, payload, writer)
         except Exception as failure:
             told = "".join(traceback.format_exception(failure))
             self.say(f"{request.launch}: answering a hook failed:\n{told}")
@@ -968,7 +1004,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             self.post.returned(posted)
 
     async def answered(
-        self, request: Register, conversations: Conversations, payload: str
+        self,
+        request: Register,
+        conversations: Conversations,
+        payload: str,
+        writer: asyncio.StreamWriter,
     ) -> Spoken:
         """Return what one hook prints: the judge's answer where it reads the hook, none where it doesn't, with what the courier adds.
 
@@ -991,7 +1031,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 f"{request.launch}: a hook lup couldn't read goes to its judge as it "
                 f"is: {unread}"
             )
-            return Spoken(answer=await self.judgement(request, payload))
+            return Spoken(answer=await self.judgement(request, payload, writer))
         conversation = conversations.named(heard.session, heard.agent)
         conversations.activities = {
             **conversations.activities,
@@ -1007,7 +1047,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 tool=heard.tool,
             )
             self.background(self.happened(request, happening))
-        answer = await self.judgement(request, payload) if heard.judged else ""
+        answer = await self.judgement(request, payload, writer) if heard.judged else ""
         own = heard.agent is None
         starting = heard.event == "session-started" and own
         prompted = heard.event == "turn-started" and own and heard.takes_title
@@ -1047,15 +1087,33 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         titled = None if title is None else Titled(session=heard.session, title=title)
         return Spoken(answer=told, posted=posted, titled=titled)
 
-    async def judgement(self, request: Register, payload: str) -> str:
+    async def judgement(
+        self, request: Register, payload: str, writer: asyncio.StreamWriter
+    ) -> str:
         """Return the judge's answer to one hook, or where it can't answer, the runtime's word that it couldn't, saying why.
 
         What the judge said beside is the service's to tell, in full; the hook's
         answer points there. It waits for as long as judging does, a hold's wait
-        for the operator included.
+        for the operator included. Where the hook's runtime ends it meanwhile
+        (`hung_up`), as when the operator interrupts its call, the hook is
+        marked ended (`HostLayout.ended`), so a hold its call waits on gives up
+        as an interrupted call's (`docs/judging-writes.md`, *Asking the
+        operator*), and the judge's answer, which nothing hears, is awaited
+        still; the mark goes once it's given.
         """
+        judging = asyncio.ensure_future(self.judge.judged(request, payload))
+        ended = self.layout.ended(payload)
         try:
-            return await self.judge.judged(request, payload)
+            async with hung_up(writer) as gone:
+                await asyncio.wait([judging, gone], return_when=asyncio.FIRST_COMPLETED)
+                if not judging.done():
+                    ended.parent.mkdir(parents=True, exist_ok=True)
+                    ended.touch()
+                    self.say(
+                        f"{request.launch}: its runtime ended a hook its judge was "
+                        "answering, so a hold its call waits on gives up"
+                    )
+            return await judging
         except HostError as failed:
             self.say(f"{request.launch}: its judge couldn't answer a hook: {failed}")
             failure = (
@@ -1063,6 +1121,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 "when it runs in the background"
             )
             return self.answerer.unanswered(request.runtime, payload, failure)
+        finally:
+            if not judging.done():
+                judging.cancel()
+            ended.unlink(missing_ok=True)
 
     async def tools_served(
         self,

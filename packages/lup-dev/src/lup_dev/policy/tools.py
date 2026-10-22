@@ -350,6 +350,11 @@ def stands(hold: Hold, *, waited: bool) -> str:
         return f"{verdict} at {clocked(hold.answer.time)}"
     if hold.commit is not None:
         return "waiting for the operator, no call waiting on it"
+    if hold.interrupted:
+        return (
+            "waiting for the operator: its call was interrupted, so the change was "
+            "put back and its version saved"
+        )
     if hold.abandoned:
         return (
             "waiting for the operator: nobody answered in time, so the change was "

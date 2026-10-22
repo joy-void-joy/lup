@@ -1430,6 +1430,34 @@ def test_a_hold_a_call_still_waits_on_is_left_to_that_call(
     assert worktree(kit, repo).store.state().holding != []
 
 
+def test_a_call_interrupted_while_it_waits_gives_its_hold_up_and_is_told_next(
+    holding_kit: Kit, repo: Path, tmp_path: Path
+) -> None:
+    """The operator interrupting the call: its runtime ends the hook, and the host
+    service marks it ended (`HostLayout.ended`), so the change is put back, its
+    version saved, and its conversation told at its next call, nothing hearing
+    this one's answer."""
+    kit = holding_kit
+    new = held_file(kit, repo)
+    mark = tmp_path / "ended"
+    bench = kit.bench.model_copy(update={"ended": mark})
+    kit.clock.on_sleep.append(mark.touch)
+    CallFinished(session=SESSION, cwd=repo, call="p1").apply(bench)
+    assert not new.exists()
+    [hold] = waiting(kit.layout)
+    assert (hold.abandoned, hold.interrupted) == (True, True)
+    assert worktree(kit, repo).store.state().holding == []
+    call(kit, repo, "p2")
+    told = finish(kit, repo, "p2").context
+    assert "Its call was interrupted while it waited for the operator" in told
+    assert f"{new} (saved at {repo}/.lup/saved/1/src/pkg/new.py)" in told
+    answer(kit.layout, hold.key, Response(approved=True), [], kit.clock)
+    call(kit, repo, "p3")
+    assert finish(kit, repo, "p3").context.startswith(
+        f"After your call was interrupted, the operator approved the change to {new}."
+    )
+
+
 def test_a_finding_on_a_holding_runtime_is_told_not_held(
     holding_kit: Kit, repo: Path
 ) -> None:
