@@ -424,6 +424,32 @@ def relayed(modules: LaunchModules, launch: Register, kind: str) -> Route:
     return Route(kind=kind, answer=answered)
 
 
+def switched(
+    conversations: Conversations, conversation: Conversation, depth: int = 0
+) -> bool:
+    """Say whether the operator's switch holds each flagged write of `conversation`: its own on, or that of a conversation above it among `conversations`, since the switch covers a conversation and its subagents; `depth` counts the conversations climbed, which never pass how many there are.
+
+    >>> known = Conversations(known=[
+    ...     Conversation(id="m", session="s1", holding=True),
+    ...     Conversation(id="a", session="s1", agent="a1", parent="m"),
+    ...     Conversation(id="b", session="s1", agent="b1", parent="a"),
+    ...     Conversation(id="c", session="s1", agent="c1"),
+    ... ])
+    >>> [switched(known, each) for each in known.known]
+    [True, True, True, False]
+    """
+    if conversation.holding:
+        return True
+    parent = (
+        None
+        if conversation.parent is None
+        else conversations.calling(conversation.parent)
+    )
+    if parent is None or depth >= len(conversations.known):
+        return False
+    return switched(conversations, parent, depth + 1)
+
+
 class Noted(Model):
     """A hook's conversation as it stands once what the hook says of subagents is noted, and what it's told of lup's tools and of names."""
 
@@ -1282,9 +1308,14 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         return request.on
 
     def holding(self, request: ShowHolding, repository: Path | None = None) -> bool:
-        """Say whether the operator holds each flagged write of a conversation of `request`'s runtime, in whichever launch serves it, of `repository` alone where one's given; not where none does."""
+        """Say whether the operator holds each flagged write of a conversation of `request`'s runtime, in whichever launch serves it, of `repository` alone where one's given; not where none does.
+
+        The switch covers a conversation and its subagents: one is held where
+        its own switch is on, or that of any conversation above it, up to its
+        session's own.
+        """
         return any(
-            each.holding
+            switched(served.conversations, each)
             for served in self.served.values()
             if served.launch.runtime == request.runtime
             and repository in (None, served.launch.repository)

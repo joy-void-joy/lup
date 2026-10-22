@@ -152,7 +152,7 @@ export interface Laid {
     regions: Region[];
 }
 
-export const EMPTY: Draft = { comments: [], letters: [], done: [], parked: [] };
+export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], parked: [] };
 
 /** Return what names a conversation among others: its repository, runtime, session and subagent. */
 export function whose(conversation: Conversation): string {

@@ -578,8 +578,8 @@ describe("the changes between two texts", () => {
 describe("a review it was sent", () => {
     it("says what it answers, or that it's the operator's message from the review where it answers nothing", () => {
         const told = { state: { state: "told" as const, at: at(9), how: "call" as const }, sender: OPERATOR, recipient: SESSION };
-        const written = item(60, { reason: "review", covers: [], comments: [], letters: [{ to: SESSION, text: "Rename it." }] }, 9, told);
-        const reviewed = item(61, { reason: "review", covers: [52], comments: [{ item: 52, quote: null, text: "Fine." }], letters: [] }, 9, told);
+        const written = item(60, { reason: "review", covers: [], comments: [], letters: [{ to: SESSION, text: "Rename it." }], remarks: [] }, 9, told);
+        const reviewed = item(61, { reason: "review", covers: [52], comments: [{ item: 52, quote: null, text: "Fine." }], letters: [], remarks: [] }, 9, told);
         const beside: Beside = {
             ...ALONE,
             exchanged: {

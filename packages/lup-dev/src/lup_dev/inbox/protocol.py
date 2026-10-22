@@ -33,7 +33,7 @@ from typing import Literal, override
 from lup.types import Model
 from lup_dev.git import Git
 from lup_dev.host.protocol import LaunchId, Reply, Request
-from lup_dev.host.records import Entry, Recorded, within
+from lup_dev.host.records import Entry, Recorded, Task, Transcript, Usage, within
 from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.inbox import context
 from lup_dev.inbox.delivery import Delivery, body
@@ -351,12 +351,17 @@ class Files(Reply):
 
 
 class Conversed(Reply):
-    """A conversation's steps, from step `since` on, and how many it has in all."""
+    """A conversation's steps, from step `since` on, and how many it has in all; what its context holds and its task list, as its record stands."""
 
     kind: Literal["inbox-conversation"] = "inbox-conversation"
     entries: list[Entry]
     since: int
     total: int
+    usage: Usage | None = None
+    """What its context held at its last reply; none where its record says
+    nothing of it."""
+    tasks: list[Task] = []
+    """Its task list as it stands; empty where it keeps none."""
 
 
 class Context(Reply):
@@ -705,7 +710,7 @@ class ConversationShowing(
     @override
     async def answer(self, request: ShowConversation) -> Reply:
         read = await self.read(request)
-        return self.conversed(read.transcript.entries, request.since)
+        return self.conversed(read.transcript, request.since)
 
     @override
     async def scoped(self, request: ShowConversation, repository: Path) -> Reply:
@@ -718,7 +723,7 @@ class ConversationShowing(
         if ran is None or not within(ran, under):
             message = "the conversation isn't one of this repository's"
             raise InboxError(message)
-        return self.conversed(read.transcript.entries, request.since)
+        return self.conversed(read.transcript, request.since)
 
     async def read(self, request: ShowConversation) -> context.Read:
         """Read the conversation's record as it stands, off the event loop."""
@@ -730,9 +735,16 @@ class ConversationShowing(
             request.agent,
         )
 
-    def conversed(self, steps: list[Entry], since: int) -> Conversed:
-        """Return the conversation's steps after the first `since`."""
-        return Conversed(entries=steps[since:], since=since, total=len(steps))
+    def conversed(self, transcript: Transcript, since: int) -> Conversed:
+        """Return the conversation's steps after the first `since`, with what its context holds and its task list."""
+        steps = transcript.entries
+        return Conversed(
+            entries=steps[since:],
+            since=since,
+            total=len(steps),
+            usage=transcript.usage,
+            tasks=transcript.tasks,
+        )
 
 
 class DiffShowing(Model, Reading[ShowDiff], arbitrary_types_allowed=True):

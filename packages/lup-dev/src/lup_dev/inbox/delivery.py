@@ -92,6 +92,7 @@ no call running, and wakes.
 """
 
 import asyncio
+import difflib
 import secrets
 import textwrap
 from collections.abc import Callable, Generator
@@ -129,7 +130,9 @@ from lup_dev.inbox.store import (
     Party,
     Passage,
     Question,
+    Quoted,
     Reason,
+    Remark,
     Review,
     Ruling,
     Stop,
@@ -405,6 +408,48 @@ def remarked(comment: Comment) -> list[Tag | str]:
         Tag(name="quote", parts=[comment.quote.text]),
         Tag(name="reply", parts=[comment.text]),
     ]
+
+
+def changed_since(code: Quoted) -> str | None:
+    """Say which of the lines `code` quotes have changed since the comment was written on them, as the file stands in its worktree: their numbers in the version quoted, `all` where the file is gone or isn't text; none where each is still there.
+
+    A quoted line is still there where the file holds it in the same order as
+    the others quoted, wherever lines added or taken away around it moved it.
+
+    >>> from pathlib import Path
+    >>> quoted = Quoted(worktree=Path("/w"), path=Path("a.py"), version="v", first=3, lines=["x = 1", "y = 2"])
+    >>> changed_since(quoted)
+    'all'
+    """
+    try:
+        text = (code.worktree / code.path).read_text()
+    except OSError, UnicodeDecodeError:
+        return "all"
+    matcher = difflib.SequenceMatcher(
+        None, text.splitlines(), code.lines, autojunk=False
+    )
+    # Where each quoted line still there is in the file as it stands, by its place in the quote.
+    found = {
+        at: block.a + (at - block.b)
+        for block in matcher.get_matching_blocks()
+        for at in range(block.b, block.b + block.size)
+    }
+    gone = [code.first + at for at in range(len(code.lines)) if at not in found]
+    return " ".join(str(number) for number in gone) if gone else None
+
+
+def remarking(remark: Remark, attributes: dict[str, str]) -> Tag:
+    """Tag one of the operator's remarks in an agent's drawer, as a review tells it: its passage's quote, saying on code which quoted lines have changed since (`changed_since`), then their reply; `attributes` say whose it is where it's told as context."""
+    since = None if remark.code is None else changed_since(remark.code)
+    changed = {} if since is None else {"changed": since}
+    return Tag(
+        name="remark",
+        attributes=attributes,
+        parts=[
+            Tag(name="quote", attributes=changed, parts=[remark.quote.text]),
+            Tag(name="reply", parts=[remark.text]),
+        ],
+    )
 
 
 def commented(item: Item, comment: str) -> str:
@@ -860,7 +905,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
 
     def reviewing(self, review: Review, recipient: Party) -> list[Tag | str]:
-        """Tag a review for the conversation it's for: the operator's message to it and its own items first, each with their comments on it, or read with nothing to add; then, in its context, the other agents' items they commented on, each whole and whose it is, and their messages to other agents, each saying whom it was for."""
+        """Tag a review for the conversation it's for: the operator's message to it, their remarks in its drawers and its own items first, each with their comments on it, or read with nothing to add; then, in its context, the other agents' items they commented on, each whole and whose it is, and their messages and remarks to other agents, each saying whom it was for."""
         items = [self.inbox.item(each) for each in review.covers]
         commented = [each.item for each in review.comments]
         addressed = list(dict.fromkeys(each.to for each in review.letters))
@@ -871,12 +916,26 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         def mine(to: Conversation) -> Tag:
             return Tag(name="message", parts=[written(to)])
 
-        def elsewhere(to: Conversation) -> Tag:
+        def placed(to: Conversation) -> dict[str, str]:
             place = self.inbox.whereabouts.get(to.key())
-            where = {} if place is None else {"worktree": str(place.worktree)}
+            return {} if place is None else {"worktree": str(place.worktree)}
+
+        def elsewhere(to: Conversation) -> Tag:
             return Tag(
-                name="message", attributes={"to": who(to), **where}, parts=[written(to)]
+                name="message",
+                attributes={"to": who(to), **placed(to)},
+                parts=[written(to)],
             )
+
+        def remarks_to(to: Conversation) -> list[Tag]:
+            theirs = to != recipient
+            return [
+                remarking(each, {"to": who(to), **placed(to)} if theirs else {})
+                for each in review.remarks
+                if each.to == to
+            ]
+
+        remarked_to = list(dict.fromkeys(each.to for each in review.remarks))
 
         def remarks(item: Item) -> list[Tag | str]:
             return [
@@ -901,6 +960,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         own: list[Tag | str] = [
             *(mine(to) for to in addressed if to == recipient),
+            *(tag for to in remarked_to if to == recipient for tag in remarks_to(to)),
             *(yours(item) for item in items if item.sender == recipient),
         ]
         others: list[Tag | str] = [
@@ -910,6 +970,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 if item.sender != recipient and item.number in commented
             ),
             *(elsewhere(to) for to in addressed if to != recipient),
+            *(tag for to in remarked_to if to != recipient for tag in remarks_to(to)),
         ]
         heading = (
             "What the operator said in the same reply on other agents' items and to "
@@ -924,11 +985,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return self.inbox.drafted(draft)
 
     def heard(self, draft: Draft) -> None:
-        """Refuse a draft with a message for a conversation lup's inbox has never heard of, which no reply could reach: it's known once one of its hooks is heard."""
-        for each in draft.letters:
-            if each.to.key() not in self.inbox.whereabouts:
+        """Refuse a draft with a message, or a remark, for a conversation lup's inbox has never heard of, which no reply could reach: it's known once one of its hooks is heard."""
+        for to in [
+            *(each.to for each in draft.letters),
+            *(each.to for each in draft.remarks),
+        ]:
+            if to.key() not in self.inbox.whereabouts:
                 message = (
-                    f"the draft writes to {who(each.to)} of {each.to.repository}, "
+                    f"the draft writes to {who(to)} of {to.repository}, "
                     "which lup's inbox has never heard of: write to an agent the "
                     "dashboard shows running"
                 )
@@ -963,7 +1027,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         draft = self.inbox.draft()
         self.heard(draft)
         covered = [self.inbox.item(each) for each in draft.covered()]
-        if not covered and not draft.written():
+        if not covered and not draft.written() and not draft.remarked():
             message = (
                 "the draft answers no item and writes to no agent: comment on an "
                 "item, take one off the list, or write to an agent under its banner"
@@ -988,9 +1052,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return dispatched
 
     def reviews(self, draft: Draft, covered: list[Item]) -> list[Item]:
-        """Make the reviews `draft` is sent as for the messages and questions it covers, `covered`, and its messages to agents, one to each conversation it reaches, and settle each item; delivering them is the caller's."""
+        """Make the reviews `draft` is sent as for the messages and questions it covers, `covered`, its messages to agents and its remarks in their drawers, one to each conversation it reaches, and settle each item; delivering them is the caller's."""
         letters = draft.written()
-        if not covered and not letters:
+        remarks = draft.remarked()
+        if not covered and not letters and not remarks:
             return []
         at = self.clock.now()
         numbers = [item.number for item in covered]
@@ -998,6 +1063,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             covers=numbers,
             comments=[each for each in draft.comments if each.item in numbers],
             letters=letters,
+            remarks=remarks,
         )
         commented = [each.item for each in draft.comments]
         senders = [
@@ -1005,7 +1071,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             for item in covered
             if item.number in commented or isinstance(item.reason, Question)
         ]
-        recipients = list(dict.fromkeys([*senders, *(each.to for each in letters)]))
+        recipients = list(
+            dict.fromkeys(
+                [
+                    *senders,
+                    *(each.to for each in letters),
+                    *(each.to for each in remarks),
+                ]
+            )
+        )
         sent = [
             self.inbox.made(review, Operator(), recipient, None, at)
             for recipient in recipients
@@ -1449,6 +1523,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             )
         await self.delivered(reply)
         return reply
+
+    def flag_approved(self, number: int) -> Item:
+        """Approve the flagged write item `number`, as marking it good in its agent's drawer does (`lup_dev.policy.since`), whatever its state but approved already, which it keeps; refused where it isn't a flagged write."""
+        item = self.inbox.item(number)
+        if not isinstance(item.reason, Flagged):
+            message = f"{cited(number)} is {what(item)}, not a flagged write"
+            raise InboxError(message)
+        if isinstance(item.state, Decided) and item.state.approved:
+            return item
+        approved = Decided(at=self.clock.now(), approved=True)
+        self.say(f"{cited(number)}, a flagged write, was approved")
+        return self.inbox.kept(item.model_copy(update={"state": approved}))
 
     def done(self, number: int) -> Item:
         """Take the message item `number` off the operator's list: a flagged write approved, read with nothing to add.

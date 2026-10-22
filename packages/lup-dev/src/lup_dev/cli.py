@@ -200,6 +200,7 @@ from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.landing import LandingTools
 from lup_dev.policy.report import finding_lines
+from lup_dev.policy.since import routes as since_routes
 from lup_dev.policy.tools import JudgeTools
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.private.building import listed
@@ -454,9 +455,14 @@ def control_routes(
     delivery: Delivery,
     recorded: dict[str, Recorded],
     dashboard: DashboardProcess | None,
+    layout: Layout,
 ) -> list[Route]:
-    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; and the dashboard's, `dashboard`'s address."""
-    return [*inbox_routes(delivery, recorded), Route.to(dashboard_shown(dashboard))]
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; and the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`."""
+    return [
+        *inbox_routes(delivery, recorded),
+        Route.to(dashboard_shown(dashboard)),
+        *since_routes(delivery, layout, LupDevSettings().lup_integration_branch),
+    ]
 
 
 @host.callback(invoke_without_command=True)
@@ -511,7 +517,7 @@ def host_serve(context: typer.Context) -> None:
         judge=WorkerJudge(modules=workers),
         spawns=SpawnRecords(adapters=known),
         post=delivery,
-        routes=control_routes(delivery, recorded(), dashboard),
+        routes=control_routes(delivery, recorded(), dashboard, layout),
         tools=room_tools(delivery, layout, remotes),
         room_routes=[*remote_routes(remotes), *clipboard_routes(Desktop.of(settings))],
         modules=workers,

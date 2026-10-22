@@ -127,7 +127,7 @@ class Message(Model):
     conversation's messages (`lup-dev inbox answer`)."""
     passages: list[Passage] = []
     """The passages of the conversation's words the operator replied to, from
-    where they read it (`docs/dashboard.md`, *The conversation*), in the
+    where they read it (`lup-dev inbox answer`), in the
     conversation's order: told before its words, each quoted with their reply."""
     ending: bool = False
     """Whether it's a session's last words of a turn, made a note by lup rather
@@ -438,8 +438,37 @@ class Letter(Model):
     text: str
 
 
+class Quoted(Model):
+    """Lines of a file as a comment quoted them, in the version of the file the comment was written on: so what changed since can be told when it reaches the agent."""
+
+    worktree: Path
+    path: Path
+    """The file, from the worktree's root."""
+    version: str
+    """git's id for the file's content as the comment was written on it."""
+    first: int
+    """The number of the first line quoted, counted from 1 in that version."""
+    lines: list[str]
+    """The lines quoted, in order, as that version held them."""
+
+
+class Remark(Model):
+    """A comment of the operator's in one of an agent's drawers in the review (`docs/dashboard.md`, *The drawers*): on a passage of its conversation, or on lines of its branch's code since they approved it, as they stood when it was written."""
+
+    to: Conversation
+    quote: Quote
+    """The passage, and where it is in the drawer as the page shows it."""
+    text: str
+    step: int | None = None
+    """The step of the conversation the passage is of, for a comment on its
+    words; none for one on code."""
+    code: Quoted | None = None
+    """The lines of the file the passage is, and their version, for a comment
+    on code; none for one on the conversation's words."""
+
+
 class Review(Model):
-    """The operator's reply, as they wrote it while reading: their comments on the items it covers, and their messages to agents.
+    """The operator's reply, as they wrote it while reading: their comments on the items it covers, their messages to agents, and their remarks in the agents' drawers.
 
     Every conversation it's sent to gets all of it, reading its own message
     and items first and the rest as context (`docs/dashboard.md`, *The
@@ -452,6 +481,8 @@ class Review(Model):
     comments: list[Comment] = []
     letters: list[Letter] = []
     """The messages it carries, each to its conversation."""
+    remarks: list[Remark] = []
+    """The comments it carries from the drawers, each to its conversation."""
 
 
 type Reason = Annotated[
@@ -848,6 +879,9 @@ class Draft(Model):
     letters: list[Letter] = []
     """Messages to agents, each written under its agent's banner, sent with the
     rest of the reply whatever's parked."""
+    remarks: list[Remark] = []
+    """Comments written in the agents' drawers, each to its agent, sent with
+    the rest of the reply whatever's parked."""
     done: list[int] = []
     """Items read and taken off the list when the draft is sent, with no
     comment of their own."""
@@ -858,6 +892,10 @@ class Draft(Model):
     def written(self) -> list[Letter]:
         """Return the messages that say something, in order: those the draft sends."""
         return [each for each in self.letters if each.text.strip()]
+
+    def remarked(self) -> list[Remark]:
+        """Return the remarks that say something, in order: those the draft sends."""
+        return [each for each in self.remarks if each.text.strip()]
 
     def covered(self) -> list[int]:
         """Return the items the draft answers, in order: each with a comment or marked done, but for the parked ones."""

@@ -6,7 +6,7 @@
 // last. What came before their last words folds. It grows at its end as the
 // conversation does, what's before staying where it was. Pure: the editor
 // (`Conversation.tsx`) draws it, lets the comments be written, and keeps the
-// reader where they are as it grows (`docs/dashboard.md`, *The conversation*).
+// reader where they are as it grows (`docs/dashboard.md`, *The drawers*).
 import { since } from "./agents";
 import {
     calls,

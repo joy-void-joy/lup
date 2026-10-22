@@ -344,6 +344,7 @@ describe("laid", () => {
 
     it("lays each item under its header in its sender's group, the parked ones last, each comment under its line", () => {
         const draft: Draft = {
+            ...EMPTY,
             comments: [
                 { item: 51, quote: { text: "Use lark", start: 17, end: 25 }, text: "Yes." },
                 { item: 51, quote: null, text: "On the whole: fine." },

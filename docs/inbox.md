@@ -95,6 +95,7 @@ What the operator said in the same reply on other agents' items and to other age
 ```
 
 - A message is `<message item from kind>`; one sent from reading the conversation holds `<quote>` and `<reply>` for each passage, then the message on the whole; a reply holds `<on>` with its item's `<opening>` and the operator's `<comment>`.
+- A comment written in one of the agent's drawers in the review (`docs/dashboard.md`, *The drawers*) is a `<remark>` beside the message: its `<quote>` then the `<reply>`. One on code quotes the file's lines as `path:12-14` and the lines, and its `<quote>` says in `changed` which of those lines have changed since the comment was written, by their numbers in the version quoted, or `all` where the file is gone (`Quoted`, `changed_since`), so the agent knows the comment may be about code that's gone.
 - An answer is `<answer item from question>`: `<asked>`, a `<decision number lean verdict>` for each, then the comment on the whole, or a plain question's answer.
 - A subagent's end is `<ended item from name>`: how it ended, in lup's words, then its last message as `<said>`, where lup hands it on.
 - One passed on from a conversation that had ended says whom it was for (`for=`); the doorbell and an item too long for a hook are `<doorbell>` and `<announced>`.

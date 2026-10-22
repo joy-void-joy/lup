@@ -113,6 +113,11 @@ class StoreLayout(Model):
         return self.home / "store.lock"
 
     @property
+    def reading(self) -> Path:
+        """The index a reader of the worktree as it stands snapshots through, beside the judge's own (`lup_dev.policy.since`)."""
+        return self.home / "reading.index"
+
+    @property
     def state(self) -> Path:
         """The worktree's state between checkpoints: commits seen, saved versions."""
         return self.home / "state.json"
@@ -374,7 +379,7 @@ class InboxLayout(Model):
 
     @property
     def talks(self) -> Path:
-        """What the operator writes on each conversation they read in the dashboard, a file named by its key (`docs/dashboard.md`, *The conversation*)."""
+        """What the operator writes on each conversation they read in the dashboard, a file named by its key (`docs/dashboard.md`, *The drawers*)."""
         return self.home / "talks"
 
     def talk(self, key: str) -> Path:

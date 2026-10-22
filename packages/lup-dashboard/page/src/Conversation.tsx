@@ -7,7 +7,7 @@
 // message, through lup. As it grows, the view follows only a reader on its last
 // line, or writing their message at its end; anyone else keeps their cursor,
 // what they see, their open folds and what they're writing. Space `r` brings the
-// review back (`docs/dashboard.md`, *The conversation*).
+// review back (`docs/dashboard.md`, *The drawers*).
 import { foldedRanges } from "@codemirror/language";
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, type DecorationSet, type EditorView } from "@codemirror/view";
