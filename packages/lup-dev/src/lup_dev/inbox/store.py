@@ -132,44 +132,16 @@ class Message(Model):
     than sent by the agent: the conversation already shows them as its words."""
 
 
-def labelled(opening: str, parts: dict[str, str]) -> str:
-    """Return `opening`, then each of `parts` that says something, after its label, a line each.
-
-    >>> print(labelled("The gate hung.", {"Trying": "check", "Would change": ""}))
-    The gate hung.
-    Trying: check
-    """
-    said = [f"{label}: {text}" for label, text in parts.items() if text.strip()]
-    return "\n".join([opening, *said] if opening.strip() else said)
-
-
 class Friction(results.Friction):
-    """What got in a conversation's way, which it told the operator at the moment it did (`friction`): news to read, never a question."""
+    """What got in a conversation's way, which it told the operator at the moment it did (`friction`), in its own words: news to read, never a question."""
 
     reason: Literal["friction"] = "friction"
 
-    @property
-    def text(self) -> str:
-        """Say it as the operator reads it: what got in the way, then what the agent was trying and would change, where it said."""
-        parts = {"Trying": self.trying, "Would change": self.would_change}
-        return labelled(self.got_in_the_way, parts)
-
 
 class HowItWent(results.HowItWent):
-    """How a piece of work went as a whole, as a conversation told the operator once near its end (`how_it_went`): news to read."""
+    """How a piece of work went as a whole, and how it felt, as a conversation told the operator once near its end (`how_it_went`), in its own words: news to read."""
 
     reason: Literal["how it went"] = "how it went"
-
-    @property
-    def text(self) -> str:
-        """Say it as the operator reads it: each part the agent filled, after its label; "Nothing notable." where it filled none."""
-        parts = {
-            "Got in the way": self.got_in_the_way,
-            "Smooth": self.smooth,
-            "Would change": self.would_change,
-            "Felt": self.felt,
-        }
-        return labelled("", parts) or "Nothing notable."
 
 
 class Stop(speaking.Stop):

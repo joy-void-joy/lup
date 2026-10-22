@@ -3,14 +3,14 @@
 import asyncio
 
 import pytest
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel
 
 from lup.sessions.results import Friction, HowItWent
 from lup.sessions.submission import End, GiveUp, KeepGoing, Toolbox
 from lup.tools import Allow, Deny, Hook, Submit, Tool, lup_hook, lup_tool
 from lup.tools.hook import hooks
 from lup.tools.serving import Answer
-from lup.tools.speaking import SPEAKING, Heard, Problem, Stop
+from lup.tools.speaking import SPEAKING, Heard, Problem, Stop, friction, how_it_went
 from lup.tools.tool import Accepted, Refused, ToolError, ToolSpec, bound, declared
 
 
@@ -103,7 +103,7 @@ def test_every_tool_of_lup_s_has_a_summary() -> None:
         "Stop by your own choice, saying why.",
         "Attach a remark to your answer, and carry on.",
         "Say what got in your way, and carry on.",
-        "Say how the work went, once, near its end.",
+        "Say how the work went and felt, once.",
     ]
 
 
@@ -222,26 +222,32 @@ def test_stopping_ends_a_typed_turn_and_the_last_ending_holds() -> None:
     assert toolbox.ending() == Stop(why="Nothing more is worth doing.")
 
 
-def test_frictions_and_how_it_went_are_kept_and_end_nothing() -> None:
+def test_frictions_and_how_it_went_are_kept_as_written_and_end_nothing() -> None:
     toolbox = Toolbox(tools=[Submit(Query), *SPEAKING], output="submit", attempts=3)
-    jammed: dict[str, JsonValue] = {
-        "got_in_the_way": "`ls` printed: Permission denied",
-        "trying": "look",
-    }
-    taken = asyncio.run(toolbox.call("friction", jammed))
-    asyncio.run(toolbox.call("friction", {"got_in_the_way": "No city."}))
-    asyncio.run(toolbox.call("how_it_went", {}))
-    asyncio.run(toolbox.call("how_it_went", {"smooth": "The tools.", "felt": "Fine."}))
-    missing = asyncio.run(toolbox.call("friction", {"trying": "look"}))
+    jammed = "`ls` printed: Permission denied, while I looked\nfor the config."
+    taken = asyncio.run(toolbox.call("friction", {"text": jammed}))
+    asyncio.run(toolbox.call("friction", {"text": "No city."}))
+    asyncio.run(toolbox.call("how_it_went", {"text": "Nothing notable."}))
+    asyncio.run(toolbox.call("how_it_went", {"text": "Smooth, and it felt fine."}))
+    labelled = asyncio.run(toolbox.call("friction", {"got_in_the_way": "No city."}))
+    empty = asyncio.run(toolbox.call("how_it_went", {}))
     assert not taken.error
     assert "Carry on" in taken.text
-    assert missing.error
+    assert labelled.error
+    assert empty.error
+    assert "text" in empty.text
     assert isinstance(toolbox.end(), KeepGoing)
-    assert toolbox.frictions() == [
-        Friction(got_in_the_way="`ls` printed: Permission denied", trying="look"),
-        Friction(got_in_the_way="No city."),
-    ]
-    assert toolbox.how_it_went() == HowItWent(smooth="The tools.", felt="Fine.")
+    assert toolbox.frictions() == [Friction(text=jammed), Friction(text="No city.")]
+    assert toolbox.how_it_went() == HowItWent(text="Smooth, and it felt fine.")
+
+
+def test_friction_and_how_it_went_each_take_one_text_alone() -> None:
+    for tool in [friction, how_it_went]:
+        schema = tool.spec().input_schema
+        properties = schema["properties"]
+        assert isinstance(properties, dict)
+        assert list(properties) == ["text"]
+        assert schema["required"] == ["text"]
 
 
 def test_the_guard_names_the_answer_blocked_and_stop() -> None:

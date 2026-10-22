@@ -1325,11 +1325,13 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
     other = tmp_path / "other"
     other.mkdir()
     jammed: dict[str, JsonValue] = {
-        "got_in_the_way": "`uv run lup-dev check` printed: engine stale",
-        "trying": "run the gate",
-        "would_change": "say the rebuild's time first",
+        "text": (
+            "`uv run lup-dev check` printed: engine stale\n"
+            "I was running the gate; saying the rebuild's time first would help."
+        )
     }
-    went: dict[str, JsonValue] = {"smooth": "The brief.", "felt": "Good."}
+    went: dict[str, JsonValue] = {"text": "The brief was clear, and it felt good."}
+    quiet: dict[str, JsonValue] = {"text": "Nothing notable."}
     stopping: dict[str, JsonValue] = {"why": "Done; nothing more is worth doing."}
 
     def stamped(hook: Path, started: str) -> dict[str, JsonValue]:
@@ -1360,7 +1362,9 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
                 "friction",
                 stamped(hook, lup_call("friction", jammed, "f1", agent_id="a1")),
             ),
-            call(mcp, "how_it_went", stamped(hook, lup_call("how_it_went", {}, "h1"))),
+            call(
+                mcp, "how_it_went", stamped(hook, lup_call("how_it_went", quiet, "h1"))
+            ),
             call(mcp, "stop", stamped(hook, lup_call("stop", stopping, "s1"))),
             call(
                 mcp2, "friction", stamped(hook2, codex_call("friction", jammed, "c1"))
@@ -1376,7 +1380,7 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
                 stamped(hook2, codex_call("stop", stopping, "c3", agent_id="b1")),
             ),
         ]
-        missing = call(mcp, "friction", {"trying": "run the gate"})
+        labelled = call(mcp, "friction", {"got_in_the_way": "The gate hung."})
         waiting = delivery.inbox.waiting(Operator())
         listed = inbox()
         shown = inbox("show", "1")
@@ -1392,8 +1396,9 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         "Your stop is with the operator, @6. End your turn.",
     ]
     assert not any(error for _, error in answers)
-    assert missing[1]
-    assert missing[0].startswith("Refused: 1 validation error for Friction")
+    # The parts a friction once had are refused: it's one text.
+    assert labelled[1]
+    assert labelled[0].startswith("Refused: 1 validation error for Friction")
     claude_session = Conversation(
         repository=tmp_path / ".git", runtime="claude", session="s1"
     )
@@ -1413,7 +1418,7 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
     friction = Friction.model_validate(jammed)
     assert [each.reason for each in waiting] == [
         friction,
-        HowItWent(),
+        HowItWent.model_validate(quiet),
         Stopped.model_validate(stopping),
         friction,
         HowItWent.model_validate(went),
@@ -1430,8 +1435,7 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
     assert "a stop by choice from" in listed.splitlines()[2]
     assert shown.endswith(
         "`uv run lup-dev check` printed: engine stale\n"
-        "Trying: run the gate\n"
-        "Would change: say the rebuild's time first\n"
+        "I was running the gate; saying the rebuild's time first would help.\n"
     )
     assert replied.startswith("Replied to @1: your reply, @7, is for subagent a1")
     assert reply.reason == Message(kind="note", text="The rebuild is fixed.", of=1)
@@ -2734,7 +2738,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "End your work by your own choice, saying why.",
         "Tell the operator a doubt, and carry on.",
         "Say what got in your way, and carry on.",
-        "Tell the operator how the work went, once.",
+        "Tell the operator how the work went and felt.",
         "Ask the operator, with numbered decisions.",
         "Send a message to a party's inbox.",
         "Wait until something reaches your inbox.",
@@ -2831,8 +2835,8 @@ def test_an_items_kind_ranks_it_where_it_comes_and_whether_it_notifies() -> None
     news: list[Reason] = [
         Message(kind="note", text="I assumed UTF-8."),
         Message(kind="note", text="Done.", ending=True),
-        Friction(got_in_the_way="The gate hung."),
-        HowItWent(),
+        Friction(text="The gate hung."),
+        HowItWent(text="Nothing notable."),
         Stopped(why="Nothing more is worth doing."),
     ]
     assert [ranked(each) for each in waiting] == [

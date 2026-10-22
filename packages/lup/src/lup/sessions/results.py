@@ -3,7 +3,9 @@
 `Friction` and `HowItWent` are the inputs of the `friction` and `how_it_went`
 tools (`lup.tools.speaking`) as much as part of the result, so the caller reads
 them as the agent wrote them; they live here because the tools' module builds on
-this one.
+this one. Each is one text in the agent's own words, never a form of labelled
+parts: what's present for an agent at the moment isn't shaped like one, and a
+form shapes the answer it asks for.
 """
 
 from datetime import timedelta
@@ -36,30 +38,15 @@ class Rejection(Model):
 
 
 class Friction(Model):
-    """What got in the agent's way, at the moment it did."""
+    """What got in the agent's way, at the moment it did, in its own words."""
 
-    got_in_the_way: str = Field(
-        description=(
-            "What got in the way, in your words: the exact command and the message "
-            "it gave, where there is one."
-        )
-    )
-    trying: str = Field(default="", description="What you were trying to do.")
-    would_change: str = Field(
-        default="", description="What you'd change so it doesn't happen again."
-    )
+    text: str = Field(description="In your own words.")
 
 
 class HowItWent(Model):
-    """How a piece of work went as a whole, as openly as the agent likes; every field left out says nothing was notable."""
+    """How a piece of work went as a whole, and how it felt, in the agent's own words."""
 
-    got_in_the_way: str = Field(
-        default="",
-        description="What got in the way: the exact command and message where there's one.",
-    )
-    smooth: str = Field(default="", description="What was smooth.")
-    would_change: str = Field(default="", description="What you'd change.")
-    felt: str = Field(default="", description="How it felt.")
+    text: str = Field(description="In your own words.")
 
 
 class TurnResult[T](Model):

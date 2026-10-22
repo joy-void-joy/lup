@@ -448,12 +448,12 @@ def test_a_note_is_taken_through_the_server() -> None:
 
 
 def test_a_friction_and_how_it_went_are_taken_through_the_server() -> None:
-    jammed = {"got_in_the_way": "The feed timed out.", "would_change": "Retry it."}
+    jammed = {"text": "The feed timed out; a retry would have saved it."}
     clients = Clients(
         [
             init(tools=UNTYPED_TOOLS),
             Call(name="friction", arguments=jammed),
-            Call(name="how_it_went", arguments={"felt": "Calm."}),
+            Call(name="how_it_went", arguments={"text": "Calm."}),
             result(),
         ]
     )
@@ -463,9 +463,9 @@ def test_a_friction_and_how_it_went_are_taken_through_the_server() -> None:
     assert not taken.is_error
     assert not went.is_error
     assert turn.toolbox.frictions() == [
-        Friction(got_in_the_way="The feed timed out.", would_change="Retry it.")
+        Friction(text="The feed timed out; a retry would have saved it.")
     ]
-    assert turn.toolbox.how_it_went() == HowItWent(felt="Calm.")
+    assert turn.toolbox.how_it_went() == HowItWent(text="Calm.")
 
 
 # The Stop hook: the turn's guard.
@@ -522,7 +522,7 @@ def test_the_stop_hook_lets_a_turn_end_once_the_agent_stops_and_the_ask_raises()
     clients = Clients(
         [
             init(),
-            Call(name="friction", arguments={"got_in_the_way": "No date given."}),
+            Call(name="friction", arguments={"text": "No date given."}),
             Call(name="stop", arguments={"why": "I'd rather not guess."}),
             Stop(),
             result("Stopped."),
@@ -532,7 +532,7 @@ def test_the_stop_hook_lets_a_turn_end_once_the_agent_stops_and_the_ask_raises()
         asyncio.run(asking(clients).ask("Will it rain?", Forecast))
     assert clients.only().stops == [{}]
     assert raised.value.why == "I'd rather not guess."
-    assert raised.value.frictions == [Friction(got_in_the_way="No date given.")]
+    assert raised.value.frictions == [Friction(text="No date given.")]
 
 
 @pytest.mark.usefixtures("unseamed")

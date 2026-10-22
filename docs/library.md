@@ -91,7 +91,7 @@ It's one mechanism on both runtimes, and neither's native structured output: Cod
 `blocked`, `stop`, `note`, `friction` and `how_it_went` (`tools/speaking.py`) are served on every ask, typed or not. They act on nothing, so they're safe where an agent has no other tool, and they're the same tools a launched session speaks to the operator through (`docs/inbox.md`), so an agent's habit carries between the two.
 - **`blocked(problem)`** ends the turn without an answer because the work can't go on; the ask raises `BlockedError` with the agent's words, so a caller tells "the agent says this can't be done" from a failure. It isn't retried, since asking again gets the same problem.
 - **`stop(why)`** ends it by the agent's own choice; the ask raises `StoppedError`, so a caller tells "the agent chose to end" from "the agent can't". It isn't retried either.
-- **`note(remark)`, `friction(got_in_the_way, …)` and `how_it_went(…)`** say something without ending the turn, read in `TurnResult.notes`, `.frictions` and `.how_it_went`, and kept on `OutputMissingError`, `BlockedError` and `StoppedError`, which end a turn without a result.
+- **`note(remark)`, `friction(text)` and `how_it_went(text)`** say something without ending the turn, read in `TurnResult.notes`, `.frictions` and `.how_it_went`, and kept on `OutputMissingError`, `BlockedError` and `StoppedError`, which end a turn without a result. A friction and how it went are each one text in the agent's own words, never labelled parts, so the tool doesn't shape what the agent says (`docs/inbox.md`, *lup's tools*).
 
 ## Tools
 

@@ -176,34 +176,17 @@ function isComment(each: Written): each is Comment {
     return !isLetter(each);
 }
 
-/** Return `opening`, then each of `parts` that says something after its label, a line each. */
-function labelled(opening: string, parts: Record<string, string>): string {
-    const said = Object.entries(parts)
-        .filter(([, text]) => text.trim() !== "")
-        .map(([label, text]) => `${label}: ${text}`);
-    return (opening.trim() === "" ? said : [opening, ...said]).join("\n");
-}
-
 /**
- * Return an item's own text as the review shows it: a message's or a question's words with its decisions, an
- * approval's question and summary; a friction's or how the work went's parts, each labelled, as the host says them.
+ * Return an item's own text as the review shows it: a message's, a friction's or how the work went's words as written,
+ * a question's with its decisions, an approval's question and summary.
  */
 export function body(item: Item): string {
     const reason = item.reason;
     switch (reason.reason) {
         case "message":
-            return reason.text;
         case "friction":
-            return labelled(reason.got_in_the_way, { Trying: reason.trying, "Would change": reason.would_change });
-        case "how it went": {
-            const parts = {
-                "Got in the way": reason.got_in_the_way,
-                Smooth: reason.smooth,
-                "Would change": reason.would_change,
-                Felt: reason.felt,
-            };
-            return labelled("", parts) || "Nothing notable.";
-        }
+        case "how it went":
+            return reason.text;
         case "stop":
             return reason.why;
         case "question": {
