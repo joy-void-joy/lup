@@ -274,6 +274,7 @@ function item(number: number, reason: Item["reason"], minute: number, fields: Pa
         reason,
         sender: SESSION,
         recipient: OPERATOR,
+        replies: [],
         quiet: false,
         made: at(minute),
         state: { state: "waiting" },

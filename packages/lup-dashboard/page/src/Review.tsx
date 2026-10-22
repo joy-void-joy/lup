@@ -31,6 +31,7 @@ import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type ReviewPlace } from "./keys";
 import { source, sourced, type Source } from "./markdown";
 import {
+    REPLY_MARK,
     aboutAt,
     answerAfter,
     answering,
@@ -52,11 +53,14 @@ import {
     placeAt,
     quoted,
     regionAt,
+    sameId,
     shownAt,
+    shownInReply,
     showing,
     stepped,
     stranded,
     tallied,
+    threaded,
     toggled,
     waited,
     withWritten,
@@ -70,6 +74,7 @@ import {
     type Item,
     type Laid,
     type Region,
+    type Threaded,
     type Where,
     type Written,
 } from "./review";
@@ -202,7 +207,7 @@ function sourcesOf(laidOut: Laid): Source[] {
         add(source("text", region.lines.filter((line) => codeAt(region, line.from) === undefined).map(whole)));
         let run: Span[] = [];
         for (const aside of region.asides) {
-            if (aside.kind === "agent") {
+            if (aside.kind === "agent" || aside.kind === "you") {
                 run.push(whole(aside));
             } else {
                 add(source("text", run));
@@ -210,6 +215,18 @@ function sourcesOf(laidOut: Laid): Source[] {
             }
         }
         add(source("text", run));
+        // Each reply in the thread under the item, its lines one stretch.
+        let reply: Span[] = [];
+        let last: Threaded | undefined;
+        for (const line of region.threads) {
+            if (last !== undefined && !sameId(last.reply.id, line.reply.id)) {
+                add(source("text", reply));
+                reply = [];
+            }
+            reply.push(whole(line));
+            last = line;
+        }
+        add(source("text", reply));
         for (const block of region.blocks) {
             add(source("comment", [block]));
         }
@@ -264,13 +281,18 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
                 });
             }
         }
+        // Each line of a reply in the thread under the item, marked as the agent's answer.
+        for (const line of region.threads) {
+            marks.push({ from: line.from - REPLY_MARK.length, to: line.from - REPLY_MARK.length, value: Decoration.line({ class: "thread-reply" }) });
+        }
         for (const block of region.blocks) {
             marks.push(...remarks(laidOut, block));
             const comment = comments[block.comment];
             const quote = comment === undefined || isLetter(comment) ? null : comment.quote;
             if (quote != null && quote.end > quote.start) {
-                const from = shownAt(region, quote.start);
-                const to = shownAt(region, quote.end);
+                const on = comment === undefined || isLetter(comment) ? null : (comment.on ?? null);
+                const from = on === null ? shownAt(region, quote.start) : shownInReply(region, on, quote.start);
+                const to = on === null ? shownAt(region, quote.end) : shownInReply(region, on, quote.end);
                 if (to > from) {
                     marks.push({ from, to, value: Decoration.mark({ class: "commented" }) });
                 }
@@ -428,6 +450,7 @@ export function Review({
                         `${cited(item.number)} ${what(item)}`,
                         ...(counted === "" ? [] : [counted]),
                         ...(typing ? ["reading types"] : []),
+                        ...(threaded(around.answers, item) ? ["replied"] : []),
                         ...(fresh(item, reviewed) ? ["new"] : []),
                         when(item.made),
                         waited(item.made, now),

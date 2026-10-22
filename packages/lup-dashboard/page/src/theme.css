@@ -551,6 +551,13 @@ kbd {
     color: var(--muted);
 }
 
+/* A reply of the agent's in the thread under an item, after the operator's comment it answers: in the orange of the
+   agent's own items, set off by a bar, so the exchange reads as a thread. */
+.thread-reply {
+    color: var(--orange);
+    border-left: 2px solid var(--orange);
+}
+
 .bar .demo {
     color: var(--bg);
     background: var(--warn);
