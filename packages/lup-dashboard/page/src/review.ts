@@ -1073,10 +1073,12 @@ export function laid(
         const mine: Placed[] = wrote.flatMap((comment, at) => (isRemark(comment) && whose(comment.to) === key ? [{ comment, at }] : []));
         let talk: Talk | null = null;
         let files: SinceFile[] = [];
+        let said: string;
         let summary: Span;
         switch (kind) {
             case "tasks": {
-                summary = w.line(tasksSummary(data.tasks));
+                said = tasksSummary(data.tasks);
+                summary = w.line(said);
                 for (const task of data.tasks) {
                     const shown = task.status === "in_progress" ? (task.active ?? task.subject) : task.subject;
                     into.asides.push({ kind: "task", ...w.line(`${TASK_MARKS[task.status]} ${shown}`) });
@@ -1087,7 +1089,8 @@ export function laid(
             case "conversation": {
                 const spoke = lastSpoken(data.entries);
                 const tracing = kind === "trace";
-                summary = w.line(tracing ? traceSummary(data.entries, true) : conversationSummary(data.entries, true));
+                said = tracing ? traceSummary(data.entries, true) : conversationSummary(data.entries, true);
+                summary = w.line(said);
                 // A remark on a step since the operator's last words shows in the trace, which holds the same steps, never twice.
                 const steps = mine.flatMap(({ comment, at }) =>
                     isRemark(comment) && comment.step != null && (tracing ? comment.step > spoke : comment.step <= spoke)
@@ -1119,7 +1122,8 @@ export function laid(
                 break;
             }
             case "since": {
-                summary = w.line(sinceSummary(data.since, data.latest));
+                said = sinceSummary(data.since, data.latest);
+                summary = w.line(said);
                 files = data.since?.files ?? [];
                 const shown = filedOf(files.map((each) => each.file), "changes", (file) => file.before == null);
                 const starts = startsOf(shown.map((each) => each.text));
@@ -1133,7 +1137,8 @@ export function laid(
                 break;
             }
         }
-        const label = w.text.slice(summary.from, summary.to);
+        // Labelled by the words written, not sliced from the text being built, which copies it whole each time.
+        const label = said;
         const last = w.at - 1;
         // A drawer with nothing under its summary line hides nothing, so it has no fold.
         if (last > summary.to) {
