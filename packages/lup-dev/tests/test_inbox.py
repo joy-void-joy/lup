@@ -3253,6 +3253,7 @@ def test_a_subagents_held_edit_waits_unlanded_until_the_operator_answers_making_
         )
         left = delivery.inbox.waiting(Operator())
     assert let["permissionDecision"] == "allow"
+    assert "The operator approved it: fine by me" in let["additionalContext"]
     [hold] = [each for holds in stores(machine) for each in holds.all()]
     assert hold.agent == "a1"
     assert hold.answer is not None

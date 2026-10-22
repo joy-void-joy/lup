@@ -88,6 +88,26 @@ def test_claude_holds_a_new_production_file_in_its_hook_and_lets_it_through_on_a
     assert running(kit, repo) == ["t1"]
 
 
+def test_claude_tells_the_operators_comment_on_a_held_write_beside_the_call(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    """An `allow`'s `permissionDecisionReason` reaches only Claude Code's debug log, so the comment goes where the model reads it."""
+    kit.announced.answering = Response(approved=True, comment="name it after the room")
+    raw = pre_tool_use(
+        repo,
+        "Write",
+        {"file_path": str(repo / "src/pkg/new.py"), "content": '"""New."""\n'},
+    )
+    output = json.loads(claude.hook(raw, on_claude))
+    assert output == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "additionalContext": "The operator approved it: name it after the room",
+        }
+    }
+
+
 def test_claude_lets_a_flagged_write_through_putting_it_before_the_operator(
     on_claude: Bench, repo: Path, kit: Kit
 ) -> None:
