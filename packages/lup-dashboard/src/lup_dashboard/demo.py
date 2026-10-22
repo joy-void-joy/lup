@@ -314,7 +314,11 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         """Return what a stand-in conversation's branch changed since the operator approved it: the parser subagent's new reader module and, once `grew`, a change to the clock beside it, from its session's worktree; each file approved from the drawer left out; nothing for the rest."""
         dev = conversation.repository / "tree" / "dev"
         worker = next(
-            (n for n in range(1, self.workers + 1) if worker_agent(n) == conversation.agent),
+            (
+                n
+                for n in range(1, self.workers + 1)
+                if worker_agent(n) == conversation.agent
+            ),
             None,
         )
         if conversation.session == "s1" and worker is not None and self.size > 0:
