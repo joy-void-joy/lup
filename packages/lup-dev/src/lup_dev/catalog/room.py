@@ -59,7 +59,9 @@ class StandardMachine(Model):
     user's shell, aliases included. The set starts from the first lup's, which its
     sessions used for months, less three: bun, a project's own where it uses one;
     github-cli, since the room holds no GitHub login; and the virtual display behind
-    the first lup's clipboard, which waits for the clipboard's own piece.
+    the first lup's clipboard, which the host's clipboard replaced. To it are added
+    what agents in rooms reached for and didn't find: `man`, `time` and `tmux`
+    (`docs/field-notes.md`, *What agents reached for in rooms*).
     """
 
     groups: list[Group] = [
@@ -109,11 +111,37 @@ class StandardMachine(Model):
         ),
         Group(
             why=(
-                "measuring and debugging: timing a command properly, arithmetic in "
-                "the shell, tracing what a process does, waiting on a file to "
-                "change rather than polling it"
+                "measuring and debugging: timing a command properly, a command's "
+                "peak memory through `/usr/bin/time`, arithmetic in the shell, "
+                "tracing what a process does, waiting on a file to change rather "
+                "than polling it"
             ),
-            names=["hyperfine", "bc", "strace", "inotify-tools"],
+            names=["hyperfine", "time", "bc", "strace", "inotify-tools"],
+        ),
+        Group(
+            why=(
+                "reads a program's manual with `man`, as `git help` does: the image "
+                "keeps every package's English man pages, and indexes them"
+            ),
+            names=["man-db"],
+        ),
+        Group(
+            why="the manual of Linux's system calls and C library",
+            names=["man-pages"],
+        ),
+        Group(
+            why=(
+                "runs a program that needs a terminal and drives it from commands, "
+                "as `git add -p` needs"
+            ),
+            names=["tmux"],
+        ),
+        Group(
+            why=(
+                "`sqlite3`, to read a SQLite database by hand; the base has it "
+                "already, for its own libraries"
+            ),
+            names=["sqlite"],
         ),
         Group(why="runs a project's Makefile", names=["make"]),
         Group(why="runs a script outside a project's environment", names=["python"]),

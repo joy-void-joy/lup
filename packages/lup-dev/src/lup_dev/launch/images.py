@@ -11,6 +11,16 @@ the selected modules name (`docs/launch.md`, *The image*):
   libraries newer than the base's, Arch's unsupported partial upgrade. `--needed`
   skips the packages the base already holds, and `--` ends pacman's options, so
   no package name is taken for one;
+- where the room has `man-db`, it keeps the English man pages, which the base's
+  `pacman.conf` extracts from no package. A `NoExtract` line appended to it
+  takes them back: the file ends in its `[options]`, and the last pattern a
+  path matches decides. The base's own packages are installed already, so
+  `--needed` skips them and their man pages would stay missing; `pacman -Qk`
+  lists each package whose files are missing, `pacman -Sw` downloads those
+  packages and checks their signatures, and `bsdtar` takes only their man pages
+  out, about 11 MiB where reinstalling them would add up to 0.4 GB to the layer.
+  `mandb` then indexes them, since no pacman hook does, so `apropos` and
+  `whatis` find them;
 - the locale is generated from the sources the base keeps for English (its
   `pacman.conf` extracts no other), so `LANG=en_US.UTF-8` is a locale in the
   room, beside the base's `C.UTF-8` (checked in a room: `locale -a` lists it);
@@ -47,6 +57,9 @@ class ImageError(LupDevError):
 def definition(packages: list[Package], base: RoomBase) -> str:
     r"""Return the Containerfile of a room holding `packages`, on `base`.
 
+    The man pages come with `man-db`, which reads them and builds their index,
+    so a room without it doesn't carry them.
+
     >>> from lup_dev.catalog.room import RoomBase
     >>> from lup_dev.declaration.kinds import Package
     >>> print(definition([Package(name="git", why="version control")], RoomBase()))
@@ -59,10 +72,26 @@ def definition(packages: list[Package], base: RoomBase) -> str:
     <BLANKLINE>
     """
     mirror = f"Server = {base.archive}/{base.snapshot:%Y/%m/%d}/$repo/os/$arch"
-    install = ["pacman", "-Syu", "--noconfirm", "--needed", "--"]
+    names = [each.name for each in packages]
+    install = join(["pacman", "-Syu", "--noconfirm", "--needed", "--", *names])
+    installing = [install]
+    if "man-db" in names:
+        manuals = "usr/share/man/man"
+        kept = quote(f"NoExtract = !{manuals}*")
+        unextracted = quote(f'$2 ~ "^/{manuals}" {{ print $1 }}')
+        cached = quote("/var/cache/pacman/pkg/%f")
+        extract = f"bsdtar -xf {{}} -C / {quote(f'{manuals}*')}"
+        installing = [
+            f"echo {kept} >> /etc/pacman.conf",
+            install,
+            f"missing=$(pacman -Qkq | awk {unextracted} | sort -u)",
+            "pacman -Sw --noconfirm -- $missing",
+            f"pacman -Sp --print-format {cached} -- $missing | xargs -I {{}} {extract}",
+            "mandb --quiet",
+        ]
     steps = [
         f"echo {quote(mirror)} > /etc/pacman.d/mirrorlist",
-        join([*install, *(each.name for each in packages)]),
+        *installing,
         f"echo {quote(f'{base.locale} {base.charmap}')} > /etc/locale.gen",
         "locale-gen",
         "rm -rf /var/cache/pacman/pkg/*",
