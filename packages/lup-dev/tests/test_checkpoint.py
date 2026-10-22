@@ -47,7 +47,7 @@ from lup_dev.stored import read_model, write_model
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from conftest import FakeRuntime, Kit, Shell
+    from conftest import Dying, FakeRuntime, Kit, Shell
 
 CORE = Path("src/pkg/core.py")
 SESSION = "s1"
@@ -1310,6 +1310,124 @@ def test_an_unanswered_hold_is_put_back_and_stays_open(
         f"{repo}/src/pkg/new.py. Your version was saved" in late
     )
     assert session(holding_kit, repo).approved == [Path("src/pkg/new.py")]
+
+
+def orphaned(kit: Kit, repo: Path, key: str, dying: Dying) -> str:
+    """Hold the next change at the finish of call `key`, its call dying while it waits; return the hold's key."""
+    dying.at_next_wait(kit.clock)
+    with pytest.raises(dying.died):
+        finish(kit, repo, key)
+    [hold] = waiting(kit.layout)
+    assert not Holds(layout=kit.layout.store(repo)).waited_on(hold.key)
+    return hold.key
+
+
+GONE = (
+    "lup's host service went away while your call waited for the operator's answer "
+    "to the change to"
+)
+
+
+def test_a_hold_whose_call_died_keeps_its_file_held_until_the_operator_answers(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    kit = holding_kit
+    new = held_file(kit, repo)
+    orphaned(kit, repo, "p1", dying)
+    call(kit, repo, "p2")
+    (repo / "README.md").write_text("# Read me\n")
+    assert finish(kit, repo, "p2").context == ""
+    store = worktree(kit, repo).store
+    assert store.content(store.accepted(), Path("README.md")) == b"# Read me\n"
+    assert store.content(store.accepted(), Path("src/pkg/new.py")) is None
+    assert new.read_text() == '"""New."""\n'
+    assert len(kit.announced.holds) == 1
+
+
+def test_an_approval_of_a_hold_whose_call_died_reaches_the_session_at_its_next_call(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    kit = holding_kit
+    new = held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    answer(kit.layout, key, Response(approved=True, comment="good name"), [], kit.clock)
+    call(kit, repo, "p2")
+    told = finish(kit, repo, "p2").context
+    assert told == (
+        f"{GONE} {new}, which they have since approved: good name. It's in place."
+    )
+    store = worktree(kit, repo).store
+    assert store.content(store.accepted(), Path("src/pkg/new.py")) == b'"""New."""\n'
+    assert store.state().holding == []
+    assert session(kit, repo).approved == [Path("src/pkg/new.py")]
+    [verdict] = [each for each in log(kit, repo).read() if each.outcome == "hold"]
+    assert verdict.answer == "approved"
+    assert waiting(kit.layout) == []
+    call(kit, repo, "p3")
+    assert finish(kit, repo, "p3").context == ""
+
+
+def test_a_decline_of_a_hold_whose_call_died_puts_it_back_at_any_sessions_checkpoint(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    kit = holding_kit
+    new = held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    answer(kit.layout, key, Response(approved=False, comment="not here"), [], kit.clock)
+    start(kit, repo, "other")
+    call_for("other", kit, repo, "o1")
+    assert finish(kit, repo, "o1", session="other").context == ""
+    assert not new.exists()
+    saved = repo / ".lup" / "saved" / "1" / "src" / "pkg" / "new.py"
+    assert saved.read_text() == '"""New."""\n'
+    [verdict] = [each for each in log(kit, repo).read() if each.outcome == "hold"]
+    assert verdict.answer == "declined"
+    call(kit, repo, "p2")
+    assert finish(kit, repo, "p2").context == (
+        f"{GONE} {new}, which they have since declined: not here. It was put back, "
+        "or never landed, and your version saved."
+    )
+
+
+def test_a_hold_whose_call_died_is_put_back_once_its_day_is_up(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    kit = holding_kit
+    new = held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    kit.clock.time += timedelta(hours=23)
+    call(kit, repo, "p2")
+    finish(kit, repo, "p2")
+    assert new.exists()
+    kit.clock.time += timedelta(hours=2)
+    call(kit, repo, "p3")
+    assert finish(kit, repo, "p3").context == ""
+    assert not new.exists()
+    [hold] = waiting(kit.layout)
+    assert (hold.key, hold.abandoned, hold.orphaned) == (key, True, False)
+    [verdict] = [each for each in log(kit, repo).read() if each.outcome == "hold"]
+    assert verdict.answer == "unanswered"
+    answer(kit.layout, key, Response(approved=True), [], kit.clock)
+    call(kit, repo, "p4")
+    assert finish(kit, repo, "p4").context.startswith(
+        f"After the hold timed out, the operator approved the change to {new}."
+    )
+
+
+def test_a_hold_a_call_still_waits_on_is_left_to_that_call(
+    holding_kit: Kit, repo: Path, dying: Dying
+) -> None:
+    """Its call is in another thread or process, which holds its lock: the call
+    acts on the answer, not the checkpoint that finds it answered."""
+    kit = holding_kit
+    new = held_file(kit, repo)
+    key = orphaned(kit, repo, "p1", dying)
+    answer(kit.layout, key, Response(approved=False), [], kit.clock)
+    with Holds(layout=kit.layout.store(repo)).waiting(key):
+        call(kit, repo, "p2")
+        assert finish(kit, repo, "p2").context == ""
+    assert new.exists()
+    assert worktree(kit, repo).store.state().holding != []
 
 
 def test_a_finding_on_a_holding_runtime_is_told_not_held(

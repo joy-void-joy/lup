@@ -17,7 +17,9 @@ call finishes, so the checkpoint after it accepts that content as already
 judged, telling it no more; one flagged is put before the operator as it's let
 through, holding no one, as is one to a file whose item may still gather the
 conversation's writes, refreshing it (`flags.py`); one declined, or left
-unanswered, never lands, and the agent's version is saved.
+unanswered, never lands, and the agent's version is saved. A write to a file
+under an open hold, a file tool's or a checkpoint's, is refused, naming it: the
+file is nobody's until the operator answers.
 
 A write is judged in the worktree of the session's repository its path is in,
 which the session then holds; a write in the repository's own git directory
@@ -53,6 +55,7 @@ from lup_dev.policy.report import (
     refusal,
     sections,
 )
+from lup_dev.policy.store import Held
 from lup_dev.policy.worktrees import place
 
 
@@ -205,6 +208,9 @@ def before(
     path = here.path
     store = worktree.store
     with worktree.lock():
+        under = [each.hold for each in store.state().holding if each.path == path]
+        if under:
+            return Decision(outcome="deny", reason=kept(disk, under[0]))
         record = worktree.session(session, bench.runtime)
         accepted = store.accepted()
         prior = [each.blob for each in record.judged if each.path == path]
@@ -272,6 +278,19 @@ def before(
     )
 
 
+def kept(path: Path, hold: str) -> str:
+    """Say why a write to `path` is refused while hold `hold` waits on it: the file is nobody's until the operator answers.
+
+    >>> kept(Path("/work/AGENTS.md"), "a1b2c3")
+    "lup holds /work/AGENTS.md for the operator's review (hold a1b2c3), so it isn't written until they answer, which reaches the conversation that made the change at its next call."
+    """
+    return (
+        f"lup holds {path} for the operator's review (hold {hold}), so it isn't "
+        "written until they answer, which reaches the conversation that made the "
+        "change at its next call."
+    )
+
+
 def held_write(
     bench: Bench,
     worktree: Worktree,
@@ -287,15 +306,19 @@ def held_write(
     """Hold a write that asks before it lands, the call waiting in its hook, and answer as the operator does.
 
     The hold is kept in `worktree`'s store and put in the operator's inbox
-    (`Announcing`); no lock is held while it waits. A write `outside` the
-    worktree, in its repository's git directory, is kept in the store of the
-    worktree the session works in, its verdict the git directory's, and is no
-    write of that worktree's once let through. Approved, the write is let
-    through, logged approved and covering the path for the rest of the session
-    as the operator answers, and the agent told it was held and approved, with
-    their comment (`approval`); declined, or
-    left unanswered within the patience, it's denied, and the agent's version
-    saved, the hold staying open where nobody answered.
+    (`Announcing`), its file held as a checkpoint's are (`Held`), so a write
+    landing under it anyway is left to its answer; no lock is held while it
+    waits but the call's own (`Holds.waiting`). A write `outside` the worktree,
+    in its repository's git directory, is kept in the store of the worktree the
+    session works in, its verdict the git directory's, and is no write of that
+    worktree's, held or once let through. Approved, the write is let through,
+    logged approved and covering the path for the rest of the session as the
+    operator answers, and the agent told it was held and approved, with their
+    comment (`approval`); declined, or left unanswered within the patience, it's
+    denied, and the agent's version saved, the hold staying open where nobody
+    answered. A hold settled meanwhile with no call waiting on it, as a later
+    checkpoint settles one whose call's process ended, is the checkpoint's to
+    tell.
     """
     services = bench.services
     store = worktree.store
@@ -325,8 +348,13 @@ def held_write(
                 files=[held],
                 diff=unified(path, earlier, after),
                 verdicts=[logged],
+                proposed=True,
             )
         )
+        if outside is None:
+            state = store.state()
+            state.holding = [*state.holding, Held(hold=key, path=path, blob=held.blob)]
+            store.remember(state)
     log = worktree.verdicts(services.layout)
     log.append([logged])
     whole = ChangedFile.of(
@@ -338,42 +366,56 @@ def held_write(
     services.announcing.announced(
         hold, bench.runtime.name(), worktree.repository, [whole]
     )
-    answer = holds.wait(key, services.clock)
-    if answer is not None and answer.approved:
-        log.append(answered(hold, "approved"))
-    if answer is not None and answer.approved and outside is not None:
-        said = approval([where / path], answer.comment)
-        return Decision(outcome="allow", reason=said, told=told(where, judgement))
-    if answer is not None and answer.approved:
+    with holds.waiting(key):
+        answer = holds.wait(key, services.clock)
         with worktree.lock():
+            state = store.state()
+            if outside is None and all(each.hold != key for each in state.holding):
+                settled = (
+                    f"lup settled its hold of the write to {where / path} (hold "
+                    f"{key}) while no call waited on it, and tells the operator's "
+                    "answer at your next call."
+                )
+                return Decision(outcome="deny", reason=settled)
+            state.holding = [each for each in state.holding if each.hold != key]
             record = worktree.session(session, bench.runtime)
-            pending = Pending(
-                call=proposal.call,
-                path=path,
-                blob=held.blob,
-                removed=judgement.removed,
-                judged=services.clock.now(),
-            )
-            record.pending = [*record.pending, pending]
-            record.waiting(services.clock.now())
-            record.approved = list(dict.fromkeys([*record.approved, path]))
+            if answer is not None and answer.approved:
+                if outside is None:
+                    pending = Pending(
+                        call=proposal.call,
+                        path=path,
+                        blob=held.blob,
+                        removed=judgement.removed,
+                        judged=services.clock.now(),
+                    )
+                    record.pending = [*record.pending, pending]
+                    record.waiting(services.clock.now())
+                    record.approved = list(dict.fromkeys([*record.approved, path]))
+                said = approval([where / path], answer.comment)
+                decision = Decision(
+                    outcome="allow", reason=said, told=told(where, judgement)
+                )
+            else:
+                number = state.saved + 1
+                refused = Refused(
+                    path=where / path,
+                    saved=store.save(number, path, after.encode()),
+                    new=earlier is None,
+                    declined=None if answer is None else answer.comment,
+                    unanswered=answer is None,
+                )
+                state.saved = number
+                decision = Decision(outcome="deny", reason=refusal([refused]))
+            store.remember(state)
             worktree.keep(record)
-        said = approval([where / path], answer.comment)
-        return Decision(outcome="allow", reason=said, told=told(where, judgement))
-    with worktree.lock():
-        state = store.state()
-        number = state.saved + 1
-        saved = store.save(number, path, after.encode())
-        state.saved = number
-        store.remember(state)
     if answer is None:
         holds.mark(key, abandoned=True)
-    log.append(answered(hold, "unanswered" if answer is None else "declined"))
-    refused = Refused(
-        path=where / path,
-        saved=saved,
-        new=earlier is None,
-        declined=None if answer is None else answer.comment,
-        unanswered=answer is None,
+    outcome = (
+        "unanswered"
+        if answer is None
+        else "approved"
+        if answer.approved
+        else "declined"
     )
-    return Decision(outcome="deny", reason=refusal([refused]))
+    log.append(answered(hold, outcome))
+    return decision

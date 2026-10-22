@@ -175,6 +175,10 @@ class StoreLayout(Model):
         """Say where one hold is kept."""
         return self.holds / f"{hold}.json"
 
+    def waiter(self, hold: str) -> Path:
+        """Say where the call waiting on hold `hold` holds its lock while it waits, which the OS frees where its process ends."""
+        return self.holds / f"{hold}.lock"
+
 
 class CheckoutLayout(Model):
     """The places inside a worktree that lup reads or writes."""

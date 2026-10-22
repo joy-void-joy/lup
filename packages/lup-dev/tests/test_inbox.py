@@ -5140,11 +5140,17 @@ def test_judged_says_where_an_open_hold_stands_and_what_waits_with_it(
         diff="",
     )
     assert [
-        stands(hold),
-        stands(hold.model_copy(update={"abandoned": True})),
-        stands(hold.model_copy(update={"commit": "c0ffee"})),
+        stands(hold, waited=True),
+        stands(hold, waited=False),
+        stands(hold.model_copy(update={"abandoned": True}), waited=False),
+        stands(hold.model_copy(update={"commit": "c0ffee"}), waited=False),
     ] == [
         "waiting for the operator, its call waiting on their answer",
+        (
+            "waiting for the operator, no call waiting on it any more: lup's host "
+            "service went away mid-wait, and their answer reaches its session at a "
+            "later call"
+        ),
         (
             "waiting for the operator: nobody answered in time, so the change was "
             "put back and its version saved"

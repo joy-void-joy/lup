@@ -56,7 +56,7 @@ from lup_dev.host.rooms import RoomTools
 from lup_dev.inbox.delivery import clocked
 from lup_dev.layout import Layout
 from lup_dev.listing import Span, latest, many, unlisted
-from lup_dev.policy.holds import Hold, logged
+from lup_dev.policy.holds import Hold, Holds, logged
 from lup_dev.policy.verdicts import Verdict, VerdictLog, tallied
 
 
@@ -148,8 +148,9 @@ class Onlooker(Model, arbitrary_types_allowed=True):
         role (`rules-pass` for production code). Your session's verdicts by
         default, every session's with `every`. Then this repository's holds
         still open, and with `answered` those answered too: each with its key,
-        when it was made and by whom, where it stands, its files with what each
-        asks, and the operator's comment. `path`, `since` and `until` narrow the
+        when it was made and by whom, where it stands, whether a call
+        still waits on it among that, its files with what each asks, and the
+        operator's comment. `path`, `since` and `until` narrow the
         verdicts and the holds alike, and `limit` and `holds_limit` say how
         many to list. Where it leaves earlier ones out, the answer says how
         many, the `until` that reads them, and the limit that lists them all.
@@ -292,7 +293,8 @@ class Onlooker(Model, arbitrary_types_allowed=True):
             if hold.commit is None
             else f"what commit {hold.commit} brought, found by {self.maker(hold)}"
         )
-        head = f"{hold.key}  {clocked(hold.created)}  {made}, {stands(hold)}"
+        waited = Holds(layout=self.layout.store(hold.worktree)).waited_on(hold.key)
+        head = f"{hold.key}  {clocked(hold.created)}  {made}, {stands(hold, waited=waited)}"
         files = [
             f"  {where(verdict)}: {', '.join(verdict.reasons)}"
             for verdict in hold.verdicts
@@ -341,8 +343,8 @@ def answer(verdict: Verdict) -> str:
     return ""
 
 
-def stands(hold: Hold) -> str:
-    """Say where a hold stands: answered, and when; or waiting, and what waits with it."""
+def stands(hold: Hold, *, waited: bool) -> str:
+    """Say where a hold stands: answered, and when; or waiting, and whether a call waits with it, which `waited` says (`Holds.waited_on`)."""
     if hold.answer is not None:
         verdict = "approved" if hold.answer.approved else "declined"
         return f"{verdict} at {clocked(hold.answer.time)}"
@@ -353,7 +355,13 @@ def stands(hold: Hold) -> str:
             "waiting for the operator: nobody answered in time, so the change was "
             "put back and its version saved"
         )
-    return "waiting for the operator, its call waiting on their answer"
+    if waited:
+        return "waiting for the operator, its call waiting on their answer"
+    return (
+        "waiting for the operator, no call waiting on it any more: lup's host "
+        "service went away mid-wait, and their answer reaches its session at a "
+        "later call"
+    )
 
 
 class JudgeTools(Model, RoomTools, arbitrary_types_allowed=True):
