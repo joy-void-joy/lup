@@ -161,7 +161,7 @@ from lup_dev.stored import write_model
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
 
-    from conftest import FakeClock, Kit, Shell
+    from conftest import FakeClock, InProcess, Kit, Shell
     from mcp.client._transport import TransportStreams
     from pydantic import JsonValue
 
@@ -6204,3 +6204,35 @@ def test_a_tool_of_lup_s_that_fails_answers_its_failure_and_the_service_says_the
     assert "Traceback (most recent call last):" in told
     assert "ValidationError" in told
 
+
+def test_the_github_module_s_tools_answer_through_the_server_with_and_without_arguments(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    tmp_path: Path,
+    in_process: type[InProcess],
+) -> None:
+    """Each call reaches the module's tool through lup's server and the launch's modules, which validate it and refuse what the launch's limits leave out, before anything reaches GitHub."""
+    modules = in_process(resolved=resolve(Project()), layout=machine)
+    with inboxed(machine, clock, notices, said, modules=modules):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        mcp = machine.host.launch("one").mcp
+        bare = call(mcp, "read_issue", {})
+        numbered = call(mcp, "read_issue", {"number": 1})
+        searched = call(mcp, "find_issues", {"query": "is:open"})
+        filed = call(mcp, "file_issue", {"title": "A bug", "body": "It bites."})
+    refused = (
+        "`{}` didn't run: the project's declaration doesn't allow `{}` with the "
+        "operator's credentials (`Core.credentials`), and allowing it is the "
+        "operator's call"
+    )
+    assert bare[1]
+    assert bare[0].startswith(
+        "`read_issue` refused the call: 1 validation error for Numbered\nnumber\n"
+    )
+    assert numbered == (refused.format("read_issue", "read-issues"), True)
+    assert searched == (refused.format("find_issues", "read-issues"), True)
+    assert filed == (refused.format("file_issue", "file-issue"), True)
