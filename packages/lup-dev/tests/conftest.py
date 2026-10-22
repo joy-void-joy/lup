@@ -141,19 +141,29 @@ def directives(content: str) -> list[Directive]:
             for kw in parsed.keywords
             if kw.arg is not None
         }
+        tracked = "issue" in keywords or "when" in keywords
+        said = [
+            each.value
+            for each in parsed.args
+            if isinstance(each, ast.Constant) and isinstance(each.value, str)
+        ]
         match parsed.func.id:
             case "ignore" if parsed.args and "why" in keywords:
                 rule = ast.literal_eval(parsed.args[0])
                 found.append(
                     Ignore(
-                        line=line, covers=covers, rule=rule, why=str(keywords["why"])
+                        line=line,
+                        covers=covers,
+                        rule=rule,
+                        why=str(keywords["why"]),
+                        issue=keywords.get("issue"),
                     )
                 )
-            case "defer" if "why" in keywords and (
-                "issue" in keywords or "when" in keywords
-            ):
+            case "defer" if "why" in keywords and tracked:
                 found.append(Defer.model_validate({"line": line, **keywords}))
-            case name:
+            case "note" if len(parsed.args) == 1 and said:
+                found.append(Note(line=line, text=said[0]))
+            case name if name in ["ignore", "defer"] or tracked:
                 found.append(
                     Malformed(
                         line=line,
@@ -161,6 +171,8 @@ def directives(content: str) -> list[Directive]:
                         problem=f"`{name}` is missing what it needs, or unknown",
                     )
                 )
+            case _:
+                found.append(Note(line=line, text=text))
     return found
 
 

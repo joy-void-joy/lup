@@ -853,6 +853,22 @@ def test_stacked_ignores_alone_keep_the_next_line_of_code(project: Project) -> N
     ]
 
 
+def test_an_ignore_carries_the_issue_it_waits_on(project: Project) -> None:
+    body = (
+        "def f(text: str) -> list[str]:\n"
+        '    return text.split(",")  # lup: ignore("string-split", why="a format", '
+        "issue=12)\n"
+        '    # lup: ignore("tuple-shape", issue="owner/repo#7", why="the caller")\n'
+        "    return []\n"
+    )
+    assert directives(project, "waiting.py", body) == [
+        Ignore(line=4, covers=4, rule="string-split", why="a format", issue=12),
+        Ignore(
+            line=5, covers=6, rule="tuple-shape", why="the caller", issue="owner/repo#7"
+        ),
+    ]
+
+
 def test_a_defer_carries_its_issue_or_condition(project: Project) -> None:
     body = (
         'x = 1  # lup: defer(issue=12, why="retry on reset")\n'
@@ -872,6 +888,42 @@ def test_a_comment_that_isnt_a_call_is_a_note(project: Project) -> None:
     ]
 
 
+def test_a_note_call_says_what_free_text_says(project: Project) -> None:
+    body = (
+        'x = 1  # lup: note("this looks wrong")\n'
+        "y = 2  # lup: this looks wrong\n"
+        "z = 3  # lup: note('this ' \"looks wrong\")\n"
+    )
+    assert directives(project, "note_call.py", body) == [
+        Note(line=3, text="this looks wrong"),
+        Note(line=4, text="this looks wrong"),
+        Note(line=5, text="this looks wrong"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "sorted(x) here, why not heapq?",
+        "retry(3) is the provider's limit",
+        'todo("tighten this")',
+        'ignor("string-split", why="a typo leaves the finding reported")',
+        "ignore this, the provider fixes it",
+        "defer to the caller's timeout",
+        "ignore",
+        "note()",
+        "note(42)",
+        'note("a", "b")',
+        "note(this is unquoted)",
+    ],
+)
+def test_any_other_comment_or_call_is_a_note_as_written(
+    project: Project, written: str
+) -> None:
+    [found] = directives(project, "other.py", f"x = 1  # lup: {written}\n")
+    assert found == Note(line=3, text=written)
+
+
 @pytest.mark.parametrize(
     "written",
     [
@@ -879,13 +931,18 @@ def test_a_comment_that_isnt_a_call_is_a_note(project: Project) -> None:
         "ignore(why='no rule')",
         'ignore("a", "b", why="two")',
         'ignore("a", why="x", extra=1)',
+        'ignore("a", why="x", when=ready)',
+        'ignore("a", why="x", why="y")',
+        'ignore("a", why="x", issue=1.5)',
         'defer(why="nothing brings it back")',
         "defer(issue=1)",
+        "defer()",
         'defer("12", why="positional")',
         'defer(issue=12, when="quoted", why="x")',
-        'unknown("x", why="y")',
+        'todo(issue=12, why="an unknown call passing an issue")',
+        'defr(when=ready, why="a typo passing a condition")',
         'ignore("x", why="y"',
-        "ignore",
+        'defer(issue=12, why="y") and more',
     ],
 )
 def test_a_directive_the_grammar_refuses_is_malformed(

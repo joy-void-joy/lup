@@ -1990,8 +1990,8 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
     lup's rules are those the worktree's declaration selects, sent to the engine
     as the judge sends them, and pyright and ruff run through its runner as the
     judge runs them. `# lup: ignore` applies to every owner's findings. With
-    `issues`, a deferral's issue is checked: on GitHub, or in a room through the
-    host service; without, deferrals' issues go unchecked.
+    `issues`, the issue a deferral or an `ignore` waits on is checked: on
+    GitHub, or in a room through the host service; without, it goes unchecked.
     """
     root = toplevel(Path.cwd())
     layout = Layout.of(LupDevSettings())
@@ -2073,8 +2073,9 @@ def rules_check(
     lup's rules are those the worktree's declaration selects, sent to the engine
     as the judge sends them, and pyright and ruff run through its runner as the
     judge runs them. `# lup: ignore` applies to every owner's findings. A
-    deferral whose issue is closed, or whose condition holds, is due, which is
-    listed and doesn't fail the check; where the issue tracker can't be
+    deferral whose issue is closed, or whose condition holds, is due, and so is
+    an `ignore` whose issue is closed, which is listed and doesn't fail the
+    check; where the issue tracker can't be
     reached (no `gh`, no login, offline), the
     issues go unchecked and the check says why. In a room, which holds no `gh`,
     the host service is asked each issue's state on the launch's request socket,
@@ -2097,7 +2098,9 @@ def rules_check(
     if due.reminders:
         typer.echo(due.told())
     if found.unreachable is not None:
-        typer.echo(f"Deferrals' issues weren't checked: {found.unreachable}.")
+        typer.echo(
+            f"The issues `# lup:` comments wait on weren't checked: {found.unreachable}."
+        )
     if paths is None and found.unreachable is None:
         common = Git(cwd=toplevel(Path.cwd())).text(
             "rev-parse", "--path-format=absolute", "--git-common-dir"

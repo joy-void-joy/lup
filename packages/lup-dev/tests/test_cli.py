@@ -368,6 +368,33 @@ def test_rules_check_over_every_file_keeps_what_came_due_for_a_session(
     assert cleared == Due()
 
 
+def test_rules_check_lists_an_ignore_whose_issue_closed_and_keeps_it_for_a_session(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "src" / "pkg" / "core.py").write_text(
+        "z = (1, 2)  # BAD tuple-shape  "
+        '# lup: ignore("tuple-shape", why="sh", issue=12)\n'
+    )
+
+    def issues(root: Path) -> Issues:
+        return Closed()
+
+    monkeypatch.setattr(cli, "GitHubIssues", issues)
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check"])
+    kept = read_model(repo / ".git" / "lup" / "due.json", Due)
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "- src/pkg/core.py:1: issue #12 is closed, which this ignore of `tuple-shape` "
+        "waits on; follow `tuple-shape` here and remove the ignore, or point it at "
+        "the issue still tracking the wait\n"
+    ) in result.output
+    assert "tuple-shape fires here" not in result.output
+    assert kept is not None
+    assert [each.rule for each in kept.reminders] == ["ignore-closed"]
+
+
 def test_rules_check_says_it_left_issues_unchecked_where_the_tracker_is_out_of_reach(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -383,7 +410,8 @@ def test_rules_check_says_it_left_issues_unchecked_where_the_tracker_is_out_of_r
     result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
     assert result.exit_code == 0
     assert (
-        "Deferrals' issues weren't checked: `gh` isn't installed here." in result.output
+        "The issues `# lup:` comments wait on weren't checked: `gh` isn't installed "
+        "here." in result.output
     )
 
 

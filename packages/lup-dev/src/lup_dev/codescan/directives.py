@@ -1,10 +1,10 @@
 """The `# lup:` comments the engine reads out of a file, as models, and checking them.
 
-A directive is written as a call (`# lup: ignore("tuple-shape", why="…")`); anything
-that isn't a call is a note. The engine parses each comment with pyright's own
-expression parser and reports it in one of these shapes, told apart by `kind`. The
-grammar and what each directive means are in `docs/judging-writes.md`, *The `# lup:`
-directives*.
+A directive is written as a call (`# lup: ignore("tuple-shape", why="…")`): `ignore`,
+`defer` or `note`. Anything else, free text or a call of another name, is a note as
+`note("…")` is. The engine parses each comment with pyright's own expression parser
+and reports it in one of these shapes, told apart by `kind`. The grammar and what
+each directive means are in `docs/judging-writes.md`, *The `# lup:` directives*.
 
 Each kind answers for itself (`docs/conventions.md`, *Dispatch*): which finding it
 keeps, what's wrong with it, and what identifies it across edits. What's wrong is
@@ -12,13 +12,15 @@ reported as a `Problem`, which the judge turns into a finding of its own rule:
 - `unused-ignore`: an `ignore` whose rule doesn't fire on the line it covers,
   fixable: never told to an agent, removed by `lup-dev rules fix`, which
   `lup-dev check --fix` runs, and reported by the gate until it's removed;
-- `malformed-directive`: a call the grammar refuses, unknown or incomplete;
-- `defer-issue`: a deferral's `issue` that's neither a number nor `owner/repo#7`;
+- `malformed-directive`: an `ignore` or a `defer` the grammar refuses, or a call
+  of another name passing a deferral's `issue` or `when`;
+- `ignore-issue`, `defer-issue`: an `issue` that's neither a number nor `owner/repo#7`;
 - `defer-condition`: a deferral's `when` naming no declared condition;
+- `ignore-closed`, at the gate: an `ignore` whose issue is closed;
 - `defer-closed`, at the gate: a deferral whose issue is closed;
 - `defer-due`, at the gate: a deferral whose condition holds.
 
-The last two are reminders (`Problem.reminder`): work that came due rather than
+The last three are reminders (`Problem.reminder`): work that came due rather than
 something wrong with the code, which the gate lists without failing, and a
 session is told at its start.
 """
@@ -82,7 +84,7 @@ class IssueRef(Model):
 
 
 class Issues(Model, ABC):
-    """Where a deferral's issue is tracked, asked whether it's still open."""
+    """Where the issue a deferral or an `ignore` waits on is tracked, asked whether it's still open."""
 
     @abstractmethod
     def state(self, issue: IssueRef) -> Literal["open", "closed", "unchecked"]:
@@ -225,11 +227,29 @@ class Problem(Model):
     (`Finding.reminder`)."""
 
 
+def unreadable(line: int, issue: int | str | None, rule: str) -> list[Problem]:
+    """List the problem, reported as `rule`, of an `issue` that names no issue; none where it does, or there's none."""
+    if issue is None or IssueRef.read(issue) is not None:
+        return []
+    message = f"`issue={issue!r}` names no issue"
+    steer = "an issue number here, or `owner/repo#7` elsewhere"
+    return [Problem(line=line, rule=rule, message=message, steer=steer)]
+
+
+def closed(issue: int | str | None, gate: Trackers | None) -> IssueRef | None:
+    """Return `issue` where the gate finds it closed; none where it's open, unchecked, unreadable, or not at the gate."""
+    found = None if issue is None else IssueRef.read(issue)
+    if found is None or gate is None or gate.issues is None:
+        return None
+    return found if gate.issues.state(found) == "closed" else None
+
+
 class Identity(Model):
     """What identifies a directive across edits, whatever line it moves to."""
 
     text: str
-    """The directive as written, after `# lup:`."""
+    """What the directive says, after `# lup:`, as an ask or a removal quotes it:
+    a note's text, or a directive's call, written out."""
     asked: bool
     """Whether adding it asks the operator: true for an `ignore`."""
 
@@ -254,7 +274,9 @@ class Ignore(Comment):
     """`# lup: ignore("<rule>", why="<reason>")`: keep one finding, with the reason why.
 
     It covers the line it's on when it follows code there, or the next line when
-    it stands alone.
+    it stands alone. With `issue=`, it waits on that issue, a fix to the rule
+    say: it keeps its finding all the same, and once the issue closes the gate
+    lists it as due, as it does a deferral.
     """
 
     kind: Literal["ignore"] = "ignore"
@@ -264,6 +286,8 @@ class Ignore(Comment):
     """The line whose finding it keeps."""
     rule: str
     why: str
+    issue: int | str | None = None
+    """An issue it waits on: a number in this repository, or `owner/repo#7` elsewhere."""
 
     @override
     def keeps(self, rule: str, line: int) -> bool:
@@ -271,22 +295,43 @@ class Ignore(Comment):
 
     @override
     def problems(self, checking: Checking) -> list[Problem]:
-        if any(self.keeps(fired.rule, fired.line) for fired in checking.fired):
-            return []
+        kept = any(self.keeps(fired.rule, fired.line) for fired in checking.fired)
         message = f"`{self.rule}` doesn't fire on line {self.covers}, which this covers"
         steer = "remove the ignore, or move it to the line the finding is on"
+        unused = Problem(
+            line=self.line,
+            rule="unused-ignore",
+            message=message,
+            steer=steer,
+            fixable=True,
+        )
+        issue = closed(self.issue, checking.gate)
+        waits = f"issue {issue} is closed, which this ignore of `{self.rule}` waits on"
+        follow = (
+            f"follow `{self.rule}` here and remove the ignore, or point it at the "
+            "issue still tracking the wait"
+        )
+        due = Problem(
+            line=self.line,
+            rule="ignore-closed",
+            message=waits,
+            steer=follow,
+            reminder=True,
+        )
         return [
-            Problem(
-                line=self.line,
-                rule="unused-ignore",
-                message=message,
-                steer=steer,
-                fixable=True,
-            )
+            *([] if kept else [unused]),
+            *unreadable(self.line, self.issue, "ignore-issue"),
+            *([] if issue is None else [due]),
         ]
 
     @override
     def identity(self) -> Identity:
+        """Return the rule it keeps and why, which the operator is asked about.
+
+        The issue it waits on isn't part of it: giving an `ignore` an issue, or
+        taking it away, keeps no other finding, so it asks nothing and isn't
+        said as removed.
+        """
         text = f"ignore({json.dumps(self.rule)}, why={json.dumps(self.why)})"
         return Identity(text=text, asked=True)
 
@@ -330,11 +375,9 @@ class Defer(Comment):
         def problem(rule: str, message: str, steer: str) -> Problem:
             return Problem(line=self.line, rule=rule, message=message, steer=steer)
 
-        issue = None if self.issue is None else IssueRef.read(self.issue)
-        if self.issue is not None and issue is None:
-            message = f"`issue={self.issue!r}` names no issue"
-            steer = "an issue number here, or `owner/repo#7` elsewhere"
-            return [problem("defer-issue", message, steer)]
+        unread = unreadable(self.line, self.issue, "defer-issue")
+        if unread:
+            return unread
         if self.when is not None and self.when not in (checking.conditions or []):
             message = f"`when={self.when}` names no declared condition"
             steer = "declare it in the conditions module the project names"
@@ -342,11 +385,7 @@ class Defer(Comment):
         gate = checking.gate
         if gate is None:
             return []
-        closed = (
-            issue is not None
-            and gate.issues is not None
-            and gate.issues.state(issue) == "closed"
-        )
+        issue = closed(self.issue, gate)
         due = self.when is not None and gate.conditions[self.when].holds()
         finish = "finish the work here, or point at the issue tracking what's left"
         closing = [
@@ -359,7 +398,7 @@ class Defer(Comment):
         waking = [
             problem("defer-due", message, steer).model_copy(update={"reminder": True})
         ]
-        return [*(closing if closed else []), *(waking if due else [])]
+        return [*([] if issue is None else closing), *(waking if due else [])]
 
     @override
     def identity(self) -> Identity:
@@ -372,11 +411,17 @@ class Defer(Comment):
 
 
 class Note(Comment):
-    """A `# lup:` comment that isn't a call: a note for whoever reads the code next."""
+    """`# lup: note("…")`, or any `# lup:` comment that's no directive: a note for whoever reads the code next.
+
+    Free text, or a call of another name, is a note as written, the same as
+    `note("…")` saying it: a note can't be wrong, so the operator's own review
+    notes never fail the gate.
+    """
 
     kind: Literal["note"] = "note"
     line: int
     text: str
+    """What it says: a `note`'s string, or the comment as written, after `lup:`."""
 
     @override
     def keeps(self, rule: str, line: int) -> bool:
@@ -392,7 +437,15 @@ class Note(Comment):
 
 
 class Malformed(Comment):
-    """A `# lup:` call the grammar refuses: unknown, or missing what it needs."""
+    """A `# lup:` call the grammar refuses, which would otherwise sit there doing nothing.
+
+    It's an `ignore` or a `defer` written wrong: missing what it needs, given
+    what it doesn't take, or not parsing as a call. Or it's a call of another
+    name passing `issue` or `when`, which only a deferral's or an `ignore`'s
+    tracking takes: read as a note, its tracking would vanish unseen. Any other
+    call of another name is a note, since an `ignore` mistyped as one still
+    leaves its finding reported.
+    """
 
     kind: Literal["malformed"] = "malformed"
     line: int

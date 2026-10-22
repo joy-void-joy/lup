@@ -1058,6 +1058,26 @@ def test_removed_committed_notes_are_listed_once_at_turn_end(
     assert end(kit, repo).block == ""
 
 
+def test_a_removed_note_call_is_said_at_the_checkpoint_and_the_turns_end(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    original = (repo / CORE).read_text()
+    (repo / CORE).write_text(
+        original + '# lup: note("why not heapq?")\n# lup: this looks off\n'
+    )
+    shell.commit(repo, "notes")
+    start(kit, repo)
+    rewritten = original + '# lup: why not heapq?\n# lup: note("this looks off")\n'
+    assert shell_write(kit, repo, "c1", CORE, rewritten).context == ""
+    reply = shell_write(kit, repo, "c2", CORE, original + "z = 3\n")
+    assert "Notes present when the session started were removed" in reply.context
+    assert "src/pkg/core.py: # lup: why not heapq?" in reply.context
+    assert "src/pkg/core.py: # lup: this looks off" in reply.context
+    first = end(kit, repo).block
+    assert "src/pkg/core.py: # lup: why not heapq?" in first
+    assert "src/pkg/core.py: # lup: this looks off" in first
+
+
 def test_every_judgement_is_logged(kit: Kit, repo: Path) -> None:
     start(kit, repo)
     shell_write(
