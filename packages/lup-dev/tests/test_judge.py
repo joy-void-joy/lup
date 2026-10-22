@@ -285,24 +285,78 @@ def test_a_new_class_asks(judge: Judging) -> None:
     assert judgement.asks[0].reason == "src/pkg/core.py adds the class `Room`"
 
 
-def test_a_changed_signature_of_a_definition_from_the_sessions_start_asks(
-    judge: Judging,
-) -> None:
-    after = CORE.replace(
-        "def helper(x: int) -> int", "def helper(x: int, y: int = 0) -> int"
+def test_a_function_or_method_added_asks_on_its_line(judge: Judging) -> None:
+    after = (
+        CORE.replace(
+            "        return prompt\n",
+            "        return prompt\n\n    def tell(self, text: str) -> None:\n        pass\n",
+        )
+        + "\n\ndef spawn() -> None:\n    pass\n"
     )
     judgement = judge(edit("src/pkg/core.py", CORE, after))
+    assert judgement.outcome == "ask"
     assert [ask.reason for ask in judgement.asks] == [
-        "src/pkg/core.py changes the signature of `helper`"
+        "src/pkg/core.py adds the method `Client.tell`",
+        "src/pkg/core.py adds the function `spawn`",
+    ]
+    assert [ask.api.line for ask in judgement.asks if ask.api] == [8, 16]
+
+
+def test_a_class_or_function_removed_asks_on_the_line_it_had(judge: Judging) -> None:
+    without_helper = CORE.replace("\n\ndef helper(x: int) -> int:\n    return x\n", "")
+    [ask] = judge(edit("src/pkg/core.py", CORE, without_helper)).asks
+    assert ask.reason == "src/pkg/core.py removes the function `helper`"
+    assert ask.api is not None
+    assert (ask.api.line, ask.api.side()) == (9, "before")
+    without_client = '"""Core."""\n\n\ndef helper(x: int) -> int:\n    return x\n'
+    gone = judge(edit("src/pkg/core.py", CORE, without_client))
+    assert [ask.reason for ask in gone.asks] == [
+        "src/pkg/core.py removes the class `Client`",
+        "src/pkg/core.py removes the method `Client.ask`",
     ]
 
 
-def test_a_definition_created_this_session_changes_freely(judge: Judging) -> None:
-    session_start = CORE
-    before = CORE + "\n\ndef fresh(a: int) -> int:\n    return a\n"
-    after = before.replace("def fresh(a: int)", "def fresh(a: int, b: int)")
-    judgement = judge(edit("src/pkg/core.py", before, after, baseline=session_start))
+def test_a_changed_signature_asks_nothing(judge: Judging) -> None:
+    after = CORE.replace(
+        "def helper(x: int) -> int", "def helper(x: int, y: int = 0) -> int"
+    ).replace("def ask(self, prompt: str)", "def ask(self, prompt: int)")
+    judgement = judge(edit("src/pkg/core.py", CORE, after))
     assert judgement.outcome == "allow"
+    assert judgement.asks == []
+
+
+def test_a_private_name_asks_nothing(judge: Judging) -> None:
+    after = CORE + (
+        "\n\ndef _helper() -> None:\n    pass\n\n\n"
+        "class _Hidden:\n    def shown(self) -> None:\n        pass\n"
+    )
+    assert judge(edit("src/pkg/core.py", CORE, after)).asks == []
+
+
+def test_a_name_the_session_created_asks_once_and_goes_freely(judge: Judging) -> None:
+    session_start = CORE
+    added = CORE + "\n\ndef fresh(a: int) -> int:\n    return a\n"
+    asked = judge(edit("src/pkg/core.py", CORE, added, baseline=session_start))
+    assert [ask.reason for ask in asked.asks] == [
+        "src/pkg/core.py adds the function `fresh`"
+    ]
+    # Taken out again, it asks nothing: it wasn't there when the session started.
+    taken = judge(edit("src/pkg/core.py", added, CORE, baseline=session_start))
+    assert taken.outcome == "allow"
+    assert taken.asks == []
+
+
+def test_a_name_the_session_took_out_goes_back_without_asking(judge: Judging) -> None:
+    without = CORE.replace("\n\ndef helper(x: int) -> int:\n    return x\n", "")
+    assert [
+        ask.reason for ask in judge(edit("src/pkg/core.py", CORE, without)).asks
+    ] == ["src/pkg/core.py removes the function `helper`"]
+    assert judge(edit("src/pkg/core.py", without, CORE, baseline=CORE)).asks == []
+
+
+def test_a_new_file_asks_new_file_alone_whatever_it_defines(judge: Judging) -> None:
+    judgement = judge(edit("src/pkg/new.py", None, CORE, baseline=None))
+    assert [ask.kind for ask in judgement.asks] == ["new-file"]
 
 
 def test_names_added_to_or_removed_from_a_package_root_ask(judge: Judging) -> None:
@@ -617,12 +671,6 @@ def test_a_reading_says_what_a_file_asks_held_or_flagged_each_on_its_line(
                 taken="flagged",
                 line=16,
                 api=ApiChanged(kind="class-added", name="Room"),
-            ),
-            Asked(
-                name="public-api",
-                taken="flagged",
-                line=5,
-                api=ApiChanged(kind="signature-changed", name="Client.ask"),
             ),
         ],
         findings=[

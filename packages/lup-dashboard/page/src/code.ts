@@ -254,23 +254,28 @@ export function shown(file: ChangedFile, showing: Showing = "changes", context: 
     };
 }
 
-/** Say what a change to the public API does, as a line that matters says it. */
+/** Say what a change to the public API does, as a line that matters says it, in the judge's words (`ApiChange.describe`). */
 function api(change: ApiChanged): string {
+    const what = change.name.includes(".") ? "method" : "function";
     switch (change.kind) {
         case "export-added":
             return `adds \`${change.name}\` to the package's root`;
         case "export-removed":
-            return `takes \`${change.name}\` out of the package's root`;
+            return `removes \`${change.name}\` from the package's root`;
         case "class-added":
             return `adds the class \`${change.name}\``;
-        case "signature-changed":
-            return `changes the signature of \`${change.name}\``;
+        case "class-removed":
+            return `removes the class \`${change.name}\``;
+        case "function-added":
+            return `adds the ${what} \`${change.name}\``;
+        case "function-removed":
+            return `removes the ${what} \`${change.name}\``;
     }
 }
 
-/** Mark a change to the public API in a header's few words: `+` a name added, `−` one taken out, `~` a signature changed. */
+/** Mark a change to the public API in a header's few words: `+` a name added, `−` one removed. */
 function signed(change: ApiChanged): string {
-    const sign = change.kind === "export-removed" ? "−" : change.kind === "signature-changed" ? "~" : "+";
+    const sign = change.kind.endsWith("-removed") ? "−" : "+";
     return `${sign}${change.name}`;
 }
 

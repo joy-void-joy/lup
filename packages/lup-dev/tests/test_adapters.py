@@ -1154,7 +1154,7 @@ def test_claude_a_second_edit_to_a_file_it_created_isnt_flagged_again_in_a_room(
     assert list(kit.flags.items) == [1]
     verdicts = Worktree.at(repo, kit.layout).verdicts(kit.layout).read()
     assert [verdict.reasons for verdict in verdicts] == [
-        ["new-file", "public-api"],
+        ["new-file"],
         ["rules-pass"],
     ]
 

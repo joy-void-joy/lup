@@ -27,39 +27,22 @@ export interface Finding {
     steer: string;
 }
 
-export type ParameterKind =
-    | 'positional-only'
-    | 'positional-or-keyword'
-    | 'variadic'
-    | 'keyword-only'
-    | 'variadic-keyword';
-
-export interface Parameter {
-    name: string;
-    kind: ParameterKind;
-    annotation: string;
-    has_default: boolean;
-}
-
-export interface Signature {
-    name: string;
-    parameters: Parameter[];
-    returns: string;
-}
-
 // Where one name of the surface is written: an export by its entry in `__all__` or
 // its binding, a class by its `class`, a function or method by its `def`, the line
 // its name is on, counted from 1.
 export interface Placed {
-    kind: 'export' | 'class' | 'signature';
+    kind: 'export' | 'class' | 'function';
     name: string;
     line: number;
 }
 
+// What other code can depend on in one file (`surface.ts`): a package root's
+// names, and the public classes, functions and methods the module defines, each
+// by its dotted name inside it (`Outer.Inner`, `Agent.ask`).
 export interface Surface {
     exported: string[];
     classes: string[];
-    signatures: Signature[];
+    functions: string[];
     places: Placed[];
 }
 

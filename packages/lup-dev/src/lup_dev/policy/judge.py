@@ -389,7 +389,7 @@ class Judge(Model, arbitrary_types_allowed=True):
         costs a parse where `judge` costs a check. No rule runs, and ruff
         doesn't: its findings are its directives' own problems, and a rule the
         declaration holds or flags, which asks through its findings, asks
-        nothing here. A signature's annotations are compared as written.
+        nothing here.
         """
         ruled = [change for change in changes if self.roles.ruled(change.path)]
         wanted = list(

@@ -245,37 +245,25 @@ def test_a_later_flagged_write_joins_the_item_judged_whole_since_it_was_made(
         tool="Edit",
         path=repo / ROOMS,
         old=room,
-        new=room + "\n\ndef open_room() -> None:\n    pass\n",
+        new=room + "\n\nCAPACITY = 4\n",
     )
     landed(kit, repo, plain)
     _, joined, refreshed = kit.flags.asked
-    # The class added asks on its own; joined, the file is judged whole since the item was made: new, with its class.
+    # The class added asks on its own; joined, the file is judged whole since the item was made: new, which asks nothing of its names.
     assert joined.joining == 1
     assert joined.file.before is None
     assert joined.file.after == Text(text=first + room)
     assert joined.file.reading == Reading(
-        role="production",
-        asks=[
-            Asked(name="new-file", taken="flagged"),
-            Asked(
-                name="public-api",
-                taken="flagged",
-                line=4,
-                api=ApiChanged(kind="class-added", name="Room"),
-            ),
-        ],
+        role="production", asks=[Asked(name="new-file", taken="flagged")]
     )
-    assert joined.flagged.summary == (
-        "src/pkg/rooms.py is a new production file\n"
-        "src/pkg/rooms.py adds the class `Room`"
-    )
+    assert joined.flagged.summary == "src/pkg/rooms.py is a new production file"
     # A write flagging nothing of its own refreshes the item, judged whole: it shows the file as it stands.
     kept = (repo / ROOMS).read_text()
     assert (refreshed.joining, refreshed.refreshing, refreshed.call) == (1, True, "e2")
     assert (refreshed.file.before, refreshed.file.after) == (None, Text(text=kept))
     assert refreshed.file.reading == joined.file.reading
     assert refreshed.flagged.summary == joined.flagged.summary
-    assert "def open_room" in refreshed.diff
+    assert "+CAPACITY = 4" in refreshed.diff
     assert sorted(kit.flags.items) == [1]
     # Read, the item gathers no more: the next flagged write is an item of its own, from where the file stands.
     kit.flags.read.append(1)

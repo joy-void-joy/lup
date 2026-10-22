@@ -513,10 +513,16 @@ def content(data: bytes) -> Content:
 
 
 type ApiKind = Literal[
-    "export-added", "export-removed", "class-added", "signature-changed"
+    "export-added",
+    "export-removed",
+    "class-added",
+    "class-removed",
+    "function-added",
+    "function-removed",
 ]
 """How a change touches what other code can depend on, as the judge finds it
-(`lup_dev.policy.surface`) and the review says it."""
+(`lup_dev.policy.surface`) and the review says it: a package root's name, a
+class, or a function or method, added or removed."""
 
 type Held = Literal["held", "flagged"]
 """How the declaration takes what a change asks: held for the operator's answer,
@@ -543,11 +549,11 @@ class Asked(Model):
     taken: Held
     line: int | None = None
     """The line it's on, counted from 1: an `ignore` added, or the name a
-    public-API change changes; none for what's about the file whole, or a name
-    the engine didn't place."""
+    public-API change adds or removes; none for what's about the file whole, or
+    a name the engine didn't place."""
     side: Literal["before", "after"] = "after"
     """Which version of the file `line` is in: what it becomes, or, for a name
-    the change takes out of a package's root, what it was."""
+    the change removes, what it was."""
     api: ApiChanged | None = None
     """What it changes of the public API, for `public-api`; none for any other."""
 

@@ -4,7 +4,8 @@ The fake engine reads a file the way the real one reports it, from markers:
 - `# BAD <rule>` on a line is a lup finding of `<rule>` there;
 - `# TYPE` on a line is one of pyright's type errors there;
 - `# lup: …` comments are parsed into directives with Python's own parser;
-- classes, functions and a package root's `__all__` make the public surface.
+- public classes, functions and methods, and a package root's `__all__`, make
+  the public surface.
 The fake linter reads `# RUFF <code>` as one of ruff's findings, and `# FIXABLE
 <code>` as one ruff fixes safely. The real engine and ruff run through uv, which
 `offline_uv` keeps off the network and out of the operator's uv state.
@@ -31,12 +32,10 @@ from lup_dev.codescan.contract import (
     Examples,
     FileReport,
     Finding,
-    Parameter,
     Parser,
     Placed,
     Position,
     Rule,
-    Signature,
     Source,
     Span,
     Surface,
@@ -176,62 +175,36 @@ def directives(content: str) -> list[Directive]:
     return found
 
 
+def public(name: str) -> bool:
+    """Say whether a name is one the real engine lists: no leading underscore, a dunder's aside."""
+    return not name.startswith("_") or (name.startswith("__") and name.endswith("__"))
+
+
 def surface(path: Path, content: str) -> Surface:
     try:
         tree = ast.parse(content)
     except SyntaxError:
         return Surface()
-
-    def signature(name: str, function: ast.FunctionDef) -> Signature:
-        arguments = function.args
-        defaults = len(arguments.defaults)
-        positional = arguments.args
-        parameters = [
-            Parameter(
-                name=argument.arg,
-                kind="positional-or-keyword",
-                annotation=ast.unparse(argument.annotation)
-                if argument.annotation
-                else "",
-                has_default=index >= len(positional) - defaults,
-            )
-            for index, argument in enumerate(positional)
-        ]
-        returns = ast.unparse(function.returns) if function.returns else ""
-        return Signature(name=name, parameters=parameters, returns=returns)
-
-    classes = [node.name for node in tree.body if isinstance(node, ast.ClassDef)]
-    functions = [
-        signature(node.name, node)
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-    ]
-    methods = [
-        signature(f"{node.name}.{item.name}", item)
-        for node in tree.body
-        if isinstance(node, ast.ClassDef)
-        for item in node.body
-        if isinstance(item, ast.FunctionDef)
-    ]
-    places = [
-        *(
-            Placed(kind="class", name=node.name, line=node.lineno)
-            for node in tree.body
-            if isinstance(node, ast.ClassDef)
-        ),
-        *(
-            Placed(kind="signature", name=node.name, line=node.lineno)
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef)
-        ),
-        *(
-            Placed(kind="signature", name=f"{node.name}.{item.name}", line=item.lineno)
-            for node in tree.body
-            if isinstance(node, ast.ClassDef)
-            for item in node.body
-            if isinstance(item, ast.FunctionDef)
-        ),
-    ]
+    # In the order written, as the real engine lists them: a class, then its methods.
+    classes: list[str] = []
+    functions: list[str] = []
+    places: list[Placed] = []
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and public(node.name):
+            classes.append(node.name)
+            places.append(Placed(kind="class", name=node.name, line=node.lineno))
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef) and public(
+                    item.name
+                ):
+                    name = f"{node.name}.{item.name}"
+                    functions.append(name)
+                    places.append(Placed(kind="function", name=name, line=item.lineno))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and public(
+            node.name
+        ):
+            functions.append(node.name)
+            places.append(Placed(kind="function", name=node.name, line=node.lineno))
     exported = []
     if path.name == "__init__.py":
         for node in tree.body:
@@ -247,10 +220,7 @@ def surface(path: Path, content: str) -> Surface:
                     if isinstance(entry, ast.Constant) and isinstance(entry.value, str)
                 )
     return Surface(
-        exported=exported,
-        classes=classes,
-        signatures=[*functions, *methods],
-        places=places,
+        exported=exported, classes=classes, functions=functions, places=places
     )
 
 

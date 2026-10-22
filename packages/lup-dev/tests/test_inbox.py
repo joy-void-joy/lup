@@ -3976,10 +3976,7 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
             "src/pkg/rooms.py landed, flagged for the operator's review. It holds at "
             "landing: `main` lands once they approve it."
         ),
-        summary=(
-            "src/pkg/rooms.py is a new production file\n"
-            "src/pkg/rooms.py adds the class `Room`"
-        ),
+        summary="src/pkg/rooms.py is a new production file",
         worktree=repo,
         path=Path("src/pkg/rooms.py"),
         branch="main",
@@ -3990,7 +3987,7 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
     [file] = files
     assert (file.before, file.after) == (None, Text(text=first + room))
     assert file.reading is not None
-    assert [each.name for each in file.reading.asks] == ["new-file", "public-api"]
+    assert [each.name for each in file.reading.asks] == ["new-file"]
     assert "src/pkg/rooms.py landed, flagged for the operator's review." in shown
     assert "+class Room:" in diff
     assert isinstance(second.reason, Flagged)

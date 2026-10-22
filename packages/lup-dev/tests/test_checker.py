@@ -66,25 +66,10 @@ REPORT = {
     "surface": {
         "exported": [],
         "classes": ["Claude"],
-        "signatures": [
-            {
-                "name": "Claude.ask",
-                "returns": "TurnResult[T]",
-                "parameters": [
-                    {
-                        "name": "self",
-                        "kind": "positional-or-keyword",
-                        "annotation": "Self",
-                        "has_default": False,
-                    },
-                    {
-                        "name": "prompt",
-                        "kind": "positional-or-keyword",
-                        "annotation": "str",
-                        "has_default": False,
-                    },
-                ],
-            }
+        "functions": ["Claude.ask"],
+        "places": [
+            {"kind": "class", "name": "Claude", "line": 8},
+            {"kind": "function", "name": "Claude.ask", "line": 11},
         ],
     },
     "imports": ["claude_agent_sdk", "lup.sessions.results"],
@@ -106,7 +91,8 @@ def test_a_report_reads_every_part() -> None:
         Note,
         Malformed,
     ]
-    assert report.surface.signatures[0].parameters[1].annotation == "str"
+    assert report.surface.functions == ["Claude.ask"]
+    assert report.surface.place("function", "Claude.ask") == 11
     assert report.imports == ["claude_agent_sdk", "lup.sessions.results"]
 
 

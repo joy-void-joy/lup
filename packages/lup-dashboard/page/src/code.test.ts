@@ -220,17 +220,17 @@ describe("the judge's reading", () => {
                     taken: "flagged",
                     line: 2,
                     side: "after",
-                    api: { kind: "signature-changed", name: "Client.ask" },
+                    api: { kind: "function-added", name: "Client.tell" },
                 },
             ],
             findings: [{ rule: "regex", message: "`re` parses\nwith a pattern", steer: "", start: 5, end: 6, taken: "told" }],
         };
         const laid = shown(changed(numbered(8, { 2: "two", 3: "three", 4: "four", 5: "five", 6: "six" }), reading));
-        expect(laid.header).toBe("core.py · changed · +5 −5 · adds an ignore · public API: +Room ~Client.ask · told: regex");
+        expect(laid.header).toBe("core.py · changed · +5 −5 · adds an ignore · public API: +Room +Client.tell · told: regex");
         expect(laid.automatic).toBe(false);
         expect(laid.whole).toBe(false);
         expect(laid.matters.map((each) => [laid.rows[each.row]!.text, each.notes])).toEqual([
-            ["two", [{ taken: "flagged", said: "public API: changes the signature of `Client.ask`" }]],
+            ["two", [{ taken: "flagged", said: "public API: adds the method `Client.tell`" }]],
             ["three", [{ taken: "flagged", said: "public API: adds the class `Room`" }]],
             ["four", [{ taken: "held", said: "adds an ignore" }]],
             ["five", [{ taken: "told", said: "regex: `re` parses with a pattern" }]],
@@ -241,7 +241,7 @@ describe("the judge's reading", () => {
     it("shows every change of a file whose asks are each on a line, but where it shows the lines that ask alone, as an approval does", () => {
         const reading: Reading = {
             ...PRODUCTION,
-            asks: [{ name: "public-api", taken: "flagged", line: 20, side: "after", api: { kind: "signature-changed", name: "f" } }],
+            asks: [{ name: "public-api", taken: "flagged", line: 20, side: "after", api: { kind: "function-added", name: "f" } }],
         };
         const file: ChangedFile = { path: "a.py", before: text(numbered(30)), after: text(numbered(30, { 10: "ten" })), reading };
         const summaries = (showing?: "changes" | "asks", read: Reading = reading) =>
@@ -264,7 +264,7 @@ describe("the judge's reading", () => {
         const laid = shown({ path: "__init__.py", before: text("a\nb\nc\n"), after: text("a\nc\n"), reading: removed });
         expect(laid.header).toBe("__init__.py · changed · +0 −1 · public API: −ask");
         expect(laid.matters).toEqual([
-            { row: 1, notes: [{ taken: "flagged", said: "public API: takes `ask` out of the package's root" }] },
+            { row: 1, notes: [{ taken: "flagged", said: "public API: removes `ask` from the package's root" }] },
         ]);
         expect(laid.whole).toBe(false);
         const created: Reading = { ...PRODUCTION, asks: [{ name: "new-file", taken: "flagged", side: "after" }] };

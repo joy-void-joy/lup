@@ -710,14 +710,14 @@ describe("what a change shows open, as it's laid out", () => {
     /** Thirty lines, `l1` to `l30`, each replaced where `changed` says. */
     const thirty = (changed: Record<number, string> = {}) =>
         Array.from({ length: 30 }, (_, at) => changed[at + 1] ?? `l${at + 1}`).join("\n") + "\n";
-    /** A file whose tenth line changes and whose twentieth changes a signature, which asks on that line alone. */
+    /** A file whose tenth line changes and whose twentieth adds a function, which asks on that line alone. */
     const signed: ChangedFile = {
         path: "a.py",
         before: { kind: "text", text: thirty() },
         after: { kind: "text", text: thirty({ 10: "ten" }) },
         reading: {
             role: "production",
-            asks: [{ name: "public-api", taken: "flagged", line: 20, side: "after", api: { kind: "signature-changed", name: "f" } }],
+            asks: [{ name: "public-api", taken: "flagged", line: 20, side: "after", api: { kind: "function-added", name: "f" } }],
             findings: [],
         },
     };

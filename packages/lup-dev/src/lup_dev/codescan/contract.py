@@ -96,39 +96,9 @@ class Due(Model):
         return "\n".join([heading, *lines])
 
 
-class Parameter(Model):
-    """One parameter of a function or method, as callers see it."""
-
-    name: str
-    kind: Literal[
-        "positional-only",
-        "positional-or-keyword",
-        "variadic",
-        "keyword-only",
-        "variadic-keyword",
-    ]
-    annotation: str
-    """The declared type as pyright prints it, or, read from the parse alone
-    (`Checker.parsed`), the annotation as written: compared whole, never taken
-    apart."""
-    has_default: bool
-
-
-class Signature(Model):
-    """A function's or method's signature.
-
-    Named by its dotted name inside its module: `submit`, `Agent.ask`.
-    """
-
-    name: str
-    parameters: list[Parameter]
-    returns: str
-    """The declared return type, said as `Parameter.annotation` is."""
-
-
-type Named = Literal["export", "class", "signature"]
-"""Which of a surface's names one is: an export, a class, or a function's or
-method's signature."""
+type Named = Literal["export", "class", "function"]
+"""Which of a surface's names one is: an export, a class, or a function or
+method."""
 
 
 class Placed(Model):
@@ -138,23 +108,42 @@ class Placed(Model):
     name: str
     line: int
     """Counted from 1: an export's entry in `__all__` or its binding, a class's
-    `class`, a function's `def`."""
+    `class`, a function's or method's `def`."""
 
 
 class Surface(Model):
     """What other code can depend on in one file.
 
-    The judge compares it before and after a change, for the public-API ask.
+    The judge compares it before and after a change, for the public-API ask. A
+    name with a leading underscore isn't listed, a dunder's aside, nor is a
+    member of such a class; a function nested in another never is.
     """
 
     exported: list[str] = []
     """The names a package's root (`__init__.py`) binds; empty elsewhere."""
     classes: list[str] = []
-    """Every class the module defines, by its dotted name inside the module."""
-    signatures: list[Signature] = []
+    """Every public class the module defines, by its dotted name inside the
+    module: `Outer`, `Outer.Inner`."""
+    functions: list[str] = []
+    """Every public function and method, by its dotted name inside the module:
+    `submit`, `Agent.ask`."""
     places: list[Placed] = []
     """Where each of the names above is written, which the review marks; a name
     `__all__` takes from another module's has none."""
+
+    def names(self, kind: Named) -> list[str]:
+        """Return the names of `kind`: the exports, the classes, or the functions and methods.
+
+        >>> Surface(classes=["Client"], functions=["Client.ask"]).names("function")
+        ['Client.ask']
+        """
+        match kind:
+            case "export":
+                return self.exported
+            case "class":
+                return self.classes
+            case "function":
+                return self.functions
 
     def place(self, kind: Named, name: str) -> int | None:
         """Return the line `name`, of `kind`, is written on; none where it isn't placed.
@@ -272,8 +261,8 @@ class Parser(ABC):
         """Read the given files of the project at `root` from their parse alone, one report per source, in order.
 
         No project is loaded and no type is read, so it costs a parse: each
-        report holds the file's directives and its public surface, each
-        annotation as written, and no finding or import. A package root's names
-        are the ones it binds itself, no import being resolved. The same path
-        may come more than once, each time with other content.
+        report holds the file's directives and its public surface, and no
+        finding or import. A package root's names are the ones it binds itself,
+        no import being resolved. The same path may come more than once, each
+        time with other content.
         """
