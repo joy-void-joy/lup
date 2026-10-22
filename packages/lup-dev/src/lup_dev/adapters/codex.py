@@ -13,9 +13,9 @@ Codex has no file tools that say what they'll write before they write it: its
 `apply_patch` is judged at the checkpoint, like a command. Its `PreToolUse` can't
 ask, so an ask is held at the checkpoint, as on every runtime, the agent waiting
 inside the hook until the operator answers the item it is in their inbox. The
-agent hears a
-checkpoint's report as `additionalContext` beside the call's result, and the result
-reaches it untouched.
+agent hears what deferred work came due as `additionalContext` of `SessionStart`,
+and a checkpoint's report as `additionalContext` beside the call's result, and the
+result reaches it untouched.
 
 A Codex session holds only the worktree it started in, a declared gap until rooms
 (`docs/judging-writes.md`, *Every worktree of the repository*): its hooks' `cwd` is
@@ -281,6 +281,13 @@ class Output(Model, alias_generator=to_camel, populate_by_name=True):
     """What a hook prints for Codex, its fields in camel case."""
 
 
+class SessionStartAnswer(Output):
+    """What `SessionStart` adds to the conversation's context as it starts."""
+
+    hook_event_name: Literal["SessionStart"] = "SessionStart"
+    additional_context: str
+
+
 class PostToolUseAnswer(Output):
     """What `PostToolUse` adds beside the call's result."""
 
@@ -291,7 +298,7 @@ class PostToolUseAnswer(Output):
 class Specific(Output):
     """An answer in the `hookSpecificOutput` field."""
 
-    hook_specific_output: PostToolUseAnswer
+    hook_specific_output: SessionStartAnswer | PostToolUseAnswer
 
 
 class Blocked(Output):
@@ -410,10 +417,14 @@ class SessionStart(Payload):
 
     @override
     def answer(self, bench: Bench) -> Output | None:
-        SessionStarted(
+        """Begin the session again in the worktree it holds, and tell its conversation what came due as it starts; the service adds its items after (`told`)."""
+        reply = SessionStarted(
             session=self.session_id, agent=self.agent_id or "", cwd=self.cwd
         ).apply(bench)
-        return None
+        if not reply.context:
+            return None
+        said = SessionStartAnswer(additional_context=reply.context)
+        return Specific(hook_specific_output=said)
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
