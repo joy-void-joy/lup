@@ -850,7 +850,7 @@ export function asideAt(region: Region, position: number): Aside | undefined {
     return region.asides.find((each) => position >= each.from && position <= each.to);
 }
 
-/** Return the folds of the item `position` is in, which `zr`, `zm`, `zR`, `zM` and Space `f` reach: none on a group's banner or the messages under it. */
+/** Return the folds of the item `position` is in, which `zr`, `zm`, `zR`, `zM` and Space `z` reach: none on a group's banner or the messages under it. */
 export function foldsOf(laidOut: Laid, position: number): Fold[] {
     return regionAt(laidOut, position)?.folds ?? [];
 }

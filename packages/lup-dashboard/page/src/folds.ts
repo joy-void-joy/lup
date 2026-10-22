@@ -1,7 +1,7 @@
 // What the fold keys reach among a view's folds, whatever the view: the folds
 // the cursor is in, outermost first, which the review's margin bars and header
 // show; within one item, the folds `zr` and `zm` open or close a level at a
-// time, and those Space `f` and a letter open or close by kind; and where `zj`,
+// time, and those Space `z` and a letter open or close by kind; and where `zj`,
 // `zk`, `[z` and `]z` go. Folds nest, each whole inside another or beside it
 // (`review.ts`, `code.ts`). Pure: the editor folds what these return
 // (`editor.ts`; `docs/dashboard.md`, *The keys*).
@@ -38,7 +38,7 @@ export function levelled<F extends Folded>(folds: readonly F[], closed: (fold: F
 }
 
 /**
- * Return the folds of one item, `folds`, that Space `f` and a letter opens, `closed` saying which are folded: each of
+ * Return the folds of one item, `folds`, that Space `z` and a letter opens, `closed` saying which are folded: each of
  * `kind` folded, and the item's own where it's folded, so what opens is seen; or, `closing`, as Shift and the letter,
  * each of `kind` open.
  */

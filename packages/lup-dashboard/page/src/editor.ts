@@ -15,7 +15,7 @@
 // was made (`History`). Each fold is folded or open as the view lays it out
 // until the operator opens or closes it, which is kept by its key: `za` opens or
 // closes the fold the cursor is in, `zo` and `zc` open and close it; `zr` and
-// `zm` open or close a level more, `zR` and `zM` all of them, and Space `f` and a
+// `zm` open or close a level more, `zR` and `zM` all of them, and Space `z` and a
 // letter those of a kind, within what the view says (in the review, the item the
 // cursor is in; in a conversation, everything); `zj` and `zk` go to the next
 // fold's start and the previous one's end, `[z` and `]z` to the start and the end
@@ -298,6 +298,27 @@ function boundOf(state: EditorState): Bound {
 /** The editor a key was last pressed in, which says what the clipboard couldn't do on a yank or a put the key made. */
 let speaking: Bound | null = null;
 
+/**
+ * Each chord Space leads in the views, as vim's keymap writes its keys, and the action it does: Space `p` parks an
+ * item, leaving it for later; Space `z` and a letter, as vim's fold keys begin with `z`, opens every fold of its kind
+ * in the item, Shift and the letter closing them; Space `h`, or Space `w` `h`, goes to the agents' tree. The list of
+ * keys (`keys.ts`) says each of them.
+ */
+export const SPACED: readonly (readonly [keys: string, action: string])[] = [
+    ["<Space>c", "lupCommentWhole"],
+    ["<Space>d", "lupDone"],
+    ["<Space>p", "lupLater"],
+    ["<Space>a", "lupApprove"],
+    ["<Space>x", "lupDecline"],
+    ["<Space>r", "lupBack"],
+    ["<Space>h", "lupTree"],
+    ["<Space>wh", "lupTree"],
+    ...FOLD_KINDS.filter((each) => each.chord).flatMap(({ kind, letter }) => [
+        [`<Space>z${letter}`, `lupFoldOpen-${kind}`] as const,
+        [`<Space>z${letter.toUpperCase()}`, `lupFoldClose-${kind}`] as const,
+    ]),
+];
+
 let mapped = false;
 
 /** Map the shared keys into vim's keymap, once: user mappings go before its own, and act on the editor the key is pressed in. */
@@ -369,14 +390,9 @@ function mapKeys(): void {
     const map = (keys: string, name: string, context: string) =>
         Vim.mapCommand(keys, "action", name, {}, { context });
     map("o", "lupCommentLine", "normal");
-    map("<Space>c", "lupCommentWhole", "normal");
-    map("<Space>d", "lupDone", "normal");
-    map("<Space>z", "lupLater", "normal");
-    map("<Space>a", "lupApprove", "normal");
-    map("<Space>x", "lupDecline", "normal");
-    map("<Space>r", "lupBack", "normal");
-    map("<Space>h", "lupTree", "normal");
-    map("<Space>wh", "lupTree", "normal");
+    for (const [keys, name] of SPACED) {
+        map(keys, name, "normal");
+    }
     // The list of every key, in place of vim's search backward, which `/` then `N` still does.
     map("?", "lupKeys", "normal");
     map("za", "lupFoldToggle", "normal");
@@ -386,13 +402,6 @@ function mapKeys(): void {
     map("zM", "lupFoldCloseAll", "normal");
     map("zr", "lupFoldOpenLevel", "normal");
     map("zm", "lupFoldCloseLevel", "normal");
-    // Space f and a letter, every fold of its kind in the item; Shift and the letter closes them.
-    for (const { kind, letter, chord } of FOLD_KINDS) {
-        if (chord) {
-            map(`<Space>f${letter}`, `lupFoldOpen-${kind}`, "normal");
-            map(`<Space>f${letter.toUpperCase()}`, `lupFoldClose-${kind}`, "normal");
-        }
-    }
     const motions = { zj: "lupNextFold", zk: "lupPreviousFold", "[z": "lupFoldStart", "]z": "lupFoldEnd" };
     for (const [keys, name] of Object.entries(motions)) {
         Vim.mapCommand(keys, "motion", name, {}, {});
@@ -538,7 +547,7 @@ const keys = Prec.highest(
 );
 
 /**
- * Return the keys of a chord begun with Space, as the list of keys writes them (`␣`, `␣f`): what vim holds of a mapping
+ * Return the keys of a chord begun with Space, as the list of keys writes them (`␣`, `␣z`): what vim holds of a mapping
  * typed but not done, in normal mode; none for any other.
  */
 export function chordOf(cm: CodeMirrorV): string {
@@ -784,7 +793,7 @@ interface Config<D, C> {
     tree: () => void;
     /** Open the list of every key (`?`). */
     list: () => void;
-    /** Told the keys of a chord begun, as the list writes them (`␣`, `␣f`), each time they change: none once it's done. */
+    /** Told the keys of a chord begun, as the list writes them (`␣`, `␣z`), each time they change: none once it's done. */
     pending?: (keys: string) => void;
     /** Whether the margin shows each fold's mark and the bars of those the cursor is in (`margin.ts`). */
     margin?: boolean;
@@ -813,7 +822,7 @@ export interface Own<C> {
     paint?: (from: number, to: number) => Range<Decoration>[];
     /** The folds `zr` opens (`opening`) or `zm` closes from `position`, or with `all` `zR` and `zM`; where none's said, those of every fold (`levelled`). */
     level?: (position: number, opening: boolean, all: boolean, closed: (fold: Folding) => boolean) => Folding[];
-    /** The folds Space `f` and a letter opens, or with Shift closes, from `position`; none where none's said. */
+    /** The folds Space `z` and a letter opens, or with Shift closes, from `position`; none where none's said. */
     kind?: (position: number, kind: FoldKind, closing: boolean, closed: (fold: Folding) => boolean) => Folding[];
 }
 

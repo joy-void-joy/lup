@@ -645,7 +645,7 @@ describe("typed folds", () => {
         expect(runs(before)).toHaveLength(4);
     });
 
-    it("reaches the folds of the item the cursor is in alone, for `zr`, `zm` and Space f", () => {
+    it("reaches the folds of the item the cursor is in alone, for `zr`, `zm` and Space z", () => {
         const at = (text: string) => out.text.indexOf(text);
         expect(foldsOf(out, at("step3()")).map((each) => each.item)).toEqual(region.folds.map(() => 56));
         expect(foldsOf(out, at("Which parser?")).every((each) => each.item === 51)).toBe(true);

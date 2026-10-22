@@ -18,7 +18,7 @@ interface Props<P extends string> {
     /** Whether the list of them all is open. */
     open: boolean;
     setOpen: (open: boolean) => void;
-    /** The keys of a chord begun, as the list writes them (`␣`, `␣f`); none where none is. */
+    /** The keys of a chord begun, as the list writes them (`␣`, `␣z`); none where none is. */
     pending?: string;
     /** How long a chord begun waits before what may follow is shown, in milliseconds. */
     waits?: number;
@@ -42,7 +42,7 @@ export function Keys<P extends string>({ parts, place, places, open, setOpen, pe
         }
     }
     const following = shown === "" ? [] : chords(parts, shown, place);
-    // The key leading to these, saying what they do together, where the list has it, as `␣f` does.
+    // The key leading to these, saying what they do together, where the list has it, as `␣z` does.
     const leading = parts.flatMap((part) => part.keys).find((key) => key.keys.split(" ").includes(shown));
     return (
         <>

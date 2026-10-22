@@ -102,7 +102,7 @@ describe("opening and closing one item's folds", () => {
         expect(levelled(READ, open, false, true).map((each) => each.key)).toEqual(["file", "body", "lines", "context"]);
     });
 
-    it("opens with Space f and a letter each fold of a kind, and the item's own so they're seen; closes with Shift and the letter", () => {
+    it("opens with Space z and a letter each fold of a kind, and the item's own so they're seen; closes with Shift and the letter", () => {
         expect(ofKind(READ, closed, "lines", false).map((each) => each.key)).toEqual(["item", "lines"]);
         expect(ofKind(READ, closed, "body", false).map((each) => each.key)).toEqual(["item"]);
         expect(ofKind(READ, closed, "body", true).map((each) => each.key)).toEqual(["body"]);
