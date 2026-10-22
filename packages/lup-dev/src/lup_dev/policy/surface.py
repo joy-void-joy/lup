@@ -83,6 +83,9 @@ class ApiChange(Model):
                 return f"adds the {what} `{self.name}`"
             case "function-removed":
                 return f"removes the {what} `{self.name}`"
+            case "signature-changed":
+                # Found by copies before, and kept by what they wrote (`ApiKind`).
+                return f"changes the signature of `{self.name}`"
 
 
 def api_changes(

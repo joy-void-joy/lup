@@ -38,6 +38,7 @@ from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.inbox import context
 from lup_dev.inbox.delivery import Delivery, body
 from lup_dev.inbox.store import (
+    Answer,
     Approval,
     ChangedFile,
     Conversation,
@@ -46,8 +47,10 @@ from lup_dev.inbox.store import (
     HeldChange,
     InboxError,
     Item,
+    Message,
     Operator,
     Passage,
+    Review,
     Ruling,
     Talk,
     Waiting,
@@ -278,6 +281,11 @@ class Items(Reply):
     reviewed: datetime | None = None
     """When the operator's last reply was sent, from the review; none before
     their first: what came after it is new to them."""
+    answers: list[Item] = []
+    """The operator's own items answering those listed, a review, a reply or
+    an answer, with the replies the agents made on them (`Item.replies`): the
+    page lays each comment and the thread under it out under the line it's on
+    (`docs/dashboard.md`, *The review*)."""
 
 
 class Shown(Reply):
@@ -412,18 +420,54 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: ListInbox) -> Reply:
         inbox = self.delivery.inbox
-        return Items(items=self.waiting(request), reviewed=inbox.reviewed())
+        waiting = self.waiting(request)
+        return Items(
+            items=waiting, reviewed=inbox.reviewed(), answers=self.answering(waiting)
+        )
 
     @override
     async def scoped(self, request: ListInbox, repository: Path) -> Reply:
         waiting = [each for each in self.waiting(request) if each.of(repository)]
-        return Items(items=waiting, reviewed=self.delivery.inbox.reviewed(repository))
+        return Items(
+            items=waiting,
+            reviewed=self.delivery.inbox.reviewed(repository),
+            answers=self.answering(waiting),
+        )
 
     def waiting(self, request: ListInbox) -> list[Item]:
         """Return the items waiting for the operator, made within `request`'s window."""
         window = request.window(self.delivery.clock.now())
         waiting = self.delivery.inbox.waiting(Operator())
         return [each for each in waiting if window.covers(each.made)]
+
+    def answering(self, items: list[Item]) -> list[Item]:
+        """Return the operator's items that answer any of `items`, oldest first, each the one sent to the item's sender: a review covering it with a comment on it, a reply to it, or an answer to it; what the threads under them are read from.
+
+        A review goes to each conversation it reaches as an item of its own,
+        each carrying every comment, so only the copy sent to the item's
+        sender answers it: the thread under the item is read once.
+        """
+        found = self.delivery.inbox.items
+
+        def answers(answer: Item, item: Item) -> bool:
+            if item.sender not in (answer.recipient, answer.addressed):
+                return False
+            match answer.reason:
+                case Review(comments=comments):
+                    return any(each.item == item.number for each in comments)
+                case Message(of=int() as of):
+                    return of == item.number
+                case Answer(question=question):
+                    return question == item.number
+                case _:
+                    return False
+
+        return [
+            found[number]
+            for number in sorted(found)
+            if found[number].sender == Operator()
+            and any(answers(found[number], item) for item in items)
+        ]
 
 
 class Showing(Model, Reading[ShowItem], arbitrary_types_allowed=True):

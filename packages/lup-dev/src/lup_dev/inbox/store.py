@@ -47,6 +47,7 @@ from lup.tools import speaking
 from lup.types import Model, MutableModel
 from lup_dev.host.protocol import HostError
 from lup_dev.host.watch import Changes
+from lup_dev.inbox.parts import PartId
 from lup_dev.layout import InboxLayout
 from lup_dev.stored import read_model, write_model
 
@@ -423,11 +424,16 @@ class Quote(Model):
 
 
 class Comment(Model):
-    """A comment of the operator's on an item: on a passage of it, one of its decisions among them, or on it whole."""
+    """A comment of the operator's on an item: on a passage of it, one of its decisions among them, or on it whole; or, in a thread, on a reply the agent made to an earlier comment."""
 
     item: int
     quote: Quote | None = None
-    """The passage it's on; none for a comment on the item whole."""
+    """The passage it's on; none for a comment on the item whole. On a reply
+    (`on`), a passage of that reply's text, its offsets counted there."""
+    on: PartId | None = None
+    """The reply of the agent's it answers, by its id, where it continues a
+    thread (`docs/inbox.md`, *Replying by id*); none for a comment on the
+    item's own text."""
     text: str
 
 
@@ -550,10 +556,16 @@ type ApiKind = Literal[
     "class-removed",
     "function-added",
     "function-removed",
+    "signature-changed",
 ]
 """How a change touches what other code can depend on, as the judge finds it
 (`lup_dev.policy.surface`) and the review says it: a package root's name, a
-class, or a function or method, added or removed."""
+class, or a function or method, added or removed. `signature-changed` is one
+the judge doesn't find (`docs/judging-writes.md`, *The public-API ask*): copies
+before found it, and the holds and the files beside items they wrote keep it.
+Every value a stored model once accepted stays read: dropped, a copy approved
+later can't read a store the one before wrote, and `judged` refuses every
+call."""
 
 type Held = Literal["held", "flagged"]
 """How the declaration takes what a change asks: held for the operator's answer,
@@ -759,6 +771,18 @@ def ranked(reason: Reason) -> Rank:
             return Rank(name="waiting on you", order=0, notifies=True)
 
 
+class Reply(Model):
+    """One reply of an agent's, kept on the operator's item it answers, under the part it answers (`docs/inbox.md`, *Replying by id*)."""
+
+    number: int
+    """Its own place among the item's parts, after the operator's own, so it's
+    cited `@546.6` and the operator's next comment can be on it."""
+    to: PartId
+    """The part of the item it answers: a comment or a reply of the operator's."""
+    text: str
+    at: datetime
+
+
 class Item(Model):
     """One item in a party's inbox."""
 
@@ -767,6 +791,11 @@ class Item(Model):
     sender: Party
     recipient: Party
     """Whose inbox it's in, who's told it."""
+    replies: list[Reply] = []
+    """The replies its recipient made to its parts, in the order they came:
+    the threads under the operator's comments, which the dashboard shows there
+    and the operator's next comments continue (`docs/inbox.md`, *Replying by
+    id*). Only an item of the operator's takes any."""
     addressed: Conversation | None = None
     """Whom it was for, where it was passed on from a conversation that had
     ended; none where it wasn't."""

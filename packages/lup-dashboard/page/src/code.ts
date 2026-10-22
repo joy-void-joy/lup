@@ -270,12 +270,14 @@ function api(change: ApiChanged): string {
             return `adds the ${what} \`${change.name}\``;
         case "function-removed":
             return `removes the ${what} \`${change.name}\``;
+        case "signature-changed":
+            return `changes the signature of \`${change.name}\``;
     }
 }
 
-/** Mark a change to the public API in a header's few words: `+` a name added, `−` one removed. */
+/** Mark a change to the public API in a header's few words: `+` a name added, `−` one removed, `~` a signature changed, which copies before found. */
 function signed(change: ApiChanged): string {
-    const sign = change.kind.endsWith("-removed") ? "−" : "+";
+    const sign = change.kind.endsWith("-removed") ? "−" : change.kind === "signature-changed" ? "~" : "+";
     return `${sign}${change.name}`;
 }
 

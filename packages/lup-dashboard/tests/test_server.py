@@ -148,7 +148,12 @@ def test_the_socket_sends_a_watchs_replies_under_its_number_then_its_end(
         {
             "kind": "watched",
             "number": 7,
-            "reply": {"kind": "inbox-items", "items": [], "reviewed": None},
+            "reply": {
+                "kind": "inbox-items",
+                "items": [],
+                "reviewed": None,
+                "answers": [],
+            },
         },
         {
             "kind": "watched",
@@ -186,7 +191,7 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
     assert second == {
         "kind": "watched",
         "number": 2,
-        "reply": {"kind": "inbox-items", "items": [], "reviewed": None},
+        "reply": {"kind": "inbox-items", "items": [], "reviewed": None, "answers": []},
     }
     assert host.asked == [ListLaunches(), ListInbox()]
 
@@ -442,7 +447,7 @@ def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) ->
         "kept": [],
     }
     assert left.json()["draft"] == {
-        "comments": [{"item": 53, "quote": None, "text": "Later."}],
+        "comments": [{"item": 53, "quote": None, "on": None, "text": "Later."}],
         "letters": [],
         "remarks": [],
         "done": [],

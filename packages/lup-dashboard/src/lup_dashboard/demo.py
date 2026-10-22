@@ -28,6 +28,7 @@ from lup_dev.host.protocol import (
 )
 from lup_dev.host.records import Called, Entry, Said, Task, Usage
 from lup_dev.inbox.delivery import body
+from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
     Context,
     Conversed,
@@ -57,6 +58,7 @@ from lup_dev.inbox.store import (
     Approval,
     Binary,
     ChangedFile,
+    Comment,
     Conversation,
     Decision,
     Done,
@@ -70,7 +72,10 @@ from lup_dev.inbox.store import (
     Message,
     Operator,
     Question,
+    Quote,
     Reading,
+    Reply,
+    Review,
     Talk,
     Text,
     Told,
@@ -435,13 +440,23 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
 
     def items(self) -> Items:
         """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn, a friction and how the work went, and two writes that landed flagged, the subagent's new module gathering three; the operator last settled an item 3 minutes ago, so those since are new."""
+        every = self.every()
+        waiting = [
+            each
+            for each in every
+            if each.recipient == Operator() and isinstance(each.state, Waiting)
+        ]
+        numbers = [each.number for each in waiting]
         return Items(
-            items=[
-                each
-                for each in self.every()
-                if each.recipient == Operator() and isinstance(each.state, Waiting)
-            ],
+            items=waiting,
             reviewed=self.ago(3),
+            answers=[
+                each
+                for each in every
+                if each.sender == Operator()
+                and isinstance(each.reason, Review)
+                and any(comment.item in numbers for comment in each.reason.comments)
+            ],
         )
 
     def sending(self, sending: SendItem) -> Shown | Refused:
@@ -614,6 +629,39 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 recipient=parser,
                 made=self.ago(23),
                 state=Told(at=self.ago(23), how="call"),
+            ),
+            # The operator's review of the voice session's note, which its reply by id brought back before them.
+            Item(
+                number=49,
+                reason=Review(
+                    covers=[52],
+                    comments=[
+                        Comment(
+                            item=52,
+                            quote=Quote(
+                                text="I assumed transcripts are UTF-8 throughout.",
+                                start=0,
+                                end=43,
+                            ),
+                            text="Every one, both runtimes' records?",
+                        )
+                    ],
+                ),
+                sender=Operator(),
+                recipient=voice,
+                made=self.ago(11),
+                state=Told(at=self.ago(11), how="call"),
+                replies=[
+                    Reply(
+                        number=2,
+                        to=PartId(item=49, part=1),
+                        text=(
+                            "Every one I read: both runtimes write UTF-8.\n"
+                            "A stray byte is replaced, never raised."
+                        ),
+                        at=self.ago(10),
+                    )
+                ],
             ),
         ]
         return [

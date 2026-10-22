@@ -10,11 +10,19 @@ Each line goes across as it is, both ways.
 When the server goes, as when lup's host service restarts, the runtime's side
 stays open, where a plain pipe would end and the runtime mark the server failed
 for good, since no runtime starts a stdio server again.
-- A request the server was answering is answered with an error saying so: its
-  answer is lost, and it may have been carried out.
+- A request the server was answering waits for it as one arriving meanwhile
+  does, and is sent again, the same line under the same id, once the server is
+  back, where sending it again is safe (`repeatable`): a `tools/call` to a tool
+  the server's own tool list marks as one that only reads (`readOnlyHint`) or
+  that a call sent again adds nothing to (`idempotentHint`), as lup's
+  `@lup_tool` marks a read, and a call that finds its wait again; and any
+  other request, which reads. The bridge reads the marks off each `tools/list`
+  answer going by (`listed`), so nothing here names a tool. A call to a tool
+  marked neither acts, so it's answered with an error saying so: its answer is
+  lost, and it may have been carried out.
 - The bridge tries to reach the server again every half second (`retry`). A
-  request arriving meanwhile waits for it, and is answered with an error after
-  a minute without it (`patience`).
+  request waiting for it, arrived meanwhile or sent again, is answered with an
+  error after a minute without it (`patience`).
 - Once it's reached again, the bridge introduces the runtime to it as the
   runtime introduced itself the first time: its `initialize` request, under an
   id of the bridge's whose answer it keeps to itself. Only the answer makes
@@ -93,11 +101,90 @@ def answered(message: Json) -> str | int | None:
             return None
 
 
+def again(tool: Json) -> bool:
+    """Say whether a call to `tool`, as a `tools/list` answer lists it, may be sent again: its annotations say it only reads (`readOnlyHint`) or that a call sent again adds nothing (`idempotentHint`).
+
+    >>> again({"name": "inbox", "annotations": {"readOnlyHint": True}})
+    True
+    >>> again({"name": "note", "annotations": {"readOnlyHint": False}}), again({"name": "note"})
+    (False, False)
+    """
+    match tool:
+        case {"annotations": {"readOnlyHint": True}} | {
+            "annotations": {"idempotentHint": True}
+        }:
+            return True
+        case _:
+            return False
+
+
+def named(tool: Json) -> str | None:
+    """Return the name of `tool`, as a `tools/list` answer lists it; none where it has none."""
+    match tool:
+        case {"name": str() as name}:
+            return name
+        case _:
+            return None
+
+
+def listed(message: Json) -> dict[str, bool]:
+    """Return each tool the `tools/list` answer `message` lists, by its name, with whether a call to it may be sent again (`again`); nothing where `message` is no such answer."""
+    match message:
+        case {"result": {"tools": list() as tools}}:
+            return {
+                name: again(tool) for tool in tools if (name := named(tool)) is not None
+            }
+        case _:
+            return {}
+
+
+def repeatable(message: Json, tools: dict[str, bool]) -> bool:
+    """Say whether the request `message`, lost with the server answering it, may be sent to the server reached again.
+
+    A `tools/call` may where `tools`, the server's list, marks its tool so
+    (`listed`); one to a tool it doesn't mark acts, and mayn't. `initialize`
+    never: the bridge introduces the runtime itself (`Replay`). Any other
+    request reads, and may.
+
+    >>> repeatable({"method": "tools/call", "params": {"name": "inbox"}}, {"inbox": True})
+    True
+    >>> repeatable({"method": "tools/call", "params": {"name": "note"}}, {"inbox": True})
+    False
+    >>> repeatable({"method": "tools/list"}, {})
+    True
+    """
+    match message:
+        case {"method": "tools/call", "params": {"name": str() as name}}:
+            return tools.get(name, False)
+        case {"method": "tools/call" | "initialize"}:
+            return False
+        case {"method": str()}:
+            return True
+        case _:
+            return False
+
+
+def lost_reason(message: Json) -> str:
+    """Say why the request `message`, lost with the server answering it, is answered with an error rather than sent again."""
+    match message:
+        case {"method": "tools/call", "params": {"name": str() as name}}:
+            return (
+                f"lup's host service went away while answering this call, and "
+                f"`{name}` acts, so it wasn't sent again: its answer is lost and it "
+                "may have been carried out; check before calling it again"
+            )
+        case _:
+            return (
+                "lup's host service went away while answering this request, so its "
+                "answer is lost"
+            )
+
+
 class Waiting:
-    """A line the runtime sent while the server was away: the request it holds, where it's one, and when it arrived."""
+    """A line of the runtime's: its text, the id of the request it holds, where it's one, and the monotonic time it arrived, or began waiting for the server again once lost with it."""
 
     def __init__(self, text: str, ident: str | int | None, since: float) -> None:
-        """Keep `text`, the id of the request it holds, and the monotonic time it arrived."""
+        """Keep `text`, the id of the request it holds, and the monotonic time `since` which it waits."""
         self.text = text
         self.ident = ident
         self.since = since
@@ -144,9 +231,14 @@ class Bridge:
         self.introduced = False
         """A server heard the runtime's `initialize`, so the next one hears it
         from the bridge."""
-        self.answering: list[str | int] = []
-        """The requests the server has and hasn't answered yet."""
+        self.answering: list[Waiting] = []
+        """The requests the server has and hasn't answered yet, each as sent."""
         self.waiting: list[Waiting] = []
+        """The lines kept for the server while it's away, in order: those sent
+        again after losing it, then those the runtime sent meanwhile."""
+        self.tools: dict[str, bool] = {}
+        """Each tool the server last listed, by name: whether a call to it may
+        be sent again (`listed`)."""
         self.ids = count(1)
 
     def run(self, lines: Iterator[str]) -> None:
@@ -168,7 +260,7 @@ class Bridge:
                 self.initialized = text
             case _:
                 pass
-        ident = requested(message)
+        sent = Waiting(text, requested(message), time.monotonic())
         with self.lock:
             if self.connection is not None:
                 try:
@@ -177,10 +269,10 @@ class Bridge:
                     self.connection = None
                 else:
                     self.introduced = self.introduced or text == self.initialize
-                    if ident is not None:
-                        self.answering = [*self.answering, ident]
+                    if sent.ident is not None:
+                        self.answering = [*self.answering, sent]
                     return
-            self.waiting = [*self.waiting, Waiting(text, ident, time.monotonic())]
+            self.waiting = [*self.waiting, sent]
 
     def serving(self) -> None:
         """Keep a connection to the server, carrying its lines to the runtime, and reach it again whenever it goes."""
@@ -236,7 +328,7 @@ class Bridge:
             self.waiting = []
             self.answering = [
                 *self.answering,
-                *(each.ident for each in waited if each.ident is not None),
+                *(each for each in waited if each.ident is not None),
             ]
             self.introduced = again or any(
                 each.text == self.initialize for each in waited
@@ -262,28 +354,35 @@ class Bridge:
                 return None
 
     def received(self, text: str) -> None:
-        """Carry one line from the server to the runtime, but the answer to the bridge's own request."""
-        ident = answered(read(text))
+        """Carry one line from the server to the runtime, but the answer to the bridge's own request; the tools a `tools/list` answer lists are noted as it goes by."""
+        message = read(text)
+        ident = answered(message)
         if isinstance(ident, str) and ident.startswith(OURS):
             return
         if ident is not None:
             with self.lock:
-                self.answering = [each for each in self.answering if each != ident]
+                self.answering = [
+                    each for each in self.answering if each.ident != ident
+                ]
+                self.tools = {**self.tools, **listed(message)}
         self.told(text)
 
     def lost(self, connection: socket.socket) -> None:
-        """Forget a connection the server closed, answering each request it hadn't with an error."""
+        """Forget a connection the server closed: each request it hadn't answered waits to be sent again where it may be (`repeatable`), and is answered with an error where it mayn't."""
         connection.close()
+        now = time.monotonic()
         with self.lock:
             self.connection = None
             lost = self.answering
             self.answering = []
-        reason = (
-            "lup's host service went away while answering this call, so its answer "
-            "is lost and it may have been carried out: check before calling it again"
-        )
-        for ident in lost:
-            self.told(failure(ident, reason))
+            kept = [each for each in lost if repeatable(read(each.text), self.tools)]
+            self.waiting = [
+                *(Waiting(each.text, each.ident, now) for each in kept),
+                *self.waiting,
+            ]
+        for each in lost:
+            if each not in kept:
+                self.told(failure(each.ident, lost_reason(read(each.text))))
 
     def expired(self) -> None:
         """Answer with an error each request that waited longer than `patience` for the server."""

@@ -57,8 +57,10 @@ class CorePaths(Model):
     """TypeScript's tests, wherever they are, as vitest, Jest and Bun find them by
     default: a test, so writing one asks nothing. pytest's tests are `Python`'s,
     by its test roots."""
-    scratch: list[str] = ["**/tmp/**", ".lup/**"]
-    """Scratch work, and the saved versions under `.lup/`: allowed at any size."""
+    scratch: list[str] = ["**/tmp/**", ".lup/**", "**/*.log"]
+    """Scratch work, the saved versions under `.lup/`, and any log, wherever it's
+    written: a worker's gate log at a worktree's root was once flagged as a new
+    production file, carrying the host's paths. Allowed at any size."""
     docs: list[str] = ["**/*.md", "docs/**"]
     """Documentation: allowed at any size."""
     data: list[str] = [

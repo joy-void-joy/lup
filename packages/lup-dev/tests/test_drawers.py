@@ -268,7 +268,7 @@ def test_a_remark_on_code_says_which_quoted_lines_changed_since_it_was_written(
             ),
         ],
     )
-    told = delivery.reviewing(review, party)
+    told = delivery.reviewing(review, party, [])
     context = "\n".join(
         [
             "<context>",

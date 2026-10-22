@@ -61,15 +61,23 @@ class Runtime:
     def send(self, message: Message) -> None:
         self.inbox.put(json.dumps(message) + "\n")
 
-    def call(self, ident: int, name: str) -> None:
+    def call(self, ident: int, name: str, meta: Message | None = None) -> None:
+        """Call the tool `name` under `ident`, its `_meta` as `meta` frames it, where a runtime frames one."""
         self.send(
             {
                 "jsonrpc": "2.0",
                 "id": ident,
                 "method": "tools/call",
-                "params": {"name": name, "arguments": {}},
+                "params": {
+                    "name": name,
+                    "arguments": {},
+                    **({} if meta is None else {"_meta": meta}),
+                },
             }
         )
+
+    def list_tools(self, ident: int) -> None:
+        self.send({"jsonrpc": "2.0", "id": ident, "method": "tools/list"})
 
     def heard(self) -> Message:
         return self.said.lines.get(timeout=PATIENT)
@@ -90,14 +98,68 @@ INITIALIZE: Message = {
 }
 INITIALIZED: Message = {"jsonrpc": "2.0", "method": "notifications/initialized"}
 
+CLIENTS: dict[str, Json] = {
+    "claude": {"name": "claude-code", "version": "2.1.306"},
+    "codex": {"name": "codex-mcp-client", "version": "0.162.1"},
+}
+"""How each runtime names itself on its `initialize`."""
+
+RUNTIMES = pytest.mark.parametrize("client", list(CLIENTS))
+"""The runtimes, each framing its introduction and its calls its own way, which the bridge carries as they are."""
+
+
+def introduction(client: str) -> Message:
+    """The `initialize` request of `client`, one of `CLIENTS`."""
+    return {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": CLIENTS[client],
+        },
+    }
+
+
+def framed(client: str, ident: int) -> Message:
+    """How `client` frames a call's `_meta`: Claude Code's `claudecode/toolUseId`, Codex's `callId` with its thread and session (`docs/field-notes.md`, *MCP in a launched session*)."""
+    if client == "codex":
+        return {"callId": f"call_{ident}", "threadId": "t1", "sessionId": "s1"}
+    return {"claudecode/toolUseId": f"toolu_{ident}"}
+
+
+TOOLS: list[Json] = [
+    {
+        "name": "inbox",
+        "description": "Read the inbox.",
+        "inputSchema": {"type": "object"},
+        "annotations": {"readOnlyHint": True, "idempotentHint": False},
+    },
+    {
+        "name": "wait_inbox",
+        "description": "Wait for the inbox.",
+        "inputSchema": {"type": "object"},
+        "annotations": {"readOnlyHint": False, "idempotentHint": True},
+    },
+    {
+        "name": "note",
+        "description": "Tell the operator.",
+        "inputSchema": {"type": "object"},
+        "annotations": {"readOnlyHint": False, "idempotentHint": False},
+    },
+]
+"""What the stand-in lists, as lup's server lists its tools with their marks: a read, a call that finds its wait again, and one that acts."""
+
 
 class Host:
-    """A stand-in for lup's server: it answers `initialize` and each tool call with the tool's name, but holds a call to `hold`."""
+    """A stand-in for lup's server: it answers `initialize`, lists `TOOLS`, and answers each tool call with the tool's name, but holds a call to a tool among `holds`, which it puts in `held` unanswered."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, holds: frozenset[str] = frozenset({"hold"})) -> None:
         self.path = path
+        self.holds = holds
         self.heard: list[Message] = []
-        self.holding = threading.Event()
+        self.held: queue.Queue[Message] = queue.Queue()
         self.connections: list[socket.socket] = []
         host = self
 
@@ -127,8 +189,12 @@ class Host:
                         "serverInfo": {"name": "lup", "version": "1"},
                     },
                 }
-            case {"method": "tools/call", "params": {"name": "hold"}}:
-                self.holding.set()
+            case {"method": "tools/list", "id": ident}:
+                return {"jsonrpc": "2.0", "id": ident, "result": {"tools": TOOLS}}
+            case {"method": "tools/call", "params": {"name": str() as name}} if (
+                name in self.holds
+            ):
+                self.held.put(message)
                 return None
             case {"method": "tools/call", "id": ident, "params": {"name": name}}:
                 return {
@@ -171,8 +237,9 @@ def runtime(path: Path) -> Generator[Runtime]:
     assert not thread.is_alive()
 
 
-def introduced(runtime: Runtime) -> None:
-    runtime.send(INITIALIZE)
+def introduced(runtime: Runtime, client: str | None = None) -> None:
+    """Introduce the runtime to the server, as `client` where one is named, and see it answered."""
+    runtime.send(INITIALIZE if client is None else introduction(client))
     assert runtime.heard()["id"] == 0
     runtime.send(INITIALIZED)
 
@@ -212,13 +279,13 @@ def test_a_runtime_that_starts_before_its_server_is_heard_once_it_s_there(
     assert [each.get("method") for each in host.heard] == ["initialize"]
 
 
-def test_across_a_restart_a_held_call_fails_and_the_session_carries_on(
+def test_across_a_restart_a_held_call_to_a_tool_not_listed_fails_and_the_session_carries_on(
     runtime: Runtime, path: Path
 ) -> None:
     first = Host(path)
     introduced(runtime)
     runtime.call(1, "hold")
-    assert first.holding.wait(timeout=PATIENT)
+    first.held.get(timeout=PATIENT)
     first.stop()
 
     lost = runtime.heard()
@@ -233,6 +300,7 @@ def test_across_a_restart_a_held_call_fails_and_the_session_carries_on(
     match lost:
         case {"id": 1, "error": {"message": str() as said}}:
             assert "went away while answering this call" in said
+            assert "`hold` acts, so it wasn't sent again" in said
             assert "may have been carried out" in said
         case _:
             pytest.fail(f"the held call wasn't answered with an error: {lost}")
@@ -250,6 +318,80 @@ def test_across_a_restart_a_held_call_fails_and_the_session_carries_on(
             assert params == INITIALIZE["params"]
         case _:
             pytest.fail(f"the restarted server heard {second.heard}")
+
+
+@RUNTIMES
+def test_across_a_restart_a_call_that_reads_or_waits_is_sent_again_and_one_that_acts_fails(
+    client: str, runtime: Runtime, path: Path
+) -> None:
+    first = Host(path, holds=frozenset({"wait_inbox", "inbox", "note"}))
+    introduced(runtime, client)
+    runtime.list_tools(1)
+    assert runtime.heard()["id"] == 1
+    runtime.call(2, "wait_inbox", framed(client, 2))
+    runtime.call(3, "inbox", framed(client, 3))
+    runtime.call(4, "note", framed(client, 4))
+    for _ in range(3):
+        first.held.get(timeout=PATIENT)
+    first.stop()
+
+    failed = runtime.heard()
+    second = Host(path)
+    changed = runtime.heard()
+    waited = runtime.heard()
+    read = runtime.heard()
+    second.stop()
+
+    match failed:
+        case {"id": 4, "error": {"message": str() as said}}:
+            assert "`note` acts, so it wasn't sent again" in said
+            assert "may have been carried out" in said
+        case _:
+            pytest.fail(f"the call that acts wasn't answered with an error: {failed}")
+    assert changed == {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}
+    assert (waited["id"], text(waited)) == (2, "wait_inbox")
+    assert (read["id"], text(read)) == (3, "inbox")
+    # The same lines again, the runtime's `_meta` and all, before the
+    # restarted server listed anything; nothing of the call that acts.
+    assert [each.get("method") for each in second.heard] == [
+        "initialize",
+        "notifications/initialized",
+        "tools/call",
+        "tools/call",
+    ]
+    assert second.heard[2:] == [first.heard[-3], first.heard[-2]]
+    match second.heard[2]:
+        case {"id": 2, "params": {"name": "wait_inbox", "_meta": meta}}:
+            assert meta == framed(client, 2)
+        case _:
+            pytest.fail(f"the call sent again lost its frame: {second.heard[2]}")
+
+
+def test_a_call_sent_again_waits_for_the_server_as_a_new_one_does_and_fails_without_it(
+    path: Path,
+) -> None:
+    runtime = Runtime()
+    impatient = Bridge(path, runtime.said, retry=0.01, patience=0.0)
+    thread = threading.Thread(
+        target=impatient.run, args=(runtime.lines(),), daemon=True
+    )
+    thread.start()
+    first = Host(path, holds=frozenset({"wait_inbox"}))
+    introduced(runtime)
+    runtime.list_tools(1)
+    assert runtime.heard()["id"] == 1
+    runtime.call(2, "wait_inbox")
+    first.held.get(timeout=PATIENT)
+    first.stop()
+    answer = runtime.heard()
+    runtime.close()
+    thread.join(timeout=PATIENT)
+
+    match answer:
+        case {"id": 2, "error": {"message": str() as said}}:
+            assert f"hasn't answered on {path}" in said
+        case _:
+            pytest.fail(f"the call sent again wasn't answered with an error: {answer}")
 
 
 def test_a_server_that_takes_the_connection_but_never_answers_isn_t_joined(

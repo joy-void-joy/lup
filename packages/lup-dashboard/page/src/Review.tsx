@@ -37,6 +37,7 @@ import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type DrawerKind, type ReviewPlace } from "./keys";
 import { source, sourced, without, type Source } from "./markdown";
 import {
+    REPLY_MARK,
     aboutAt,
     answerAfter,
     answering,
@@ -53,6 +54,7 @@ import {
     heading,
     isDrawer,
     isLetter,
+    isRegion,
     isRemark,
     laid,
     news,
@@ -60,12 +62,15 @@ import {
     placeAt,
     quoted,
     regionAt,
+    sameId,
     scopeAt,
     shownAt,
+    shownInReply,
     showing,
     stepped,
     stranded,
     tallied,
+    threaded,
     toggled,
     waited,
     whose,
@@ -83,6 +88,7 @@ import {
     type Laid,
     type Region,
     type Scope,
+    type Threaded,
     type Where,
     type Written,
 } from "./review";
@@ -233,7 +239,7 @@ function sourcesOf(laidOut: Laid): Source[] {
         add(source("text", region.lines.filter((line) => codeAt(region, line.from) === undefined).map(whole)));
         let run: Span[] = [];
         for (const aside of region.asides) {
-            if (aside.kind === "agent") {
+            if (aside.kind === "agent" || aside.kind === "you") {
                 run.push(whole(aside));
             } else {
                 add(source("text", run));
@@ -241,6 +247,18 @@ function sourcesOf(laidOut: Laid): Source[] {
             }
         }
         add(source("text", run));
+        // Each reply in the thread under the item, its lines one stretch.
+        let reply: Span[] = [];
+        let last: Threaded | undefined;
+        for (const line of region.threads) {
+            if (last !== undefined && !sameId(last.reply.id, line.reply.id)) {
+                add(source("text", reply));
+                reply = [];
+            }
+            reply.push(whole(line));
+            last = line;
+        }
+        add(source("text", reply));
         for (const block of region.blocks) {
             add(source("comment", [block]));
         }
@@ -291,6 +309,18 @@ function quotedIn(drawer: Drawer, written: Written): Span | null {
     return drawer.lines.length === 0 ? null : { from: shownAt(drawer, quote.start), to: shownAt(drawer, quote.end) };
 }
 
+/** Return where a comment on `region`'s item quotes, in the item's text or in the reply of the thread it's on; none for a remark, a comment on the whole, or an empty passage. */
+function quotedUnder(region: Region, written: Written): Span | null {
+    if (isRemark(written) || isLetter(written) || written.quote == null || written.quote.end <= written.quote.start) {
+        return null;
+    }
+    const quote = written.quote;
+    const on = written.on ?? null;
+    return on === null
+        ? { from: shownAt(region, quote.start), to: shownAt(region, quote.end) }
+        : { from: shownInReply(region, on, quote.start), to: shownInReply(region, on, quote.end) };
+}
+
 /** Draw the review: groups' banners and the messages under them, items' headers, done and parked items, the lines under each item and in each drawer, the changed files' headers, each comment's lines, and the passage each comment is on. */
 function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): DecorationSet {
     const marks: { from: number; to: number; value: Decoration }[] = [];
@@ -332,17 +362,19 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
                 });
             }
         }
+        // Each line of a reply in the thread under an item, marked as the agent's answer.
+        if (isRegion(scope)) {
+            for (const line of scope.threads) {
+                marks.push({ from: line.from - REPLY_MARK.length, to: line.from - REPLY_MARK.length, value: Decoration.line({ class: "thread-reply" }) });
+            }
+        }
         for (const block of scope.blocks) {
             marks.push(...remarks(laidOut, block));
             const comment = comments[block.comment];
             if (comment === undefined || isLetter(comment)) {
                 continue;
             }
-            const span = isDrawer(scope)
-                ? quotedIn(scope, comment)
-                : isRemark(comment) || comment.quote == null || comment.quote.end <= comment.quote.start
-                  ? null
-                  : { from: shownAt(scope, comment.quote.start), to: shownAt(scope, comment.quote.end) };
+            const span = isDrawer(scope) ? quotedIn(scope, comment) : quotedUnder(scope as Region, comment);
             if (span !== null && span.to > span.from) {
                 marks.push({ from: span.from, to: span.to, value: Decoration.mark({ class: "commented" }) });
             }
@@ -498,6 +530,7 @@ export function Review({
                         `${cited(item.number)} ${what(item)}`,
                         ...(counted === "" ? [] : [counted]),
                         ...(typing ? ["reading types"] : []),
+                        ...(threaded(around.answers, item) ? ["replied"] : []),
                         ...(fresh(item, reviewed) ? ["new"] : []),
                         when(item.made),
                         waited(item.made, now),

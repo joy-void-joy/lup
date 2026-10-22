@@ -971,8 +971,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         runtime's terms as one its judge couldn't answer. Where the hook is gone
         before its answer is written, what it would have told is put back as
         waiting; otherwise a title the answer gives the session's runtime is
-        kept as the one lup left it with (`Names.titled`).
+        kept as the one lup left it with (`Names.titled`). The launch is taken
+        as it stands (`current`), not as the socket's closure had it at
+        registration: a rename since changed its name and its container.
         """
+        request = self.current(request)
         payload = (await reader.read()).decode()
         try:
             spoken = await self.answered(request, conversations, payload, writer)
@@ -1142,7 +1145,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         said with its traceback, and the connection closes.
         """
         toolset = LaunchTools(
-            launch=request,
+            launch=lambda: self.current(request),
             tools=self.toolsets(request),
             conversations=conversations,
             say=self.say,
@@ -1370,10 +1373,14 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             case _:
                 return Activity(state="idle", since=at)
 
+    def current(self, request: Register) -> Register:
+        """Return launch `request` as it stands: as served, its name and its container with each rename since it registered; as given where it isn't served."""
+        served = self.served.get(request.launch)
+        return request if served is None else served.launch
+
     def named(self, request: Register) -> str:
         """Return launch `request`'s name as it stands."""
-        served = self.served.get(request.launch)
-        current = request if served is None else served.launch
+        current = self.current(request)
         return current.name or current.launch
 
     async def reopen(self) -> None:
