@@ -728,7 +728,9 @@ def heading(item: Item) -> str:
 def hold_answered(
     layout: Layout, change: HeldChange, *, approved: bool, comment: str
 ) -> None:
-    """Write the operator's answer to a held change where its hook waits for it, or a later checkpoint tells it."""
+    """Write the operator's answer to a held change where its hook waits for it, or a later checkpoint tells it; a hold at landing has no hook, its answer its item's own state."""
+    if change.key is None:
+        return
     answer(
         layout,
         change.key,
