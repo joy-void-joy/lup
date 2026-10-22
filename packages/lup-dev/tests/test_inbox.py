@@ -6181,3 +6181,26 @@ def test_judged_and_the_review_read_a_hold_and_an_item_s_files_a_copy_before_wro
     assert f"  {worktree / core}: whole-file" in listed
     assert files.files == [whole]
 
+
+def test_a_tool_of_lup_s_that_fails_answers_its_failure_and_the_service_says_the_traceback(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Left to `mcp`, a pydantic `ValidationError` a tool raises reaches the session as JSON-RPC's bare "Invalid request parameters", logged nowhere (`LaunchTools.answered`)."""
+    log = machine.verdicts(tmp_path / ".git")
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text('{"key": "v1", "time": "yesterday"}\n')
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        text, error = call(machine.host.launch("one").mcp, "judged", {})
+    assert error
+    assert text.startswith(
+        "`judged` failed, which is lup's fault, not the call's; the host service's "
+        "output has the traceback: "
+    )
+    assert "validation error" in text
+    assert "Verdict" in text
+    [told] = [line for line in said if line.startswith("one: `judged` failed:\n")]
+    assert "Traceback (most recent call last):" in told
+    assert "ValidationError" in told
+
