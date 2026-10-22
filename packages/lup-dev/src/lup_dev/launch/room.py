@@ -76,11 +76,11 @@ from pathlib import Path
 from shlex import split
 from typing import TYPE_CHECKING
 
+from lup.programs import ProgramMissingError, run
 from lup.rooms.container import Container, Image, Mask, Mount
 from lup.sessions import bridge
 from lup.sessions.terminal import TerminalSettings
 from lup.types import Model
-from lup.programs import ProgramMissingError, run
 from lup_dev.catalog.room import Editor, Editors, RoomBase
 from lup_dev.clipboard import shim
 from lup_dev.declaration.kinds import Package
@@ -185,10 +185,12 @@ def qr_code(text: str, requirement: Requirement = QRENCODE) -> str | None:
     the address, so one visit is enough; where it's missing, the command says
     how to get it in the requirement's own words.
     """
-    try:
-        return run(requirement.tool, "-t", "ANSIUTF8", text).text()
-    except ProgramMissingError:
-        return None
+    for program in requirement.programs():
+        try:
+            return run(program, "-t", "ANSIUTF8", text).text()
+        except ProgramMissingError:
+            continue
+    return None
 
 
 class Repository(Model):

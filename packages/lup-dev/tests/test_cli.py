@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, Self
 
 from typer.testing import CliRunner
 
-from lup_dev import Rules, cli
+from lup_dev import Requirement, Rules, cli
 from lup_dev.codescan.contract import Due
 from lup_dev.codescan.directives import GitHubIssues, IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
@@ -17,10 +17,9 @@ from lup_dev.declaration.modules.code_rules import lup_default
 from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.forge.protocol import IssueState, Stated
 from lup_dev.host.client import RoomClient
-from lup_dev import Requirement
 from lup_dev.host.dashboard import DashboardShown, ShowDashboard
-from lup_dev.launch.room import qr_code
 from lup_dev.host.protocol import HostError, Refused, Reply, Request
+from lup_dev.launch.room import qr_code
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.stored import read_model
@@ -566,9 +565,11 @@ def dashboard_command(
     stand_in = Requirement(
         tool=str(drawing), optional=True, why="a stand-in", install="nothing"
     )
-    monkeypatch.setattr(
-        cli, "qr_code", lambda text: qr_code(text, requirement=stand_in)
-    )
+
+    def drawn(text: str) -> str | None:
+        return qr_code(text, requirement=stand_in)
+
+    monkeypatch.setattr(cli, "qr_code", drawn)
     result = runner.invoke(cli.app, ["dashboard", "--no-open", *arguments])
     assert result.exit_code == 0, result.output
     return result.output.splitlines()
@@ -599,8 +600,8 @@ def test_dashboard_says_how_to_get_the_qr_code_without_qrencode_and_draws_none_f
     assert dashboard_command(monkeypatch, tmp_path, beyond, qrencode=False) == [
         TUNNEL,
         (
-            "To scan it as a QR code, install `qrencode`, your system's package of "
-            "that name, and run this again."
+            "To scan it as a QR code, install `qrencode`: your system's "
+            "`qrencode` package, then run this again."
         ),
     ]
     assert dashboard_command(monkeypatch, tmp_path, alone, qrencode=False) == [

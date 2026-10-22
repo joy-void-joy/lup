@@ -153,7 +153,6 @@ from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
     QRENCODE,
-    qr_code,
     Lent,
     OperatorsEditor,
     RoomClipboard,
@@ -162,6 +161,7 @@ from lup_dev.launch.room import (
     lend,
     lent,
     maintaining_room,
+    qr_code,
     receiving,
     refreshed,
     related,
@@ -1016,7 +1016,7 @@ def dashboard_open(
     if chosen != shown.address:
         typer.echo(
             qr_code(chosen)
-            or f"To scan it as a QR code, install `{QRENCODE.tool}`: "
+            or f"To scan it as a QR code, install `{QRENCODE.named()}`: "
             f"{QRENCODE.install}, then run this again."
         )
     if opened:

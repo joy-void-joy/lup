@@ -24,8 +24,8 @@ from pathlib import Path
 from typing import Literal, override
 from urllib.parse import urlsplit
 
-from lup.programs import ProgramError, ProgramMissingError, Running, run, started
-from lup.types import Model, MutableModel
+from lup.programs import ProgramError, Running, started
+from lup.types import MutableModel
 from lup_dev.host.protocol import HostError, Reply, Request
 from lup_dev.host.service import Companion, Handler
 from lup_dev.settings import Address
