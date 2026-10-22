@@ -8,7 +8,7 @@ Everything between a session and the operator goes through the inbox, which the 
 |---|---|
 | `ask` | Asks the operator: numbered decisions, each with the agent's lean, or a plain question. With `wait`, the call holds until they answer and returns the answer; without, the answer comes with a later call |
 | `note` | Tells the operator an assumption, a doubt or a counterargument, and carries on: news, with no notice |
-| `friction`, `how_it_went` | Says what got in the way, the moment it does; says how a piece of work went, once near its end. Each reaches the operator directly, a subagent's too, never its parent |
+| `friction`, `how_it_went` | Says what got in the way, the moment it does; says how a piece of work went and felt, once near its end. Each reaches the operator directly, a subagent's too, never its parent |
 | `blocked`, `stop` | Says the work can't go on; ends it by the agent's own choice. Either answer tells the agent to end its turn |
 | `send` | A message of a kind (`note`, `problem`, `disagreement`, `question`) to the operator's inbox, the general verb beside the speaking tools |
 | `wait_inbox` | Holds until something reaches the agent, and returns all of it |
@@ -20,6 +20,7 @@ Everything between a session and the operator goes through the inbox, which the 
 
 - **Who serves which:** the inbox's tools are the core's (`InboxTools`, `inbox/tools.py`), and so is `judged` (`JudgeTools`, `policy/tools.py`), which the inbox, below the judge in `lup_dev`'s layers, can't import; `rename` is the host service's own; the GitHub tools are the `GitHub` module's, served from the launch's process of its repository's approved copy (`docs/host.md`, *Each launch's judge and modules*).
 - **The speaking tools are the library's** (`lup.tools.speaking`): `blocked`, `stop`, `note`, `friction` and `how_it_went` have the same names and inputs on an ask from code, so an agent's habit carries between the two. In a launched session whoever asked is the operator.
+- **`friction` and `how_it_went` each take one text,** in the agent's own words, which the operator's inbox and the dashboard show as written: they're for what's present for the agent at the moment, how the work felt among it, and labelled parts would make them a form, shaping what's said to fit.
 - **`wait_inbox` isn't called `wait`,** since on a Codex model in code mode Codex has a `wait` tool of its own, and two tools of one name invite the wrong call.
 - **`judged` is sized to be read whole:** the latest 50 verdicts and 20 holds of each state, never splitting a moment, with how many it left out and the `until` that reads them. lup's own log, listed whole after ten days, was 785,000 characters, past what a tool's result holds.
 - **Results are one text block:** Codex shows the model only a result's `structuredContent` where it has one, and Claude Code reads `content`, so a result with both would read differently on each. A large result is the runtime's to keep for now (#164).

@@ -538,12 +538,12 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             Item(
                 number=57,
                 reason=Friction(
-                    got_in_the_way=(
+                    text=(
                         "`uv run lup-dev check` rebuilt the engine for four minutes "
-                        "before the tests ran, printing nothing until then."
-                    ),
-                    trying="run the gate on the reader",
-                    would_change="say the rebuild, and how long it takes, first",
+                        "before the tests ran, printing nothing until then. I was "
+                        "running the gate on the reader; a line saying the rebuild, "
+                        "and how long it takes, would have kept me from killing it."
+                    )
                 ),
                 sender=parser,
                 recipient=Operator(),
@@ -554,9 +554,10 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             Item(
                 number=58,
                 reason=HowItWent(
-                    got_in_the_way="The judge repeated the file's findings after each edit.",
-                    smooth="The brief named every file I needed.",
-                    felt="Steady.",
+                    text=(
+                        "Steady. The brief named every file I needed; the judge "
+                        "repeating the file's findings after each edit wore a little."
+                    )
                 ),
                 sender=voice,
                 recipient=Operator(),
