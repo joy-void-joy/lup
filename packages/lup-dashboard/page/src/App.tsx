@@ -1,39 +1,48 @@
-// The page: every agent the host serves on the left; everything waiting for the
-// operator beside it, as one review in groups, one per agent, every agent
-// running having one, their reply written into it, their messages to agents
-// among it, and a line saying what the reply covers and who it reaches: every
-// agent it covers or writes to, each getting all of it. Selecting an agent opens its
-// conversation in the review's place; Space `r` in it, the palette, or the
-// title bar brings the review back as it was left. Space `h` gives the keyboard
-// to the tree, and Space `l` back to the view (`AgentTree.tsx`).
+// The page: everything waiting for the operator as one review in groups, one
+// per agent, every agent running having one, its banner saying what the agent
+// is doing, what it's working on and its context, its drawers at the group's end
+// holding its tasks, its trace, what its branch changed since the operator
+// approved it and its whole conversation; the operator's reply written into it,
+// their messages to agents and their remarks in the drawers among it, and a line
+// saying what the reply covers and who it reaches: every agent it covers or
+// writes to, each getting all of it. The palette (Ctrl+K) goes to an agent's
+// group. Each agent's record is read at every hook the host hears and every
+// five seconds besides, for its banner and its drawers; what its branch changed
+// since the operator approved it every ten seconds, with the version shown, so
+// what they read never moves until Space `l` brings the latest in
+// (`docs/dashboard.md`, *The review*, *The drawers*).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { everyone, launches, running, type Agent, type Launch } from "./agents";
-import { AgentTree } from "./AgentTree";
+import { doing, everyone, launches, ring, running, type Running } from "./agents";
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
-import { Conversation } from "./Conversation";
-import { Details } from "./Details";
 import { useNow, useWatched } from "./hooks";
 import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
 import { Palette } from "./Palette";
-import { Review } from "./Review";
+import { Review, type Jump } from "./Review";
 import {
+    UNREAD,
     answer,
     changing,
     covered,
+    currentTask,
     EMPTY,
+    flag,
     messages,
     pruned,
+    remarks,
     whose,
+    type AgentDrawers,
     type Answered,
     type ChangedFile,
     type Context,
     type Conversation as InboxConversation,
     type Draft,
+    type Drawers,
     type Head,
     type Item,
+    type Since,
 } from "./review";
 
 const SAID = {
@@ -43,21 +52,35 @@ const SAID = {
     refused: "this page's token is refused: open the dashboard again from `lup-dev dashboard`",
 };
 
+/** How long the page waits between reading each agent's record with no hook heard, in milliseconds: a record written just after its hook is read all the same. */
+const EVERY = 5000;
+
+/** How long the page waits between asking what each agent's branch changed since the operator approved it, in milliseconds: each asking snapshots the worktree. */
+const SINCE_EVERY = 10_000;
+
+/** A conversation running, as the review names it: with its launch's ids and its banner's parts. */
+interface Live extends Running {
+    conversation: InboxConversation;
+    key: string;
+}
+
 export function App() {
     const { reply, connection } = useWatched({ kind: "list" });
     const inbox = useWatched({ kind: "inbox-list" });
     const now = useNow();
-    // The review's ages are told to the minute, so it's laid out again once a minute, not every second.
+    // The review's ages are told to the minute, so it's laid out again once a minute, not every second; the banners'
+    // durations every five seconds, which lays the whole review out again, its drawers among it.
     const minute = useNow(60_000);
-    const [selected, setSelected] = useState<string | null>(null);
+    const soon = useNow(5000);
     const [palette, setPalette] = useState(false);
     const [draft, setDraft] = useState<Draft>(EMPTY);
     const [contexts, setContexts] = useState<Map<number, Answered<Context>>>(new Map());
     const [files, setFiles] = useState<Map<number, Answered<ChangedFile[]>>>(new Map());
     const around = useMemo(() => ({ contexts, files }), [contexts, files]);
+    // What the host has answered of each agent, for its banner and its drawers, by its conversation.
+    const [drawers, setDrawers] = useState<Drawers>(new Map());
     // The items whose context, and whose files, were asked for, so each is asked once: an approval's files once
-    // more when the judge has read their types (`typing`), a flagged write's as another joins it (`writes`), each
-    // asking keyed by its number and how far along it was.
+    // more when the judge has read their types (`typing`), each asking keyed by its number and how far along it was.
     const asked = useRef({ contexts: new Set<number>(), files: new Set<string>() });
     // Each item's latest asking for its files, whose answer alone is shown.
     const latest = useRef(new Map<number, string>());
@@ -71,13 +94,13 @@ export function App() {
     // The keys of a chord begun in the review, whose following keys the line of keys shows.
     const [chord, setChord] = useState("");
     const [epoch, setEpoch] = useState(0);
+    const [jump, setJump] = useState<Jump | null>(null);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
     const served = reply?.kind === "listed" ? launches(reply) : [];
     const agents = everyone(served);
-    const shown = found(served, agents, selected);
     const talkers = useMemo(() => agents.map((each) => each.talker), [agents]);
 
-    // A party as it's called: a conversation by its path in the tree, else by its runtime's ids.
+    // A party as it's called: a conversation by its path, else by its runtime's ids.
     const called = useCallback(
         (party: Item["sender"]) => {
             if (party.party === "operator") {
@@ -92,8 +115,8 @@ export function App() {
     );
     const named = useCallback((item: Item) => called(item.sender), [called]);
 
-    // The conversations running, in the tree's order, each with its banner: the review gives each a group.
-    const live = useMemo(
+    // The conversations running, in the order the host lists them: the review gives each a group.
+    const live = useMemo<Live[]>(
         () =>
             running(reply?.kind === "listed" ? launches(reply) : []).map(({ launch, talker }) => {
                 const conversation: InboxConversation = {
@@ -103,22 +126,29 @@ export function App() {
                     session: talker.session,
                     agent: talker.agent ?? null,
                 };
-                return { conversation, banner: [last(launch.repository), last(launch.worktree), talker.path].join(" · ") };
+                return { launch, talker, conversation, key: whose(conversation) };
             }),
         [reply],
     );
     const agentsRunning = useMemo(() => live.map((each) => each.conversation), [live]);
 
+    // What the banner says of an agent beyond its name: what it's doing, what it's working on, its context, and whether its flagged writes are held.
     const banner = useCallback(
         (head: Head) => {
+            const found = (party: InboxConversation) => live.find((each) => each.key === whose(party));
             if ("conversation" in head) {
                 // A conversation that isn't running, written to all the same, by its runtime's ids where it isn't known.
-                const key = whose(head.conversation);
-                const found = live.find((each) => whose(each.conversation) === key);
-                return found?.banner ?? [last(head.conversation.repository), called(head.conversation)].join(" · ");
+                const agent = found(head.conversation);
+                return agent === undefined ? [last(head.conversation.repository), called(head.conversation)].join(" · ") : bannered(agent);
             }
             const item = head.item;
             const sender = item.sender;
+            if (sender.party === "conversation") {
+                const agent = found(sender);
+                if (agent !== undefined) {
+                    return bannered(agent);
+                }
+            }
             const repository =
                 sender.party === "conversation"
                     ? sender.repository
@@ -127,48 +157,50 @@ export function App() {
                       : null;
             const where = [repository, item.worktree ?? null].flatMap((each) => (each === null ? [] : [last(each)]));
             return [...where, sender.party === "operator" ? "lup's approvals" : named(item)].join(" · ");
+
+            function bannered(agent: Live): string {
+                const data = drawers.get(agent.key) ?? UNREAD;
+                const task = currentTask(data.tasks);
+                const usage = data.usage;
+                return [
+                    [last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · "),
+                    doing(agent.talker.activity, soon),
+                    ...(task === null ? [] : [`▶ ${task}`]),
+                    ...(usage === null ? [] : [ring(usage.used, usage.window)]),
+                    ...(agent.talker.holding === true ? ["holding"] : []),
+                ].join(" · ");
+            }
         },
-        [named, called, live],
+        [named, called, live, drawers, soon],
     );
 
-    const waiting = useMemo(() => (inbox.reply?.kind === "inbox-items" ? inbox.reply.items : []), [inbox.reply]);
-    const review = useCallback(() => setSelected(null), []);
-    const nav = useRef<HTMLElement>(null);
+    // What waits for the operator: a flagged write is no item of the review, shown in its agent's drawer instead.
+    const waiting = useMemo(
+        () => (inbox.reply?.kind === "inbox-items" ? inbox.reply.items.filter((each) => !flag(each)) : []),
+        [inbox.reply],
+    );
     const main = useRef<HTMLElement>(null);
 
-    // The keyboard to the tree, on the conversation shown, or its first row; and back to the view shown.
-    const toTree = useCallback(() => {
-        const tree = nav.current;
-        const row =
-            tree?.querySelector<HTMLElement>('[role="row"][aria-selected="true"]') ??
-            tree?.querySelector<HTMLElement>('[role="row"]');
-        row?.focus();
-    }, []);
-    const toView = useCallback(() => {
-        const editors = [...(main.current?.querySelectorAll<HTMLElement>(".cm-content") ?? [])];
-        editors.find((each) => each.closest("[hidden]") === null)?.focus();
-    }, []);
-
-    function hold(agent: Agent) {
-        const at = found(served, agents, agent.talker.path);
-        if (at === null) {
+    /** Turn the operator's switch for the agent `conversation` is: whether each flagged write of it and its subagents is held. */
+    function hold(conversation: InboxConversation) {
+        const agent = live.find((each) => each.key === whose(conversation));
+        if (agent === undefined) {
+            setSaid("The switch is turned on an agent running.");
             return;
         }
         const on = agent.talker.holding !== true;
         const { session, agent: subagent, path } = agent.talker;
-        void ask({ kind: "set-holding", launch: at.launch.launch.launch, session, agent: subagent ?? null, on }).then(
-            (answer) => {
-                if (answer.kind === "refused") {
-                    setSaid(answer.error);
-                    return;
-                }
-                setSaid(
-                    on
-                        ? `Each flagged write of ${path} is held for your answer.`
-                        : `${path}'s flagged writes land again, flagged.`,
-                );
-            },
-        );
+        void ask({ kind: "set-holding", launch: agent.launch.launch, session, agent: subagent ?? null, on }).then((answer) => {
+            if (answer.kind === "refused") {
+                setSaid(answer.error);
+                return;
+            }
+            setSaid(
+                on
+                    ? `Each flagged write of ${path} and its subagents is held for your answer.`
+                    : `${path}'s flagged writes land again, flagged.`,
+            );
+        });
     }
 
     useEffect(() => {
@@ -242,8 +274,7 @@ export function App() {
 
     useEffect(() => {
         // Each item's context, where an agent's call made it, and each file an item changes (`changing`), asked
-        // once it's in the inbox; an approval's again once the judge has read their types, a flagged write's
-        // again as a later one joins it.
+        // once it's in the inbox; an approval's again once the judge has read their types.
         for (const item of waiting) {
             const number = item.number;
             if (item.call != null && !asked.current.contexts.has(number)) {
@@ -253,7 +284,7 @@ export function App() {
                 ).then((context) => setContexts((before) => new Map(before).set(number, context)));
             }
             const reason = item.reason;
-            const stage = reason.reason === "approval" ? reason.typing : reason.reason === "flagged" ? reason.writes : 0;
+            const stage = reason.reason === "approval" ? reason.typing : 0;
             const reading = `${number}:${stage}`;
             if (changing(item) && !asked.current.files.has(reading)) {
                 asked.current.files.add(reading);
@@ -269,6 +300,151 @@ export function App() {
             }
         }
     }, [waiting]);
+
+    /** Change what's held of one agent's drawers. */
+    const drawn = useCallback((key: string, next: (before: AgentDrawers) => AgentDrawers) => {
+        setDrawers((before) => new Map(before).set(key, next(before.get(key) ?? UNREAD)));
+    }, []);
+
+    // How many steps of each agent's record the page has, so each asking reads only what came since.
+    const have = useRef(new Map<string, number>());
+    const reading = useRef(false);
+    const again = useRef(false);
+
+    /** Read each agent running's record for the steps since those the page has, with its task list and its context, and the items it exchanged; again where a hook was heard meanwhile. */
+    const refresh = useCallback(async () => {
+        if (reading.current) {
+            again.current = true;
+            return;
+        }
+        reading.current = true;
+        try {
+            do {
+                again.current = false;
+                await Promise.all(live.map((agent) => read(agent)));
+            } while (again.current);
+        } finally {
+            reading.current = false;
+        }
+
+        async function read(agent: Live): Promise<void> {
+            const { conversation, key } = agent;
+            const since = have.current.get(key) ?? 0;
+            try {
+                const [steps, listed] = await Promise.all([
+                    ask({ kind: "inbox-show-conversation", runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null, since }),
+                    ask({ kind: "inbox-list-items", conversation }),
+                ]);
+                const exchanged = listed.kind === "inbox-exchanged" ? { sent: listed.sent, received: listed.received } : null;
+                if (steps.kind !== "inbox-conversation") {
+                    drawn(key, (before) => ({ ...before, exchanged }));
+                    return;
+                }
+                const whole = steps.total < since;
+                if (whole) {
+                    // The record is shorter than what the page read of it: read it again whole.
+                    have.current.set(key, 0);
+                    again.current = true;
+                } else {
+                    have.current.set(key, since + steps.entries.length);
+                }
+                drawn(key, (before) => ({
+                    ...before,
+                    entries: whole ? [] : [...before.entries, ...steps.entries],
+                    tasks: steps.tasks ?? [],
+                    usage: steps.usage ?? null,
+                    exchanged,
+                }));
+            } catch (error) {
+                console.warn("lup's dashboard: an agent's record couldn't be read", error);
+            }
+        }
+    }, [live, drawn]);
+
+    useEffect(() => {
+        void refresh();
+    }, [reply, refresh]);
+
+    useEffect(() => {
+        const asking = setInterval(() => void refresh(), EVERY);
+        return () => clearInterval(asking);
+    }, [refresh]);
+
+    // What each agent's branch changed since the operator approved it, as the page shows it, by its conversation.
+    const shown = useRef(new Map<string, Since>());
+
+    /** Ask what `agent`'s branch changed since the operator approved it: with the version shown, kept still where it isn't the one as it stands, unless `fresh`, which brings the latest in. */
+    const since = useCallback(
+        async (agent: Live, fresh: boolean) => {
+            const was = shown.current.get(agent.key) ?? null;
+            const reply = await answered({ kind: "policy-show-since", conversation: agent.conversation, seen: fresh ? null : (was?.version ?? null) }, (answer) =>
+                answer.kind === "policy-since" ? answer : null,
+            );
+            if (!("shown" in reply)) {
+                if (fresh) {
+                    setSaid(`Since you approved couldn't be read: ${reply.refused}`);
+                }
+                return;
+            }
+            const now = reply.shown;
+            if (now.same) {
+                return;
+            }
+            if (was === null || fresh) {
+                shown.current.set(agent.key, now);
+                drawn(agent.key, (before) => ({ ...before, since: now, latest: null }));
+                return;
+            }
+            drawn(agent.key, (before) => ({ ...before, latest: now.version === was.version ? null : now }));
+        },
+        [drawn],
+    );
+
+    const refreshSince = useCallback(async () => {
+        await Promise.all(live.map((agent) => since(agent, false)));
+    }, [live, since]);
+
+    useEffect(() => {
+        void refreshSince();
+        const asking = setInterval(() => void refreshSince(), SINCE_EVERY);
+        return () => clearInterval(asking);
+    }, [refreshSince]);
+
+    /** Bring the latest of what an agent's branch changed into its drawer. */
+    const bringIn = useCallback(
+        (conversation: InboxConversation) => {
+            const agent = live.find((each) => each.key === whose(conversation));
+            if (agent !== undefined) {
+                void since(agent, true);
+            }
+        },
+        [live, since],
+    );
+
+    /** Approve the flagged writes on an agent's branch, those on `path` or every one, and read the drawer anew from what was approved. */
+    const approveSince = useCallback(
+        (conversation: InboxConversation, path: string | null) => {
+            const agent = live.find((each) => each.key === whose(conversation));
+            void ask({ kind: "policy-approve-since", conversation, path }).then((answer) => {
+                if (answer.kind === "refused") {
+                    setSaid(answer.error);
+                    return;
+                }
+                if (answer.kind === "policy-approved") {
+                    const flags = answer.flags;
+                    setSaid(
+                        flags.length === 0
+                            ? `Nothing flagged${path === null ? " on the branch" : ` on ${path}`} was waiting for your approval.`
+                            : `Approved ${flags.map(cited).join(", ")}${path === null ? ": the branch's landing waits on none of them" : ""}.`,
+                    );
+                }
+                if (agent !== undefined) {
+                    void since(agent, true);
+                }
+            });
+        },
+        [live, since],
+    );
 
     const drafted = useRef(draft);
     drafted.current = draft;
@@ -327,6 +503,17 @@ export function App() {
         }
     }
 
+    /** Go to an agent's group, as the palette asks. */
+    const goTo = useCallback(
+        (path: string) => {
+            const agent = live.find((each) => each.talker.path === path);
+            if (agent !== undefined) {
+                setJump((before) => ({ to: agent.conversation, number: (before?.number ?? 0) + 1 }));
+            }
+        },
+        [live],
+    );
+
     const numbers = covered(draft);
     const commented = numbers.filter((number) => (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== ""));
     const coveredItems = waiting.filter((each) => numbers.includes(each.number));
@@ -346,16 +533,19 @@ export function App() {
     const told = coveredItems.filter(
         (each) => !yesOrNo(each) && (commented.includes(each.number) || each.reason.reason === "question"),
     );
-    // Written to: each agent a message under its banner is for, which the reply reaches whatever it covers.
+    // Written to: each agent a message under its banner, or a remark in its drawers, is for, which the reply reaches whatever it covers.
     const letters = messages(draft);
+    const remarked = remarks(draft);
     const writtenTo = [...new Set(letters.map((each) => called(each.to)))];
-    const reached = [...new Set([...writtenTo, ...told.map(named), ...pushers])];
+    const remarkedTo = [...new Set(remarked.map((each) => called(each.to)))];
+    const reached = [...new Set([...writtenTo, ...remarkedTo, ...told.map(named), ...pushers])];
     const onMessages = commented.filter((number) => told.some((each) => each.number === number));
     const read = coveredItems.filter((each) => !yesOrNo(each) && !commented.includes(each.number)).map((each) => each.number);
     const citing = (list: number[]) => list.map(cited).join(", ");
-    const replying = numbers.length > 0 || letters.length > 0;
+    const replying = numbers.length > 0 || letters.length > 0 || remarked.length > 0;
     const covering = [
         ...(writtenTo.length === 0 ? [] : [`${letters.length === 1 ? "a message" : "messages"} to ${writtenTo.join(", ")}`]),
+        ...(remarkedTo.length === 0 ? [] : [`${remarked.length === 1 ? "a remark" : `${remarked.length} remarks`} to ${remarkedTo.join(", ")}`]),
         ...(onMessages.length === 0 ? [] : [`comments on ${citing(onMessages)}`]),
         ...(read.length === 0 ? [] : [`read ${citing(read)}`]),
         ...(approving.length === 0 ? [] : [`approving ${citing(approving.map((each) => each.number))}`]),
@@ -372,67 +562,15 @@ export function App() {
                 {reply?.kind === "refused" ? <span className="error">{reply.error}</span> : null}
                 {said === null ? null : <span className="said">{said}</span>}
                 <span className="spacer" />
+                <span className="count">
+                    {agents.length} {agents.length === 1 ? "agent" : "agents"} · {waiting.length} waiting on you
+                </span>
                 <button type="button" onClick={() => setPalette(true)}>
                     Go to <kbd>Ctrl</kbd> <kbd>K</kbd>
                 </button>
             </header>
-            <nav className="win" aria-label="Agents" ref={nav}>
-                <div className="wb">
-                    agents <span className="count">{agents.length}</span>
-                    <span className="spacer" />
-                    <span className="hint">
-                        <kbd>h</kbd> hold · <kbd>␣l</kbd> view
-                    </span>
-                </div>
-                <div className="buf">
-                    <AgentTree
-                        served={served}
-                        selected={selected}
-                        select={setSelected}
-                        now={now}
-                        hold={hold}
-                        right={toView}
-                    />
-                </div>
-                {shown === null ? null : (
-                    <div className="agent-details">
-                        <Details launch={shown.launch} agent={shown.agent} now={now} />
-                    </div>
-                )}
-            </nav>
             <main className="win" ref={main}>
-                {selected === null ? (
-                    <div className="wb">
-                        waiting on you <span className="count">{waiting.length}</span>
-                    </div>
-                ) : shown?.agent == null ? (
-                    <>
-                        <div className="wb">
-                            <button type="button" className="crumb" onClick={review} title="Back to the review">
-                                waiting on you <span className="count">{waiting.length}</span>
-                            </button>
-                            <span className="muted">›</span>
-                            <span>{shown === null ? selected : (shown.launch.launch.name ?? shown.launch.launch.launch)}</span>
-                        </div>
-                        <p className="empty">
-                            {shown === null
-                                ? "It's no longer served: its launch has ended."
-                                : "Its session hasn't started: there's no conversation to read yet."}
-                        </p>
-                    </>
-                ) : (
-                    <Conversation
-                        key={selected}
-                        launch={shown.launch}
-                        agent={shown.agent}
-                        beat={reply}
-                        waiting={waiting.length}
-                        back={review}
-                        tree={toTree}
-                        say={setSaid}
-                    />
-                )}
-                <div className="review" hidden={selected !== null}>
+                <div className="review">
                     <Review
                         items={waiting}
                         agents={agentsRunning}
@@ -441,17 +579,20 @@ export function App() {
                         banner={banner}
                         called={called}
                         around={around}
+                        drawers={drawers}
                         send={() => {
                             if (replying) {
                                 void sent();
                             }
                         }}
                         approve={approve}
+                        approveSince={approveSince}
+                        latest={bringIn}
+                        hold={hold}
+                        jump={jump}
                         say={setSaid}
                         inserting={setInserting}
                         epoch={epoch}
-                        shown={selected === null}
-                        tree={toTree}
                         placed={setPlace}
                         pending={setChord}
                         list={openList}
@@ -485,20 +626,12 @@ export function App() {
                     />
                 </div>
             </main>
-            <Palette
-                open={palette}
-                setOpen={setPalette}
-                agents={agents}
-                select={setSelected}
-                review={review}
-                waiting={waiting.length}
-                now={now}
-            />
+            <Palette open={palette} setOpen={setPalette} agents={agents} select={goTo} now={now} />
         </div>
     );
 }
 
-/** Ask the host for more of an item than its own text: what `shown` takes from its reply, or why it refused, or why it couldn't be asked. */
+/** Ask the host for more than the inbox's own text: what `shown` takes from its reply, or why it refused, or why it couldn't be asked. */
 async function answered<T>(request: Asked, shown: (answer: Replied) => T | null): Promise<Answered<T>> {
     try {
         const answer = await ask(request);
@@ -516,26 +649,4 @@ async function answered<T>(request: Asked, shown: (answer: Replied) => T | null)
 function last(path: string): string {
     const name = path.split("/").filter((each) => each !== "").at(-1) ?? path;
     return name.endsWith(".git") ? name.slice(0, -".git".length) : name;
-}
-
-/** The launch and conversation `key` names: a conversation's path, or a launch whose session hasn't started. */
-function found(
-    served: Launch[],
-    agents: Agent[],
-    key: string | null,
-): { launch: Launch; agent: Agent | null } | null {
-    if (key === null) {
-        return null;
-    }
-    const waiting = served.find((each) => `launch:${each.launch.launch}` === key);
-    if (waiting !== undefined) {
-        return { launch: waiting, agent: null };
-    }
-    const agent = agents.find((each) => each.talker.path === key);
-    const launch = served.find((each) => agent !== undefined && each.session !== null && within(each.session, agent));
-    return agent === undefined || launch === undefined ? null : { launch, agent };
-}
-
-function within(root: Agent, agent: Agent): boolean {
-    return root === agent || root.children.some((child) => within(child, agent));
 }

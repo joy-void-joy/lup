@@ -43,16 +43,25 @@ import {
     whose,
     withWritten,
     written,
+    sinceSummary,
+    tasksSummary,
+    traceSummary,
+    UNREAD,
+    type AgentDrawers,
     type Around,
     type ChangedFile,
     type Comment,
     type Context,
     type Conversation,
     type Draft,
+    type Drawers,
+    type Entry,
     type Fold,
     type Head,
     type Item,
     type Naming,
+    type Remark,
+    type Since,
     type Written,
 } from "./review";
 
@@ -493,7 +502,7 @@ describe("what folds under an item", () => {
             ["file", false],
             ["item", false],
         ]);
-        expect(top).toMatchObject({ item: 54, kind: "lines", name: 'a.py ["","l1"]', label: "3 unchanged lines, 1–3" });
+        expect(top).toMatchObject({ of: "54", kind: "lines", name: 'a.py ["","l1"]', label: "3 unchanged lines, 1–3" });
         expect(shown(top!.summary.from, top!.summary.to)).toBe("3 unchanged lines, 1–3");
         expect(top!.from).toBe(top!.summary.to);
         expect(shown(top!.from, top!.to)).toBe("\nl1\nl2\nl3");
@@ -509,7 +518,7 @@ describe("what folds under an item", () => {
         ]);
 
         const [context] = question!.folds;
-        expect(context).toMatchObject({ item: 51, kind: "context", closed: true, label: "context" });
+        expect(context).toMatchObject({ of: "51", kind: "context", closed: true, label: "context" });
         expect(shown(context!.summary.from, context!.summary.to)).toBe(
             "context · 7 steps, from your words 9m before this item",
         );
@@ -555,7 +564,7 @@ describe("what folds under an item", () => {
         const [note, approval] = out.regions;
         const shown = (from: number, to: number) => out.text.slice(from, to);
         const [file, created] = approval!.folds.filter((each) => each.kind === "file");
-        expect(file).toMatchObject({ item: 54, kind: "file", name: "t.py", closed: true });
+        expect(file).toMatchObject({ of: "54", kind: "file", name: "t.py", closed: true });
         expect(created).toMatchObject({ name: "n.py", closed: false });
         expect(shown(file!.summary.from, file!.summary.to)).toBe("t.py · changed · +1 −1 · automatic");
         expect(shown(file!.from, file!.to)).toBe("\na\nb\nB");
@@ -711,8 +720,8 @@ describe("typed folds", () => {
 
     it("reaches the folds of the item the cursor is in alone, for `zr`, `zm` and Space z", () => {
         const at = (text: string) => out.text.indexOf(text);
-        expect(foldsOf(out, at("step3()")).map((each) => each.item)).toEqual(region.folds.map(() => 56));
-        expect(foldsOf(out, at("Which parser?")).every((each) => each.item === 51)).toBe(true);
+        expect(foldsOf(out, at("step3()")).map((each) => each.of)).toEqual(region.folds.map(() => "56"));
+        expect(foldsOf(out, at("Which parser?")).every((each) => each.of === "51")).toBe(true);
         expect(foldsOf(out, at("━━ s1"))).toEqual([]);
         // zr from the held change opens its automatic file alone, then its runs and bodies, then its context.
         const closed = new Set(region.folds.filter((each) => each.closed));
@@ -735,7 +744,7 @@ describe("typed folds", () => {
         expect(step(false)).toEqual(["lines", "lines", "lines", "body", "body", "lines", "body"]);
         expect(step(false)).toEqual(["file", "file"]);
         expect(step(false)).toEqual([]);
-        expect([...closed].every((each) => each.item === 56)).toBe(true);
+        expect([...closed].every((each) => each.of === "56")).toBe(true);
     });
 
     it("says in the header where the cursor is: the group, the item, the file and the folds it's in", () => {
@@ -812,12 +821,9 @@ describe("what a change shows open, as it's laid out", () => {
     /** Unchanged lines alone folded, three kept around the change on line 10 and around the line that asks. */
     const everyChange = { runs: ["6 unchanged lines, 1–6", "3 unchanged lines, 14–16", "7 unchanged lines, 24–30"], hidden: false };
 
-    it("opens every change of a flagged write, folding only unchanged lines, 3 kept around each change and each line that matters", () => {
-        expect(folded(FLAGGED)).toEqual(everyChange);
-    });
-
-    it("opens every change of a held change, folding only unchanged lines, as a flagged write does", () => {
+    it("opens every change of a held change, folding only unchanged lines, 3 kept around each change and each line that matters", () => {
         expect(folded(HELD)).toEqual(everyChange);
+        expect(folded(FLAGGED)).toEqual(everyChange);
     });
 
     it("keeps an approval's file showing the lines that ask alone, with their context, its other changes folded", () => {
@@ -860,23 +866,20 @@ describe("comments on a changed file's lines", () => {
         expect(onItem(opened(out, empty))?.quote?.text).toBe("b.md:2\n+");
     });
 
-    it("shows a flagged write's file under it as a held change's, its lines quoted the same", () => {
+    it("shows a flagged write's file under it as a held change's, where one is still laid out, its lines quoted the same", () => {
         const flagged = laid([FLAGGED], [], banner, header, EMPTY, { contexts: new Map(), files: new Map([[70, { shown: [CHANGED] }]]) });
         const line = (text: string) => flagged.text.indexOf(`\n${text}\n`) + 1;
         expect([changing(FLAGGED), changing(HELD), changing(NOTE)]).toEqual([true, true, false]);
         expect(flagged.text.startsWith("━━ s2 ━━\n── #70 ──\na.py landed, flagged for the operator's review.\n")).toBe(true);
         expect(flagged.regions[0]!.code.length).toBeGreaterThan(0);
         expect(onItem(opened(flagged, line("L7")))).toEqual({ item: 70, quote: { text: "a.py:7\n+L7", start: expect.any(Number), end: expect.any(Number) }, text: "" });
-        // Its file is a flagged one to the line of keys, read rather than approved.
-        expect(placeAt(flagged, line("L7"))).toBe("flagged");
+        expect(placeAt(flagged, line("L7"))).toBe("file");
         expect(placeAt(flagged, flagged.text.indexOf("a.py landed"))).toBe("item");
     });
 
-    it("answers an approval or a held change with Space a and Space x, and reads a flagged write with Space a, never declining it", () => {
-        expect([answering(APPROVAL, true), answering(HELD, false)]).toEqual([{ kind: "answer" }, { kind: "answer" }]);
-        expect(answering(FLAGGED, true)).toEqual({ kind: "read" });
-        expect(answering(FLAGGED, false)).toEqual({ kind: "say", text: "A flag is read or commented on, never declined." });
-        expect([answering(NOTE, true), answering(QUESTION, false)]).toEqual([{ kind: "nothing" }, { kind: "nothing" }]);
+    it("answers an approval or a held change with Space a and Space x, and nothing else", () => {
+        expect([answering(APPROVAL), answering(HELD)]).toEqual([{ kind: "answer" }, { kind: "answer" }]);
+        expect([answering(FLAGGED), answering(NOTE), answering(QUESTION)]).toEqual([{ kind: "nothing" }, { kind: "nothing" }, { kind: "nothing" }]);
     });
 
     it("quotes a passage across a file's lines, and across files, each under its path and the span of its lines", () => {
@@ -1049,5 +1052,161 @@ describe("waited and fresh", () => {
         expect(fresh(QUESTION, "2026-10-17T11:00:00Z")).toBe(true);
         expect(fresh(QUESTION, "2026-10-17T12:30:00Z")).toBe(false);
         expect(fresh(QUESTION, null)).toBe(false);
+    });
+});
+
+describe("the drawers at the end of each agent's group", () => {
+    const S1 = from("s1", "a1");
+    const ENTRIES: Entry[] = [
+        { kind: "said", by: "operator", text: "Build the reader.", at: "2026-10-17T11:50:00Z" },
+        { kind: "said", by: "agent", text: "Reading the records.", at: "2026-10-17T11:51:00Z" },
+        { kind: "called", tool: "Bash", at: "2026-10-17T11:52:00Z" },
+        { kind: "called", tool: "Read", at: "2026-10-17T11:52:00Z" },
+        { kind: "said", by: "operator", text: "Ask me first.", at: "2026-10-17T11:55:00Z" },
+        { kind: "said", by: "agent", text: "Twenty kinds of line.", at: "2026-10-17T11:56:00Z" },
+        { kind: "called", tool: "Grep", at: "2026-10-17T11:57:00Z" },
+    ];
+    const READER = '"""Reader."""\n\n\nclass Reader:\n    def turns(self):\n        a = 1\n        b = 2\n        return a + b\n';
+    const SINCE: Since = {
+        kind: "policy-since",
+        worktree: "/w/feat",
+        branch: "feat",
+        version: "t1 0",
+        writes: 3,
+        same: false,
+        files: [
+            {
+                file: {
+                    path: "reader.py",
+                    before: null,
+                    after: { kind: "text", text: READER },
+                    reading: { role: "production", asks: [{ name: "new-file", taken: "flagged", side: "after" }], findings: [] },
+                },
+                version: "b1",
+                flags: [70],
+                since: null,
+            },
+        ],
+    };
+    const DATA: AgentDrawers = {
+        entries: ENTRIES,
+        tasks: [
+            { id: "1", subject: "Write the sampler", status: "completed", active: null },
+            { id: "2", subject: "Write the models", status: "in_progress", active: "Writing the models" },
+            { id: "3", subject: "Measure", status: "pending", active: null },
+        ],
+        usage: { used: 112_000, window: 1_000_000, model: null },
+        exchanged: null,
+        since: SINCE,
+        latest: null,
+    };
+    const drawers: Drawers = new Map([[whose(S1), DATA]]);
+    const out = laid([QUESTION, NOTE], [S1], banner, header, EMPTY, NOTHING, [], drawers);
+    const at = (text: string) => out.text.indexOf(text);
+    const lines = (from: number, to: number) => out.text.slice(from, to).split("\n");
+
+    it("lays four drawers after the group's items, each folded under its summary line, a new module's bodies folded too", () => {
+        const [group] = out.groups;
+        expect(group?.drawers.map((each) => each.kind)).toEqual(["tasks", "trace", "since", "conversation"]);
+        expect(out.groups[1]?.drawers).toEqual([]);
+        const texts = out.drawers.map((each) => lines(each.header.from, each.folds.at(-1)!.to));
+        expect(texts[0]).toEqual(["tasks · 3 entries, 1 done, 1 in progress", "✓ Write the sampler", "▶ Writing the models", "· Measure"]);
+        expect(texts[1]).toEqual(["trace · 2 steps since your last message", "Twenty kinds of line.", "· called Grep"]);
+        expect(texts[2]?.slice(0, 2)).toEqual(["since you approved on feat · 1 file", "reader.py · created · 8 lines · new file"]);
+        expect(texts[3]?.slice(0, 3)).toEqual(["conversation · 7 steps", "earlier · 4 steps, from 5m before your last words", "you: Build the reader."]);
+        // Each drawer is its own fold, folded; the new module's bodies fold until opened, its file open.
+        const own = out.drawers.map((each) => each.folds.at(-1)!);
+        expect(own.map((each) => [each.kind, each.closed, each.of])).toEqual([
+            ["tasks", true, `tasks ${whose(S1)}`],
+            ["trace", true, `trace ${whose(S1)}`],
+            ["since", true, `since ${whose(S1)}`],
+            ["conversation", true, `conversation ${whose(S1)}`],
+        ]);
+        const since = out.drawers[2]!;
+        expect(since.folds.map((each) => [each.kind, each.label, each.closed])).toEqual([
+            ["body", "Reader", true],
+            ["body", "turns", true],
+            ["file", "reader.py", false],
+            ["since", "since you approved on feat · 1 file", true],
+        ]);
+        expect(foldKey(since.folds[1]!)).toBe(`since ${whose(S1)} body reader.py ["Reader","turns"]`);
+        // The items came before the drawers, the group after them where it is.
+        expect(at("── #51")).toBeLessThan(at("tasks ·"));
+        expect(at("conversation · 7 steps")).toBeLessThan(at("━━ s2"));
+        // An agent the host hasn't answered of has no drawers; a drawer with nothing under its summary line has no fold.
+        expect(laid([QUESTION], [S1], banner, header, EMPTY, NOTHING).drawers).toEqual([]);
+        const bare = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), UNREAD]]));
+        expect(bare.drawers.map((each) => [each.kind, each.folds.length])).toEqual([["tasks", 0], ["trace", 0], ["since", 0], ["conversation", 0]]);
+        expect(bare.text).toContain("tasks · none kept\n\ntrace · nothing\n\nsince you approved · not read yet\n\nconversation · 0 steps\n\n");
+    });
+
+    it("opens a remark on the agent's words in the trace, and on a file's line since you approved, recording the version", () => {
+        expect(opened(out, at("Twenty"))).toEqual({ to: S1, quote: { text: "Twenty kinds of line.", start: 0, end: 21 }, text: "", step: 5 });
+        expect(opened(out, at("        a = 1"))).toEqual({
+            to: S1,
+            quote: { text: "reader.py:6\n+        a = 1", start: expect.any(Number), end: expect.any(Number) },
+            text: "",
+            code: { worktree: "/w/feat", path: "reader.py", version: "b1", first: 6, lines: ["        a = 1"] },
+        });
+        const from = at("        a = 1");
+        const to = at("        return") + 8;
+        const across = quoted(out, from, to);
+        expect(across !== undefined && "code" in across ? across.code : null).toEqual({ worktree: "/w/feat", path: "reader.py", version: "b1", first: 6, lines: ["        a = 1", "        b = 2", "        return a + b"] });
+        for (const line of ["tasks ·", "✓ Write", "· called Grep", "trace ·", "since you approved", "earlier ·"]) {
+            expect(opened(out, at(line))).toBeUndefined();
+        }
+        expect(opened(out, at("━━ s1"))).toEqual({ to: S1, text: "" });
+    });
+
+    it("places each remark under its line, one on a step since your last words in the trace alone, and says whom it goes to", () => {
+        const onCode = opened(out, at("        a = 1"));
+        const quote = onCode !== undefined && "quote" in onCode && onCode.quote != null ? onCode.quote : { text: "", start: 0, end: 0 };
+        const remarks: Remark[] = [
+            { to: S1, quote: { text: "Twenty kinds of line.", start: 0, end: 21 }, text: "Which twenty?", step: 5 },
+            { to: S1, quote: { text: "Reading the records.", start: 0, end: 20 }, text: "Good.", step: 1 },
+            { to: S1, quote, text: "Name it.", code: { worktree: "/w/feat", path: "reader.py", version: "b1", first: 6, lines: ["        a = 1"] } },
+        ];
+        const draft: Draft = { ...EMPTY, remarks };
+        const wrote = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers);
+        const text = wrote.text;
+        expect(text.split("Which twenty?").length).toBe(2);
+        expect(text).toContain("Twenty kinds of line.\nWhich twenty?\n· called Grep");
+        expect(text).toContain("Reading the records.\nGood.\n");
+        expect(text.indexOf("Good.")).toBeGreaterThan(text.indexOf("conversation · 7 steps"));
+        expect(text).toContain("        a = 1\nName it.\n");
+        const naming: Naming = { group: () => "g", item: (each) => `#${each.item.number}`, party: (party) => `agent ${party.session}/${party.agent}` };
+        expect(heading(wrote, text.indexOf("Name it."), true, written(draft), naming).map((each) => `${each.kind}: ${each.text}`)).toEqual([
+            "to: to agent s1/a1",
+            "group: g",
+            "since: since",
+            "file: reader.py",
+            "body: Reader",
+            "body: turns",
+        ]);
+        expect(blockAt(wrote, text.indexOf("Name it."))?.comment).toBe(2);
+        expect(written(draft)[2]).toBe(remarks[2]);
+        expect(withWritten(EMPTY, remarks).remarks).toEqual(remarks);
+    });
+
+    it("says where the cursor is in a drawer for the line of keys", () => {
+        expect(placeAt(out, at("tasks ·"))).toBe("drawer");
+        expect(placeAt(out, at("✓ Write"))).toBe("drawer");
+        expect(placeAt(out, at("Twenty"))).toBe("trace");
+        expect(placeAt(out, at("· called Grep"))).toBe("aside");
+        expect(placeAt(out, at("        a = 1"))).toBe("since");
+        expect(placeAt(out, at("reader.py · created"))).toBe("since");
+        expect(placeAt(out, at("you: Build"))).toBe("aside");
+    });
+
+    it("says in each summary line what the drawer holds, and how many writes came since, which Space l brings in", () => {
+        expect(tasksSummary([])).toBe("tasks · none kept");
+        expect(traceSummary(ENTRIES, true)).toBe("trace · 2 steps since your last message");
+        expect(traceSummary(ENTRIES.slice(0, 5), true)).toBe("trace · nothing since your last message");
+        expect(traceSummary([], false)).toBe("trace · not read yet");
+        expect(sinceSummary(null, null)).toBe("since you approved · not read yet");
+        expect(sinceSummary(SINCE, null)).toBe("since you approved on feat · 1 file");
+        expect(sinceSummary(SINCE, { ...SINCE, version: "t2 0", writes: 5 })).toBe("since you approved on feat · 1 file · 2 writes since · ␣l brings it in");
+        expect(sinceSummary(SINCE, { ...SINCE, version: "t1 1", writes: 3 })).toBe("since you approved on feat · 1 file · changed since · ␣l brings it in");
+        expect(sinceSummary({ ...SINCE, files: [] }, { ...SINCE, files: [] })).toBe("since you approved on feat · nothing");
     });
 });

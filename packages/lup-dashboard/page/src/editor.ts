@@ -19,8 +19,7 @@
 // letter those of a kind, within what the view says (in the review, the item the
 // cursor is in; in a conversation, everything); `zj` and `zk` go to the next
 // fold's start and the previous one's end, `[z` and `]z` to the start and the end
-// of the open fold the cursor is in (`folds.ts`). Space `h`, or Space `w` `h`,
-// goes to the agents' tree; `?` opens the list of every key, in place of vim's
+// of the open fold the cursor is in (`folds.ts`). `?` opens the list of every key, in place of vim's
 // search backward; once a chord is begun, as with Space, the view is told what's
 // pressed, to show what may follow. `"+` and `"*` are the system clipboard, and a
 // yank or a put the clipboard refused is said in the page's top line
@@ -65,8 +64,12 @@ interface Actions {
     matter: (forward: boolean) => void;
     written: (forward: boolean) => void;
     approve: (approved: boolean) => void;
-    back: () => void;
-    tree: () => void;
+    /** Space `A`: mark all of a "since you approved" drawer good. */
+    approveAll: () => void;
+    /** Space `l`: bring the latest into a "since you approved" drawer. */
+    latest: () => void;
+    /** `h` on a banner: turn the operator's switch to hold the agent's flagged writes; elsewhere it's vim's `h`, said by false. */
+    hold: () => boolean;
     list: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
     foldLevel: (opening: boolean, all: boolean) => void;
@@ -304,10 +307,10 @@ function boundOf(state: EditorState): Bound {
 let speaking: Bound | null = null;
 
 /**
- * Each chord Space leads in the views, as vim's keymap writes its keys, and the action it does: Space `p` parks an
- * item, leaving it for later; Space `z` and a letter, as vim's fold keys begin with `z`, opens every fold of its kind
- * in the item, Shift and the letter closing them; Space `h`, or Space `w` `h`, goes to the agents' tree. The list of
- * keys (`keys.ts`) says each of them.
+ * Each chord Space leads in the review, as vim's keymap writes its keys, and the action it does: Space `p` parks an
+ * item, leaving it for later; Space `A` marks a "since you approved" drawer good and Space `l` brings its latest in;
+ * Space `z` and a letter, as vim's fold keys begin with `z`, opens every fold of its kind in the item or the drawer,
+ * Shift and the letter closing them. The list of keys (`keys.ts`) says each of them.
  */
 export const SPACED: readonly (readonly [keys: string, action: string])[] = [
     ["<Space>c", "lupCommentWhole"],
@@ -315,9 +318,8 @@ export const SPACED: readonly (readonly [keys: string, action: string])[] = [
     ["<Space>p", "lupLater"],
     ["<Space>a", "lupApprove"],
     ["<Space>x", "lupDecline"],
-    ["<Space>r", "lupBack"],
-    ["<Space>h", "lupTree"],
-    ["<Space>wh", "lupTree"],
+    ["<Space>A", "lupApproveAll"],
+    ["<Space>l", "lupLatest"],
     ...FOLD_KINDS.filter((each) => each.chord).flatMap(({ kind, letter }) => [
         [`<Space>z${letter}`, `lupFoldOpen-${kind}`] as const,
         [`<Space>z${letter.toUpperCase()}`, `lupFoldClose-${kind}`] as const,
@@ -362,8 +364,14 @@ function mapKeys(): void {
     action("lupPreviousWritten", (actions) => actions.written(false));
     action("lupApprove", (actions) => actions.approve(true));
     action("lupDecline", (actions) => actions.approve(false));
-    action("lupBack", (actions) => actions.back());
-    action("lupTree", (actions) => actions.tree());
+    action("lupApproveAll", (actions) => actions.approveAll());
+    action("lupLatest", (actions) => actions.latest());
+    // `h` holds an agent's flagged writes on its banner, and moves left, as vim's `h` does, anywhere else.
+    action("lupHold", (actions, cm) => {
+        if (!actions.hold()) {
+            Vim.handleKey(cm, "<Left>", "mapping");
+        }
+    });
     action("lupKeys", (actions) => actions.list());
     // Vim's own fold keys, which its CodeMirror mode leaves unmapped, on CodeMirror's folds.
     action("lupFoldToggle", (actions) => actions.fold("toggle"));
@@ -397,6 +405,7 @@ function mapKeys(): void {
     const map = (keys: string, name: string, context: string) =>
         Vim.mapCommand(keys, "action", name, {}, { context });
     map("o", "lupCommentLine", "normal");
+    map("h", "lupHold", "normal");
     for (const [keys, name] of SPACED) {
         map(keys, name, "normal");
     }
@@ -803,8 +812,6 @@ interface Config<D, C> {
     epoch: number;
     /** Whether the editor is shown: shown again, it takes the keyboard. */
     shownNow: boolean;
-    /** Give the keyboard to the agents' tree. */
-    tree: () => void;
     /** Open the list of every key (`?`). */
     list: () => void;
     /** Told the keys of a chord begun, as the list writes them (`␣`, `␣z`), each time they change: none once it's done. */
@@ -833,7 +840,12 @@ export interface Own<C> {
     /** Go to the next or previous line that matters, as the review's are by the judge's reading, opening what folds it on the way. */
     matter?: (forward: boolean) => void;
     approve?: (approved: boolean) => void;
-    back?: () => void;
+    /** Mark all of the "since you approved" drawer the cursor is in good, as Space `A` does; none where the view has none. */
+    approveAll?: () => void;
+    /** Bring the latest into the "since you approved" drawer the cursor is in, as Space `l` does. */
+    latest?: () => void;
+    /** Turn the operator's switch for the agent whose banner the cursor is on, and say whether it was on one. */
+    hold?: () => boolean;
     /** What's painted on the lines from `from` to `to` while they're in view, beyond what `draw` drew: a changed file's lines and their highlighting. */
     paint?: (from: number, to: number) => Range<Decoration>[];
     /** The folds `zr` opens (`opening`) or `zm` closes from `position`, or with `all` `zR` and `zM`; where none's said, those of every fold (`levelled`). */
@@ -1132,8 +1144,9 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 editor.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true });
             },
             approve: (approved) => own.approve?.(approved),
-            back: () => own.back?.(),
-            tree: config.tree,
+            approveAll: () => own.approveAll?.(),
+            latest: () => own.latest?.(),
+            hold: () => own.hold?.() ?? false,
             list: config.list,
             fold: (how) => {
                 const editor = view.current;
