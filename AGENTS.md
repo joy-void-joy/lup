@@ -19,7 +19,7 @@ To change what sessions are told, propose an edit to the file it belongs in, wit
 7. **A release is a pull request from `dev` to `main`,** which the operator reviews and merges. Its description says what changed since the last release. Never merge into `main` or push to it yourself.
 8. **lup's own sessions use a piece once it's finished.** Until then, don't select it in `lup_project.py` or point lup's guidance at it: the sessions building it would be working inside it.
 
-The roadmap issue (#123) orders the work, so what you file can find its place there.
+**Issues stay few and current.** Before filing, search, and add to the issue that's there rather than file one beside it. When a newer issue covers an older one, close the older the same day, saying where each part went: close readily, and reopen or file anew for a part that remains. The roadmap issue (#123) orders the work: filing or closing an issue it lists means editing its list, not adding a comment.
 
 ## lup's code
 
