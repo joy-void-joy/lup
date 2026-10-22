@@ -11,13 +11,13 @@
 // highlighted as they come into view, each line that matters by the judge's
 // reading barred and saying what it triggered; the item's header counts its files
 // by why each is open; under each item, its context. Each fold has a kind,
-// marked in the margin beside its summary line, with a bar for each fold the
-// cursor is in (`margin.ts`); the context, each run of unchanged lines and each
-// automatic file fold, folded until opened, and `zr`, `zm`, `zR`, `zM` and Space
-// `z` act on the item the cursor is in. The header over the review says where
-// the cursor is: the group, the item, the file and the folds it's in, and,
-// while a comment is being written, whom it goes to (`docs/dashboard.md`, *The
-// review*).
+// its letter in the margin beside its summary line, in the column of its depth,
+// a bar under it for each fold the cursor is in (`margin.ts`); the context, each
+// run of unchanged lines and each automatic file fold, folded until opened, and
+// `zr`, `zm`, `zR`, `zM` and Space `z` act on the item the cursor is in. The
+// header over the review says where the cursor is: the group, the item, the
+// file and the folds it's in, and, while a comment is being written, whom it
+// goes to (`docs/dashboard.md`, *The review*).
 import { RangeSetBuilder, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState } from "react";

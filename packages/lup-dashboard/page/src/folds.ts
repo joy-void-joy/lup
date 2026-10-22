@@ -16,6 +16,26 @@ export function around<F extends Pick<Folding, "summary" | "to">>(folds: readonl
     return folds.filter((each) => at >= each.summary.from && at <= each.to).sort((a, b) => a.summary.from - b.summary.from);
 }
 
+/**
+ * Return how deep each of `folds` is: how many of the others hold it, from a summary line to a last line, the outermost
+ * none. Folds nest, each whole inside another or beside it, so a fold the cursor is in is as deep as its place among
+ * those `around` it, and the review's margin draws each in the column of its depth (`margin.ts`).
+ */
+export function depths<F extends Pick<Folding, "summary" | "to">>(folds: readonly F[]): Map<F, number> {
+    const ordered = [...folds].sort((a, b) => a.summary.from - b.summary.from || b.to - a.to);
+    // The folds holding the one reached so far, outermost first.
+    const holding: F[] = [];
+    const found = new Map<F, number>();
+    for (const fold of ordered) {
+        while (holding.length > 0 && (holding.at(-1)?.to ?? 0) < fold.summary.from) {
+            holding.pop();
+        }
+        found.set(fold, holding.length);
+        holding.push(fold);
+    }
+    return found;
+}
+
 /** Return the level `zr` and `zm` open and close `fold` at, by its kind (`FOLD_KINDS`); a fold of no kind is at none. */
 export function levelOf(fold: Folded): number | undefined {
     return FOLD_KINDS.find((each) => each.kind === fold.kind)?.level;

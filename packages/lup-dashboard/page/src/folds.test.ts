@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
-import { around, foldEdge, levelled, nextFold, ofKind } from "./folds";
+import { around, depths, foldEdge, levelled, nextFold, ofKind } from "./folds";
 import type { FoldKind } from "./keys";
 
 // A text of lines two characters long, line `n` starting at `3n`.
@@ -34,6 +34,19 @@ describe("the folds the cursor is in", () => {
         expect(around(FOLDS, start(7)).map((each) => each.key)).toEqual(["A", "B", "C", "D"]);
         expect(around(FOLDS, start(4)).map((each) => each.key)).toEqual(["A", "B", "C"]);
         expect(around(FOLDS, start(21))).toEqual([]);
+    });
+
+    it("sets each as deep as the folds holding it, so its column in the margin is its place among those the cursor is in", () => {
+        const deep = depths(FOLDS);
+        expect(FOLDS.map((each) => `${each.key}${deep.get(each)}`)).toEqual(["A0", "B1", "C2", "D3", "E2", "F1", "G0", "H1", "I2"]);
+        for (const at of [7, 13, 18, 25]) {
+            const chain = around(FOLDS, start(at));
+            expect(chain.map((each) => deep.get(each))).toEqual(chain.map((_, depth) => depth));
+        }
+        // Two folds under one summary line, as two bodies declared on it: the one around the other is outermost.
+        const inner = fold("K", "body", 2, 4, false);
+        const outer = fold("J", "body", 2, 6, false);
+        expect([...depths([inner, outer]).entries()].map(([each, depth]) => `${each.key}${depth}`)).toEqual(["J0", "K1"]);
     });
 });
 

@@ -31,9 +31,10 @@
     --fold-body: var(--purple);
     --fold-lines: var(--muted);
     --fold-context: var(--cyan);
-    /* How far apart the margin's bars are, one a fold the cursor is in, and how many fit. */
-    --bar-step: 4px;
-    --bars: 6;
+    /* How many columns the review's margin has, one for each depth folds nest to,
+       and how wide each is: a letter's width, and a little. */
+    --columns: 6;
+    --column: calc(1ch + 1px);
 
     --mono: "JetBrains Mono", "Iosevka Term", "Iosevka", "Fira Code", "Cascadia Mono",
         "Source Code Pro", "DejaVu Sans Mono", ui-monospace, monospace;
@@ -840,17 +841,19 @@ kbd {
     color: var(--fold-context);
 }
 
-/* The review's margin: a row a line, as tall as the line beside it. The bars of
-   the folds the cursor is in, outermost leftmost, each from its summary line to
-   its last, set in a little at both ends so two folds one after another show
-   apart; then the mark of the fold a line is the summary line of. */
+/* The review's margin: a row a line, as tall as the line beside it, and a
+   column for each depth folds nest to, outermost leftmost, a fold deeper than
+   the last sharing it. In a fold's column, beside its summary line, the letter
+   of its kind, outlined where it's folded; under it, for each fold the cursor is
+   in, a thin bar down to the fold's last line, set in a little at its end so two
+   folds one after another show apart: each bar begins with its letter. */
 .buffer .cm-gutters {
     background: var(--bg);
     border: 0;
 }
 
 .buffer .fold-margin {
-    width: calc(3px + var(--bars) * var(--bar-step) + 2ch + 2px);
+    width: calc(2px + var(--columns) * var(--column));
 }
 
 .buffer .fold-margin .cm-gutterElement {
@@ -863,17 +866,25 @@ kbd {
     inset: 0;
 }
 
+/* Where a bar's or a letter's column starts, by its fold's depth. */
+.fold-bar,
+.fold-mark {
+    --at: calc(1px + min(var(--depth), var(--columns) - 1) * var(--column));
+}
+
 .fold-bar {
     position: absolute;
     top: 0;
     bottom: 0;
-    left: calc(3px + var(--depth) * var(--bar-step));
+    left: calc(var(--at) + var(--column) / 2 - 1px);
     width: 2px;
     background: currentColor;
 }
 
+/* On the summary line the letter stands for the bar, which goes on from under
+   it where the line wraps. */
 .fold-bar.is-first {
-    top: 3px;
+    top: var(--lh);
 }
 
 .fold-bar.is-last {
@@ -882,10 +893,17 @@ kbd {
 
 .fold-mark {
     position: absolute;
-    top: 0;
-    right: 2px;
-    line-height: var(--lh);
+    top: 1px;
+    left: var(--at);
+    width: var(--column);
+    height: calc(var(--lh) - 2px);
+    line-height: calc(var(--lh) - 2px);
+    text-align: center;
     font-weight: 700;
+}
+
+.fold-mark.is-folded {
+    box-shadow: inset 0 0 0 1px currentColor;
 }
 
 /* A folded fold's placeholder: outlined in its kind's colour. */
@@ -1028,7 +1046,7 @@ kbd {
 
 @media (max-width: 640px) {
     :root {
-        --bar-step: 3px;
+        --columns: 5;
     }
 
     .where {
