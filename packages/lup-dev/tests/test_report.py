@@ -13,7 +13,6 @@ from lup_dev.policy.report import (
     refusal,
     removed_notes,
     turn_end,
-    unheld,
 )
 
 ROOT = Path("/work/lup")
@@ -140,19 +139,6 @@ def test_removed_notes_and_turn_end() -> None:
     assert turn_end([found(at(1, 1), "E501", "too long", owner="ruff")]).startswith(
         "lup won't end the turn yet"
     )
-
-
-def test_what_doesnt_hold_the_turns_end() -> None:
-    left = [found(at(2, 5), "reportCallIssue", "wrong arguments", owner="pyright")]
-    assert unheld([], "working") == ""
-    working = unheld(left, "working")
-    assert working.startswith(
-        "A subagent of this session at work touched these files too"
-    )
-    assert working.endswith(
-        "  /work/lup/src/lup/claude.py:2:5 - reportCallIssue: wrong arguments"
-    )
-    assert "they fail the gate until cleared" in unheld(left, "repeated")
 
 
 def test_a_move_of_head_is_told_as_its_commits() -> None:

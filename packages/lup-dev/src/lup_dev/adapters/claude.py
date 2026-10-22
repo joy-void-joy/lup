@@ -18,9 +18,10 @@ runtime. The agent hears what deferred work came due as `additionalContext` of
 result, and what a turn's end tells it, the session's or a subagent's, as
 `additionalContext` of `Stop` or `SubagentStop`, which holds the turn: it goes
 on, the text shown as hook feedback rather than a hook error.
-`stop_hook_active` says a turn's end follows such a hold. When judging itself fails at a turn's end, the turn ends,
-and the operator is warned once in `systemMessage`, which also carries what the
-session's turn's end tells without holding it.
+`stop_hook_active` says a turn's end follows such a hold. An end that doesn't
+hold tells nothing: `systemMessage` would reach the operator, not the agent.
+When judging itself fails at a turn's end, the turn ends, and the operator is
+warned once in `systemMessage`.
 
 In a launched room (`docs/host.md`, *The one hook*), Claude Code runs the room's
 hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and
@@ -831,8 +832,8 @@ class Stop(Payload):
 
     What the turn's end tells the agent holds it, as `additionalContext`, which
     the hooks reference says means "The conversation continues so Claude can act
-    on it"; what it tells without holding it goes to the operator, in
-    `systemMessage`.
+    on it"; an end that doesn't hold says nothing. Only a judge's failure goes
+    to the operator, in `systemMessage`.
     """
 
     hook_event_name: Literal["Stop"]
@@ -867,11 +868,7 @@ class Stop(Payload):
             after_block=self.stop_hook_active,
         )
         reply = ended.apply(bench)
-        if reply.block:
-            return held(self.hook_event_name, reply.block)
-        if reply.note:
-            return OperatorWarning(system_message=reply.note)
-        return None
+        return held(self.hook_event_name, reply.block) if reply.block else None
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:

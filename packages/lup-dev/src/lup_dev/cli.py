@@ -2034,17 +2034,7 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
     def found(path: Path) -> list[Finding]:
         report = next(each for each in reports if each.path == path)
         every = [*report.findings, *(each for each in ruff if each.path == path)]
-        ruled = worktree.roles.ruled(path)
-        kept = [
-            each
-            for each in every
-            if (ruled or each.owner != "lup")
-            and not worktree.roles.exempt(path, each.rule)
-            and not any(
-                directive.keeps(each.rule, each.span.start.line)
-                for directive in report.directives
-            )
-        ]
+        kept = worktree.roles.kept(report, every)
         checking = Checking(
             fired=[Fired(rule=each.rule, line=each.span.start.line) for each in every],
             conditions=list(conditions),

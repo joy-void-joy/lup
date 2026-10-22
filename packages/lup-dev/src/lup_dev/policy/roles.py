@@ -24,12 +24,15 @@ gets is in `docs/judging-writes.md`, *What each change gets*.
 
 import tomllib
 from pathlib import Path, PurePath
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from lup.types import Model
 from lup_dev.declaration.kinds import Pytest
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.layout import CheckoutLayout
+
+if TYPE_CHECKING:
+    from lup_dev.codescan.contract import FileReport, Finding
 
 type Role = Literal[
     "protected", "operator", "excluded", "test", "scratch", "docs", "data", "production"
@@ -134,6 +137,30 @@ class Roles(Model):
         not from pyright and ruff.
         """
         return self.ruled(path) or (self.is_python(path) and self.role(path) == "test")
+
+    def kept(self, report: FileReport, findings: list[Finding]) -> list[Finding]:
+        """Return those of `findings`, the engine's and ruff's in `report`'s file, that hold there.
+
+        None where the roles check nothing; lup's only where its rules read, so
+        a test has pyright's and ruff's alone; none of a rule the declaration
+        exempts the file from, nor one an `ignore` in the file keeps. Every
+        place findings are told or held reads them through here: the judge's
+        reports, a checkpoint's, a turn's end and the gate.
+        """
+        path = report.path
+        if not self.checked(path):
+            return []
+        ruled = self.ruled(path)
+        return [
+            found
+            for found in findings
+            if (ruled or found.owner != "lup")
+            and not self.exempt(path, found.rule)
+            and not any(
+                directive.keeps(found.rule, found.span.start.line)
+                for directive in report.directives
+            )
+        ]
 
     def is_test(self, path: Path) -> bool:
         """Say whether `path` is a test: one the test patterns match, or one pytest collects or reads as a conftest.

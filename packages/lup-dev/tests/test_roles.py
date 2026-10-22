@@ -1,11 +1,15 @@
 """Path roles, and the project declaration they read."""
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
 from lup_dev import (
+    CodeRules,
     Core,
+    Exemption,
+    Exemptions,
     Module,
     Modules,
     Paths,
@@ -14,6 +18,8 @@ from lup_dev import (
     Python,
     TestRoots,
 )
+from lup_dev.codescan.contract import FileReport, Finding, Position, Span
+from lup_dev.codescan.directives import Ignore
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.policy.roles import Roles
 
@@ -207,3 +213,52 @@ def test_without_python_nothing_is_a_python_module(repo: Path) -> None:
     assert not without.is_python(Path("src/pkg/core.py"))
     assert without.role(Path("tests/test_core.py")) == "production"
     assert without.role(Path("pyproject.toml")) == "data"
+
+
+def fired(
+    path: str, line: int, owner: Literal["lup", "pyright", "ruff"], rule: str
+) -> Finding:
+    place = Position(line=line, column=1)
+    return Finding(
+        path=Path(path),
+        span=Span(start=place, end=place),
+        owner=owner,
+        rule=rule,
+        message=f"{rule} fires here",
+    )
+
+
+def kept_in(roles: Roles, path: str) -> list[str]:
+    """Return the rules of the findings `roles` keeps in `path`, where every owner fired one, a second `regex` under an `ignore`."""
+    every = [
+        fired(path, 1, "lup", "regex"),
+        fired(path, 2, "lup", "tuple-shape"),
+        fired(path, 3, "pyright", "reportCallIssue"),
+        fired(path, 4, "ruff", "E501"),
+        fired(path, 5, "lup", "regex"),
+    ]
+    kept = Ignore(line=5, covers=5, rule="regex", why="a grammar")
+    report = FileReport(path=Path(path), findings=every, directives=[kept])
+    return [found.rule for found in roles.kept(report, every)]
+
+
+def test_what_holds_in_a_file_is_what_its_role_and_the_declaration_leave(
+    repo: Path,
+) -> None:
+    lifted = Exemption(rule="tuple-shape", paths=["src/pkg/**"], why="a shape")
+    project = Project(
+        modules=Modules.default()
+        .edit(CodeRules(exempt=Exemptions().add(lifted)))
+        .edit(Core(paths=Paths().add(excluded=["vendor/**"])))
+    )
+    judged = roles(repo, project)
+    assert kept_in(judged, "src/pkg/core.py") == ["regex", "reportCallIssue", "E501"]
+    assert kept_in(judged, "src/other.py") == [
+        "regex",
+        "tuple-shape",
+        "reportCallIssue",
+        "E501",
+    ]
+    assert kept_in(judged, "tests/test_core.py") == ["reportCallIssue", "E501"]
+    assert kept_in(judged, "tmp/scratch.py") == []
+    assert kept_in(judged, "vendor/lib.py") == []

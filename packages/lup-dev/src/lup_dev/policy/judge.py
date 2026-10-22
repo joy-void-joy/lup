@@ -597,22 +597,12 @@ class Judge(Model, arbitrary_types_allowed=True):
         )
 
     def kept(self, versions: Versions) -> list[Finding]:
-        """Return every owner's findings in the after version, once `ignore`s apply.
-
-        A rule the declaration exempts the file from is left out too.
-        """
+        """Return the engine's and ruff's findings in the after version that hold in its file (`Roles.kept`)."""
         if versions.after is None:
             return []
-        directives = versions.after.directives
-        return [
-            found
-            for found in [*versions.after.findings, *versions.ruff]
-            if not self.roles.exempt(found.path, found.rule)
-            and not any(
-                directive.keeps(found.rule, found.span.start.line)
-                for directive in directives
-            )
-        ]
+        return self.roles.kept(
+            versions.after, [*versions.after.findings, *versions.ruff]
+        )
 
     def information(self, versions: Versions) -> list[Finding]:
         """Return the type errors and ruff's findings the agent hears as information.
