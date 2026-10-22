@@ -28,6 +28,7 @@ from mcp.types import (
     JSONRPCNotification,
     JSONRPCResponse,
     TextContent,
+    ToolAnnotations,
     jsonrpc_message_adapter,
 )
 from pydantic import Field
@@ -765,6 +766,64 @@ def test_ask_without_wait_returns_at_once_and_the_answer_comes_at_a_call(
     )
 
 
+def test_an_ask_sent_again_across_a_restart_finds_its_question_and_asks_no_second(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        mcp = machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        questions: list[dict[str, JsonValue]] = [
+            {"question": "Which parser?", "wait": True},
+            {"question": "Which cache?", "wait": True},
+            {"question": "Why?"},
+        ]
+        asks = [
+            json.loads(send(hook, lup_call("ask", question, f"q{at}")))[
+                "hookSpecificOutput"
+            ]["updatedInput"]
+            for at, question in enumerate(questions, start=1)
+        ]
+        # Answered while the service was away: the call sent again returns at once.
+        dropped(mcp, "ask", asks[0], delivery.holding)
+        inbox("answer", "1", "--comment", "Lark.")
+        answered = call(mcp, "ask", asks[0])
+        # Still waiting: the call sent again holds on the same question.
+        dropped(mcp, "ask", asks[1], delivery.holding)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            delivery.holding.clear()
+            asking = pool.submit(call, mcp, "ask", asks[1])
+            assert delivery.holding.wait(timeout=60)
+            inbox("answer", "3", "--comment", "None.")
+            held = asking.result(timeout=60)
+        # Without `wait`, sent again, it makes no second question either.
+        once = call(mcp, "ask", asks[2])
+        twice = call(mcp, "ask", asks[2])
+        asked = [
+            (item.number, item.call)
+            for item in delivery.inbox.items.values()
+            if isinstance(item.reason, Question)
+        ]
+    assert answered == (
+        (
+            '<answer item="2" from="operator" question="1">\n'
+            "<asked>Which parser?</asked>\nLark.\n</answer>"
+        ),
+        False,
+    )
+    assert held == (
+        (
+            '<answer item="4" from="operator" question="3">\n'
+            "<asked>Which cache?</asked>\nNone.\n</answer>"
+        ),
+        False,
+    )
+    assert once == twice
+    assert once[0].startswith("Your question is with the operator, @5.")
+    assert asked == [(1, "q1"), (3, "q2"), (5, "q3")]
+
+
 class Socket:
     """A stand-in for a session's messaging socket: every line written to it, one connection each."""
 
@@ -1010,6 +1069,24 @@ INITIALIZE: dict[str, JsonValue] = {
     },
 }
 """A session introducing itself to lup's tool server, on the handshake revision."""
+
+
+def dropped(
+    path: Path, name: str, arguments: dict[str, JsonValue], holding: threading.Event
+) -> None:
+    """Call the tool `name` through lup's tool server on `path`, and close the connection once the call holds, as the bridge's connection closes when the service restarts: the service cancels the call, and the bridge sends it again on a new connection."""
+    holding.clear()
+    session = Session(path)
+    session.said(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        }
+    )
+    assert holding.wait(timeout=60)
+    session.close()
 
 
 def channel(content: str, token: str) -> str:
@@ -5950,3 +6027,81 @@ def test_a_comment_on_a_hold_lands_nothing_and_the_next_hold_shows_what_changed_
     assert again != latest
     assert landings.on_forge("refs/heads/dev") == old
     assert flag_state == Waiting()
+
+
+def test_a_land_sent_again_across_a_restart_holds_on_its_holds_again_and_lands_once_approved(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    rooms, path = '"""Rooms."""\n', "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, rooms)
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with (
+        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        hook = machine.host.launch("one").hook
+        mcp = machine.host.launch("one").mcp
+        send(hook, started("claude"))
+        flag = landings.flag(path, rooms, session)
+        stamped = json.loads(send(hook, lup_call("land", {}, "l1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        dropped(mcp, "land", stamped, delivery.holding)
+        delivery.holding.clear()
+        landing = pool.submit(call, mcp, "land", stamped)
+        assert delivery.holding.wait(timeout=60)
+        [hold] = [
+            each
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.reason, HeldChange)
+        ]
+        inbox("answer", str(hold.number), "--approve", "--comment", "")
+        answer, error = landing.result(timeout=60)
+        holds = [
+            item.number
+            for item in delivery.inbox.items.values()
+            if isinstance(item.reason, HeldChange)
+        ]
+    assert not error
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+    assert f"The operator approved @{hold.number} (`{path}`)." in answer
+    assert (hold.call, hold.number) == ("l1", flag + 1)
+    assert holds == [hold.number]
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_lup_s_tools_say_which_may_be_sent_again_across_a_restart(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    async def listed(path: Path) -> dict[str, ToolAnnotations | None]:
+        async with Client(bridged(path), mode="legacy") as connected:
+            tools = (await connected.list_tools()).tools
+        return {tool.name: tool.annotations for tool in tools}
+
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        tools = asyncio.run(listed(machine.host.launch("one").mcp))
+    marks = {
+        name: (each.read_only_hint, each.idempotent_hint)
+        for name, each in tools.items()
+        if each is not None
+    }
+    assert set(marks) == set(tools)
+    assert {name for name, (reads, _) in marks.items() if reads} == {"inbox", "judged"}
+    assert {name for name, (_, again) in marks.items() if again} == {
+        "ask",
+        "wait_inbox",
+        "land",
+    }
+    github = {spec.name: (spec.reads, spec.idempotent) for spec in GitHubTools.specs()}
+    assert {name for name, (reads, _) in github.items() if reads} == {
+        "read_issue",
+        "find_issues",
+    }
+    assert not any(again for _, again in github.values())

@@ -35,7 +35,7 @@ from pydantic import Field, JsonValue, PositiveInt
 
 from lup.tools import speaking
 from lup.tools.serving import Answer
-from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec, lup_tool
+from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec, bound, lup_tool
 from lup.types import Model
 from lup_dev.host.protocol import Register
 from lup_dev.host.rooms import RoomTools
@@ -267,6 +267,22 @@ class Speaker(Model, arbitrary_types_allowed=True):
         parent = " and your parent" if await self.passed_up(went) else ""
         return Said(text=f"How it went is with the operator, {cited(number)}{parent}.")
 
+    def asked(self) -> int | None:
+        """Return the number of the question this call made already, where the call is one sent again across a restart of the service: a question from this conversation anchored to the call's id (`Item.call`); none where there's none, or the call carries no id."""
+        if self.call is None:
+            return None
+        return next(
+            (
+                item.number
+                for item in self.delivery.inbox.about(self.party.repository)
+                if item.sender == self.party
+                and item.call == self.call
+                and isinstance(item.reason, Question)
+            ),
+            None,
+        )
+
+    @lup_tool(idempotent=True)
     async def ask(self, asked: Asking) -> Said:
         """Ask the operator, with numbered decisions.
 
@@ -286,7 +302,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 for choice in asked.decisions
             ],
         )
-        number = await self.said(question)
+        number = self.asked()
+        if number is None:
+            number = await self.said(question)
         if not asked.wait:
             return Said(
                 text=(
@@ -307,6 +325,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             )
         )
 
+    @lup_tool
     async def send(self, sending: Sending) -> Said:
         """Send a message to a party's inbox.
 
@@ -319,6 +338,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         number = await self.said(Message(kind=sending.kind, text=sending.text))
         return Said(text=f"Your message is with the {sending.to}, {cited(number)}.")
 
+    @lup_tool(idempotent=True)
     async def wait_inbox(self, nothing: Nothing) -> Said:
         """Wait until something reaches your inbox.
 
@@ -343,6 +363,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         return Said(text=await self.delivery.held(self.party, arrived))
 
+    @lup_tool(reads=True)
     async def inbox(self, reading: Reading) -> Said:
         """Read this repository's inbox, changing nothing.
 
@@ -384,6 +405,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         ]
         return Said(text="\n".join(lines))
 
+    @lup_tool
     async def withdraw(self, withdrawing: Withdrawing) -> Said:
         """Take back an item the operator needn't see.
 
@@ -434,7 +456,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
 
     def tools(self) -> list[AgentTool]:
-        """Return the inbox's tools, each calling this conversation's function: the speaking tools, as the library serves them, then the inbox's own."""
+        """Return the inbox's tools, each calling this conversation's function: the speaking tools, as the library serves them, then the inbox's own, as declared (`bound`)."""
         functions = {
             speaking.blocked.name: self.blocked,
             speaking.stop.name: self.stop,
@@ -457,14 +479,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 speaking.how_it_went,
             ]
         ]
-        own = [
-            lup_tool(self.ask),
-            lup_tool(self.send),
-            lup_tool(self.wait_inbox),
-            lup_tool(self.inbox),
-            lup_tool(self.withdraw),
-        ]
-        return [*spoken, *own]
+        return [*spoken, *bound(self)]
 
 
 def specs() -> list[ToolSpec]:
