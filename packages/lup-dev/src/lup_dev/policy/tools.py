@@ -24,11 +24,11 @@ lup's state (`Layout`) and its clock; the inbox sits below the judge in
   service's clock.
 - **Sized to be read whole:** an answer counts the verdicts it selects by
   outcome and reason (`tallied`, as `lup-dev verdicts` does), then lists the
-  latest of them, and of each group of holds, up to a bound (`Onlooker.listed`,
-  `Onlooker.holds_listed`). Where it leaves some out, it says how many and the
-  `until` that reads them, so nothing is out of reach. lup's own log held 4,000
-  verdicts after ten days, 785,000 characters listed whole: more than a tool's
-  result holds.
+  latest of them, and of each group of holds, up to the call's `limit` and
+  `holds_limit` (`lup_dev.listing`). Where it leaves some out, it says how many,
+  the `until` that reads them and the limit that lists them all, so nothing is
+  out of reach. lup's own log held 4,000 verdicts after ten days, 785,000
+  characters listed whole: more than a tool's result holds.
 - **Nothing outside the repository:** what's listed is the launch's
   repository's, whose git directory the launcher found on the host
   (`Register.repository`), never one the room names. Every store is read to
@@ -41,11 +41,10 @@ runtime's tool search finds. It answers in words, as `content`.
 """
 
 import asyncio
-from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, override
+from typing import override
 
-from pydantic import Field, JsonValue
+from pydantic import Field, JsonValue, PositiveInt
 
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused, ToolSpec, bound, declared, lup_tool
@@ -56,11 +55,9 @@ from lup_dev.host.protocol import Register
 from lup_dev.host.rooms import RoomTools
 from lup_dev.inbox.delivery import clocked
 from lup_dev.layout import Layout
+from lup_dev.listing import Span, latest, many, unlisted
 from lup_dev.policy.holds import Hold, logged
 from lup_dev.policy.verdicts import Verdict, VerdictLog, tallied
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 def where(verdict: Verdict) -> Path:
@@ -76,46 +73,7 @@ def where(verdict: Verdict) -> Path:
     return verdict.path if verdict.worktree is None else verdict.worktree / verdict.path
 
 
-def moment(given: datetime | timedelta | None, now: datetime) -> datetime | None:
-    """Return the time `since` or `until` names: a time as given, one without a zone the host's; a duration, counted back from `now`; none where none is given.
-
-    >>> from datetime import UTC
-    >>> moment(timedelta(hours=2), datetime(2026, 1, 1, 12, tzinfo=UTC))
-    datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
-    """
-    match given:
-        case None:
-            return None
-        case timedelta():
-            return now - given
-        case datetime():
-            return given.astimezone()
-
-
-class Window(Model):
-    """When what's listed was made: from `since` on, and before `until`; unbounded on a side with none."""
-
-    since: datetime | None = None
-    until: datetime | None = None
-
-    def covers(self, time: datetime) -> bool:
-        """Say whether `time` falls in the window."""
-        return (self.since is None or time >= self.since) and (
-            self.until is None or time < self.until
-        )
-
-    def said(self) -> str:
-        """Say the window after a heading's subject, to the minute as each line says a time; or nothing where it's unbounded."""
-        if self.since is not None and self.until is not None:
-            return f" between {clocked(self.since)} and {clocked(self.until)}"
-        if self.since is not None:
-            return f" since {clocked(self.since)}"
-        if self.until is not None:
-            return f" before {clocked(self.until)}"
-        return ""
-
-
-class Scope(Model):
+class Scope(Span):
     """Which of the judge's verdicts and holds to read."""
 
     every: bool = Field(
@@ -133,23 +91,6 @@ class Scope(Model):
             "in every worktree. Left out, every file."
         ),
     )
-    since: datetime | timedelta | None = Field(
-        default=None,
-        description=(
-            "Only what was made from this time on: an ISO 8601 time, such as "
-            "`2026-10-19T09:30` (without a zone, the host's, as the answer says "
-            "times), or an ISO 8601 duration back from now, such as `PT2H` or "
-            "`P3D`. Left out, from the first."
-        ),
-    )
-    until: datetime | timedelta | None = Field(
-        default=None,
-        description=(
-            "Only what was made before this time, in the same forms as `since`: "
-            "an answer that leaves out earlier verdicts or holds says the `until` "
-            "that reads them. Left out, up to now."
-        ),
-    )
     answered: bool = Field(
         default=False,
         description=(
@@ -157,14 +98,21 @@ class Scope(Model):
             "open alone, and the answered counted."
         ),
     )
+    limit: PositiveInt = Field(
+        default=50,
+        description=(
+            "How many verdicts to list at most, the latest: about 10,000 "
+            "characters with `every`. Those left out are counted."
+        ),
+    )
+    holds_limit: PositiveInt = Field(
+        default=20,
+        description="How many holds of each state to list at most, the latest.",
+    )
 
     def covers(self, verdict: Verdict) -> bool:
         """Say whether `verdict` judged the file `path` names, by its path relative to its worktree or by its absolute one; every verdict, where it names none."""
         return self.path is None or self.path in [verdict.path, where(verdict)]
-
-    def window(self, now: datetime) -> Window:
-        """Return when what's listed was made, a duration counted back from `now`."""
-        return Window(since=moment(self.since, now), until=moment(self.until, now))
 
     def on(self) -> str:
         """Say what `path` narrows a heading to, or nothing where it names no file."""
@@ -181,12 +129,6 @@ class Onlooker(Model, arbitrary_types_allowed=True):
     clock: Clock
     """The host service's clock, which a duration in `since` or `until` counts
     back from."""
-    listed: int = Field(default=50, gt=0)
-    """How many verdicts an answer lists at most, the latest: about 10,000
-    characters with `every`, which an agent reads whole."""
-    holds_listed: int = Field(default=20, gt=0)
-    """How many holds an answer lists at most of those still open, and of those
-    answered, the latest of each."""
 
     @lup_tool
     async def judged(self, scope: Scope) -> str:
@@ -208,9 +150,10 @@ class Onlooker(Model, arbitrary_types_allowed=True):
         still open, and with `answered` those answered too: each with its key,
         when it was made and by whom, where it stands, its files with what each
         asks, and the operator's comment. `path`, `since` and `until` narrow the
-        verdicts and the holds alike. Where it leaves earlier ones out, the
-        answer says how many and the `until` that reads them. It changes
-        nothing.
+        verdicts and the holds alike, and `limit` and `holds_limit` say how
+        many to list. Where it leaves earlier ones out, the answer says how
+        many, the `until` that reads them, and the limit that lists them all.
+        It changes nothing.
         """
         return await asyncio.to_thread(self.read, scope)
 
@@ -239,8 +182,8 @@ class Onlooker(Model, arbitrary_types_allowed=True):
         narrowed = f"{scope.on()}{window.said()}"
         return "\n\n".join(
             [
-                *self.verdicts(verdicts, narrowed, every=scope.every),
-                *self.holds(holds, narrowed, answered=scope.answered),
+                *self.verdicts(verdicts, narrowed, scope),
+                *self.holds(holds, narrowed, scope),
             ]
         )
 
@@ -252,9 +195,10 @@ class Onlooker(Model, arbitrary_types_allowed=True):
         )
 
     def verdicts(
-        self, verdicts: list[Verdict], narrowed: str, *, every: bool
+        self, verdicts: list[Verdict], narrowed: str, scope: Scope
     ) -> list[str]:
-        """Say `verdicts`: counted by outcome and reason, then the latest a line each, with how many it leaves out; or that there's none."""
+        """Say `verdicts`: counted by outcome and reason, then the latest a line each, up to `scope`'s limit, with how many it leaves out; or that there's none."""
+        every = scope.every
         if not verdicts:
             whose = "No session has a" if every else "Your session has no"
             return [f"{whose} verdict in this repository{narrowed}."]
@@ -266,7 +210,7 @@ class Onlooker(Model, arbitrary_types_allowed=True):
             ),
             *(tally.line() for tally in tallied(verdicts)),
         ]
-        shown = latest(verdicts, lambda verdict: verdict.time, self.listed)
+        shown = latest(verdicts, lambda verdict: verdict.time, scope.limit)
         heading = (
             "Each, oldest first:"
             if len(shown) == len(verdicts)
@@ -275,7 +219,12 @@ class Onlooker(Model, arbitrary_types_allowed=True):
         lines = [
             heading,
             *(self.line(verdict, every=every) for verdict in shown),
-            *unlisted(len(verdicts) - len(shown), "earlier verdict", shown[0].time),
+            *unlisted(
+                len(verdicts) - len(shown),
+                "earlier verdict",
+                shown[0].time,
+                len(verdicts),
+            ),
         ]
         return ["\n".join(counted), "\n".join(lines)]
 
@@ -294,30 +243,33 @@ class Onlooker(Model, arbitrary_types_allowed=True):
             return f"{said}, by your session"
         return f"{said}, by {verdict.runtime} session {verdict.session}"
 
-    def holds(self, holds: list[Hold], narrowed: str, *, answered: bool) -> list[str]:
-        """Say `holds`: those still open; those answered where `answered` asks for them, else how many; or that there's none."""
+    def holds(self, holds: list[Hold], narrowed: str, scope: Scope) -> list[str]:
+        """Say `holds`: those still open; those answered where `scope` asks for them, else how many; or that there's none."""
         if not holds:
             return [f"This repository has no hold{narrowed}."]
         still = [hold for hold in holds if hold.answer is None]
         done = [hold for hold in holds if hold.answer is not None]
         listed = (
-            [self.listing(still, "still open", narrowed)]
+            [self.listing(still, "still open", narrowed, scope.holds_limit)]
             if still
             else [f"This repository has no hold still open{narrowed}."]
         )
         if not done:
             return listed
-        if answered:
-            return [*listed, self.listing(done, "answered", narrowed)]
+        if scope.answered:
+            return [
+                *listed,
+                self.listing(done, "answered", narrowed, scope.holds_limit),
+            ]
         counted = (
             f"Not listed: {many(len(done), 'hold')} answered{narrowed}, which "
             "`answered` lists."
         )
         return [*listed, counted]
 
-    def listing(self, holds: list[Hold], state: str, narrowed: str) -> str:
-        """Say `holds`, which share a `state`, under their heading: the latest, with how many it leaves out."""
-        shown = latest(holds, lambda hold: hold.created, self.holds_listed)
+    def listing(self, holds: list[Hold], state: str, narrowed: str, most: int) -> str:
+        """Say `holds`, which share a `state`, under their heading: the latest `most`, with how many it leaves out."""
+        shown = latest(holds, lambda hold: hold.created, most)
         return "\n".join(
             [
                 f"This repository's holds {state}{narrowed}, oldest first:",
@@ -326,7 +278,9 @@ class Onlooker(Model, arbitrary_types_allowed=True):
                     len(holds) - len(shown),
                     "earlier hold",
                     shown[0].created,
-                    f" {state}",
+                    len(holds),
+                    state=f" {state}",
+                    limit="holds_limit",
                 ),
             ]
         )
@@ -363,46 +317,6 @@ class Onlooker(Model, arbitrary_types_allowed=True):
         if hold.agent is None:
             return "your session's own conversation"
         return f"your session's subagent {hold.agent}"
-
-
-def latest[T](items: list[T], when: Callable[[T], datetime], most: int) -> list[T]:
-    """Return the latest `most` of `items`, which are oldest first by `when`.
-
-    Fewer where the oldest of them shares its moment with one left out, so an
-    `until` at that moment reads every one left out; where they all share it,
-    every item of that moment, however many.
-
-    >>> from datetime import UTC
-    >>> def day(item: int) -> datetime:
-    ...     return datetime(2026, 1, item, tzinfo=UTC)
-    >>> latest([1, 2, 3], day, 2), latest([1, 2, 2, 3], day, 2), latest([1, 3, 3, 3], day, 2)
-    ([2, 3], [3], [3, 3, 3])
-    """
-    if len(items) <= most:
-        return items
-    shown = items[-most:]
-    cut = when(shown[0])
-    if when(items[-most - 1]) != cut:
-        return shown
-    after = [item for item in shown if when(item) > cut]
-    return after or [item for item in items if when(item) == cut]
-
-
-def unlisted(left: int, noun: str, before: datetime, state: str = "") -> list[str]:
-    """Say how many of `noun` an answer left out, in `state`, and the `until` that reads them, the moment of the earliest listed; nothing where it left none out."""
-    if not left:
-        return []
-    until = before.astimezone().isoformat()
-    return [f'Not listed: {many(left, noun)}{state}, which `until` "{until}" reads.']
-
-
-def many(count: int, noun: str) -> str:
-    """Say a count of `noun`, plural but for one.
-
-    >>> many(1, "verdict"), many(2, "earlier verdict")
-    ('1 verdict', '2 earlier verdicts')
-    """
-    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
 def settled(verdict: Verdict, hold: Hold | None) -> Verdict:

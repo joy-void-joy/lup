@@ -203,9 +203,14 @@ def test_found_gives_each_time_the_operator_said_every_word() -> None:
         [Said(by="operator", text="Nothing about it.", at=at(9))], title="other"
     )
     hit = views.found([other, TALK], ["LATER", "yes"])
+    whole = views.found([other, TALK], ["LATER", "yes"], whole=True)
     missed = views.found([TALK], ["absent"])
     assert hit.startswith("`lup-impl` (claude c0fa70bc), ")
     assert "\n  answering: Two options:\n  you:\n    1->yes\n    2->later\n" in hit
+    assert (
+        "\n  answering:\n    Two options:\n    1. queue\n    2. agents\n  you:\n"
+        "    1->yes\n    2->later\n"
+    ) in whole
     assert "other" not in hit
     assert missed == "You never said 'absent' in a kept session.\n"
 
@@ -237,12 +242,20 @@ def test_lup_dev_transcripts_reads_the_repositorys_kept_copies(
     listed = runner.invoke(cli.app, ["transcripts", "list"])
     shown = runner.invoke(cli.app, ["transcripts", "show", "lup-impl"])
     found = runner.invoke(cli.app, ["transcripts", "search", "queue", "first"])
+    whole = runner.invoke(
+        cli.app, ["transcripts", "search", "queue", "first", "--whole"]
+    )
     assert listed.exit_code == 0, listed.output
     assert "`lup-impl` (claude s1)  4 from you  in /w/lup.git/tree/dev" in listed.output
     assert "  you:\n    2->queue, yes\n" in shown.output
     assert (
         "  answering: Which do you want?\n  you:\n    Also, the queue first."
         in found.output
+    )
+    assert whole.exit_code == 0, whole.output
+    assert (
+        "  answering:\n    Which do you want?\n  you:\n    Also, the queue first."
+        in whole.output
     )
 
 

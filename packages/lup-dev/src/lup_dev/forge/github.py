@@ -351,6 +351,10 @@ class Search(Model):
     limit: int
     """How many matches were asked for: where as many came, more may match."""
 
+    def full(self) -> bool:
+        """Say whether as many matches came as were asked for, here and elsewhere: more may match."""
+        return len(self.found) + self.elsewhere >= self.limit
+
 
 class Ref(Answered):
     """A branch, as GitHub's GraphQL answers for one."""
@@ -448,6 +452,10 @@ class GitHub(Model):
     repository: GitHubRepository
     directory: Path
     """The repository's git directory on the host, where `gh` runs."""
+    searched: PositiveInt = 1000
+    """The most matches GitHub's search gives a query: its API answers none
+    past them, and `gh search` refuses a `--limit` beyond ("`--limit` must be
+    between 1 and 1000")."""
 
     @classmethod
     def launched(

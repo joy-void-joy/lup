@@ -18,7 +18,8 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   subagents' ends among it. It isn't called `wait`, a name a runtime has for a
   tool of its own;
 - `inbox` reads the inbox of the agent's repository, changing nothing: each
-  item in a line, and the agent's own read whole;
+  item in a line, the latest up to the call's `limit`, narrowed by `since` and
+  `until` as `judged` is (`lup_dev.listing`), and the agent's own read whole;
 - `withdraw` takes back a message or question the agent sent that the
   operator needn't see, with its reason: the agent's workflow is its own.
 
@@ -30,7 +31,7 @@ runtime's tool search finds. Each answers in words, as `content`.
 import inspect
 from typing import TYPE_CHECKING, Literal, override
 
-from pydantic import Field, JsonValue
+from pydantic import Field, JsonValue, PositiveInt
 
 from lup.tools import speaking
 from lup.tools.serving import Answer
@@ -64,6 +65,7 @@ from lup_dev.inbox.store import (
     Waiting,
     cited,
 )
+from lup_dev.listing import Span, latest, unlisted
 
 if TYPE_CHECKING:
     from lup.sessions import results
@@ -124,7 +126,7 @@ class Nothing(Model):
     """No input."""
 
 
-class Reading(Model):
+class Reading(Span):
     """What of the inbox to read."""
 
     number: int | None = Field(
@@ -139,6 +141,12 @@ class Reading(Model):
         description=(
             "List every item, those answered, done or told too; left out, those "
             "still waiting alone."
+        ),
+    )
+    limit: PositiveInt = Field(
+        default=50,
+        description=(
+            "How many items to list at most, the latest. Those left out are counted."
         ),
     )
 
@@ -341,24 +349,40 @@ class Speaker(Model, arbitrary_types_allowed=True):
         Lists the items about this repository, oldest first, a line each: its
         number, when it was made, what it is, from whom to whom, where it
         stands, and its first line. Those still waiting, for the operator or
-        for an agent, by default; every one with `every`. Given an item's
-        `number`, one you sent or that was sent to you, it's read whole. It
-        marks nothing read and answers nothing: what reaches you still comes
-        through `wait_inbox` and beside your calls.
+        for an agent, by default; every one with `every`. `since` and `until`
+        narrow them by when each was made, and `limit` says how many to list,
+        the latest: where it leaves earlier ones out, the answer says how many,
+        the `until` that reads them, and the `limit` that lists them all. Given
+        an item's `number`, one you sent or that was sent to you, it's read
+        whole. It marks nothing read and answers nothing: what reaches you
+        still comes through `wait_inbox` and beside your calls.
         """
         items = self.delivery.inbox.about(self.party.repository)
         if reading.number is not None:
             return Said(text=self.whole(reading.number, items))
-        listed = [
-            item for item in items if reading.every or isinstance(item.state, Waiting)
-        ]
-        if not listed:
+        window = reading.window(self.delivery.clock.now())
+        chosen = sorted(
+            (
+                item
+                for item in items
+                if (reading.every or isinstance(item.state, Waiting))
+                and window.covers(item.made)
+            ),
+            key=lambda item: item.made,
+        )
+        if not chosen:
+            where = "is in" if reading.every else "waits in"
             return Said(
-                text="Nothing about this repository is in the inbox."
-                if reading.every
-                else "Nothing about this repository waits in the inbox."
+                text=f"Nothing about this repository {where} the inbox{window.said()}."
             )
-        return Said(text="\n".join(self.line(item) for item in listed))
+        shown = latest(chosen, lambda item: item.made, reading.limit)
+        lines = [
+            *(self.line(item) for item in shown),
+            *unlisted(
+                len(chosen) - len(shown), "earlier item", shown[0].made, len(chosen)
+            ),
+        ]
+        return Said(text="\n".join(lines))
 
     async def withdraw(self, withdrawing: Withdrawing) -> Said:
         """Take back an item the operator needn't see.

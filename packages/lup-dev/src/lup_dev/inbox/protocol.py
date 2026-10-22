@@ -53,10 +53,11 @@ from lup_dev.inbox.store import (
     Waiting,
     cited,
 )
+from lup_dev.listing import Span
 
 
-class ListInbox(Request, reads=True):
-    """List what waits in the operator's inbox, oldest first."""
+class ListInbox(Request, Span, reads=True):
+    """List what waits in the operator's inbox, oldest first, made within `since` and `until`: a duration counted back by the service's clock, and every item waiting, where neither is given."""
 
     kind: Literal["inbox-list"] = "inbox-list"
 
@@ -406,13 +407,18 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: ListInbox) -> Reply:
         inbox = self.delivery.inbox
-        return Items(items=inbox.waiting(Operator()), reviewed=inbox.reviewed())
+        return Items(items=self.waiting(request), reviewed=inbox.reviewed())
 
     @override
     async def scoped(self, request: ListInbox, repository: Path) -> Reply:
-        inbox = self.delivery.inbox
-        waiting = [each for each in inbox.waiting(Operator()) if each.of(repository)]
-        return Items(items=waiting, reviewed=inbox.reviewed(repository))
+        waiting = [each for each in self.waiting(request) if each.of(repository)]
+        return Items(items=waiting, reviewed=self.delivery.inbox.reviewed(repository))
+
+    def waiting(self, request: ListInbox) -> list[Item]:
+        """Return the items waiting for the operator, made within `request`'s window."""
+        window = request.window(self.delivery.clock.now())
+        waiting = self.delivery.inbox.waiting(Operator())
+        return [each for each in waiting if window.covers(each.made)]
 
 
 class Showing(Model, Reading[ShowItem], arbitrary_types_allowed=True):
