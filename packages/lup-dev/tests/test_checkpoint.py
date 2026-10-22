@@ -405,7 +405,7 @@ def test_a_new_file_through_the_shell_is_held_and_lands_on_a_yes(
 ) -> None:
     start(kit, repo)
     reply = shell_write(kit, repo, "c1", Path("src/pkg/new.py"), '"""New."""\n')
-    assert reply.context.startswith("The operator approved the held change to")
+    assert reply.context.startswith("lup held the write to")
     assert last_asks(kit) == ["src/pkg/new.py is a new production file"]
     assert (repo / "src" / "pkg" / "new.py").read_text() == '"""New."""\n'
 
@@ -770,7 +770,7 @@ def test_a_clean_change_to_a_protected_module_through_the_shell_is_held(
     start(kit, repo)
     changed = (repo / HOOK).read_text().replace("return x", "return x + 1")
     reply = shell_write(kit, repo, "c1", HOOK, changed)
-    assert reply.context.startswith("The operator approved the held change to")
+    assert reply.context.startswith("lup held the write to")
     assert any(
         ".claude/hooks/check.py is a protected path" in each for each in last_asks(kit)
     )
@@ -888,7 +888,7 @@ def test_a_subagent_is_at_work_until_its_end_lets_it_go(kit: Kit, repo: Path) ->
     call(kit, repo, "worker-lost", agent="worker")
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
     first = subagent_ends(kit, repo, "worker").block
-    assert first.startswith("The operator approved the held change to")
+    assert first.startswith("lup held the write to")
     assert "lup won't end the turn yet" not in first
     mailed = end(kit, repo).block
     assert "lup won't end the turn yet" not in mailed
@@ -912,7 +912,7 @@ def test_a_turns_end_leaves_a_subagents_call_in_flight_to_its_finish(
     assert end(kit, repo) == Reply()
     assert new.exists()
     told = finish(kit, repo, "w1", agent="worker").context
-    assert told.startswith("The operator approved the held change to")
+    assert told.startswith("lup held the write to")
 
 
 def test_a_subagents_file_tool_write_landed_before_its_call_finished_stays(
@@ -937,7 +937,7 @@ def test_what_the_turns_end_must_tell_still_blocks_while_a_subagent_works(
     call(kit, repo, "lost")
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
     block = end(kit, repo).block
-    assert block.startswith("The operator approved the held change to")
+    assert block.startswith("lup held the write to")
     assert "A subagent of this session at work touched these files too" in block
     assert "lup won't end the turn yet" not in block
 
@@ -1189,8 +1189,8 @@ def test_an_ask_is_held_until_the_operator_approves(
     answer_on_sleep(holding_kit, Response(approved=True, comment="good name"))
     reply = finish(holding_kit, repo, "p1")
     assert (
-        f"The operator approved the held change to {repo}/src/pkg/new.py: good name"
-        in reply.context
+        f"lup held the write to {repo}/src/pkg/new.py for the operator's review, "
+        "and they approved it: good name" in reply.context
     )
     assert new.read_text() == '"""New."""\n'
     store = worktree(holding_kit, repo).store

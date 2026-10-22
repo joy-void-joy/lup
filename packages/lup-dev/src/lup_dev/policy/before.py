@@ -45,7 +45,14 @@ from lup_dev.policy.checkpoint import (
 from lup_dev.policy.flags import Landed, Put, flagged
 from lup_dev.policy.holds import HeldFile, Hold, answered, unified
 from lup_dev.policy.judge import Ask, Change, Judgement
-from lup_dev.policy.report import Refused, information, placed, refusal, sections
+from lup_dev.policy.report import (
+    Refused,
+    approval,
+    information,
+    placed,
+    refusal,
+    sections,
+)
 from lup_dev.policy.worktrees import place
 
 
@@ -285,7 +292,8 @@ def held_write(
     worktree the session works in, its verdict the git directory's, and is no
     write of that worktree's once let through. Approved, the write is let
     through, logged approved and covering the path for the rest of the session
-    as the operator answers, and their comment told; declined, or
+    as the operator answers, and the agent told it was held and approved, with
+    their comment (`approval`); declined, or
     left unanswered within the patience, it's denied, and the agent's version
     saved, the hold staying open where nobody answered.
     """
@@ -334,7 +342,7 @@ def held_write(
     if answer is not None and answer.approved:
         log.append(answered(hold, "approved"))
     if answer is not None and answer.approved and outside is not None:
-        said = f"The operator approved it: {answer.comment}" if answer.comment else ""
+        said = approval([where / path], answer.comment)
         return Decision(outcome="allow", reason=said, told=told(where, judgement))
     if answer is not None and answer.approved:
         with worktree.lock():
@@ -350,7 +358,7 @@ def held_write(
             record.waiting(services.clock.now())
             record.approved = list(dict.fromkeys([*record.approved, path]))
             worktree.keep(record)
-        said = f"The operator approved it: {answer.comment}" if answer.comment else ""
+        said = approval([where / path], answer.comment)
         return Decision(outcome="allow", reason=said, told=told(where, judgement))
     with worktree.lock():
         state = store.state()
