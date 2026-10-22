@@ -318,6 +318,23 @@ def test_claude_subagent_stop_doesnt_hold_on_the_subagents_own_files(
     assert claude.hook(stop, on_claude) == ""
 
 
+def test_claude_stop_says_nothing_of_a_file_a_subagent_at_work_touched_too(
+    on_claude: Bench, repo: Path
+) -> None:
+    """What's left there may be the subagent's in progress; `systemMessage` would tell the operator alone."""
+    claude_breaks_core(on_claude, repo)
+    claude_breaks_core(on_claude, repo, agent_id="sub")
+    stop = payload(repo, "Stop", stop_hook_active=False)
+    assert claude.hook(stop, on_claude) == ""
+    subagent_stop = payload(
+        repo, "SubagentStop", agent_id="sub", stop_hook_active=False
+    )
+    claude.hook(subagent_stop, on_claude)
+    assert held_on(claude.hook(stop, on_claude)).startswith(
+        "lup won't end the turn yet"
+    )
+
+
 def test_claude_subagent_stop_holds_once_on_a_held_changes_answer(
     on_claude: Bench, repo: Path
 ) -> None:
@@ -341,19 +358,14 @@ def test_claude_subagent_stop_holds_once_on_a_held_changes_answer(
     assert claude.hook(subagent_stop, on_claude) == ""
 
 
-def test_claude_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
+def test_claude_stop_after_a_block_on_the_same_findings_lets_the_turn_end_saying_nothing(
     on_claude: Bench, repo: Path
 ) -> None:
+    """The agent was told them as the end held; `systemMessage` would tell the operator alone."""
     claude_breaks_core(on_claude, repo)
     first = claude.hook(payload(repo, "Stop", stop_hook_active=False), on_claude)
     assert held_on(first).startswith("lup won't end the turn yet")
-    printed = claude.hook(payload(repo, "Stop", stop_hook_active=True), on_claude)
-    again = json.loads(printed)
-    assert "decision" not in again
-    assert "hookSpecificOutput" not in again
-    assert again["systemMessage"].startswith(
-        "lup held the turn's end once already, and lets it end"
-    )
+    assert claude.hook(payload(repo, "Stop", stop_hook_active=True), on_claude) == ""
 
 
 class Broken(Checker):
@@ -703,6 +715,19 @@ def test_codex_subagent_stop_doesnt_hold_on_the_subagents_own_files(
     assert codex.hook(codex_stop(repo, after_block=False), on_codex) == ""
 
 
+def test_codex_stop_says_nothing_of_a_file_a_subagent_at_work_touched_too(
+    on_codex: Bench, repo: Path
+) -> None:
+    """What's left there may be the subagent's in progress; `systemMessage` would tell the operator alone."""
+    codex_breaks_core(on_codex, repo)
+    codex_breaks_core(on_codex, repo, agent_id="019b")
+    assert codex.hook(codex_stop(repo, after_block=False), on_codex) == ""
+    codex.hook(codex_subagent_stop(repo), on_codex)
+    output = json.loads(codex.hook(codex_stop(repo, after_block=False), on_codex))
+    assert output["decision"] == "block"
+    assert output["reason"].startswith("lup won't end the turn yet")
+
+
 def test_codex_subagent_stop_holds_once_on_a_held_changes_answer(
     on_codex: Bench, repo: Path
 ) -> None:
@@ -725,17 +750,14 @@ def test_codex_subagent_stop_holds_once_on_a_held_changes_answer(
     assert codex.hook(codex_subagent_stop(repo), on_codex) == ""
 
 
-def test_codex_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
+def test_codex_stop_after_a_block_on_the_same_findings_lets_the_turn_end_saying_nothing(
     on_codex: Bench, repo: Path
 ) -> None:
+    """The agent was told them as the end held; `systemMessage` would tell the operator alone."""
     codex_breaks_core(on_codex, repo)
     first = json.loads(codex.hook(codex_stop(repo, after_block=False), on_codex))
     assert first["decision"] == "block"
-    again = json.loads(codex.hook(codex_stop(repo, after_block=True), on_codex))
-    assert "decision" not in again
-    assert again["systemMessage"].startswith(
-        "lup held the turn's end once already, and lets it end"
-    )
+    assert codex.hook(codex_stop(repo, after_block=True), on_codex) == ""
 
 
 def test_codex_agent_stops_is_told_an_item_and_stops_again_ending_at_once(
@@ -2009,9 +2031,9 @@ def test_codex_adds_what_a_conversation_is_told_to_every_answer() -> None:
         "decision": "block",
         "reason": f"Type errors left.\n\n{BOTH}",
     }
-    noted = json.dumps({"systemMessage": "Findings passed."})
+    noted = json.dumps({"systemMessage": "The judge failed."})
     assert json.loads(codex.told(stop, noted, ITEMS) or "") == {
-        "systemMessage": "Findings passed.",
+        "systemMessage": "The judge failed.",
         "decision": "block",
         "reason": BOTH,
     }

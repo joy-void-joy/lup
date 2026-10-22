@@ -892,12 +892,7 @@ def test_a_subagent_is_at_work_until_its_end_lets_it_go(kit: Kit, repo: Path) ->
     assert "lup won't end the turn yet" not in first
     mailed = end(kit, repo).block
     assert "lup won't end the turn yet" not in mailed
-    working = end(kit, repo)
-    assert working.block == ""
-    assert working.note.startswith(
-        "A subagent of this session at work touched these files too"
-    )
-    assert f"{repo}/src/pkg/core.py:11:" in working.note
+    assert end(kit, repo) == Reply()
     assert subagent_ends(kit, repo, "worker") == Reply()
     assert end(kit, repo).block.startswith("lup won't end the turn yet")
 
@@ -938,11 +933,13 @@ def test_what_the_turns_end_must_tell_still_blocks_while_a_subagent_works(
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
     block = end(kit, repo).block
     assert block.startswith("lup held the write to")
-    assert "A subagent of this session at work touched these files too" in block
     assert "lup won't end the turn yet" not in block
+    # The subagent's finding is told once, as the checkpoint's mail: what's
+    # left in a file a subagent at work touched isn't told again.
+    assert block.count(f"{repo}/src/pkg/core.py:11:") == 1
 
 
-def test_the_same_findings_after_a_block_let_the_turn_end_saying_so(
+def test_the_same_findings_after_a_block_let_the_turn_end_saying_nothing(
     kit: Kit, repo: Path
 ) -> None:
     start(kit, repo)
@@ -950,10 +947,7 @@ def test_the_same_findings_after_a_block_let_the_turn_end_saying_so(
     shell_write(kit, repo, "c1", CORE, broken)
     first = end(kit, repo).block
     assert first.startswith("lup won't end the turn yet")
-    let = end(kit, repo, after_block=True)
-    assert let.block == ""
-    assert let.note.startswith("lup held the turn's end once already, and lets it end")
-    assert f"{repo}/src/pkg/core.py:11:" in let.note
+    assert end(kit, repo, after_block=True) == Reply()
     # A later turn ends at once: the findings were passed, and haven't changed.
     assert end(kit, repo) == Reply()
 
@@ -964,10 +958,7 @@ def test_an_end_following_a_hold_ends_whatever_is_left(kit: Kit, repo: Path) -> 
     shell_write(kit, repo, "c1", CORE, broken)
     end(kit, repo)
     shell_write(kit, repo, "c2", CORE, broken + "z: str = 1  # TYPE\n")
-    let = end(kit, repo, after_block=True)
-    assert let.block == ""
-    assert let.note.startswith("lup held the turn's end once already")
-    assert f"{repo}/src/pkg/core.py:12:" in let.note
+    assert end(kit, repo, after_block=True) == Reply()
     assert end(kit, repo) == Reply()
 
 

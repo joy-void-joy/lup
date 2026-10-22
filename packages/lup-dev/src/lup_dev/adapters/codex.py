@@ -38,10 +38,9 @@ left that no `PostToolUse` finishes. That end is the judge's whole set's
 checkpoint, waits for the importers pass, and holds the turn (`decision:
 "block"`, a continuation prompt to Codex) on the type errors and ruff's findings
 left in the files its own conversation touched, until the same findings follow a
-block (`stop_hook_active`), when the turn ends and the operator is told in
-`systemMessage`; a refusal, a move, an answer to a hold, removed notes and mail
-hold it once each. A subagent's `SubagentStop` never holds on findings, only on
-what it must be told. Where
+block (`stop_hook_active`), when the turn ends saying nothing; a refusal, a move,
+an answer to a hold, removed notes and mail hold it once each. A subagent's
+`SubagentStop` never holds on findings, only on what it must be told. Where
 the launch's judge can't answer a hook, the host service answers it through
 `unanswered`: at `PostToolUse` the agent is told beside the call's result, as when
 judging fails; anything else warns the operator in `systemMessage`, and the call
@@ -621,9 +620,10 @@ class PostToolUse(Payload):
 class Stop(Payload):
     """`Stop`: the session's own conversation ends its turn.
 
-    What the turn's end tells without holding it goes to the operator, in
-    `systemMessage`: its docs list no `additionalContext` for `Stop`, and a
-    `reason` with `decision: "block"` becomes "a new continuation prompt".
+    What the turn's end tells the agent holds it, as the `reason` of `decision:
+    "block"`, which becomes "a new continuation prompt"; its docs list no
+    `additionalContext` for `Stop`. An end that doesn't hold says nothing: only
+    a judge's failure goes to the operator, in `systemMessage`.
     """
 
     hook_event_name: Literal["Stop"]
@@ -657,11 +657,7 @@ class Stop(Payload):
             after_block=self.stop_hook_active,
         )
         reply = ended.apply(bench)
-        if reply.block:
-            return Blocked(reason=reply.block)
-        if reply.note:
-            return OperatorWarning(system_message=reply.note)
-        return None
+        return Blocked(reason=reply.block) if reply.block else None
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
