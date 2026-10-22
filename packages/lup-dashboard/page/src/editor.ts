@@ -33,8 +33,8 @@
 // margin (`margin.ts`; `Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
 // A fold may be inside another, as an item's text is inside what came before the
 // operator's last words: the fold keys act on the innermost the cursor is in.
-import { foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
-import { Annotation, EditorState, Facet, Prec, StateEffect, StateField, type Range } from "@codemirror/state";
+import { foldEffect, foldedRanges, syntaxTree, unfoldEffect } from "@codemirror/language";
+import { Annotation, EditorSelection, EditorState, Facet, Prec, StateEffect, StateField, type Range } from "@codemirror/state";
 import {
     Decoration,
     EditorView,
@@ -50,7 +50,7 @@ import { defineClipboard } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, foldEdge, levelled, nextFold } from "./folds";
 import { FOLD_KINDS, type FoldKind } from "./keys";
-import { continued, markdown } from "./markdown";
+import { continued, hiddenOn, markdown } from "./markdown";
 import { margin, placeheld, type Margined } from "./margin";
 
 /** What the vim keys and the editor's own events do, as a view stands: replaced at each render. */
@@ -696,6 +696,80 @@ const withinComment = EditorState.transactionFilter.of((transaction) => {
     return { selection: { anchor: Math.min(Math.max(head, block.from), block.to) }, scrollIntoView: true };
 });
 
+/**
+ * Return where vim's cursor rests once `state`'s selection is made, where it was put on a mark the Markdown hides
+ * (`hiddenOn`), which has no width to show it on: on the next character shown the way it came from `was`, as if the
+ * mark weren't there, or back where going on would leave the line, since outside `visual` mode a block cursor rests
+ * on a character and never on the line's end. In visual mode the cursor is the character before the head where the
+ * selection runs forward, as vim draws it, and the anchor stays. None where the cursor rests on a character shown
+ * already, or the line has none to rest on.
+ */
+export function pastHidden(state: EditorState, was: number, visual: boolean): EditorSelection | null {
+    const { main } = state.selection;
+    const ahead = main.anchor < main.head;
+    const at = ahead ? main.head - 1 : main.head;
+    const hidden = hiddenOn(state, at);
+    if (!hidden.some((each) => at >= each.from && at < each.to)) {
+        return null;
+    }
+    const line = state.doc.lineAt(at);
+    const last = visual && line.to < state.doc.length ? line.to : line.to - 1;
+    // The first character shown from `at` on, or back from it; none before the line's edge.
+    const shown = (step: 1 | -1): number | null => {
+        let position = at;
+        let within = hidden.find((each) => position >= each.from && position < each.to);
+        while (within !== undefined) {
+            position = step > 0 ? within.to : within.from - 1;
+            within = hidden.find((each) => position >= each.from && position < each.to);
+        }
+        return position < line.from || position > last ? null : position;
+    };
+    const forward = main.head >= was;
+    const rest = shown(forward ? 1 : -1) ?? shown(forward ? -1 : 1);
+    if (rest === null) {
+        return null;
+    }
+    if (main.empty) {
+        return EditorSelection.single(rest);
+    }
+    return EditorSelection.single(main.anchor, ahead ? rest + 1 : rest);
+}
+
+/** Return where vim's cursor rests in `view` past the hidden marks (`pastHidden`), from `was`, as vim stands; none where it rests already, or in insert, visual line or visual block mode. */
+function restingIn(view: EditorView, was: number): EditorSelection | null {
+    const mode = vimOf(view)?.state.vim;
+    if (mode === undefined || mode.insertMode || mode.visualLine || mode.visualBlock) {
+        return null;
+    }
+    return pastHidden(view.state, was, mode.visualMode);
+}
+
+/**
+ * Keep vim's cursor off the marks the Markdown hides: put on one, by a motion, a jump, a click, the text laid out anew
+ * or read further, it's moved past it once vim's key is done (`restingIn`), as a selection vim didn't make, so vim
+ * takes the cursor from the editor, as it does after a click. Vim's key may dispatch again after the selection, to
+ * scroll, so where it rests is read again as it's moved. Not in insert mode, where the cursor's line shows its marks
+ * and a thin cursor rests between characters, nor in visual line or block mode, whose selection vim keeps by lines or
+ * columns.
+ */
+const offHidden = EditorView.updateListener.of((update) => {
+    const reread = syntaxTree(update.startState) !== syntaxTree(update.state);
+    if (!update.selectionSet && !update.docChanged && !reread) {
+        return;
+    }
+    const was = update.startState.selection.main.head;
+    if (restingIn(update.view, was) === null) {
+        return;
+    }
+    const { view } = update;
+    queueMicrotask(() => {
+        const moved = restingIn(view, was);
+        if (moved !== null) {
+            view.dispatch({ selection: moved });
+        }
+    });
+});
+
 /** Return whether CodeMirror holds `fold` folded. */
 export function isFolded(state: EditorState, fold: Span): boolean {
     let found = false;
@@ -918,6 +992,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     drawSelection(),
                     onlyComments,
                     withinComment,
+                    offHidden,
                     EditorView.lineWrapping,
                     placeheld(margined),
                     config.margin === true ? margin(margined) : [],
