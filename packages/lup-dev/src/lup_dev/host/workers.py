@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
+from lup.programs import ProgramError, Running, started
 from lup.sessions.terminal import Event
 from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec
@@ -245,7 +246,7 @@ async def refusals(
 class Worker(MutableModel, arbitrary_types_allowed=True):
     """One of a launch's processes: the copy it runs, where it answers, and what it's answering."""
 
-    process: asyncio.subprocess.Process
+    process: Running
     command: Path
     """The copy's command it was started from, its links followed: which copy
     it runs, whichever the repository's approved command names since."""
@@ -348,7 +349,7 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
                 raise HostError(message)
             command = launch.judge.resolve()
             found = self.running.get(launch.launch)
-            alive = found is not None and found.process.returncode is None
+            alive = found is not None and found.process.status is None
             if found is None or not alive or found.command != command:
                 if found is not None and not alive:
                     self.say(f"{launch.launch}: its process is gone; starting it again")
@@ -379,15 +380,9 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
         self.starting[launch.launch] = command
         try:
             try:
-                # lup: ignore("subprocess", why="the host service keeps each launch's process running beside its event loop, which sh can't: it forks, and holds a thread per program")
-                process = await asyncio.create_subprocess_exec(
-                    *argv,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                )
-            except OSError as missing:
-                message = f"`{shlex.join(argv)}` doesn't run: {missing}"
-                raise HostError(message) from missing
+                process = await started(*argv)
+            except ProgramError as unstarted:
+                raise HostError(str(unstarted)) from unstarted
             worker = await self.readied(launch, argv, process, socket, command)
         finally:
             del self.starting[launch.launch]
@@ -402,7 +397,7 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
         self,
         launch: Register,
         argv: list[str],
-        process: asyncio.subprocess.Process,
+        process: Running,
         socket: Path,
         command: Path,
     ) -> Worker:
@@ -411,20 +406,17 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
         Where it ends first, or doesn't list them, it's ended and `HostError`
         raised.
         """
-        if process.stdin is None or process.stdout is None:
-            message = f"`{shlex.join(argv)}` started without its pipes"
-            raise HostError(message)
-        process.stdin.write(f"{launch.model_dump_json()}\n".encode())
-        await process.stdin.drain()
-        ready = await process.stdout.readline()
+        process.input.write(f"{launch.model_dump_json()}\n".encode())
+        await process.input.drain()
+        ready = await process.output.readline()
         if not ready:
-            status = await process.wait()
+            status = await process.ended()
             message = (
                 f"`{shlex.join(argv)}` ended with status {status} before it was "
                 "ready; what it said is in the host service's output"
             )
             raise HostError(message)
-        output = asyncio.create_task(self.printed(launch.launch, process.stdout))
+        output = asyncio.create_task(self.printed(launch.launch, process.output))
         worker = Worker(
             process=process,
             command=command,
@@ -471,14 +463,7 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
 
     async def ended(self, worker: Worker) -> None:
         """End `worker`: its input closed, then killed where it's still there after `ending`; its socket removed."""
-        process = worker.process
-        if process.returncode is None and process.stdin is not None:
-            process.stdin.close()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=self.ending.total_seconds())
-        except TimeoutError:
-            process.kill()
-            await process.wait()
+        await worker.process.ended(within=self.ending)
         # What it printed last is said, unless a program it started holds its
         # output open past it.
         await asyncio.wait([worker.output], timeout=self.ending.total_seconds())

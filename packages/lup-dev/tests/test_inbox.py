@@ -57,8 +57,7 @@ from lup_dev.host.protocol import (
 )
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded, Said
-from lup_dev.host.service import UNDECIDED, Asked, HostService, Judged, Naming
-from lup_dev.host.service import judged as run_on_host
+from lup_dev.host.service import UNDECIDED, HostService, Naming, Program, executed
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import LaunchJudge, LaunchModules, WorkerJudge, Workers
 from lup_dev.inbox.delivery import Delivery, clocked, opening
@@ -164,6 +163,7 @@ if TYPE_CHECKING:
     from mcp.client._transport import TransportStreams
     from pydantic import JsonValue
 
+    from lup.programs import Ran
     from lup_dev.layout import HostLayout
 
 runner = CliRunner()
@@ -369,7 +369,7 @@ def inboxed(
     judge: LaunchJudge | None = None,
     modules: LaunchModules | None = None,
     remotes: Callable[[Delivery], Remotes] | None = None,
-    rooms: Callable[[Asked], Awaitable[Judged]] | None = None,
+    rooms: Callable[[Program], Awaitable[Ran]] | None = None,
 ) -> Generator[Watched]:
     """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, and running in a launch's room through `rooms`, where given."""
     known = cli.Adapters(known=cli.adapters())
@@ -5568,16 +5568,16 @@ class Landings:
         )
         return root
 
-    async def room(self, asked: Asked) -> Judged:
+    async def room(self, program: Program) -> Ran:
         """Run what the host asks of the launch's room, `podman exec` into it, on this machine instead, where the room's paths are the host's."""
-        self.ran.append(asked.command)
-        match asked.command:
+        self.ran.append(program.command)
+        match program.command:
             case ["podman", "exec", "--workdir", workdir, _, *command]:
-                return await run_on_host(
-                    Asked(command=command, payload="", directory=Path(workdir))
+                return await executed(
+                    Program(command=command, payload="", directory=Path(workdir))
                 )
             case _:
-                message = f"the room was asked {asked.command}"
+                message = f"the room was asked {program.command}"
                 raise AssertionError(message)
 
     def wrote(self, root: Path, path: str, content: str) -> None:

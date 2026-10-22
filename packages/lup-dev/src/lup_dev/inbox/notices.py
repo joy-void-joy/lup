@@ -13,13 +13,13 @@ which can deadlock a process with threads (#23), and the service's event loop
 mustn't wait on it.
 """
 
-import asyncio
 import shutil
 from abc import ABC, abstractmethod
 from typing import override
 
 import typer
 
+from lup.programs import ProgramMissingError, awaited
 from lup.types import Model
 
 
@@ -49,22 +49,15 @@ class NotifySend(Notices, Model):
         if program is None:
             return
         try:
-            # lup: ignore("subprocess", why="raised from the host service's event loop, which sh can't share: it forks, which can deadlock a process with threads (#23)")
-            process = await asyncio.create_subprocess_exec(
+            ran = await awaited(
                 program,
                 f"--app-name={self.application}",
                 summary,
                 body,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
+                checked=False,
             )
-            _, error = await process.communicate()
-        except OSError as unrun:
+        except ProgramMissingError as unrun:
             typer.echo(f"lup-dev: the desktop notice failed: {unrun}", err=True)
             return
-        if process.returncode != 0:
-            typer.echo(
-                f"lup-dev: the desktop notice failed: {error.decode(errors='replace')}",
-                err=True,
-            )
+        if ran.status != 0:
+            typer.echo(f"lup-dev: the desktop notice failed: {ran.said()}", err=True)

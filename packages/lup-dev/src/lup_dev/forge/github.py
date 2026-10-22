@@ -12,7 +12,7 @@ through the operator's `gh` and its login:
   choose which repository the operator's login acts on. Reading reaches another
   repository too, any the operator's login can read, where a call names it
   (`docs/launch.md`, *Related repositories*); writing stays on the launch's own.
-- **Spawned, never forked.** `gh` runs through the host service's `judged`,
+- **Spawned, never forked.** `gh` runs through the host service's `executed`,
   awaited on its event loop as each judge is, in the repository's git directory.
 - **Its git pinned there.** `gh` runs with `GIT_DIR` and `GIT_COMMON_DIR` both
   naming that directory (`lup_dev.git`, `pinning`), which the git it runs
@@ -46,7 +46,7 @@ from lup.types import Model
 from lup_dev.errors import LupDevError
 from lup_dev.git import pinning
 from lup_dev.host.protocol import GitHubRepository, Register
-from lup_dev.host.service import Asked, judged
+from lup_dev.host.service import Program, executed
 
 PROGRAM = "gh"
 """The program lup reaches GitHub through, as the `PATH` finds it."""
@@ -81,14 +81,14 @@ async def ran(arguments: list[str], directory: Path, given: str = "") -> str:
     failure, in its own words.
     """
     command = [PROGRAM, *arguments]
-    asked = Asked(
+    program = Program(
         command=[*pinning(directory), *command], payload=given, directory=directory
     )
-    answer = await judged(asked)
-    error = answer.error.strip()
+    answer = await executed(program)
+    error = answer.said()
     match answer.status:
         case 0:
-            return answer.output
+            return answer.output.decode(errors="replace")
         case 4:
             message = (
                 f"`gh` on the host has no GitHub login; `gh auth login` there signs "

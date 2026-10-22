@@ -325,7 +325,7 @@ def test_a_new_copy_takes_new_hooks_while_the_one_before_finishes_its_hold(
             after = await judge.judged(launch, "y")
             # The process of `a` still answers the hold it was asked, and
             # nothing new reaches it.
-            assert first.process.returncode is None
+            assert first.process.status is None
             assert sorted(each.parent.name for each in workers.commands()) == [
                 "a",
                 "b",
@@ -333,7 +333,7 @@ def test_a_new_copy_takes_new_hooks_while_the_one_before_finishes_its_hold(
             await holds.release()
             answered = await asyncio.wait_for(held, timeout=PATIENCE)
             await asyncio.wait_for(asyncio.gather(*workers.retiring), PATIENCE)
-            assert first.process.returncode is not None
+            assert first.process.status is not None
             assert not first.socket.exists()
             assert [each.parent.name for each in workers.commands()] == ["b"]
             again = await judge.judged(launch, "z")
@@ -365,7 +365,7 @@ def test_a_launch_s_process_that_dies_judging_fails_that_hook_and_starts_again(
             dying = workers.running["one"]
             with pytest.raises(HostError, match="ended before it answered"):
                 await judge.judged(launch, "die")
-            await asyncio.wait_for(dying.process.wait(), timeout=PATIENCE)
+            await asyncio.wait_for(dying.process.process.wait(), timeout=PATIENCE)
             again = await judge.judged(launch, "x")
             assert workers.running["one"] is not dying
             assert not dying.socket.exists()
@@ -390,8 +390,8 @@ def test_a_launch_ending_ends_its_processes_a_replaced_one_holding_among_them(
             assert await judge.judged(launch, "y") == "b answers y"
             second = workers.running["one"]
             await workers.close(launch)
-            assert first.process.returncode is not None
-            assert second.process.returncode is not None
+            assert first.process.status is not None
+            assert second.process.status is not None
             assert workers.commands() == []
             assert not list(isolated.launches.glob("one.modules.*"))
             with pytest.raises(HostError):

@@ -305,7 +305,7 @@ def test_a_launch_s_own_process_serves_its_committed_declaration_s_modules(
         offered = await workers.open(registered)
         calling = Calling(name="shout", arguments={"text": "hi"}, caller=CALLER)
         first = await workers.ask(registered, calling)
-        process = workers.running["one"].process
+        process = workers.running["one"].process.process
         process.kill()
         await process.wait()
         again = await workers.ask(registered, calling)

@@ -362,8 +362,9 @@ export const rules = {
             'commands are run, checked and reported.',
         steer:
             'Run programs with `lup.programs`: `run("git", "status", cwd=root)`, which starts them safely beside ' +
-            'threads and raises on a status the caller doesn\'t accept, or `detached(…)` for one that outlives ' +
-            'its caller.',
+            'threads and raises on a status the caller doesn\'t accept; on an event loop, `await awaited(…)`, ' +
+            'which holds no thread, or `started(…)` for one the caller talks to while it runs; or ' +
+            '`detached(…)` for one that outlives its caller.',
         check(file) {
             for (const imported of file.importsOf(['subprocess', 'sh'])) {
                 file.report(imported.node, `this import brings in \`${imported.module}\``);
@@ -391,6 +392,28 @@ export const rules = {
                         def status() -> str:
                             """Return the working tree's status."""
                             return run("git", "status").text()
+                    `,
+                },
+                {
+                    code: python`
+                        import asyncio
+
+
+                        async def status() -> bytes:
+                            """Return the working tree's status."""
+                            process = await asyncio.create_subprocess_exec(
+                                "git", "status", stdout=asyncio.subprocess.PIPE
+                            )
+                            output, _ = await process.communicate()
+                            return output
+                    `,
+                    rewritten: python`
+                        from lup.programs import awaited
+
+
+                        async def status() -> bytes:
+                            """Return the working tree's status."""
+                            return (await awaited("git", "status")).output
                     `,
                 },
             ],

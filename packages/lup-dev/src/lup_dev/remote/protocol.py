@@ -45,7 +45,7 @@ as the repository's `config` sets it: pinned, that `config` is the only one of
 the repository's git reads, read-only in every room and the operator's to
 write, so a project's own `core.sshCommand` there holds. Each git is spawned
 through asyncio and awaited on the service's event loop, as each judge is
-(`host/service.py`, `judged`). The operator's credentials are the service's
+(`host/service.py`, `executed`). The operator's credentials are the service's
 environment. Each push and fetch is said in the service's log, with git's
 standard error once.
 """
@@ -58,12 +58,13 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import AfterValidator
 
+from lup.programs import Ran
 from lup.types import Model, MutableModel
 from lup_dev.git import pinning
 from lup_dev.host.protocol import Action, HostError, Limits, Register, Reply, Request
 from lup_dev.host.publishing import Place, Push, Refusal, Updating, told
 from lup_dev.host.rooms import RoomHandler, RoomRoute
-from lup_dev.host.service import Asked, Judged, judged
+from lup_dev.host.service import Program, executed
 from lup_dev.host.workers import LaunchModules, refusals
 
 if TYPE_CHECKING:
@@ -419,7 +420,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
 
     say: Callable[[str], None]
     """Where each push and fetch is said: the service's log."""
-    run: Callable[[Asked], Awaitable[Judged]] = judged
+    run: Callable[[Program], Awaitable[Ran]] = executed
     """Runs one git command to its end on the service's event loop."""
     landed: Callable[[Register, list[str]], Awaitable[None]] | None = None
     """Told which refs a launch's push updated, once it's done and before its
@@ -443,11 +444,11 @@ class Remotes(Model, arbitrary_types_allowed=True):
         ran = await self.git(launch, "ls-remote", "--end-of-options", url)
         if ran.status != 0:
             self.told(launch, f"listing `{remote}` ({url})", ran)
-            message = f"git couldn't list `{remote}`: {oneline(ran.error)}"
+            message = f"git couldn't list `{remote}`: {oneline(ran.said())}"
             raise HostError(message)
 
         def read() -> Iterator[Ref]:
-            for line in ran.output.splitlines():
+            for line in ran.text().splitlines():
                 match line.split():
                     case [listed, name]:
                         yield Ref(object=listed, name=name)
@@ -469,7 +470,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
 
     async def git(
         self, launch: Register, *arguments: str, own_parents: bool = False
-    ) -> Judged:
+    ) -> Ran:
         """Run git in `launch`'s repository's own git directory, pinned there (`pinning`), with what it could be led into turned off.
 
         `own_parents` has git read each commit's parents from the commit alone:
@@ -486,7 +487,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
             else []
         )
         return await self.run(
-            Asked(
+            Program(
                 command=[
                     *pinning(launch.repository),
                     *ungrafted,
@@ -525,7 +526,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
             case _:
                 message = (
                     f"git couldn't say whether {ancestor} is in {tip}'s history: "
-                    f"{oneline(ran.error)}"
+                    f"{oneline(ran.said())}"
                 )
                 raise HostError(message)
 
@@ -609,9 +610,9 @@ class Remotes(Model, arbitrary_types_allowed=True):
             launch, "remote", "get-url", *(["--push"] if push else []), remote
         )
         if found.status != 0:
-            message = f"git couldn't say `{remote}`'s URL: {oneline(found.error)}"
+            message = f"git couldn't say `{remote}`'s URL: {oneline(found.said())}"
             raise HostError(message)
-        return found.output.strip()
+        return found.text().strip()
 
     async def fetched(
         self, launch: Register, remote: str, wanted: list[Wanted], *, push: bool
@@ -637,7 +638,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
         asked = ", ".join(f"{each.object} as {each.name}" for each in wanted)
         self.told(launch, f"fetching {asked} from `{remote}` ({url})", ran)
         if ran.status != 0:
-            message = f"git couldn't fetch from `{remote}`: {oneline(ran.error)}"
+            message = f"git couldn't fetch from `{remote}`: {oneline(ran.said())}"
             raise HostError(message)
         return [
             each
@@ -659,10 +660,10 @@ class Remotes(Model, arbitrary_types_allowed=True):
             )
             raise HostError(message)
 
-    def told(self, launch: Register, what: str, ran: Judged) -> None:
+    def told(self, launch: Register, what: str, ran: Ran) -> None:
         """Say what one git command did for `launch`, with what git wrote to its standard error, once."""
         outcome = "done" if ran.status == 0 else f"failed (status {ran.status})"
-        said = ran.error.strip()
+        said = ran.said().strip()
         self.say(
             f"{launch.launch}: {what}: {outcome}"
             + (f". git said:\n{said}" if said else "")
@@ -912,7 +913,7 @@ class PushHandler(Model, RoomHandler[Pushing]):
         )
         if ran.status == 0:
             return None
-        return oneline(ran.error) or f"git push ended with status {ran.status}"
+        return oneline(ran.said()) or f"git push ended with status {ran.status}"
 
 
 class FetchHandler(Model, RoomHandler[Fetching]):
