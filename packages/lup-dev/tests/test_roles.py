@@ -70,6 +70,9 @@ def core(paths: Paths) -> Project:
         ("src/pkg/schema.json", "production"),
         ("src/pkg/core.py", "production"),
         ("src/pkg/test_helpers.py", "test"),
+        ("packages/lup-dashboard/page/src/folds.test.ts", "test"),
+        ("web/src/App.test.tsx", "test"),
+        ("packages/lup-dashboard/page/src/folds.ts", "production"),
         ("scripts/run.sh", "production"),
     ],
 )
@@ -130,6 +133,21 @@ def test_test_roots_a_projects_own_module_holds_are_named_too(repo: Path) -> Non
     assert roles(repo, project).role(Path("studio/tests/test_a.py")) == "test"
     assert roles(repo, project).role(Path("tests/test_core.py")) == "test"
     assert roles(repo, project).role(Path("src/pkg/test_helpers.py")) == "production"
+
+
+def test_a_typescript_test_is_a_test_without_python(repo: Path) -> None:
+    page = Path("packages/lup-dashboard/page/src/keys.test.ts")
+    without = roles(repo, Project(modules=Modules.default().drop("python")))
+    assert without.role(page) == "test"
+    assert not without.checked(page)
+
+
+def test_a_project_names_its_own_tests(repo: Path) -> None:
+    project = core(Paths().add(tests=["web/**/*.spec.ts", "e2e/**"]))
+    assert roles(repo, project).role(Path("web/src/a.spec.ts")) == "test"
+    assert roles(repo, project).role(Path("e2e/flows/login.py")) == "test"
+    assert roles(repo, project).role(Path("web/src/a.test.ts")) == "test"
+    assert roles(repo, project).role(Path("web/src/a.ts")) == "production"
 
 
 def test_a_project_adds_protected_paths(repo: Path) -> None:

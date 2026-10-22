@@ -71,7 +71,7 @@ class Paths(Layer, extra="forbid"):
     >>> Paths.of(dta=["episodes/**"])
     Traceback (most recent call last):
     ...
-    lup_dev.declaration.errors.ProjectError: `Paths` has no role `dta`; its roles are `protected`, `operator_documents`, `excluded`, `scratch`, `docs`, `data`, `source_trees`, `python` and `conftest`
+    lup_dev.declaration.errors.ProjectError: `Paths` has no role `dta`; its roles are `protected`, `operator_documents`, `excluded`, `tests`, `scratch`, `docs`, `data`, `source_trees`, `python` and `conftest`
     """
 
     protected: Patterns = Patterns()
@@ -81,6 +81,9 @@ class Paths(Layer, extra="forbid"):
     excluded: Patterns = Patterns()
     """Paths held to nothing: no rules and no findings, and writes allowed. A path
     both protected and excluded still asks."""
+    tests: Patterns = Patterns()
+    """Tests by their paths, wherever they are, such as another language's: a
+    test, so writing one asks nothing. pytest's are found by the test roots."""
     scratch: Patterns = Patterns()
     """Scratch work: allowed at any size."""
     docs: Patterns = Patterns()

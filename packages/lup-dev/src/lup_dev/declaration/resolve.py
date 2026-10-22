@@ -84,6 +84,8 @@ class PathRoles(Model, extra="forbid"):
     protected: list[str]
     operator_documents: list[str]
     excluded: list[str]
+    tests: list[str] = []
+    """Empty in a declaration kept before this role, which may still stand in."""
     scratch: list[str]
     docs: list[str]
     data: list[str]

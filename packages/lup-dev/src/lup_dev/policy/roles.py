@@ -3,9 +3,11 @@
 1. **protected:** the project's declaration, and the paths its modules protect;
 2. **operator:** the operator's documents, `DESIGN.md` and `AGENTS.md`;
 3. **excluded:** what its modules hold to nothing;
-4. **test:** a module under a test root and matching its file patterns, or a
-   `conftest.py` under one: the roots the declaration names, or where it keeps
-   lup's default, the ones pytest's configuration gives;
+4. **test:** a file the test patterns match, TypeScript's `*.test.ts` and
+   `*.test.tsx` by default, wherever it is; or a module under a test root and
+   matching its file patterns, or a `conftest.py` under one: the roots the
+   declaration names, or where it keeps lup's default, the ones pytest's
+   configuration gives;
 5. **scratch:** `tmp/` at any depth, and the saved versions under `.lup/`;
 6. **docs:** Markdown files and `docs/`;
 7. **data:** data formats outside a source tree;
@@ -134,13 +136,22 @@ class Roles(Model):
         return self.ruled(path) or (self.is_python(path) and self.role(path) == "test")
 
     def is_test(self, path: Path) -> bool:
-        """Say whether pytest collects `path` as a test, or reads it as a conftest.
+        """Say whether `path` is a test: one the test patterns match, or one pytest collects or reads as a conftest.
 
-        The test roots are the ones the declaration names; where it keeps lup's
-        default, pytest's configuration says where tests are, as it did before a
-        project could name its own, until the gate checks `testpaths` against the
-        declared roots (#176).
+        The test patterns name tests wherever they are, such as another
+        language's, which its own runner collects. pytest's test roots are the
+        ones the declaration names; where it keeps lup's default, pytest's
+        configuration says where tests are, as it did before a project could name
+        its own, until the gate checks `testpaths` against the declared roots
+        (#176).
+
+        >>> from lup_dev import Project
+        >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
+        >>> roles.is_test(Path("page/src/keys.test.ts"))
+        True
         """
+        if matches(path, self.declaration.paths.tests):
+            return True
         if not self.is_python(path):
             return False
         named = PurePath(path.name)
