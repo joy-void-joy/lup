@@ -94,6 +94,7 @@ from lup_dev.inbox.protocol import (
 from lup_dev.inbox.store import (
     Answer,
     Answered,
+    ApiChanged,
     Approval,
     AtLanding,
     Binary,
@@ -6105,3 +6106,78 @@ def test_lup_s_tools_say_which_may_be_sent_again_across_a_restart(
         "find_issues",
     }
     assert not any(again for _, again in github.values())
+
+
+def test_judged_and_the_review_read_a_hold_and_an_item_s_files_a_copy_before_wrote(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A copy before found `signature-changed`, which the holds and the files beside items it wrote keep: a value a stored model once accepted stays read, since `judged` reads every store's holds whole and the review an item's files (`ApiKind`)."""
+    worktree = tmp_path / "w"
+    worktree.mkdir()
+    repository = tmp_path / ".git"
+    core = Path("src/core.py")
+    reading = Reading(
+        role="production",
+        asks=[
+            Ask(
+                name="public-api",
+                taken="flagged",
+                line=1,
+                api=ApiChanged(kind="signature-changed", name="f"),
+            )
+        ],
+    )
+    verdict = Verdict(
+        key="v1",
+        time=clock.now(),
+        session="s1",
+        runtime="claude",
+        tool="Write",
+        worktree=worktree,
+        path=core,
+        role="production",
+        outcome="hold",
+        reasons=["whole-file"],
+    )
+    holds = Holds(layout=machine.store(worktree))
+    hold = holds.put(
+        Hold(
+            key=holds.unused(),
+            worktree=worktree,
+            session="s1",
+            created=clock.now(),
+            files=[
+                HeldFile(
+                    path=core,
+                    role="production",
+                    blob="abc",
+                    reasons=["whole-file"],
+                    asks=["src/core.py is rewritten whole"],
+                    reading=reading,
+                )
+            ],
+            diff="-def f(): ...\n+def f(x): ...\n",
+            verdicts=[verdict],
+        )
+    )
+    VerdictLog(path=machine.verdicts(repository)).append([verdict])
+    whole = ChangedFile(
+        path=core,
+        before=Text(text="def f(): ...\n"),
+        after=Text(text="def f(x): ...\n"),
+        reading=reading,
+    )
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        InboxAnnouncing(layout=machine.host, clock=clock).announced(
+            hold, "claude", repository, [whole]
+        )
+        [item] = delivery.inbox.waiting(Operator())
+        listed, error = call(machine.host.launch("one").mcp, "judged", {})
+        files = client(machine.host, clock).ask(ShowFiles(number=item.number), Files)
+    assert not error, listed
+    assert f"{worktree / core}  Write  hold (whole-file), no answer yet" in listed
+    assert f"  {worktree / core}: whole-file" in listed
+    assert files.files == [whole]
+
