@@ -1044,6 +1044,13 @@ kbd {
     line-height: calc(var(--lh) - 2px);
 }
 
+/* What waits below, at the line's end: how many items are to answer, and how many are new. */
+.where-tally {
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: var(--muted);
+}
+
 @media (max-width: 640px) {
     :root {
         --columns: 5;
@@ -1063,6 +1070,11 @@ kbd {
     }
 
     .where-outer {
+        display: none;
+    }
+
+    /* The two lines are the group and the path; the bar over the review counts what waits. */
+    .where-tally {
         display: none;
     }
 }
