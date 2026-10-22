@@ -62,4 +62,4 @@ A room can't write the git directory's `config` or `hooks/`, but it writes the r
 - **Bodies go on `gh`'s standard input,** and every value the model writes as `--flag=value` or after `--`, never through a shell.
 - **`gh` missing or logged out on the host:** each tool answers why, and the launch says it once; `gh` is an optional requirement of the host.
 
-**The gate in a room.** The gate checks that each `defer(issue=…)`'s issue is still open (`docs/judging-writes.md`, *The `# lup:` directives*), and a room has no `gh`. So in a room it asks the host, an `IssueState` on the request socket answered by the `GitHub` module within `read-issues`; elsewhere it runs `gh` itself. An issue the host doesn't answer goes unchecked, said with its reason.
+**The gate in a room.** The gate checks that each `issue=` a `defer` or an `ignore` waits on is still open (`docs/judging-writes.md`, *The `# lup:` directives*), and a room has no `gh`. So in a room it asks the host, an `IssueState` on the request socket answered by the `GitHub` module within `read-issues`; elsewhere it runs `gh` itself. An issue the host doesn't answer goes unchecked, said with its reason.

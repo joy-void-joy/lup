@@ -69,6 +69,7 @@ export interface Ignore {
     covers: number;
     rule: string;
     why: string;
+    issue: number | string | null;
 }
 
 export interface Defer {

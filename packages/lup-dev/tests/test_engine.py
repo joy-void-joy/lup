@@ -853,6 +853,22 @@ def test_stacked_ignores_alone_keep_the_next_line_of_code(project: Project) -> N
     ]
 
 
+def test_an_ignore_carries_the_issue_it_waits_on(project: Project) -> None:
+    body = (
+        "def f(text: str) -> list[str]:\n"
+        '    return text.split(",")  # lup: ignore("string-split", why="a format", '
+        "issue=12)\n"
+        '    # lup: ignore("tuple-shape", issue="owner/repo#7", why="the caller")\n'
+        "    return []\n"
+    )
+    assert directives(project, "waiting.py", body) == [
+        Ignore(line=4, covers=4, rule="string-split", why="a format", issue=12),
+        Ignore(
+            line=5, covers=6, rule="tuple-shape", why="the caller", issue="owner/repo#7"
+        ),
+    ]
+
+
 def test_a_defer_carries_its_issue_or_condition(project: Project) -> None:
     body = (
         'x = 1  # lup: defer(issue=12, why="retry on reset")\n'
@@ -916,6 +932,8 @@ def test_any_other_comment_or_call_is_a_note_as_written(
         'ignore("a", "b", why="two")',
         'ignore("a", why="x", extra=1)',
         'ignore("a", why="x", when=ready)',
+        'ignore("a", why="x", why="y")',
+        'ignore("a", why="x", issue=1.5)',
         'defer(why="nothing brings it back")',
         "defer(issue=1)",
         "defer()",

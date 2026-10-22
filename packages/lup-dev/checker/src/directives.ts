@@ -21,8 +21,9 @@ import { Comment, IdentifierToken, StringTokenFlags, Token, TokenType } from 'py
 import { Directive } from './protocol';
 
 const layout = [TokenType.Indent, TokenType.Dedent, TokenType.NewLine, TokenType.EndOfStream];
-const ignoreForm = 'written as `ignore("<rule>", why="<reason>")`';
+const ignoreForm = 'written as `ignore("<rule>", why="<reason>")`, with `issue=12` where it waits on that issue';
 const deferForm = 'written as `defer(issue=12, why="…")` or `defer(when=condition, why="…")`';
+const issueForm = '`issue` is a number, or a string such as `"owner/repo#7"`';
 const tracking = ['issue', 'when'];
 
 export function readDirectives(parse: ParseFileResults): Directive[] {
@@ -120,8 +121,8 @@ function read(parse: ParseFileResults, body: TextRange, line: number, covers: ()
         default:
             if (call?.d.args.some((arg) => arg.d.name && tracking.includes(arg.d.name.d.value))) {
                 const problem =
-                    `\`${named}\` is no directive, yet passes \`issue\` or \`when\`, which track a \`defer\`: ` +
-                    "lup's calls are `ignore`, `defer` and `note`";
+                    `\`${named}\` is no directive, yet passes \`issue\` or \`when\`, which track a \`defer\` ` +
+                    "or an `ignore`: lup's calls are `ignore`, `defer` and `note`";
                 return malformed(line, text, problem);
             }
             return { kind: 'note', line, text };
@@ -140,20 +141,29 @@ function noteText(call: CallNode): string | undefined {
 
 function readIgnore(call: CallNode, line: number, text: string, covers: () => number): Directive {
     const positional = call.d.args.filter((arg) => !arg.d.name);
-    const keywords = call.d.args.filter((arg) => arg.d.name);
     const rule = positional.length === 1 ? stringValue(positional[0].d.valueExpr) : undefined;
     if (positional.length !== 1 || positional[0].d.argCategory !== ArgCategory.Simple || !rule) {
         return malformed(line, text, `\`ignore\` names one rule, as a string: it's ${ignoreForm}`);
     }
-    const unknown = keywords.filter((arg) => arg.d.name!.d.value !== 'why');
-    if (unknown.length > 0) {
-        return malformed(line, text, `\`ignore\` takes only \`why\`: it's ${ignoreForm}`);
+    const keywords = call.d.args.filter((arg) => arg.d.name);
+    const given = new Map(keywords.map((arg) => [arg.d.name!.d.value, arg.d.valueExpr]));
+    if (given.size !== keywords.length) {
+        return malformed(line, text, `\`ignore\` names a keyword twice: it's ${ignoreForm}`);
     }
-    const why = keywords.length === 1 ? stringValue(keywords[0].d.valueExpr) : undefined;
+    const unknown = [...given.keys()].filter((name) => !['why', 'issue'].includes(name));
+    if (unknown.length > 0) {
+        return malformed(line, text, `\`ignore\` takes \`why\` and \`issue\`, not \`${unknown[0]}\``);
+    }
+    const why = given.has('why') ? stringValue(given.get('why')!) : undefined;
     if (!why || why.trim() === '') {
         return malformed(line, text, `\`ignore\` needs its reason, \`why="…"\`: it's ${ignoreForm}`);
     }
-    return { kind: 'ignore', line, covers: covers(), rule, why };
+    const issueNode = given.get('issue');
+    const issue = issueNode ? issueValue(issueNode) : undefined;
+    if (issueNode && issue === undefined) {
+        return malformed(line, text, issueForm);
+    }
+    return { kind: 'ignore', line, covers: covers(), rule, why, issue: issue ?? null };
 }
 
 function readDefer(call: CallNode, line: number, text: string): Directive {
@@ -173,9 +183,9 @@ function readDefer(call: CallNode, line: number, text: string): Directive {
         return malformed(line, text, `\`defer\` needs what's left undone, \`why="…"\`: it's ${deferForm}`);
     }
     const issueNode = given.get('issue');
-    const issue = issueNode ? integerValue(issueNode) ?? stringValue(issueNode) : undefined;
+    const issue = issueNode ? issueValue(issueNode) : undefined;
     if (issueNode && issue === undefined) {
-        return malformed(line, text, '`issue` is a number, or a string such as `"owner/repo#7"`');
+        return malformed(line, text, issueForm);
     }
     const whenNode = given.get('when');
     if (whenNode && whenNode.nodeType !== ParseNodeType.Name) {
@@ -205,6 +215,11 @@ function stringValue(node: ExpressionNode): string | undefined {
         value += part.d.value;
     }
     return value;
+}
+
+// An `issue`'s value: a number here, or a string such as `"owner/repo#7"`.
+function issueValue(node: ExpressionNode): number | string | undefined {
+    return integerValue(node) ?? stringValue(node);
 }
 
 function integerValue(node: ExpressionNode): number | undefined {

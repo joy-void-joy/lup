@@ -74,6 +74,40 @@ def test_an_ignore_keeps_any_owners_finding() -> None:
     assert ignore("E501").problems(Checking(fired=[Fired(rule="E501", line=3)])) == []
 
 
+def test_an_ignore_waiting_on_a_closed_issue_is_due_and_keeps_its_finding() -> None:
+    waiting = ignore().model_copy(update={"issue": 12})
+    fired = [Fired(rule="tuple-shape", line=3)]
+    closed = Checking(
+        fired=fired, gate=Trackers(issues=FakeIssues(closed=[12]), conditions={})
+    )
+    [problem] = waiting.problems(closed)
+    assert (problem.rule, problem.line) == ("ignore-closed", 2)
+    assert problem.reminder
+    assert "issue #12 is closed" in problem.message
+    assert waiting.keeps("tuple-shape", 3)
+    still_open = Checking(
+        fired=fired, gate=Trackers(issues=FakeIssues(), conditions={})
+    )
+    assert waiting.problems(still_open) == []
+    assert waiting.problems(Checking(fired=fired)) == []
+    unchecked = Checking(fired=fired, gate=Trackers(issues=None, conditions={}))
+    assert waiting.problems(unchecked) == []
+
+
+def test_an_ignore_needs_a_readable_issue() -> None:
+    waiting = ignore().model_copy(update={"issue": "lup seven"})
+    [problem] = waiting.problems(Checking(fired=[Fired(rule="tuple-shape", line=3)]))
+    assert problem.rule == "ignore-issue"
+    assert not problem.reminder
+
+
+def test_an_ignores_issue_is_no_part_of_what_the_operator_is_asked() -> None:
+    waiting = ignore().model_copy(update={"issue": 12})
+    assert waiting.identity() == ignore().identity()
+    assert added_suppressions([ignore()], [waiting]) == []
+    assert missing([waiting], [ignore()]) == []
+
+
 def test_a_malformed_directive_is_a_finding() -> None:
     malformed = Malformed(line=4, text="todo()", problem="`todo` is no directive")
     [problem] = malformed.problems(Checking())

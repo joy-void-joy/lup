@@ -152,7 +152,11 @@ def directives(content: str) -> list[Directive]:
                 rule = ast.literal_eval(parsed.args[0])
                 found.append(
                     Ignore(
-                        line=line, covers=covers, rule=rule, why=str(keywords["why"])
+                        line=line,
+                        covers=covers,
+                        rule=rule,
+                        why=str(keywords["why"]),
+                        issue=keywords.get("issue"),
                     )
                 )
             case "defer" if "why" in keywords and tracked:

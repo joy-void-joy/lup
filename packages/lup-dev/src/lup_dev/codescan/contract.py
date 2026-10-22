@@ -66,7 +66,8 @@ class Finding(Model):
     """
     reminder: bool = False
     """Whether it's work that came due rather than something wrong with the
-    code: a deferral whose issue closed or whose condition holds. The gate lists
+    code: a deferral whose issue closed or whose condition holds, or an
+    `ignore` whose issue closed. The gate lists
     it without failing, so its verdict depends on the files alone, and a
     session is told it at its start."""
 
@@ -75,7 +76,7 @@ class Due(Model):
     """The deferred work a repository's gate last found due: each reminder, where it is and what came due.
 
     `lup-dev rules check` over every file writes it, where it could ask about
-    every deferral's issue; a session's start tells it (`GitDirectoryLayout.due`).
+    every issue a `# lup:` comment waits on; a session's start tells it (`GitDirectoryLayout.due`).
     """
 
     reminders: list[Finding] = []
