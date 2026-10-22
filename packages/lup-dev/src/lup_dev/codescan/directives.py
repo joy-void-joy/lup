@@ -1,10 +1,10 @@
 """The `# lup:` comments the engine reads out of a file, as models, and checking them.
 
-A directive is written as a call (`# lup: ignore("tuple-shape", why="…")`); anything
-that isn't a call is a note. The engine parses each comment with pyright's own
-expression parser and reports it in one of these shapes, told apart by `kind`. The
-grammar and what each directive means are in `docs/judging-writes.md`, *The `# lup:`
-directives*.
+A directive is written as a call (`# lup: ignore("tuple-shape", why="…")`): `ignore`,
+`defer` or `note`. Anything else, free text or a call of another name, is a note as
+`note("…")` is. The engine parses each comment with pyright's own expression parser
+and reports it in one of these shapes, told apart by `kind`. The grammar and what
+each directive means are in `docs/judging-writes.md`, *The `# lup:` directives*.
 
 Each kind answers for itself (`docs/conventions.md`, *Dispatch*): which finding it
 keeps, what's wrong with it, and what identifies it across edits. What's wrong is
@@ -12,7 +12,8 @@ reported as a `Problem`, which the judge turns into a finding of its own rule:
 - `unused-ignore`: an `ignore` whose rule doesn't fire on the line it covers,
   fixable: never told to an agent, removed by `lup-dev rules fix`, which
   `lup-dev check --fix` runs, and reported by the gate until it's removed;
-- `malformed-directive`: a call the grammar refuses, unknown or incomplete;
+- `malformed-directive`: an `ignore` or a `defer` the grammar refuses, or a call
+  of another name passing a deferral's `issue` or `when`;
 - `defer-issue`: a deferral's `issue` that's neither a number nor `owner/repo#7`;
 - `defer-condition`: a deferral's `when` naming no declared condition;
 - `defer-closed`, at the gate: a deferral whose issue is closed;
@@ -229,7 +230,8 @@ class Identity(Model):
     """What identifies a directive across edits, whatever line it moves to."""
 
     text: str
-    """The directive as written, after `# lup:`."""
+    """What the directive says, after `# lup:`, as an ask or a removal quotes it:
+    a note's text, or a directive's call, written out."""
     asked: bool
     """Whether adding it asks the operator: true for an `ignore`."""
 
@@ -372,11 +374,17 @@ class Defer(Comment):
 
 
 class Note(Comment):
-    """A `# lup:` comment that isn't a call: a note for whoever reads the code next."""
+    """`# lup: note("…")`, or any `# lup:` comment that's no directive: a note for whoever reads the code next.
+
+    Free text, or a call of another name, is a note as written, the same as
+    `note("…")` saying it: a note can't be wrong, so the operator's own review
+    notes never fail the gate.
+    """
 
     kind: Literal["note"] = "note"
     line: int
     text: str
+    """What it says: a `note`'s string, or the comment as written, after `lup:`."""
 
     @override
     def keeps(self, rule: str, line: int) -> bool:
@@ -392,7 +400,15 @@ class Note(Comment):
 
 
 class Malformed(Comment):
-    """A `# lup:` call the grammar refuses: unknown, or missing what it needs."""
+    """A `# lup:` call the grammar refuses, which would otherwise sit there doing nothing.
+
+    It's an `ignore` or a `defer` written wrong: missing what it needs, given
+    what it doesn't take, or not parsing as a call. Or it's a call of another
+    name passing `issue` or `when`, which only a deferral's tracking takes: read
+    as a note, its tracking would vanish unseen. Any other call of another name
+    is a note, since an `ignore` mistyped as one still leaves its finding
+    reported.
+    """
 
     kind: Literal["malformed"] = "malformed"
     line: int
