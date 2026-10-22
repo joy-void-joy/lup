@@ -15,7 +15,7 @@ from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
 from lup_dev.host.courier import Conversations, Heard, Spawned, Telling
 from lup_dev.inbox.store import Text
 from lup_dev.policy.checkpoint import Bench, Running, Services, Worktree
-from lup_dev.policy.holds import Holds, Response, waiting
+from lup_dev.policy.holds import Response
 from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
@@ -79,6 +79,10 @@ def test_claude_holds_a_new_production_file_in_its_hook_and_lets_it_through_on_a
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
+            "additionalContext": (
+                f"lup held the write to {repo}/src/pkg/new.py for the operator's "
+                "review, and they approved it."
+            ),
         }
     }
     assert [each.asks for each in hold.files] == [
@@ -88,10 +92,10 @@ def test_claude_holds_a_new_production_file_in_its_hook_and_lets_it_through_on_a
     assert running(kit, repo) == ["t1"]
 
 
-def test_claude_tells_the_operators_comment_on_a_held_write_beside_the_call(
+def test_claude_tells_a_held_writes_approval_and_comment_beside_the_call(
     on_claude: Bench, repo: Path, kit: Kit
 ) -> None:
-    """An `allow`'s `permissionDecisionReason` reaches only Claude Code's debug log, so the comment goes where the model reads it."""
+    """An `allow`'s `permissionDecisionReason` reaches only Claude Code's debug log, so the approval goes where the model reads it."""
     kit.announced.answering = Response(approved=True, comment="name it after the room")
     raw = pre_tool_use(
         repo,
@@ -103,7 +107,10 @@ def test_claude_tells_the_operators_comment_on_a_held_write_beside_the_call(
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
-            "additionalContext": "The operator approved it: name it after the room",
+            "additionalContext": (
+                f"lup held the write to {repo}/src/pkg/new.py for the operator's "
+                "review, and they approved it: name it after the room"
+            ),
         }
     }
 
@@ -321,7 +328,7 @@ def test_claude_subagent_stop_holds_once_on_a_held_changes_answer(
         repo, "SubagentStop", agent_id="sub", stop_hook_active=False
     )
     first = claude.hook(subagent_stop, on_claude)
-    assert held_on(first, "SubagentStop").startswith("The operator approved")
+    assert held_on(first, "SubagentStop").startswith("lup held the write to")
     assert claude.hook(subagent_stop, on_claude) == ""
 
 
@@ -501,9 +508,15 @@ def test_codex_hears_a_finding_beside_the_result(on_codex: Bench, repo: Path) ->
     assert "decision" not in output
 
 
+@pytest.mark.parametrize(
+    ("comment", "said"),
+    [("", "."), ("good name", ": good name")],
+    ids=["bare", "commented"],
+)
 def test_codex_holds_an_ask_until_the_operator_answers(
-    on_codex: Bench, repo: Path, kit: Kit
+    on_codex: Bench, repo: Path, kit: Kit, *, comment: str, said: str
 ) -> None:
+    kit.announced.answering = Response(approved=True, comment=comment)
     codex.hook(
         payload(
             repo,
@@ -516,17 +529,11 @@ def test_codex_holds_an_ask_until_the_operator_answers(
         on_codex,
     )
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
-
-    def approve() -> None:
-        [hold] = waiting(kit.layout)
-        Holds(layout=kit.layout.store(repo)).answer(
-            hold.key, Response(approved=True), kit.clock
-        )
-
-    kit.clock.on_sleep.append(approve)
     output = json.loads(codex.hook(post(repo, {"output": "done"}), on_codex))
-    assert output["hookSpecificOutput"]["additionalContext"].startswith(
-        f"The operator approved the held change to {repo}/src/pkg/new.py."
+    [told, *_] = output["hookSpecificOutput"]["additionalContext"].split("\n\n")
+    assert told == (
+        f"lup held the write to {repo}/src/pkg/new.py for the operator's review, "
+        f"and they approved it{said}"
     )
     assert (repo / "src" / "pkg" / "new.py").exists()
 
@@ -705,7 +712,7 @@ def test_codex_subagent_stop_holds_once_on_a_held_changes_answer(
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
     first = json.loads(codex.hook(codex_subagent_stop(repo), on_codex))
     assert first["decision"] == "block"
-    assert first["reason"].startswith("The operator approved the held change to")
+    assert first["reason"].startswith("lup held the write to")
     assert codex.hook(codex_subagent_stop(repo), on_codex) == ""
 
 
@@ -956,7 +963,7 @@ def test_codex_judges_a_patch_in_a_worktree_a_claude_write_was_allowed_in(
     output = codex.hook(captured("3-post-tool-use-add", repo), on_codex)
     assert (repo / "livecheck.py").exists()
     assert json.loads(output)["hookSpecificOutput"]["additionalContext"].startswith(
-        "The operator approved the held change to"
+        "lup held the write to"
     )
     assert running(kit, repo) == ["toolu_1"]
 
@@ -979,7 +986,7 @@ def test_codex_judges_a_patch_after_one_that_failed_at_the_turns_end(
     assert running(kit, repo) == [FAILED_PATCH]
     output = json.loads(codex.hook(captured("9-stop", repo), on_codex))
     assert output["decision"] == "block"
-    assert output["reason"].startswith("The operator approved the held change to")
+    assert output["reason"].startswith("lup held the write to")
     assert (repo / "livecheck.py").exists()
     assert running(kit, repo) == []
 
@@ -996,7 +1003,7 @@ def test_codex_clears_a_failed_patchs_call_at_the_turns_end(
     (repo / "livecheck.py").write_text(LIVECHECK)
     output = json.loads(codex.hook(captured("3-post-tool-use-add", repo), on_codex))
     assert output["hookSpecificOutput"]["additionalContext"].startswith(
-        "The operator approved the held change to"
+        "lup held the write to"
     )
     assert (repo / "livecheck.py").exists()
 
@@ -1027,7 +1034,7 @@ def test_codex_clears_a_call_of_an_earlier_turn_at_the_next_turns_start(
     )
     output = json.loads(codex.hook(captured("3-post-tool-use-add", repo), on_codex))
     assert output["hookSpecificOutput"]["additionalContext"].startswith(
-        "The operator approved the held change to"
+        "lup held the write to"
     )
 
 
@@ -1053,7 +1060,7 @@ def test_codex_a_subagents_call_holds_back_the_main_conversations_checkpoint(
     )
     output = json.loads(codex.hook(finished, on_codex))
     assert output["hookSpecificOutput"]["additionalContext"].startswith(
-        "The operator approved the held change to"
+        "lup held the write to"
     )
 
 
@@ -1135,10 +1142,13 @@ MANIFEST = Path("pyproject.toml")
 ADDED = "\n[tool.added]\nx = 1\n"
 
 
+@pytest.mark.parametrize(
+    ("comment", "said"), [("", "."), ("fine", ": fine")], ids=["bare", "commented"]
+)
 def test_claude_holds_a_shell_write_to_a_protected_file_and_keeps_it_on_a_yes(
-    on_claude: Bench, repo: Path, kit: Kit
+    on_claude: Bench, repo: Path, kit: Kit, *, comment: str, said: str
 ) -> None:
-    kit.announced.answering = Response(approved=True, comment="fine")
+    kit.announced.answering = Response(approved=True, comment=comment)
     was = (repo / MANIFEST).read_text()
     in_room(payload(repo, "SessionStart", source="startup"), on_claude)
 
@@ -1148,8 +1158,9 @@ def test_claude_holds_a_shell_write_to_a_protected_file_and_keeps_it_on_a_yes(
     told = beside(shell(repo, on_claude, "b1", append))
     [hold] = kit.announced.holds
     assert (hold.call, [each.path for each in hold.files]) == ("b1", [MANIFEST])
-    assert told.startswith(
-        f"The operator approved the held change to {repo / MANIFEST}: fine"
+    assert told == (
+        f"lup held the write to {repo / MANIFEST} for the operator's review, "
+        f"and they approved it{said}"
     )
     assert (repo / MANIFEST).read_text() == was + ADDED
     assert running(kit, repo) == []

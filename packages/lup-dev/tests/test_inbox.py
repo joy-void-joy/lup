@@ -3346,6 +3346,27 @@ def documented(repo: Path, shell: Shell) -> Path:
     return agents
 
 
+def approving(item: Item, comment: str) -> None:
+    """Approve the held change `item` with `lup-dev inbox answer`, commenting `comment`: an empty one is no comment, which the terminal would ask for otherwise."""
+    inbox("answer", str(item.number), "--approve", "--comment", comment)
+
+
+def approved_line(path: Path, comment: str) -> str:
+    """The line telling the agent its write to `path` was held for the operator's review and approved, with their `comment`."""
+    after = f": {comment}" if comment else "."
+    return (
+        f"lup held the write to {path} for the operator's review, "
+        f"and they approved it{after}"
+    )
+
+
+COMMENTS = pytest.mark.parametrize(
+    "comment", ["", "keep it"], ids=["bare", "commented"]
+)
+"""An approval without a comment, and one with."""
+
+
+@COMMENTS
 @pytest.mark.parametrize(
     ("runtime", "hooked", "turn"),
     [("claude", claude, {}), ("codex", codex, {"turn_id": "u1"})],
@@ -3362,6 +3383,7 @@ def test_a_held_shell_write_holds_its_call_until_the_operator_answers_and_tells_
     runtime: str,
     hooked: Callable[..., str],
     turn: dict[str, str],
+    comment: str,
 ) -> None:
     agents = documented(repo, shell)
     where = {"cwd": str(repo), **turn}
@@ -3395,12 +3417,13 @@ def test_a_held_shell_write_holds_its_call_until_the_operator_answers_and_tells_
         item = held_item(delivery, notices)
         collected(machine, clock)
         assert not finished.done()
-        inbox("answer", str(item.number), "--approve", "--comment", "keep it")
+        approving(item, comment)
         told = context(finished.result(timeout=PATIENCE))
-    assert told == f"The operator approved the held change to {agents}: keep it"
+    assert told == approved_line(agents, comment)
     assert agents.read_text() == "# Agents\nMore.\n"
 
 
+@COMMENTS
 def test_a_subagents_held_edit_waits_unlanded_until_the_operator_answers_making_one_hold(
     machine: Layout,
     clock: FakeClock,
@@ -3410,6 +3433,7 @@ def test_a_subagents_held_edit_waits_unlanded_until_the_operator_answers_making_
     repo: Path,
     shell: Shell,
     tmp_path: Path,
+    comment: str,
 ) -> None:
     """A subagent edits an operator's document in a worktree of its own, its hooks naming the session's (#213)."""
     documented(repo, shell)
@@ -3442,7 +3466,7 @@ def test_a_subagents_held_edit_waits_unlanded_until_the_operator_answers_making_
         collected(machine, clock)
         assert not started.done()
         assert agents.read_text() == "# Agents\n"
-        inbox("answer", str(item.number), "--approve", "--comment", "fine by me")
+        approving(item, comment)
         let = json.loads(started.result(timeout=PATIENCE))["hookSpecificOutput"]
         agents.write_text("# Agents\n\nA line.\n")
         send(
@@ -3458,11 +3482,13 @@ def test_a_subagents_held_edit_waits_unlanded_until_the_operator_answers_making_
         )
         left = delivery.inbox.waiting(Operator())
     assert let["permissionDecision"] == "allow"
-    assert "The operator approved it: fine by me" in let["additionalContext"]
+    # A subagent's first call is told lup's tools too, after the approval.
+    told, _, _ = let["additionalContext"].partition("\n\n")
+    assert told == approved_line(agents, comment)
     [hold] = [each for holds in stores(machine) for each in holds.all()]
     assert hold.agent == "a1"
     assert hold.answer is not None
-    assert (hold.answer.approved, hold.answer.comment) == (True, "fine by me")
+    assert (hold.answer.approved, hold.answer.comment) == (True, comment)
     assert left == []
 
 

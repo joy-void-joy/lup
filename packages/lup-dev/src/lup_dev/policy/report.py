@@ -4,8 +4,9 @@ lup's findings on the lines a call changed are told after it, each with its
 steer, beside the type errors and ruff's findings, and those on lines no change
 touched apart; none refuses (`docs/judging-writes.md`, *Findings*). A refusal
 is a held change the operator declined or left unanswered, put back or never
-written, with where the agent's version is saved. A move of `HEAD` is told as
-its commits', never put back.
+written, with where the agent's version is saved; an approval, one the operator
+approved, in a line saying lup held it for their review. A move of `HEAD` is
+told as its commits', never put back.
 
 A session hears about several worktrees, from any working directory, so every
 report names each file by its absolute path, as pyright's command line does.
@@ -95,6 +96,22 @@ def refusal(refused: list[Refused]) -> str:
         return "\n".join(lines)
 
     return sections([header, *(block(one) for one in refused)])
+
+
+def approval(paths: list[Path], comment: str) -> str:
+    """Tell a held change the operator approved, in one line: lup held it for their review, and they approved it, their comment after.
+
+    It says nothing of how long they took: the agent needs to know the
+    operator saw the change, not to pace itself on their time.
+
+    >>> approval([Path("/work/AGENTS.md")], "")
+    "lup held the write to /work/AGENTS.md for the operator's review, and they approved it."
+    >>> approval([Path("/work/a.py"), Path("/work/b.py")], "keep it")
+    "lup held the write to /work/a.py, /work/b.py for the operator's review, and they approved it: keep it"
+    """
+    named = ", ".join(str(path) for path in paths)
+    said = f": {comment}" if comment else "."
+    return f"lup held the write to {named} for the operator's review, and they approved it{said}"
 
 
 def information(

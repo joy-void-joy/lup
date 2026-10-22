@@ -112,7 +112,13 @@ def test_a_write_that_asks_is_held_for_the_operator_and_let_through_on_a_yes(
             )
         ]
     ]
-    assert decision == Decision(outcome="allow")
+    assert decision == Decision(
+        outcome="allow",
+        reason=(
+            f"lup held the write to {repo}/src/pkg/core.py for the operator's "
+            "review, and they approved it."
+        ),
+    )
     assert [each.asks for each in hold.files] == [
         ["the write replaces the whole of src/pkg/core.py"]
     ]

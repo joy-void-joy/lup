@@ -77,6 +77,7 @@ from lup_dev.policy.report import (
     Moved,
     MovedFile,
     Refused,
+    approval,
     information,
     moved,
     placed,
@@ -1518,8 +1519,9 @@ def settle(
 ) -> Checked:
     """Wait for the operator's answer to `hold`, then act on it.
 
-    An approval accepts the held content as it is; a decline, or no answer in
-    time, puts it back with the agent's version saved.
+    An approval accepts the held content as it is, the agent told it was held
+    and approved (`approval`); a decline, or no answer in time, puts it back
+    with the agent's version saved.
     """
     services = bench.services
     store = worktree.store
@@ -1562,12 +1564,8 @@ def settle(
         store.remember(state)
         worktree.keep(session)
     log.append(answered(hold, "approved"))
-    comment = f": {answer.comment}" if answer.comment else "."
-    named = ", ".join(str(root / path) for path in paths)
-    notice = Checked(
-        notices=[f"The operator approved the held change to {named}{comment}"]
-    )
-    return notice.then(checkpoint(bench, worktree, key, agent))
+    told = approval([root / path for path in paths], answer.comment)
+    return Checked(notices=[told]).then(checkpoint(bench, worktree, key, agent))
 
 
 class Warned(MutableModel):

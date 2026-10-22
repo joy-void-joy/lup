@@ -10,9 +10,10 @@
 | `SubagentStop` | `ConversationEnded` |
 
 A file tool's write that asks is held in `PreToolUse` for the operator's answer
-in their inbox, then let through (`allow`), their comment told beside the call,
-or denied (`deny`) with it: Claude Code's own prompt isn't used, so a hold is
-answered the same way on every runtime. The agent hears a
+in their inbox, then let through (`allow`), told beside the call that lup held
+it and they approved it, with their comment, or denied (`deny`) with it: Claude
+Code's own prompt isn't used, so a hold is answered the same way on every
+runtime. The agent hears a
 checkpoint's report as `additionalContext` beside the call's result, and what a
 turn's end tells it, the session's or a subagent's, as `additionalContext` of
 `Stop` or `SubagentStop`, which holds the turn: it goes on, the text shown as
@@ -157,8 +158,8 @@ What its judging relies on, from Claude Code's hooks reference
 - `PreToolUse`'s `permissionDecisionReason` is "For `"deny"`, shown to Claude.
   For `"allow"` and `"defer"`, written to the debug log only", and its
   `additionalContext` is "String added to Claude's context alongside the tool
-  result" (read 2026-10-22): what a write let through is told, an approval's
-  comment among it, goes in `additionalContext`;
+  result" (read 2026-10-22): what a write let through is told, its approval
+  among it, goes in `additionalContext`;
 - `tool_use_id` is in both `PreToolUse` and `PostToolUse`, so a call's start and
   finish match; a call that fails fires `PostToolUseFailure` instead, with the same
   id;
