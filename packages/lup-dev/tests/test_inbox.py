@@ -122,6 +122,8 @@ from lup_dev.inbox.store import (
     Text,
     Told,
     Waiting,
+    cited,
+    item_number,
     ranked,
 )
 from lup_dev.inbox.store import Stop as Stopped
@@ -494,7 +496,7 @@ def test_an_item_is_told_at_the_conversations_next_call_and_never_again(
             "lup: this session is `"
         )
         assert inbox("send", "one", "Look at the cache.") == (
-            f"Sent item 1 to `{tmp_path.name}`, claude session s1.\n"
+            f"Sent @1 to `{tmp_path.name}`, claude session s1.\n"
         )
         told = send(hook, bash("b1"))
         again = send(hook, bash("b2"))
@@ -673,19 +675,17 @@ def test_ask_with_wait_holds_until_the_operator_answers_each_decision(
             returned = asking.result(timeout=60)
         asked = delivery.inbox.item(1)
     assert listed == (
-        f"   1  2026-10-01 12:00  a question from `{tmp_path.name}` (claude session s1) "
+        f"   @1  2026-10-01 12:00  a question from `{tmp_path.name}` (claude session s1) "
         f"in {tmp_path}: "
         "Which parser?\n"
     )
     assert shown == (
-        f"Item 1, a question from claude session s1 in {tmp_path} to the operator, "
+        f"@1, a question from claude session s1 in {tmp_path} to the operator, "
         "made 2026-10-01 12:00, waiting:\nWhich parser?\n"
         "1. Parse with lark\n   Its lean: yes, it's typed\n"
         "2. Keep the cache\n   Its lean: no\n"
     )
-    assert (
-        answered == "Answered item 1: your answer, item 2, is for claude session s1.\n"
-    )
+    assert answered == "Answered @1: your answer, @2, is for claude session s1.\n"
     assert returned == (
         (
             '<answer item="2" from="operator" question="1">\n'
@@ -720,7 +720,7 @@ def test_ask_without_wait_returns_at_once_and_the_answer_comes_at_a_call(
         told = send(hook, bash("b1"))
     assert returned == (
         (
-            "Your question is with the operator, item 1. Their answer reaches you "
+            "Your question is with the operator, @1. Their answer reaches you "
             "at a later call; `wait_inbox` waits for it."
         ),
         False,
@@ -791,7 +791,7 @@ def test_an_idle_session_is_woken_once_through_its_messaging_socket(
     # The doorbell carries no item: they stay waiting, and the next call tells both.
     assert woken.state == Told(at=clock.now(), how="call")
     assert context(told) == f"{first_note('Wake up.')}\n\n{note(2, 'And this.')}"
-    assert "one: woke claude session s1 for items 1" in said
+    assert "one: woke claude session s1 for @1" in said
 
 
 def bell(number: int) -> str:
@@ -1017,7 +1017,7 @@ def test_an_idle_claude_session_is_pushed_what_waits_and_takes_it_at_its_turns_s
     assert taken == ""
     assert after == ""
     assert frames == []
-    assert "one: pushed items 1 to claude session s1" in said
+    assert "one: pushed @1 to claude session s1" in said
 
 
 def test_a_push_not_taken_in_time_is_put_back_and_its_launch_rung_through_the_socket_from_then_on(
@@ -1178,9 +1178,7 @@ def test_an_ended_subagents_answer_goes_to_its_sessions_main_conversation(
         answered = inbox("answer", "1", "--comment", "Yes.")
         told = send(hook, bash("b1"))
         answer = delivery.inbox.item(2)
-    assert (
-        answered == "Answered item 1: your answer, item 2, is for claude session s1.\n"
-    )
+    assert answered == "Answered @1: your answer, @2, is for claude session s1.\n"
     assert answer.addressed == Conversation(
         repository=tmp_path / ".git", runtime="claude", session="s1", agent="a1"
     )
@@ -1208,7 +1206,7 @@ def test_items_survive_a_restart_and_reach_a_session_resumed_in_a_launch_of_its_
         )
         where = delivery.inbox.whereabouts
     assert listed == (
-        f"   1  2026-10-01 12:00  a note from `{tmp_path.name}` (claude session s1) "
+        f"   @1  2026-10-01 12:00  a note from `{tmp_path.name}` (claude session s1) "
         f"in {tmp_path}: A doubt.\n"
     )
     assert context(resumed) == note(2, "Kept.")
@@ -1230,11 +1228,9 @@ def test_the_operator_replies_to_a_note_the_reply_saying_what_it_answers(
         told = send(hook, bash("b1"))
         own = refused("answer", "2", "--comment", "Again.")
         again = inbox("answer", "1", "--comment", "One more thing.")
-    assert wordless == "item 1 is a note: give your reply in words"
-    assert ruled == "item 1 is a note, which takes a reply in words, not verdicts"
-    assert replied == (
-        "Replied to item 1: your reply, item 2, is for claude session s1.\n"
-    )
+    assert wordless == "@1 is a note: give your reply in words"
+    assert ruled == "@1 is a note, which takes a reply in words, not verdicts"
+    assert replied == ("Replied to @1: your reply, @2, is for claude session s1.\n")
     assert listed == "Nothing waits for you.\n"
     assert context(told) == (
         '<message item="2" from="operator" kind="note">\n'
@@ -1245,12 +1241,10 @@ def test_the_operator_replies_to_a_note_the_reply_saying_what_it_answers(
         "</message>"
     )
     assert own == (
-        "item 2 is a note from the operator: neither a question waiting for an "
+        "@2 is a note from the operator: neither a question waiting for an "
         "answer nor a conversation's message to reply to"
     )
-    assert again == (
-        "Replied to item 1: your reply, item 3, is for claude session s1.\n"
-    )
+    assert again == ("Replied to @1: your reply, @3, is for claude session s1.\n")
 
 
 def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
@@ -1270,26 +1264,26 @@ def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
         invalid = call(mcp, "send", {"to": "someone", "kind": "note", "text": "x"})
         listed = inbox()
     assert reported == (
-        "Your problem is with the operator, item 1. End your turn.",
+        "Your problem is with the operator, @1. End your turn.",
         False,
     )
-    assert noted == ("Your note is with the operator, item 2. Carry on.", False)
-    assert sent == ("Your message is with the operator, item 3.", False)
+    assert noted == ("Your note is with the operator, @2. Carry on.", False)
+    assert sent == ("Your message is with the operator, @3.", False)
     assert invalid[1]
     assert invalid[0].startswith("Refused: 1 validation error for Sending")
     assert listed.splitlines() == [
         (
-            f"   1  2026-10-01 12:00  a problem from `{tmp_path.name}` (claude session "
+            f"   @1  2026-10-01 12:00  a problem from `{tmp_path.name}` (claude session "
             f"s1) in {tmp_path}: "
             "The build is broken."
         ),
         (
-            f"   2  2026-10-01 12:00  a note from `{tmp_path.name}` (claude session "
+            f"   @2  2026-10-01 12:00  a note from `{tmp_path.name}` (claude session "
             f"s1) in {tmp_path}: "
             "I assumed UTF-8."
         ),
         (
-            f"   3  2026-10-01 12:00  a disagreement from `{tmp_path.name}` (claude "
+            f"   @3  2026-10-01 12:00  a disagreement from `{tmp_path.name}` (claude "
             f"session s1) in {tmp_path}: Not this way."
         ),
     ]
@@ -1367,12 +1361,12 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         reply = delivery.inbox.item(7)
         done = inbox("done", "2")
     assert [text for text, _ in answers] == [
-        "Your friction is with the operator, item 1. Carry on.",
-        "How it went is with the operator, item 2.",
-        "Your stop is with the operator, item 3. End your turn.",
-        "Your friction is with the operator, item 4. Carry on.",
-        "How it went is with the operator, item 5.",
-        "Your stop is with the operator, item 6. End your turn.",
+        "Your friction is with the operator, @1. Carry on.",
+        "How it went is with the operator, @2.",
+        "Your stop is with the operator, @3. End your turn.",
+        "Your friction is with the operator, @4. Carry on.",
+        "How it went is with the operator, @5.",
+        "Your stop is with the operator, @6. End your turn.",
     ]
     assert not any(error for _, error in answers)
     assert missing[1]
@@ -1403,7 +1397,7 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         Stopped.model_validate(stopping),
     ]
     first = listed.splitlines()[0]
-    assert first.startswith("   1  2026-10-01 12:00  a friction from `")
+    assert first.startswith("   @1  2026-10-01 12:00  a friction from `")
     assert first.endswith(
         f"(subagent a1 of claude session s1) in {tmp_path}: "
         "`uv run lup-dev check` printed: engine stale"
@@ -1416,12 +1410,10 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         "Trying: run the gate\n"
         "Would change: say the rebuild's time first\n"
     )
-    assert replied.startswith(
-        "Replied to item 1: your reply, item 7, is for subagent a1"
-    )
+    assert replied.startswith("Replied to @1: your reply, @7, is for subagent a1")
     assert reply.reason == Message(kind="note", text="The rebuild is fixed.", of=1)
     assert reply.recipient == claude_session.model_copy(update={"agent": "a1"})
-    assert done.startswith("Item 2")
+    assert done.startswith("@2")
     # News, each of them: to read, never raising a notice.
     assert [each.rank.name for each in waiting] == ["news"] * 6
     assert notices.raised == []
@@ -1455,18 +1447,47 @@ def test_numbered_decisions_are_each_answered_once_and_a_message_is_done(
         nothing = refused("show", "9")
         listed = inbox()
     assert missing == (
-        "item 1 asks 2 decisions, each taking one answer (`leaning`, `undecided`, "
+        "@1 asks 2 decisions, each taking one answer (`leaning`, `undecided`, "
         "`leave open`, or words); these were given for [1]"
     )
     assert "these were given for [1, 1, 2]" in twice
-    assert wordless == "item 3 is a question answered in words: give them"
-    assert not_done == "item 1 is a question: answer it, `lup-dev inbox answer 1`"
-    assert done == "Item 2 is done.\n"
-    assert (
-        replied == "Replied to item 2: your reply, item 4, is for claude session s1.\n"
-    )
-    assert nothing == "the inbox holds no item 9"
-    assert [line.split()[0] for line in listed.splitlines()] == ["1", "3"]
+    assert wordless == "@3 is a question answered in words: give them"
+    assert not_done == "@1 is a question: answer it, `lup-dev inbox answer 1`"
+    assert done == "@2 is done.\n"
+    assert replied == "Replied to @2: your reply, @4, is for claude session s1.\n"
+    assert nothing == "the inbox holds no @9"
+    assert [line.split()[0] for line in listed.splitlines()] == ["@1", "@3"]
+
+
+def test_an_items_number_is_cited_with_an_at_and_read_back_cited_or_bare() -> None:
+    assert cited(270) == "@270"
+    assert item_number(cited(270)) == 270
+    assert item_number("270") == 270
+    for typed in ["#270", "item 270", "@", "@@270"]:
+        with pytest.raises(ValueError, match="invalid literal for int"):
+            item_number(typed)
+
+
+def test_each_command_takes_an_items_number_cited_or_bare(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        mcp = machine.host.launch("one").mcp
+        noted = call(mcp, "note", {"remark": "Read me."})
+        call(mcp, "ask", {"question": "In words?"})
+        call(mcp, "note", {"remark": "And me."})
+        shown = inbox("show", "@1")
+        answered = inbox("answer", "@2", "--comment", "Yes.")
+        done = inbox("done", "@3")
+        hashed = runner.invoke(cli.app, ["inbox", "show", "#1"])
+    assert noted == ("Your note is with the operator, @1. Carry on.", False)
+    assert shown.startswith(f"@1, a note from claude session s1 in {tmp_path}")
+    assert answered == "Answered @2: your answer, @4, is for claude session s1.\n"
+    assert done == "@3 is done.\n"
+    assert hashed.exit_code == 2
+    assert "Invalid value for 'number': #1" in hashed.output
 
 
 def test_lup_dev_inbox_answer_asks_each_decision_in_turn_at_a_terminal(
@@ -1599,7 +1620,7 @@ def test_lup_dev_rename_and_send_name_a_launch_by_its_name(
     assert renamed.output == "Launch two is `reviewer`.\n"
     assert isinstance(held.exception, HostError)
     assert "`reviewer` is launch two's" in str(held.exception)
-    assert sent == "Sent item 1 to `reviewer`, claude session s2.\n"
+    assert sent == "Sent @1 to `reviewer`, claude session s2.\n"
 
 
 def introduction() -> str:
@@ -1773,7 +1794,7 @@ def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_
         "      w/explore-auth/grep-tokens  general-purpose",
     ]
     assert listed == (
-        "   1  2026-10-01 12:00  a note from `w/explore-auth/grep-tokens` "
+        "   @1  2026-10-01 12:00  a note from `w/explore-auth/grep-tokens` "
         f"(subagent a2 of claude session s1) in {tmp_path / 'w'}: Found it.\n"
     )
 
@@ -1984,7 +2005,7 @@ def test_lup_dev_inbox_send_names_a_launch_by_its_id_or_its_worktree(
         launched(machine, clock, tmp_path, "two", "claude")
         several = runner.invoke(cli.app, ["inbox", "send", str(tmp_path), "x"])
         unheard = refused("send", "two", "x")
-    assert by_worktree == f"Sent item 1 to `{tmp_path.name}`, claude session s1.\n"
+    assert by_worktree == f"Sent @1 to `{tmp_path.name}`, claude session s1.\n"
     assert isinstance(nowhere.exception, InboxError)
     assert (
         str(nowhere.exception)
@@ -2033,7 +2054,7 @@ def test_lup_dev_mount_lends_a_directory_to_a_running_room_and_tells_its_session
 
     assert sealed.output == (
         f"Lent {atlas} to launch one, read-only, at /lent/atlas in its room; "
-        "item 1 tells its session.\n"
+        "@1 tells its session.\n"
     )
     assert "writable, at /lent/atlas-2 in its room" in open_.output
     assert "read-only, at /lent/transcripts in its room" in module.output
@@ -2156,11 +2177,11 @@ def test_an_agents_session_on_the_host_lists_the_sessions_and_the_inbox_and_show
         f"`w`  claude in {tmp_path / 'w'}  (one)  container lup-one, running"
     )
     assert listed == (
-        "   1  2026-10-01 12:00  a note from `w` (claude session s1) in "
+        "   @1  2026-10-01 12:00  a note from `w` (claude session s1) in "
         f"{tmp_path / 'w'}: Mine.\n"
     )
     assert shown == (
-        f"Item 1, a note from claude session s1 in {tmp_path / 'w'} to the operator, "
+        f"@1, a note from claude session s1 in {tmp_path / 'w'} to the operator, "
         "made 2026-10-01 12:00, waiting:\nMine.\n"
     )
 
@@ -2304,24 +2325,24 @@ def test_a_room_lists_and_shows_its_repositorys_sessions_and_items_alone(
         done = runner.invoke(cli.app, ["inbox", "done", "1"])
     assert everything.exit_code == 0, everything.output
     assert [each.split()[0] for each in everything.output.splitlines()] == [
-        "1",
-        "2",
-        "3",
-        "4",
+        "@1",
+        "@2",
+        "@3",
+        "@4",
     ]
     assert listing.exit_code == 0, (listing.output, listing.exception)
     assert listing.output == (
         f"`work`  claude in {repo}  (one)  container lup-one, running\n  work\n"
     )
-    assert [each.split()[0] for each in listed.splitlines()] == ["1", "3"]
+    assert [each.split()[0] for each in listed.splitlines()] == ["@1", "@3"]
     assert "Theirs." not in listed
     assert shown.endswith(":\nMine.\n")
     assert diff.strip() == "diff for Approve mine?"
     assert "→ called mcp__lup__note: this item" in moment
     assert theirs == [
-        "item 2 isn't this repository's",
-        "item 2 isn't this repository's",
-        "item 4 isn't this repository's",
+        "@2 isn't this repository's",
+        "@2 isn't this repository's",
+        "@4 isn't this repository's",
     ]
     assert isinstance(done.exception, InboxError)
 
@@ -3290,7 +3311,7 @@ def test_an_approval_keeps_each_file_it_changes_whole_and_shows_them_on_request(
             host.ask(ShowFiles(number=asked.number + 1), Files)
     assert shown == Files(number=asked.number, files=changed)
     assert str(unasked.value) == (
-        f"item {asked.number + 1} is a note, which changes no file: an approval, a "
+        f"@{asked.number + 1} is a note, which changes no file: an approval, a "
         "held change or a flagged write does"
     )
 
@@ -3474,7 +3495,7 @@ def test_a_comment_on_an_approval_a_push_asked_reaches_the_session_that_pushed(
     assert settled.here
     assert context(told) == (
         '<message item="2" from="operator" kind="note">\n'
-        f"The operator declined item {asked.number}, the approval your push asked "
+        f"The operator declined @{asked.number}, the approval your push asked "
         '("Approve the host zone at abc?"), and commented:\n'
         "Split the reader out first.\n"
         "</message>"
@@ -3482,7 +3503,7 @@ def test_a_comment_on_an_approval_a_push_asked_reaches_the_session_that_pushed(
     assert nothing == ""
     assert context(later) == (
         f'<message item="{typed.number + 1}" from="operator" kind="note">\n'
-        f"The operator declined item {typed.number}, the approval your push asked "
+        f"The operator declined @{typed.number}, the approval your push asked "
         '("Approve the host zone at abc?"), and commented:\nNot yet.\n'
         "</message>"
     )
@@ -3656,7 +3677,7 @@ def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
         "the draft answers no item and writes to no agent: comment on an item, take "
         "one off the list, or write to an agent under its banner"
     )
-    assert own == "item 2 is a note from the operator, which a review doesn't answer"
+    assert own == "@2 is a note from the operator, which a review doesn't answer"
 
 
 def refused_draft(machine: Layout, clock: FakeClock, draft: Draft) -> str:
@@ -3726,9 +3747,7 @@ def test_lup_dev_inbox_send_reaches_a_subagent_by_its_path(
         sent = inbox("send", "w/explore-auth", "Look at the tests too.")
         told = context(send(hook, records.call("a1", "Explore", "c2")))
         main = send(hook, bash("b1"))
-    assert (
-        sent == "Sent item 1 to `w/explore-auth`, subagent a1 of claude session s1.\n"
-    )
+    assert sent == "Sent @1 to `w/explore-auth`, subagent a1 of claude session s1.\n"
     assert told == first_note("Look at the tests too.")
     assert main == ""
 
@@ -3805,7 +3824,7 @@ def test_an_items_moment_is_read_from_its_senders_record_around_its_call(
         Said(by="agent", text="Carrying on.", at=when),
     ]
     assert found.anchor == 3
-    assert str(unanchored.value) == "item 2 was made by no agent's call"
+    assert str(unanchored.value) == "@2 was made by no agent's call"
     assert shown.exit_code == 0, shown.output
     assert "· called Bash\n\n→ called mcp__lup__note: this item\n\n" in shown.output
 
@@ -3852,19 +3871,19 @@ def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
     at = "2026-10-01 12:00"
     sub = "subagent a1 of claude session s1"
     assert waiting.splitlines() == [
-        f"2  {at}  a note from {sub} to the operator, waiting: I assumed UTF-8.",
-        f"4  {at}  an answer from the operator to you, waiting: A model per kind.",
+        f"@2  {at}  a note from {sub} to the operator, waiting: I assumed UTF-8.",
+        f"@4  {at}  an answer from the operator to you, waiting: A model per kind.",
     ]
     assert every.splitlines() == [
         (
-            f"1  {at}  a question from you to the operator, answered at {at}, "
-            "item 4: Which parser?"
+            f"@1  {at}  a question from you to the operator, answered at {at}, "
+            "@4: Which parser?"
         ),
         *waiting.splitlines(),
     ]
     assert asked == (
-        f"Item 1, a question you sent to the operator at {at}, answered at {at}, "
-        "item 4:\nWhich parser?\nTwenty kinds of line."
+        f"@1, a question you sent to the operator at {at}, answered at {at}, "
+        "@4:\nWhich parser?\nTwenty kinds of line."
     )
     assert answer == (
         '<answer item="4" from="operator" question="1">\n'
@@ -3873,20 +3892,19 @@ def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
         "</answer>\n\nIt's waiting."
     )
     assert theirs == (
-        f"Item 2 is a note from {sub} to the operator, which isn't yours: only your "
+        f"@2 is a note from {sub} to the operator, which isn't yours: only your "
         "own items are read whole. Its first line: I assumed UTF-8."
     )
     assert elsewhere == missing.replace("9", "3")
     assert missing == (
-        "Item 9 isn't among this repository's: `inbox` reads this repository's "
-        "items alone."
+        "@9 isn't among this repository's: `inbox` reads this repository's items alone."
     )
     assert own == (
-        f"Item 2, a note you sent to the operator at {at}, waiting:\nI assumed UTF-8.",
+        f"@2, a note you sent to the operator at {at}, waiting:\nI assumed UTF-8.",
         False,
     )
-    assert "   4  " not in listed
-    assert [line.split()[0] for line in listed.splitlines()] == ["2", "3"]
+    assert "   @4  " not in listed
+    assert [line.split()[0] for line in listed.splitlines()] == ["@2", "@3"]
 
 
 def test_an_agent_withdraws_its_own_waiting_item_and_nothing_else(
@@ -3920,22 +3938,22 @@ def test_an_agent_withdraws_its_own_waiting_item_and_nothing_else(
         theirs = withdrawing(3)
         listed = inbox()
         shown = inbox("show", "1")
-    assert taken == "Item 1 is withdrawn, off the operator's list."
+    assert taken == "@1 is withdrawn, off the operator's list."
     assert again == (
-        "Not withdrawn: item 1 no longer waits for the operator: it's withdrawn at "
+        "Not withdrawn: @1 no longer waits for the operator: it's withdrawn at "
         "2026-10-01 12:00 by its sender: It's green now."
     )
     assert answered == (
-        "Not withdrawn: item 2 no longer waits for the operator: it's answered at "
-        "2026-10-01 12:00, item 4"
+        "Not withdrawn: @2 no longer waits for the operator: it's answered at "
+        "2026-10-01 12:00, @4"
     )
     assert theirs == (
-        "Not withdrawn: item 3 is a note from subagent a1 of claude session s1: "
+        "Not withdrawn: @3 is a note from subagent a1 of claude session s1: "
         "only its sender withdraws it"
     )
-    assert [line.split()[0] for line in listed.splitlines()] == ["3"]
+    assert [line.split()[0] for line in listed.splitlines()] == ["@3"]
     assert "withdrawn at 2026-10-01 12:00 by its sender: It's green now." in shown
-    assert "item 1, a note, was withdrawn by its sender" in said
+    assert "@1, a note, was withdrawn by its sender" in said
 
 
 def test_judged_reads_a_sessions_verdicts_and_its_repositorys_holds_changing_nothing(
@@ -4567,7 +4585,7 @@ def test_a_sent_draft_approves_what_it_marks_read_and_held_changes_commented_on(
     assert note.recipient == pusher
     assert isinstance(note.reason, Message)
     assert note.reason.text == (
-        f"The operator commented on item {pushed.number}, the approval your push "
+        f"The operator commented on @{pushed.number}, the approval your push "
         'asked ("Approve the host zone at abc?"), and hasn\'t answered it:\n'
         "Split the reader out first."
     )

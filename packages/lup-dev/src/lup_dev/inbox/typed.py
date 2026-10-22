@@ -21,7 +21,14 @@ from typing import override
 from lup.types import MutableModel
 from lup_dev.host.service import Companion
 from lup_dev.inbox.delivery import Delivery
-from lup_dev.inbox.store import Approval, ChangedFile, InboxError, Item, Operator
+from lup_dev.inbox.store import (
+    Approval,
+    ChangedFile,
+    InboxError,
+    Item,
+    Operator,
+    cited,
+)
 
 
 class TypeReader(MutableModel, Companion, arbitrary_types_allowed=True):
@@ -82,17 +89,17 @@ class TypeReader(MutableModel, Companion, arbitrary_types_allowed=True):
         except Exception as failure:
             self.over(number, str(failure))
             told = "".join(traceback.format_exception(failure))
-            self.say(f"item {number}: its types couldn't be read:\n{told}")
+            self.say(f"{cited(number)}: its types couldn't be read:\n{told}")
             return
         self.over(number, "")
-        self.say(f"item {number}: its types are read")
+        self.say(f"{cited(number)}: its types are read")
 
     async def kept(
         self, number: int, approval: Approval, worktree: Path | None
     ) -> None:
         """Read approval `number`'s files wholly, in the worktree it was asked from, and keep them beside it."""
         if worktree is None:
-            message = f"item {number} names no worktree to read its files in"
+            message = f"{cited(number)} names no worktree to read its files in"
             raise InboxError(message)
         inbox = self.delivery.inbox
         files = await asyncio.to_thread(inbox.files, number)

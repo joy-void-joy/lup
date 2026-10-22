@@ -51,6 +51,7 @@ from lup_dev.inbox.store import (
     Ruling,
     Talk,
     Waiting,
+    cited,
 )
 
 
@@ -388,7 +389,7 @@ class Exchanged(Reply):
 def owned(item: Item, repository: Path) -> Item:
     """Return `item` where it's of `repository` alone (`Item.of`); refuse it otherwise, saying nothing of it, as to a room of `repository`."""
     if not item.of(repository):
-        message = f"item {item.number} isn't this repository's"
+        message = f"{cited(item.number)} isn't this repository's"
         raise InboxError(message)
     return item
 

@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { everyone, type Agent, type Launch } from "./agents";
 import { ask, type Asked, type ReplyOf } from "./api";
-import { changes, moved, saying, shownIn, type Folding, type Span } from "./comments";
+import { changes, cited, moved, saying, shownIn, type Folding, type Span } from "./comments";
 import {
     UNEXCHANGED,
     UNSAID,
@@ -443,7 +443,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
             const number = answer.kind === "inbox-item" ? answer.item.number : 0;
             store({ talk: UNSAID, sent: [...current.current.sent, { number, text, after, at: new Date().toISOString() }] }, true);
             setEpoch((was) => was + 1);
-            say(`Sent to ${talker.path} as #${number}, through lup.`);
+            say(`Sent to ${talker.path} as ${cited(number)}, through lup.`);
         } catch (error) {
             say(error instanceof Error ? error.message : String(error));
         }
@@ -485,7 +485,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
                         </span>
                     )}
                     {sent.length === 0 ? null : (
-                        <span className="muted"> Sent from here: {sent.map((each) => `#${each.number}`).join(", ")}.</span>
+                        <span className="muted"> Sent from here: {sent.map((each) => cited(each.number)).join(", ")}.</span>
                     )}
                 </div>
                 <Keys

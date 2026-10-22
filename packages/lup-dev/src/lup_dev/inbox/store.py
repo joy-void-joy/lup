@@ -6,14 +6,15 @@ subagents. A conversation is keyed by its runtime, its session's id and its own,
 within a repository, rather than by the launch it runs in, so a session resumed
 in a launch of its own finds what waited for it there.
 
-An item has a number, one sequence per user, so the operator answers `12`; a
-reason (a message with its kind, a question with its numbered decisions, an
-answer, an approval asked yes or no; a friction, how a piece of work went, or a
-stop by choice, each as the agent's tool took it; a change held, or a write that
-landed flagged, as the judge put it), whose kind ranks it (`ranked`); a sender
-and a recipient; when it was made; and its state: waiting, told (when, and
-how), answered, done, or for an approval decided. An item for a conversation
-that has ended goes to its session's main conversation, saying whose it was.
+An item has a number, one sequence per user, cited `@12` wherever it's named
+(`cited`), so the operator answers `@12`, or `12`; a reason (a message with its
+kind, a question with its numbered decisions, an answer, an approval asked yes
+or no; a friction, how a piece of work went, or a stop by choice, each as the
+agent's tool took it; a change held, or a write that landed flagged, as the
+judge put it), whose kind ranks it (`ranked`); a sender and a recipient; when
+it was made; and its state: waiting, told (when, and how), answered, done, or
+for an approval decided. An item for a conversation that has ended goes to its
+session's main conversation, saying whose it was.
 
 An approval is trust on launch's: the launch's own question, put to the
 operator's inbox and answered at the launching terminal or any other, whichever
@@ -631,6 +632,24 @@ class Item(Model):
         return bool(found) and all(each == repository for each in found)
 
 
+def cited(number: int) -> str:
+    """Name item `number` as a reader sees it named: `@270`, which nobody takes for a GitHub issue or pull request's `#270`.
+
+    >>> cited(270)
+    '@270'
+    """
+    return f"@{number}"
+
+
+def item_number(typed: str) -> int:
+    """Read an item's number as the operator types it: as it's cited, `@270`, or bare, `270`; anything else raises `ValueError`, which a command line says is an invalid value.
+
+    >>> item_number(cited(270)), item_number("270")
+    (270, 270)
+    """
+    return int(typed.removeprefix("@"))
+
+
 class Whereabouts(Model):
     """Where a conversation was last heard: the launch its session runs in, and whether it has ended."""
 
@@ -811,7 +830,7 @@ class Inbox(MutableModel):
         """Return item `number`, or say there's none."""
         found = self.items.get(number)
         if found is None:
-            message = f"the inbox holds no item {number}"
+            message = f"the inbox holds no {cited(number)}"
             raise InboxError(message)
         return found
 

@@ -51,6 +51,7 @@ from lup_dev.inbox.store import (
     Reading,
     Superseded,
     Waiting,
+    cited,
 )
 from lup_dev.inbox.store import Approval as StoredApproval
 from lup_dev.inbox.store import Text as TextContent
@@ -459,8 +460,7 @@ def answering(trust: Trust) -> Answering:
 
 
 INBOXED = (
-    "It's item 1 in your inbox too: `lup-dev inbox answer 1` answers it from any "
-    "terminal."
+    "It's @1 in your inbox too: `lup-dev inbox answer 1` answers it from any terminal."
 )
 """What the launching terminal says after the summary, of the approval's item."""
 
@@ -2047,12 +2047,10 @@ def test_the_approval_is_an_inbox_item_the_launching_terminal_answers(
         item.reason.text,
         "The whole diff: `lup-dev inbox show 1 --diff`.",
     ]
-    assert shown.startswith(f"Item 1, an approval from the operator in {audiobook}")
+    assert shown.startswith(f"@1, an approval from the operator in {audiobook}")
     assert "approved at" in shown.splitlines()[0]
     assert '+"""Its conditions."""' in whole
-    assert (
-        late == "Item 1 was approved already, elsewhere: your answer changes nothing.\n"
-    )
+    assert late == "@1 was approved already, elsewhere: your answer changes nothing.\n"
     assert listed == "Nothing waits for you.\n"
     [notice] = raised
     assert notice.startswith(f"lup: an approval from the operator in {audiobook}")
@@ -2076,8 +2074,8 @@ def test_lup_dev_inbox_answer_answers_it_and_the_terminal_stops_asking(
         outcome = trust.ensure()
     assert isinstance(outcome, Trusted)
     assert asker.asked == [WHOLE]
-    assert asker.said[-1] == "Item 1 was approved elsewhere."
-    assert elsewhere == ["Item 1 is approved: each launch waiting on it goes on.\n"]
+    assert asker.said[-1] == "@1 was approved elsewhere."
+    assert elsewhere == ["@1 is approved: each launch waiting on it goes on.\n"]
     assert [each.commit for each in recording(trust).installed] == [
         outcome.approval.commit
     ]
@@ -2101,7 +2099,7 @@ def test_declined_from_the_inbox_keeps_the_copy_approved_before(
         )
         outcome = trust.ensure()
     assert outcome == Kept(commit=head, approval=first.approval)
-    assert asker.said[-1] == "Item 2 was declined elsewhere."
+    assert asker.said[-1] == "@2 was declined elsewhere."
     assert recording(trust).installed == []
 
 
@@ -2150,7 +2148,7 @@ def test_two_launches_wait_on_one_approval_and_one_installs(
         items = list(running.delivery.inbox.items)
     assert not waiting.is_alive()
     assert items == [1]
-    assert answering(second).said[-1] == "Item 1 was approved elsewhere."
+    assert answering(second).said[-1] == "@1 was approved elsewhere."
     # Whichever takes the approval's lock first installs; the other reads it.
     [trusted] = [each for each in outcomes if isinstance(each, Trusted)]
     [unchanged] = [each for each in outcomes if isinstance(each, Unchanged)]
@@ -2209,7 +2207,7 @@ def test_a_wait_outlives_a_service_restart_and_hears_the_next_ones_answer(
             assert elsewhere.given() is None
             assert approvals.asked(asking) == number
             assert inbox("answer", str(number), "--approve").startswith(
-                f"Item {number} is approved"
+                f"@{number} is approved"
             )
             answered_elsewhere(elsewhere)
             assert elsewhere.given() is True
@@ -2239,7 +2237,7 @@ def test_lup_dev_inbox_answer_asks_an_approval_as_the_launch_does(
         number = inboxed(machine, clock).asked(asking)
         said = inbox("answer", str(number))
         item = running.delivery.inbox.item(number)
-    assert said == f"Item {number} is approved: each launch waiting on it goes on.\n"
+    assert said == f"@{number} is approved: each launch waiting on it goes on.\n"
     assert item.state == Decided(at=clock.now(), approved=True)
     assert acting == [Acted(fingerprint="zone", approved=True)]
     [summary] = terminal.said
@@ -2277,15 +2275,15 @@ def test_an_approval_of_a_newer_zone_supersedes_the_one_waiting(
     assert again == older
     assert replaced.state == Superseded(at=clock.now(), by=newer)
     assert isinstance(running.delivery.inbox.item(other).state, Waiting)
-    assert f"{older:>4}  " not in listed
-    assert f"{newer:>4}  " in listed
+    assert f"{cited(older):>5}  " not in listed
+    assert f"{cited(newer):>5}  " in listed
     assert (
         f"(`answer {newer}` shows its summary, offers its whole diff, and asks; "
         f"`show {newer} --diff` pages the diff alone)"
     ) in listed
     assert isinstance(late.exception, SupersededError)
     assert str(late.exception) == (
-        f"Item {older} was superseded by item {newer}, an approval of the host zone "
+        f"@{older} was superseded by @{newer}, an approval of the host zone "
         "at the integration branch's tip."
     )
     assert acting == []
@@ -2297,7 +2295,7 @@ class SupersededOnce(Here):
     def answer(self, number: int, *, approved: bool, comment: str = "") -> Given:
         if not self.answers:
             self.answers.append(approved)
-            message = f"Item {number} was superseded by item 2."
+            message = f"@{number} was superseded by @2."
             raise SupersededError(message)
         return super().answer(number, approved=approved)
 
@@ -2313,9 +2311,8 @@ def test_a_launch_whose_approval_is_superseded_asks_about_the_tip_instead(
     assert isinstance(outcome, Trusted)
     assert isinstance(trust.approvals, SupersededOnce)
     assert len(trust.approvals.asking) == 2
-    assert (
-        "Item 1 was superseded by item 2. The tip moved: asking about it instead."
-        in (asker.said)
+    assert "@1 was superseded by @2. The tip moved: asking about it instead." in (
+        asker.said
     )
     assert approved(lup, kit, shell) == outcome.approval
 

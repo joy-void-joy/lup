@@ -75,6 +75,7 @@ from lup_dev.inbox.store import (
     Text,
     Told,
     Waiting,
+    cited,
 )
 from lup_dev.inbox.store import Asked as Ask
 
@@ -691,7 +692,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         }
         entries = moments.get(number)
         if entries is None:
-            return Refused(error=f"item {number} was made by no agent's call")
+            return Refused(error=f"{cited(number)} was made by no agent's call")
         [anchor] = [
             at
             for at, each in enumerate(entries)
@@ -700,7 +701,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Context(number=number, entries=entries, anchor=anchor)
 
     def conversation(self, session: str, agent: str | None) -> list[Entry]:
-        """Return a stand-in conversation: for the parser subagent, the call that sent item 47, then its moment around item 51 with what led to it; for any other, a short exchange."""
+        """Return a stand-in conversation: for the parser subagent, the call that sent @47, then its moment around @51 with what led to it; for any other, a short exchange."""
         if (session, agent) == ("s1", "a02"):
             return [
                 Said(
@@ -1301,7 +1302,7 @@ def files(number: int, *, typed: bool = True) -> Files | Refused:
                 ],
             )
         case _:
-            return Refused(error=f"item {number} changes no file")
+            return Refused(error=f"{cited(number)} changes no file")
 
 
 def launch(id_: str, name: str, runtime: str, worktree: Path) -> Register:

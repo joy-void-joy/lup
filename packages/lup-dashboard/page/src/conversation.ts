@@ -10,6 +10,7 @@
 import { since } from "./agents";
 import {
     calls,
+    cited,
     kept,
     lastOf,
     passage,
@@ -180,11 +181,11 @@ function standing(item: Item, received: Exchange[]): string | null {
         case "decided":
             return state.approved ? "approved" : "declined";
         case "superseded":
-            return `superseded by #${state.by}`;
+            return `superseded by ${cited(state.by)}`;
     }
     const answers = answering(item, received);
     if (answers.length > 0) {
-        return `answered by ${answers.map((each) => `#${each}`).join(", ")}`;
+        return `answered by ${answers.map(cited).join(", ")}`;
     }
     switch (state.state) {
         case "waiting":
@@ -207,13 +208,13 @@ function came(item: Item, whose: Whose): string {
     }
     switch (reason.reason) {
         case "answer":
-            return `your answer to #${reason.question}`;
+            return `your answer to ${cited(reason.question)}`;
         case "review":
             return reason.covers.length === 0
                 ? "your message, from the review"
-                : `your review of ${reason.covers.map((each) => `#${each}`).join(", ")}`;
+                : `your review of ${reason.covers.map(cited).join(", ")}`;
         case "message":
-            return reason.of == null ? "your message" : `your reply to #${reason.of}`;
+            return reason.of == null ? "your message" : `your reply to ${cited(reason.of)}`;
         default:
             return `your ${what(item)}`;
     }
@@ -242,7 +243,7 @@ function inboxed(exchanged: Exchanged, sent: Sent[], whose: Whose): Inboxed[] {
         return {
             number: item.number,
             from: true,
-            line: dotted(`→ #${item.number} ${what(item)} to ${to}`, standing(item, exchanged.received)),
+            line: dotted(`→ ${cited(item.number)} ${what(item)} to ${to}`, standing(item, exchanged.received)),
             text: [...setIn(text), ...comment],
             where: item.call == null ? { at: item.made } : { call: item.call, at: item.made },
         };
@@ -253,7 +254,7 @@ function inboxed(exchanged: Exchanged, sent: Sent[], whose: Whose): Inboxed[] {
         const ours = passed != null && (passed.agent ?? null) === whose.agent;
         const recipient = item.recipient;
         const head = [
-            `← #${item.number} ${came(item, whose)}`,
+            `← ${cited(item.number)} ${came(item, whose)}`,
             from === undefined ? "" : ", from here",
             passed == null || ours ? "" : `, for ${whose.name(passed)}, which had ended`,
         ].join("");
@@ -278,7 +279,7 @@ function inboxed(exchanged: Exchanged, sent: Sent[], whose: Whose): Inboxed[] {
             (each): Inboxed => ({
                 number: each.number,
                 from: false,
-                line: `← #${each.number} your message, from here`,
+                line: `← ${cited(each.number)} your message, from here`,
                 text: setIn(each.text),
                 where: { after: each.after, at: each.at },
             }),

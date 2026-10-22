@@ -142,6 +142,8 @@ from lup_dev.inbox.store import (
     Ruling,
     Stop,
     Verdict,
+    cited,
+    item_number,
 )
 from lup_dev.inbox.store import Conversation as InboxConversation
 from lup_dev.inbox.tools import InboxTools
@@ -562,7 +564,7 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
     if number is not None:
         typer.echo(
             f"{launch.launch}: the push moved {integration}, and with it the code "
-            f"the host runs: approval item {number} is in the inbox"
+            f"the host runs: approval {cited(number)} is in the inbox"
         )
 
 
@@ -684,7 +686,7 @@ def line(item: Item, listed: Listed | None = None) -> str:
         else ""
     )
     return (
-        f"{item.number:>4}  {clocked(item.made)}  {what(item)} from "
+        f"{cited(item.number):>5}  {clocked(item.made)}  {what(item)} from "
         f"{sender_named(item.sender, listed or Listed(launches=[]))}{where}: "
         f"{opening(item)}{reading}"
     )
@@ -716,7 +718,7 @@ def heading(item: Item) -> str:
     """Say what an item is, whose to whom, when it was made and where it stands."""
     where = "" if item.worktree is None else f" in {item.worktree}"
     return (
-        f"Item {item.number}, {what(item)} from {who(item.sender)}{where} to "
+        f"{cited(item.number)}, {what(item)} from {who(item.sender)}{where} to "
         f"{who(item.recipient)}, made {clocked(item.made)}, {standing(item)}:"
     )
 
@@ -757,7 +759,7 @@ def shown(item: Item) -> str:
                 + (f": {each.comment}" if each.comment else "")
                 for each in rulings
             ]
-            body = [f"To item {question}.", *decided, comment]
+            body = [f"To {cited(question)}.", *decided, comment]
         case (
             Approval(text=text, summary=summary)
             | HeldChange(text=text, summary=summary)
@@ -770,9 +772,9 @@ def shown(item: Item) -> str:
                 f"The whole diff: `lup-dev inbox show {item.number} --diff`.",
             ]
         case Review(covers=covers, comments=comments, letters=letters):
-            numbers = ", ".join(str(each) for each in covers)
+            numbers = ", ".join(cited(each) for each in covers)
             body = [
-                *([f"Of items {numbers}."] if covers else []),
+                *([f"Of {numbers}."] if covers else []),
                 *(f"To {who(each.to)}: {each.text}" for each in letters),
                 *(commented(each) for each in comments),
             ]
@@ -782,8 +784,8 @@ def shown(item: Item) -> str:
 def commented(comment: Comment) -> str:
     """Say one comment of a review, for the operator: where it's on, then what it says."""
     if comment.quote is None:
-        return f"On item {comment.item}: {comment.text}"
-    return f'On item {comment.item}, "{comment.quote.text}": {comment.text}'
+        return f"On {cited(comment.item)}: {comment.text}"
+    return f'On {cited(comment.item)}, "{comment.quote.text}": {comment.text}'
 
 
 def ruling(decision: int) -> Ruling:
@@ -822,7 +824,7 @@ def prompted(item: Item) -> AnswerItem:
             )
             return AnswerItem(number=item.number, rulings=rulings, comment=whole)
         case _:
-            message = f"item {item.number} is {what(item)}: nothing to answer"
+            message = f"{cited(item.number)} is {what(item)}: nothing to answer"
             raise InboxError(message)
 
 
@@ -999,7 +1001,10 @@ def inbox_list(context: typer.Context) -> None:
 
 @inbox.command("show")
 def inbox_show(
-    number: Annotated[int, typer.Argument(help="The item's number.")],
+    number: Annotated[
+        int,
+        typer.Argument(parser=item_number, help="The item's number: `@12`, or `12`."),
+    ],
     *,
     diff: Annotated[
         bool,
@@ -1047,11 +1052,11 @@ def approved_here(number: int, given: Given) -> str:
     """Say what came of answering approval `number` at this terminal."""
     if not given.here:
         return (
-            f"Item {number} was {settled(approved=given.approved)} already, "
+            f"{cited(number)} was {settled(approved=given.approved)} already, "
             "elsewhere: your answer changes nothing."
         )
     return (
-        f"Item {number} is {settled(approved=given.approved)}: each launch waiting "
+        f"{cited(number)} is {settled(approved=given.approved)}: each launch waiting "
         "on it goes on."
     )
 
@@ -1076,7 +1081,10 @@ def acted_on(approval: Approval, given: Given) -> str | None:
 
 @inbox.command("answer")
 def inbox_answer(
-    number: Annotated[int, typer.Argument(help="The item's number.")],
+    number: Annotated[
+        int,
+        typer.Argument(parser=item_number, help="The item's number: `@12`, or `12`."),
+    ],
     *,
     approve: Annotated[
         bool | None,
@@ -1176,7 +1184,7 @@ def inbox_answer(
     done = "Replied to" if isinstance(answer.reason, Message) else "Answered"
     noun = "reply" if isinstance(answer.reason, Message) else "answer"
     typer.echo(
-        f"{done} item {number}: your {noun}, item {answer.number}, is for "
+        f"{done} {cited(number)}: your {noun}, {cited(answer.number)}, is for "
         f"{who(answer.recipient)}."
     )
 
@@ -1204,19 +1212,24 @@ def held_answer(
     )
     told = "let it land" if landing else "declined it"
     typer.echo(
-        f"Item {item.number}: you {told}; the agent waiting on it goes on."
+        f"{cited(item.number)}: you {told}; the agent waiting on it goes on."
         if settled.here
-        else f"Item {item.number} was answered already, elsewhere: yours changes nothing."
+        else f"{cited(item.number)} was answered already, elsewhere: yours changes nothing."
     )
 
 
 @inbox.command("done")
 def inbox_done(
-    number: Annotated[int, typer.Argument(help="The message's number.")],
+    number: Annotated[
+        int,
+        typer.Argument(
+            parser=item_number, help="The message's number: `@12`, or `12`."
+        ),
+    ],
 ) -> None:
     """Take a message or a flagged write you've read off your list."""
     answering().ask(FinishItem(number=number), Shown)
-    typer.echo(f"Item {number} is done.")
+    typer.echo(f"{cited(number)} is done.")
 
 
 @inbox.command("send")
@@ -1245,14 +1258,14 @@ def inbox_send(
         case [Addressed(launch=launch, agent=agent)]:
             sent = client.ask(SendItem(launch=launch, text=text, agent=agent), Shown)
             typer.echo(
-                f"Sent item {sent.item.number} to `{to}`, {who(sent.item.recipient)}."
+                f"Sent {cited(sent.item.number)} to `{to}`, {who(sent.item.recipient)}."
             )
             return
         case _:
             pass
     launch = the_launch(listed.launches, to)
     sent = client.ask(SendItem(launch=launch.launch, text=text), Shown).item
-    typer.echo(f"Sent item {sent.number} to `{launch.name}`, {who(sent.recipient)}.")
+    typer.echo(f"Sent {cited(sent.number)} to `{launch.name}`, {who(sent.recipient)}.")
 
 
 class Addressed(Model):
@@ -1853,7 +1866,7 @@ def mount(
     ).item
     typer.echo(
         f"Lent {source} to launch {launch.launch}, {access}, at {room} in its room; "
-        f"item {told.number} tells its session."
+        f"{cited(told.number)} tells its session."
     )
 
 
