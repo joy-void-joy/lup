@@ -875,9 +875,16 @@ def transcripts_show(
 @transcripts.command("search")
 def transcripts_search(
     words: Annotated[list[str], typer.Argument(help="Words you said, all of them.")],
+    *,
+    whole: Annotated[
+        bool,
+        typer.Option(
+            "--whole", help="What each time answered whole, rather than its first line."
+        ),
+    ] = False,
 ) -> None:
-    """Find each time you said all of `words`, in any kept session: when, your words, and what they answered."""
-    typer.echo(views.found(kept_sessions(Path.cwd()), words), nl=False)
+    """Find each time you said all of `words`, in any kept session: when, your words, and the first line of what they answered, or with `--whole` all of it."""
+    typer.echo(views.found(kept_sessions(Path.cwd()), words, whole=whole), nl=False)
 
 
 @app.command("sessions")

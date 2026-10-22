@@ -134,20 +134,25 @@ def counted(tool: str, times: int) -> str:
     return tool if times == 1 else f"{tool} x{times}"
 
 
-def found(sessions: list[Transcript], words: list[str]) -> str:
-    """Return each time the operator said all of `words`, any case, newest session first: the session, when, their words, and the first line of what they answered."""
+def found(sessions: list[Transcript], words: list[str], *, whole: bool = False) -> str:
+    """Return each time the operator said all of `words`, any case, newest session first: the session, when, their words, and what they answered, its first line, or `whole`."""
     wanted = [word.casefold() for word in words]
 
     def matched(said: Said) -> bool:
         text = said.text.casefold()
         return all(word in text for word in wanted)
 
+    def answering(before: Said | None) -> str:
+        if before is None:
+            return "  answering: "
+        if whole:
+            return f"  answering:\n{indented(before.text)}"
+        return f"  answering: {first_line(before.text)}"
+
     def hit(session: Transcript, said: Said) -> str:
-        before = session.replied(said)
-        answering = "" if before is None else first_line(before.text)
         return (
-            f"{called(session)}, {when(said.at)}\n  answering: {answering}\n"
-            f"  you:\n{indented(said.text)}"
+            f"{called(session)}, {when(said.at)}\n"
+            f"{answering(session.replied(said))}\n  you:\n{indented(said.text)}"
         )
 
     hits = [
