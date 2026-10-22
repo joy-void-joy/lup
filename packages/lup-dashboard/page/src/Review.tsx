@@ -23,16 +23,18 @@ import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./code";
-import { changes, cited, moved, type Block, type Change, type Folding } from "./comments";
+import { changes, cited, moved, type Block, type Change, type Folding, type Span } from "./comments";
 import { closedAs, folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type ReviewPlace } from "./keys";
+import { source, sourced, type Source } from "./markdown";
 import {
     aboutAt,
     answering,
     arrival,
     blockAt,
     blocksOf,
+    codeAt,
     codeFrom,
     flag,
     foldKey,
@@ -173,6 +175,42 @@ function painted(laidOut: Laid, from: number, to: number): Range<Decoration>[] {
         }
     }
     return ranges;
+}
+
+/**
+ * Return what of the review is written in Markdown (`markdown.ts`): each item's own text, its lines whole and the
+ * comments under them left out; the agent's words in its context, each run of them one; and each comment and message.
+ */
+function sourcesOf(laidOut: Laid): Source[] {
+    const found: Source[] = [];
+    const add = (made: Source | null) => {
+        if (made !== null) {
+            found.push(made);
+        }
+    };
+    const whole = (line: Span) => ({ from: line.from, to: Math.min(line.to + 1, laidOut.text.length) });
+    for (const group of laidOut.groups) {
+        for (const block of group.blocks) {
+            add(source("comment", [block]));
+        }
+    }
+    for (const region of laidOut.regions) {
+        add(source("text", region.lines.filter((line) => codeAt(region, line.from) === undefined).map(whole)));
+        let run: Span[] = [];
+        for (const aside of region.asides) {
+            if (aside.kind === "agent") {
+                run.push(whole(aside));
+            } else {
+                add(source("text", run));
+                run = [];
+            }
+        }
+        add(source("text", run));
+        for (const block of region.blocks) {
+            add(source("comment", [block]));
+        }
+    }
+    return found;
 }
 
 /** Mark each line of a comment or a message shown at `block`. */
@@ -408,6 +446,7 @@ export function Review({
                 .flatMap((each) => each.folds)
                 .map((each) => ({ ...each, key: foldKey(each) }))
                 .sort((a, b) => a.from - b.from || b.to - a.to),
+            sources: sourcesOf(laidOut),
         }),
         [laidOut],
     );
@@ -467,11 +506,13 @@ export function Review({
             // Where the view is, anchored to the text at its top and mapped through the changes.
             const changing = current.state.changes(made);
             const scrolled = current.scrollSnapshot().map(changing);
+            // What's written in Markdown goes with the text, which is read by it in this transaction.
             current.dispatch({
                 changes: changing,
                 selection: { anchor: uncovered(closed, anchor) },
                 scrollIntoView: landed,
                 annotations: rebuilt.of(true),
+                effects: sourced.of(laidFor.sources),
             });
             refold(current, laidFor.folds, kept.current);
             if (!landed && scrolled !== undefined) {

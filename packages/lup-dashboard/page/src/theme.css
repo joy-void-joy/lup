@@ -1195,3 +1195,31 @@ kbd {
     color: var(--err);
 }
 
+/* Markdown, in an item's text and a comment (`markdown.ts`): code in the colour
+   of strings, each line of a block of it barred; a construct's marks, where
+   they show, muted, as a quote's and a list's always do; a link's text
+   underlined, its address on hover; and a table's cells padded by what's drawn
+   beside them, in the muted colour of its pipes. */
+.tok-monospace {
+    color: var(--cyan);
+}
+
+.tok-processingInstruction,
+.tok-labelName,
+.tok-contentSeparator,
+.tok-quote {
+    color: var(--muted);
+}
+
+.tok-strikethrough {
+    text-decoration: line-through;
+}
+
+.buffer .cm-line.md-code {
+    box-shadow: inset 2px 0 0 var(--muted);
+}
+
+.md-pad {
+    white-space: pre;
+    color: var(--muted);
+}

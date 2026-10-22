@@ -17,6 +17,7 @@ import { everyone, type Agent, type Launch } from "./agents";
 import { ask, type Asked, type ReplyOf } from "./api";
 import { changes, cited, moved, saying, shownIn, type Folding, type Span } from "./comments";
 import {
+    ITEM_INDENT,
     UNEXCHANGED,
     UNSAID,
     aboutAt,
@@ -42,6 +43,7 @@ import { rebuilt, refold, useEditor } from "./editor";
 import { useWatched } from "./hooks";
 import { CONVERSATION_KEYS, CONVERSATION_PLACES } from "./keys";
 import { Keys } from "./Keys";
+import { source, sourced, without, type Source } from "./markdown";
 
 interface Props {
     launch: Launch;
@@ -135,6 +137,41 @@ function decorations(laidOut: Laid, talk: Talk): DecorationSet {
         builder.add(each.from, each.to, each.value);
     }
     return builder.finish();
+}
+
+/**
+ * Return what of the conversation is written in Markdown (`markdown.ts`): the agent's words at each step, their lines
+ * whole and the comments under them left out; each item's text under its line, without what sets it in; and each
+ * comment, the message among them.
+ */
+function sourcesOf(laidOut: Laid): Source[] {
+    const found: Source[] = [];
+    const add = (made: Source | null) => {
+        if (made !== null) {
+            found.push(made);
+        }
+    };
+    const end = (line: Span) => Math.min(line.to + 1, laidOut.text.length);
+    for (const words of laidOut.words) {
+        const first = words.lines[0];
+        const last = words.lines.at(-1);
+        if (first !== undefined && last !== undefined) {
+            const whole = { from: first.start, to: end(last) };
+            add(source("text", without(whole, words.blocks.map((block) => ({ from: block.from, to: end(block) })))));
+        }
+    }
+    for (const item of laidOut.items) {
+        const fold = item.fold;
+        if (fold === null) {
+            continue;
+        }
+        const rows = laidOut.asides.filter((each) => each.kind === "item-text" && each.from >= fold.from && each.to <= fold.to);
+        add(source("text", rows.map((row) => ({ from: Math.min(row.from + ITEM_INDENT.length, row.to), to: end(row) }))));
+    }
+    for (const block of laidOut.blocks) {
+        add(source("comment", [block]));
+    }
+    return found;
 }
 
 /** Return whether the line at `position` is in sight. */
@@ -325,6 +362,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         [entries, beside, talk, folded],
     );
     const folding = useMemo(() => folds(laidOut), [laidOut]);
+    const sourcing = useMemo(() => sourcesOf(laidOut), [laidOut]);
     const editor = useEditor<Talk, Remark>({
         shown: { text: laidOut.text, blocks: laidOut.blocks, folds: folding },
         draft: talk,
@@ -368,11 +406,13 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
             anchor = moved(head, made, doc);
         }
         if (changing) {
+            // What's written in Markdown goes with the text, which is read by it in this transaction.
             view.dispatch({
                 changes: made,
                 selection: anchor === undefined ? undefined : { anchor },
                 scrollIntoView: anchor !== undefined && (following || arriving !== null),
                 annotations: rebuilt.of(true),
+                effects: sourced.of(sourcing),
             });
         } else if (anchor !== undefined) {
             view.dispatch({ selection: { anchor }, scrollIntoView: true });
