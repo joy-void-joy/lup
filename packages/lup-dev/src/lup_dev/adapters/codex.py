@@ -46,7 +46,19 @@ the launch's judge can't answer a hook, the host service answers it through
 judging fails; anything else warns the operator in `systemMessage`, and the call
 goes on. Where the room's hook can't reach the service, it ends with status 1:
 Codex marks the hook's run failed, shows "hook exited with code 1" (not what the
-hook wrote to standard error), and the call goes on.
+hook wrote to standard error), and the call goes on. Where it reached the
+service and the connection was lost before an answer, as when the service
+restarts while a hold waits, it ends with status 2 at a call's start, its finish
+and a turn's end, its line on standard error, and 1 at a session's start and a
+turn's start (`lost`, `launch/session.py`). Read in each event's
+`parse_completed` (`hooks/src/events/`) at `b89ce9a2b`, of 2026-06-06: status 2
+with something on standard error blocks `PreToolUse`'s call with it as the
+reason, gives it to the model as feedback at `PostToolUse`, continues the turn
+on it at `Stop` and `SubagentStop`, and stops the turn at `UserPromptSubmit`,
+which a turn's start mustn't do to the operator's prompt. So the service
+answers every hook with something, `{}` where it decides nothing, which
+`parse_json` (`hooks/src/engine/output_parser.rs`) reads with each field its
+default: no decision.
 
 The judge reads every hook a launched Codex session runs (`heard`). It adds to
 each answer through `told`: a call to
@@ -169,8 +181,9 @@ payloads 0.162.1 sent for a patch, a shell command and a turn's end are kept in
 - how a hook's end reads (`hooks/src/events/`, each event's `parse_completed`):
   status 0 with nothing printed completes with no decision; any status but 0 or 2
   marks the run failed with the entry "hook exited with code <status>", and the
-  call goes on; status 2 blocks where the event can, so the room's hook never ends
-  with it; `systemMessage` alone is a valid answer to every event this adapter
+  call goes on; status 2 blocks where the event can, so the room's hook ends with
+  it only where its connection to the host service was lost before an answer;
+  `systemMessage` alone is a valid answer to every event this adapter
   hooks, shown as a warning entry.
 
 Its release channel (`CodexChannel`) is the one its standalone installer reads
@@ -239,7 +252,7 @@ from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from datetime import timedelta
 
     import httpx
@@ -875,8 +888,8 @@ def told(raw: str, answer: str, telling: Telling) -> str | None:
     return added.model_dump_json(by_alias=True, exclude_none=True)
 
 
-def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
-    """Return the hooks a launched Codex session runs `command` at: the events the host service hears.
+def hooks(command: Callable[[Event], list[str]], timeout: timedelta) -> list[Hook]:
+    """Return the hooks a launched Codex session runs at the events the host service hears, each running the command `command` gives for its event.
 
     `SessionStart`; `UserPromptSubmit`, each turn's start, which clears the
     calls the conversation left in an earlier turn; `PreToolUse` and
@@ -893,7 +906,9 @@ def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
         "turn-ended",
         "conversation-ended",
     ]
-    return [Hook(event=event, command=command, timeout=timeout) for event in events]
+    return [
+        Hook(event=event, command=command(event), timeout=timeout) for event in events
+    ]
 
 
 def agent() -> Declaration:

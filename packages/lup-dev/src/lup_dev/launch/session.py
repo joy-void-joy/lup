@@ -25,14 +25,17 @@ worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
   runtimes ask about for a linked one;
 - the launch's own directory, where the compiled files are written.
 
-The hook in the room is one command for every runtime and event: `socat` pipes
-the runtime's payload unchanged to the launch's socket, `/run/lup/hook.sock`, and
-prints the answer, so nothing in the room parses a payload. Where it can't reach
-the host service, having waited a minute for it as across a restart (`piped`),
-the command ends with status 1 and says why on standard error:
-an error each runtime shows, the call going on, rather than the silence a
-runtime reads as no decision. Status 2 would block the call on both runtimes, so
-the command never ends with it (each adapter says what its runtime does).
+The hook in the room is one command for every runtime, and one for each event:
+`socat` pipes the runtime's payload unchanged to the launch's socket,
+`/run/lup/hook.sock`, and prints the answer, so nothing in the room parses a
+payload. Where it can't reach the host service, having waited a minute for it as
+across a restart (`piped`), the command ends with status 1 and says why on
+standard error: an error each runtime shows, the call going on, rather than the
+silence a runtime reads as no decision. Where it reached the service and the
+connection ended before an answer, it fails as its event needs (`lost`): status
+2, which on both runtimes blocks the call, tells the agent beside its result or
+holds a turn's end, and 1 at a session's or a turn's start (each adapter says
+what its runtime does).
 """
 
 import io
@@ -40,6 +43,7 @@ import shlex
 import tempfile
 from contextlib import contextmanager
 from datetime import timedelta
+from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -64,6 +68,7 @@ from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, LaunchSockets
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
+    from lup.sessions.terminal import Event
     from lup.tools.tool import ToolSpec
     from lup_dev.codescan.contract import Rule
     from lup_dev.launch.room import Lent, RelatedRepository
@@ -116,8 +121,48 @@ def approved_declaration(
         yield Approved(commit=commit, resolved=resolved, root=root)
 
 
-def piped(timeout: timedelta = timedelta(hours=25)) -> list[str]:
-    """Return the command a room's hook runs: the payload piped to the host service, its answer printed.
+class Lost(Model):
+    """What a room's hook does where its connection to the host service is lost before an answer: the status it ends with, and the line it says."""
+
+    status: int
+    said: str
+
+
+def lost(event: Event) -> Lost:
+    """Return what the room's hook at `event` does where the host service goes away after the payload is sent, before it answers.
+
+    Status 2, at a call's start, its finish and a conversation's turn's end, does
+    on both runtimes what keeps a write from landing unreviewed and tells the
+    agent the line: it blocks the call, or tells the agent beside the call's
+    result, or holds the turn's end once (`docs/host.md`, *The one hook*). At a
+    session's start or a turn's start, status 2 would drop the operator's
+    prompt, and no write is judged there, so the hook ends with status 1, an
+    error each runtime shows the operator.
+    """
+    gone = (
+        "lup: the host service went away before it answered this hook, as it does "
+        "when it restarts,"
+    )
+    held = (
+        "A write lup held for the operator's review stays held, and their answer "
+        "reaches you at a later call."
+    )
+    match event:
+        case "session-started" | "turn-started":
+            return Lost(status=1, said=f"{gone} so its answer was lost.")
+        case "call-started":
+            return Lost(
+                status=2, said=f"{gone} so this call didn't run: make it again. {held}"
+            )
+        case "call-finished" | "turn-ended" | "conversation-ended":
+            return Lost(
+                status=2,
+                said=f"{gone} so what was written is judged at your next call. {held}",
+            )
+
+
+def piped(event: Event, timeout: timedelta = timedelta(hours=25)) -> list[str]:
+    """Return the command a room's hook at `event` runs: the payload piped to the host service, its answer printed.
 
     Where the service is away, as while it restarts, `socat` waits for it as
     lup's bridge waits for the tool server, read from a bridge built with its
@@ -128,6 +173,15 @@ def piped(timeout: timedelta = timedelta(hours=25)) -> list[str]:
     for the answer once the payload is sent: `timeout`, above a hold's day. A
     failure, to reach the service in that minute or any other, ends the command
     with status 1 and a line on standard error.
+
+    The service answers every hook with something, an empty JSON object where
+    it decides nothing (`UNDECIDED`, `host/service.py`), so a connection that
+    ends with no answer was lost: the service stopped, or its process ended or
+    was killed, each of which `socat` ends with status 0 and nothing printed.
+    The command then does what `lost` says for `event`, never ending as the
+    no decision the runtime would read in silence. The answer is kept whole,
+    trailing newlines too, with a mark after it that the shell's capture can't
+    strip.
     """
     socket = LaunchSockets(directory=ROOM_SOCKETS).hook
     seconds = str(int(timeout.total_seconds()))
@@ -135,23 +189,34 @@ def piped(timeout: timedelta = timedelta(hours=25)) -> list[str]:
     tries = round(bridge.patience / bridge.retry)
     address = f"UNIX-CONNECT:{socket},retry={tries},interval={bridge.retry:g}"
     pipe = shlex.join(["socat", "-t", seconds, "-", address])
-    said = shlex.quote(
+    unreached = shlex.quote(
         f"lup: this hook couldn't reach lup's host service on {socket}, so it "
         "wasn't judged. On the host, `lup-dev host` serves this session again."
     )
-    return ["sh", "-c", f"{pipe} || {{ echo {said} >&2; exit 1; }}"]
+    gone = lost(event)
+    script = "\n".join(
+        [
+            f"answer=$({pipe} && echo .) || {{ echo {unreached} >&2; exit 1; }}",
+            (
+                f'[ "$answer" != . ] || {{ echo {shlex.quote(gone.said)} >&2; '
+                f"exit {gone.status}; }}"
+            ),
+            'printf %s "${answer%.}"',
+        ]
+    )
+    return ["sh", "-c", script]
 
 
 def hooked(
-    spelled: Callable[[list[str], timedelta], list[Hook]],
+    spelled: Callable[[Callable[[Event], list[str]], timedelta], list[Hook]],
     hold: timedelta = timedelta(hours=25),
 ) -> list[Hook]:
-    """Return a runtime's hooks, as its adapter spells them (`spelled`), each running the room's pipe.
+    """Return a runtime's hooks, as its adapter spells them (`spelled`), each running the room's pipe for its event.
 
     The hook waits for its answer as long as the pipe does: `hold`, above a hold's
     day.
     """
-    return spelled(piped(hold), hold)
+    return spelled(partial(piped, timeout=hold), hold)
 
 
 def served(hold: timedelta = timedelta(hours=25)) -> list[ToolServer]:

@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import timedelta
 
 from lup.sessions.declaration import Declaration
-from lup.sessions.terminal import Hook
+from lup.sessions.terminal import Event, Hook
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model
 from lup_dev.host.courier import Heard, Spawned, Telling
@@ -59,9 +59,9 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """Starts a turn of an idle session through lup's tool server, on its own
     connection; none where the runtime takes nothing a server pushes, a gap its
     module declares."""
-    hooks: Callable[[list[str], timedelta], list[Hook]]
-    """The hooks a launched session runs a command at, each waiting up to a
-    timeout: the events the host service hears."""
+    hooks: Callable[[Callable[[Event], list[str]], timedelta], list[Hook]]
+    """The hooks a launched session runs at the events the host service hears,
+    each running the command given for its event and waiting up to a timeout."""
     channel: Channel
     """Its release channel, which a launch fetches the latest CLI from."""
     agent: Callable[[], Declaration]

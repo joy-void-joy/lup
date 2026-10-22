@@ -78,6 +78,7 @@ from lup_dev.host.protocol import (
 )
 from lup_dev.host.rooms import RoomHandler, RoomRoute, RoomTools
 from lup_dev.host.service import (
+    UNDECIDED,
     Answerer,
     Asked,
     Companion,
@@ -633,18 +634,56 @@ def test_a_hook_its_judge_cant_answer_is_answered_in_the_runtimes_terms(
     assert registered.directory.is_dir()
 
 
-def test_a_failed_answer_is_said_and_the_hook_hears_nothing(
+def test_a_failed_answer_is_said_and_the_hook_hears_it_in_the_runtimes_terms(
     layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
 ) -> None:
     host = client(layout, clock)
     with served(service(layout, Judge(), said)):
         host.register(launch(tmp_path, "one", "first"))
-        assert send(layout.launch("one").hook, "boom") == ""
+        heard = send(layout.launch("one").hook, "boom")
         assert send(layout.launch("one").hook, "after") == "first answers after\n"
+    assert heard == (
+        "first unanswered boom: the host service failed answering it, "
+        f"RuntimeError('the stub fails'); its output says more, {layout.log} when "
+        "it runs in the background\n"
+    )
     [failed] = [
         line for line in said if line.startswith("one: answering a hook failed")
     ]
     assert "RuntimeError: the stub fails" in failed
+
+
+def test_a_hook_nothing_is_decided_on_is_answered_with_something(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    """The room's hook tells an answer from a connection lost before one by
+    whether anything came (`piped`), so no decision is an empty JSON object."""
+    host = client(layout, clock)
+    with served(service(layout, Quiet(), said)):
+        host.register(launch(tmp_path, "one", "first"))
+        assert send(layout.launch("one").hook, "x") == UNDECIDED
+    assert json.loads(UNDECIDED) == {}
+
+
+def test_a_service_stopping_while_a_hook_waits_leaves_it_unanswered(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    """What the room's hook reads as a lost connection, since every answer is
+    something: the connection closed with nothing written."""
+    host = client(layout, clock)
+    judge = Judge()
+    with (
+        served(service(layout, judge, said)),
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        host.register(launch(tmp_path, "one", "first"))
+        held = pool.submit(send, layout.launch("one").hook, "hold")
+        try:
+            judge.arrived.wait()
+            assert host.stop()
+            assert held.result() == ""
+        finally:
+            judge.released.set()
 
 
 class Echo(Request, reads=False):
@@ -972,7 +1011,7 @@ def test_a_hook_the_judge_doesnt_read_is_answered_without_it(
             send(hook, payload) for payload in [started, write, shell, stop, *unread]
         ]
         lup_tool = json.loads(send(hook, lups("echo", "t3")))
-    assert answers[1:] == ["", "", "", "", ""]
+    assert answers[1:] == [UNDECIDED] * 5
     named = json.loads(answers[0])["hookSpecificOutput"]
     assert named["sessionTitle"] == "one"
     assert named["additionalContext"].startswith("lup: this session is `one`")

@@ -17,10 +17,11 @@ on. It holds three sockets:
   session is judged by the code approved for its repository without paying a
   start of Python and an import of `lup-dev` at each hook (`host/workers.py`).
   One it doesn't read is answered by the service itself, without asking the
-  judge, as no decision. Every answer goes out through the `Courier` again, a
-  call to lup's tools rewritten to carry lup's id for the conversation calling,
-  and what the `Post` says waits for the conversation added: counted told once
-  the answer is written, and put back where the hook was gone first. Hooks for
+  judge, as no decision, which is never nothing (`UNDECIDED`). Every answer
+  goes out through the `Courier` again, a call to lup's tools rewritten to
+  carry lup's id for the conversation calling, and what the `Post` says waits
+  for the conversation added: counted told once the answer is written, and put
+  back where the hook was gone first. Hooks for
   parallel calls arrive at once and a hold waits for hours, so each is awaited
   on the event loop, which goes on serving meanwhile, and answered in a thread
   of its own in the launch's process. Where the judge can't answer (its process
@@ -37,7 +38,9 @@ on. It holds three sockets:
 Each launch is recorded beside its directory, so a service started after one
 stopped serves the same launches, in the directories their rooms mounted. The
 service stops without waiting for the answers in flight: the launches'
-processes are ended, and their hooks hear nothing.
+processes are ended, and their hooks hear nothing, which the room's hook tells
+from an answer: it fails rather than letting the call go on unjudged (`lost`,
+`launch/session.py`).
 """
 
 import asyncio
@@ -554,6 +557,15 @@ async def closed(server: asyncio.Server) -> None:
     await server.wait_closed()
 
 
+UNDECIDED = "{}\n"
+"""What the service answers a hook where nothing is decided or told: an empty
+JSON object, which both runtimes read as an answer deciding nothing (each
+adapter says how), as they would read nothing printed. Every hook is answered
+with something, so the room's hook tells an answer from a connection lost
+before one, which `socat` ends as it ends an empty answer (`piped`,
+`launch/session.py`)."""
+
+
 type Answering = Callable[
     [asyncio.StreamReader, asyncio.StreamWriter], Coroutine[None, None, None]
 ]
@@ -914,13 +926,14 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     ) -> None:
         """Answer one hook heard on a launch's socket, and close the connection.
 
-        The payload is read to the end and answered. Where answering fails even
-        so, the failure is said, with its traceback, and the connection closes
-        unanswered: the room's hook prints nothing and ends with status 0, which
-        the runtime takes as no decision. Where the hook is gone before its
-        answer is written, what it would have told is put back as waiting;
-        otherwise a title the answer gives the session's runtime is kept as the
-        one lup left it with (`Names.titled`).
+        The payload is read to the end and answered, always with something:
+        `UNDECIDED` where nothing is decided or told, so the room's hook tells an
+        answer from a lost connection. Where answering fails even so, the
+        failure is said, with its traceback, and the hook is answered in the
+        runtime's terms as one its judge couldn't answer. Where the hook is gone
+        before its answer is written, what it would have told is put back as
+        waiting; otherwise a title the answer gives the session's runtime is
+        kept as the one lup left it with (`Names.titled`).
         """
         payload = (await reader.read()).decode()
         try:
@@ -928,10 +941,16 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         except Exception as failure:
             told = "".join(traceback.format_exception(failure))
             self.say(f"{request.launch}: answering a hook failed:\n{told}")
-            spoken = Spoken(answer="")
+            failed = (
+                f"the host service failed answering it, {failure!r}; its output "
+                f"says more, {self.layout.log} when it runs in the background"
+            )
+            unanswered = self.answerer.unanswered(request.runtime, payload, failed)
+            spoken = Spoken(answer=unanswered)
         self.changes.changed()
+        answer = spoken.answer if spoken.answer.strip() else UNDECIDED
         try:
-            writer.write(spoken.answer.encode())
+            writer.write(answer.encode())
             await writer.drain()
             writer.close()
             await writer.wait_closed()
