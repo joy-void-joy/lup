@@ -12,16 +12,23 @@
 // and previous comment, where the cursor last was in it. Ctrl+Enter in a comment ends
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
 // any change to the draft, `g-` and `g+` go through its history in the order it
-// was made (`History`). What folds is folded until opened: `za` opens or
-// closes the fold under the cursor, `zo` and `zc` open and close it, `zR` and
-// `zM` open and close them all, `zr` and `zm` those hiding a change alone (a file
-// folded whole, a run holding changed lines), unchanged context left as it is. Space `h`, or Space `w` `h`, goes to the agents'
-// tree; `?` opens the list of every key, in place of vim's search backward. Each view says what else its keys do, lays its own text out and draws
-// it, and may paint the lines in view as well, as the review paints a changed
-// file's (`Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`). A fold may be
-// inside another, as an item's text is inside what came before the operator's
-// last words: the fold keys act on the innermost the cursor is on.
-import { codeFolding, foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
+// was made (`History`). Each fold is folded or open as the view lays it out
+// until the operator opens or closes it, which is kept by its key: `za` opens or
+// closes the fold the cursor is in, `zo` and `zc` open and close it; `zr` and
+// `zm` open or close a level more, `zR` and `zM` all of them, and Space `f` and a
+// letter those of a kind, within what the view says (in the review, the item the
+// cursor is in; in a conversation, everything); `zj` and `zk` go to the next
+// fold's start and the previous one's end, `[z` and `]z` to the start and the end
+// of the open fold the cursor is in (`folds.ts`). Space `h`, or Space `w` `h`,
+// goes to the agents' tree; `?` opens the list of every key, in place of vim's
+// search backward; once a chord is begun, as with Space, the view is told what's
+// pressed, to show what may follow. Each view says what else its keys do, lays
+// its own text out and draws it, and may paint the lines in view as well, as the
+// review paints a changed file's, and draw its folds' marks and bars in the
+// margin (`margin.ts`; `Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
+// A fold may be inside another, as an item's text is inside what came before the
+// operator's last words: the fold keys act on the innermost the cursor is in.
+import { foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
 import { Annotation, EditorState, Facet, Prec, StateEffect, StateField, type Range } from "@codemirror/state";
 import {
     Decoration,
@@ -35,6 +42,9 @@ import { Vim, getCM, vim, type CodeMirror, type CodeMirrorV } from "@replit/code
 import { useEffect, useRef, type RefObject } from "react";
 
 import { saying, type Block, type Folding, type Span } from "./comments";
+import { around, foldEdge, levelled, nextFold } from "./folds";
+import { FOLD_KINDS, type FoldKind } from "./keys";
+import { margin, placeheld, type Margined } from "./margin";
 
 /** What the vim keys and the editor's own events do, as a view stands: replaced at each render. */
 interface Actions {
@@ -51,12 +61,16 @@ interface Actions {
     tree: () => void;
     list: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
-    foldAll: (closing: boolean) => void;
-    foldDiffs: (closing: boolean) => void;
-    folded: (state: EditorState) => void;
+    foldLevel: (opening: boolean, all: boolean) => void;
+    foldKind: (kind: FoldKind, closing: boolean) => void;
+    /** Where `zj` and `zk` (`next`), or `[z` and `]z` (`edge`), go from the line starting at `line`. */
+    foldMotion: (line: number, how: "next" | "edge", forward: boolean) => number | undefined;
+    folded: (update: ViewUpdate) => void;
+    folds: () => readonly Folding[];
     undo: (way: "undo" | "redo" | "earlier" | "later") => void;
     send: () => void;
     blocks: () => Block[];
+    chord: (keys: string) => void;
     edited: (update: ViewUpdate) => void;
     paint: (from: number, to: number) => Range<Decoration>[];
 }
@@ -259,10 +273,27 @@ function mapKeys(): void {
     action("lupFoldToggle", (actions) => actions.fold("toggle"));
     action("lupFoldOpen", (actions) => actions.fold("open"));
     action("lupFoldClose", (actions) => actions.fold("close"));
-    action("lupFoldOpenAll", (actions) => actions.foldAll(false));
-    action("lupFoldCloseAll", (actions) => actions.foldAll(true));
-    action("lupFoldOpenDiffs", (actions) => actions.foldDiffs(false));
-    action("lupFoldCloseDiffs", (actions) => actions.foldDiffs(true));
+    action("lupFoldOpenAll", (actions) => actions.foldLevel(true, true));
+    action("lupFoldCloseAll", (actions) => actions.foldLevel(false, true));
+    action("lupFoldOpenLevel", (actions) => actions.foldLevel(true, false));
+    action("lupFoldCloseLevel", (actions) => actions.foldLevel(false, false));
+    for (const { kind, chord } of FOLD_KINDS) {
+        if (chord) {
+            action(`lupFoldOpen-${kind}`, (actions) => actions.foldKind(kind, false));
+            action(`lupFoldClose-${kind}`, (actions) => actions.foldKind(kind, true));
+        }
+    }
+    // `zj`, `zk`, `[z` and `]z` are motions, as in vim, so `v]z` selects to a fold's end.
+    const motion = (name: string, how: "next" | "edge", forward: boolean) =>
+        Vim.defineMotion(name, (cm, head) => {
+            const line = cm.indexFromPos({ line: head.line, ch: 0 });
+            const target = boundOf(cm.cm6.state).actions?.foldMotion(line, how, forward);
+            return target === undefined ? head : cm.posFromIndex(target);
+        });
+    motion("lupNextFold", "next", true);
+    motion("lupPreviousFold", "next", false);
+    motion("lupFoldStart", "edge", false);
+    motion("lupFoldEnd", "edge", true);
     action("lupUndo", (actions) => actions.undo("undo"));
     action("lupRedo", (actions) => actions.undo("redo"));
     action("lupEarlierState", (actions) => actions.undo("earlier"));
@@ -285,8 +316,19 @@ function mapKeys(): void {
     map("zc", "lupFoldClose", "normal");
     map("zR", "lupFoldOpenAll", "normal");
     map("zM", "lupFoldCloseAll", "normal");
-    map("zr", "lupFoldOpenDiffs", "normal");
-    map("zm", "lupFoldCloseDiffs", "normal");
+    map("zr", "lupFoldOpenLevel", "normal");
+    map("zm", "lupFoldCloseLevel", "normal");
+    // Space f and a letter, every fold of its kind in the item; Shift and the letter closes them.
+    for (const { kind, letter, chord } of FOLD_KINDS) {
+        if (chord) {
+            map(`<Space>f${letter}`, `lupFoldOpen-${kind}`, "normal");
+            map(`<Space>f${letter.toUpperCase()}`, `lupFoldClose-${kind}`, "normal");
+        }
+    }
+    const motions = { zj: "lupNextFold", zk: "lupPreviousFold", "[z": "lupFoldStart", "]z": "lupFoldEnd" };
+    for (const [keys, name] of Object.entries(motions)) {
+        Vim.mapCommand(keys, "motion", name, {}, {});
+    }
     map("u", "lupUndo", "normal");
     map("<C-r>", "lupRedo", "normal");
     map("g-", "lupEarlierState", "normal");
@@ -366,6 +408,8 @@ const keys = Prec.highest(
                 return false;
             }
             const bound = boundOf(view.state);
+            // Once vim has the key: the chord begun, if any, for the view to show what may follow.
+            queueMicrotask(() => bound.actions?.chord(chordOf(cm)));
             if (!cm.state.vim.insertMode) {
                 const step = deadPressed(bound.keyed.dead, { key: event.key, composing: event.isComposing });
                 bound.keyed.dead = step.dead;
@@ -395,6 +439,16 @@ const keys = Prec.highest(
         },
     }),
 );
+
+/**
+ * Return the keys of a chord begun with Space, as the list of keys writes them (`␣`, `␣f`): what vim holds of a mapping
+ * typed but not done, in normal mode; none for any other.
+ */
+export function chordOf(cm: CodeMirrorV): string {
+    const vim = cm.state.vim;
+    const held = vim.insertMode || vim.visualMode ? [] : vim.inputState.keyBuffer;
+    return held[0] === "<Space>" ? held.map((key) => (key === "<Space>" ? "␣" : key)).join("") : "";
+}
 
 /** Give vim each character of `text`, as typed. */
 function give(cm: CodeMirrorV, text: string): void {
@@ -535,8 +589,16 @@ export function folding(fold: Span, closing: boolean): StateEffect<Span> {
     return closing ? foldEffect.of(range) : unfoldEffect.of(range);
 }
 
-/** Fold each of `folds` again as the operator left it, where the text around it changed: folded unless they opened it, its range as laid out. */
-export function refold(view: EditorView, folds: Folding[], unfolded: Set<string>): void {
+/** Return whether `fold` is folded as the operator left it, `kept` by its key, else as it's laid out. */
+export function closedAs(fold: Folding, kept: ReadonlyMap<string, boolean>): boolean {
+    return kept.get(fold.key) ?? fold.closed;
+}
+
+/**
+ * Fold each of `folds` again as the operator left it, where the text around it changed: as `kept` holds it, by its
+ * key, else as it's laid out (`closedAs`), its range as laid out. What it does isn't the operator's, so isn't kept.
+ */
+export function refold(view: EditorView, folds: Folding[], kept: ReadonlyMap<string, boolean>): void {
     const effects: StateEffect<Span>[] = [];
     for (const fold of folds) {
         let exact = false;
@@ -547,7 +609,7 @@ export function refold(view: EditorView, folds: Folding[], unfolded: Set<string>
                 effects.push(unfoldEffect.of({ from, to }));
             }
         });
-        const closing = !unfolded.has(fold.key);
+        const closing = closedAs(fold, kept);
         if (closing && !exact) {
             effects.push(foldEffect.of({ from: fold.from, to: fold.to }));
         }
@@ -562,8 +624,28 @@ export function refold(view: EditorView, folds: Folding[], unfolded: Set<string>
         }
     });
     if (effects.length > 0) {
-        view.dispatch({ effects });
+        view.dispatch({ effects, annotations: rebuilt.of(true) });
     }
+}
+
+/**
+ * Return `kept` with each of `folds` the operator opened or closed from `before` to `after`, by its key: by its keys,
+ * a click, or the cursor going into it. One they left alone isn't kept, so it keeps folding as it's laid out.
+ */
+export function keptFolds(
+    folds: readonly Folding[],
+    before: EditorState,
+    after: EditorState,
+    kept: ReadonlyMap<string, boolean>,
+): Map<string, boolean> {
+    const next = new Map(kept);
+    for (const fold of folds) {
+        const now = isFolded(after, fold);
+        if (now !== isFolded(before, fold)) {
+            next.set(fold.key, now);
+        }
+    }
+    return next;
 }
 
 /** Return where the cursor goes once a fold closes over it: on its summary line where it was in what the fold hides, else where it was. */
@@ -603,6 +685,10 @@ interface Config<D, C> {
     tree: () => void;
     /** Open the list of every key (`?`). */
     list: () => void;
+    /** Told the keys of a chord begun, as the list writes them (`␣`, `␣f`), each time they change: none once it's done. */
+    pending?: (keys: string) => void;
+    /** Whether the margin shows each fold's mark and the bars of those the cursor is in (`margin.ts`). */
+    margin?: boolean;
 }
 
 /** What a view's keys do with what it laid out. */
@@ -624,6 +710,10 @@ export interface Own<C> {
     back?: () => void;
     /** What's painted on the lines from `from` to `to` while they're in view, beyond what `draw` drew: a changed file's lines and their highlighting. */
     paint?: (from: number, to: number) => Range<Decoration>[];
+    /** The folds `zr` opens (`opening`) or `zm` closes from `position`, or with `all` `zR` and `zM`; where none's said, those of every fold (`levelled`). */
+    level?: (position: number, opening: boolean, all: boolean, closed: (fold: Folding) => boolean) => Folding[];
+    /** The folds Space `f` and a letter opens, or with Shift closes, from `position`; none where none's said. */
+    kind?: (position: number, kind: FoldKind, closing: boolean, closed: (fold: Folding) => boolean) => Folding[];
 }
 
 /** One editor, as a view uses it. */
@@ -634,8 +724,8 @@ export interface Editor<D, C> {
     head: () => number;
     /** Where the cursor goes once the text is laid out again, read and cleared by the view. */
     landing: RefObject<Landing>;
-    /** The folds the operator opened, by key: each laying out folds every other one. */
-    unfolded: RefObject<Set<string>>;
+    /** The folds the operator opened or closed, by key, whether each is folded: each laying out folds every other one as it's laid out. */
+    kept: RefObject<Map<string, boolean>>;
     /** The draft as it was last rendered. */
     latest: RefObject<D>;
     /** Whether a comment is being written. */
@@ -660,13 +750,15 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     const view = useRef<EditorView | null>(null);
     const bound = useRef<Bound>({ actions: null, keyed: { ...NONE } });
     const landing = useRef<Landing>(null);
-    const unfolded = useRef(new Set<string>());
+    const kept = useRef(new Map<string, boolean>());
     const latest = useRef(config.draft);
     latest.current = config.draft;
     const telling = useRef(config.inserting);
     telling.current = config.inserting;
     const following = useRef(config.moved);
     following.current = config.moved;
+    const chording = useRef(config.pending);
+    chording.current = config.pending;
     // The draft's history, for `u`, Ctrl+R, `g-` and `g+`; and whether the comment being written has its step
     // already, so it's undone whole.
     const history = useRef<History<D>>(begun(config.draft));
@@ -685,6 +777,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
         if (host === null) {
             return;
         }
+        // What folds, for the margin and the placeholders: as this view last laid it out.
+        const margined: Margined = {
+            folds: (state) => boundOf(state).actions?.folds() ?? [],
+            redrawn: (update) => update.transactions.some((each) => each.annotation(rebuilt) === true || each.effects.some((effect) => effect.is(drawn))),
+        };
         const created = new EditorView({
             parent: host,
             state: EditorState.create({
@@ -696,7 +793,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     onlyComments,
                     withinComment,
                     EditorView.lineWrapping,
-                    codeFolding({ placeholderText: "…" }),
+                    placeheld(margined),
+                    config.margin === true ? margin(margined) : [],
                     drawing,
                     painting,
                     EditorView.updateListener.of((update) => {
@@ -705,10 +803,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                         if (update.docChanged && !replaced) {
                             actions?.edited(update);
                         }
-                        // A fold opened or closed however it was, by its keys, a click, or the cursor going into it,
-                        // is kept for the next laying out; an edit only moves the folds with the text.
-                        if (!update.docChanged && foldedRanges(update.startState) !== foldedRanges(update.state)) {
-                            actions?.folded(update.state);
+                        // A fold opened or closed by the operator, however it was, by its keys, a click, or the cursor
+                        // going into it, is kept for the next laying out; an edit only moves the folds with the text,
+                        // and the view folding again as it lays out isn't the operator's doing.
+                        if (!update.docChanged && !replaced && foldedRanges(update.startState) !== foldedRanges(update.state)) {
+                            actions?.folded(update);
                         }
                         const head = update.state.selection.main.head;
                         if (update.docChanged || update.selectionSet) {
@@ -802,7 +901,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
         if (editor === null) {
             return;
         }
-        const changing = folds.filter((each) => isFolded(editor.state, each) !== closing);
+        // In the text's order, a fold over others after them, as CodeMirror takes the folds a transaction makes; the
+        // cursor going to the outermost one closing over it.
+        const changing = folds
+            .filter((each) => isFolded(editor.state, each) !== closing)
+            .sort((a, b) => a.from - b.from || b.to - a.to);
         const at = head();
         const back = closing ? uncovered(changing, at) : at;
         editor.dispatch({
@@ -906,10 +1009,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             fold: (how) => {
                 const editor = view.current;
                 const at = head();
-                // Of folds one inside another, the innermost the cursor is on: the one whose summary line starts last.
-                const fold = shown.folds
-                    .filter((each) => at >= each.summary.from && at <= each.to)
-                    .reduce<Folding | undefined>((inner, each) => (inner === undefined || each.summary.from > inner.summary.from ? each : inner), undefined);
+                // Of folds one inside another, the innermost the cursor is in.
+                const fold = around(shown.folds, at).at(-1);
                 if (editor === null || fold === undefined) {
                     return;
                 }
@@ -921,21 +1022,42 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     editor.dispatch({ effects: folding(fold, closing), selection: back, scrollIntoView: true });
                 }
             },
-            foldAll: (closing) => foldEvery(shown.folds, closing),
-            foldDiffs: (closing) => foldEvery(shown.folds.filter((each) => each.diff === true), closing),
-            folded: (state) => {
-                // The folds are where this layout puts them only while the text is still its own.
-                if (state.sliceDoc() !== shown.text) {
+            foldLevel: (opening, all) => {
+                const editor = view.current;
+                if (editor === null) {
                     return;
                 }
-                for (const fold of shown.folds) {
-                    if (isFolded(state, fold)) {
-                        unfolded.current.delete(fold.key);
-                    } else {
-                        unfolded.current.add(fold.key);
-                    }
-                }
+                const closed = (fold: Folding) => isFolded(editor.state, fold);
+                const folds = own.level?.(head(), opening, all, closed) ?? levelled(shown.folds, closed, opening, all);
+                foldEvery(folds, !opening);
             },
+            foldKind: (kind, closing) => {
+                const editor = view.current;
+                if (editor === null) {
+                    return;
+                }
+                foldEvery(own.kind?.(head(), kind, closing, (fold) => isFolded(editor.state, fold)) ?? [], closing);
+            },
+            foldMotion: (line, how, forward) => {
+                const editor = view.current;
+                if (editor === null) {
+                    return undefined;
+                }
+                const closed = (fold: Folding) => isFolded(editor.state, fold);
+                const startOf = (position: number) => editor.state.doc.lineAt(position).from;
+                return how === "next"
+                    ? nextFold(shown.folds, closed, line, forward, startOf)
+                    : foldEdge(shown.folds, closed, line, !forward, startOf);
+            },
+            folded: (update) => {
+                // The folds are where this layout puts them only while the text is still its own.
+                if (update.state.sliceDoc() !== shown.text) {
+                    return;
+                }
+                kept.current = keptFolds(shown.folds, update.startState, update.state, kept.current);
+            },
+            folds: () => shown.folds,
+            chord: (keys) => chording.current?.(keys),
             undo: (way) => {
                 const now = rewritten(history.current, latest.current);
                 const gone = went(now, way);
@@ -968,7 +1090,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
         view,
         head,
         landing,
-        unfolded,
+        kept,
         latest,
         writing: () => keyed.inserting,
         record,

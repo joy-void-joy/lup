@@ -191,8 +191,9 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
     }, [names, subagent]);
     const [refused, setRefused] = useState<string | null>(null);
     const [inserting, setInserting] = useState(false);
-    // Whether the list of every key is open.
+    // Whether the list of every key is open, and the keys of a chord begun, whose following keys are shown.
     const [listing, setListing] = useState(false);
+    const [chord, setChord] = useState("");
     const [epoch, setEpoch] = useState(0);
     const have = useRef(0);
     const asking = useRef(false);
@@ -335,6 +336,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         shownNow: true,
         tree,
         list: () => setListing(true),
+        pending: setChord,
     });
     const before = useRef<Laid | null>(null);
     // Whether the message being begun was begun from the conversation's last line.
@@ -374,7 +376,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         } else if (anchor !== undefined) {
             view.dispatch({ selection: { anchor }, scrollIntoView: true });
         }
-        refold(view, folding, editor.unfolded.current);
+        refold(view, folding, editor.kept.current);
         before.current = laidOut;
         editor.landing.current = null;
         editor.draw(decorations(laidOut, talk));
@@ -494,6 +496,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
                     places={CONVERSATION_PLACES}
                     open={listing}
                     setOpen={setListing}
+                    pending={chord}
                 />
             </div>
         </>

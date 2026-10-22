@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { levelled } from "./folds";
 import {
     EMPTY,
     aboutAt,
@@ -15,8 +16,10 @@ import {
     flag,
     foldAt,
     foldKey,
+    foldsOf,
     fresh,
     groupAt,
+    heading,
     isLetter,
     laid,
     messages,
@@ -26,6 +29,7 @@ import {
     plain,
     pruned,
     quoted,
+    recipient,
     regionAt,
     shownAt,
     stepped,
@@ -42,8 +46,10 @@ import {
     type Context,
     type Conversation,
     type Draft,
+    type Fold,
     type Head,
     type Item,
+    type Naming,
     type Written,
 } from "./review";
 
@@ -147,13 +153,14 @@ function onItem(written: Written | undefined): Comment | undefined {
 }
 
 describe("laid", () => {
-    it("folds an item marked read whole under its header, and nothing else", () => {
+    it("folds each item whole under its header, folded once it's marked read, and nothing else", () => {
         const out = laid([QUESTION, NOTE], [], banner, header, { ...EMPTY, done: [52] }, NOTHING);
         const question = out.regions.find((each) => each.item.number === 51);
         const note = out.regions.find((each) => each.item.number === 52);
-        expect(question!.folds.filter((each) => each.kind === "whole")).toEqual([]);
-        const [read] = note!.folds.filter((each) => each.kind === "whole");
-        expect(read!.name).toBe("read");
+        expect(question!.folds.map((each) => [each.kind, each.closed])).toEqual([["item", false]]);
+        const [read] = note!.folds;
+        expect(note!.folds).toHaveLength(1);
+        expect(read).toMatchObject({ kind: "item", name: "", closed: true });
         expect(out.text.slice(read!.summary.from, read!.summary.to)).toBe("── #52 ──");
         expect(out.text.slice(read!.from, read!.to)).toBe("\nI assumed UTF-8.");
     });
@@ -161,14 +168,15 @@ describe("laid", () => {
     it("folds an item left for later whole under its header, as one marked read, landing on its header", () => {
         const out = laid([QUESTION, NOTE], [], banner, header, { ...EMPTY, parked: [51] }, NOTHING);
         const question = out.regions.find((each) => each.item.number === 51)!;
-        const [later] = question.folds.filter((each) => each.kind === "whole");
-        expect(later!.name).toBe("later");
-        expect(foldKey(later!)).not.toBe(foldKey({ ...later!, name: "read" }));
+        const [later] = question.folds;
+        expect(later).toMatchObject({ kind: "item", closed: true });
         expect(out.text.slice(later!.summary.from, later!.summary.to)).toBe("── #51 · later ──");
         expect(out.text.slice(later!.from, later!.to)).toMatch(/^\nWhich parser\?\n.*lean: no$/s);
         expect(arrival(question)).toBe(question.header.from);
         const back = laid([QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
-        expect(back.regions.flatMap((each) => each.folds)).toEqual([]);
+        expect(back.regions.flatMap((each) => each.folds).map((each) => each.closed)).toEqual([false, false]);
+        // Its own fold is named the same, read, left for later or neither, which says how it's folded.
+        expect(back.regions.map((each) => foldKey(each.folds[0]!))).toEqual(["52 item ", "51 item "]);
     });
 
     it("puts the group with the newest item first, each group's items in their order", () => {
@@ -414,9 +422,15 @@ describe("what folds under an item", () => {
         const [approval, question] = out.regions;
         const shown = (from: number, to: number) => out.text.slice(from, to);
 
-        const [top, bottom] = approval!.folds;
-        expect(approval!.folds).toHaveLength(2);
-        expect(top).toMatchObject({ item: 54, kind: "code", name: "a.py:0" });
+        const runs = approval!.folds.filter((each) => each.kind === "lines");
+        const [top, bottom] = runs;
+        expect(approval!.folds.map((each) => [each.kind, each.closed])).toEqual([
+            ["lines", true],
+            ["lines", true],
+            ["file", false],
+            ["item", false],
+        ]);
+        expect(top).toMatchObject({ item: 54, kind: "lines", name: 'a.py ["","l1"]', label: "3 unchanged lines, 1–3" });
         expect(shown(top!.summary.from, top!.summary.to)).toBe("3 unchanged lines, 1–3");
         expect(top!.from).toBe(top!.summary.to);
         expect(shown(top!.from, top!.to)).toBe("\nl1\nl2\nl3");
@@ -432,7 +446,7 @@ describe("what folds under an item", () => {
         ]);
 
         const [context] = question!.folds;
-        expect(context).toMatchObject({ item: 51, kind: "context" });
+        expect(context).toMatchObject({ item: 51, kind: "context", closed: true, label: "context" });
         expect(shown(context!.summary.from, context!.summary.to)).toBe(
             "context · 7 steps, from your words 9m before this item",
         );
@@ -477,8 +491,9 @@ describe("what folds under an item", () => {
         const out = laid([APPROVAL, NOTE], [], banner, header, EMPTY, read);
         const [approval, note] = out.regions;
         const shown = (from: number, to: number) => out.text.slice(from, to);
-        const [file] = approval!.folds.filter((each) => each.kind === "file");
-        expect(file).toMatchObject({ item: 54, kind: "file", name: "t.py" });
+        const [file, created] = approval!.folds.filter((each) => each.kind === "file");
+        expect(file).toMatchObject({ item: 54, kind: "file", name: "t.py", closed: true });
+        expect(created).toMatchObject({ name: "n.py", closed: false });
         expect(shown(file!.summary.from, file!.summary.to)).toBe("t.py · changed · +1 −1 · automatic");
         expect(shown(file!.from, file!.to)).toBe("\na\nb\nB");
         expect(approval!.stops.map((each) => shown(each, out.text.indexOf("\n", each)))).toEqual([
@@ -514,10 +529,11 @@ describe("what folds under an item", () => {
         const out = laid([QUESTION, APPROVAL], [], banner, header, EMPTY, around);
         expect(foldAt(out, out.text.indexOf("context ·"))?.kind).toBe("context");
         expect(foldAt(out, out.text.indexOf("Ask me first"))?.kind).toBe("context");
-        expect(foldAt(out, out.text.indexOf("l2\n"))?.kind).toBe("code");
-        expect(foldAt(out, out.text.indexOf("L7"))).toBeUndefined();
-        expect(foldAt(out, out.text.indexOf("Keep the cache"))).toBeUndefined();
-        expect(foldAt(out, out.text.indexOf("no context"))).toBeUndefined();
+        expect(foldAt(out, out.text.indexOf("l2\n"))?.kind).toBe("lines");
+        expect(foldAt(out, out.text.indexOf("L7"))?.kind).toBe("file");
+        expect(foldAt(out, out.text.indexOf("Keep the cache"))?.kind).toBe("item");
+        expect(foldAt(out, out.text.indexOf("no context"))?.kind).toBe("item");
+        expect(foldAt(out, out.text.indexOf("━━ s1"))).toBeUndefined();
         for (const line of ["context ·", "→ called", "3 unchanged", "no context"]) {
             expect(opened(out, out.text.indexOf(line))).toBeUndefined();
         }
@@ -536,11 +552,163 @@ describe("what folds under an item", () => {
         const untimed: Context = { ...agents, entries: [{ kind: "called", tool: "blocked", id: "call-51" }], anchor: 0 };
         const summary = (context: Context) => {
             const out = laid([QUESTION], [], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map() });
-            const [fold] = out.regions[0]!.folds;
+            const [fold] = out.regions[0]!.folds.filter((each) => each.kind === "context");
             return out.text.slice(fold!.summary.from, fold!.summary.to);
         };
         expect(summary(agents)).toBe("context · 2 steps, from 2h before this item");
         expect(summary(untimed)).toBe("context · 1 step");
+    });
+});
+
+/** A Python module whose `run` method, of `count` lines, holds a change at its tenth, after `head` lines of its own at the top. */
+function clock(count: number, changed: boolean, head: string[] = []): string {
+    const steps = Array.from({ length: count }, (_, at) => `        step${at + 1}()`);
+    if (changed) {
+        steps[9] = "        changed()";
+    }
+    return [...head, '"""A clock."""', "", "", "class Clock:", "    def run(self):", ...steps, "", "", "def after():", "    a = 1", "    return a"].join("\n") + "\n";
+}
+
+describe("typed folds", () => {
+    const HELD: Item = {
+        number: 56,
+        reason: { reason: "held", text: "Let it land?", summary: "", worktree: "/w", key: "k" },
+        sender: from("s1"),
+        recipient: { party: "operator" },
+        made: AT,
+        state: { state: "waiting" },
+        rank: WAITING,
+    };
+    const AUTOMATIC: ChangedFile = {
+        path: "t.py",
+        before: { kind: "text", text: "a\nb\n" },
+        after: { kind: "text", text: "a\nB\n" },
+        reading: { role: "test", asks: [], findings: [] },
+    };
+    const held = (after: string): ChangedFile => ({
+        path: "clock.py",
+        before: { kind: "text", text: clock(30, false) },
+        after: { kind: "text", text: after },
+        reading: { role: "production", asks: [{ name: "protected", taken: "held", side: "after" }], findings: [] },
+    });
+    const around = (after: string): Around => ({
+        contexts: new Map([[56, { shown: { ...CONTEXT, number: 56 } }]]),
+        files: new Map([[56, { shown: [AUTOMATIC, held(after)] }]]),
+    });
+    const out = laid([HELD, QUESTION], [], banner, header, EMPTY, around(clock(30, true)));
+    const region = out.regions.find((each) => each.item.number === 56)!;
+    const said = (fold: Fold) => [fold.kind, fold.label, fold.closed];
+
+    it("folds each kind as it's laid out: the item, a file and a body open, an automatic file, unchanged lines and the context folded", () => {
+        // The change is on line 15, in `Clock.run`, whose lines declaring it stay in view, 4 and 5.
+        expect(region.folds.map(said)).toEqual([
+            ["file", "t.py", true],
+            ["lines", "3 unchanged lines, 1–3", true],
+            ["lines", "6 unchanged lines, 6–11", true],
+            ["lines", "17 unchanged lines, 19–35", true],
+            ["body", "Clock", false],
+            ["body", "run", false],
+            ["lines", "5 unchanged lines, 36–40", true],
+            ["body", "after", false],
+            ["file", "clock.py", false],
+            ["context", "context", true],
+            ["item", "── #56 ──", false],
+        ]);
+        // Marked read, the item folds whole, what's in it as it was.
+        const read = laid([HELD], [], banner, header, { ...EMPTY, done: [56] }, around(clock(30, true)));
+        expect(read.regions[0]!.folds.map(said).at(-1)).toEqual(["item", "── #56 ──", true]);
+    });
+
+    it("nests each fold whole inside another or beside it, never across one's edge", () => {
+        const holds = (outer: Fold, inner: Fold) => outer.summary.from <= inner.summary.from && inner.to <= outer.to;
+        const apart = (a: Fold, b: Fold) => a.to < b.summary.from || b.to < a.summary.from;
+        for (const a of region.folds) {
+            for (const b of region.folds) {
+                expect(holds(a, b) || holds(b, a) || apart(a, b)).toBe(true);
+            }
+        }
+    });
+
+    it("names each fold by what it hides, so an item laid out again by a later write keeps each the operator left", () => {
+        const keys = (laidOut: typeof out) => laidOut.regions.find((each) => each.item.number === 56)!.folds.map(foldKey);
+        // A later write adds two lines at the file's top, moving every row and line under them.
+        const later = laid([HELD, QUESTION], [], banner, header, EMPTY, around(clock(30, true, ["import os", "import re"])));
+        const before = keys(out);
+        const after = keys(later);
+        for (const kind of ["item", "file", "body", "context"]) {
+            expect(after.filter((each) => each.startsWith(`56 ${kind}`))).toEqual(before.filter((each) => each.startsWith(`56 ${kind}`)));
+        }
+        // Each run keeps its name but the one at the top, which the new lines' context takes: those in the method, and
+        // the one holding the function after it, though they all start lower.
+        const runs = (keys: string[]) => keys.filter((each) => each.startsWith("56 lines"));
+        expect(runs(after)).toEqual(runs(before).slice(1));
+        expect(runs(before)).toHaveLength(4);
+    });
+
+    it("reaches the folds of the item the cursor is in alone, for `zr`, `zm` and Space f", () => {
+        const at = (text: string) => out.text.indexOf(text);
+        expect(foldsOf(out, at("step3()")).map((each) => each.item)).toEqual(region.folds.map(() => 56));
+        expect(foldsOf(out, at("Which parser?")).every((each) => each.item === 51)).toBe(true);
+        expect(foldsOf(out, at("━━ s1"))).toEqual([]);
+        // zr from the held change opens its automatic file alone, then its runs and bodies, then its context.
+        const closed = new Set(region.folds.filter((each) => each.closed));
+        const step = (opening: boolean) => {
+            const changed = levelled(foldsOf(out, at("step3()")), (fold) => closed.has(fold), opening, false);
+            for (const fold of changed) {
+                if (opening) {
+                    closed.delete(fold);
+                } else {
+                    closed.add(fold);
+                }
+            }
+            return changed.map((each) => each.kind);
+        };
+        expect(step(true)).toEqual(["file"]);
+        expect(step(true)).toEqual(["lines", "lines", "lines", "lines"]);
+        expect(step(true)).toEqual(["context"]);
+        expect(step(true)).toEqual([]);
+        expect(step(false)).toEqual(["context"]);
+        expect(step(false)).toEqual(["lines", "lines", "lines", "body", "body", "lines", "body"]);
+        expect(step(false)).toEqual(["file", "file"]);
+        expect(step(false)).toEqual([]);
+        expect([...closed].every((each) => each.item === 56)).toBe(true);
+    });
+
+    it("says in the header where the cursor is: the group, the item, the file and the folds it's in", () => {
+        const draft: Draft = { ...EMPTY, comments: [{ item: 56, quote: null, text: "Why?" }], letters: [{ to: from("s1", "a1"), text: "Hi." }] };
+        const wrote = laid([HELD, QUESTION], [], banner, header, draft, around(clock(30, true)));
+        const naming: Naming = {
+            group: (group) => `group ${group.conversation?.session ?? "lup"}`,
+            item: (each) => `#${each.item.number}`,
+            party: (party) => `agent ${party.session}${party.agent === null ? "" : `/${party.agent}`}`,
+        };
+        const at = (text: string) => wrote.text.indexOf(text);
+        const says = (position: number, writing = false) =>
+            heading(wrote, position, writing, written(draft), naming).map((each) => `${each.kind}: ${each.text}`);
+        expect(says(at("━━ s1"))).toEqual(["group: group s1"]);
+        expect(says(at("Let it land?"))).toEqual(["group: group s1", "item: #56"]);
+        expect(says(at("t.py · changed"))).toEqual(["group: group s1", "item: #56", "file: t.py"]);
+        expect(says(at("step3()"))).toEqual([
+            "group: group s1",
+            "item: #56",
+            "file: clock.py",
+            "body: Clock",
+            "body: run",
+            "lines: 6 unchanged lines, 6–11",
+        ]);
+        expect(says(at("changed()"))).toEqual(["group: group s1", "item: #56", "file: clock.py", "body: Clock", "body: run"]);
+        expect(says(at("→ called"))).toEqual(["group: group s1", "item: #56", "context: context"]);
+        // While a comment is written, whom it goes to; a message, the agent it's to.
+        expect(says(at("Why?"), true)).toEqual(["to: to agent s1", "group: group s1", "item: #56"]);
+        expect(says(at("Hi."), true)).toEqual(["to: to agent s1/a1", "group: group s1"]);
+        expect(says(0, true)).toEqual(["group: group s1"]);
+        expect(heading(laid([], [], banner, header, EMPTY, NOTHING), 0, false, [], naming)).toEqual([]);
+    });
+
+    it("sends a comment on an approval to the session whose push asked it, and none where none did", () => {
+        expect(recipient(APPROVAL)).toBeNull();
+        expect(recipient({ ...APPROVAL, reason: { ...APPROVAL.reason, pushed_by: from("s9") } as Item["reason"] })).toEqual(from("s9"));
+        expect(recipient(NOTE)).toEqual(from("s2"));
     });
 });
 

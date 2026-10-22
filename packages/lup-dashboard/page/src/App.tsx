@@ -68,6 +68,8 @@ export function App() {
     const [place, setPlace] = useState<Exclude<ReviewPlace, "insert">>("nothing");
     const [listing, setListing] = useState(false);
     const openList = useCallback(() => setListing(true), []);
+    // The keys of a chord begun in the review, whose following keys the line of keys shows.
+    const [chord, setChord] = useState("");
     const [epoch, setEpoch] = useState(0);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
     const served = reply?.kind === "listed" ? launches(reply) : [];
@@ -437,6 +439,7 @@ export function App() {
                         draft={draft}
                         change={change}
                         banner={banner}
+                        called={called}
                         around={around}
                         send={() => {
                             if (replying) {
@@ -450,6 +453,7 @@ export function App() {
                         shown={selected === null}
                         tree={toTree}
                         placed={setPlace}
+                        pending={setChord}
                         list={openList}
                         reviewed={inbox.reply?.kind === "inbox-items" ? (inbox.reply.reviewed ?? null) : null}
                         now={minute}
@@ -477,6 +481,7 @@ export function App() {
                         places={REVIEW_PLACES}
                         open={listing}
                         setOpen={setListing}
+                        pending={chord}
                     />
                 </div>
             </main>

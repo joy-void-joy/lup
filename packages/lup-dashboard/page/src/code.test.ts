@@ -68,7 +68,7 @@ describe("a changed file's lines", () => {
         expect(deleted.rows).toEqual([{ change: "removed", side: "before", number: 1, offset: 0, text: "old" }]);
         const same = shown({ path: "s.py", before: text(numbered(5)), after: text(numbered(5)) });
         expect(same.header).toBe("s.py · changed · no line differs");
-        expect(same.runs).toEqual([{ from: 0, to: 5, summary: "5 unchanged lines, 1–5", changed: 0 }]);
+        expect(same.runs).toEqual([{ from: 0, to: 5, summary: "5 unchanged lines, 1–5", changed: 0, name: '["","l1"]' }]);
         expect(shown({ path: "i.png", before: null, after: { kind: "binary", size: 1150 } })).toMatchObject({
             header: "i.png · created · binary, not shown · 1,150 bytes",
             rows: [],
@@ -77,6 +77,124 @@ describe("a changed file's lines", () => {
         expect(
             shown({ path: "i.png", before: { kind: "binary", size: 10 }, after: { kind: "binary", size: 12 } }).header,
         ).toBe("i.png · changed · binary, not shown · 10 bytes → 12 bytes");
+    });
+});
+
+/** A Python module: a function, then a class with a method of `count` lines, the `changed` one of them, then another function. */
+function module(count: number, changed: Record<number, string> = {}): string {
+    const body = Array.from({ length: count }, (_, at) => `        ${changed[at + 1] ?? `step${at + 1}()`}`);
+    return [
+        "import os",
+        "",
+        "",
+        "def first():",
+        "    a = 1",
+        "    return a",
+        "",
+        "",
+        "class Clock:",
+        '    """The time."""',
+        "",
+        "    def sleep(self):",
+        ...body,
+        "",
+        "",
+        "def last():",
+        "    b = 2",
+        "    return b",
+    ].join("\n") + "\n";
+}
+
+describe("a file's bodies", () => {
+    it("reads each function's and class's body from the file's syntax, each named after the bodies it's in", () => {
+        const laid = shown({ path: "clock.py", before: null, after: text(module(4)) });
+        const rows = (body: { from: number; to: number }) => [laid.rows[body.from]!.text, laid.rows[body.to]!.text];
+        expect(laid.bodies.map((each) => [each.names, ...rows(each)])).toEqual([
+            [["first"], "def first():", "    return a"],
+            [["Clock"], "class Clock:", "        step4()"],
+            [["Clock", "sleep"], "    def sleep(self):", "        step4()"],
+            [["last"], "def last():", "    return b"],
+        ]);
+        expect(new Set(laid.bodies.map((each) => each.name)).size).toBe(4);
+    });
+
+    it("reads JavaScript's and TypeScript's functions, methods, classes and callbacks, an unnamed one by its first line, a body hiding one line not folding", () => {
+        const code = [
+            "export function since(then: Date): string {",
+            "    const x = 1;",
+            "    return `${x}`;",
+            "}",
+            "class A {",
+            "    m(x: number): void {",
+            "        go();",
+            "        go();",
+            "    }",
+            "    get y() { return 1; }",
+            "}",
+            "const f = (a: number) => {",
+            "    a += 1;",
+            "    return a;",
+            "};",
+            'describe("x", () => {',
+            '    it("y", () => {',
+            "        expect(1);",
+            "    });",
+            "});",
+            "const g = () =>",
+            "    1;",
+        ].join("\n");
+        const laid = shown({ path: "a.ts", before: null, after: text(code) });
+        expect(laid.bodies.map((each) => each.names)).toEqual([
+            ["since"],
+            ["A"],
+            ["A", "m"],
+            ["f"],
+            ['describe("x", () => {'],
+            ['describe("x", () => {', 'it("y", () => {'],
+        ]);
+        expect(shown({ path: "a.md", before: null, after: text(code) }).bodies).toEqual([]);
+    });
+
+    it("counts a name given twice, so each names one body", () => {
+        const code = "def f():\n    a = 1\n    return a\n\n\ndef f():\n    b = 2\n    return b\n";
+        const [one, two] = shown({ path: "a.py", before: null, after: text(code) }).bodies;
+        expect(one!.names).toEqual(two!.names);
+        expect(one!.name).not.toBe(two!.name);
+    });
+
+    it("cuts a run where it crosses a body's edge, the line declaring a body around a change kept in view", () => {
+        const laid = shown({ path: "clock.py", before: text(module(30)), after: text(module(30, { 15: "changed()" })) });
+        const runs = laid.runs.map((each) => [each.summary, laid.rows[each.from]!.text.trim(), laid.rows[each.to - 1]!.text.trim()]);
+        // Unchanged but for 3 lines around the change, 24–30; cut at the class's and the method's edges.
+        expect(runs).toEqual([
+            ["8 unchanged lines, 1–8", "import os", ""],
+            ["2 unchanged lines, 10–11", '"""The time."""', ""],
+            ["11 unchanged lines, 13–23", "step1()", "step11()"],
+            ["12 unchanged lines, 31–42", "step19()", "step30()"],
+            ["5 unchanged lines, 43–47", "", "return b"],
+        ]);
+        // The line declaring the method the change is in stays in view, between the runs before and inside it.
+        expect(laid.runs.some((each) => laid.rows.slice(each.from, each.to).some((row) => row.text === "    def sleep(self):"))).toBe(false);
+        const sleep = laid.bodies.find((each) => each.names.join(".") === "Clock.sleep")!;
+        const clock = laid.bodies.find((each) => each.names.join(".") === "Clock")!;
+        const inside = (run: { from: number; to: number }, body: { from: number; to: number }) => run.from > body.from && run.to - 1 <= body.to;
+        const apart = (run: { from: number; to: number }, body: { from: number; to: number }) => run.to - 1 < body.from || run.from > body.to;
+        const around = (run: { from: number; to: number }, body: { from: number; to: number }) => run.from <= body.from && run.to - 1 >= body.to;
+        for (const run of laid.runs) {
+            for (const body of laid.bodies) {
+                expect(inside(run, body) || apart(run, body) || around(run, body)).toBe(true);
+            }
+        }
+        // Each run is named by the body it's in and what it hides: the bodies it holds whole, else its first line with words.
+        const first = laid.bodies.find((each) => each.names.join(".") === "first")!;
+        const last = laid.bodies.find((each) => each.names.join(".") === "last")!;
+        expect(laid.runs.map((each) => JSON.parse(each.name) as unknown)).toEqual([
+            ["", [first.name]],
+            [clock.name, '"""The time."""'],
+            [sleep.name, "step1()"],
+            [sleep.name, "step19()"],
+            ["", [last.name]],
+        ]);
     });
 });
 

@@ -1,6 +1,25 @@
+import { foldEffect, foldState, unfoldEffect } from "@codemirror/language";
+import { EditorState } from "@codemirror/state";
+import type { CodeMirrorV } from "@replit/codemirror-vim";
 import { describe, expect, it } from "vitest";
 
-import { begun, deadPressed, deadTyped, nextWritten, rewritten, stepped, visit, went, type Dead, type History, type Pressed } from "./editor";
+import type { Folding } from "./comments";
+import {
+    begun,
+    chordOf,
+    closedAs,
+    deadPressed,
+    deadTyped,
+    keptFolds,
+    nextWritten,
+    rewritten,
+    stepped,
+    visit,
+    went,
+    type Dead,
+    type History,
+    type Pressed,
+} from "./editor";
 
 describe("the draft's history", () => {
     const draft = (history: History<string>) => history.states[history.at]?.draft;
@@ -110,5 +129,47 @@ describe("a dead key outside insert mode", () => {
 
     it("keeps a key the browser composes from vim, and a dead key pressed again waits again", () => {
         expect(through([DEAD, key("Process"), { typed: "`" }, DEAD, { typed: "'" }, key(" ")]).vim).toEqual(["`", "'"]);
+    });
+});
+
+describe("folds kept as the operator left them", () => {
+    // Four lines, `a` to `d`: one fold over `b` and `c`, folded as it's laid out, and one over `d`, open.
+    const doc = "a\nb\nc\nd";
+    const folded: Folding = { key: "folded", closed: true, summary: { from: 0, to: 1 }, from: 1, to: 5 };
+    const open: Folding = { key: "open", closed: false, summary: { from: 4, to: 5 }, from: 5, to: 7 };
+    const folds = [folded, open];
+    const laidOut = EditorState.create({ doc, extensions: [foldState] }).update({ effects: foldEffect.of(folded) }).state;
+
+    it("keeps each fold the operator opened or closed, by its key, and none they left alone", () => {
+        const opened = laidOut.update({ effects: unfoldEffect.of(folded) }).state;
+        expect(keptFolds(folds, laidOut, opened, new Map())).toEqual(new Map([["folded", false]]));
+        const closed = opened.update({ effects: foldEffect.of(open) }).state;
+        expect(keptFolds(folds, opened, closed, new Map([["folded", false]]))).toEqual(
+            new Map([
+                ["folded", false],
+                ["open", true],
+            ]),
+        );
+        expect(keptFolds(folds, laidOut, laidOut, new Map())).toEqual(new Map());
+    });
+
+    it("folds each as the operator left it, else as it's laid out", () => {
+        expect([closedAs(folded, new Map()), closedAs(open, new Map())]).toEqual([true, false]);
+        expect([closedAs(folded, new Map([["folded", false]])), closedAs(open, new Map([["open", true]]))]).toEqual([false, true]);
+    });
+});
+
+describe("a chord begun", () => {
+    const held = (keys: string[], mode: { insertMode?: boolean; visualMode?: boolean } = {}) =>
+        chordOf({
+            state: { vim: { insertMode: false, visualMode: false, ...mode, inputState: { keyBuffer: keys } } },
+        } as unknown as CodeMirrorV);
+
+    it("says what vim holds of a chord begun with Space, as the list writes it, and nothing of any other", () => {
+        expect(held(["<Space>"])).toBe("␣");
+        expect(held(["<Space>", "f"])).toBe("␣f");
+        expect(held([])).toBe("");
+        expect(held(["z"])).toBe("");
+        expect(held(["<Space>"], { insertMode: true })).toBe("");
     });
 });

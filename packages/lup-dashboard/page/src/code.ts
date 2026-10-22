@@ -8,8 +8,11 @@
 // words, and which of its lines matter, each saying what it triggered; a file
 // that asks nothing, held or flagged, is automatic, its header alone in view,
 // and in one whose asks are each on a line, those lines alone are open, with
-// their context, every other change folded. Pure: the review lays these rows into its text (`review.ts`),
-// and its editor paints the lines in view with them (`Review.tsx`).
+// their context, every other change folded. Each function's and class's body,
+// read from the file's syntax, can fold under the line declaring it; a run of
+// lines never crosses a body's edge, so every fold sits whole inside another.
+// Pure: the review lays these rows into its text (`review.ts`), and its editor
+// paints the lines in view with them (`Review.tsx`).
 import { javascriptLanguage, jsxLanguage, tsxLanguage, typescriptLanguage } from "@codemirror/lang-javascript";
 import { jsonLanguage } from "@codemirror/lang-json";
 import { markdownLanguage } from "@codemirror/lang-markdown";
@@ -18,7 +21,7 @@ import { StreamLanguage, type Language } from "@codemirror/language";
 import { toml } from "@codemirror/legacy-modes/mode/toml";
 import { classHighlighter, highlightTree } from "@lezer/highlight";
 
-import { hunks } from "./comments";
+import { hunks, lineOf } from "./comments";
 import type { components } from "./generated/api";
 
 export type ChangedFile = components["schemas"]["ChangedFile"];
@@ -60,6 +63,23 @@ export interface Run {
     summary: string;
     /** How many of its rows are changed: none for a run of unchanged lines. */
     changed: number;
+    /**
+     * What names it across layouts, by what it hides, so it's found again as lines are added or taken away elsewhere in
+     * the file: the body it's in, none at the file's top level; the bodies it holds whole, or where it holds none its
+     * first line with words; and, where two are named alike, which of them it is.
+     */
+    name: string;
+}
+
+/**
+ * A function's or a class's body, by its rows: the row declaring it, which stays in view while it folds, and its last;
+ * the bodies it's in and its own name, an unnamed function's by its first line; and what names it across layouts.
+ */
+export interface Body {
+    from: number;
+    to: number;
+    names: string[];
+    name: string;
 }
 
 /** What a line that matters triggered, said at its end, and how the declaration takes it. */
@@ -82,14 +102,15 @@ export interface Reason {
 }
 
 /**
- * A changed file as the review shows it: its header line, its rows in order, and the runs of them that fold; why it's
- * open, from the judge's reading of it, none where it wasn't read; whether it's automatic; whether what it asks is
- * about it whole, its header then a line that matters; and the rows that matter.
+ * A changed file as the review shows it: its header line, its rows in order, the runs of them that fold and the bodies
+ * of its functions and classes; why it's open, from the judge's reading of it, none where it wasn't read; whether it's
+ * automatic; whether what it asks is about it whole, its header then a line that matters; and the rows that matter.
  */
 export interface Shown {
     header: string;
     rows: Row[];
     runs: Run[];
+    bodies: Body[];
     reasons: Reason[];
     automatic: boolean;
     whole: boolean;
@@ -209,10 +230,12 @@ export function shown(file: ChangedFile, context: number = CONTEXT): Shown {
     const kept = new Set(placed.matters.map((each) => each.row));
     // A file whose asks are each on a line shows those lines alone, with their context, its other changes folded.
     const onLines = !automatic && !placed.whole && placed.matters.length > 0;
+    const found = bodiesOf(file, rows);
     return {
         header,
         rows,
-        runs: runs(rows, context, kept, onLines),
+        runs: runs(rows, context, kept, onLines, found),
+        bodies: found,
         reasons,
         automatic,
         whole: placed.whole,
@@ -382,13 +405,21 @@ export function shownOnce(file: ChangedFile): Shown {
     return made;
 }
 
+/** Rows `from` up to `to` of a file. */
+interface Stretch {
+    from: number;
+    to: number;
+}
+
 /**
  * Return the runs of rows to fold: each run's part `context` rows or more from every change and every row that
  * matters (`kept`), where it hides `FEWEST` rows or more. Unchanged rows alone fold, but `onLines`, where the rows
- * that matter are the only ones kept open, changed rows among the rest folding, each run saying how many it holds.
+ * that matter are the only ones kept open, changed rows among the rest folding, each run saying how many it holds. A run
+ * never crosses the edge of one of `bodies` (`cut`), so each sits whole inside the body or around it, and is named by
+ * what it hides (`Run.name`).
  */
-function runs(rows: Row[], context: number, kept: Set<number> = new Set(), onLines: boolean = false): Run[] {
-    const found: Run[] = [];
+function runs(rows: Row[], context: number, kept: Set<number> = new Set(), onLines: boolean = false, bodies: Body[] = []): Run[] {
+    const stretches: Stretch[] = [];
     const folding = (at: number) => (onLines || rows[at]?.change === "same") && !kept.has(at);
     let start = 0;
     while (start < rows.length) {
@@ -400,19 +431,138 @@ function runs(rows: Row[], context: number, kept: Set<number> = new Set(), onLin
         while (end < rows.length && folding(end)) {
             end += 1;
         }
-        const from = start === 0 ? start : start + context;
-        const to = end === rows.length ? end : end - context;
-        if (to - from >= FEWEST) {
-            const first = rows[from]?.number ?? 0;
-            const last = rows[to - 1]?.number ?? 0;
-            const changed = rows.slice(from, to).filter((row) => row.change !== "same").length;
-            const said =
-                changed === 0 ? counted(to - from, "unchanged line") : `${counted(to - from, "line")}, ${changed} changed`;
-            found.push({ from, to, summary: `${said}, ${first}–${last}`, changed });
-        }
+        stretches.push({ from: start === 0 ? start : start + context, to: end === rows.length ? end : end - context });
         start = end;
     }
+    const pieces = bodies
+        .reduce((each, body) => each.flatMap((stretch) => cut(stretch, body)), stretches)
+        .filter((stretch) => stretch.to - stretch.from >= FEWEST);
+    const named = new Map<string, number>();
+    return pieces.map(({ from, to }) => {
+        const first = rows[from]?.number ?? 0;
+        const last = rows[to - 1]?.number ?? 0;
+        const changed = rows.slice(from, to).filter((row) => row.change !== "same").length;
+        const said =
+            changed === 0 ? counted(to - from, "unchanged line") : `${counted(to - from, "line")}, ${changed} changed`;
+        // The innermost body it's in: the one starting last of those holding it whole.
+        const within = bodies.filter((body) => body.from < from && to - 1 <= body.to).at(-1)?.name ?? "";
+        // What it hides: the outermost bodies it holds whole, else its first line with words.
+        const held = bodies.filter((body) => body.from >= from && body.to <= to - 1);
+        const outermost = held.filter((body) => !held.some((other) => other.from < body.from && body.to <= other.to));
+        const words = rows.slice(from, to).find((row) => row.text.trim() !== "")?.text.trim() ?? "";
+        const hides = JSON.stringify([within, outermost.length > 0 ? outermost.map((body) => body.name) : words]);
+        const times = named.get(hides) ?? 0;
+        named.set(hides, times + 1);
+        return { from, to, summary: `${said}, ${first}–${last}`, changed, name: times === 0 ? hides : `${hides} ${times}` };
+    });
+}
+
+/**
+ * Return `stretch` cut where it crosses an edge of `body`, so each part is inside the body or outside it: where it holds
+ * the row declaring the body but not its last, that row stays in view between its two parts, as the line a folded body
+ * is under; where it starts inside the body and goes on past it, it's cut after the body's last row.
+ */
+function cut(stretch: Stretch, body: Body): Stretch[] {
+    const last = stretch.to - 1;
+    if (stretch.from <= body.from && body.from <= last && body.to > last) {
+        return [
+            { from: stretch.from, to: body.from },
+            { from: body.from + 1, to: stretch.to },
+        ];
+    }
+    if (stretch.from > body.from && stretch.from <= body.to && last > body.to) {
+        return [
+            { from: stretch.from, to: body.to + 1 },
+            { from: body.to + 1, to: stretch.to },
+        ];
+    }
+    return [stretch];
+}
+
+/** The syntax nodes that declare a function or a class, by their names in Python's grammar and in JavaScript's and TypeScript's. */
+const DECLARING = new Set([
+    "FunctionDefinition",
+    "ClassDefinition",
+    "FunctionDeclaration",
+    "ClassDeclaration",
+    "MethodDeclaration",
+    "FunctionExpression",
+    "ArrowFunction",
+    "ClassExpression",
+]);
+
+/** The child of a declaration that names it, in each grammar. */
+const NAMING = ["VariableName", "VariableDefinition", "PropertyDefinition", "PrivatePropertyDefinition"];
+
+/** A node of a file's syntax tree. */
+type Node = Tree["topNode"];
+
+/**
+ * Return the bodies of the functions and classes `file` declares, in the order they start, read from the syntax of
+ * what it becomes, or of what it was where it's deleted, in a language with such bodies: each from the row declaring
+ * it to its last, where that hides `FEWEST` rows or more; named by its declaration, an unnamed one by where it's
+ * assigned or else by its first line, after the bodies it's in, a name given twice counted, so each names one body.
+ */
+function bodiesOf(file: ChangedFile, rows: Row[]): Body[] {
+    const side: Row["side"] = file.after?.kind === "text" ? "after" : "before";
+    const text = textOf(file[side]);
+    const language = languageOf(file.path);
+    if (text === null || language === null || !BODIED.has(language)) {
+        return [];
+    }
+    const starts = lines(text).map((each) => each.offset);
+    const index = new Map(rows.flatMap((row, at) => (row.side === side ? [[row.number, at] as const] : [])));
+    const rowAt = (offset: number) => index.get(lineOf(starts, offset) + 1);
+    const found: Body[] = [];
+    const seen = new Map<string, number>();
+    const walk = (node: Node, names: string[]) => {
+        let inner = names;
+        if (declaring(node)) {
+            const from = rowAt(node.from);
+            const end = node.from + text.slice(node.from, node.to).trimEnd().length;
+            const to = rowAt(Math.max(end - 1, node.from));
+            if (from !== undefined && to !== undefined) {
+                inner = [...names, nameOf(node, text) ?? (rows[from]?.text.trim() ?? "")];
+                const key = JSON.stringify(inner);
+                const times = seen.get(key) ?? 0;
+                seen.set(key, times + 1);
+                if (to - from >= FEWEST) {
+                    found.push({ from, to, names: inner, name: times === 0 ? key : `${key} ${times}` });
+                }
+            }
+        }
+        for (let child = node.firstChild; child !== null; child = child.nextSibling) {
+            walk(child, inner);
+        }
+    };
+    walk(treeOf(file, side, text, language).topNode, []);
     return found;
+}
+
+/** Return whether `node` declares a function or a class: one of `DECLARING`, or a method written in an object's braces. */
+function declaring(node: Node): boolean {
+    return DECLARING.has(node.name) || (node.name === "Property" && node.getChild("ParamList") !== null);
+}
+
+/** Return the name `node` declares: its own, or, where it has none, that of what it's assigned to, a variable or a property; none for one passed as it is. */
+function nameOf(node: Node, text: string): string | null {
+    const said = (named: Node | null) => (named === null ? null : text.slice(named.from, named.to));
+    const own = NAMING.map((name) => node.getChild(name)).find((each) => each !== null) ?? null;
+    if (own !== null) {
+        return said(own);
+    }
+    const parent = node.parent;
+    if (parent?.name === "Property") {
+        return said(parent.getChild("PropertyDefinition"));
+    }
+    if (parent?.name !== "VariableDeclaration") {
+        return null;
+    }
+    let before = node.prevSibling;
+    while (before !== null && before.name !== "VariableDefinition") {
+        before = before.prevSibling;
+    }
+    return said(before);
 }
 
 /** The languages known, by what a file's name ends with. */
@@ -433,6 +583,12 @@ const LANGUAGES: { ending: string; language: Language }[] = [
     { ending: "/uv.lock", language: StreamLanguage.define(toml) },
 ];
 
+/** A text's syntax, as its language's parser reads it. */
+type Tree = ReturnType<Language["parser"]["parse"]>;
+
+/** The languages whose syntax declares functions and classes, whose bodies fold. */
+const BODIED = new Set<Language>([pythonLanguage, typescriptLanguage, tsxLanguage, javascriptLanguage, jsxLanguage]);
+
 /** Return the language a file's text is highlighted in, by its name; none where none is known. */
 export function languageOf(path: string): Language | null {
     const named = `/${path}`;
@@ -448,14 +604,34 @@ export interface Token {
 
 /** Return the tokens of `text` highlighted in `language`, in order, parsed whole. */
 export function highlighted(text: string, language: Language): Token[] {
+    return tokensIn(language.parser.parse(text));
+}
+
+/** Return the tokens of a parsed text, in order. */
+function tokensIn(tree: Tree): Token[] {
     const tokens: Token[] = [];
-    highlightTree(language.parser.parse(text), classHighlighter, (from, to, classes) => {
+    highlightTree(tree, classHighlighter, (from, to, classes) => {
         tokens.push({ from, to, classes });
     });
     return tokens;
 }
 
-/** Each file's tokens, by side, once highlighted: a file's text is parsed once, the first time a line of it is in view. */
+/** Each file's syntax trees, by side, once parsed: for its bodies as it's laid out, and its highlighting as its lines come into view. */
+const trees = new WeakMap<ChangedFile, { before?: Tree; after?: Tree }>();
+
+/** Return the syntax tree of one side of `file`, its `text` in `language`, parsed once and kept. */
+function treeOf(file: ChangedFile, side: Row["side"], text: string, language: Language): Tree {
+    const kept = trees.get(file) ?? {};
+    const found = kept[side];
+    if (found !== undefined) {
+        return found;
+    }
+    const made = language.parser.parse(text);
+    trees.set(file, { ...kept, [side]: made });
+    return made;
+}
+
+/** Each file's tokens, by side, once highlighted: a file's text is highlighted once, the first time a line of it is in view. */
 const highlights = new WeakMap<ChangedFile, { before?: Token[]; after?: Token[] }>();
 
 /** Return the tokens of one side of `file`, highlighted once and kept; none where its language isn't known or it isn't text. */
@@ -467,7 +643,7 @@ export function tokensOf(file: ChangedFile, side: Row["side"]): Token[] {
     }
     const text = textOf(file[side]);
     const language = languageOf(file.path);
-    const made = text === null || language === null ? [] : highlighted(text, language);
+    const made = text === null || language === null ? [] : tokensIn(treeOf(file, side, text, language));
     highlights.set(file, { ...kept, [side]: made });
     return made;
 }
