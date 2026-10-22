@@ -12,13 +12,16 @@ import {
     deadTyped,
     keptFolds,
     nextWritten,
+    ownOf,
     rewritten,
     stepped,
+    UNPRESSED,
     visit,
     went,
     type Dead,
     type History,
     type Pressed,
+    type Typing,
 } from "./editor";
 
 describe("the draft's history", () => {
@@ -86,49 +89,93 @@ describe("going between the comments one wrote", () => {
     });
 });
 
-/** What vim gets of a dead key's keys and the text they type, outside insert mode, in order: each key it's given and each text, and what lands, which is nothing. */
-function through(events: ({ pressed: Pressed } | { typed: string })[]): { vim: string[]; dead: Dead } {
-    let dead: Dead = "none";
+/**
+ * What vim gets of a dead key's keys and the text the browser types, outside insert mode, in order: each key that goes
+ * to it and each text given it; and each key the browser alone gets, to type what it composes. What lands is nothing.
+ */
+function through(events: ({ pressed: Pressed } | { typed: string; typing: Typing })[]): { vim: string[]; browser: string[]; dead: Dead["at"] } {
+    let dead = UNPRESSED;
     const vim: string[] = [];
+    const browser: string[] = [];
     for (const event of events) {
         if ("pressed" in event) {
             const step = deadPressed(dead, event.pressed);
             dead = step.dead;
-            if (!step.kept) {
+            if (step.given !== "") {
+                vim.push(step.given);
+            }
+            if (step.goes === "vim") {
                 vim.push(event.pressed.key);
+            } else if (step.goes === "browser") {
+                browser.push(event.pressed.key);
             }
         } else {
-            const step = deadTyped(dead);
+            const step = deadTyped(dead, event.typing, event.typed);
             dead = step.dead;
             if (step.given) {
                 vim.push(event.typed);
             }
         }
     }
-    return { vim, dead };
+    return { vim, browser, dead: dead.at };
 }
 
-const DEAD = { pressed: { key: "Dead", composing: false } };
-const key = (name: string, composing = false) => ({ pressed: { key: name, composing } });
+const DEAD = { pressed: { key: "Dead", composing: false, printable: false } };
+const key = (name: string, composing = false) => ({ pressed: { key: name, composing, printable: [...name].length === 1 } });
+const PROCESS = key("Process");
+const shown = (text: string) => ({ typed: text, typing: "composing" as const });
+const typed = (text: string) => ({ typed: text, typing: "typed" as const });
+const ended = (text: string) => ({ typed: text, typing: "ended" as const });
 
 describe("a dead key outside insert mode", () => {
-    it("gives vim what it first types, once, and keeps the Space completing it from vim", () => {
-        // `` ` `` composing shows `` ` ``, then Space commits it, then `a`: a jump to mark `a`.
-        expect(through([DEAD, { typed: "`" }, key(" ", true), { typed: "`" }, key("a")])).toEqual({ vim: ["`", "a"], dead: "none" });
-        // The browser ending the composition early: Space comes as a key of its own, then its text.
-        expect(through([DEAD, { typed: "'" }, key(" "), { typed: "'" }, key("a")]).vim).toEqual(["'", "a"]);
+    it("gives vim what it types once completed, never what it shows while composed, as Chromium on Linux sends `\"` then Space", () => {
+        // `"` shows `¨` while it waits; Space, "Process" to the page, has the browser type `"`; then `+yy` copies.
+        const copied = through([DEAD, shown("¨"), PROCESS, typed('"'), key("+"), key("y"), key("y")]);
+        expect(copied).toEqual({ vim: ['"', "+", "y", "y"], browser: [], dead: "none" });
+        // `"` then `+`, on a layout that types both: vim gets both.
+        expect(through([DEAD, shown("¨"), PROCESS, typed('"+'), key("y"), key("y")]).vim).toEqual(['"+', "y", "y"]);
+        // On a layout that types nothing for the two, vim gets neither, and `yy` stays a yank of its own.
+        expect(through([DEAD, shown("¨"), PROCESS, key("y"), key("y")]).vim).toEqual(["y", "y"]);
     });
 
-    it("lets the key after it reach vim where it isn't a Space, as `` ` `` then `a` jumps to mark `a`", () => {
-        expect(through([DEAD, { typed: "`" }, key("a")])).toEqual({ vim: ["`", "a"], dead: "none" });
+    it("gives vim what a composition ends with once, though the browser types it again after", () => {
+        expect(through([DEAD, shown("¨"), key(" ", true), shown('"'), ended('"'), typed('"'), key("+")])).toEqual({
+            vim: ['"', "+"],
+            browser: [],
+            dead: "none",
+        });
+    });
+
+    it("gives vim the dead key's own character where the browser dropped its composition, then the key after it but a Space", () => {
+        // The composition dropped once the page took what it showed: the next key comes as itself, typing nothing composed.
+        expect(through([DEAD, shown("¨"), key(" "), key("+"), key("y")])).toEqual({ vim: ['"', "+", "y"], browser: [], dead: "none" });
+        expect(through([DEAD, shown("¨"), key("+"), key("y")]).vim).toEqual(['"', "+", "y"]);
+        expect(through([DEAD, shown("´"), key(" "), key("a")]).vim).toEqual(["'", "a"]);
+        expect(ownOf("`")).toBe("`");
+    });
+
+    it("leaves the key after it to the browser where it composes nothing, so it types what the two make", () => {
+        // A dead key then the next key as itself, as Chromium sends them on Windows: Space types `"`.
+        expect(through([DEAD, key(" "), typed('"'), key("+"), key("y")])).toEqual({ vim: ['"', "+", "y"], browser: [" "], dead: "none" });
+        // `"` then `+` typing `"+` in two goes to vim whole.
+        expect(through([DEAD, key("+"), typed('"'), typed("+"), key("y")]).vim).toEqual(['"', "+", "y"]);
+    });
+
+    it("waits through a key that only modifies another, and lets one that types nothing reach vim", () => {
+        expect(through([DEAD, key("Shift"), key("+"), typed('"+')])).toEqual({ vim: ["Shift", '"+'], browser: ["+"], dead: "giving" });
+        expect(through([DEAD, key("Escape"), key("j")])).toEqual({ vim: ["Escape", "j"], browser: [], dead: "none" });
+    });
+
+    it("jumps to a mark with `` ` `` then Space then its letter, the Space never reaching vim, which would begin a chord", () => {
+        expect(through([DEAD, shown("`"), PROCESS, typed("`"), key("a")]).vim).toEqual(["`", "a"]);
     });
 
     it("gives vim nothing typed with no dead key pressed, as a paste, and takes no key from vim", () => {
-        expect(through([{ typed: "dd" }, key(" "), key("j")])).toEqual({ vim: [" ", "j"], dead: "none" });
+        expect(through([typed("dd"), key(" "), key("j")])).toEqual({ vim: [" ", "j"], browser: [], dead: "none" });
     });
 
     it("keeps a key the browser composes from vim, and a dead key pressed again waits again", () => {
-        expect(through([DEAD, key("Process"), { typed: "`" }, DEAD, { typed: "'" }, key(" ")]).vim).toEqual(["`", "'"]);
+        expect(through([DEAD, PROCESS, typed("`"), DEAD, shown("´"), key(" ", true), ended("'")]).vim).toEqual(["`", "'"]);
     });
 });
 

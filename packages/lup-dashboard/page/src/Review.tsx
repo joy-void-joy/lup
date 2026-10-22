@@ -416,6 +416,7 @@ export function Review({
         epoch,
         shownNow: shown,
         tree,
+        say,
         moved: (at) => {
             setHead(at);
             placed(placeAt(laidOut, at));

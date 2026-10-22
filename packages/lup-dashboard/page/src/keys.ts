@@ -95,6 +95,23 @@ const WRITING: Part<"insert">[] = [
     },
 ];
 
+/** Copying to the system clipboard and putting from it, the same in each view (`clipboard.ts`). */
+const COPYING: Part<never>[] = [
+    {
+        title: "The clipboard",
+        keys: [
+            {
+                keys: '"+y "*y',
+                does: 'yank into the system clipboard: "+yy a line, v, a motion and "+y a selection; where " is a dead key, " then Space; a page on plain http keeps it to itself, and says so',
+                short: "copy",
+                at: [],
+            },
+            { keys: '"+p "*p', does: "put the system clipboard after the cursor, in a comment, once the browser lets the page read it", short: "put", at: [] },
+            { keys: "v… ^c", does: "copy the selection, wherever the page is served", short: "copy it", at: [] },
+        ],
+    },
+];
+
 /** The keys of this list, which the line of keys says at its end, wherever the cursor is. */
 const LIST: Part<never>[] = [{ title: "This list", keys: [{ keys: "?", does: "open it; Esc, q or ? closes it", short: "all keys", at: [] }] }];
 
@@ -203,6 +220,7 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
             },
         ],
     },
+    ...COPYING,
     ...LIST,
 ];
 
@@ -238,6 +256,7 @@ export const CONVERSATION_KEYS: Part<ConversationPlace>[] = [
             { keys: "zR zM", does: "open or close them all", short: "all", at: [] },
         ],
     },
+    ...COPYING,
     ...LIST,
 ];
 

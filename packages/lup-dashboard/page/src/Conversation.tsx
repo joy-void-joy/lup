@@ -337,6 +337,7 @@ export function Conversation({ launch, agent, beat, waiting, back, tree, say }: 
         tree,
         list: () => setListing(true),
         pending: setChord,
+        say,
     });
     const before = useRef<Laid | null>(null);
     // Whether the message being begun was begun from the conversation's last line.
