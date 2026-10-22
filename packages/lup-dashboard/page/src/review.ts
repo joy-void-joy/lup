@@ -393,8 +393,8 @@ export const NEVER_DECLINED = "A flag is read or commented on, never declined.";
 
 /**
  * Return what Space a (`approved`) or Space x does on `item`: approve or decline an approval or a held change; on a
- * flagged write, Space a marks it read, "looks good", as Space d does, and Space x says it's never declined; on any
- * other item, nothing.
+ * flagged write, Space a marks it read, "looks good", approving it, as Space d does, and Space x says it's never
+ * declined; on any other item, nothing.
  */
 export function answering(item: Item, approved: boolean): Answering {
     switch (item.reason.reason) {

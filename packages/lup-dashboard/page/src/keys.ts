@@ -123,7 +123,7 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
         keys: [
             {
                 keys: "␣a",
-                does: "approve the approval or held change, the comments under it going with it; a flagged write, mark it read, as ␣d does",
+                does: "approve the approval or held change, the comments under it going with it; a flagged write, mark it read, approving it, as ␣d does",
                 short: "approve",
                 at: ["change", "file"],
             },
