@@ -329,41 +329,65 @@ function filed(item: Item, around: Around): Filed[] {
     if (!changing(item) || files === undefined || !("shown" in files)) {
         return [];
     }
-    return files.shown.flatMap((file) => {
-        const laidOut = shownOnce(file, showing(item));
-        const header: Filed = {
+    return files.shown.flatMap((file) => filedOnce(file, showing(item)));
+}
+
+/** Each file's lines as laid out under an item, by what it shows, laid out once: the review is laid out again at each key typed in a comment, and a file's lines don't change (`shownOnce`). */
+const filedOut = new WeakMap<ChangedFile, Map<Showing, Filed[]>>();
+
+/** Return the lines of `file` under an item, showing what `showing` says (`filed`), laid out once and kept: its header, then its rows, each with the run it opens, the bodies it declares and those it ends, found by row. */
+function filedOnce(file: ChangedFile, showing: Showing): Filed[] {
+    const kept = filedOut.get(file) ?? new Map<Showing, Filed[]>();
+    const found = kept.get(showing);
+    if (found !== undefined) {
+        return found;
+    }
+    const laidOut = shownOnce(file, showing);
+    const header: Filed = {
+        file,
+        row: null,
+        text: laidOut.header,
+        opens: null,
+        closes: false,
+        matter: null,
+        stop: laidOut.whole,
+        declares: [],
+        finishes: [],
+        folds: laidOut.rows.length > 0 ? { closed: laidOut.automatic } : null,
+        ends: false,
+    };
+    const matters = new Map(laidOut.matters.map((each) => [each.row, each]));
+    const opens = new Map(laidOut.runs.map((each) => [each.from, each]));
+    const closes = new Set(laidOut.runs.map((each) => each.to));
+    const byRow = (at: (body: Body) => number) => {
+        const rows = new Map<number, Body[]>();
+        for (const body of laidOut.bodies) {
+            rows.set(at(body), [...(rows.get(at(body)) ?? []), body]);
+        }
+        return rows;
+    };
+    const declares = byRow((body) => body.from);
+    const finishes = byRow((body) => body.to);
+    const rows = laidOut.rows.map((row, at): Filed => {
+        const run = opens.get(at);
+        const matter = matters.get(at) ?? null;
+        return {
             file,
-            row: null,
-            text: laidOut.header,
-            opens: null,
-            closes: false,
-            matter: null,
-            stop: laidOut.whole,
-            declares: [],
-            finishes: [],
-            folds: laidOut.rows.length > 0 ? { closed: laidOut.automatic } : null,
-            ends: false,
+            row,
+            text: row.text,
+            opens: run === undefined ? null : { summary: run.summary, name: run.name },
+            closes: closes.has(at + 1),
+            matter,
+            stop: (matter?.notes.length ?? 0) > 0,
+            declares: declares.get(at) ?? [],
+            finishes: finishes.get(at) ?? [],
+            folds: null,
+            ends: at === laidOut.rows.length - 1,
         };
-        const matters = new Map(laidOut.matters.map((each) => [each.row, each]));
-        const rows = laidOut.rows.map((row, at): Filed => {
-            const run = laidOut.runs.find((each) => each.from === at);
-            const matter = matters.get(at) ?? null;
-            return {
-                file,
-                row,
-                text: row.text,
-                opens: run === undefined ? null : { summary: run.summary, name: run.name },
-                closes: laidOut.runs.some((each) => each.to === at + 1),
-                matter,
-                stop: (matter?.notes.length ?? 0) > 0,
-                declares: laidOut.bodies.filter((each) => each.from === at),
-                finishes: laidOut.bodies.filter((each) => each.to === at),
-                folds: null,
-                ends: at === laidOut.rows.length - 1,
-            };
-        });
-        return [header, ...rows];
     });
+    const made = [header, ...rows];
+    filedOut.set(file, kept.set(showing, made));
+    return made;
 }
 
 /** A group as it's laid out: what names it among the others, the agent it's of, what its banner names it by, and its items. */
@@ -590,40 +614,42 @@ export function laid(
         });
         const stops: number[] = [];
         const filedSpans: FileSpan[] = [];
-        // What each fold under the item opened is, until the line ending it: the run, the file, each body by its name.
-        let run: { summary: Aside; name: string } | null = null;
+        // What each fold under the item opened is, until the line ending it: the run, with its summary line's words, the file, each body by its name.
+        let run: { summary: Aside; name: string; said: string } | null = null;
         let whole: { summary: Span; from: number; closed: boolean } | null = null;
         const bodies = new Map<string, { summary: Span; from: number }>();
+        // A fold under a file's lines, named by the file's path and what it hides within it, hiding up to `to`.
+        const fold = (kind: FoldKind, path: string, name: string, label: string, closed: boolean, summary: Span, from: number, to: number) =>
+            folds.push({ item: item.number, kind, name: name === "" ? path : `${path} ${name}`, label, closed, summary, from, to });
         files.forEach((each, index) => {
             const path = each.file.path;
             if (each.opens !== null) {
-                run = { summary: writeAside({ kind: "summary", text: each.opens.summary }), name: each.opens.name };
+                run = { summary: writeAside({ kind: "summary", text: each.opens.summary }), name: each.opens.name, said: each.opens.summary };
             }
             const at = ownCount + index;
             const written = writeLine(each.text, at);
             const span = { from: written.from, to: written.to };
-            code.push({ ...span, file: each.file, row: each.row, matter: each.matter });
+            code.push({ from: written.from, to: written.to, file: each.file, row: each.row, matter: each.matter });
             if (each.stop) {
                 stops.push(written.from);
             }
-            const fold = (kind: FoldKind, name: string, label: string, closed: boolean, summary: Span, from: number) =>
-                folds.push({ item: item.number, kind, name: name === "" ? path : `${path} ${name}`, label, closed, summary, from, to: written.to });
-            const ran: { summary: Aside; name: string } | null = run;
+            const ran: { summary: Aside; name: string; said: string } | null = run;
             if (each.closes && ran !== null) {
                 const summary = { from: ran.summary.from, to: ran.summary.to };
-                fold("lines", ran.name, text.slice(summary.from, summary.to), true, summary, summary.to);
+                // Labelled by the words written, not sliced from the text being built, which copies it whole each time.
+                fold("lines", path, ran.name, ran.said, true, summary, summary.to, written.to);
                 run = null;
             }
             for (const body of each.finishes) {
                 const declared = bodies.get(body.name);
                 if (declared !== undefined) {
-                    fold("body", body.name, body.names.at(-1) ?? "", false, declared.summary, declared.from);
+                    fold("body", path, body.name, body.names.at(-1) ?? "", false, declared.summary, declared.from, written.to);
                     bodies.delete(body.name);
                 }
             }
             const opening: { summary: Span; from: number; closed: boolean } | null = whole;
             if (each.ends && opening !== null) {
-                fold("file", "", path, opening.closed, opening.summary, opening.from);
+                fold("file", path, "", path, opening.closed, opening.summary, opening.from, written.to);
                 whole = null;
             }
             writeBlocks(at);
