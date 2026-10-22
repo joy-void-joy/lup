@@ -598,6 +598,15 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 call="call-60",
                 made=self.ago(2.5),
             ),
+            Item(
+                number=61,
+                reason=Message(kind="note", text=MARKDOWN_NOTE),
+                sender=session,
+                recipient=Operator(),
+                worktree=dev,
+                call="call-61",
+                made=self.ago(0.8),
+            ),
             *self.sent,
         ]
 
@@ -689,6 +698,19 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 operator("Let the tests say why they wait.", 4),
                 agent("The clock's `sleep` takes the reason.", 2.7),
                 called("Edit", 2.5, "call-60"),
+            ],
+            61: [
+                operator(
+                    "Build the transcript reader, both runtimes. Ask me about the "
+                    "shape before you build on it.",
+                    9,
+                ),
+                agent(
+                    "Counting what each kind of line holds, before the reader is shaped.",
+                    1.2,
+                ),
+                called("Bash", 1.1),
+                called("mcp__lup__note", 0.8, "call-61"),
             ],
         }
         entries = moments.get(number)
@@ -1081,6 +1103,40 @@ CLOCK_BEFORE = '''    def sleep(self, seconds: float) -> None:
 CLOCK_AFTER = '''    def sleep(self, seconds: float, *, why: str = "") -> None:
         """Wait `seconds`, for `why`, which a test's clock says."""
 '''
+
+
+MARKDOWN_NOTE = """\
+Read the first runtime's records whole: what each kind of line holds, and what \
+I'd build on it.
+
+| kind | lines | says |
+|:-----|------:|:-----|
+| `user` | 412 | the operator's words, and each tool's result |
+| `assistant` | 398 | the agent's words and its calls |
+| `summary` | 3 | a compaction's summary |
+| `system` | 17 | nothing to you |
+
+**Only four kinds say anything**; the rest is *bookkeeping*. Next, unless you \
+say otherwise:
+
+1. a model per kind, as @51 leans
+2. the reader, with a test on each kind
+   - the `summary` kind first, which the legacy reader got wrong
+3. then the second runtime's records
+
+## Open
+
+Whether a record's `summary` replaces what came before it. The legacy reader \
+kept both:
+
+```python
+def turns(path: Path) -> list[Entry]:
+    return [Entry.model_validate(json.loads(line)) for line in lines(path)]
+```
+
+See [the field notes](docs/field-notes.md) and `records.py`.
+"""
+"""A session's note written in Markdown, as agents write them: a table, emphasis, a list, a heading, code and a link, for the page to show as such."""
 
 
 def text(*parts: str) -> Text:

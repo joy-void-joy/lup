@@ -327,6 +327,7 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
         58,
         59,
         60,
+        61,
     ]
     assert other.json() == {
         "kind": "refused",
