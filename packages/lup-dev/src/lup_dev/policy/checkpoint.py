@@ -58,7 +58,7 @@ from lup.types import Model, MutableModel
 from lup_dev.approval import approved
 from lup_dev.clock import Clock
 from lup_dev.codescan.conditions import declared
-from lup_dev.codescan.contract import Checker, Due, FileReport, Finding, Source
+from lup_dev.codescan.contract import Checker, Due, Finding, Source
 from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.load import load
@@ -819,18 +819,6 @@ def noted(root: Path, notes: list[RemovedNote]) -> list[RemovedNote]:
     return [note.model_copy(update={"path": root / note.path}) for note in notes]
 
 
-def kept(report: FileReport, findings: list[Finding]) -> list[Finding]:
-    """Return `findings` the report's `ignore`s don't keep out."""
-    return [
-        found
-        for found in findings
-        if not any(
-            directive.keeps(found.rule, found.span.start.line)
-            for directive in report.directives
-        )
-    ]
-
-
 class Attributed(Model):
     """What a verdict is attributed to: its worktree, its session, its tool."""
 
@@ -1412,7 +1400,7 @@ def watch(worktree: Worktree, session: Session, found: Found) -> list[Finding]:
     importing = [
         each
         for report in found.reports
-        for each in kept(report, report.findings)
+        for each in worktree.roles.kept(report, report.findings)
         if each.owner != "lup"
     ]
     paths = list(dict.fromkeys(each.path for each in importing))
@@ -1700,11 +1688,13 @@ def confirm(bench: Bench, worktree: Worktree, key: str, agent: str, call: str) -
 def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding]:
     """Return lup's findings, the type errors and ruff's findings left in `paths`.
 
-    As the files stand on disk, once `ignore`s apply, each named by its absolute
-    path. A finding ruff, or `lup-dev rules fix`, clears safely isn't one: the
-    session landing the work applies the fix. The engine and ruff are asked with
-    the rule selection and the runner of the declaration the worktree is judged
-    by.
+    As the files stand on disk, those that hold there (`Roles.kept`): lup's only
+    where its rules read, so a test's are pyright's and ruff's alone, and none
+    the declaration exempts the file from or an `ignore` keeps; each named by
+    its absolute path. A finding ruff, or `lup-dev rules fix`, clears safely
+    isn't one: the session landing the work applies the fix. The engine and
+    ruff are asked with the rule selection and the runner of the declaration the
+    worktree is judged by.
     """
     services = bench.services
     sources = [
@@ -1722,7 +1712,7 @@ def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding
     found = [
         found
         for report in reports
-        for found in kept(
+        for found in worktree.roles.kept(
             report,
             [*report.findings, *(each for each in ruff if each.path == report.path)],
         )

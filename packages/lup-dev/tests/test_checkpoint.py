@@ -1035,6 +1035,49 @@ def test_a_finding_ruff_fixes_safely_neither_informs_nor_holds_the_turn(
     assert end(kit, repo) == Reply()
 
 
+def test_a_tests_turns_end_holds_on_pyrights_and_ruffs_findings_alone(
+    kit: Kit, repo: Path
+) -> None:
+    """Tests are exempt from lup's rules, not from pyright and ruff."""
+    start(kit, repo)
+    test = Path("tests/test_core.py")
+    ruled = "def test_it():\n    assert True  # BAD regex\n"
+    shell_write(kit, repo, "c1", test, ruled)
+    assert end(kit, repo) == Reply()
+    checked = ruled + "z: str = 1  # TYPE\nw = 1  # RUFF E501\n"
+    shell_write(kit, repo, "c2", test, checked)
+    block = end(kit, repo).block
+    assert block.startswith("lup won't end the turn yet")
+    assert f"{repo}/tests/test_core.py:3:" in block
+    assert f"{repo}/tests/test_core.py:4:" in block
+    assert f"{repo}/tests/test_core.py:2:" not in block
+
+
+EXEMPTING_REGEX = (
+    "from lup_dev import CodeRules, Exemption, Exemptions, Modules, Project\n"
+    "lifted = Exemption(rule='regex', paths=['src/pkg/**'], why='a grammar')\n"
+    "lifting = CodeRules(exempt=Exemptions().add(lifted))\n"
+    "project = Project(modules=Modules.default().edit(lifting))\n"
+)
+
+
+def test_a_finding_the_declaration_exempts_holds_no_turns_end(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    declare(repo, EXEMPTING_REGEX)
+    shell.commit(repo, "lift regex from the package")
+    start(kit, repo)
+    lifted = (repo / CORE).read_text() + "y = 2  # BAD regex\n"
+    assert shell_write(kit, repo, "c1", CORE, lifted).context == ""
+    assert end(kit, repo) == Reply()
+    shaped = lifted + "z = (1, 2)  # BAD tuple-shape\n"
+    shell_write(kit, repo, "c2", CORE, shaped)
+    block = end(kit, repo).block
+    assert block.startswith("lup won't end the turn yet")
+    assert f"{repo}/src/pkg/core.py:12:" in block
+    assert f"{repo}/src/pkg/core.py:11:" not in block
+
+
 def test_removed_committed_notes_are_listed_once_at_turn_end(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:
@@ -1446,6 +1489,21 @@ def test_the_importers_errors_go_to_the_session_whose_change_they_follow(
     assert other is not None
     assert other.watched == {"": [USER]}
     assert end(kit, repo, "other").block.startswith("lup won't end the turn yet")
+
+
+def test_the_importers_errors_are_told_and_watched_only_where_the_roles_check(
+    kit: Kit, repo: Path
+) -> None:
+    scratch = Path("tmp/user.py")
+    kit.engine.importer_reports = [importer_error(scratch), importer_error(USER)]
+    start(kit, repo)
+    changed = (repo / CORE).read_text().replace("return x", "return x + 1")
+    shell_write(kit, repo, "c1", CORE, changed)
+    worktree(kit, repo).importers().run(kit.engine, Plain())
+    told = shell_write(kit, repo, "c2", Path("README.md"), "# Changed\n").context
+    assert f"{repo}/src/pkg/user.py:1:1 - reportCallIssue" in told
+    assert "tmp/user.py" not in told
+    assert session(kit, repo).watched == {"": [USER]}
 
 
 def bad(root: Path) -> None:
