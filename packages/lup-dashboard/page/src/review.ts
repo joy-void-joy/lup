@@ -511,45 +511,71 @@ export function showing(item: Item): Showing {
  * new module in a drawer, its bodies fold until opened, but those holding a line that matters.
  */
 function filedOf(files: ChangedFile[], showing: Showing, design: (file: ChangedFile) => boolean): Filed[] {
-    return files.flatMap((file) => {
-        const laidOut = shownOnce(file, showing);
-        const header: Filed = {
+    return files.flatMap((file) => filedOnce(file, showing, design(file)));
+}
+
+/** Each file's lines as laid out, by what it shows and whether its bodies fold as a design's, laid out once: the review is laid out again at each key typed in a comment, and a file's lines don't change (`shownOnce`). */
+const filedOut = new WeakMap<ChangedFile, Map<string, Filed[]>>();
+
+/** Return the lines of `file` showing what `showing` says, its bodies folding where `designed` (`filedOf`), laid out once and kept: its header, then its rows, each with the run it opens, the bodies it declares and those it ends, found by row. */
+function filedOnce(file: ChangedFile, showing: Showing, designed: boolean): Filed[] {
+    const kept = filedOut.get(file) ?? new Map<string, Filed[]>();
+    const key = `${showing} ${designed ? "designed" : "shown"}`;
+    const found = kept.get(key);
+    if (found !== undefined) {
+        return found;
+    }
+    const laidOut = shownOnce(file, showing);
+    const header: Filed = {
+        file,
+        row: null,
+        text: laidOut.header,
+        opens: null,
+        closes: false,
+        matter: null,
+        stop: laidOut.whole,
+        declares: [],
+        finishes: [],
+        folds: laidOut.rows.length > 0 ? { closed: laidOut.automatic } : null,
+        ends: false,
+        designed: false,
+    };
+    const matters = new Map(laidOut.matters.map((each) => [each.row, each]));
+    const opens = new Map(laidOut.runs.map((each) => [each.from, each]));
+    const closes = new Set(laidOut.runs.map((each) => each.to));
+    const byRow = (at: (body: Body) => number) => {
+        const rows = new Map<number, Body[]>();
+        for (const body of laidOut.bodies) {
+            rows.set(at(body), [...(rows.get(at(body)) ?? []), body]);
+        }
+        return rows;
+    };
+    const declares = byRow((body) => body.from);
+    const finishes = byRow((body) => body.to);
+    // A body holding a line that matters stays open in a design.
+    const mattering = (body: Body) => laidOut.matters.some((each) => each.row > body.from && each.row <= body.to);
+    const rows = laidOut.rows.map((row, at): Filed => {
+        const run = opens.get(at);
+        const matter = matters.get(at) ?? null;
+        const declared = declares.get(at) ?? [];
+        return {
             file,
-            row: null,
-            text: laidOut.header,
-            opens: null,
-            closes: false,
-            matter: null,
-            stop: laidOut.whole,
-            declares: [],
-            finishes: [],
-            folds: laidOut.rows.length > 0 ? { closed: laidOut.automatic } : null,
-            ends: false,
-            designed: false,
+            row,
+            text: row.text,
+            opens: run === undefined ? null : { summary: run.summary, name: run.name },
+            closes: closes.has(at + 1),
+            matter,
+            stop: (matter?.notes.length ?? 0) > 0,
+            declares: declared,
+            finishes: finishes.get(at) ?? [],
+            folds: null,
+            ends: at === laidOut.rows.length - 1,
+            designed: designed && !declared.some(mattering),
         };
-        const matters = new Map(laidOut.matters.map((each) => [each.row, each]));
-        const designed = design(file);
-        const rows = laidOut.rows.map((row, at): Filed => {
-            const run = laidOut.runs.find((each) => each.from === at);
-            const matter = matters.get(at) ?? null;
-            const declares = laidOut.bodies.filter((each) => each.from === at);
-            return {
-                file,
-                row,
-                text: row.text,
-                opens: run === undefined ? null : { summary: run.summary, name: run.name },
-                closes: laidOut.runs.some((each) => each.to === at + 1),
-                matter,
-                stop: (matter?.notes.length ?? 0) > 0,
-                declares,
-                finishes: laidOut.bodies.filter((each) => each.to === at),
-                folds: null,
-                ends: at === laidOut.rows.length - 1,
-                designed: designed && !declares.some((body) => laidOut.matters.some((each) => each.row > body.from && each.row <= body.to)),
-            };
-        });
-        return [header, ...rows];
     });
+    const made = [header, ...rows];
+    filedOut.set(file, kept.set(key, made));
+    return made;
 }
 
 /** Return the lines of each file an item changes (`changing`), as the host answered them; none for any other item, or before the host has answered. */
@@ -742,42 +768,44 @@ function gathering(): Gathering {
  * (`writeBlocks`, by the line's place among the scope's own lines from `first`), its runs, bodies and files folding.
  */
 function layCode(w: Writer, into: Gathering, of: string, files: Filed[], first: number, starts: number[], writeBlocks: (line: number) => void): void {
-    // What each fold opened is, until the line ending it: the run, the file, each body by its name.
-    let run: { summary: Aside; name: string } | null = null;
+    // What each fold opened is, until the line ending it: the run, with its summary line's words, the file, each body by its name.
+    let run: { summary: Aside; name: string; said: string } | null = null;
     let whole: { summary: Span; from: number; closed: boolean } | null = null;
     const bodies = new Map<string, { summary: Span; from: number; closed: boolean }>();
+    // A fold under a file's lines, named by the file's path and what it hides within it, hiding up to `to`.
+    const fold = (kind: FoldKind, path: string, name: string, label: string, closed: boolean, summary: Span, from: number, to: number) =>
+        into.folds.push({ of, kind, name: name === "" ? path : `${path} ${name}`, label, closed, summary, from, to });
     files.forEach((each, index) => {
         const path = each.file.path;
         if (each.opens !== null) {
             const aside = { kind: "summary" as const, ...w.line(each.opens.summary) };
             into.asides.push(aside);
-            run = { summary: aside, name: each.opens.name };
+            run = { summary: aside, name: each.opens.name, said: each.opens.summary };
         }
         const at = first + index;
         const span = w.line(each.text);
         into.lines.push({ ...span, own: starts[at] ?? 0 });
-        into.code.push({ ...span, file: each.file, row: each.row, matter: each.matter });
+        into.code.push({ from: span.from, to: span.to, file: each.file, row: each.row, matter: each.matter });
         if (each.stop) {
             into.stops.push(span.from);
         }
-        const fold = (kind: FoldKind, name: string, label: string, closed: boolean, summary: Span, from: number) =>
-            into.folds.push({ of, kind, name: name === "" ? path : `${path} ${name}`, label, closed, summary, from, to: span.to });
-        const ran: { summary: Aside; name: string } | null = run;
+        const ran: { summary: Aside; name: string; said: string } | null = run;
         if (each.closes && ran !== null) {
             const summary = { from: ran.summary.from, to: ran.summary.to };
-            fold("lines", ran.name, w.text.slice(summary.from, summary.to), true, summary, summary.to);
+            // Labelled by the words written, not sliced from the text being built, which copies it whole each time.
+            fold("lines", path, ran.name, ran.said, true, summary, summary.to, span.to);
             run = null;
         }
         for (const body of each.finishes) {
             const declared = bodies.get(body.name);
             if (declared !== undefined) {
-                fold("body", body.name, body.names.at(-1) ?? "", declared.closed, declared.summary, declared.from);
+                fold("body", path, body.name, body.names.at(-1) ?? "", declared.closed, declared.summary, declared.from, span.to);
                 bodies.delete(body.name);
             }
         }
         const opening: { summary: Span; from: number; closed: boolean } | null = whole;
         if (each.ends && opening !== null) {
-            fold("file", "", path, opening.closed, opening.summary, opening.from);
+            fold("file", path, "", path, opening.closed, opening.summary, opening.from, span.to);
             whole = null;
         }
         writeBlocks(at);
@@ -1045,10 +1073,12 @@ export function laid(
         const mine: Placed[] = wrote.flatMap((comment, at) => (isRemark(comment) && whose(comment.to) === key ? [{ comment, at }] : []));
         let talk: Talk | null = null;
         let files: SinceFile[] = [];
+        let said: string;
         let summary: Span;
         switch (kind) {
             case "tasks": {
-                summary = w.line(tasksSummary(data.tasks));
+                said = tasksSummary(data.tasks);
+                summary = w.line(said);
                 for (const task of data.tasks) {
                     const shown = task.status === "in_progress" ? (task.active ?? task.subject) : task.subject;
                     into.asides.push({ kind: "task", ...w.line(`${TASK_MARKS[task.status]} ${shown}`) });
@@ -1059,7 +1089,8 @@ export function laid(
             case "conversation": {
                 const spoke = lastSpoken(data.entries);
                 const tracing = kind === "trace";
-                summary = w.line(tracing ? traceSummary(data.entries, true) : conversationSummary(data.entries, true));
+                said = tracing ? traceSummary(data.entries, true) : conversationSummary(data.entries, true);
+                summary = w.line(said);
                 // A remark on a step since the operator's last words shows in the trace, which holds the same steps, never twice.
                 const steps = mine.flatMap(({ comment, at }) =>
                     isRemark(comment) && comment.step != null && (tracing ? comment.step > spoke : comment.step <= spoke)
@@ -1075,7 +1106,9 @@ export function laid(
                 };
                 const earlier = tracing ? ("nothing" as const) : history(data.entries, []);
                 const laidOut = laidTalk(entries, beside, { comments: steps.map((each) => each.remark) }, earlier, first);
-                talk = shifted(laidOut, w.at);
+                // Where the talk starts: its folds' labels are read from its own text, not the whole being built.
+                const offset = w.at;
+                talk = shifted(laidOut, offset);
                 if (laidOut.text !== "") {
                     w.text += `${laidOut.text}\n`;
                 }
@@ -1084,12 +1117,13 @@ export function laid(
                 into.asides.push(...talk.asides);
                 const folds = [...(talk.fold === null ? [] : [talk.fold]), ...talk.items.flatMap((item) => (item.fold === null ? [] : [item.fold]))];
                 for (const fold of folds) {
-                    into.folds.push({ of, kind: "context", name: fold.key, label: w.text.slice(fold.summary.from, fold.summary.to), closed: fold.closed, summary: fold.summary, from: fold.from, to: fold.to });
+                    into.folds.push({ of, kind: "context", name: fold.key, label: laidOut.text.slice(fold.summary.from - offset, fold.summary.to - offset), closed: fold.closed, summary: fold.summary, from: fold.from, to: fold.to });
                 }
                 break;
             }
             case "since": {
-                summary = w.line(sinceSummary(data.since, data.latest));
+                said = sinceSummary(data.since, data.latest);
+                summary = w.line(said);
                 files = data.since?.files ?? [];
                 const shown = filedOf(files.map((each) => each.file), "changes", (file) => file.before == null);
                 const starts = startsOf(shown.map((each) => each.text));
@@ -1103,7 +1137,8 @@ export function laid(
                 break;
             }
         }
-        const label = w.text.slice(summary.from, summary.to);
+        // Labelled by the words written, not sliced from the text being built, which copies it whole each time.
+        const label = said;
         const last = w.at - 1;
         // A drawer with nothing under its summary line hides nothing, so it has no fold.
         if (last > summary.to) {

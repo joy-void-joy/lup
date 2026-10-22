@@ -1,6 +1,7 @@
 import { syntaxTree } from "@codemirror/language";
 import { EditorState, type Range, type Transaction } from "@codemirror/state";
 import type { Decoration } from "@codemirror/view";
+import { NodeProp } from "@lezer/common";
 import { describe, expect, it } from "vitest";
 
 import type { Span } from "./comments";
@@ -195,7 +196,38 @@ describe("Enter in a comment", () => {
     });
 });
 
-describe("the sources as the text changes", () => {
+describe("the sources' trees as the text changes", () => {
+    it("keep each source's node, with the Markdown tree mounted on it, where the edit didn't touch the source, reading anew the one it did", () => {
+        const comment = "a *comment*";
+        // Lezer keeps no fragment of a stretch under 128 characters between an edit and the text's edge, so the
+        // item before the comment is long, as items are.
+        const first = `first *item*, ${"with words enough to be kept as a fragment, ".repeat(4)}`;
+        const text = `${first}\n${comment}\nsecond *item*\n`;
+        const found = [
+            source("text", lined(text, first)),
+            source("comment", [{ from: text.indexOf(comment), to: text.indexOf(comment) + comment.length }]),
+            source("text", lined(text, "second *item*")),
+        ].flatMap((each) => (each === null ? [] : [each]));
+        const state = laid(text, found);
+        // The source's node holding `word`, at where the word is in that state's text.
+        const node = (of: EditorState, word: string) => {
+            let found = syntaxTree(of).resolveInner(of.doc.toString().indexOf(word), 1);
+            while (found.parent !== null && found.name !== "Markdown") {
+                found = found.parent;
+            }
+            return found;
+        };
+        const mounted = (of: EditorState, word: string) => node(of, word).tree?.prop(NodeProp.mounted)?.tree;
+        const typed = state.update({ changes: { from: text.indexOf(comment) + comment.length, insert: "!" } }).state;
+        for (const word of ["first", "second"]) {
+            expect(node(typed, word).tree).toBe(node(state, word).tree);
+            expect(mounted(typed, word)).toBe(mounted(state, word));
+        }
+        expect(node(typed, comment).tree).not.toBe(node(state, comment).tree);
+        expect(around(typed, text.indexOf("comment"))).toEqual(["Emphasis", "Paragraph", "Document", "Markdown", "Text"]);
+        expect(typed.sliceDoc(text.indexOf(comment), text.indexOf(comment) + comment.length + 1)).toBe(`${comment}!`);
+    });
+
     it("read a comment opened empty once something is typed in it", () => {
         const text = "a line\n\nanother line\n";
         const found = [source("text", [{ from: 0, to: 7 }]), source("comment", [{ from: 7, to: 7 }]), source("text", [{ from: 8, to: 21 }])].flatMap(

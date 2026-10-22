@@ -101,24 +101,33 @@ const own = defineLanguageFacet();
 const TEXT = NodeType.define({ id: 0, name: "Text", top: true, props: [[languageDataProp, own]] });
 const MARKDOWN = NodeType.define({ id: 1, name: "Markdown" });
 
-/** A node of the outer tree being built: its stretch, and its children so far, each at its place from the node's start. */
-interface Building {
+/** A node of the outer tree being built: its stretch, the source it's the node of, none for the text whole, and its children so far, each at its place from the node's start. */
+export interface Building {
     type: NodeType;
     from: number;
     to: number;
+    source: Source | null;
     children: Tree[];
     positions: number[];
 }
 
-/** Return the tree of the text's sources, `length` long: a node for each, a comment under an item's lines inside the item's node, in the text's order. */
-export function treeOf(found: readonly Source[], length: number): Tree {
+/** Return a new tree of `node` as built. */
+function built(node: Building): Tree {
+    return new Tree(node.type, node.children, node.positions, node.to - node.from);
+}
+
+/**
+ * Return the tree of the text's sources, `length` long: a node for each, a comment under an item's lines inside the
+ * item's node, in the text's order, each node's tree `made` of it as built, new unless the maker has one to reuse.
+ */
+export function treeOf(found: readonly Source[], length: number, made: (node: Building) => Tree = built): Tree {
     const ordered = [...found].sort((a, b) => a.from - b.from || b.to - a.to);
-    const open: Building[] = [{ type: TEXT, from: 0, to: length, children: [], positions: [] }];
+    const open: Building[] = [{ type: TEXT, from: 0, to: length, source: null, children: [], positions: [] }];
     const close = () => {
         const done = open.pop();
         const parent = open.at(-1);
         if (done !== undefined && parent !== undefined) {
-            parent.children.push(new Tree(done.type, done.children, done.positions, done.to - done.from));
+            parent.children.push(made(done));
             parent.positions.push(done.from - parent.from);
         }
     };
@@ -126,7 +135,7 @@ export function treeOf(found: readonly Source[], length: number): Tree {
         while (open.length > 1 && each.from >= (open.at(-1)?.to ?? 0)) {
             close();
         }
-        open.push({ type: MARKDOWN, from: each.from, to: Math.min(each.to, length), children: [], positions: [] });
+        open.push({ type: MARKDOWN, from: each.from, to: Math.min(each.to, length), source: each, children: [], positions: [] });
     }
     while (open.length > 1) {
         close();
@@ -135,14 +144,37 @@ export function treeOf(found: readonly Source[], length: number): Tree {
     return new Tree(TEXT, top?.children ?? [], top?.positions ?? [], length);
 }
 
+/** Return what names a node across parses: its source's kind, its length, the text of each of its lines where it is from the node's start, and each child's name where it is. */
+function keyOf(node: Building, input: Input, named: WeakMap<Tree, string>): string {
+    const lines = (node.source?.lines ?? []).map((line) => [line.from - node.from, input.read(line.from, Math.min(line.to, input.length))]);
+    const children = node.children.map((child, at) => [node.positions[at] ?? 0, named.get(child) ?? ""]);
+    return JSON.stringify([node.source?.kind ?? "", node.to - node.from, lines, children]);
+}
+
 /**
  * The text's own parser: the tree of its sources (`treeOf`), read from the state being parsed, with the Markdown parser
- * mounted on each over its lines (`parseMixed`), so each is read as one whatever lies between its lines.
+ * mounted on each over its lines (`parseMixed`), so each is read as one whatever lies between its lines. A source's
+ * node is the very `Tree` the last parse built for a source of the same text and shape (`keyOf`), the Markdown tree
+ * mounted on it going with it, since the mixed parser reuses a mounted tree on the very node it was mounted on alone:
+ * an edit reads anew the source it touched, and the item's text a comment under its lines is in, and a layout anew
+ * the sources it changed, every other source being read as it was.
  */
 class Sourced extends Parser {
+    /** Each source's node as last built, by what names it (`keyOf`), kept from one parse to the next. */
+    kept = new Map<string, Tree>();
+
     createParse(input: Input, fragments: readonly TreeFragment[], ranges: readonly Span[]): PartialParse {
         const found = ParseContext.get()?.state.field(sources, false) ?? [];
-        const tree = treeOf(found, input.length);
+        const named = new WeakMap<Tree, string>();
+        const nodes = new Map<string, Tree>();
+        const tree = treeOf(found, input.length, (node) => {
+            const key = keyOf(node, input, named);
+            const made = nodes.get(key) ?? this.kept.get(key) ?? built(node);
+            nodes.set(key, made);
+            named.set(made, key);
+            return made;
+        });
+        this.kept = nodes;
         const byStart = new Map(found.map((each) => [each.from, each]));
         const whole: PartialParse = { parsedPos: input.length, stoppedAt: null, advance: () => tree, stopAt: () => undefined };
         const nest = (node: SyntaxNodeRef) => {

@@ -805,15 +805,21 @@ export function closedAs(fold: Folding, kept: ReadonlyMap<string, boolean>): boo
  */
 export function refold(view: EditorView, folds: Folding[], kept: ReadonlyMap<string, boolean>): void {
     const effects: StateEffect<Span>[] = [];
+    // What's folded, by where each range starts: each fold finds its own range there, rather than walking every
+    // range inside it, and a range no fold starts is found once, with thousands of folds laid out.
+    const folded = new Map<number, number[]>();
+    foldedRanges(view.state).between(0, view.state.doc.length, (from, to) => {
+        folded.set(from, [...(folded.get(from) ?? []), to]);
+    });
+    const starts = new Set(folds.map((each) => each.from));
     for (const fold of folds) {
-        let exact = false;
-        foldedRanges(view.state).between(fold.from, fold.to, (from, to) => {
-            if (from === fold.from && to === fold.to) {
-                exact = true;
-            } else if (from === fold.from) {
-                effects.push(unfoldEffect.of({ from, to }));
+        const ends = folded.get(fold.from) ?? [];
+        const exact = ends.includes(fold.to);
+        for (const to of ends) {
+            if (to !== fold.to) {
+                effects.push(unfoldEffect.of({ from: fold.from, to }));
             }
-        });
+        }
         const closing = closedAs(fold, kept);
         if (closing && !exact) {
             effects.push(foldEffect.of({ from: fold.from, to: fold.to }));
@@ -823,11 +829,13 @@ export function refold(view: EditorView, folds: Folding[], kept: ReadonlyMap<str
         }
     }
     // A range folded where nothing folds any more, as an item's text once it's no longer marked read, opens.
-    foldedRanges(view.state).between(0, view.state.doc.length, (from, to) => {
-        if (!folds.some((each) => each.from === from)) {
-            effects.push(unfoldEffect.of({ from, to }));
+    for (const [from, ends] of folded) {
+        if (!starts.has(from)) {
+            for (const to of ends) {
+                effects.push(unfoldEffect.of({ from, to }));
+            }
         }
-    });
+    }
     if (effects.length > 0) {
         view.dispatch({ effects, annotations: rebuilt.of(true) });
     }

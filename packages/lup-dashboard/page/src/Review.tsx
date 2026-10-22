@@ -410,9 +410,11 @@ function what(item: Item): string {
     }
 }
 
+/** How an item's header says when it came: made once, since `toLocaleString` makes one at each call, and the review is laid out again at each key typed in a comment. */
+const WHEN = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
 function when(made: string): string {
-    const at = new Date(made);
-    return at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    return WHEN.format(new Date(made));
 }
 
 /** Return what names an item in the header over the review: the first part of its header, before its first ` · `, without the rule around it. */

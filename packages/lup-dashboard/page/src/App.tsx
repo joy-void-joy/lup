@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { doing, everyone, launches, ring, running, type Activity, type Running } from "./agents";
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
-import { useNow, useWatched } from "./hooks";
+import { useNow, useSame, useWatched } from "./hooks";
 import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
 import { Palette } from "./Palette";
@@ -46,6 +46,16 @@ import {
     type Item,
     type Since,
 } from "./review";
+
+/** How long the answers to items' contexts and files are gathered before the review is laid out with them, in milliseconds. */
+const GATHERED = 100;
+
+/** The answers gathered so far, and the moment they're due to be laid out, where one is set. */
+interface Gathered {
+    contexts: Map<number, Answered<Context>>;
+    files: Map<number, Answered<ChangedFile[]>>;
+    due: ReturnType<typeof setTimeout> | null;
+}
 
 const SAID = {
     connecting: "connecting",
@@ -85,6 +95,26 @@ export function App() {
     const asked = useRef({ contexts: new Set<number>(), files: new Set<string>() });
     // Each item's latest asking for its files, whose answer alone is shown.
     const latest = useRef(new Map<number, string>());
+    // What the host answered of items, gathered for a moment (`GATHERED`) and laid out together: at load, every
+    // item's files and context answer within the same second, and the review laid out once for them all costs
+    // what laid out once for each would.
+    const gathered = useRef<Gathered>({ contexts: new Map(), files: new Map(), due: null });
+    const gather = useCallback((add: (held: Gathered) => void) => {
+        const held = gathered.current;
+        add(held);
+        held.due ??= setTimeout(() => {
+            held.due = null;
+            const came = { contexts: held.contexts, files: held.files };
+            held.contexts = new Map();
+            held.files = new Map();
+            if (came.contexts.size > 0) {
+                setContexts((before) => new Map([...before, ...came.contexts]));
+            }
+            if (came.files.size > 0) {
+                setFiles((before) => new Map([...before, ...came.files]));
+            }
+        }, GATHERED);
+    }, []);
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
     const [inserting, setInserting] = useState(false);
@@ -97,9 +127,15 @@ export function App() {
     const [epoch, setEpoch] = useState(0);
     const [jump, setJump] = useState<Jump | null>(null);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const served = reply?.kind === "listed" ? launches(reply) : [];
-    const agents = everyone(served);
-    const talkers = useMemo(() => agents.map((each) => each.talker), [agents]);
+    const served = useMemo(() => (reply?.kind === "listed" ? launches(reply) : []), [reply]);
+    const agents = useMemo(() => everyone(served), [served]);
+    // What the review reads of the listing stays the same object while it says the same (`useSame`): the host
+    // answers the watch again at every hook, with what each conversation is doing, and the review lays nothing out
+    // anew for a reply that changed nothing its text says (`docs/host.md`, *Watching*).
+    const talkers = useSame(
+        useMemo(() => agents.map((each) => each.talker), [agents]),
+        (list) => list.map((each) => `${each.session} ${each.agent ?? ""} ${each.path}`).join("\n"),
+    );
 
     // A party as it's called: a conversation by its path, else by its runtime's ids.
     const called = useCallback(
@@ -119,7 +155,7 @@ export function App() {
     // The conversations running, in the order the host lists them: the review gives each a group.
     const live = useMemo<Live[]>(
         () =>
-            running(reply?.kind === "listed" ? launches(reply) : []).map(({ launch, talker }) => {
+            running(served).map(({ launch, talker }) => {
                 const conversation: InboxConversation = {
                     party: "conversation",
                     repository: launch.repository,
@@ -129,25 +165,34 @@ export function App() {
                 };
                 return { launch, talker, conversation, key: whose(conversation) };
             }),
-        [reply],
+        [served],
     );
-    const agentsRunning = useMemo(() => live.map((each) => each.conversation), [live]);
+    const agentsRunning = useSame(
+        useMemo(() => live.map((each) => each.conversation), [live]),
+        (list) => list.map(whose).join("\n"),
+    );
+
+    // What each agent's banner says, by its conversation, kept the same object while every banner says the same
+    // (`useSame`): a hook that changed nothing a banner says, or a record read that changed no task or ring, lays
+    // nothing out anew; one that did changes the banner's words, which the text holds, so the review is laid out.
+    const bannered = useSame(
+        useMemo(() => new Map(live.map((agent) => [agent.key, bannerOf(agent, drawers.get(agent.key) ?? UNREAD, soon)])), [live, drawers, soon]),
+        (map) => JSON.stringify([...map]),
+    );
 
     // What the banner says of an agent beyond its name: what it's doing, what it's working on, its context, and whether its flagged writes are held.
     const banner = useCallback(
         (head: Head) => {
-            const found = (party: InboxConversation) => live.find((each) => each.key === whose(party));
             if ("conversation" in head) {
                 // A conversation that isn't running, written to all the same, by its runtime's ids where it isn't known.
-                const agent = found(head.conversation);
-                return agent === undefined ? [last(head.conversation.repository), called(head.conversation)].join(" · ") : bannered(agent);
+                return bannered.get(whose(head.conversation)) ?? [last(head.conversation.repository), called(head.conversation)].join(" · ");
             }
             const item = head.item;
             const sender = item.sender;
             if (sender.party === "conversation") {
-                const agent = found(sender);
-                if (agent !== undefined) {
-                    return bannered(agent);
+                const said = bannered.get(whose(sender));
+                if (said !== undefined) {
+                    return said;
                 }
             }
             const repository =
@@ -158,21 +203,8 @@ export function App() {
                       : null;
             const where = [repository, item.worktree ?? null].flatMap((each) => (each === null ? [] : [last(each)]));
             return [...where, sender.party === "operator" ? "lup's approvals" : named(item)].join(" · ");
-
-            function bannered(agent: Live): string {
-                const data = drawers.get(agent.key) ?? UNREAD;
-                const task = currentTask(data.tasks);
-                const usage = data.usage;
-                return [
-                    [last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · "),
-                    doing(agent.talker.activity, soon),
-                    ...(task === null ? [] : [`▶ ${task}`]),
-                    ...(usage === null ? [] : [ring(usage.used, usage.window)]),
-                    ...(agent.talker.holding === true ? ["holding"] : []),
-                ].join(" · ");
-            }
         },
-        [named, called, live, drawers, soon],
+        [named, called, bannered],
     );
 
     // What waits for the operator: a flagged write is no item of the review, shown in its agent's drawer instead.
@@ -282,7 +314,7 @@ export function App() {
                 asked.current.contexts.add(number);
                 void answered({ kind: "inbox-show-context", number }, (answer) =>
                     answer.kind === "inbox-context" ? answer : null,
-                ).then((context) => setContexts((before) => new Map(before).set(number, context)));
+                ).then((context) => gather((held) => held.contexts.set(number, context)));
             }
             const reason = item.reason;
             const stage = reason.reason === "approval" ? reason.typing : 0;
@@ -295,16 +327,20 @@ export function App() {
                 ).then((shown) => {
                     // An answer to an earlier asking, arriving after a later one's, is dropped.
                     if (latest.current.get(number) === reading) {
-                        setFiles((before) => new Map(before).set(number, shown));
+                        gather((held) => held.files.set(number, shown));
                     }
                 });
             }
         }
     }, [waiting]);
 
-    /** Change what's held of one agent's drawers. */
+    /** Change what's held of one agent's drawers; held as it was where nothing changed (`sameDrawers`), as at a record read at a hook that wrote nothing, so the review isn't laid out anew. */
     const drawn = useCallback((key: string, next: (before: AgentDrawers) => AgentDrawers) => {
-        setDrawers((before) => new Map(before).set(key, next(before.get(key) ?? UNREAD)));
+        setDrawers((before) => {
+            const was = before.get(key) ?? UNREAD;
+            const now = next(was);
+            return sameDrawers(was, now) ? before : new Map(before).set(key, now);
+        });
     }, []);
 
     // How many steps of each agent's record the page has, so each asking reads only what came since; and which
@@ -679,4 +715,29 @@ async function answered<T>(request: Asked, shown: (answer: Replied) => T | null)
 function last(path: string): string {
     const name = path.split("/").filter((each) => each !== "").at(-1) ?? path;
     return name.endsWith(".git") ? name.slice(0, -".git".length) : name;
+}
+
+/** Say an agent's banner beyond its name: where it is, what it's doing as of `now`, what it's working on, its context, and whether its flagged writes are held. */
+function bannerOf(agent: Live, data: AgentDrawers, now: Date): string {
+    const task = currentTask(data.tasks);
+    const usage = data.usage;
+    return [
+        [last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · "),
+        doing(agent.talker.activity, now),
+        ...(task === null ? [] : [`▶ ${task}`]),
+        ...(usage === null ? [] : [ring(usage.used, usage.window)]),
+        ...(agent.talker.holding === true ? ["holding"] : []),
+    ].join(" · ");
+}
+
+/** Whether two of what's held of an agent's drawers say the same: as many steps of its record, its branch at the same version with as many files, and the same tasks, context and items exchanged. */
+function sameDrawers(a: AgentDrawers, b: AgentDrawers): boolean {
+    const sameSince = (x: Since | null, y: Since | null) =>
+        x === y || (x !== null && y !== null && x.version === y.version && (x.files ?? []).length === (y.files ?? []).length);
+    return (
+        a.entries.length === b.entries.length &&
+        sameSince(a.since, b.since) &&
+        sameSince(a.latest, b.latest) &&
+        JSON.stringify([a.tasks, a.usage, a.exchanged]) === JSON.stringify([b.tasks, b.usage, b.exchanged])
+    );
 }

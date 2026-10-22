@@ -96,18 +96,44 @@ async def until_closed(server: uvicorn.Server, sockets: list[socket.socket]) -> 
 
 
 @app.command()
-def demo(port: int = 8767, address: str = "127.0.0.1") -> None:
+def demo(
+    port: int = 8767,
+    address: str = "127.0.0.1",
+    size: Annotated[
+        int | None,
+        typer.Option(
+            help=(
+                "How many flagged writes of a busy day the review holds beside the "
+                "demo's own items, each of a file of hundreds of lines, from six "
+                "workers: a busy day's unless given, 0 for the demo's own items alone."
+            )
+        ),
+    ] = None,
+    hooks: Annotated[
+        float,
+        typer.Option(
+            help=(
+                "How many stand-in hook calls a minute the workers make, each "
+                "answering every watch again, as the host service does at each hook."
+            )
+        ),
+    ] = 0,
+) -> None:
     """Serve the dashboard over stand-in data on `address` and `port`, until stopped, printing where to open it.
 
     The real page, every view populated, with no host service or session behind
     it (`lup_dashboard/demo.py`): for looking at a view while it's built, and
-    trying one before it lands.
+    trying one before it lands, at a busy day's size (`--size`) and, with
+    `--hooks`, under a busy day's watch answers.
     """
     token = secrets.token_urlsafe(16)
     listening = socket.create_server((address, port))
     bound = listening.getsockname()[1]
+    host = Demo(hooks=hooks)
+    if size is not None:
+        host.size = size
     served = application(
-        Demo(), Access(token=token, port=bound), DashboardLayout().page, demo=True
+        host, Access(token=token, port=bound), DashboardLayout().page, demo=True
     )
     typer.echo(f"http://{address}:{bound}/#token={token}")
     server = uvicorn.Server(uvicorn.Config(served, log_level="warning"))
