@@ -81,11 +81,13 @@ The rule reads a constant's type, and how a collection is written: a number or a
 
 ## Truncation and comments
 
-**Decision.** Don't truncate: cutting a sequence at a literal bound (`rows[:200]`) to make it fit is refused; where a format forces a limit, keep the full copy and point at it, in an `ignore` saying so. Code reads as if it was always this way: no "new", "now", "fixed", "previously" or "no longer" in comments and docstrings, since "the call now waits" means something only against how it used to be; history belongs in commit messages.
+**Decision.** Don't truncate: cutting a sequence at a fixed bound, a literal or a constant (`rows[:200]`, `rows[:LIMIT]`), to make it fit is refused; where a format forces a limit, keep the full copy and point at it, in an `ignore` saying so. A limit on what reaches a caller is the caller's to set, with a default: a field of a tool's input, an option of a command. An answer that stops short says so, and how to reach the rest: a larger limit, a narrower query. Code reads as if it was always this way: no "new", "now", "fixed", "previously" or "no longer" in comments and docstrings, since "the call now waits" means something only against how it used to be; history belongs in commit messages.
+
+**Why.** A cut nobody mentions reads as the whole: an agent handed the first 100 matches takes them for all there are, and one that can't raise the limit can't reach the rest.
 
 `historical-voice` is a heuristic over prose: a misfire is the rule's bug, rewritten when one shows up.
 
-**Enforced by:** `silent-truncation`, `historical-voice`.
+**Enforced by:** `silent-truncation`; `fixed-tool-limit` (in a function serving a tool of lup's library, and the functions of its file it names, a cut or a `limit`-style argument whose bound is a literal, a constant or a field of what the tool is bound to, rather than the call's input); `historical-voice`.
 
 ## Types
 
