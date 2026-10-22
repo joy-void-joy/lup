@@ -276,7 +276,9 @@ class Engine:
                 return Ran(command=process.arguments, status=0)
             case ["container", "exists", name]:
                 self.record(f"container {name}")
-                return Ran(command=process.arguments, status=1 if name in self.gone else 0)
+                return Ran(
+                    command=process.arguments, status=1 if name in self.gone else 0
+                )
             case ["unshare", *unshared]:
                 self.unshared.append(unshared)
                 return Ran(command=process.arguments, status=0)

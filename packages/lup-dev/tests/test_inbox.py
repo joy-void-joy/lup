@@ -1996,7 +1996,9 @@ def podman_of(*running: str) -> Podman:
     def answered(process: Process) -> Ran:
         match process.arguments:
             case ["podman", "container", "exists", name]:
-                return Ran(command=process.arguments, status=0 if name in running else 1)
+                return Ran(
+                    command=process.arguments, status=0 if name in running else 1
+                )
             case _:
                 message = f"podman asked {process.arguments}"
                 raise AssertionError(message)

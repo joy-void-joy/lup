@@ -354,9 +354,7 @@ def test_a_projects_images_are_listed_and_one_removed() -> None:
         },
         {"Id": "0a1b2c3d4e5f", "Size": 1, "Containers": 2, "Created": 1791846000},
     ]
-    engine, recorder = podman(
-        exited(0, json.dumps(listed)), exited(0)
-    )
+    engine, recorder = podman(exited(0, json.dumps(listed)), exited(0))
 
     images = engine.images("lup")
     engine.remove(images[0])

@@ -1618,7 +1618,9 @@ class Containers:
             case ["container", "exists", _] if self.broken:
                 return Ran(command=process.arguments, status=125)
             case ["container", "exists", name]:
-                return Ran(command=process.arguments, status=0 if name in self.running else 1)
+                return Ran(
+                    command=process.arguments, status=0 if name in self.running else 1
+                )
             case ["rename", before, after] if not self.refusing:
                 self.running = [
                     after if each == before else each for each in self.running
