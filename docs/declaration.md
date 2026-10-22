@@ -137,7 +137,7 @@ A tool's name and a request's kind are shared across modules, so the same one fr
 | `Core` | every protected path but the Python tools', the operator's documents, TypeScript's tests (`*.test.ts`, `*.test.tsx`), scratch, docs and data; the standard machine; lup's session defaults; the credentials' limits; guidance `core` |
 | `Python` | the Python tools' files (protected), source trees, Python files and `conftest.py`; the runner, `Uv()`; the test roots, `tests/`; the gate's `rules`, `format`, `pytest` and `lint-imports`; guidance `python` |
 | `CodeRules` | every rule but those `catalog/rules.py` leaves out, each with its reason (`runtime-mention` alone today); no exemptions; guidance `code-rules`. Requires Node `>=22.18` for the engine |
-| `GitHub` | the GitHub tools; the answer to a room's gate asking an issue's state; how many matches `find_issues` asks for |
+| `GitHub` | the GitHub tools; the answer to a room's gate asking an issue's state |
 | `Transcripts` | copying the runtime's session records when a launch opens and stops; its data, mounted in every room; guidance `transcripts` |
 | `Private` | what lup reads on the host never published, and the person's own values; refusing at `publishing`; the gate's `private` step; guidance `private` (`docs/private.md`) |
 

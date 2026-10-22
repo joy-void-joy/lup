@@ -11,8 +11,6 @@ class GitHub(Module):
 
     name = "github"
 
-    limit: int = 100
-    """The most matches `find_issues` asks GitHub for."""
     tools: Toolsets = Toolsets.of(GitHubTools)
     """Reading and finding issues; filing, editing, closing and reopening one;
     commenting and editing a comment; opening a draft pull request."""

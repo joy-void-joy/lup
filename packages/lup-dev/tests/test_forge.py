@@ -196,11 +196,10 @@ def called(
     name: str,
     arguments: JsonValue,
     registered: Register,
-    limit: int = 100,
     withheld: Withheld | None = PRIVATE,
 ) -> Answer:
     """Call one of the GitHub module's tools as a launch's own process calls it, `Private`'s list for the launch's repository `withheld`, or none."""
-    declared = Project(modules=Modules.default().edit(GitHub(limit=limit)))
+    declared = Project(modules=Modules.default().edit(GitHub()))
     layout = Layout(state=registered.worktree, data=registered.worktree)
     if withheld is not None:
         write_model(
@@ -235,10 +234,10 @@ def test_each_tool_is_summarized_in_fifty_characters_at_most() -> None:
 def test_a_call_with_an_argument_no_tool_takes_is_refused(
     gh: Gh, tmp_path: Path
 ) -> None:
-    answer = called("find_issues", {"query": "x", "limit": 5}, launch(tmp_path))
+    answer = called("find_issues", {"query": "x", "sort": "updated"}, launch(tmp_path))
     assert answer.error
     assert answer.text.startswith("`find_issues` refused the call:")
-    assert "limit" in answer.text
+    assert "sort" in answer.text
     assert gh.calls() == []
 
 
@@ -491,13 +490,54 @@ def test_find_issues_says_where_more_may_match_and_searches_every_state(
 ) -> None:
     gh.recorded("search issues", "search-issues.json")
     answer = called(
-        "find_issues", {"query": "", "state": "all"}, launch(tmp_path), limit=3
+        "find_issues", {"query": "", "state": "all", "limit": 3}, launch(tmp_path)
     )
-    assert "GitHub gave the first 3 matches it found; more may match" in answer.text
+    assert answer.text.splitlines()[-1] == (
+        "GitHub gave the first 3 matches it found; more may match: a larger "
+        "`limit`, up to 1,000, lists them."
+    )
     [arguments] = gh.arguments()
     assert "--limit=3" in arguments
     assert not [each for each in arguments if each.startswith("--state")]
     assert arguments[-1] == "--"
+
+
+def test_find_issues_at_githubs_most_says_to_narrow_the_query(
+    gh: Gh, tmp_path: Path
+) -> None:
+    [match] = json.loads((RECORDED / "search-issues.json").read_text())[:1]
+    matches = [{**match, "number": number} for number in range(1, 1001)]
+    gh.answer("search issues", json.dumps(matches))
+    answer = called("find_issues", {"query": "", "limit": 1000}, launch(tmp_path))
+    assert not answer.error
+    lines = answer.text.splitlines()
+    assert lines[0] == "1000 open in joy-void-joy/lup for ``:"
+    assert len(lines) == 1002
+    assert lines[-1] == (
+        "GitHub gave the first 1,000 matches it found, the most its search gives a "
+        "query; more may match: narrow the query, by `created:` or `updated:` "
+        "dates say, to reach them."
+    )
+    [arguments] = gh.arguments()
+    assert "--limit=1000" in arguments
+
+
+def test_find_issues_refuses_a_limit_past_githubs_most_before_gh_runs(
+    gh: Gh, tmp_path: Path
+) -> None:
+    answer = called("find_issues", {"query": "", "limit": 1001}, launch(tmp_path))
+    assert answer.error
+    assert "`limit` is 1,000 at most" in answer.text
+    assert gh.calls() == []
+
+
+def test_find_issues_says_nothing_more_where_fewer_came_than_asked(
+    gh: Gh, tmp_path: Path
+) -> None:
+    gh.recorded("search issues", "search-issues.json")
+    answer = called("find_issues", {"query": "", "limit": 4}, launch(tmp_path))
+    assert "more may match" not in answer.text
+    assert "--limit=4" in gh.arguments()[0]
 
 
 def test_find_issues_refuses_a_query_whose_quotes_dont_close(

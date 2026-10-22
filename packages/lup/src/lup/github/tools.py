@@ -31,7 +31,7 @@ from lup.tools.tool import lup_tool
 from lup.types import Model
 from lup_dev.declaration.serving import ModuleTools
 from lup_dev.forge import github as gh
-from lup_dev.forge.github import Closing, GitHubError, terms
+from lup_dev.forge.github import Closing, GitHubError, Search, terms
 from lup_dev.host.protocol import Action, GitHubRepository
 from lup_dev.host.publishing import Part, Post
 from lup_dev.settings import LupDevSettings
@@ -94,6 +94,13 @@ class Query(Reading):
         description=(
             "Which to find: the open ones, the closed ones (a merged pull request "
             "among them), or all."
+        ),
+    )
+    limit: PositiveInt = Field(
+        default=100,
+        description=(
+            "How many matches to list at most, in GitHub's order: up to 1,000, "
+            "the most GitHub's search gives a query."
         ),
     )
 
@@ -266,27 +273,26 @@ class GitHubTools(ModuleTools):
         operator's login can read, named by `repository` as `owner/name`: each
         match's number, whether it's an issue or a pull request, its state,
         when it was last updated, and its title, in GitHub's order of
-        relevance. `read_issue` reads one whole. Searching before filing an
-        issue finds one already open.
+        relevance, up to `limit`; where as many came, the answer says more may
+        match. `read_issue` reads one whole. Searching before filing an issue
+        finds one already open.
         """
         github = self.github("read-issues", asked)
-        search = await github.search(asked.query, asked.state, self.module.limit)
+        if asked.limit > github.searched:
+            message = (
+                f"`limit` is {github.searched:,} at most, the most matches GitHub's "
+                "search gives a query: narrow the query, by `created:` dates say, to "
+                "reach the rest"
+            )
+            raise GitHubError(message)
+        search = await github.search(asked.query, asked.state, asked.limit)
         found = [each.text() for each in search.found]
         heading = (
             f"{len(found)} {asked.state} in {github.repository} for `{asked.query}`:"
             if found
             else f"Nothing {asked.state} in {github.repository} matches `{asked.query}`."
         )
-        more = (
-            [
-                (
-                    f"GitHub gave the first {search.limit} matches it found; more "
-                    "may match: narrow the query to see them."
-                )
-            ]
-            if len(search.found) + search.elsewhere >= search.limit
-            else []
-        )
+        more = beyond(search, github.searched)
         elsewhere = (
             [
                 (
@@ -297,7 +303,7 @@ class GitHubTools(ModuleTools):
             if search.elsewhere
             else []
         )
-        return "\n".join([heading, *found, *more, *elsewhere])
+        return "\n".join([heading, *found, *elsewhere, *more])
 
     @lup_tool
     async def file_issue(self, asked: NewIssue) -> str:
@@ -503,3 +509,23 @@ class GitHubTools(ModuleTools):
             f"Opened a draft pull request from `{asked.branch}` into "
             f"`{integration}`: {link}"
         )
+
+
+def beyond(search: Search, searched: int) -> list[str]:
+    """Say what may match past what `search` gave, and how to reach it: a larger `limit`, or past `searched`, the most GitHub's search gives a query, a narrower query; nothing where fewer came than were asked for."""
+    if not search.full():
+        return []
+    if search.limit < searched:
+        return [
+            (
+                f"GitHub gave the first {search.limit} matches it found; more may "
+                f"match: a larger `limit`, up to {searched:,}, lists them."
+            )
+        ]
+    return [
+        (
+            f"GitHub gave the first {search.limit:,} matches it found, the most its "
+            "search gives a query; more may match: narrow the query, by `created:` "
+            "or `updated:` dates say, to reach them."
+        )
+    ]
