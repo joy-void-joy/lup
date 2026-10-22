@@ -1656,14 +1656,15 @@ CODEX_PROMPT = json.dumps(
 
 
 def test_each_runtime_hears_a_turns_start_with_its_prompt_and_tells_beside_it() -> None:
-    for adapter, raw, session, prompt in [
+    for adapter, raw, session, prompt, titles in [
         (
             claude,
             CLAUDE_PROMPT,
             "s1",
             '<channel source="lup" wake="t1">\nHi.\n</channel>',
+            True,
         ),
-        (codex, CODEX_PROMPT, "t1", "Go on."),
+        (codex, CODEX_PROMPT, "t1", "Go on.", False),
     ]:
         assert adapter.heard(raw) == Heard(
             fits=10_000,
@@ -1671,6 +1672,7 @@ def test_each_runtime_hears_a_turns_start_with_its_prompt_and_tells_beside_it() 
             session=session,
             judged=True,
             prompt=prompt,
+            takes_title=titles,
         )
         assert adapter.told(raw, "", TOLD) is None
         assert json.loads(adapter.told(raw, "", ITEMS) or "") == {
@@ -1679,6 +1681,73 @@ def test_each_runtime_hears_a_turns_start_with_its_prompt_and_tells_beside_it() 
                 "additionalContext": BOTH,
             }
         }
+
+
+TITLE = Telling(caller="c1", title="parser-work")
+
+
+def test_claude_hears_the_sessions_title_at_a_prompt_and_gives_it_one_where_told() -> (
+    None
+):
+    titled = json.dumps({**json.loads(CLAUDE_PROMPT), "session_title": "dev"})
+    heard = claude.heard(titled)
+    assert (heard.title, heard.takes_title) == ("dev", True)
+    subagent = json.dumps({**json.loads(titled), "agent_id": "a1"})
+    assert not claude.heard(subagent).takes_title
+    assert json.loads(claude.told(titled, "", TITLE) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "sessionTitle": "parser-work",
+        }
+    }
+    both = Telling(caller="c1", items=ITEMS.items, title="parser-work")
+    assert json.loads(claude.told(titled, "", both) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": BOTH,
+            "sessionTitle": "parser-work",
+        }
+    }
+    assert claude.told(titled, "", TOLD) is None
+
+
+@pytest.mark.parametrize(
+    ("source", "takes"),
+    [
+        ("startup", True),
+        ("resume", True),
+        ("fork", True),
+        ("compact", False),
+        ("clear", False),
+    ],
+)
+def test_claude_takes_a_title_at_the_starts_sessiontitle_applies_at(
+    source: str, *, takes: bool
+) -> None:
+    raw = payload(Path("/w"), "SessionStart", source=source, session_title="dev")
+    heard = claude.heard(raw)
+    assert (heard.title, heard.takes_title) == ("dev", takes)
+    assert json.loads(claude.told(raw, "", TITLE) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "sessionTitle": "parser-work",
+        }
+    }
+
+
+def test_codex_hears_no_title_and_gives_none() -> None:
+    started = (CAPTURED / "1-session-start.json").read_text()
+    for raw in [started, CODEX_PROMPT]:
+        heard = codex.heard(raw)
+        assert (heard.title, heard.takes_title) == (None, False)
+        assert codex.told(raw, "", TITLE) is None
+    both = Telling(caller="c1", items=ITEMS.items, title="parser-work")
+    assert json.loads(codex.told(CODEX_PROMPT, "", both) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": BOTH,
+        }
+    }
 
 
 def test_claude_pushes_through_a_channel_and_codex_takes_no_push() -> None:

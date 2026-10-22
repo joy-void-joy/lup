@@ -468,6 +468,34 @@ def named_here(name: str) -> str:
     )
 
 
+def renamed_there(name: str) -> str:
+    """Tell a session the operator renamed it in its runtime, which lup took as its launch's name."""
+    return (
+        f"lup: the operator renamed this session `{name}`: how they, lup's "
+        "commands and other sessions call it from now on. Keep the name they gave."
+    )
+
+
+class Named(Model):
+    """A launch's name as its session starts or takes a prompt, and what the hook's answer says of it."""
+
+    name: str
+    told: list[str] = []
+    """What the conversation is told of its name: at a start, the name; at a
+    prompt, that the operator renamed it, where they did."""
+    title: str | None = None
+    """The title the hook's answer gives the runtime: the name, where the hook
+    takes a title and the runtime's own differs; none otherwise."""
+
+
+class Titled(Model):
+    """A title a hook's answer gives a session's runtime."""
+
+    session: str
+    """The runtime's id for the session."""
+    title: str
+
+
 def introduction(tools: list[ToolSpec]) -> str:
     """Tell a subagent the tools lup serves it, which its session's guidance lists and it doesn't read: each by its name and summary, as the guidance lists them (`summaries`).
 
@@ -499,10 +527,13 @@ def introduction(tools: list[ToolSpec]) -> str:
 
 
 class Spoken(Model):
-    """What a hook prints, and what it tells the conversation from its inbox."""
+    """What a hook prints, what it tells the conversation from its inbox, and the title it gives the session's runtime."""
 
     answer: str
     posted: Posted = Posted()
+    titled: Titled | None = None
+    """The title the answer gives the session's runtime, kept as the one lup
+    left it with once the answer is written; none where it gives none."""
 
 
 class Served(Model, arbitrary_types_allowed=True):
@@ -550,7 +581,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     served, for what's pushed to its session."""
     say: Callable[[str], None]
     names: Names
-    """The name each session last had, so a session resumed takes it back."""
+    """The name each session last had, so a session resumed takes it back, and
+    its title in its runtime as lup last left it, so a title the operator gave
+    there is told from lup's own."""
     spawns: Spawns | None = None
     """How each runtime recorded its subagents' spawns; none reads nothing, so
     subagents go without names until they rename themselves."""
@@ -733,27 +766,52 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         self.served[launch.launch] = served.model_copy(update={"launch": launch})
         self.layout.record(launch.launch).write_text(launch.model_dump_json(indent=2))
 
-    async def started(self, launch: str, session: str, title: str | None) -> str:
-        """Name launch `launch` as its session `session` starts, and return its name.
+    async def named_at(self, launch: str, heard: Heard) -> Named:
+        """Name launch `launch` as its session starts or takes a prompt (`heard`), and return its name, with what the hook's answer says of it.
 
-        A name the runtime gives the session (`title`, as the operator renamed it
-        in the runtime) is taken in a name's shape (`shaped`) where it's free; otherwise
-        the name `session` last had, where it's free, as a session resumed in a
-        later launch; otherwise the launch keeps its own. The name is kept as
-        `session`'s.
+        Where the hook takes a title (`Heard.takes_title`), the runtime's title
+        for the session is read against the one lup last left it with
+        (`Names.title`): that one is lup's own, an old one a resume carries
+        included, and the session's name outranks it; another is the operator's,
+        as they renamed the session in the runtime, and is taken in a name's
+        shape (`shaped`) where it's free. Either way it's kept as the one lup
+        found, until an answer giving the runtime another is written (`hook`).
+        At a start, the name the session last had comes next, where it's free,
+        as a session resumed in a later launch; otherwise the launch keeps its
+        own. The name is kept as the session's, and given as the runtime's title
+        where the hook takes one and the runtime's differs. An operator's title
+        that can't be taken is said: the runtime is given lup's name back.
         """
         current = self.served[launch].launch
-        given = None if title is None else shaped(title)
+        session = heard.session
+        title = heard.title if heard.takes_title else None
+        theirs = None if title in [None, self.names.title(session)] else title
+        given = None if theirs is None else shaped(theirs)
+        if title is not None:
+            self.names.titled(session, title)
+        last = self.names.last(session) if heard.event == "session-started" else None
         wanted = [
             each
-            for each in [given, self.names.last(session)]
+            for each in [given, last]
             if each is not None and held(each, self.claims(), current) is None
         ]
         name = next(iter(wanted), current.name or "")
         if name != current.name:
             await self.renamed(launch, name)
         self.names.keep(session, name)
-        return name
+        if theirs is not None and name != given:
+            self.say(
+                f"{launch}: its session's title in its runtime, `{theirs}`, can't "
+                f"be its name (not a name's shape, or another launch's), so the "
+                f"runtime is given `{name}`"
+            )
+        gives = name if heard.takes_title and name and name != title else None
+        match heard.event:
+            case "session-started":
+                told = [named_here(name)]
+            case _:
+                told = [renamed_there(name)] if name == given != current.name else []
+        return Named(name=name, told=told, title=gives)
 
     async def offered(self, request: Register) -> Offered:
         """Start the launch's process, its judge and its modules, and return what the modules serve that the core doesn't.
@@ -830,7 +888,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         so, the failure is said, with its traceback, and the connection closes
         unanswered: the room's hook prints nothing and ends with status 0, which
         the runtime takes as no decision. Where the hook is gone before its
-        answer is written, what it would have told is put back as waiting.
+        answer is written, what it would have told is put back as waiting;
+        otherwise a title the answer gives the session's runtime is kept as the
+        one lup left it with (`Names.titled`).
         """
         payload = (await reader.read()).decode()
         try:
@@ -849,6 +909,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             self.say(f"{request.launch}: the hook was gone before its answer: {gone}")
             self.returned(spoken.posted)
             return
+        if spoken.titled is not None:
+            self.names.titled(spoken.titled.session, spoken.titled.title)
         self.say(f"{request.launch}: answered a hook")
 
     def returned(self, posted: Posted) -> None:
@@ -865,11 +927,12 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         is told what the post says waits for it, in what room the judge's answer
         leaves. A session's own turn's end puts its last message before the
         operator (`Post.concluded`) before anything is told, so the message is
-        theirs to read whether the end is held or let through. A payload the
-        courier can't read goes to the judge as it is, which answers it or says
-        it couldn't; where the courier can't add to the judge's answer, the
-        answer goes out as the judge gave it, and what it would have told is put
-        back. Either is said.
+        theirs to read whether the end is held or let through. A session's own
+        start, and its own prompt where the hook takes a title, name its launch
+        (`named_at`). A payload the courier can't read goes to the judge as it
+        is, which answers it or says it couldn't; where the courier can't add to
+        the judge's answer, the answer goes out as the judge gave it, and what
+        it would have told is put back. Either is said.
         """
         try:
             heard = self.courier.heard(request.runtime, payload)
@@ -895,13 +958,13 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             self.background(self.happened(request, happening))
         answer = await self.judgement(request, payload) if heard.judged else ""
-        starting = heard.event == "session-started" and heard.agent is None
-        name = (
-            await self.started(request.launch, heard.session, heard.title)
-            if starting
-            else None
+        own = heard.agent is None
+        starting = heard.event == "session-started" and own
+        prompted = heard.event == "turn-started" and own and heard.takes_title
+        named = (
+            await self.named_at(request.launch, heard) if starting or prompted else None
         )
-        naming = [*([] if name is None else [named_here(name)]), *said]
+        naming = [*([] if named is None else named.told), *said]
         room = (
             heard.fits
             - len(answer.encode())
@@ -917,8 +980,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             if self.post is None
             else await self.post.telling(request, conversation, heard, room)
         )
+        title = None if named is None else named.title
         telling = Telling(
-            caller=conversation.id, items=[*naming, *posted.items], title=name
+            caller=conversation.id, items=[*naming, *posted.items], title=title
         )
         try:
             told = self.courier.told(request.runtime, payload, answer, telling)
@@ -929,7 +993,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             self.returned(posted)
             return Spoken(answer=answer)
-        return Spoken(answer=told, posted=posted)
+        titled = None if title is None else Titled(session=heard.session, title=title)
+        return Spoken(answer=told, posted=posted, titled=titled)
 
     async def judgement(self, request: Register, payload: str) -> str:
         """Return the judge's answer to one hook, or where it can't answer, the runtime's word that it couldn't, saying why.

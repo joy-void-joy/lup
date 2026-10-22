@@ -101,13 +101,23 @@ start a turn (`turn/start`) runs inside the terminal's own process under
 turn: the operator typing in its terminal starts one, told it at
 `UserPromptSubmit`.
 
-Nor can lup's name for a session reach Codex's own title, a gap declared with
-its evidence: Codex names threads (`/rename`, its own generated titles, `codex
+Nor can lup's name for a session reach Codex's own title, at its start or at a
+prompt after a rename, nor a `/rename` there reach lup: a gap declared with its
+evidence. Codex names threads (`/rename`, its own generated titles, `codex
 resume <name>`), but sets a name only through its app server's
 `thread/name/set`, which runs inside the terminal's own process under
-`--no-daemon`, and its hooks neither carry a thread's name nor set one
-(`hooks/src/schema.rs`, `deny_unknown_fields`; read at `rust-v0.163.0`). lup's
-names work on Codex everywhere in lup; the title is Codex's own.
+`--no-daemon`. Its hooks neither carry a thread's name nor set one, so none
+takes a title (`Heard.takes_title`). Read in `hooks/src/schema.rs` at
+`rust-v0.163.0`, the latest release on 2026-10-22: `UserPromptSubmit`'s input
+(`UserPromptSubmitCommandInput`) carries the session, the turn, the agent, the
+transcript, the directory, the model, the permission mode and the prompt, and
+`SessionStart`'s the same less the turn, the agent and the prompt, plus its
+`source`; `UserPromptSubmit`'s output (`UserPromptSubmitCommandOutputWire`)
+takes the universal fields, `decision`, `reason` and a `hookSpecificOutput` of
+`hookEventName` and `additionalContext` alone, and `SessionStart`'s the
+universal fields and the same `hookSpecificOutput`, each refusing a field it
+doesn't name (`deny_unknown_fields`). lup's names work on Codex everywhere in
+lup; the title is Codex's own.
 
 What its judging relies on, from Codex's hooks documentation and its source at
 `rust-v0.162.1` (paths under `codex-rs/`), whose hook schemas
