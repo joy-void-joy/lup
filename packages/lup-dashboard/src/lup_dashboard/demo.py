@@ -130,6 +130,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """How many stand-in hook calls have come."""
     hooking: asyncio.TimerHandle | None = None
     """The next stand-in hook call, once the page first asked for the launches."""
+    began: datetime | None = None
+    """When the demo began, as of the clock the first time it's asked (`ago`)."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -193,9 +195,15 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
 
     @override
     async def watch(self, request: Asked) -> AsyncGenerator[Replied]:
+        """Yield the reply at once, then again at each change where it differs from the one yielded last, as the host service's watch does (`docs/host.md`, *Watching*): a stand-in hook call sends the launches again, with what a worker does, and the inbox only where it changed."""
+        sent = ""
         while True:
             changed = self.changed
-            yield await self.ask(request)
+            replied = await self.ask(request)
+            line = replied.model_dump_json()
+            if line != sent:
+                yield replied
+                sent = line
             await changed.wait()
 
     @override
@@ -216,8 +224,10 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         self.changed = asyncio.Event()
 
     def ago(self, minutes: float) -> datetime:
-        """Return the moment `minutes` before the clock's."""
-        return self.clock.now() - timedelta(minutes=minutes)
+        """Return the moment `minutes` before the demo began (`began`): its stand-in items and activities are made at moments before it, kept as a real inbox's are, so a watch's reply differs from the one before only where something changed."""
+        if self.began is None:
+            self.began = self.clock.now()
+        return self.began - timedelta(minutes=minutes)
 
     def listed(self) -> Listed:
         """Return four launches over three repositories: one with subagents working, asking and ended; one idle; one on the second runtime; one whose session hasn't started."""
@@ -857,9 +867,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         self.hooked += 1
         self.changed.set()
         self.changed = asyncio.Event()
-        self.hooking = asyncio.get_running_loop().call_later(
-            60 / self.hooks, self.hook
-        )
+        self.hooking = asyncio.get_running_loop().call_later(60 / self.hooks, self.hook)
 
     def working(self) -> list[Talker]:
         """Return the workers' conversations (`workers`), subagents of the lup-impl session, each calling a tool or between calls as the stand-in hook calls have it (`hook`); none without a busy day's writes (`size`)."""
@@ -916,7 +924,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         def said(n: int) -> list[Item]:
             number = self.first_worked + 2 * (n - 1)
             note = Message(
-                kind="note", text=f"Worker {n}'s reading of the records.\n\n{MARKDOWN_NOTE}"
+                kind="note",
+                text=f"Worker {n}'s reading of the records.\n\n{MARKDOWN_NOTE}",
             )
             friction = Friction(
                 text=(
@@ -925,7 +934,10 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     "would have kept me from killing it."
                 )
             )
-            return [item(number, n, note, 400 - n), item(number + 1, n, friction, 390 - n)]
+            return [
+                item(number, n, note, 400 - n),
+                item(number + 1, n, friction, 390 - n),
+            ]
 
         def landed(i: int) -> Item:
             number = self.first_worked + 2 * self.workers + i
@@ -1017,7 +1029,11 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ),
                 at=before(50),
             ),
-            Said(by="agent", text="Reading the files the brief names first.", at=before(49)),
+            Said(
+                by="agent",
+                text="Reading the files the brief names first.",
+                at=before(49),
+            ),
             Called(tool="Read", at=before(48)),
             Called(tool="Grep", at=before(47)),
             Said(
