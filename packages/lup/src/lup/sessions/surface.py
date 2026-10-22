@@ -18,11 +18,11 @@ class Agent(ABC):
     """An agent that answers a prompt, typed or as text."""
 
     @overload
-    # lup: ignore("interface-shape", why="an overload is a signature, not behaviour (#47)")
+    # lup: ignore("interface-shape", why="an `@overload` stub is a signature the type checker reads, not concrete behaviour, which the rule counts it as", issue=49)
     async def ask(self, prompt: str, output: None = None) -> TurnResult[str]: ...
 
     @overload
-    # lup: ignore("interface-shape", why="an overload is a signature, not behaviour (#47)")
+    # lup: ignore("interface-shape", why="an `@overload` stub is a signature the type checker reads, not concrete behaviour, which the rule counts it as", issue=49)
     async def ask[T: BaseModel](
         self, prompt: str, output: type[T] | Submit[T]
     ) -> TurnResult[T]: ...
