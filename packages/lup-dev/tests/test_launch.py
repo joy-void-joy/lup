@@ -6,6 +6,7 @@ service, or reads the clock; the hook command runs under `sh` with a stand-in
 `socat`.
 """
 
+import io
 import json
 import shlex
 from datetime import timedelta
@@ -19,6 +20,7 @@ from typer.testing import CliRunner
 import lup
 from lup.programs import Ran, run
 from lup.rooms.engine import Exited, Podman, Process
+from lup.sessions.bridge import Bridge
 from lup.sessions.terminal import (
     Cli,
     SessionSettings,
@@ -1054,7 +1056,7 @@ def test_the_hook_pipes_the_payload_to_the_launchs_socket() -> None:
         "-t",
         "90000",
         "-",
-        "UNIX-CONNECT:/run/lup/hook.sock",
+        "UNIX-CONNECT:/run/lup/hook.sock,retry=120,interval=0.5",
         "||",
         "{",
         "echo",
@@ -1068,6 +1070,16 @@ def test_the_hook_pipes_the_payload_to_the_launchs_socket() -> None:
         "1;",
         "}",
     ]
+
+
+def test_the_hook_waits_for_the_service_as_long_as_lups_bridge_does() -> None:
+    _, _, script = piped()
+    _, options = shlex.split(script)[4].split(",", 1)
+    bridge = Bridge(Path("/run/lup/mcp.sock"), io.StringIO())
+
+    assert options == "retry=120,interval=0.5"
+    assert bridge.retry == 0.5
+    assert bridge.patience == 120 * 0.5
 
 
 def socat(tmp_path: Path, script: str) -> Path:
@@ -1099,7 +1111,7 @@ def test_the_hook_prints_the_answer_unchanged(tmp_path: Path) -> None:
     assert ran.output.decode() == '{"answer": 1}\n'
     assert ran.error.decode() == ""
     assert (tmp_path / "arguments").read_text() == (
-        "-t 90000 - UNIX-CONNECT:/run/lup/hook.sock\n"
+        "-t 90000 - UNIX-CONNECT:/run/lup/hook.sock,retry=120,interval=0.5\n"
     )
     assert json.loads((path / "socat.payload").read_text()) == {
         "hook_event_name": "SessionStart"

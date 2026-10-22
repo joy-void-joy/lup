@@ -28,12 +28,14 @@ worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
 The hook in the room is one command for every runtime and event: `socat` pipes
 the runtime's payload unchanged to the launch's socket, `/run/lup/hook.sock`, and
 prints the answer, so nothing in the room parses a payload. Where it can't reach
-the host service, the command ends with status 1 and says why on standard error:
+the host service, having waited a minute for it as across a restart (`piped`),
+the command ends with status 1 and says why on standard error:
 an error each runtime shows, the call going on, rather than the silence a
 runtime reads as no decision. Status 2 would block the call on both runtimes, so
 the command never ends with it (each adapter says what its runtime does).
 """
 
+import io
 import shlex
 import tempfile
 from contextlib import contextmanager
@@ -41,6 +43,7 @@ from datetime import timedelta
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
+from lup.sessions.bridge import Bridge
 from lup.sessions.terminal import (
     Cli,
     Hook,
@@ -116,13 +119,22 @@ def approved_declaration(
 def piped(timeout: timedelta = timedelta(hours=25)) -> list[str]:
     """Return the command a room's hook runs: the payload piped to the host service, its answer printed.
 
-    `socat`'s `-t` is how long it waits for the answer once the payload is sent:
-    `timeout`, above a hold's day. A failure, to reach the service or any other,
-    ends the command with status 1 and a line on standard error.
+    Where the service is away, as while it restarts, `socat` waits for it as
+    lup's bridge waits for the tool server, read from a bridge built with its
+    defaults and never run (`Bridge`'s `retry` and `patience`): it tries again
+    to connect every half second, for up to a minute. It reads the payload only
+    once connected, and never connects again, so no payload is sent twice: a
+    connection lost once made isn't tried again. Its `-t` is how long it waits
+    for the answer once the payload is sent: `timeout`, above a hold's day. A
+    failure, to reach the service in that minute or any other, ends the command
+    with status 1 and a line on standard error.
     """
     socket = LaunchSockets(directory=ROOM_SOCKETS).hook
     seconds = str(int(timeout.total_seconds()))
-    pipe = shlex.join(["socat", "-t", seconds, "-", f"UNIX-CONNECT:{socket}"])
+    bridge = Bridge(socket, io.StringIO())
+    tries = round(bridge.patience / bridge.retry)
+    address = f"UNIX-CONNECT:{socket},retry={tries},interval={bridge.retry:g}"
+    pipe = shlex.join(["socat", "-t", seconds, "-", address])
     said = shlex.quote(
         f"lup: this hook couldn't reach lup's host service on {socket}, so it "
         "wasn't judged. On the host, `lup-dev host` serves this session again."
