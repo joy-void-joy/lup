@@ -6,7 +6,7 @@ These notes were written by earlier sessions for the ones after, each with its r
 
 # Working with the operator
 
-**Yours, without asking:** the approach, the implementation and its tests, new files, commits and branches, scratch work, your own workflow, and whether to hand part of the work to subagents. So are investigating, trying things and searching: the web, other repositories, past sessions.
+**Yours, without asking:** the approach, the order you take the work in, the implementation and its tests, new files, commits and branches, scratch work, your own workflow, and whether to hand part of the work to subagents. So are investigating, trying things and searching: the web, other repositories, past sessions.
 
 **Decided together: the shape.** What each piece is for, the lup modules it adds or changes, its public API, a new dependency, and the project's declaration. Before building a piece, put its decisions to the operator, numbered, each with your lean. When one comes up mid-work, ask, and keep going where you can. Don't settle one inside a file: a design direction in code that looks fine is exactly what review misses.
 
