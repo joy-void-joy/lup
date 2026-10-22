@@ -15,7 +15,7 @@ import pytest
 from mcp import Client
 from mcp.shared.memory import create_client_server_memory_streams
 from mcp.shared.message import SessionMessage
-from mcp.types import TextContent, jsonrpc_message_adapter
+from mcp.types import TextContent, ToolAnnotations, jsonrpc_message_adapter
 from pydantic import BaseModel, JsonValue
 
 from lup.sessions.submission import Toolbox
@@ -130,6 +130,39 @@ def test_the_toolset_s_tools_are_listed(mode: str) -> None:
     assert tool.name == "echo"
     assert tool.description == "Say back what you're given.\n\nWord for word, as JSON."
     assert tool.input_schema == ECHO.input_schema
+
+
+class Marked(Toolset):
+    """Serves a read, a call that finds its wait again, and one that acts, each answering its name."""
+
+    def specs(self) -> list[ToolSpec]:
+        return [
+            ECHO.model_copy(update={"name": "read", "reads": True}),
+            ECHO.model_copy(update={"name": "wait", "idempotent": True}),
+            ECHO,
+        ]
+
+    async def call(self, name: str, arguments: JsonValue) -> Answer:
+        del arguments
+        return Answer(text=name)
+
+
+@ERAS
+def test_a_tool_s_marks_are_listed_as_its_annotations_both_said(mode: str) -> None:
+    async def listed(client: Client) -> Any:
+        return (await client.list_tools()).tools
+
+    read, wait, echo = asyncio.run(through(Marked(), mode, listed))
+
+    assert read.annotations == ToolAnnotations(
+        read_only_hint=True, idempotent_hint=False
+    )
+    assert wait.annotations == ToolAnnotations(
+        read_only_hint=False, idempotent_hint=True
+    )
+    assert echo.annotations == ToolAnnotations(
+        read_only_hint=False, idempotent_hint=False
+    )
 
 
 @ERAS

@@ -251,7 +251,7 @@ class GitHubTools(ModuleTools):
             raise GitHubError(refusal)
         return gh.GitHub.launched(self.launch, asked.elsewhere())
 
-    @lup_tool
+    @lup_tool(reads=True)
     async def read_issue(self, asked: Numbered) -> str:
         """Read an issue or pull request, with its comments.
 
@@ -265,7 +265,7 @@ class GitHubTools(ModuleTools):
         github = self.github("read-issues", asked)
         return (await github.thread(asked.number)).text()
 
-    @lup_tool
+    @lup_tool(reads=True)
     async def find_issues(self, asked: Query) -> str:
         """Search a repository's issues and pull requests.
 

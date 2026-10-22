@@ -95,6 +95,29 @@ def test_a_tool_made_without_lup_tool_is_checked_too() -> None:
         ToolSpec(name="spec", description="\n", input_schema={})
 
 
+def test_a_tool_s_marks_say_whether_a_call_may_be_sent_again() -> None:
+    @lup_tool(reads=True)
+    async def lookup(query: Query) -> Weather:
+        """Look a city up."""
+        return Weather(summary=query.city)
+
+    class Waiter(BaseModel):
+        @lup_tool(idempotent=True)
+        async def wait(self, query: Query) -> str:
+            """Wait for a city's weather."""
+            return query.city
+
+    waits = declared(Waiter)["wait"]
+    [waiting] = bound(Waiter())
+    assert (lookup.spec().reads, lookup.spec().idempotent) == (True, False)
+    assert (waits.reads, waits.idempotent) == (False, True)
+    assert waiting.spec() == waits
+    # Unmarked, a tool acts; marked when made from a function, as when decorated.
+    assert (weather.spec().reads, weather.spec().idempotent) == (False, False)
+    assert lup_tool(weather.function, idempotent=True).spec().idempotent
+    assert not any(tool.spec().reads or tool.spec().idempotent for tool in SPEAKING)
+
+
 def test_every_tool_of_lup_s_has_a_summary() -> None:
     summaries = [tool.spec().summary for tool in [Submit(Query), *SPEAKING]]
     assert summaries == [

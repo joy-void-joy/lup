@@ -130,7 +130,7 @@ class Onlooker(Model, arbitrary_types_allowed=True):
     """The host service's clock, which a duration in `since` or `until` counts
     back from."""
 
-    @lup_tool
+    @lup_tool(reads=True)
     async def judged(self, scope: Scope) -> str:
         """Read the judge's verdicts and holds.
 
