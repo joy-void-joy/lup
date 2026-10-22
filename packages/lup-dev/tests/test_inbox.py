@@ -585,8 +585,9 @@ def test_a_subagents_end_holds_once_on_what_waits_for_it(
         )["hookSpecificOutput"]["updatedInput"]
         call(machine.host.launch("one").mcp, "ask", arguments)
         inbox("answer", "1", "--comment", "Yes.")
-        held = send(hook, claude("SubagentStop", agent_id="a1", stop_hook_active=False))
-        let = send(hook, claude("SubagentStop", agent_id="a1", stop_hook_active=True))
+        ending = {"agent_id": "a1", "last_assistant_message": "Asked."}
+        held = send(hook, claude("SubagentStop", stop_hook_active=False, **ending))
+        let = send(hook, claude("SubagentStop", stop_hook_active=True, **ending))
     assert json.loads(held)["hookSpecificOutput"]["hookEventName"] == "SubagentStop"
     assert context(held) == (
         '<answer item="2" from="operator" question="1">\n'

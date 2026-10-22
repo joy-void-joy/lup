@@ -1618,6 +1618,22 @@ BOTH = "The operator answered.\n\nAnd again."
             Heard(fits=10_000, event="turn-ended", session="s1", judged=True),
         ),
         (
+            payload(
+                Path("/w"),
+                "SubagentStop",
+                agent_id="a1",
+                last_assistant_message="Done.",
+            ),
+            Heard(
+                fits=10_000,
+                event="conversation-ended",
+                session="s1",
+                agent="a1",
+                judged=True,
+                said="Done.",
+            ),
+        ),
+        (
             payload(Path("/w"), "SubagentStop", agent_id="a1"),
             Heard(
                 fits=10_000,
@@ -1625,6 +1641,7 @@ BOTH = "The operator answered.\n\nAnd again."
                 session="s1",
                 agent="a1",
                 judged=True,
+                stopped=True,
             ),
         ),
     ],
@@ -1900,6 +1917,7 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
                 "cwd": "/w",
                 "hook_event_name": "SubagentStop",
                 "agent_id": "a1",
+                "last_assistant_message": "Found three.",
             }
         )
     )
@@ -1909,6 +1927,7 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
         session=session,
         agent="a1",
         judged=True,
+        said="Found three.",
     )
 
 
@@ -2031,13 +2050,17 @@ def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
         )
 
     assert claude.spawned(subagent("a1", "Explore")) == Spawned(
-        name="explore-auth", kind="Explore"
+        name="explore-auth", kind="Explore", handed=True
     )
     assert claude.spawned(subagent("a2", "general-purpose")) == Spawned(
-        parent="a1", kind="general-purpose"
+        parent="a1", kind="general-purpose", handed=True
     )
-    assert claude.spawned(subagent("a3", "Plan")) == Spawned(kind="Plan")
-    assert claude.spawned(subagent("a4", "fork")) == Spawned(kind="fork", guided=True)
+    assert claude.spawned(subagent("a3", "Plan")) == Spawned(kind="Plan", handed=True)
+    assert claude.spawned(subagent("a4", "fork")) == Spawned(
+        kind="fork", guided=True, handed=True
+    )
+    # Claude Code's own agents, a prompt's suggestion among them: no type, no record.
+    assert claude.spawned(subagent("a5", "")) == Spawned(internal=True, handed=True)
     assert claude.spawned(pre_tool_use(Path("/w"), "Bash", {"command": "ls"})) is None
 
 
@@ -2073,6 +2096,20 @@ def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
             }
         )
 
+    def ended(thread: str, own: Path, parent: Path) -> str:
+        return json.dumps(
+            {
+                "session_id": "root",
+                "cwd": "/w",
+                "hook_event_name": "SubagentStop",
+                "agent_id": thread,
+                "agent_type": "explorer",
+                "transcript_path": str(parent),
+                "agent_transcript_path": str(own),
+                "last_assistant_message": "Done.",
+            }
+        )
+
     child = rollout("th-a1", "root", "/root/explore_auth")
     grandchild = rollout("th-a2", "th-a1", "/root/explore_auth/grep_tokens")
     unnamed = rollout("th-a3", "root", None)
@@ -2085,11 +2122,14 @@ def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
     )
 
     assert codex.spawned(subagent("th-a1", child)) == Spawned(
-        name="explore_auth", kind="explorer", guided=True
+        name="explore_auth", kind="explorer", guided=True, handed=True
     )
-    assert codex.spawned(subagent("th-a2", grandchild)) == Spawned(
-        name="grep_tokens", parent="th-a1", kind="explorer", guided=True
+    grandchilds = Spawned(
+        name="grep_tokens", parent="th-a1", kind="explorer", guided=True, handed=True
     )
+    assert codex.spawned(subagent("th-a2", grandchild)) == grandchilds
+    # First heard at its end, which names its parent's rollout and its own.
+    assert codex.spawned(ended("th-a2", grandchild, child)) == grandchilds
     explorer = Spawned(kind="explorer", guided=True)
     assert codex.spawned(subagent("th-a3", unnamed)) == explorer
     assert codex.spawned(subagent("th-a4", None)) == explorer
