@@ -286,8 +286,12 @@ class State(Wire):
 
 
 class OwnSettings(Wire):
-    """What a launch reads of the operator's own Claude Code settings: which session settings they set themselves."""
+    """What a launch reads of the operator's own Claude Code settings: which session settings they set themselves, and the model their `/model` saved."""
 
+    model: str | None = None
+    """The model `/model` saved, by its alias or its name, `[1m]` after it for
+    the long context (`model-config`, *Setting your model*); none where they
+    saved none, and Claude Code runs its default."""
     subagent_prompt_cache_ttl: Literal["5m", "1h"] | None = None
     auto_memory_enabled: bool | None = None
     idle_compaction: bool | None = None

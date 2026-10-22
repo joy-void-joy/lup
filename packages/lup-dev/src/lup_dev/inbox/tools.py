@@ -21,7 +21,9 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   item in a line, the latest up to the call's `limit`, narrowed by `since` and
   `until` as `judged` is (`lup_dev.listing`), and the agent's own read whole;
 - `withdraw` takes back a message or question the agent sent that the
-  operator needn't see, with its reason: the agent's workflow is its own.
+  operator needn't see, with its reason: the agent's workflow is its own;
+- `reply` answers the operator's comments by their ids, several in one call,
+  each kept on their item as a thread (`docs/inbox.md`, *Replying by id*).
 
 A tool's docstring's first line is its summary, 50 characters at most, which the
 guidance lists (`launch/guidance.py`); the rest is its description, which the
@@ -44,10 +46,12 @@ from lup_dev.inbox.delivery import (
     body,
     clocked,
     opening,
+    replied_to,
     standing,
     what,
     who,
 )
+from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.store import (
     Answered,
     Conversation,
@@ -65,6 +69,8 @@ from lup_dev.inbox.store import (
     Waiting,
     cited,
 )
+from lup_dev.inbox.tags import Tag
+from lup_dev.inbox.threads import Replying, anchors, parts_of
 from lup_dev.listing import Span, latest, unlisted
 
 if TYPE_CHECKING:
@@ -136,6 +142,14 @@ class Reading(Span):
             "or that was sent to you. Left out, the items are listed, a line each."
         ),
     )
+    part: str | None = Field(
+        default=None,
+        description=(
+            "One part to read alone, by its id (`414.3`): of an item you sent, "
+            "one of its Markdown blocks; of one sent to you, the operator's words "
+            "there, or a reply of yours. With it, `number` is left out."
+        ),
+    )
     every: bool = Field(
         default=False,
         description=(
@@ -148,6 +162,28 @@ class Reading(Span):
         description=(
             "How many items to list at most, the latest. Those left out are counted."
         ),
+    )
+
+
+class Answering(Model):
+    """One reply: what it answers, by its id, and its words."""
+
+    to: str = Field(
+        description=(
+            "The id of what it answers, as the tag carried it (`546.2`): a comment "
+            "or reply of the operator's in a review, a message or an answer sent "
+            "to you."
+        )
+    )
+    text: str = Field(description="Your reply to it, in full.")
+
+
+class Replies(Model):
+    """Your replies, each to a part of the operator's by its id."""
+
+    replies: list[Answering] = Field(
+        min_length=1,
+        description="Each reply, in the order you'd have them read.",
     )
 
 
@@ -379,6 +415,12 @@ class Speaker(Model, arbitrary_types_allowed=True):
         still comes through `wait_inbox` and beside your calls.
         """
         items = self.delivery.inbox.about(self.party.repository)
+        if reading.part is not None:
+            try:
+                wanted = PartId.parsed(reading.part)
+            except ValueError as unread:
+                return Said(text=f"Not read: {unread}")
+            return Said(text=self.part(wanted, items))
         if reading.number is not None:
             return Said(text=self.whole(reading.number, items))
         window = reading.window(self.delivery.clock.now())
@@ -445,15 +487,89 @@ class Speaker(Model, arbitrary_types_allowed=True):
         if self.party in (item.recipient, item.addressed):
             return f"{self.delivery.said(item)}\n\nIt's {standing(item)}."
         if item.sender == self.party:
+            parts = "\n".join(
+                Tag(
+                    name="part", attributes={"id": each.id.said()}, parts=[each.text]
+                ).written()
+                for each in parts_of(item, body(item))
+            )
             return (
                 f"{cited(number)}, {what(item)} you sent to {who(item.recipient)} at "
-                f"{clocked(item.made)}, {standing(item)}:\n{body(item)}"
+                f"{clocked(item.made)}, {standing(item)}:\n{parts}"
             )
         return (
             f"{cited(number)} is {what(item)} from {who(item.sender)} to "
             f"{who(item.recipient)}, which isn't yours: only your own items are read "
             f"whole. Its first line: {opening(item)}"
         )
+
+    def part(self, wanted: PartId, items: list[Item]) -> str:
+        """Say part `wanted` of its item, where the item is this conversation's own (`whole`): a block of an item it sent, as a `<part>` tag; the operator's words there in one sent to it, as the item's tag carried them; a reply of its own, as `<reply>`. One that isn't there is said."""
+        item = next((each for each in items if each.number == wanted.item), None)
+        if item is None or self.party not in (
+            item.recipient,
+            item.addressed,
+            item.sender,
+        ):
+            return self.whole(wanted.item, items)
+        if item.sender == self.party:
+            found = next(
+                (each for each in parts_of(item, body(item)) if each.id == wanted), None
+            )
+            if found is None:
+                return f"{cited(wanted.item)} has no part {wanted.cited()}."
+            return Tag(
+                name="part", attributes={"id": wanted.said()}, parts=[found.text]
+            ).written()
+        anchor = next((each for each in anchors(item) if each.id == wanted), None)
+        if anchor is not None:
+            where = {} if anchor.item is None else {"on": str(anchor.item)}
+            return Tag(
+                name="part",
+                attributes={"id": wanted.said(), **where},
+                parts=[anchor.text],
+            ).written()
+        reply = next(
+            (each for each in item.replies if each.number == wanted.part), None
+        )
+        if reply is not None:
+            return Tag(
+                name="reply",
+                attributes={"id": wanted.said(), "to": reply.to.said()},
+                parts=[reply.text],
+            ).written()
+        return f"{cited(wanted.item)} has no part {wanted.cited()}."
+
+    @lup_tool
+    async def reply(self, replying: Replies) -> Said:
+        """Reply to the operator's comments, each by its id.
+
+        Each `<reply id="546.2">` or `<comment id>` in a review, a message or
+        an answer sent to you can be answered by its id, and one call carries
+        every reply of a round. Each is kept on the operator's item under what
+        it answers, never as an item of its own, and the dashboard shows it
+        there, under their comment, so the exchange reads as a thread: the
+        item of yours their comment was on comes back before them with the
+        thread, and their next comment on your reply reaches you as an `<on>`
+        naming the reply's id. An id naming no part, a comment on another
+        agent's item, or a reply of your own is refused, naming what you may
+        answer, and nothing of the call is kept. What answers no point of
+        theirs is your turn's last words, which reach them as a note; `note`
+        is for what they didn't say.
+        """
+        try:
+            replies = [
+                Replying(to=PartId.parsed(each.to), text=each.text)
+                for each in replying.replies
+            ]
+            kept = await self.delivery.replied_by(self.party, replies)
+        except (ValueError, InboxError) as refused:
+            return Said(text=f"Not replied: {refused}")
+        said = [
+            replied_to([reply], self.delivery.anchored(self.party, each))
+            for reply, each in zip(kept, replies, strict=True)
+        ]
+        return Said(text=f"Your replies are with the operator: {'; '.join(said)}.")
 
     def tools(self) -> list[AgentTool]:
         """Return the inbox's tools, each calling this conversation's function: the speaking tools, as the library serves them, then the inbox's own, as declared (`bound`)."""

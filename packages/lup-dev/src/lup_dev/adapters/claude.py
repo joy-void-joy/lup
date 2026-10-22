@@ -228,9 +228,10 @@ from pydantic.alias_generators import to_camel
 import lup
 from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
-from lup.sessions.terminal import Cli, Hook
+from lup.adapters.claude.terminal import own_settings
+from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
-from lup.types import JsonObject, Model, Settings
+from lup.types import JsonObject, Model, MutableModel, Settings
 from lup_dev.adapters import Adapter, Pushing
 from lup_dev.host.courier import Heard, Spawned, Telling
 from lup_dev.host.records import (
@@ -239,7 +240,10 @@ from lup_dev.host.records import (
     Reader,
     Record,
     Records,
+    Status,
+    Task,
     Transcript,
+    Usage,
     within,
 )
 from lup_dev.host.records import Said as Spoken
@@ -1325,11 +1329,12 @@ class TextBlock(Model, extra="ignore"):
 
 
 class ToolUse(Model, extra="ignore"):
-    """A call to a tool, by its name, and its id, which the call's hooks carry as `tool_use_id`."""
+    """A call to a tool, by its name, its id, which the call's hooks carry as `tool_use_id`, and its input, read for the calls that write the task list."""
 
     type: Literal["tool_use"]
     name: str
     id: str | None = None
+    input: JsonObject = {}
 
 
 class ToolResult(Model, extra="ignore"):
@@ -1337,6 +1342,73 @@ class ToolResult(Model, extra="ignore"):
 
     type: Literal["tool_result"]
     tool_use_id: str
+
+
+class TaskMade(Model, extra="ignore"):
+    """A task as `TaskCreate`'s result names it: its id, numbered in the session's list, and its subject."""
+
+    id: str
+    subject: str
+
+
+class ToolResulted(Model, extra="ignore"):
+    """What a `user` line keeps of a call's result beyond its text (`toolUseResult`): the task a `TaskCreate` made, where it's one."""
+
+    task: TaskMade | None = None
+
+
+class TaskCreated(
+    Model, extra="ignore", alias_generator=to_camel, populate_by_name=True
+):
+    """`TaskCreate`'s input: the task's subject, and what it says while in progress."""
+
+    subject: str
+    active_form: str | None = None
+
+
+class TaskUpdated(
+    Model, extra="ignore", alias_generator=to_camel, populate_by_name=True
+):
+    """`TaskUpdate`'s input: the task, by its id, and what changes of it: its status, `deleted` taking it off the list, its subject, or what it says while in progress."""
+
+    task_id: str
+    status: Status | Literal["deleted"] | None = None
+    subject: str | None = None
+    active_form: str | None = None
+
+
+class Todo(Model, extra="ignore", alias_generator=to_camel, populate_by_name=True):
+    """One entry of `TodoWrite`'s list: what's to do, where it stands, and what it says while in progress."""
+
+    content: str
+    status: Status
+    active_form: str | None = None
+
+
+class TodosWritten(Model, extra="ignore"):
+    """`TodoWrite`'s input: the whole list, which replaces the one before."""
+
+    todos: list[Todo]
+
+
+class Counted(Model, extra="ignore"):
+    """What a reply's `usage` counts of its input: the tokens read anew, those written to the cache, and those read from it, which together are the context the reply was made in."""
+
+    input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+
+    def used(self) -> int:
+        """Return the tokens the context held at the reply: each part of its input.
+
+        >>> Counted(input_tokens=2, cache_creation_input_tokens=14149, cache_read_input_tokens=8077).used()
+        22228
+        """
+        return (
+            self.input_tokens
+            + self.cache_creation_input_tokens
+            + self.cache_read_input_tokens
+        )
 
 
 class OtherBlock(Model, extra="ignore"):
@@ -1367,6 +1439,20 @@ class UserLine(Model, extra="ignore", alias_generator=to_camel):
     is_compact_summary: bool = False
     is_sidechain: bool = False
     cwd: Path | None = None
+    tool_use_result: ToolResulted | None = None
+    """What the line keeps of the result it carries, where it carries one."""
+
+    def answers(self) -> list[str]:
+        """Return the ids of the calls whose results the line carries."""
+        match self.message.content:
+            case str():
+                return []
+            case blocks:
+                return [
+                    block.tool_use_id
+                    for block in blocks
+                    if isinstance(block, ToolResult)
+                ]
 
     def operators(self) -> str | None:
         """Return the operator's words in it; none where it holds none of theirs.
@@ -1394,9 +1480,13 @@ class UserLine(Model, extra="ignore", alias_generator=to_camel):
 
 
 class AssistantMessage(Model, extra="ignore"):
-    """An assistant line's message: its parts."""
+    """An assistant line's message: its parts, the model that made it, and what its input counted."""
 
     content: list[Block] = []
+    model: str | None = None
+    """The model, as the API names it: without the `[1m]` the operator's
+    settings may add, so the window isn't read from it (`window`)."""
+    usage: Counted | None = None
 
 
 class AssistantLine(Model, extra="ignore", alias_generator=to_camel):
@@ -1460,7 +1550,18 @@ type Line = Annotated[
 
 
 class ClaudeTranscripts(Model, Reader):
-    """Claude Code's records, read: a session's file per session under `projects/<folder>/`, its subagents' in a folder beside it."""
+    """Claude Code's records, read: a session's file per session under `projects/<folder>/`, its subagents' in a folder beside it; each conversation's context from its last reply, in the window the operator's `settings` choose."""
+
+    settings: Path | None = None
+    """The operator's own settings file, whose model says the window; none
+    reads no window, as for a copy of the records."""
+    window: int = 200_000
+    """The context window of Claude's models, in tokens, but for the long one."""
+    long: str = "[1m]"
+    """What the operator's settings add after a model's name to choose its long
+    context (`model-config`, *Setting your model*)."""
+    long_window: int = 1_000_000
+    """The long context's window, in tokens."""
 
     @override
     def sessions(self, copies: Path) -> list[Path]:
@@ -1474,6 +1575,11 @@ class ClaudeTranscripts(Model, Reader):
         # A subagent's own record, `<session>/subagents/agent-<id>.jsonl`, is all
         # sidechain; a session's own is its main line.
         sidechain = record.parent.name == "subagents"
+        own = [
+            each
+            for each in lines
+            if isinstance(each, AssistantLine) and each.is_sidechain == sidechain
+        ]
         return Transcript(
             runtime=Claude().name(),
             session=record.stem,
@@ -1482,7 +1588,131 @@ class ClaudeTranscripts(Model, Reader):
             entries=[
                 entry for each in lines for entry in entries(each, sidechain=sidechain)
             ],
+            usage=self.usage(own),
+            tasks=tasks(lines),
         )
+
+    def usage(self, own: list[AssistantLine]) -> Usage | None:
+        """Return what the context held at the last of `own`, the conversation's replies, that counted its input; none where none did."""
+        counted = [each for each in own if each.message.usage is not None]
+        if not counted:
+            return None
+        last = counted[-1].message
+        return Usage(
+            used=last.usage.used() if last.usage is not None else 0,
+            window=self.windowed(self.model()),
+            model=last.model,
+        )
+
+    def windowed(self, model: str | None) -> int | None:
+        """Return the context window of the model the operator's settings name: the long one where the name ends `[1m]`, else the usual; none where they name none, Claude Code running its default.
+
+        The record names each reply's model without the suffix, so the window is
+        read from the settings, which the launch applies (`--setting-sources
+        user`): a model changed there mid-session reads as it stands.
+
+        >>> reading = ClaudeTranscripts()
+        >>> reading.windowed("opus[1m]"), reading.windowed("sonnet"), reading.windowed(None)
+        (1000000, 200000, None)
+        """
+        if model is None:
+            return None
+        return self.long_window if model.endswith(self.long) else self.window
+
+    def model(self) -> str | None:
+        """Return the model the operator's settings choose; none where they choose none, or there are no settings to read."""
+        if self.settings is None:
+            return None
+        try:
+            return own_settings(self.settings).model
+        except TerminalError:
+            return None
+
+
+class Replay(MutableModel):
+    """The task list as the calls of a record so far left it, and the `TaskCreate`s waiting for their result to number them."""
+
+    kept: dict[str, Task] = {}
+    creating: dict[str, TaskCreated] = {}
+    """By the id of the call, until its result is read."""
+
+    def take(self, line: Line) -> None:
+        """Make what `line` does to the list: a call that writes it, or the result numbering a task created."""
+        match line:
+            case AssistantLine(message=message):
+                for block in message.content:
+                    if isinstance(block, ToolUse):
+                        self.kept = self.written(block)
+            case (
+                UserLine(tool_use_result=ToolResulted(task=TaskMade() as made)) as user
+            ):
+                for answered in user.answers():
+                    created = self.creating.pop(answered, None)
+                    if created is not None:
+                        self.kept[made.id] = Task(
+                            id=made.id,
+                            subject=made.subject,
+                            status="pending",
+                            active=created.active_form,
+                        )
+            case _:
+                pass
+
+    def written(self, call: ToolUse) -> dict[str, Task]:
+        """Return the list as `call` leaves it, noting a `TaskCreate` until its result numbers it; a call whose input doesn't read as its tool's leaves it as it is."""
+        try:
+            match call.name:
+                case "TaskCreate" if call.id is not None:
+                    self.creating[call.id] = TaskCreated.model_validate(call.input)
+                case "TaskUpdate":
+                    return updated(self.kept, TaskUpdated.model_validate(call.input))
+                case "TodoWrite":
+                    todos = TodosWritten.model_validate(call.input).todos
+                    return {
+                        str(at): Task(
+                            id=str(at),
+                            subject=each.content,
+                            status=each.status,
+                            active=each.active_form,
+                        )
+                        for at, each in enumerate(todos, start=1)
+                    }
+                case _:
+                    pass
+        except ValidationError:
+            return self.kept
+        return self.kept
+
+
+def tasks(lines: list[Line]) -> list[Task]:
+    """Replay the task list from the calls that wrote it, and return it as it stands at the record's end.
+
+    `TaskCreate` adds an entry, numbered by its result (`TaskMade`), so a
+    subagent's, which shares its session's list, takes the number the list
+    gave it; `TaskUpdate` changes one, `deleted` taking it off; `TodoWrite`
+    replaces the whole list, its entries numbered in order.
+    """
+    replay = Replay()
+    for line in lines:
+        replay.take(line)
+    return list(replay.kept.values())
+
+
+def updated(kept: dict[str, Task], change: TaskUpdated) -> dict[str, Task]:
+    """Return the task list `kept` with `change` made to the task it names, or as it was where the list has no such task."""
+    task = kept.get(change.task_id)
+    if task is None:
+        return kept
+    if change.status == "deleted":
+        return {key: each for key, each in kept.items() if key != change.task_id}
+    changed = task.model_copy(
+        update={
+            "status": task.status if change.status is None else change.status,
+            "subject": task.subject if change.subject is None else change.subject,
+            "active": task.active if change.active_form is None else change.active_form,
+        }
+    )
+    return {**kept, change.task_id: changed}
 
 
 def parsed(record: Path) -> Iterator[Line]:
@@ -1583,5 +1813,5 @@ def adapter() -> Adapter:
         channel=ClaudeChannel(),
         agent=agent,
         records=ClaudeRecords(directory=ClaudeLayout.of(ClaudeSettings()).directory),
-        reader=ClaudeTranscripts(),
+        reader=ClaudeTranscripts(settings=ClaudeLayout.of(ClaudeSettings()).settings),
     )

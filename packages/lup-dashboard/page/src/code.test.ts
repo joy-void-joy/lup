@@ -222,11 +222,19 @@ describe("the judge's reading", () => {
                     side: "after",
                     api: { kind: "function-added", name: "Client.tell" },
                 },
+                // A kind the judge no longer finds, which items from copies before keep.
+                {
+                    name: "public-api",
+                    taken: "flagged",
+                    line: 6,
+                    side: "after",
+                    api: { kind: "signature-changed", name: "Client.ask" },
+                },
             ],
             findings: [{ rule: "regex", message: "`re` parses\nwith a pattern", steer: "", start: 5, end: 6, taken: "told" }],
         };
         const laid = shown(changed(numbered(8, { 2: "two", 3: "three", 4: "four", 5: "five", 6: "six" }), reading));
-        expect(laid.header).toBe("core.py · changed · +5 −5 · adds an ignore · public API: +Room +Client.tell · told: regex");
+        expect(laid.header).toBe("core.py · changed · +5 −5 · adds an ignore · public API: +Room +Client.tell ~Client.ask · told: regex");
         expect(laid.automatic).toBe(false);
         expect(laid.whole).toBe(false);
         expect(laid.matters.map((each) => [laid.rows[each.row]!.text, each.notes])).toEqual([
@@ -234,7 +242,7 @@ describe("the judge's reading", () => {
             ["three", [{ taken: "flagged", said: "public API: adds the class `Room`" }]],
             ["four", [{ taken: "held", said: "adds an ignore" }]],
             ["five", [{ taken: "told", said: "regex: `re` parses with a pattern" }]],
-            ["six", []],
+            ["six", [{ taken: "flagged", said: "public API: changes the signature of `Client.ask`" }]],
         ]);
     });
 

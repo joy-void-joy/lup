@@ -1,12 +1,13 @@
 // One conversation laid out as one text to read and move through: the
 // operator's words and the agent's, each run of calls in a line, the items of
-// lup's inbox it sent and was sent, what the operator sent it from here among
-// them, each in a line with its text folded under it, and their comments on the
-// agent's words, each under the line it's on, with their message on the whole
-// last. What came before their last words folds. It grows at its end as the
-// conversation does, what's before staying where it was. Pure: the editor
-// (`Conversation.tsx`) draws it, lets the comments be written, and keeps the
-// reader where they are as it grows (`docs/dashboard.md`, *The conversation*).
+// lup's inbox it sent and was sent, what the operator sent it from the review
+// among them, each in a line with its text folded under it, and their remarks
+// on the agent's words, each under the line it's on. What came before their
+// last words folds. It grows at its end as the conversation does, what's before
+// staying where it was. Pure: the review lays it into an agent's trace and
+// conversation drawers (`review.ts`), the trace from the operator's last words
+// on, and keeps the reader where they are as it grows (`docs/dashboard.md`,
+// *The drawers*).
 import { since } from "./agents";
 import {
     calls,
@@ -14,7 +15,6 @@ import {
     kept,
     lastOf,
     passage,
-    saying,
     shownIn,
     spoken,
     starts as startsOf,
@@ -30,13 +30,12 @@ import type { components } from "./generated/api";
 export type Entry = components["schemas"]["Entry"];
 export type Item = components["schemas"]["Item"];
 export type Exchange = components["schemas"]["Exchange"];
-export type Passage = components["schemas"]["Passage"];
 type Party = components["schemas"]["Conversation"];
 
-/** A comment of the operator's: on a line or a passage of what the agent said at step `step`; or, with no step, their message on the conversation whole. */
+/** A comment of the operator's on a line or a passage of what the agent said at step `step`: what the review's remark on the conversation holds of it (`Remark`, `review.ts`). */
 export interface Remark {
-    step: number | null;
-    quote: Quote | null;
+    step: number;
+    quote: Quote;
     text: string;
 }
 
@@ -71,9 +70,9 @@ export interface Whose {
 
 /**
  * What a line no comment is on shows: the summary of what folds, the operator's words, a run of calls, an item the
- * conversation sent or one it was sent, a line of an item's text, or the line the operator's message is under.
+ * conversation sent or one it was sent, or a line of an item's text.
  */
-export type Kind = "summary" | "you" | "agent" | "calls" | "item-from" | "item-to" | "item-text" | "message";
+export type Kind = "summary" | "you" | "agent" | "calls" | "item-from" | "item-to" | "item-text";
 
 /** A line no comment is on. */
 export interface Aside extends Span {
@@ -108,10 +107,8 @@ export interface Laid {
     items: Placed[];
     /** Where each thing said starts: the operator's words, the agent's, an item. */
     turns: number[];
-    /** The conversation's last line, before the operator's message. */
+    /** The conversation's last line. */
     last: Span | null;
-    /** The line the operator's message is under, where they're writing one. */
-    message: Span | null;
 }
 
 /** Where an item goes among the steps: just after the call that made it, where the record holds it; after the steps the conversation had when it was sent from here; else by when it was told, or made. */
@@ -366,9 +363,6 @@ function counted(count: number, one: string): string {
     return `${count} ${one}${count === 1 ? "" : "s"}`;
 }
 
-/** The line the operator's message is under, at the end. */
-export const MESSAGE = "── your message ──";
-
 /** What a conversation shows beside its steps: the items of lup's inbox it exchanged, the messages sent to it from here among them, said as to whose conversation it is. */
 export interface Beside {
     sent: Sent[];
@@ -377,14 +371,16 @@ export interface Beside {
 }
 
 /**
- * Lay a conversation out as one text: each step in order, the operator's words after `you:`, the agent's as they
- * are, each run of calls in one line; each item of lup's inbox it exchanged in a line among them, its text folded
- * under it (`merged`); under each line of the agent's words, the comments on it; then the operator's message on the
- * whole, under its line. What came before `earlier` folds under a summary line. Laid out again with more steps, or an
- * item arriving, everything before the last line stays as it was: what arrives is added after it.
+ * Lay a conversation out as one text: each step in order, `entries` being the steps from step `first` on, the
+ * operator's words after `you:`, the agent's as they are, each run of calls in one line; each item of lup's inbox it
+ * exchanged in a line among them, its text folded under it (`merged`); under each line of the agent's words, the
+ * comments on it. What came before `earlier` folds under a summary line. Laid out again with more steps, or an item
+ * arriving, everything before the last line stays as it was: what arrives is added after it.
  */
-export function laid(entries: Entry[], beside: Beside, talk: Talk, earlier: Earlier): Laid {
-    const turns = merged(entries, inboxed(beside.exchanged, beside.sent, beside.whose));
+export function laid(entries: Entry[], beside: Beside, talk: Talk, earlier: Earlier, first: number = 0): Laid {
+    const turns = merged(entries, inboxed(beside.exchanged, beside.sent, beside.whose)).map((turn) =>
+        "entry" in turn ? { ...turn, step: turn.step + first } : turn,
+    );
     const rows: string[] = [];
     let length = 0;
     const words: Words[] = [];
@@ -404,7 +400,6 @@ export function laid(entries: Entry[], beside: Beside, talk: Talk, earlier: Earl
         return span;
     };
     const comments = talk.comments.map((comment, at) => ({ comment, at }));
-    const said = new Set(turns.flatMap((each) => ("entry" in each && each.entry.kind === "said" && each.entry.by === "agent" ? [each.step] : [])));
     const writeBlocks = (shown: { comment: Remark; at: number }[]) => {
         for (const { comment, at } of shown) {
             const span = write(comment.text);
@@ -499,11 +494,7 @@ export function laid(entries: Entry[], beside: Beside, talk: Talk, earlier: Earl
             ? null
             : { key: "earlier", summary, from: summary.to, to: foldTo, closed: true };
 
-    // The message on the whole, and any comment on words no longer laid out, last, under the message's line.
-    const closing = comments.filter(({ comment }) => comment.step === null || !said.has(comment.step));
-    const message = closing.length === 0 ? null : aside("message", MESSAGE);
-    writeBlocks(closing);
-    return { text: rows.join("\n"), words, asides, blocks, fold, items, turns: starts, last, message };
+    return { text: rows.join("\n"), words, asides, blocks, fold, items, turns: starts, last };
 }
 
 /** Return what folds in a laid-out conversation: what came before the operator's last words first, then each item's text. */
@@ -528,11 +519,8 @@ export function blockAt(laidOut: Laid, position: number): Block | undefined {
     return laidOut.blocks.find((each) => position >= each.from && position <= each.to);
 }
 
-/** Return where a comment opened on the line at `position` goes: on that line of the agent's words, or the operator's message from its line; none on any other line. */
+/** Return where a comment opened on the line at `position` goes: on that line of the agent's words; none on any other line. */
 export function opened(laidOut: Laid, position: number): Remark | undefined {
-    if (laidOut.message !== null && position >= laidOut.message.from && position <= laidOut.message.to) {
-        return { step: null, quote: null, text: "" };
-    }
     const found = lineAt(laidOut, position);
     if (found === undefined) {
         return undefined;
@@ -553,52 +541,36 @@ export function quoted(laidOut: Laid, from: number, to: number): Remark | undefi
     return quote.end > quote.start ? { step: first.words.step, quote, text: "" } : undefined;
 }
 
-/** Return where a comment on the agent's words is about, in the text: the last character of what it quotes; none for the message. */
+/** Return where a comment on the agent's words is about, in the text: the last character of what it quotes; none where its step isn't laid out. */
 export function aboutAt(laidOut: Laid, comment: Remark): number | undefined {
     const words = laidOut.words.find((each) => each.step === comment.step);
-    if (words === undefined || comment.quote == null) {
+    if (words === undefined) {
         return undefined;
     }
     return shownIn(words.lines, lastOf(comment.quote), words.lines[0]?.start ?? 0);
 }
 
-/**
- * Return what's sent of the operator's comments, for lup to tell the agent (`SendItem`): each passage of its words
- * they replied to, with their reply, in the order they were said; then their message on the whole.
- */
-export function sending(talk: Talk): { text: string; passages: Passage[] } {
-    const comments = saying(talk.comments);
-    const quoted = comments
-        .filter((each) => each.step !== null && each.quote != null)
-        .sort((a, b) => (a.step ?? 0) - (b.step ?? 0) || (a.quote?.start ?? 0) - (b.quote?.start ?? 0));
-    const rest = comments.filter((each) => each.step === null || each.quote == null);
+/** Return `laidOut` moved by `by` in the text: each span of it where it is once the conversation is laid out after `by` characters, as a drawer lays it; its text is still its own, which the drawer replaces by the whole once that's laid out. */
+export function shifted(laidOut: Laid, by: number): Laid {
+    const span = <S extends Span>(each: S): S => ({ ...each, from: each.from + by, to: each.to + by });
+    const folding = (fold: Folding | null): Folding | null => (fold === null ? null : { ...span(fold), summary: span(fold.summary) });
     return {
-        passages: quoted.map((each) => ({ quote: each.quote?.text ?? "", text: each.text.trim() })),
-        text: rest.map((each) => each.text.trim()).join("\n\n"),
+        text: laidOut.text,
+        words: laidOut.words.map((each) => ({ ...each, lines: each.lines.map((line) => ({ ...span(line), start: line.start + by })), blocks: each.blocks.map(span) })),
+        asides: laidOut.asides.map(span),
+        blocks: laidOut.blocks.map(span),
+        fold: folding(laidOut.fold),
+        items: laidOut.items.map((each) => ({ ...each, line: span(each.line), fold: folding(each.fold) })),
+        turns: laidOut.turns.map((each) => each + by),
+        last: laidOut.last === null ? null : span(laidOut.last),
     };
 }
 
-/**
- * Say what's sent as the page shows it until its item is listed: each reply under the passage it quotes, set off
- * as a quotation is in a mail; then the message on the whole.
- */
-export function message(talk: Talk): string {
-    const { passages, text } = sending(talk);
-    const parts = passages.map((each) => {
-        const lines = each.quote.split("\n").map((line) => (line === "" ? ">" : `> ${line}`));
-        return `${lines.join("\n")}\n\n${each.text}`;
-    });
-    return [...parts, ...(text === "" ? [] : [text])].join("\n\n");
-}
-
-/** Where the reader is, as the conversation grows: on its last line, writing their message at its end, or anywhere else, where nothing they see moves. */
-export type Reading = "last" | "message" | "elsewhere";
+/** Where the reader is, as the conversation grows: on its last line, or anywhere else, where nothing they see moves. */
+export type Reading = "last" | "elsewhere";
 
 /** Return where the reader is with the cursor at `head`. */
 export function reading(laidOut: Laid, head: number): Reading {
-    if (laidOut.message !== null && head >= laidOut.message.from) {
-        return "message";
-    }
     const last = laidOut.last;
     return last === null || (head >= last.from && head <= last.to) ? "last" : "elsewhere";
 }

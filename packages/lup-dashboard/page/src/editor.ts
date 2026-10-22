@@ -19,8 +19,7 @@
 // letter those of a kind, within what the view says (in the review, the item the
 // cursor is in; in a conversation, everything); `zj` and `zk` go to the next
 // fold's start and the previous one's end, `[z` and `]z` to the start and the end
-// of the open fold the cursor is in (`folds.ts`). Space `h`, or Space `w` `h`,
-// goes to the agents' tree; `?` opens the list of every key, in place of vim's
+// of the open fold the cursor is in (`folds.ts`). `?` opens the list of every key, in place of vim's
 // search backward; once a chord is begun, as with Space, the view is told what's
 // pressed, to show what may follow. `"+` and `"*` are the system clipboard, and a
 // yank or a put the clipboard refused is said in the page's top line
@@ -33,8 +32,8 @@
 // margin (`margin.ts`; `Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
 // A fold may be inside another, as an item's text is inside what came before the
 // operator's last words: the fold keys act on the innermost the cursor is in.
-import { foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
-import { Annotation, EditorState, Facet, Prec, StateEffect, StateField, type Range } from "@codemirror/state";
+import { foldEffect, foldedRanges, syntaxTree, unfoldEffect } from "@codemirror/language";
+import { Annotation, EditorSelection, EditorState, Facet, Prec, StateEffect, StateField, type Range } from "@codemirror/state";
 import {
     Decoration,
     EditorView,
@@ -50,7 +49,7 @@ import { defineClipboard } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, foldEdge, levelled, nextFold } from "./folds";
 import { FOLD_KINDS, type FoldKind } from "./keys";
-import { continued, markdown } from "./markdown";
+import { continued, hiddenOn, markdown } from "./markdown";
 import { margin, placeheld, type Margined } from "./margin";
 
 /** What the vim keys and the editor's own events do, as a view stands: replaced at each render. */
@@ -65,8 +64,12 @@ interface Actions {
     matter: (forward: boolean) => void;
     written: (forward: boolean) => void;
     approve: (approved: boolean) => void;
-    back: () => void;
-    tree: () => void;
+    /** Space `A`: mark all of a "since you approved" drawer good. */
+    approveAll: () => void;
+    /** Space `l`: bring the latest into a "since you approved" drawer. */
+    latest: () => void;
+    /** `h` on a banner: turn the operator's switch to hold the agent's flagged writes; elsewhere it's vim's `h`, said by false. */
+    hold: () => boolean;
     list: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
     foldLevel: (opening: boolean, all: boolean) => void;
@@ -304,10 +307,10 @@ function boundOf(state: EditorState): Bound {
 let speaking: Bound | null = null;
 
 /**
- * Each chord Space leads in the views, as vim's keymap writes its keys, and the action it does: Space `p` parks an
- * item, leaving it for later; Space `z` and a letter, as vim's fold keys begin with `z`, opens every fold of its kind
- * in the item, Shift and the letter closing them; Space `h`, or Space `w` `h`, goes to the agents' tree. The list of
- * keys (`keys.ts`) says each of them.
+ * Each chord Space leads in the review, as vim's keymap writes its keys, and the action it does: Space `p` parks an
+ * item, leaving it for later; Space `A` marks a "since you approved" drawer good and Space `l` brings its latest in;
+ * Space `z` and a letter, as vim's fold keys begin with `z`, opens every fold of its kind in the item or the drawer,
+ * Shift and the letter closing them. The list of keys (`keys.ts`) says each of them.
  */
 export const SPACED: readonly (readonly [keys: string, action: string])[] = [
     ["<Space>c", "lupCommentWhole"],
@@ -315,9 +318,8 @@ export const SPACED: readonly (readonly [keys: string, action: string])[] = [
     ["<Space>p", "lupLater"],
     ["<Space>a", "lupApprove"],
     ["<Space>x", "lupDecline"],
-    ["<Space>r", "lupBack"],
-    ["<Space>h", "lupTree"],
-    ["<Space>wh", "lupTree"],
+    ["<Space>A", "lupApproveAll"],
+    ["<Space>l", "lupLatest"],
     ...FOLD_KINDS.filter((each) => each.chord).flatMap(({ kind, letter }) => [
         [`<Space>z${letter}`, `lupFoldOpen-${kind}`] as const,
         [`<Space>z${letter.toUpperCase()}`, `lupFoldClose-${kind}`] as const,
@@ -362,8 +364,14 @@ function mapKeys(): void {
     action("lupPreviousWritten", (actions) => actions.written(false));
     action("lupApprove", (actions) => actions.approve(true));
     action("lupDecline", (actions) => actions.approve(false));
-    action("lupBack", (actions) => actions.back());
-    action("lupTree", (actions) => actions.tree());
+    action("lupApproveAll", (actions) => actions.approveAll());
+    action("lupLatest", (actions) => actions.latest());
+    // `h` holds an agent's flagged writes on its banner, and moves left, as vim's `h` does, anywhere else.
+    action("lupHold", (actions, cm) => {
+        if (!actions.hold()) {
+            Vim.handleKey(cm, "<Left>", "mapping");
+        }
+    });
     action("lupKeys", (actions) => actions.list());
     // Vim's own fold keys, which its CodeMirror mode leaves unmapped, on CodeMirror's folds.
     action("lupFoldToggle", (actions) => actions.fold("toggle"));
@@ -397,6 +405,7 @@ function mapKeys(): void {
     const map = (keys: string, name: string, context: string) =>
         Vim.mapCommand(keys, "action", name, {}, { context });
     map("o", "lupCommentLine", "normal");
+    map("h", "lupHold", "normal");
     for (const [keys, name] of SPACED) {
         map(keys, name, "normal");
     }
@@ -696,6 +705,80 @@ const withinComment = EditorState.transactionFilter.of((transaction) => {
     return { selection: { anchor: Math.min(Math.max(head, block.from), block.to) }, scrollIntoView: true };
 });
 
+/**
+ * Return where vim's cursor rests once `state`'s selection is made, where it was put on a mark the Markdown hides
+ * (`hiddenOn`), which has no width to show it on: on the next character shown the way it came from `was`, as if the
+ * mark weren't there, or back where going on would leave the line, since outside `visual` mode a block cursor rests
+ * on a character and never on the line's end. In visual mode the cursor is the character before the head where the
+ * selection runs forward, as vim draws it, and the anchor stays. None where the cursor rests on a character shown
+ * already, or the line has none to rest on.
+ */
+export function pastHidden(state: EditorState, was: number, visual: boolean): EditorSelection | null {
+    const { main } = state.selection;
+    const ahead = main.anchor < main.head;
+    const at = ahead ? main.head - 1 : main.head;
+    const hidden = hiddenOn(state, at);
+    if (!hidden.some((each) => at >= each.from && at < each.to)) {
+        return null;
+    }
+    const line = state.doc.lineAt(at);
+    const last = visual && line.to < state.doc.length ? line.to : line.to - 1;
+    // The first character shown from `at` on, or back from it; none before the line's edge.
+    const shown = (step: 1 | -1): number | null => {
+        let position = at;
+        let within = hidden.find((each) => position >= each.from && position < each.to);
+        while (within !== undefined) {
+            position = step > 0 ? within.to : within.from - 1;
+            within = hidden.find((each) => position >= each.from && position < each.to);
+        }
+        return position < line.from || position > last ? null : position;
+    };
+    const forward = main.head >= was;
+    const rest = shown(forward ? 1 : -1) ?? shown(forward ? -1 : 1);
+    if (rest === null) {
+        return null;
+    }
+    if (main.empty) {
+        return EditorSelection.single(rest);
+    }
+    return EditorSelection.single(main.anchor, ahead ? rest + 1 : rest);
+}
+
+/** Return where vim's cursor rests in `view` past the hidden marks (`pastHidden`), from `was`, as vim stands; none where it rests already, or in insert, visual line or visual block mode. */
+function restingIn(view: EditorView, was: number): EditorSelection | null {
+    const mode = vimOf(view)?.state.vim;
+    if (mode === undefined || mode.insertMode || mode.visualLine || mode.visualBlock) {
+        return null;
+    }
+    return pastHidden(view.state, was, mode.visualMode);
+}
+
+/**
+ * Keep vim's cursor off the marks the Markdown hides: put on one, by a motion, a jump, a click, the text laid out anew
+ * or read further, it's moved past it once vim's key is done (`restingIn`), as a selection vim didn't make, so vim
+ * takes the cursor from the editor, as it does after a click. Vim's key may dispatch again after the selection, to
+ * scroll, so where it rests is read again as it's moved. Not in insert mode, where the cursor's line shows its marks
+ * and a thin cursor rests between characters, nor in visual line or block mode, whose selection vim keeps by lines or
+ * columns.
+ */
+const offHidden = EditorView.updateListener.of((update) => {
+    const reread = syntaxTree(update.startState) !== syntaxTree(update.state);
+    if (!update.selectionSet && !update.docChanged && !reread) {
+        return;
+    }
+    const was = update.startState.selection.main.head;
+    if (restingIn(update.view, was) === null) {
+        return;
+    }
+    const { view } = update;
+    queueMicrotask(() => {
+        const moved = restingIn(view, was);
+        if (moved !== null) {
+            view.dispatch({ selection: moved });
+        }
+    });
+});
+
 /** Return whether CodeMirror holds `fold` folded. */
 export function isFolded(state: EditorState, fold: Span): boolean {
     let found = false;
@@ -803,12 +886,12 @@ interface Config<D, C> {
     epoch: number;
     /** Whether the editor is shown: shown again, it takes the keyboard. */
     shownNow: boolean;
-    /** Give the keyboard to the agents' tree. */
-    tree: () => void;
     /** Open the list of every key (`?`). */
     list: () => void;
     /** Told the keys of a chord begun, as the list writes them (`␣`, `␣z`), each time they change: none once it's done. */
     pending?: (keys: string) => void;
+    /** Told each fold the operator opens, by its keys or a click, as a view reads what a drawer shows on opening it. */
+    unfolded?: (fold: Folding) => void;
     /** Whether the margin shows each fold's mark and the bars of those the cursor is in (`margin.ts`). */
     margin?: boolean;
     /** Say something in the page's top line, as why a yank didn't reach the clipboard. */
@@ -833,7 +916,12 @@ export interface Own<C> {
     /** Go to the next or previous line that matters, as the review's are by the judge's reading, opening what folds it on the way. */
     matter?: (forward: boolean) => void;
     approve?: (approved: boolean) => void;
-    back?: () => void;
+    /** Mark all of the "since you approved" drawer the cursor is in good, as Space `A` does; none where the view has none. */
+    approveAll?: () => void;
+    /** Bring the latest into the "since you approved" drawer the cursor is in, as Space `l` does. */
+    latest?: () => void;
+    /** Turn the operator's switch for the agent whose banner the cursor is on, and say whether it was on one. */
+    hold?: () => boolean;
     /** What's painted on the lines from `from` to `to` while they're in view, beyond what `draw` drew: a changed file's lines and their highlighting. */
     paint?: (from: number, to: number) => Range<Decoration>[];
     /** The folds `zr` opens (`opening`) or `zm` closes from `position`, or with `all` `zR` and `zM`; where none's said, those of every fold (`levelled`). */
@@ -885,6 +973,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     following.current = config.moved;
     const chording = useRef(config.pending);
     chording.current = config.pending;
+    const unfolding = useRef(config.unfolded);
+    unfolding.current = config.unfolded;
     // The draft's history, for `u`, Ctrl+R, `g-` and `g+`; and whether the comment being written has its step
     // already, so it's undone whole.
     const history = useRef<History<D>>(begun(config.draft));
@@ -918,6 +1008,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     drawSelection(),
                     onlyComments,
                     withinComment,
+                    offHidden,
                     EditorView.lineWrapping,
                     placeheld(margined),
                     config.margin === true ? margin(margined) : [],
@@ -1132,8 +1223,9 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 editor.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true });
             },
             approve: (approved) => own.approve?.(approved),
-            back: () => own.back?.(),
-            tree: config.tree,
+            approveAll: () => own.approveAll?.(),
+            latest: () => own.latest?.(),
+            hold: () => own.hold?.() ?? false,
             list: config.list,
             fold: (how) => {
                 const editor = view.current;
@@ -1184,6 +1276,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     return;
                 }
                 kept.current = keptFolds(shown.folds, update.startState, update.state, kept.current);
+                for (const fold of shown.folds) {
+                    if (isFolded(update.startState, fold) && !isFolded(update.state, fold)) {
+                        unfolding.current?.(fold);
+                    }
+                }
             },
             folds: () => shown.folds,
             chord: (keys) => chording.current?.(keys),

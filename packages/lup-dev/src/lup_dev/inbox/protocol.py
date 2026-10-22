@@ -33,11 +33,12 @@ from typing import Literal, override
 from lup.types import Model
 from lup_dev.git import Git
 from lup_dev.host.protocol import LaunchId, Reply, Request
-from lup_dev.host.records import Entry, Recorded, within
+from lup_dev.host.records import Entry, Recorded, Task, Transcript, Usage, within
 from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.inbox import context
 from lup_dev.inbox.delivery import Delivery, body
 from lup_dev.inbox.store import (
+    Answer,
     Approval,
     ChangedFile,
     Conversation,
@@ -46,8 +47,10 @@ from lup_dev.inbox.store import (
     HeldChange,
     InboxError,
     Item,
+    Message,
     Operator,
     Passage,
+    Review,
     Ruling,
     Talk,
     Waiting,
@@ -278,6 +281,11 @@ class Items(Reply):
     reviewed: datetime | None = None
     """When the operator's last reply was sent, from the review; none before
     their first: what came after it is new to them."""
+    answers: list[Item] = []
+    """The operator's own items answering those listed, a review, a reply or
+    an answer, with the replies the agents made on them (`Item.replies`): the
+    page lays each comment and the thread under it out under the line it's on
+    (`docs/dashboard.md`, *The review*)."""
 
 
 class Shown(Reply):
@@ -351,12 +359,17 @@ class Files(Reply):
 
 
 class Conversed(Reply):
-    """A conversation's steps, from step `since` on, and how many it has in all."""
+    """A conversation's steps, from step `since` on, and how many it has in all; what its context holds and its task list, as its record stands."""
 
     kind: Literal["inbox-conversation"] = "inbox-conversation"
     entries: list[Entry]
     since: int
     total: int
+    usage: Usage | None = None
+    """What its context held at its last reply; none where its record says
+    nothing of it."""
+    tasks: list[Task] = []
+    """Its task list as it stands; empty where it keeps none."""
 
 
 class Context(Reply):
@@ -407,18 +420,54 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
     @override
     async def answer(self, request: ListInbox) -> Reply:
         inbox = self.delivery.inbox
-        return Items(items=self.waiting(request), reviewed=inbox.reviewed())
+        waiting = self.waiting(request)
+        return Items(
+            items=waiting, reviewed=inbox.reviewed(), answers=self.answering(waiting)
+        )
 
     @override
     async def scoped(self, request: ListInbox, repository: Path) -> Reply:
         waiting = [each for each in self.waiting(request) if each.of(repository)]
-        return Items(items=waiting, reviewed=self.delivery.inbox.reviewed(repository))
+        return Items(
+            items=waiting,
+            reviewed=self.delivery.inbox.reviewed(repository),
+            answers=self.answering(waiting),
+        )
 
     def waiting(self, request: ListInbox) -> list[Item]:
         """Return the items waiting for the operator, made within `request`'s window."""
         window = request.window(self.delivery.clock.now())
         waiting = self.delivery.inbox.waiting(Operator())
         return [each for each in waiting if window.covers(each.made)]
+
+    def answering(self, items: list[Item]) -> list[Item]:
+        """Return the operator's items that answer any of `items`, oldest first, each the one sent to the item's sender: a review covering it with a comment on it, a reply to it, or an answer to it; what the threads under them are read from.
+
+        A review goes to each conversation it reaches as an item of its own,
+        each carrying every comment, so only the copy sent to the item's
+        sender answers it: the thread under the item is read once.
+        """
+        found = self.delivery.inbox.items
+
+        def answers(answer: Item, item: Item) -> bool:
+            if item.sender not in (answer.recipient, answer.addressed):
+                return False
+            match answer.reason:
+                case Review(comments=comments):
+                    return any(each.item == item.number for each in comments)
+                case Message(of=int() as of):
+                    return of == item.number
+                case Answer(question=question):
+                    return question == item.number
+                case _:
+                    return False
+
+        return [
+            found[number]
+            for number in sorted(found)
+            if found[number].sender == Operator()
+            and any(answers(found[number], item) for item in items)
+        ]
 
 
 class Showing(Model, Reading[ShowItem], arbitrary_types_allowed=True):
@@ -705,7 +754,7 @@ class ConversationShowing(
     @override
     async def answer(self, request: ShowConversation) -> Reply:
         read = await self.read(request)
-        return self.conversed(read.transcript.entries, request.since)
+        return self.conversed(read.transcript, request.since)
 
     @override
     async def scoped(self, request: ShowConversation, repository: Path) -> Reply:
@@ -718,7 +767,7 @@ class ConversationShowing(
         if ran is None or not within(ran, under):
             message = "the conversation isn't one of this repository's"
             raise InboxError(message)
-        return self.conversed(read.transcript.entries, request.since)
+        return self.conversed(read.transcript, request.since)
 
     async def read(self, request: ShowConversation) -> context.Read:
         """Read the conversation's record as it stands, off the event loop."""
@@ -730,9 +779,16 @@ class ConversationShowing(
             request.agent,
         )
 
-    def conversed(self, steps: list[Entry], since: int) -> Conversed:
-        """Return the conversation's steps after the first `since`."""
-        return Conversed(entries=steps[since:], since=since, total=len(steps))
+    def conversed(self, transcript: Transcript, since: int) -> Conversed:
+        """Return the conversation's steps after the first `since`, with what its context holds and its task list."""
+        steps = transcript.entries
+        return Conversed(
+            entries=steps[since:],
+            since=since,
+            total=len(steps),
+            usage=transcript.usage,
+            tasks=transcript.tasks,
+        )
 
 
 class DiffShowing(Model, Reading[ShowDiff], arbitrary_types_allowed=True):

@@ -454,6 +454,16 @@ export function revealing(state: EditorState): number | null {
     return inComment ? state.doc.lineAt(head).from : null;
 }
 
+/** Return what `decorate` hides on the line at `position` of `state`, in order: the stretches a cursor finds no character to rest on. */
+export function hiddenOn(state: EditorState, position: number): Span[] {
+    const line = state.doc.lineAt(position);
+    const revealed = revealing(state);
+    return decorate(state, [{ from: line.from, to: line.to }], (at) => at === revealed)
+        .filter((each) => each.value === HIDDEN)
+        .map((each) => ({ from: each.from, to: each.to }))
+        .sort((a, b) => a.from - b.from);
+}
+
 /**
  * What the Markdown shows on the lines in view, drawn again as the view scrolls, the text changes, more of it is read,
  * the sources are laid out anew, or the cursor moves, since the line it's on in a comment shows its marks.

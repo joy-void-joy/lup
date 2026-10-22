@@ -64,6 +64,35 @@ type Entry = Annotated[Said | Called, Field(discriminator="kind")]
 """One step of a session, in order: something said, or a tool called."""
 
 
+class Usage(Model):
+    """What a conversation's context holds, as its runtime last recorded a reply: the tokens in use, and the window they're in where it's known."""
+
+    used: int
+    """The tokens in the context at the last reply: its input, the cached part
+    of it included, and on a runtime that counts it the output it added."""
+    window: int | None = None
+    """The model's context window, in tokens; none where neither the record
+    nor the runtime's settings say it."""
+    model: str | None = None
+    """The model, as the record names it."""
+
+
+type Status = Literal["pending", "in_progress", "completed"]
+"""Where an entry of a task list stands: both runtimes name the three states
+so."""
+
+
+class Task(Model):
+    """One entry of a conversation's task list, as its runtime keeps it."""
+
+    id: str
+    subject: str
+    status: Status
+    active: str | None = None
+    """What the entry says while it's in progress, where the runtime keeps a
+    present-tense form of it beside the subject; none where it keeps none."""
+
+
 class Transcript(Model):
     """One session as it was recorded: who said what, and the tools called between, in order."""
 
@@ -76,6 +105,12 @@ class Transcript(Model):
     directory: Path | None = None
     """Where it ran, as its record says."""
     entries: list[Entry] = []
+    usage: Usage | None = None
+    """What its context held at its last reply; none where the record says
+    nothing of it."""
+    tasks: list[Task] = []
+    """Its task list as it stands at the record's end, replayed from the calls
+    that wrote it; empty where it keeps none."""
 
     def started(self) -> datetime | None:
         """Return when its first timed step happened; none where none is timed."""

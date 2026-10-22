@@ -5,7 +5,7 @@ import { NodeProp } from "@lezer/common";
 import { describe, expect, it } from "vitest";
 
 import type { Span } from "./comments";
-import { continued, decorate, markdown, revealing, source, sourced, sources, treeOf, without, type Source } from "./markdown";
+import { continued, decorate, hiddenOn, markdown, revealing, source, sourced, sources, treeOf, without, type Source } from "./markdown";
 
 /** The lines of `text` from the one holding `first` to the one holding `last`, each with its line break, as a source is read from them. */
 function lined(text: string, first: string, last: string = first): Span[] {
@@ -146,6 +146,23 @@ describe("a construct's marks", () => {
         const inText = state.update({ selection: { anchor: text.indexOf("own") } }).state;
         expect(revealing(inText)).toBeNull();
         expect(hidden(inText, decorate(inText, WHOLE, () => false))).toEqual(["**", "**", "**", "**", "*", "*"]);
+    });
+
+    it("are what a cursor finds no character of on a line, in order, but on the line it reveals", () => {
+        const comment = "**bold** here";
+        const text = ["## Title", "an item's **own** *line*", comment, ""].join("\n");
+        const found = [
+            source("text", [...lined(text, "## Title"), ...lined(text, "an item's **own** *line*")]),
+            source("comment", [{ from: text.indexOf(comment), to: text.indexOf(comment) + comment.length }]),
+        ].flatMap((each) => (each === null ? [] : [each]));
+        const state = laid(text, found);
+        const spans = (at: number, where: EditorState = state) => hiddenOn(where, at).map((each) => where.sliceDoc(each.from, each.to));
+        expect(spans(text.indexOf("Title"))).toEqual(["## "]);
+        expect(spans(text.indexOf("own"))).toEqual(["**", "**", "*", "*"]);
+        expect(spans(text.indexOf("here"))).toEqual(["**", "**"]);
+        const inComment = state.update({ selection: { anchor: text.indexOf("here") } }).state;
+        expect(spans(text.indexOf("here"), inComment)).toEqual([]);
+        expect(spans(text.indexOf("own"), inComment)).toEqual(["**", "**", "*", "*"]);
     });
 });
 

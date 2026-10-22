@@ -47,6 +47,7 @@ from lup.tools import speaking
 from lup.types import Model, MutableModel
 from lup_dev.host.protocol import HostError
 from lup_dev.host.watch import Changes
+from lup_dev.inbox.parts import PartId
 from lup_dev.layout import InboxLayout
 from lup_dev.stored import read_model, write_model
 
@@ -127,7 +128,7 @@ class Message(Model):
     conversation's messages (`lup-dev inbox answer`)."""
     passages: list[Passage] = []
     """The passages of the conversation's words the operator replied to, from
-    where they read it (`docs/dashboard.md`, *The conversation*), in the
+    where they read it (`lup-dev inbox answer`), in the
     conversation's order: told before its words, each quoted with their reply."""
     ending: bool = False
     """Whether it's a session's last words of a turn, made a note by lup rather
@@ -423,11 +424,16 @@ class Quote(Model):
 
 
 class Comment(Model):
-    """A comment of the operator's on an item: on a passage of it, one of its decisions among them, or on it whole."""
+    """A comment of the operator's on an item: on a passage of it, one of its decisions among them, or on it whole; or, in a thread, on a reply the agent made to an earlier comment."""
 
     item: int
     quote: Quote | None = None
-    """The passage it's on; none for a comment on the item whole."""
+    """The passage it's on; none for a comment on the item whole. On a reply
+    (`on`), a passage of that reply's text, its offsets counted there."""
+    on: PartId | None = None
+    """The reply of the agent's it answers, by its id, where it continues a
+    thread (`docs/inbox.md`, *Replying by id*); none for a comment on the
+    item's own text."""
     text: str
 
 
@@ -438,8 +444,37 @@ class Letter(Model):
     text: str
 
 
+class Quoted(Model):
+    """Lines of a file as a comment quoted them, in the version of the file the comment was written on: so what changed since can be told when it reaches the agent."""
+
+    worktree: Path
+    path: Path
+    """The file, from the worktree's root."""
+    version: str
+    """git's id for the file's content as the comment was written on it."""
+    first: int
+    """The number of the first line quoted, counted from 1 in that version."""
+    lines: list[str]
+    """The lines quoted, in order, as that version held them."""
+
+
+class Remark(Model):
+    """A comment of the operator's in one of an agent's drawers in the review (`docs/dashboard.md`, *The drawers*): on a passage of its conversation, or on lines of its branch's code since they approved it, as they stood when it was written."""
+
+    to: Conversation
+    quote: Quote
+    """The passage, and where it is in the drawer as the page shows it."""
+    text: str
+    step: int | None = None
+    """The step of the conversation the passage is of, for a comment on its
+    words; none for one on code."""
+    code: Quoted | None = None
+    """The lines of the file the passage is, and their version, for a comment
+    on code; none for one on the conversation's words."""
+
+
 class Review(Model):
-    """The operator's reply, as they wrote it while reading: their comments on the items it covers, and their messages to agents.
+    """The operator's reply, as they wrote it while reading: their comments on the items it covers, their messages to agents, and their remarks in the agents' drawers.
 
     Every conversation it's sent to gets all of it, reading its own message
     and items first and the rest as context (`docs/dashboard.md`, *The
@@ -452,6 +487,8 @@ class Review(Model):
     comments: list[Comment] = []
     letters: list[Letter] = []
     """The messages it carries, each to its conversation."""
+    remarks: list[Remark] = []
+    """The comments it carries from the drawers, each to its conversation."""
 
 
 type Reason = Annotated[
@@ -519,10 +556,16 @@ type ApiKind = Literal[
     "class-removed",
     "function-added",
     "function-removed",
+    "signature-changed",
 ]
 """How a change touches what other code can depend on, as the judge finds it
 (`lup_dev.policy.surface`) and the review says it: a package root's name, a
-class, or a function or method, added or removed."""
+class, or a function or method, added or removed. `signature-changed` is one
+the judge doesn't find (`docs/judging-writes.md`, *The public-API ask*): copies
+before found it, and the holds and the files beside items they wrote keep it.
+Every value a stored model once accepted stays read: dropped, a copy approved
+later can't read a store the one before wrote, and `judged` refuses every
+call."""
 
 type Held = Literal["held", "flagged"]
 """How the declaration takes what a change asks: held for the operator's answer,
@@ -728,6 +771,18 @@ def ranked(reason: Reason) -> Rank:
             return Rank(name="waiting on you", order=0, notifies=True)
 
 
+class Reply(Model):
+    """One reply of an agent's, kept on the operator's item it answers, under the part it answers (`docs/inbox.md`, *Replying by id*)."""
+
+    number: int
+    """Its own place among the item's parts, after the operator's own, so it's
+    cited `@546.6` and the operator's next comment can be on it."""
+    to: PartId
+    """The part of the item it answers: a comment or a reply of the operator's."""
+    text: str
+    at: datetime
+
+
 class Item(Model):
     """One item in a party's inbox."""
 
@@ -736,6 +791,11 @@ class Item(Model):
     sender: Party
     recipient: Party
     """Whose inbox it's in, who's told it."""
+    replies: list[Reply] = []
+    """The replies its recipient made to its parts, in the order they came:
+    the threads under the operator's comments, which the dashboard shows there
+    and the operator's next comments continue (`docs/inbox.md`, *Replying by
+    id*). Only an item of the operator's takes any."""
     addressed: Conversation | None = None
     """Whom it was for, where it was passed on from a conversation that had
     ended; none where it wasn't."""
@@ -848,6 +908,9 @@ class Draft(Model):
     letters: list[Letter] = []
     """Messages to agents, each written under its agent's banner, sent with the
     rest of the reply whatever's parked."""
+    remarks: list[Remark] = []
+    """Comments written in the agents' drawers, each to its agent, sent with
+    the rest of the reply whatever's parked."""
     done: list[int] = []
     """Items read and taken off the list when the draft is sent, with no
     comment of their own."""
@@ -858,6 +921,10 @@ class Draft(Model):
     def written(self) -> list[Letter]:
         """Return the messages that say something, in order: those the draft sends."""
         return [each for each in self.letters if each.text.strip()]
+
+    def remarked(self) -> list[Remark]:
+        """Return the remarks that say something, in order: those the draft sends."""
+        return [each for each in self.remarks if each.text.strip()]
 
     def covered(self) -> list[int]:
         """Return the items the draft answers, in order: each with a comment or marked done, but for the parked ones."""

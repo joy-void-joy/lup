@@ -133,7 +133,7 @@ export function margin(margined: Margined): Extension[] {
 }
 
 /** The fold kinds whose placeholder says how many lines they hide: the others' summary lines say what they hide. */
-const COUNTED = new Set<FoldKind>(["item", "file", "body"]);
+const COUNTED = new Set<FoldKind>(["item", "file", "body", "tasks", "trace", "since", "conversation"]);
 
 /**
  * Return CodeMirror's folding, each placeholder drawn by the kind of the fold it stands for, of those `margined` says:

@@ -9,6 +9,8 @@ dependencies = [
     # Renders a launched session's guidance from the modules' sections.
     "jinja2>=3.1",
     "lup",
+    # Reads an item's text into its Markdown blocks, the parts an id names (`inbox/parts.py`).
+    "markdown-it-py>=4.2.0",
     "packaging>=26.3",
     "pydantic>=2.12",
     # The gate runs a project's tests on several workers (`catalog/gate.py`).

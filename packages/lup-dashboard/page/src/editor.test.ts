@@ -1,5 +1,5 @@
 import { foldEffect, foldState, unfoldEffect } from "@codemirror/language";
-import { EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState } from "@codemirror/state";
 import type { CodeMirrorV } from "@replit/codemirror-vim";
 import { describe, expect, it } from "vitest";
 
@@ -13,6 +13,7 @@ import {
     keptFolds,
     nextWritten,
     ownOf,
+    pastHidden,
     rewritten,
     SPACED,
     stepped,
@@ -24,7 +25,46 @@ import {
     type Pressed,
     type Typing,
 } from "./editor";
-import { CONVERSATION_KEYS, REVIEW_KEYS } from "./keys";
+import { REVIEW_KEYS } from "./keys";
+import { markdown, source, sourced } from "./markdown";
+
+describe("vim's cursor and the marks the Markdown hides", () => {
+    const comment = "a **comment** line";
+    const text = ["# Title", "see **bold** here, *soft*", comment, ""].join("\n");
+    const at = (needle: string, offset = 0) => text.indexOf(needle) + offset;
+    const lineOf = (needle: string) => ({ from: at(needle), to: text.indexOf("\n", at(needle)) + 1 });
+    const found = [
+        source("text", [lineOf("# Title"), lineOf("see **bold**")]),
+        source("comment", [{ from: at(comment), to: at(comment) + comment.length }]),
+    ].flatMap((each) => (each === null ? [] : [each]));
+    const laid = EditorState.create({ extensions: markdown() }).update({ changes: { from: 0, insert: text }, effects: sourced.of(found) }).state;
+    /** What the cursor rests on once put at `head` from `was`: the character under it, or the text a selection from `anchor` covers; none where it stays. */
+    const rests = (head: number, was: number, visual = false, anchor = head) => {
+        const moved = pastHidden(laid.update({ selection: EditorSelection.single(anchor, head) }).state, was, visual);
+        return moved === null ? null : moved.main.empty ? text[moved.main.head] : text.slice(moved.main.from, moved.main.to);
+    };
+
+    it("rests past a mark the way the cursor came, on the next character shown", () => {
+        expect(rests(at("**bold"), at("**bold") - 1)).toBe("b");
+        expect(rests(at("** here", 1), at("** here", 2))).toBe("d");
+        expect(rests(at("see"), at("see") + 1)).toBeNull();
+    });
+
+    it("rests back where going on would leave the line, and on where coming back would, the line's end only in visual mode", () => {
+        expect(rests(at("# Title"), at("Title"))).toBe("T");
+        expect(rests(at("*soft*", 5), at("soft"))).toBe("t");
+        expect(rests(at("*soft*", 6), at("soft"), true, at("soft"))).toBe("soft*\n");
+    });
+
+    it("moves a visual selection's head past the mark, the mark inside the selection whole, and keeps its anchor", () => {
+        expect(rests(at("**bold**", 7), at("**bold**", 6), true, at("bold"))).toBe("bold** ");
+        expect(rests(at("** here", 1), at("** here", 2), true, at("here") + 1)).toBe("d** h");
+    });
+
+    it("leaves the cursor in a comment, whose line shows its marks", () => {
+        expect(rests(at("**comment"), at("**comment") - 1)).toBeNull();
+    });
+});
 
 describe("the draft's history", () => {
     const draft = (history: History<string>) => history.states[history.at]?.draft;
@@ -251,7 +291,7 @@ describe("the chords Space leads", () => {
 
     it("maps each chord the list of keys names, once, and leads each chord it names further", () => {
         expect(new Set(SPACED.map(([keys]) => keys)).size).toBe(SPACED.length);
-        const listed = [...REVIEW_KEYS.flatMap((part) => part.keys), ...CONVERSATION_KEYS.flatMap((part) => part.keys)]
+        const listed = REVIEW_KEYS.flatMap((part) => part.keys)
             .flatMap((key) => key.keys.split(" "))
             .filter((keys) => keys.startsWith("␣"))
             .map((keys) => keys.replace("␣", "<Space>"));

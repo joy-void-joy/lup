@@ -12,8 +12,9 @@ Everything between a session and the operator goes through the inbox, which the 
 | `blocked`, `stop` | Says the work can't go on; ends it by the agent's own choice. Either answer tells the agent to end its turn |
 | `send` | A message of a kind (`note`, `problem`, `disagreement`, `question`) to the operator's inbox, the general verb beside the speaking tools |
 | `wait_inbox` | Holds until something reaches the agent, one of its own subagents ending among it, and returns all of it |
-| `inbox` | Reads the repository's inbox, changing nothing: what's still waiting, for the operator or an agent, every item with `every`, narrowed by `since` and `until` and the latest up to `limit`; or one of the agent's own whole |
+| `inbox` | Reads the repository's inbox, changing nothing: what's still waiting, for the operator or an agent, every item with `every`, narrowed by `since` and `until` and the latest up to `limit`; or one of the agent's own whole, its parts with their ids, or one part alone by its id (`part`) |
 | `withdraw` | Takes back a message or question the agent sent that no longer needs the operator, with its reason |
+| `reply` | Answers the operator's comments by their ids, several in one call, each kept on their item under what it answers, a thread the dashboard shows there (*Replying by id*) |
 | `judged` | Reads what the judge made of the repository's writes, and its holds, changing nothing (`docs/judging-writes.md`, *The verdict log*) |
 | `land` | Lands a local branch on the integration branch once the gate passed on it and the operator approved each file flagged on what it lands, holding the call while they review, then cleans up after each branch it landed (`docs/judging-writes.md`, *Landing a branch*) |
 | `rename` | Names the session's launch, or a subagent, after its task (`docs/launch.md`, *Names*) |
@@ -50,6 +51,7 @@ lup-dev inbox send <to> <text>        a message to a launch's session, or to a s
 
 - **The parties:** the operator, and each conversation of each session, its main one or a subagent. A conversation is keyed by its runtime, its session and its own id within a repository, not by the launch it runs in, so a session resumed in a later launch finds what waited for it.
 - **An item** has a number, one sequence per user, cited `@12` wherever lup names it (`cited`, `inbox/store.py`; the page's `cited`, `comments.ts`), which nobody takes for a GitHub issue's `#12`; a command takes it cited or bare, `lup-dev inbox answer @12` or `12`. It has a sender and a recipient, the worktree it's from, when it was made, and its state: waiting, told, answered, done, decided, superseded or withdrawn. It's one of: a message of its kind, one the operator sent from reading a conversation holding each passage they replied to with their reply (`Message.passages`); a friction, how it went or a stop; a subagent's end, for its parent; a question; an answer; a review; trust's approval (`docs/trust.md`); a held change, the judge's or a landing's; a flagged write (`docs/judging-writes.md`, *Asking the operator*, *Landing a branch*).
+- **Parts and ids.** An item's text has parts, cited `@414.3` (`PartId`, `inbox/parts.py`): the Markdown blocks of the text, numbered from 1 within the item, a paragraph, a heading, a code block, a quote, a rule, and each item of a list and each row of a table, since a list or a table is usually the whole message and a reply is on one of its lines; read by markdown-it with the table extension the dashboard's parser reads too. The operator's own words are parts of their items as well (`anchors`, `inbox/threads.py`): a review's comments, in its order, those on other agents' items counted so the numbers hold for every agent it reaches; the comment a reply to a note carries; each passage's reply in a message sent from reading a conversation; an answer's rulings, then its comment. An anchor into an item is then small and stays put: a review quotes a passage by the part it starts in and a cue of its first line, the agent answers a comment by its id (*Replying by id*), and `inbox` reads one part alone. An id is a model of two numbers, read by a parser that refuses anything else.
 - **Its kind's rank** (`ranked`, `inbox/store.py`), the one place each kind's is said: what waits on the operator first, raising a notice; news next (a note, a friction, how it went, a stop, a turn's last words, a subagent's end); flags last.
 - **What an approval, a held change or a flagged write changes** is kept beside it: its whole diff, and each file whole before and after, a binary one by its size, which the dashboard shows. Nothing is cut.
 - **An item for a conversation that has ended** goes to its session's main conversation, saying whose it was: a subagent that asked without waiting is usually gone by the time the operator answers.
@@ -74,33 +76,40 @@ Every item waiting for a conversation is told together, oldest first, by whichev
 - **a held call whose turn ended** while it held, as a Codex model in code mode may, returns saying the items come at the next call;
 - **a hook gone before its answer was written** puts back as waiting what it would have told.
 
-**As tags.** Each item is told as one tag (`Delivery.tagged`, written by `inbox/tags.py`), saying first what it is, its number and whom it's from, so a quote, the operator's reply to it and their comment on a whole item can't be taken for one another:
+**As tags.** Each item is told as one tag (`Delivery.tagged`, written by `inbox/tags.py`), saying first what it is, its number and whom it's from, so a quote, the operator's reply to it and their comment on a whole item can't be taken for one another; what it quotes of the agent's own words it points at rather than repeats, since a review that repeated everything the agent said was found "very long" by the end of a session (*Parts and ids*):
 
 ```
-<review item="153" from="operator" covers="150 151 149">
+<review item="546" from="operator" covers="414 416 386 387 388">
 <message>…the operator's message to you…</message>
-<on item="150" kind="note">
-<opening>…its first line…</opening>
-<quote>…the passage they selected…</quote>
-<reply>…their reply to it…</reply>
-<comment>…their comment on the whole item…</comment>
+<on item="414" kind="note">
+<quote part="414.3">…the first line of the passage they selected…</quote>
+<reply id="546.1">…their reply to it…</reply>
 </on>
-<on item="151" kind="question" read="with nothing to add">…</on>
+<on item="416" kind="question">
+<opening>…its first line…</opening>
+<comment id="546.2">…their comment on the whole item…</comment>
+</on>
+<read items="386 387 388"/>
 <context>
 What the operator said in the same reply on other agents' items and to other agents: not yours to act on, unless it says so.
-<on item="149" kind="friction" from="claude session 3a2d…" worktree="…"><text>…that item whole…</text>…</on>
+<on item="417" kind="friction" from="claude session 3a2d…" worktree="…"><quote part="417.1">…</quote><reply>…</reply></on>
 <message to="claude session 77e1…" worktree="…">…</message>
 </context>
 </review>
 ```
 
-- A message is `<message item from kind>`; one sent from reading the conversation holds `<quote>` and `<reply>` for each passage, then the message on the whole; a reply holds `<on>` with its item's `<opening>` and the operator's `<comment>`.
-- An answer is `<answer item from question>`: `<asked>`, a `<decision number lean verdict>` for each, then the comment on the whole, or a plain question's answer.
+- A quote names the part the passage starts in and is cut to a cue, its first line shortened to 80 characters at a word's end, `…` saying where (`cue`, `inbox/threads.py`): the agent has its own words in its context, and the id finds the rest (`inbox` with `part`). The first line alone saved little, since a passage is usually a whole paragraph, one line of the source however long; over three sessions' reviews the cue saved a third to a half of each. A passage no part holds, as a changed file's lines, is quoted whole. An item they quoted has no `<opening>`; one they commented on whole keeps a one-line opening. Items only marked read are one `<read>`. The context names each other item, its kind and its sender, and carries the operator's words there, never the other item's text.
+- Each `<reply>` and `<comment>` of the agent's own carries the id of its part of the review, which `reply` answers (*Replying by id*); the context's carry none, being nobody's to answer. A comment on a reply of the agent's quotes that reply by its id: `<quote part="546.6">`.
+- A message is `<message item from kind>`; one sent from reading the conversation holds `<quote>` and `<reply id>` for each passage, then the message on the whole; a reply holds `<on>` with its item's `<opening>` and the operator's `<comment id>`.
+- A comment written in one of the agent's drawers in the review (`docs/dashboard.md`, *The drawers*) is a `<remark>` beside the message: its `<quote>` then the `<reply>`, neither numbered yet, so `reply` doesn't answer a remark by id. One on code quotes the file's lines as `path:12-14` and the lines, and its `<quote>` says in `changed` which of those lines have changed since the comment was written, by their numbers in the version quoted, or `all` where the file is gone (`Quoted`, `changed_since`), so the agent knows the comment may be about code that's gone.
+- An answer is `<answer item from question>`: `<asked>`, a `<decision number lean verdict id>` for each, then the `<comment id>` on the whole, or a plain question's answer as one.
 - A subagent's end is `<ended item from name>`: how it ended, in lup's words, then its last message as `<said>`, where lup hands it on.
 - One passed on from a conversation that had ended says whom it was for (`for=`); the doorbell and an item too long for a hook are `<doorbell>` and `<announced>`.
 - Text stays as written, the operator's code as code: only `</` becomes `<\/`, so no text closes a tag. The dashboard shows what's inside an item's tag (`Delivery.words`).
 - The comments an approval's note and a held change's answer carry stay prose (`remark`).
 - An attribute holds an item's bare number, its name saying what the number is; where lup's own words in a tag name an item, it's cited, as everywhere else: "The operator declined @7, the approval your push asked".
+
+**Replying by id.** `reply` takes a list of replies, each an id and a text, so a round costs one call however many points it answers, and receiving needs none: what reaches the agent comes beside its calls as ever. An id names a comment or reply of the operator's in an item addressed to the agent's conversation, a review's, a message's or an answer's; one on another agent's item, one of the agent's own replies, or one naming no part is refused naming what it may answer, and nothing of that call is kept (`answerable`, `inbox/threads.py`). Each reply is kept on the operator's item as a thread under the part it answers, numbered after the item's own parts (`Item.replies`, cited `@546.6`), never an item of its own; the agent's item the part was on goes back before the operator, waiting again, with a notice where its kind raises one (`Delivery.replied_by`), so the dashboard shows the thread under their comment (`docs/dashboard.md`, *The review*). A reply on a passage of a conversation reopens nothing: it's shown where the conversation is read. The operator answering a reply comments on it there, and that comment reaches the agent as a quote of the reply by its id under `<on>` for the item, so the thread goes on. The turn's last words still become a note, for what isn't anchored, and `note` and `file_issue` are for what the operator didn't say.
 
 **A turn's last message** becomes a note in the operator's inbox (`Delivery.concluded`), so what a session ends its turn saying reaches them without the agent sending it again. An end that's held makes one too, before it tells what waits: the turn's next end carries only its own message, so the held one would never reach the operator, and their reply comes at a turn's end most of the time. Each end that says something is its own note, since the agent's next end carries new words (`docs/field-notes.md`, *The end after a held end*). A subagent's last message is its parent's, and makes none: its end is told to its parent (*Parties and items*).
 

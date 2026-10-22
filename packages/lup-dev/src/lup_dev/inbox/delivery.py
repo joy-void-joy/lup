@@ -47,12 +47,21 @@ call's result, or when a push carrying it is taken, and never again:
 **As tags.** Each item is told as one element (`tagged`, `inbox/tags.py`),
 named for what it is (`message`, `answer`, `review`), its attributes saying its
 number, whom it's from, whom it was for where it was passed on, and what it
-answers. What the operator said on an agent's item is `<on item kind>`: its
-first line as `<opening>`, a passage they quoted as `<quote>` with their
-`<reply>` under it, a comment on the whole item as `<comment>`; a review's
-words on other agents' items and to other agents sit in its `<context>`. The
-doorbell and an announcement are tags too. The dashboard shows what's inside an
-item's tag (`words`), as its agent reads it.
+answers. What the operator said on an agent's item is `<on item kind>`: a
+passage they quoted as `<quote part>`, cut to its first line where the part's
+id finds the rest (`inbox/threads.py`), with their `<reply id>` under it; a
+comment on the whole item as `<comment id>` after the item's first line as
+`<opening>`; each id the part of the operator's item the agent's `reply`
+answers (`replied`). Items only marked read are one `<read items>`. A review's
+words on other agents' items and to other agents sit in its `<context>`, each
+other item named and never repeated. The doorbell and an announcement are tags
+too. The dashboard shows what's inside an item's tag (`words`), as its agent
+reads it.
+
+**A reply by id** (`replied`) is kept on the operator's item it answers, after
+their parts (`Item.replies`), never an item of its own; the agent's item the
+part is on goes back before the operator, where the review shows the thread
+under their comment and their next comment continues it (`Comment.on`).
 
 **An item for a conversation that has ended** goes to its session's main
 conversation, saying whose it was: one made for it then (`Inbox.made`), and
@@ -92,6 +101,7 @@ no call running, and wakes.
 """
 
 import asyncio
+import difflib
 import secrets
 import textwrap
 from collections.abc import Callable, Generator
@@ -129,7 +139,10 @@ from lup_dev.inbox.store import (
     Party,
     Passage,
     Question,
+    Quoted,
     Reason,
+    Remark,
+    Reply,
     Review,
     Ruling,
     Stop,
@@ -142,6 +155,16 @@ from lup_dev.inbox.store import (
     cited,
 )
 from lup_dev.inbox.tags import Tag, inside
+from lup_dev.inbox.threads import (
+    Anchor,
+    Replying,
+    addressed_to,
+    anchors,
+    answerable,
+    cue,
+    located,
+    parts_of,
+)
 from lup_dev.layout import HostLayout
 
 if TYPE_CHECKING:
@@ -227,11 +250,11 @@ def opening(item: Item) -> str:
 
 
 def body(item: Item) -> str:
-    """Return an item's text whole, as its sender wrote it: a question's with each decision numbered, with its lean; a review's messages, then its comments."""
+    """Return an item's text whole, as its sender wrote it: a question's with each decision numbered, its lean on the line under it, as the dashboard lays it out (`page/src/review.ts`), so a passage quoted there is found here by its offsets (`located`); a review's messages, then its comments."""
     match item.reason:
         case Question(text=text, decisions=decisions):
             numbered = [
-                f"{at}. {each.text} (lean: {each.lean})"
+                f"{at}. {each.text}\n   lean: {each.lean}"
                 for at, each in enumerate(decisions, start=1)
             ]
             return "\n".join([text, *numbered])
@@ -397,14 +420,100 @@ def remark(comment: Comment) -> str:
     return f"  On this passage:\n{quoted}\n    {comment.text}"
 
 
-def remarked(comment: Comment) -> list[Tag | str]:
-    """Tag one of the operator's comments on an item, as a review tells it: a passage's quote then their reply to it, or their comment on the item whole."""
+def remarked(item: Item, comment: Comment, anchor: Anchor | None) -> list[Tag | str]:
+    """Tag one of the operator's comments on `item`, as a review tells it: a passage's quote then their reply to it, or their comment on the item whole; each with the id of its part of the review, `anchor`'s, where the review is the reader's own.
+
+    A quote names the part it starts in (`located`) and is cut to a cue of
+    its first line (`cue`), the agent having its own words; one no part
+    holds, as a changed file's lines, is quoted whole. On a reply of the
+    agent's (`Comment.on`), the quote is of that reply, which its id names.
+    """
+    numbered = {} if anchor is None else {"id": anchor.id.said()}
     if comment.quote is None:
-        return [Tag(name="comment", parts=[comment.text])]
-    return [
-        Tag(name="quote", parts=[comment.quote.text]),
-        Tag(name="reply", parts=[comment.text]),
-    ]
+        on = {} if comment.on is None else {"on": comment.on.said()}
+        return [
+            Tag(name="comment", attributes={**numbered, **on}, parts=[comment.text])
+        ]
+    text = body(item)
+    found = (
+        comment.on.said()
+        if comment.on is not None
+        else next(
+            (
+                each.id.said()
+                for each in [located(parts_of(item, text), text, comment.quote)]
+                if each is not None
+            ),
+            None,
+        )
+    )
+    quoted = (
+        Tag(name="quote", parts=[comment.quote.text])
+        if found is None
+        else Tag(
+            name="quote", attributes={"part": found}, parts=[cue(comment.quote.text)]
+        )
+    )
+    return [quoted, Tag(name="reply", attributes=numbered, parts=[comment.text])]
+
+
+def replied_to(replies: list[Reply], anchor: Anchor) -> str:
+    """Say what a reply answers, for the agent that made it: the operator's part, and the item of the agent's it's on where it's on one.
+
+    >>> from datetime import UTC, datetime
+    >>> from lup_dev.inbox.parts import PartId
+    >>> anchor = Anchor(id=PartId(item=546, part=2), text="Why?", item=414)
+    >>> reply = Reply(number=6, to=anchor.id, text="Because.", at=datetime(2026, 1, 1, tzinfo=UTC))
+    >>> replied_to([reply], anchor)
+    '@546.6 on @546.2 (on your @414)'
+    """
+    where = "" if anchor.item is None else f" (on your {cited(anchor.item)})"
+    return ", ".join(
+        f"{cited(each.to.item)}.{each.number} on {each.to.cited()}{where}"
+        for each in replies
+    )
+
+
+def changed_since(code: Quoted) -> str | None:
+    """Say which of the lines `code` quotes have changed since the comment was written on them, as the file stands in its worktree: their numbers in the version quoted, `all` where the file is gone or isn't text; none where each is still there.
+
+    A quoted line is still there where the file holds it in the same order as
+    the others quoted, wherever lines added or taken away around it moved it.
+
+    >>> from pathlib import Path
+    >>> quoted = Quoted(worktree=Path("/w"), path=Path("a.py"), version="v", first=3, lines=["x = 1", "y = 2"])
+    >>> changed_since(quoted)
+    'all'
+    """
+    try:
+        text = (code.worktree / code.path).read_text()
+    except OSError, UnicodeDecodeError:
+        return "all"
+    matcher = difflib.SequenceMatcher(
+        None, text.splitlines(), code.lines, autojunk=False
+    )
+    # Where each quoted line still there is in the file as it stands, by its place in the quote.
+    found = {
+        at: block.a + (at - block.b)
+        for block in matcher.get_matching_blocks()
+        for at in range(block.b, block.b + block.size)
+    }
+    gone = [code.first + at for at in range(len(code.lines)) if at not in found]
+    return " ".join(str(number) for number in gone) if gone else None
+
+
+def remarking(remark: Remark, attributes: dict[str, str]) -> Tag:
+    """Tag one of the operator's remarks in an agent's drawer, as a review tells it: its passage's quote, saying on code which quoted lines have changed since (`changed_since`), then their reply; `attributes` say whose it is where it's told as context."""
+    since = None if remark.code is None else changed_since(remark.code)
+    changed = {} if since is None else {"changed": since}
+    return Tag(
+        name="remark",
+        attributes=attributes,
+        parts=[
+            Tag(name="quote", attributes=changed, parts=[remark.quote.text]),
+            Tag(name="reply", parts=[remark.text]),
+        ],
+    )
 
 
 def commented(item: Item, comment: str) -> str:
@@ -793,15 +902,21 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             else {"for": f"{who(item.addressed)}, whose conversation had ended"}
         )
         head = {"item": str(item.number), "from": named(item.sender), **passed}
+        parts = anchors(item)
         match item.reason:
             case Message(kind=said, text=text, of=int() as of):
                 original = self.inbox.item(of)
+                [anchor] = parts
                 replied = on(
                     original,
                     {},
                     [
                         Tag(name="opening", parts=[opening(original)]),
-                        Tag(name="comment", parts=[text]),
+                        Tag(
+                            name="comment",
+                            attributes={"id": anchor.id.said()},
+                            parts=[text],
+                        ),
                     ],
                 )
                 return Tag(
@@ -810,10 +925,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case Message(kind=said, text=text, passages=passages):
                 replies = [
                     part
-                    for each in passages
+                    for each, anchor in zip(passages, parts, strict=True)
                     for part in [
                         Tag(name="quote", parts=[each.quote]),
-                        Tag(name="reply", parts=[each.text]),
+                        Tag(
+                            name="reply",
+                            attributes={"id": anchor.id.said()},
+                            parts=[each.text],
+                        ),
                     ]
                 ]
                 whole = [text] if text or not passages else []
@@ -826,7 +945,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return Tag(
                     name="answer",
                     attributes={**head, "question": str(question)},
-                    parts=self.answered(answer),
+                    parts=self.answered(answer, parts),
                 )
             case Review(covers=covers) as review:
                 covering = (
@@ -835,7 +954,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 return Tag(
                     name="review",
                     attributes={**head, **covering},
-                    parts=self.reviewing(review, item.addressed or item.recipient),
+                    parts=self.reviewing(
+                        review, item.addressed or item.recipient, parts
+                    ),
                 )
             case Ended(name=name, heading=heading, passed=passed):
                 said = [] if passed is None else [Tag(name="said", parts=[passed])]
@@ -859,8 +980,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     parts=[body(item)],
                 )
 
-    def reviewing(self, review: Review, recipient: Party) -> list[Tag | str]:
-        """Tag a review for the conversation it's for: the operator's message to it and its own items first, each with their comments on it, or read with nothing to add; then, in its context, the other agents' items they commented on, each whole and whose it is, and their messages to other agents, each saying whom it was for."""
+    def reviewing(
+        self, review: Review, recipient: Party, parts: list[Anchor]
+    ) -> list[Tag | str]:
+        """Tag a review for the conversation it's for: the operator's message to it, their remarks in its drawers (`remarking`) and its own items they commented on first, each comment with the id of its part among `parts`, the review's (`remarked`); its items read with nothing to add in one line; then, in its context, the other agents' items they commented on, each named and never repeated, and their messages and remarks to other agents, each saying whom it was for."""
         items = [self.inbox.item(each) for each in review.covers]
         commented = [each.item for each in review.comments]
         addressed = list(dict.fromkeys(each.to for each in review.letters))
@@ -871,37 +994,66 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         def mine(to: Conversation) -> Tag:
             return Tag(name="message", parts=[written(to)])
 
-        def elsewhere(to: Conversation) -> Tag:
+        def placed(to: Conversation) -> dict[str, str]:
             place = self.inbox.whereabouts.get(to.key())
-            where = {} if place is None else {"worktree": str(place.worktree)}
+            return {} if place is None else {"worktree": str(place.worktree)}
+
+        def elsewhere(to: Conversation) -> Tag:
             return Tag(
-                name="message", attributes={"to": who(to), **where}, parts=[written(to)]
+                name="message",
+                attributes={"to": who(to), **placed(to)},
+                parts=[written(to)],
             )
 
-        def remarks(item: Item) -> list[Tag | str]:
+        def remarks_to(to: Conversation) -> list[Tag]:
+            theirs = to != recipient
+            return [
+                remarking(each, {"to": who(to), **placed(to)} if theirs else {})
+                for each in review.remarks
+                if each.to == to
+            ]
+
+        remarked_to = list(dict.fromkeys(each.to for each in review.remarks))
+
+        def remarks(item: Item, *, own: bool) -> list[Tag | str]:
             return [
                 part
-                for each in review.comments
+                for each, anchor in zip(review.comments, parts, strict=True)
                 if each.item == item.number
-                for part in remarked(each)
+                for part in remarked(item, each, anchor if own else None)
             ]
 
         def yours(item: Item) -> Tag:
-            said = remarks(item)
-            read = {} if said else {"read": "with nothing to add"}
-            return on(item, read, [Tag(name="opening", parts=[opening(item)]), *said])
+            quoted = any(
+                each.quote is not None
+                for each in review.comments
+                if each.item == item.number
+            )
+            first = [] if quoted else [Tag(name="opening", parts=[opening(item)])]
+            return on(item, {}, [*first, *remarks(item, own=True)])
 
         def theirs(item: Item) -> Tag:
             where = {} if item.worktree is None else {"worktree": str(item.worktree)}
             return on(
                 item,
                 {"from": named(item.sender), **where},
-                [Tag(name="text", parts=[body(item)]), *remarks(item)],
+                remarks(item, own=False),
             )
 
+        read = [
+            str(item.number)
+            for item in items
+            if item.sender == recipient and item.number not in commented
+        ]
         own: list[Tag | str] = [
             *(mine(to) for to in addressed if to == recipient),
-            *(yours(item) for item in items if item.sender == recipient),
+            *(tag for to in remarked_to if to == recipient for tag in remarks_to(to)),
+            *(
+                yours(item)
+                for item in items
+                if item.sender == recipient and item.number in commented
+            ),
+            *([Tag(name="read", attributes={"items": " ".join(read)})] if read else []),
         ]
         others: list[Tag | str] = [
             *(
@@ -910,6 +1062,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 if item.sender != recipient and item.number in commented
             ),
             *(elsewhere(to) for to in addressed if to != recipient),
+            *(tag for to in remarked_to if to != recipient for tag in remarks_to(to)),
         ]
         heading = (
             "What the operator said in the same reply on other agents' items and to "
@@ -918,17 +1071,81 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         context = [Tag(name="context", parts=[heading, *others])] if others else []
         return [*own, *context]
 
+    async def replied_by(
+        self, party: Conversation, replies: list[Replying]
+    ) -> list[Reply]:
+        """Keep each of `replies` on the operator's item it answers, from `party`, and return them as kept, each numbered after the item's parts (`threaded`); put each item of the agent's a reply is on back before the operator, so the review shows the thread (`reopened`).
+
+        Each reply's part is checked first (`answerable`), so a call with one
+        wrong id keeps nothing: refused where an id names no item, an item
+        that isn't the operator's words to `party`, a comment on another
+        agent's item, or one of the agent's own replies, naming what it may
+        answer. A reply on a passage of the agent's conversation reopens
+        nothing: it's shown where the conversation is read.
+        """
+        anchored = [self.anchored(party, each) for each in replies]
+        at = self.clock.now()
+        kept = [self.threaded(each, at) for each in replies]
+        for anchor in anchored:
+            if anchor.item is not None:
+                await self.reopened(party, anchor.item)
+        return kept
+
+    def threaded(self, replying: Replying, at: datetime) -> Reply:
+        """Keep `replying` on the item it answers, numbered after the item's parts and the replies before it, and return it."""
+        item = self.inbox.item(replying.to.item)
+        reply = Reply(
+            number=len(anchors(item)) + len(item.replies) + 1,
+            to=replying.to,
+            text=replying.text,
+            at=at,
+        )
+        self.inbox.kept(item.model_copy(update={"replies": [*item.replies, reply]}))
+        return reply
+
+    def anchored(self, party: Conversation, replying: Replying) -> Anchor:
+        """Return the part `replying` answers, where `party` may answer it; raise `InboxError` saying why not."""
+        item = self.inbox.item(replying.to.item)
+        if not addressed_to(item, party):
+            message = (
+                f"{cited(item.number)} is {what(item)} from {who(item.sender)} to "
+                f"{who(item.recipient)}, not the operator's words to you: `reply` "
+                "answers a part of a review, a message or an answer sent to you"
+            )
+            raise InboxError(message)
+        senders = [item.recipient, item.addressed]
+        sent = [
+            each.number for each in self.inbox.items.values() if each.sender in senders
+        ]
+        return answerable(item, replying.to, sent)
+
+    async def reopened(self, party: Conversation, number: int) -> None:
+        """Put item `number` of the agent's back before the operator, where it had left their list: waiting again, with a notice where its kind raises one, saying `party` replied on it."""
+        item = self.inbox.item(number)
+        if item.recipient != Operator() or isinstance(item.state, Waiting):
+            return
+        reopened = self.inbox.kept(item.model_copy(update={"state": Waiting()}))
+        if not reopened.rank.notifies:
+            return
+        summary = f"lup: {who(party)} replied on {cited(number)}, {what(item)}"
+        await self.notices.notify(
+            summary, f"{opening(item)}\nlup-dev inbox show {number}"
+        )
+
     def drafted(self, draft: Draft) -> Draft:
         """Keep the operator's draft reply, and return it; refused where a message in it is for a conversation lup's inbox has never heard of (`heard`)."""
         self.heard(draft)
         return self.inbox.drafted(draft)
 
     def heard(self, draft: Draft) -> None:
-        """Refuse a draft with a message for a conversation lup's inbox has never heard of, which no reply could reach: it's known once one of its hooks is heard."""
-        for each in draft.letters:
-            if each.to.key() not in self.inbox.whereabouts:
+        """Refuse a draft with a message, or a remark, for a conversation lup's inbox has never heard of, which no reply could reach: it's known once one of its hooks is heard."""
+        for to in [
+            *(each.to for each in draft.letters),
+            *(each.to for each in draft.remarks),
+        ]:
+            if to.key() not in self.inbox.whereabouts:
                 message = (
-                    f"the draft writes to {who(each.to)} of {each.to.repository}, "
+                    f"the draft writes to {who(to)} of {to.repository}, "
                     "which lup's inbox has never heard of: write to an agent the "
                     "dashboard shows running"
                 )
@@ -963,7 +1180,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         draft = self.inbox.draft()
         self.heard(draft)
         covered = [self.inbox.item(each) for each in draft.covered()]
-        if not covered and not draft.written():
+        if not covered and not draft.written() and not draft.remarked():
             message = (
                 "the draft answers no item and writes to no agent: comment on an "
                 "item, take one off the list, or write to an agent under its banner"
@@ -988,9 +1205,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return dispatched
 
     def reviews(self, draft: Draft, covered: list[Item]) -> list[Item]:
-        """Make the reviews `draft` is sent as for the messages and questions it covers, `covered`, and its messages to agents, one to each conversation it reaches, and settle each item; delivering them is the caller's."""
+        """Make the reviews `draft` is sent as for the messages and questions it covers, `covered`, its messages to agents and its remarks in their drawers, one to each conversation it reaches, and settle each item; delivering them is the caller's."""
         letters = draft.written()
-        if not covered and not letters:
+        remarks = draft.remarked()
+        if not covered and not letters and not remarks:
             return []
         at = self.clock.now()
         numbers = [item.number for item in covered]
@@ -998,6 +1216,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             covers=numbers,
             comments=[each for each in draft.comments if each.item in numbers],
             letters=letters,
+            remarks=remarks,
         )
         commented = [each.item for each in draft.comments]
         senders = [
@@ -1005,7 +1224,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             for item in covered
             if item.number in commented or isinstance(item.reason, Question)
         ]
-        recipients = list(dict.fromkeys([*senders, *(each.to for each in letters)]))
+        recipients = list(
+            dict.fromkeys(
+                [
+                    *senders,
+                    *(each.to for each in letters),
+                    *(each.to for each in remarks),
+                ]
+            )
+        )
         sent = [
             self.inbox.made(review, Operator(), recipient, None, at)
             for recipient in recipients
@@ -1067,8 +1294,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     update={"kept": [*dispatched.kept, item.number]}
                 )
 
-    def answered(self, answer: Answer) -> list[Tag | str]:
-        """Tag the operator's answer: what was asked, then each decision with its text, the lean it was asked with and their verdict, then their words: a comment on the whole, or a plain question's answer."""
+    def answered(self, answer: Answer, parts: list[Anchor]) -> list[Tag | str]:
+        """Tag the operator's answer: what was asked, then each decision with its text, the lean it was asked with and their verdict, then their words, a comment on the whole or a plain question's answer; each ruling and the comment with the id of its part among `parts`, the answer's, which the agent's `reply` answers."""
         match self.inbox.item(answer.question).reason:
             case Question(text=text, decisions=decisions):
                 pass
@@ -1076,7 +1303,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 message = f"{cited(answer.question)} isn't a question"
                 raise InboxError(message)
 
-        def decided(ruling: Ruling) -> Tag:
+        def decided(ruling: Ruling, anchor: Anchor) -> Tag:
             decision = decisions[ruling.decision - 1]
             verdict = (
                 "answered in words" if ruling.verdict is None else ruled(ruling.verdict)
@@ -1090,18 +1317,22 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     "number": str(ruling.decision),
                     "lean": decision.lean,
                     "verdict": verdict,
+                    "id": anchor.id.said(),
                 },
                 parts=[decision.text, *words],
             )
 
-        rulings = [decided(ruling) for ruling in answer.rulings]
-        whole: list[Tag | str] = (
-            []
-            if not answer.comment
-            else [Tag(name="comment", parts=[answer.comment])]
-            if rulings
-            else [answer.comment]
-        )
+        ruled_on = parts[: len(answer.rulings)]
+        rulings = [
+            decided(ruling, anchor)
+            for ruling, anchor in zip(answer.rulings, ruled_on, strict=True)
+        ]
+        whole: list[Tag | str] = [
+            Tag(
+                name="comment", attributes={"id": anchor.id.said()}, parts=[anchor.text]
+            )
+            for anchor in parts[len(answer.rulings) :]
+        ]
         return [Tag(name="asked", parts=[text]), *rulings, *whole]
 
     def told(self, party: Conversation, room: int, fits: int, how: How) -> Posted:
@@ -1449,6 +1680,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             )
         await self.delivered(reply)
         return reply
+
+    def flag_approved(self, number: int) -> Item:
+        """Approve the flagged write item `number`, as marking it good in its agent's drawer does (`lup_dev.policy.since`), whatever its state but approved already, which it keeps; refused where it isn't a flagged write."""
+        item = self.inbox.item(number)
+        if not isinstance(item.reason, Flagged):
+            message = f"{cited(number)} is {what(item)}, not a flagged write"
+            raise InboxError(message)
+        if isinstance(item.state, Decided) and item.state.approved:
+            return item
+        approved = Decided(at=self.clock.now(), approved=True)
+        self.say(f"{cited(number)}, a flagged write, was approved")
+        return self.inbox.kept(item.model_copy(update={"state": approved}))
 
     def done(self, number: int) -> Item:
         """Take the message item `number` off the operator's list: a flagged write approved, read with nothing to add.

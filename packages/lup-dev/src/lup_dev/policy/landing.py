@@ -27,11 +27,17 @@ gated branch, `dev` by default, to a local branch's tip:
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
    it's clean and nobody works in it; then the local branch deleted.
 
-**Which branches it lands:** the local branches in the history of the tip and not
-in that of the gated branch's tip on the remote, the branch landed among them.
-A flag keeps the branch its worktree had checked out (`Flagged.branch`): one on a
-branch renamed or deleted since holds nothing, and a stale one on a branch name
-used again holds that branch's landing.
+**Which branches it lands:** of the local branches in the history of the tip and
+not in that of the gated branch's tip on the remote, those the landing merged
+(`landed_branches`): the branch landed, and each whose tip is a parent beyond the
+first of a merge on the first-parent line from the tip down to the remote's. A
+branch whose tip is one of that line's own commits, just made from the
+integration branch say, has nothing of its own in the landing: it's left alone,
+its worktree with it, holds the landing on no flag, and the answer names it, so
+the session landing isn't surprised to find it there. A flag keeps the branch
+its worktree had checked out (`Flagged.branch`): one on a branch renamed or
+deleted since holds nothing, and a stale one on a branch name used again holds
+that branch's landing.
 
 **The version a hold starts from** is the latest the operator saw of the file on
 the branches landed: a flagged write or a hold at landing they approved, read or
@@ -46,11 +52,15 @@ the launch's container, `git worktree remove` without `--force`, so git itself
 keeps one with changes or untracked files, and what it ignores (its `.venv`, its
 scratch) goes with it. Removed on the host, the path would be the one
 `<git directory>/worktrees/<name>/gitdir` names, which the room writes, and the
-host's recursive delete could be aimed outside the repository. Left alone, and
-said: the repository's main worktree, one where the conversation landing works,
-and one where a conversation of a launch still served works, as the judge's
-session index has it (`Holding.works`); the local branch it has checked out
-stays with it.
+host's recursive delete could be aimed outside the repository. The container is
+named as the launch's record has it when the cleanup runs (`reached`), since
+`rename` renames it with the launch and the landing may have waited hours on
+its holds, and podman is asked for it once before any worktree is removed: one
+that isn't there is said once, with its name, and each worktree named as left.
+Left alone, and said: the repository's main worktree, one where the conversation
+landing works, and one where a conversation of a launch still served works, as
+the judge's session index has it (`Holding.works`); the local branch it has
+checked out stays with it.
 
 The tool's docstring's first line is its summary, 50 characters at most, which
 the guidance lists (`launch/guidance.py`); the rest is its description. It
@@ -87,6 +97,7 @@ from lup_dev.inbox.store import (
     Done,
     Flagged,
     HeldChange,
+    Inbox,
     InboxError,
     Item,
     Reading,
@@ -190,6 +201,13 @@ class Worker(Model):
     why: str
 
 
+class Reached(Model):
+    """The launch's room as a landing's cleanup reaches it: its container's name where podman has it, else why no worktree is removed, said once."""
+
+    container: str | None = None
+    unreached: str | None = None
+
+
 class Cleaned(Model):
     """What a landing's cleanup did, and what it left with why, a line each."""
 
@@ -214,8 +232,33 @@ def short(ref: str) -> str:
     return ref.removeprefix("refs/heads/")
 
 
-def landed_branches(git: Git, tip: str, old: str | None) -> dict[str, str]:
-    """Return the local branches a landing of `tip` lands, each ref's full name with its tip: those in `tip`'s history and not in `old`'s, the gated branch's tip on the remote, where it has one."""
+class Branches(Model):
+    """The local branches in a landing's history and not in the remote's: those it lands, each ref's full name with its tip, and those it leaves alone, having merged none of them."""
+
+    landed: dict[str, str] = {}
+    alone: list[str] = []
+
+
+def landed_branches(git: Git, tip: str, old: str | None, source: str) -> Branches:
+    """Return the local branches a landing of `tip`, the branch `source`'s, lands, and those it leaves alone.
+
+    Of the local branches in `tip`'s history and not in `old`'s, the gated
+    branch's tip on the remote where it has one, it lands those the landing
+    merged: `source` itself, and each whose tip is a parent beyond the first
+    of a merge on the first-parent line from `tip` down to `old`. The rest
+    have nothing of their own in it, their tip being one of that line's own
+    commits: a branch just made from the integration branch, say, whose
+    worktree a session may be about to work in.
+    """
+    excluded = [] if old is None else [f"^{old}"]
+    walked = git.text("rev-list", "--first-parent", "--parents", tip, *excluded)
+    # Each tip merged on the line, with the merge that merged it.
+    merged = {
+        parent: merge
+        for line in walked.splitlines()
+        for merge, *parents in [line.split()]
+        for parent in parents[1:]
+    }
     listed = git.run(
         "for-each-ref",
         "--format=%(refname)%00%(objectname)",
@@ -223,8 +266,19 @@ def landed_branches(git: Git, tip: str, old: str | None) -> dict[str, str]:
         *([] if old is None else [f"--no-merged={old}"]),
         "refs/heads/",
     )
-    found = [nul_separated(line) for line in listed.output.splitlines()]
-    return dict(found)
+    found = dict(nul_separated(line) for line in listed.output.splitlines())
+    return Branches(
+        landed={
+            ref: commit
+            for ref, commit in found.items()
+            if ref == source or commit in merged
+        },
+        alone=[
+            ref
+            for ref, commit in found.items()
+            if ref != source and commit not in merged
+        ],
+    )
 
 
 def changed_files(git: Git, old: str | None, tip: str) -> list[Path]:
@@ -354,6 +408,69 @@ def shown_from(onto: str, since: int | None, old: str | None) -> str:
     return f"Shown whole: `{onto}` isn't on the remote yet."
 
 
+def approved(item: Item) -> bool:
+    """Say whether the operator approved `item`."""
+    return isinstance(item.state, Decided) and item.state.approved
+
+
+class Baseline(Model, arbitrary_types_allowed=True):
+    """What the operator last saw of a repository's files, read from the inbox: the version each hold at landing starts from, and each file of an agent's drawer since they approved it (`lup_dev.policy.since`)."""
+
+    inbox: Inbox
+    repository: Path
+    """The repository's git directory."""
+
+    def flags(self, branches: list[str], path: Path | None = None) -> list[Flag]:
+        """Return the flagged writes on `branches` the operator hasn't approved, those on the file at `path` alone where one's given."""
+        return [
+            Flag(number=item.number, flagged=item.reason)
+            for item in self.inbox.about(self.repository)
+            if isinstance(item.reason, Flagged)
+            and item.reason.branch in branches
+            and (path is None or item.reason.path == path)
+            and not approved(item)
+        ]
+
+    def seen(self, path: Path, landed: list[str]) -> Item | None:
+        """Return the latest item of the file at `path` on the branches `landed` that the operator saw: a flagged write or a hold at landing they approved, read or commented on, the last they settled; none where they saw none."""
+        seen = [
+            Seen(item=item, at=at)
+            for item in self.inbox.about(self.repository)
+            if flagged_on(path, landed, item) and (at := settled_at(item)) is not None
+        ]
+        latest = max(seen, key=lambda each: each.at, default=None)
+        return None if latest is None else latest.item
+
+    def kept(self, item: Item, path: Path) -> bytes | None:
+        """Return the version of `path` kept beside `item`, what it changed it to; none where none is kept as text."""
+        try:
+            files = self.inbox.files(item.number)
+        except InboxError:
+            return None
+        found = next((each for each in files if each.path == path), None)
+        if found is None or not isinstance(found.after, Text):
+            return None
+        return found.after.text.encode()
+
+    def reading(self, flag: Flag, after: bytes | None) -> Reading | None:
+        """Return the judge's reading of the file as `flag`, the latest on it, kept it: its lines and findings kept only where the file as it stands, `after`, is as that flag left it."""
+        try:
+            files = self.inbox.files(flag.number)
+        except InboxError:
+            return None
+        found = next((each for each in files if each.path == flag.flagged.path), None)
+        if found is None or found.reading is None:
+            return None
+        if isinstance(found.after, Text) and found.after.text.encode() == after:
+            return found.reading
+        return Reading(
+            role=found.reading.role,
+            asks=[
+                each.model_copy(update={"line": None}) for each in found.reading.asks
+            ],
+        )
+
+
 class Lander(Model, arbitrary_types_allowed=True):
     """One conversation of a launch landing a branch: the tool's function, bound to it."""
 
@@ -376,6 +493,11 @@ class Lander(Model, arbitrary_types_allowed=True):
     def party(self) -> Conversation:
         """Return the inbox's party for the conversation landing."""
         return Delivery.party(self.launch, self.caller)
+
+    @property
+    def baseline(self) -> Baseline:
+        """Return what the operator last saw of the repository's files."""
+        return Baseline(inbox=self.delivery.inbox, repository=self.launch.repository)
 
     @lup_tool(idempotent=True)
     async def land(self, landing: Landing) -> str:
@@ -435,8 +557,10 @@ class Lander(Model, arbitrary_types_allowed=True):
         unpassed = await asyncio.to_thread(self.unpassed, git, tip, source)
         if unpassed is not None:
             return unpassed
-        branches = await asyncio.to_thread(landed_branches, git, tip, old)
-        holds = await self.holds(git, onto, tip, old, branches)
+        branches = await asyncio.to_thread(
+            landed_branches, git, tip, old, f"refs/heads/{source}"
+        )
+        holds = await self.holds(git, onto, tip, old, branches.landed)
         waited = await self.waited(holds)
         if not all(each.approved for each in waited.outcomes):
             return unapproved(waited)
@@ -452,13 +576,14 @@ class Lander(Model, arbitrary_types_allowed=True):
             kept = " What the operator approved stays approved." if holds else ""
             refusals = f"\n{reply.said}" if reply.said else ""
             return f"Not landed: {update.error}.{kept}{refusals}"
-        cleaned = await self.cleaned(git, remote, refs, branches, onto)
+        cleaned = await self.cleaned(git, remote, refs, branches.landed, onto)
         was = "new there" if old is None else f"which was at {old}"
         return "\n".join(
             [
                 f"Landed {tip} on `{short(onto)}` at `{remote}`, {was}.",
                 *approvals(waited),
                 *said(cleaned),
+                *left_alone(source, branches.alone),
             ]
         )
 
@@ -521,12 +646,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         names = [short(ref) for ref in branches]
         changed = await asyncio.to_thread(changed_files, git, old, tip)
         flags = [
-            Flag(number=item.number, flagged=item.reason)
-            for item in self.delivery.inbox.about(self.launch.repository)
-            if isinstance(item.reason, Flagged)
-            and item.reason.branch in names
-            and item.reason.path in changed
-            and not (isinstance(item.state, Decided) and item.state.approved)
+            each for each in self.baseline.flags(names) if each.flagged.path in changed
         ]
         paths = list(dict.fromkeys(each.flagged.path for each in flags))
         return [
@@ -561,8 +681,11 @@ class Lander(Model, arbitrary_types_allowed=True):
                 "flags": [each.number for each in flags],
             }
         )
-        seen = self.seen(path, landed)
-        kept = None if seen is None else await asyncio.to_thread(self.after, seen, path)
+        baseline = self.baseline
+        seen = baseline.seen(path, landed)
+        kept = (
+            None if seen is None else await asyncio.to_thread(baseline.kept, seen, path)
+        )
         since = None if seen is None or kept is None else seen.number
         before = (
             kept
@@ -571,7 +694,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         )
         after = await asyncio.to_thread(blob, git, landing.tip, path)
         latest = max(flags, key=lambda each: each.number)
-        reading = await asyncio.to_thread(self.reading, latest, after)
+        reading = await asyncio.to_thread(baseline.reading, latest, after)
         asks = dict.fromkeys(
             line for each in flags for line in each.flagged.summary.splitlines()
         )
@@ -592,45 +715,6 @@ class Lander(Model, arbitrary_types_allowed=True):
             change, self.party, diff, [file], call=self.call
         )
         return Held(number=item.number, path=path)
-
-    def seen(self, path: Path, landed: list[str]) -> Item | None:
-        """Return the latest item of the file at `path` on the branches `landed` that the operator saw: a flagged write or a hold at landing they approved, read or commented on, the last they settled; none where they saw none."""
-        seen = [
-            Seen(item=item, at=at)
-            for item in self.delivery.inbox.about(self.launch.repository)
-            if flagged_on(path, landed, item) and (at := settled_at(item)) is not None
-        ]
-        latest = max(seen, key=lambda each: each.at, default=None)
-        return None if latest is None else latest.item
-
-    def after(self, item: Item, path: Path) -> bytes | None:
-        """Return the version of `path` kept beside `item`, what it changed it to; none where none is kept as text."""
-        try:
-            files = self.delivery.inbox.files(item.number)
-        except InboxError:
-            return None
-        found = next((each for each in files if each.path == path), None)
-        if found is None or not isinstance(found.after, Text):
-            return None
-        return found.after.text.encode()
-
-    def reading(self, flag: Flag, after: bytes | None) -> Reading | None:
-        """Return the judge's reading of the file as `flag`, the latest on it, kept it: its lines and findings kept only where the tip holds the file as that flag left it."""
-        try:
-            files = self.delivery.inbox.files(flag.number)
-        except InboxError:
-            return None
-        found = next((each for each in files if each.path == flag.flagged.path), None)
-        if found is None or found.reading is None:
-            return None
-        if isinstance(found.after, Text) and found.after.text.encode() == after:
-            return found.reading
-        return Reading(
-            role=found.reading.role,
-            asks=[
-                each.model_copy(update={"line": None}) for each in found.reading.asks
-            ],
-        )
 
     async def waited(self, holds: list[Held]) -> Waited:
         """Hold the call until no hold of `holds` waits for the operator, and return what reached the conversation meanwhile, told, and how each was answered; at once, telling nothing, where there's none."""
@@ -673,27 +757,82 @@ class Lander(Model, arbitrary_types_allowed=True):
         places = list(self.delivery.inbox.whereabouts.values())
         working = await asyncio.to_thread(self.working, places)
         main = trees[0].root if trees else None
+        left = {
+            **({} if main is None else {main: "the repository's main worktree"}),
+            **working,
+        }
+        roots = {
+            ref: [each.root for each in trees if each.branch == ref] for ref in landed
+        }
+        removing = [
+            root for each in roots.values() for root in each if root not in left
+        ]
+        room = await self.reached() if removing else Reached()
         return Cleaned.joined(
             [
-                await self.branch_cleaned(
-                    git,
-                    remote,
-                    ref,
-                    commit,
-                    on_remote=ref in listed,
-                    roots=[each.root for each in trees if each.branch == ref],
-                    left={
-                        **(
-                            {}
-                            if main is None
-                            else {main: "the repository's main worktree"}
-                        ),
-                        **working,
-                    },
-                )
-                for ref, commit in landed.items()
+                Cleaned(left=[] if room.unreached is None else [room.unreached]),
+                *[
+                    await self.branch_cleaned(
+                        git,
+                        remote,
+                        ref,
+                        commit,
+                        on_remote=ref in listed,
+                        roots=roots[ref],
+                        left=left,
+                        room=room,
+                    )
+                    for ref, commit in landed.items()
+                ],
             ]
         )
+
+    async def reached(self) -> Reached:
+        """Reach the launch's room for the cleanup: its container, named as the launch's record has it at this moment, where podman has it; else why no worktree is removed.
+
+        `rename` renames the container with the launch (`Launches.moved`),
+        and the launch as this call was given it keeps the name it registered
+        with, while the call may have waited hours on its holds: so the name is
+        read from the record the service keeps current. podman is asked once,
+        before any worktree is removed, so a container that isn't there is said
+        once, with its name, rather than once a worktree.
+        """
+        record = await asyncio.to_thread(
+            recorded, self.layout.host.record(self.launch.launch)
+        )
+        container = (self.launch if record is None else record).container
+        if container is None:
+            return Reached(
+                unreached=(
+                    "lup can't reach your room, its launch naming no container, so "
+                    "no worktree was removed"
+                )
+            )
+        ran = await self.run(
+            Program(
+                command=["podman", "container", "exists", container],
+                payload="",
+                directory=self.launch.repository,
+            )
+        )
+        match ran.status:
+            case 0:
+                return Reached(container=container)
+            case 1:
+                return Reached(
+                    unreached=(
+                        f"no container named `{container}`, your room's as lup has "
+                        "it, is there, so no worktree was removed"
+                    )
+                )
+            case status:
+                said = oneline(ran.said()) or f"it ended with status {status}"
+                return Reached(
+                    unreached=(
+                        "podman couldn't say whether your room's container "
+                        f"`{container}` is there ({said}), so no worktree was removed"
+                    )
+                )
 
     async def branch_cleaned(
         self,
@@ -705,10 +844,13 @@ class Lander(Model, arbitrary_types_allowed=True):
         on_remote: bool,
         roots: list[Path],
         left: dict[Path, str],
+        room: Reached,
     ) -> Cleaned:
-        """Clean up after the branch `ref`, landed at `commit`: its copy on `remote` where it's there, each worktree of `roots` having it checked out but those `left` names, and the local branch where none still has it."""
+        """Clean up after the branch `ref`, landed at `commit`: its copy on `remote` where it's there, each worktree of `roots` having it checked out but those `left` names, in `room` where it's reached, and the local branch where none still has it."""
         deleted = await self.remote_deleted(remote, ref) if on_remote else Cleaned()
-        trees = [await self.worktree_removed(root, left.get(root)) for root in roots]
+        trees = [
+            await self.worktree_removed(root, left.get(root), room) for root in roots
+        ]
         kept = [root for root, each in zip(roots, trees, strict=True) if each.left]
         branch = (
             await asyncio.to_thread(local_deleted, git, ref, commit)
@@ -735,17 +877,20 @@ class Lander(Model, arbitrary_types_allowed=True):
             return Cleaned(left=[f"`{short(ref)}` on `{remote}`: {update.error}"])
         return Cleaned(done=[f"deleted `{short(ref)}` on `{remote}`"])
 
-    async def worktree_removed(self, root: Path, why: str | None) -> Cleaned:
-        """Remove the worktree at `root` in the launch's room, as its session would, unless `why` says why it's left; say how it went.
+    async def worktree_removed(
+        self, root: Path, why: str | None, room: Reached
+    ) -> Cleaned:
+        """Remove the worktree at `root` in the launch's room, `room`, as its session would, unless `why` says why it's left; say how it went.
 
         `git worktree remove` without `--force` keeps a worktree with changes or
-        untracked files, saying so, and takes what git ignores with it.
+        untracked files, saying so, and takes what git ignores with it. Where
+        the room isn't reached, the worktree is named as left, the reason said
+        once for all of them (`reached`).
         """
         if why is not None:
             return Cleaned(left=[f"the worktree {root}: {why}"])
-        container = self.launch.container
-        if container is None:
-            return Cleaned(left=[f"the worktree {root}: lup can't reach your room"])
+        if room.container is None:
+            return Cleaned(left=[f"the worktree {root}"])
         ran = await self.run(
             Program(
                 command=[
@@ -753,7 +898,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                     "exec",
                     "--workdir",
                     str(self.launch.worktree),
-                    container,
+                    room.container,
                     "git",
                     "worktree",
                     "remove",
@@ -874,6 +1019,14 @@ def said(cleaned: Cleaned) -> list[str]:
     )
     left = ["Left:", *(f"- {line}" for line in cleaned.left)] if cleaned.left else []
     return [*done, *left]
+
+
+def left_alone(source: str, alone: list[str]) -> list[str]:
+    """Say which branches in the landing's history it left alone, the branch `source` having merged none of them, in a line; nothing where there's none."""
+    if not alone:
+        return []
+    named = ", ".join(f"`{short(ref)}`" for ref in alone)
+    return [f"Left alone, `{source}` having merged none of them: {named}."]
 
 
 class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):

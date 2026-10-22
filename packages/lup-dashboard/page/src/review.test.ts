@@ -37,22 +37,34 @@ import {
     steps,
     stranded,
     tallied,
+    threadAt,
+    threaded,
+    threadsOf,
     toAnswer,
     toggled,
     waited,
     whose,
     withWritten,
     written,
+    sinceSummary,
+    tasksSummary,
+    traceSummary,
+    UNREAD,
+    type AgentDrawers,
     type Around,
     type ChangedFile,
     type Comment,
     type Context,
     type Conversation,
     type Draft,
+    type Drawers,
+    type Entry,
     type Fold,
     type Head,
     type Item,
     type Naming,
+    type Remark,
+    type Since,
     type Written,
 } from "./review";
 
@@ -78,6 +90,7 @@ const QUESTION: Item = {
     },
     sender: from("s1", "a1"),
     recipient: { party: "operator" },
+    replies: [],
     quiet: false,
     made: AT,
     state: { state: "waiting" },
@@ -89,6 +102,7 @@ const NOTE: Item = {
     reason: { reason: "message", passages: [], ending: false, kind: "note", text: "I assumed UTF-8." },
     sender: from("s2"),
     recipient: { party: "operator" },
+    replies: [],
     quiet: false,
     made: AT,
     state: { state: "waiting" },
@@ -107,6 +121,7 @@ const APPROVAL: Item = {
     },
     sender: { party: "operator" },
     recipient: { party: "operator" },
+    replies: [],
     quiet: false,
     made: AT,
     state: { state: "waiting" },
@@ -125,6 +140,7 @@ const FLAGGED: Item = {
     },
     sender: from("s2"),
     recipient: { party: "operator" },
+    replies: [],
     quiet: false,
     made: AT,
     state: { state: "waiting" },
@@ -146,7 +162,7 @@ const CONTEXT: Context = {
     ],
 };
 
-const NOTHING: Around = { contexts: new Map(), files: new Map() };
+const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [] };
 
 const header = (item: Item, parked: boolean) => `── #${item.number}${parked ? " · later" : ""} ──`;
 const banner = (head: Head, parked: boolean) => {
@@ -344,6 +360,7 @@ describe("laid", () => {
 
     it("lays each item under its header in its sender's group, the parked ones last, each comment under its line", () => {
         const draft: Draft = {
+            ...EMPTY,
             comments: [
                 { item: 51, quote: { text: "Use lark", start: 17, end: 25 }, text: "Yes." },
                 { item: 51, quote: null, text: "On the whole: fine." },
@@ -422,7 +439,7 @@ describe("laid", () => {
 
     it("says where the cursor is, for the line of keys", () => {
         const draft: Draft = { ...EMPTY, comments: [{ item: 51, quote: null, text: "Fine." }] };
-        const files: Around = { contexts: new Map([[51, { shown: CONTEXT }]]), files: new Map([[54, { shown: [CHANGED] }]]) };
+        const files: Around = { contexts: new Map([[51, { shown: CONTEXT }]]), files: new Map([[54, { shown: [CHANGED] }]]), answers: [] };
         const out = laid([QUESTION, APPROVAL], [from("s3")], banner, header, draft, files);
         const at = (text: string) => out.text.indexOf(text);
         expect(placeAt(out, at("Fine."))).toBe("written");
@@ -454,6 +471,7 @@ describe("what folds under an item", () => {
             [54, { refused: "item 54 was made by no agent's call" }],
         ]),
         files: new Map([[54, { shown: [CHANGED] }]]),
+        answers: [],
     };
 
     it("says each step of a context in a line, its words' own lines kept, a run of calls in one, the call that made the item marked", () => {
@@ -492,7 +510,7 @@ describe("what folds under an item", () => {
             ["file", false],
             ["item", false],
         ]);
-        expect(top).toMatchObject({ item: 54, kind: "lines", name: 'a.py ["","l1"]', label: "3 unchanged lines, 1–3" });
+        expect(top).toMatchObject({ of: "54", kind: "lines", name: 'a.py ["","l1"]', label: "3 unchanged lines, 1–3" });
         expect(shown(top!.summary.from, top!.summary.to)).toBe("3 unchanged lines, 1–3");
         expect(top!.from).toBe(top!.summary.to);
         expect(shown(top!.from, top!.to)).toBe("\nl1\nl2\nl3");
@@ -508,7 +526,7 @@ describe("what folds under an item", () => {
         ]);
 
         const [context] = question!.folds;
-        expect(context).toMatchObject({ item: 51, kind: "context", closed: true, label: "context" });
+        expect(context).toMatchObject({ of: "51", kind: "context", closed: true, label: "context" });
         expect(shown(context!.summary.from, context!.summary.to)).toBe(
             "context · 7 steps, from your words 9m before this item",
         );
@@ -549,12 +567,13 @@ describe("what folds under an item", () => {
                     },
                 ],
             ]),
+            answers: [],
         };
         const out = laid([APPROVAL, NOTE], [], banner, header, EMPTY, read);
         const [note, approval] = out.regions;
         const shown = (from: number, to: number) => out.text.slice(from, to);
         const [file, created] = approval!.folds.filter((each) => each.kind === "file");
-        expect(file).toMatchObject({ item: 54, kind: "file", name: "t.py", closed: true });
+        expect(file).toMatchObject({ of: "54", kind: "file", name: "t.py", closed: true });
         expect(created).toMatchObject({ name: "n.py", closed: false });
         expect(shown(file!.summary.from, file!.summary.to)).toBe("t.py · changed · +1 −1 · automatic");
         expect(shown(file!.from, file!.to)).toBe("\na\nb\nB");
@@ -613,7 +632,7 @@ describe("what folds under an item", () => {
         };
         const untimed: Context = { ...agents, entries: [{ kind: "called", tool: "blocked", id: "call-51" }], anchor: 0 };
         const summary = (context: Context) => {
-            const out = laid([QUESTION], [], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map() });
+            const out = laid([QUESTION], [], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map(), answers: [] });
             const [fold] = out.regions[0]!.folds.filter((each) => each.kind === "context");
             return out.text.slice(fold!.summary.from, fold!.summary.to);
         };
@@ -637,6 +656,7 @@ describe("typed folds", () => {
         reason: { reason: "held", text: "Let it land?", summary: "", worktree: "/w", key: "k" },
         sender: from("s1"),
         recipient: { party: "operator" },
+        replies: [],
         quiet: false,
         made: AT,
         state: { state: "waiting" },
@@ -657,6 +677,7 @@ describe("typed folds", () => {
     const around = (after: string): Around => ({
         contexts: new Map([[56, { shown: { ...CONTEXT, number: 56 } }]]),
         files: new Map([[56, { shown: [AUTOMATIC, held(after)] }]]),
+        answers: [],
     });
     const out = laid([HELD, QUESTION], [], banner, header, EMPTY, around(clock(30, true)));
     const region = out.regions.find((each) => each.item.number === 56)!;
@@ -710,8 +731,8 @@ describe("typed folds", () => {
 
     it("reaches the folds of the item the cursor is in alone, for `zr`, `zm` and Space z", () => {
         const at = (text: string) => out.text.indexOf(text);
-        expect(foldsOf(out, at("step3()")).map((each) => each.item)).toEqual(region.folds.map(() => 56));
-        expect(foldsOf(out, at("Which parser?")).every((each) => each.item === 51)).toBe(true);
+        expect(foldsOf(out, at("step3()")).map((each) => each.of)).toEqual(region.folds.map(() => "56"));
+        expect(foldsOf(out, at("Which parser?")).every((each) => each.of === "51")).toBe(true);
         expect(foldsOf(out, at("━━ s1"))).toEqual([]);
         // zr from the held change opens its automatic file alone, then its runs and bodies, then its context.
         const closed = new Set(region.folds.filter((each) => each.closed));
@@ -734,7 +755,7 @@ describe("typed folds", () => {
         expect(step(false)).toEqual(["lines", "lines", "lines", "body", "body", "lines", "body"]);
         expect(step(false)).toEqual(["file", "file"]);
         expect(step(false)).toEqual([]);
-        expect([...closed].every((each) => each.item === 56)).toBe(true);
+        expect([...closed].every((each) => each.of === "56")).toBe(true);
     });
 
     it("says in the header where the cursor is: the group, the item, the file and the folds it's in", () => {
@@ -795,6 +816,7 @@ describe("what a change shows open, as it's laid out", () => {
         reason: { reason: "held", text: "Let it land?", summary: "", worktree: "/w", key: "k" },
         sender: from("s1"),
         recipient: { party: "operator" },
+        replies: [],
         quiet: false,
         made: AT,
         state: { state: "waiting" },
@@ -802,7 +824,7 @@ describe("what a change shows open, as it's laid out", () => {
     };
     /** The runs of lines folded under `item`, changing `signed`, as it's laid out, and whether its change on line 10 is among what they hide. */
     const folded = (item: Item) => {
-        const around: Around = { contexts: new Map(), files: new Map([[item.number, { shown: [signed] }]]) };
+        const around: Around = { contexts: new Map(), files: new Map([[item.number, { shown: [signed] }]]), answers: [] };
         const out = laid([item], [], banner, header, EMPTY, around);
         const runs = out.regions[0]!.folds.filter((each) => each.kind === "lines" && each.closed);
         const ten = out.text.indexOf("\nten\n") + 1;
@@ -811,12 +833,9 @@ describe("what a change shows open, as it's laid out", () => {
     /** Unchanged lines alone folded, three kept around the change on line 10 and around the line that asks. */
     const everyChange = { runs: ["6 unchanged lines, 1–6", "3 unchanged lines, 14–16", "7 unchanged lines, 24–30"], hidden: false };
 
-    it("opens every change of a flagged write, folding only unchanged lines, 3 kept around each change and each line that matters", () => {
-        expect(folded(FLAGGED)).toEqual(everyChange);
-    });
-
-    it("opens every change of a held change, folding only unchanged lines, as a flagged write does", () => {
+    it("opens every change of a held change, folding only unchanged lines, 3 kept around each change and each line that matters", () => {
         expect(folded(HELD)).toEqual(everyChange);
+        expect(folded(FLAGGED)).toEqual(everyChange);
     });
 
     it("keeps an approval's file showing the lines that ask alone, with their context, its other changes folded", () => {
@@ -830,13 +849,14 @@ describe("comments on a changed file's lines", () => {
         reason: { reason: "held", text: "Let the change to 2 files land?", summary: "a.py: asks", worktree: "/w", key: "k" },
         sender: from("s1"),
         recipient: { party: "operator" },
+        replies: [],
         quiet: false,
         made: AT,
         state: { state: "waiting" },
         rank: WAITING,
     };
     const CREATED: ChangedFile = { path: "b.md", before: null, after: { kind: "text", text: "# B\n\nNew.\n" } };
-    const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]) };
+    const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]), answers: [] };
     const out = laid([HELD], [], banner, header, EMPTY, around);
     const at = (line: string) => out.text.indexOf(`\n${line}\n`) + 1;
 
@@ -859,23 +879,20 @@ describe("comments on a changed file's lines", () => {
         expect(onItem(opened(out, empty))?.quote?.text).toBe("b.md:2\n+");
     });
 
-    it("shows a flagged write's file under it as a held change's, its lines quoted the same", () => {
-        const flagged = laid([FLAGGED], [], banner, header, EMPTY, { contexts: new Map(), files: new Map([[70, { shown: [CHANGED] }]]) });
+    it("shows a flagged write's file under it as a held change's, where one is still laid out, its lines quoted the same", () => {
+        const flagged = laid([FLAGGED], [], banner, header, EMPTY, { contexts: new Map(), files: new Map([[70, { shown: [CHANGED] }]]), answers: [] });
         const line = (text: string) => flagged.text.indexOf(`\n${text}\n`) + 1;
         expect([changing(FLAGGED), changing(HELD), changing(NOTE)]).toEqual([true, true, false]);
         expect(flagged.text.startsWith("━━ s2 ━━\n── #70 ──\na.py landed, flagged for the operator's review.\n")).toBe(true);
         expect(flagged.regions[0]!.code.length).toBeGreaterThan(0);
         expect(onItem(opened(flagged, line("L7")))).toEqual({ item: 70, quote: { text: "a.py:7\n+L7", start: expect.any(Number), end: expect.any(Number) }, text: "" });
-        // Its file is a flagged one to the line of keys, read rather than approved.
-        expect(placeAt(flagged, line("L7"))).toBe("flagged");
+        expect(placeAt(flagged, line("L7"))).toBe("file");
         expect(placeAt(flagged, flagged.text.indexOf("a.py landed"))).toBe("item");
     });
 
-    it("answers an approval or a held change with Space a and Space x, and reads a flagged write with Space a, never declining it", () => {
-        expect([answering(APPROVAL, true), answering(HELD, false)]).toEqual([{ kind: "answer" }, { kind: "answer" }]);
-        expect(answering(FLAGGED, true)).toEqual({ kind: "read" });
-        expect(answering(FLAGGED, false)).toEqual({ kind: "say", text: "A flag is read or commented on, never declined." });
-        expect([answering(NOTE, true), answering(QUESTION, false)]).toEqual([{ kind: "nothing" }, { kind: "nothing" }]);
+    it("answers an approval or a held change with Space a and Space x, and nothing else", () => {
+        expect([answering(APPROVAL), answering(HELD)]).toEqual([{ kind: "answer" }, { kind: "answer" }]);
+        expect([answering(FLAGGED), answering(NOTE), answering(QUESTION)]).toEqual([{ kind: "nothing" }, { kind: "nothing" }, { kind: "nothing" }]);
     });
 
     it("quotes a passage across a file's lines, and across files, each under its path and the span of its lines", () => {
@@ -1024,6 +1041,106 @@ describe("every agent's group, and the messages under its banner", () => {
     });
 });
 
+describe("the thread under an item", () => {
+    /** The operator's review that answered the note: a comment on its passage, and the agent's reply to it, kept on the review after its one part. */
+    const REVIEW: Item = {
+        number: 60,
+        reason: {
+            reason: "review",
+            covers: [52],
+            comments: [{ item: 52, quote: { text: "UTF-8", start: 10, end: 15 }, on: null, text: "Every one?" }],
+            letters: [],
+            remarks: [],
+        },
+        sender: { party: "operator" },
+        recipient: from("s2"),
+        replies: [{ number: 2, to: { item: 60, part: 1 }, text: "Every one I read.\nA stray byte is replaced.", at: AT }],
+        quiet: false,
+        made: AT,
+        state: { state: "told", at: AT, how: "call" },
+        rank: WAITING,
+    };
+    /** The operator's answer to the question: a ruling on each decision, and a comment on the whole, the second ruling replied to. */
+    const ANSWER: Item = {
+        number: 61,
+        reason: {
+            reason: "answer",
+            question: 51,
+            rulings: [
+                { decision: 1, verdict: "leaning", comment: "" },
+                { decision: 2, verdict: null, comment: "Drop it." },
+            ],
+            comment: "Go.",
+        },
+        sender: { party: "operator" },
+        recipient: from("s1", "a1"),
+        replies: [{ number: 4, to: { item: 61, part: 2 }, text: "Dropped.", at: AT }],
+        quiet: false,
+        made: AT,
+        state: { state: "told", at: AT, how: "call" },
+        rank: WAITING,
+    };
+    const around: Around = { contexts: new Map(), files: new Map(), answers: [REVIEW, ANSWER] };
+
+    it("reads the thread from the operator's items answering the item: each comment by its part's id, and the replies to them", () => {
+        expect(threadsOf([REVIEW, ANSWER], 52)).toEqual({
+            said: [{ id: { item: 60, part: 1 }, text: "Every one?", quote: { text: "UTF-8", start: 10, end: 15 }, on: null, decision: null }],
+            replies: [{ id: { item: 60, part: 2 }, to: { item: 60, part: 1 }, text: "Every one I read.\nA stray byte is replaced." }],
+        });
+        expect(threadsOf([REVIEW, ANSWER], 51).said.map((each) => [each.id.part, each.text, each.decision])).toEqual([
+            [1, "leaning", 1],
+            [2, "Drop it.", 2],
+            [3, "Go.", null],
+        ]);
+        expect([threaded([REVIEW, ANSWER], NOTE), threaded([REVIEW], QUESTION), threaded([], NOTE)]).toEqual([true, false, false]);
+    });
+
+    it("lays each comment under the line it's on, the agent's reply under it, a ruling under its decision, and a comment on the whole under the header", () => {
+        const out = laid([QUESTION, NOTE], [], banner, header, EMPTY, around);
+        expect(out.text).toBe(
+            "━━ s1 ━━\n── #51 ──\nyou: Go.\nWhich parser?\n1. Use lark\n   lean: yes\nyou: leaning\n2. Keep the cache\n   lean: no\nyou: Drop it.\n↳ Dropped.\n\n" +
+                "━━ s2 ━━\n── #52 ──\nI assumed UTF-8.\nyou: Every one?\n↳ Every one I read.\n  A stray byte is replaced.\n\n",
+        );
+        const [question, note] = out.regions;
+        // The operator's own comments are read, never commented; the reply's lines take comments, each knowing its reply.
+        expect(question!.asides.map((each) => [each.kind, out.text.slice(each.from, each.to)])).toEqual([
+            ["you", "you: Go."],
+            ["you", "you: leaning"],
+            ["you", "you: Drop it."],
+        ]);
+        expect(note!.threads.map((each) => [out.text.slice(each.from, each.to), each.own, each.reply.id])).toEqual([
+            ["Every one I read.", 0, { item: 60, part: 2 }],
+            ["A stray byte is replaced.", 18, { item: 60, part: 2 }],
+        ]);
+        expect(opened(out, out.text.indexOf("you: Every"))).toBeUndefined();
+        expect(placeAt(out, out.text.indexOf("you: Every"))).toBe("aside");
+        expect(placeAt(out, out.text.indexOf("stray byte"))).toBe("item");
+    });
+
+    it("opens a comment on a reply's line, or on a passage of the reply, carrying the reply's id, and lays it under that line", () => {
+        const out = laid([NOTE], [], banner, header, EMPTY, around);
+        const stray = out.text.indexOf("A stray byte is replaced.");
+        expect(opened(out, stray)).toEqual({
+            item: 52,
+            quote: { text: "A stray byte is replaced.", start: 18, end: 43 },
+            on: { item: 60, part: 2 },
+            text: "",
+        });
+        expect(quoted(out, stray + 2, stray + 7)).toEqual({ item: 52, quote: { text: "stray", start: 20, end: 25 }, on: { item: 60, part: 2 }, text: "" });
+        // Across a reply and the item's own text: nothing.
+        expect(quoted(out, out.text.indexOf("UTF-8"), stray + 7)).toBeUndefined();
+        const comment: Comment = { item: 52, quote: { text: "stray", start: 20, end: 25 }, on: { item: 60, part: 2 }, text: "Fine." };
+        const written = laid([NOTE], [], banner, header, { ...EMPTY, comments: [comment] }, around);
+        expect(written.text).toBe("━━ s2 ━━\n── #52 ──\nI assumed UTF-8.\nyou: Every one?\n↳ Every one I read.\n  A stray byte is replaced.\nFine.\n\n");
+        const [region] = written.regions;
+        const [block] = region!.blocks;
+        expect(written.text.slice(block!.from, block!.to)).toBe("Fine.");
+        // Ctrl+Enter goes back to the passage's last character, in the reply.
+        expect(aboutAt(written, comment, block!)).toBe(written.text.indexOf("stray") + 4);
+        expect(threadAt(region!, written.text.indexOf("stray"))?.reply.id).toEqual({ item: 60, part: 2 });
+    });
+});
+
 describe("the draft", () => {
     it("toggles done and parked, says what it covers, and drops comments that say nothing", () => {
         let draft = toggled(EMPTY, "done", 52);
@@ -1048,5 +1165,161 @@ describe("waited and fresh", () => {
         expect(fresh(QUESTION, "2026-10-17T11:00:00Z")).toBe(true);
         expect(fresh(QUESTION, "2026-10-17T12:30:00Z")).toBe(false);
         expect(fresh(QUESTION, null)).toBe(false);
+    });
+});
+
+describe("the drawers at the end of each agent's group", () => {
+    const S1 = from("s1", "a1");
+    const ENTRIES: Entry[] = [
+        { kind: "said", by: "operator", text: "Build the reader.", at: "2026-10-17T11:50:00Z" },
+        { kind: "said", by: "agent", text: "Reading the records.", at: "2026-10-17T11:51:00Z" },
+        { kind: "called", tool: "Bash", at: "2026-10-17T11:52:00Z" },
+        { kind: "called", tool: "Read", at: "2026-10-17T11:52:00Z" },
+        { kind: "said", by: "operator", text: "Ask me first.", at: "2026-10-17T11:55:00Z" },
+        { kind: "said", by: "agent", text: "Twenty kinds of line.", at: "2026-10-17T11:56:00Z" },
+        { kind: "called", tool: "Grep", at: "2026-10-17T11:57:00Z" },
+    ];
+    const READER = '"""Reader."""\n\n\nclass Reader:\n    def turns(self):\n        a = 1\n        b = 2\n        return a + b\n';
+    const SINCE: Since = {
+        kind: "policy-since",
+        worktree: "/w/feat",
+        branch: "feat",
+        version: "t1 0",
+        writes: 3,
+        same: false,
+        files: [
+            {
+                file: {
+                    path: "reader.py",
+                    before: null,
+                    after: { kind: "text", text: READER },
+                    reading: { role: "production", asks: [{ name: "new-file", taken: "flagged", side: "after" }], findings: [] },
+                },
+                version: "b1",
+                flags: [70],
+                since: null,
+            },
+        ],
+    };
+    const DATA: AgentDrawers = {
+        entries: ENTRIES,
+        tasks: [
+            { id: "1", subject: "Write the sampler", status: "completed", active: null },
+            { id: "2", subject: "Write the models", status: "in_progress", active: "Writing the models" },
+            { id: "3", subject: "Measure", status: "pending", active: null },
+        ],
+        usage: { used: 112_000, window: 1_000_000, model: null },
+        exchanged: null,
+        since: SINCE,
+        latest: null,
+    };
+    const drawers: Drawers = new Map([[whose(S1), DATA]]);
+    const out = laid([QUESTION, NOTE], [S1], banner, header, EMPTY, NOTHING, [], drawers);
+    const at = (text: string) => out.text.indexOf(text);
+    const lines = (from: number, to: number) => out.text.slice(from, to).split("\n");
+
+    it("lays four drawers after the group's items, each folded under its summary line, a new module's bodies folded too", () => {
+        const [group] = out.groups;
+        expect(group?.drawers.map((each) => each.kind)).toEqual(["tasks", "trace", "since", "conversation"]);
+        expect(out.groups[1]?.drawers).toEqual([]);
+        const texts = out.drawers.map((each) => lines(each.header.from, each.folds.at(-1)!.to));
+        expect(texts[0]).toEqual(["tasks · 3 entries, 1 done, 1 in progress", "✓ Write the sampler", "▶ Writing the models", "· Measure"]);
+        expect(texts[1]).toEqual(["trace · 2 steps since your last message", "Twenty kinds of line.", "· called Grep"]);
+        expect(texts[2]?.slice(0, 2)).toEqual(["since you approved on feat · 1 file", "reader.py · created · 8 lines · new file"]);
+        expect(texts[3]?.slice(0, 3)).toEqual(["conversation · 7 steps", "earlier · 4 steps, from 5m before your last words", "you: Build the reader."]);
+        // Each drawer is its own fold, folded; the new module's bodies fold until opened, its file open.
+        const own = out.drawers.map((each) => each.folds.at(-1)!);
+        expect(own.map((each) => [each.kind, each.closed, each.of])).toEqual([
+            ["tasks", true, `tasks ${whose(S1)}`],
+            ["trace", true, `trace ${whose(S1)}`],
+            ["since", true, `since ${whose(S1)}`],
+            ["conversation", true, `conversation ${whose(S1)}`],
+        ]);
+        const since = out.drawers[2]!;
+        expect(since.folds.map((each) => [each.kind, each.label, each.closed])).toEqual([
+            ["body", "Reader", true],
+            ["body", "turns", true],
+            ["file", "reader.py", false],
+            ["since", "since you approved on feat · 1 file", true],
+        ]);
+        expect(foldKey(since.folds[1]!)).toBe(`since ${whose(S1)} body reader.py ["Reader","turns"]`);
+        // The items came before the drawers, the group after them where it is.
+        expect(at("── #51")).toBeLessThan(at("tasks ·"));
+        expect(at("conversation · 7 steps")).toBeLessThan(at("━━ s2"));
+        // An agent the host hasn't answered of has no drawers; a drawer with nothing under its summary line has no fold.
+        expect(laid([QUESTION], [S1], banner, header, EMPTY, NOTHING).drawers).toEqual([]);
+        const bare = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), UNREAD]]));
+        expect(bare.drawers.map((each) => [each.kind, each.folds.length])).toEqual([["tasks", 0], ["trace", 0], ["since", 0], ["conversation", 0]]);
+        expect(bare.text).toContain("tasks · none kept\n\ntrace · nothing\n\nsince you approved · not read yet\n\nconversation · 0 steps\n\n");
+    });
+
+    it("opens a remark on the agent's words in the trace, and on a file's line since you approved, recording the version", () => {
+        expect(opened(out, at("Twenty"))).toEqual({ to: S1, quote: { text: "Twenty kinds of line.", start: 0, end: 21 }, text: "", step: 5 });
+        expect(opened(out, at("        a = 1"))).toEqual({
+            to: S1,
+            quote: { text: "reader.py:6\n+        a = 1", start: expect.any(Number), end: expect.any(Number) },
+            text: "",
+            code: { worktree: "/w/feat", path: "reader.py", version: "b1", first: 6, lines: ["        a = 1"] },
+        });
+        const from = at("        a = 1");
+        const to = at("        return") + 8;
+        const across = quoted(out, from, to);
+        expect(across !== undefined && "code" in across ? across.code : null).toEqual({ worktree: "/w/feat", path: "reader.py", version: "b1", first: 6, lines: ["        a = 1", "        b = 2", "        return a + b"] });
+        for (const line of ["tasks ·", "✓ Write", "· called Grep", "trace ·", "since you approved", "earlier ·"]) {
+            expect(opened(out, at(line))).toBeUndefined();
+        }
+        expect(opened(out, at("━━ s1"))).toEqual({ to: S1, text: "" });
+    });
+
+    it("places each remark under its line, one on a step since your last words in the trace alone, and says whom it goes to", () => {
+        const onCode = opened(out, at("        a = 1"));
+        const quote = onCode !== undefined && "quote" in onCode && onCode.quote != null ? onCode.quote : { text: "", start: 0, end: 0 };
+        const remarks: Remark[] = [
+            { to: S1, quote: { text: "Twenty kinds of line.", start: 0, end: 21 }, text: "Which twenty?", step: 5 },
+            { to: S1, quote: { text: "Reading the records.", start: 0, end: 20 }, text: "Good.", step: 1 },
+            { to: S1, quote, text: "Name it.", code: { worktree: "/w/feat", path: "reader.py", version: "b1", first: 6, lines: ["        a = 1"] } },
+        ];
+        const draft: Draft = { ...EMPTY, remarks };
+        const wrote = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers);
+        const text = wrote.text;
+        expect(text.split("Which twenty?").length).toBe(2);
+        expect(text).toContain("Twenty kinds of line.\nWhich twenty?\n· called Grep");
+        expect(text).toContain("Reading the records.\nGood.\n");
+        expect(text.indexOf("Good.")).toBeGreaterThan(text.indexOf("conversation · 7 steps"));
+        expect(text).toContain("        a = 1\nName it.\n");
+        const naming: Naming = { group: () => "g", item: (each) => `#${each.item.number}`, party: (party) => `agent ${party.session}/${party.agent}` };
+        expect(heading(wrote, text.indexOf("Name it."), true, written(draft), naming).map((each) => `${each.kind}: ${each.text}`)).toEqual([
+            "to: to agent s1/a1",
+            "group: g",
+            "since: since",
+            "file: reader.py",
+            "body: Reader",
+            "body: turns",
+        ]);
+        expect(blockAt(wrote, text.indexOf("Name it."))?.comment).toBe(2);
+        expect(written(draft)[2]).toBe(remarks[2]);
+        expect(withWritten(EMPTY, remarks).remarks).toEqual(remarks);
+    });
+
+    it("says where the cursor is in a drawer for the line of keys", () => {
+        expect(placeAt(out, at("tasks ·"))).toBe("drawer");
+        expect(placeAt(out, at("✓ Write"))).toBe("drawer");
+        expect(placeAt(out, at("Twenty"))).toBe("trace");
+        expect(placeAt(out, at("· called Grep"))).toBe("aside");
+        expect(placeAt(out, at("        a = 1"))).toBe("since");
+        expect(placeAt(out, at("reader.py · created"))).toBe("since");
+        expect(placeAt(out, at("you: Build"))).toBe("aside");
+    });
+
+    it("says in each summary line what the drawer holds, and how many writes came since, which Space l brings in", () => {
+        expect(tasksSummary([])).toBe("tasks · none kept");
+        expect(traceSummary(ENTRIES, true)).toBe("trace · 2 steps since your last message");
+        expect(traceSummary(ENTRIES.slice(0, 5), true)).toBe("trace · nothing since your last message");
+        expect(traceSummary([], false)).toBe("trace · not read yet");
+        expect(sinceSummary(null, null)).toBe("since you approved · not read yet");
+        expect(sinceSummary(SINCE, null)).toBe("since you approved on feat · 1 file");
+        expect(sinceSummary(SINCE, { ...SINCE, version: "t2 0", writes: 5 })).toBe("since you approved on feat · 1 file · 2 writes since · ␣l brings it in");
+        expect(sinceSummary(SINCE, { ...SINCE, version: "t1 1", writes: 3 })).toBe("since you approved on feat · 1 file · changed since · ␣l brings it in");
+        expect(sinceSummary({ ...SINCE, files: [] }, { ...SINCE, files: [] })).toBe("since you approved on feat · nothing");
     });
 });
