@@ -497,6 +497,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
         "found gh",
         "found notify-send",
         "found wl-paste",
+        "found qrencode",
         "github .git",
         "host",
         "cli",

@@ -17,12 +17,15 @@ from lup_dev.declaration.modules.code_rules import lup_default
 from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.forge.protocol import IssueState, Stated
 from lup_dev.host.client import RoomClient
-from lup_dev.host.protocol import Refused, Reply
+from lup_dev.host.dashboard import DashboardShown, QrCode, ShowDashboard
+from lup_dev.host.protocol import HostError, Refused, Reply, Request
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import pytest
     from conftest import FakeClock, Kit, Shell
 
@@ -517,3 +520,96 @@ def test_the_engine_is_the_worktree_engine_as_settings_place_it(
     assert isinstance(engine, EngineChecker)
     assert engine.layout.runtime == tmp_path / "run" / "lup"
     assert engine.idle == timedelta(seconds=90)
+
+
+class ShowsDashboard:
+    """A host service answering `ShowDashboard` with where the dashboard is opened."""
+
+    def __init__(self, shown: DashboardShown) -> None:
+        self.shown = shown
+
+    def ask[R: Reply](self, request: Request, reply: type[R]) -> R:
+        assert isinstance(request, ShowDashboard)
+        return reply.model_validate(self.shown.model_dump())
+
+
+LOCALHOST = "http://127.0.0.1:8766/#token=t"
+TUNNEL = "http://10.8.0.2:8766/#token=t"
+SIX = "http://[fd00::2]:8766/#token=t"
+
+
+def showing(shown: DashboardShown) -> Callable[[str], ShowsDashboard]:
+    """What `cli.answering` returns: a service showing `shown`."""
+
+    def answering(what: str) -> ShowsDashboard:
+        del what
+        return ShowsDashboard(shown)
+
+    return answering
+
+
+def dashboard_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    shown: DashboardShown,
+    *arguments: str,
+    qrencode: bool = True,
+) -> list[str]:
+    """Run `lup-dev dashboard` against a service showing `shown`, `qrencode` a stand-in printing what it was asked to draw, or absent, and return its lines."""
+    drawing = tmp_path / "qrencode"
+    if qrencode:
+        drawing.write_text('#!/bin/sh\nprintf "QR[%s %s %s]\\n" "$@"\n')
+        drawing.chmod(0o755)
+    monkeypatch.setattr(cli, "answering", showing(shown))
+    monkeypatch.setattr(cli, "QrCode", lambda: QrCode(executable=str(drawing)))
+    result = runner.invoke(cli.app, ["dashboard", "--no-open", *arguments])
+    assert result.exit_code == 0, result.output
+    return result.output.splitlines()
+
+
+def test_dashboard_draws_the_address_beyond_localhost_as_a_qr_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    shown = DashboardShown(address=LOCALHOST, elsewhere=[TUNNEL, SIX])
+    assert dashboard_command(monkeypatch, tmp_path, shown) == [
+        TUNNEL,
+        f"QR[-t ANSIUTF8 {TUNNEL}]",
+    ]
+    assert dashboard_command(monkeypatch, tmp_path, shown, "--address", "fd00::2") == [
+        SIX,
+        f"QR[-t ANSIUTF8 {SIX}]",
+    ]
+    assert dashboard_command(
+        monkeypatch, tmp_path, shown, "--address", "localhost"
+    ) == [LOCALHOST]
+
+
+def test_dashboard_says_how_to_get_the_qr_code_without_qrencode_and_draws_none_for_localhost(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    beyond = DashboardShown(address=LOCALHOST, elsewhere=[TUNNEL])
+    alone = DashboardShown(address=LOCALHOST)
+    assert dashboard_command(monkeypatch, tmp_path, beyond, qrencode=False) == [
+        TUNNEL,
+        (
+            "To scan it as a QR code, install `qrencode`, your system's package of "
+            "that name, and run this again."
+        ),
+    ]
+    assert dashboard_command(monkeypatch, tmp_path, alone, qrencode=False) == [
+        LOCALHOST
+    ]
+    assert dashboard_command(monkeypatch, tmp_path, alone) == [LOCALHOST]
+
+
+def test_dashboard_refuses_an_address_the_dashboard_doesnt_listen_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    shown = DashboardShown(address=LOCALHOST, elsewhere=[TUNNEL])
+    monkeypatch.setattr(cli, "answering", showing(shown))
+    result = runner.invoke(cli.app, ["dashboard", "--no-open", "--address", "10.8.0.3"])
+    assert result.exit_code == 1
+    assert isinstance(result.exception, HostError)
+    assert str(result.exception) == (
+        "the dashboard doesn't listen on 10.8.0.3: it listens on 127.0.0.1, 10.8.0.2"
+    )

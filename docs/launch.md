@@ -19,7 +19,7 @@ lup-dev sessions [--all]
 **What a launch does,** in order (`launched`, `cli.py`):
 1. checks the code the host runs against the copy the operator approved, and asks where it changed (`docs/trust.md`);
 2. reads the declaration at the approved commit, exported from git's objects, so neither a branch nor an edit made in a room changes the room a launch runs in;
-3. checks the host's requirements: podman and git, and `gh`, `notify-send` and a clipboard program, each optional and said where missing; and names the repository on GitHub;
+3. checks the host's requirements: podman and git, and `gh`, `notify-send`, a clipboard program and `qrencode`, each optional and said where missing; and names the repository on GitHub;
 4. starts the host service where none answers, and fetches the runtime's latest CLI where a newer one is out (*The CLIs*);
 5. finds the related repositories and the operator's editor, builds the list of values never published (`docs/private.md`), and makes the room, refusing what can't be mounted safely before an image build that may take minutes;
 6. builds the room's image where it's missing, and compiles the session's settings and renders its guidance;

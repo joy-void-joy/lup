@@ -1,56 +1,129 @@
-"""The dashboard, as the host service runs it: its child, on localhost, for as long as the service serves.
+"""The dashboard, as the host service runs it: its child, on localhost and on the addresses the operator names, for as long as the service serves.
 
-`docs/dashboard.md`, *Running*. `lup_dev` never imports the dashboard
-(`lup_dashboard`, which imports `lup_dev`): it runs its command, `lup-dashboard
-serve <port>`, found beside the interpreter running the service, where the
-dashboard is installed with it. The service writes the token its API wants as
-its input's first line, reads the address it listens on from its output's
-first line, and keeps its input open: the dashboard ends when that input
-closes, so it goes with the service, however the service ends.
+`docs/dashboard.md`, *Running* and *Access*. `lup_dev` never imports the
+dashboard (`lup_dashboard`, which imports `lup_dev`): it runs its command,
+`lup-dashboard serve <port> [--address <address>]…`, found beside the
+interpreter running the service, where the dashboard is installed with it. The
+service writes the token its API wants as its input's first line, reads the
+address it listens on from its output's first line, and keeps its input open:
+the dashboard ends when that input closes, so it goes with the service, however
+the service ends.
 
 The token is kept in the host's state, which no room mounts, so a page left open
 reconnects with the cookie it holds once the service, and the dashboard with it,
 start again on the same port. `lup-dev dashboard` asks the service for the
 address, the token in its fragment (`ShowDashboard`), starting the dashboard
-again where it's gone.
+again where it's gone, and draws the address another device opens as a QR code
+(`QrCode`).
 """
 
 import secrets
 import shlex
+from ipaddress import IPv6Address
 from pathlib import Path
 from typing import Literal, override
+from urllib.parse import urlsplit
 
-from lup.programs import ProgramError, Running, started
-from lup.types import MutableModel
+from lup.programs import ProgramError, ProgramMissingError, Running, run, started
+from lup.types import Model, MutableModel
 from lup_dev.host.protocol import HostError, Reply, Request
 from lup_dev.host.service import Companion, Handler
+from lup_dev.settings import Address
+
+
+def hosted(address: Address) -> str:
+    """Return `address` as a URL and a `Host` header write it: an IPv6 address in brackets.
+
+    >>> from ipaddress import ip_address
+    >>> hosted(ip_address("10.8.0.2")), hosted(ip_address("fd00::2"))
+    ('10.8.0.2', '[fd00::2]')
+    """
+    return f"[{address}]" if isinstance(address, IPv6Address) else str(address)
 
 
 class ShowDashboard(Request, reads=False):
-    """Return the dashboard's address, its token in the fragment, starting it where it isn't running."""
+    """Return the dashboard's addresses, its token in each fragment, starting it where it isn't running."""
 
     kind: Literal["dashboard"] = "dashboard"
 
 
 class DashboardShown(Reply):
-    """Where the operator opens the dashboard: its address, the token its page trades for a cookie in the fragment."""
+    """Where the dashboard is opened: its address on localhost and on each other address it listens on, the token its page trades for a cookie in each fragment."""
 
     kind: Literal["dashboard-shown"] = "dashboard-shown"
     address: str
+    """On localhost: where the operator's browser opens it."""
+    elsewhere: list[str] = []
+    """On each address bound beyond localhost (`LUP_DASHBOARD_ADDRESSES`), in
+    their order: what another device opens, a phone over WireGuard."""
+
+    def chosen(self, host: str | None) -> str:
+        """Return the address to show: the one on `host`, or the first beyond localhost, since that's what another device needs, else localhost's.
+
+        Raise `HostError` where the dashboard listens on no `host`.
+
+        >>> shown = DashboardShown(address="http://127.0.0.1:8766/#token=t",
+        ...     elsewhere=["http://10.8.0.2:8766/#token=t", "http://[fd00::2]:8766/#token=t"])
+        >>> shown.chosen(None)
+        'http://10.8.0.2:8766/#token=t'
+        >>> shown.chosen("fd00::2")
+        'http://[fd00::2]:8766/#token=t'
+        >>> shown.chosen("10.8.0.3")
+        Traceback (most recent call last):
+        ...
+        lup_dev.host.protocol.HostError: the dashboard doesn't listen on 10.8.0.3: it listens on 127.0.0.1, 10.8.0.2, fd00::2
+        """
+        if host is None:
+            return self.elsewhere[0] if self.elsewhere else self.address
+        wanted = "127.0.0.1" if host == "localhost" else host
+        every = [self.address, *self.elsewhere]
+        listening = [urlsplit(each).hostname or "" for each in every]
+        found = [
+            each for each, on in zip(every, listening, strict=True) if on == wanted
+        ]
+        if found:
+            return found[0]
+        message = (
+            f"the dashboard doesn't listen on {host}: it listens on "
+            f"{', '.join(listening)}"
+        )
+        raise HostError(message)
+
+
+class QrCode(Model):
+    """The dashboard's address as a QR code in the terminal, which a phone's camera reads with the token in it, so one visit is enough.
+
+    Drawn by `qrencode`, an optional requirement of the host (`launch/room.py`,
+    `host_needs`): where it isn't installed, `lup-dev dashboard` says how to get
+    it, in one line.
+    """
+
+    executable: str = "qrencode"
+
+    def drawn(self, text: str) -> str | None:
+        """Return `text` as a QR code of block characters, which a terminal shows; none where `qrencode` isn't installed."""
+        try:
+            return run(self.executable, "-t", "ANSIUTF8", text).text()
+        except ProgramMissingError:
+            return None
 
 
 class DashboardProcess(MutableModel, Companion, arbitrary_types_allowed=True):
-    """The dashboard as a process of its own: `command`, the port appended, the service's child, begun and ended with it."""
+    """The dashboard as a process of its own: `command`, the port and each address appended, the service's child, begun and ended with it."""
 
     command: list[str]
     """Its command without the port: `[<bin>/lup-dashboard, "serve"]`."""
     port: int
-    """The port it listens on, on localhost: the same each time it starts, so a
-    page left open finds it again."""
+    """The port it listens on, on every address: the same each time it starts,
+    so a page left open finds it again."""
+    addresses: list[Address] = []
+    """The addresses it listens on beyond localhost (`LUP_DASHBOARD_ADDRESSES`),
+    each passed as `--address`."""
     token: Path
     """The file keeping its token, made the first time, readable by its owner alone."""
     process: Running | None = None
     address: str | None = None
+    """Where it listens on localhost, as its output's first line said."""
 
     @override
     async def begin(self) -> None:
@@ -63,18 +136,29 @@ class DashboardProcess(MutableModel, Companion, arbitrary_types_allowed=True):
             return
         await process.ended()
 
-    async def start(self) -> str:
-        """Start the dashboard where it isn't running, and return the address it's opened at, its token in the fragment.
+    async def start(self) -> DashboardShown:
+        """Start the dashboard where it isn't running, and return where it's opened: on localhost, and on each other address, the token in each fragment.
 
-        Raise `HostError` where it can't start, saying why.
+        The port the other addresses are opened at is the one localhost's
+        address says, since port 0 takes a free one. Raise `HostError` where
+        it can't start, saying why.
         """
         if self.process is None or self.process.status is not None:
             self.address = await self.spawned()
-        return f"{self.address}/#token={self.kept()}"
+        token = self.kept()
+        port = urlsplit(self.address).port
+        return DashboardShown(
+            address=f"{self.address}/#token={token}",
+            elsewhere=[
+                f"http://{hosted(each)}:{port}/#token={token}"
+                for each in self.addresses
+            ],
+        )
 
     async def spawned(self) -> str:
-        """Start the dashboard, its token its input's first line, and return the address its output's first line says it listens on."""
-        command = [*self.command, str(self.port)]
+        """Start the dashboard, its token its input's first line, and return the address its output's first line says it listens on, on localhost."""
+        bound = [word for each in self.addresses for word in ["--address", str(each)]]
+        command = [*self.command, str(self.port), *bound]
         try:
             process = await started(*command)
         except ProgramError as unstarted:
@@ -103,7 +187,7 @@ class DashboardProcess(MutableModel, Companion, arbitrary_types_allowed=True):
 
 
 class Showing(MutableModel, Handler[ShowDashboard], arbitrary_types_allowed=True):
-    """Answers `ShowDashboard`: the dashboard's address, starting it where it's gone; where it isn't installed, why."""
+    """Answers `ShowDashboard`: the dashboard's addresses, starting it where it's gone; where it isn't installed, why."""
 
     dashboard: DashboardProcess | None
     missing: str
@@ -117,4 +201,4 @@ class Showing(MutableModel, Handler[ShowDashboard], arbitrary_types_allowed=True
     async def answer(self, request: ShowDashboard) -> Reply:
         if self.dashboard is None:
             raise HostError(self.missing)
-        return DashboardShown(address=await self.dashboard.start())
+        return await self.dashboard.start()

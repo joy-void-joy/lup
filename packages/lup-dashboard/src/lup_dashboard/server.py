@@ -1,4 +1,4 @@
-"""The dashboard's server: the page, and its API relaying the host service's requests, on localhost alone.
+"""The dashboard's server: the page, and its API relaying the host service's requests, on localhost and on the addresses the operator names.
 
 `docs/dashboard.md`, *The API* and *Access*. `POST /api/ask` sends one of the
 host's requests the page may send (`api.Asked`) and returns its reply. The
@@ -8,10 +8,11 @@ change (`Relay`): one connection however many it holds, where a browser keeps
 six to a host. Everything else is the built page.
 
 Rooms share the host's network, so being on localhost keeps nothing out but
-other machines: every call to the API carries the dashboard's token, in its
-cookie or as a bearer, and comes from the dashboard's own address. The page is
-handed the token in its address's fragment, which no request carries, and trades
-it for the cookie (`POST /api/session`).
+other machines, and an address of the machine's beyond it, as its WireGuard one,
+lets a device on that network in: every call to the API carries the dashboard's
+token, in its cookie or as a bearer, and comes from one of the dashboard's own
+addresses (`Access`). The page is handed the token in its address's fragment,
+which no request carries, and trades it for the cookie (`POST /api/session`).
 """
 
 import asyncio
@@ -47,39 +48,49 @@ from lup_dashboard.api import (
     Watched,
 )
 from lup_dashboard.host import Host
+from lup_dev.host.dashboard import hosted
 from lup_dev.host.protocol import HostError
 from lup_dev.inbox.protocol import AnswerApproval, Reviewed, SendDraft, Settled
 from lup_dev.inbox.store import Approval, Item
+from lup_dev.settings import Address
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 class Access(Model):
-    """Who may use the dashboard: whoever holds its token, from its own address."""
+    """Who may use the dashboard: whoever holds its token, from one of its own addresses."""
 
     token: str
     port: int
-    """The port it listens on, on localhost."""
-    hosts: list[str] = ["127.0.0.1", "localhost"]
-    """The names it answers to: a request naming another host, as a page served
-    elsewhere rebinding its name to localhost would, is refused."""
+    """The port it listens on, on every address."""
+    addresses: list[Address] = []
+    """The addresses it listens on beyond localhost (`LUP_DASHBOARD_ADDRESSES`;
+    `docs/dashboard.md`, *Access*), each a host it answers to."""
 
     def cookie(self) -> str:
-        """Name the cookie the page holds the token in, once it's traded it: one per port, since a browser shares localhost's cookies across its ports, and two dashboards' would overwrite each other.
+        """Name the cookie the page holds the token in, once it's traded it: one per port, since a browser shares localhost's cookies across its ports, and two dashboards' would overwrite each other; a browser keeps each host's own, so another address gets its own once its page trades the token.
 
         >>> Access(token="t", port=8766).cookie()
         'lup-dashboard-8766'
         """
         return f"lup-dashboard-{self.port}"
 
+    def hosts(self) -> list[str]:
+        """List the hosts it answers to: localhost by both its names, and each other address; a request naming another host, as a page served elsewhere rebinding its name to one of these would, is refused.
+
+        >>> Access(token="t", port=8766, addresses=["10.8.0.2", "fd00::2"]).hosts()
+        ['127.0.0.1', 'localhost', '10.8.0.2', '[fd00::2]']
+        """
+        return ["127.0.0.1", "localhost", *(hosted(each) for each in self.addresses)]
+
     def origins(self) -> list[str]:
-        """List the origins whose pages may call the API: the dashboard's own.
+        """List the origins whose pages may call the API: the dashboard's own, on each host.
 
         >>> Access(token="t", port=8766).origins()
         ['http://127.0.0.1:8766', 'http://localhost:8766']
         """
-        return [f"http://{host}:{self.port}" for host in self.hosts]
+        return [f"http://{host}:{self.port}" for host in self.hosts()]
 
 
 class About(Model):
@@ -151,7 +162,7 @@ def application(
         docs_url=None,
         redoc_url=None,
     )
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=access.hosts)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=access.hosts())
     cookie = APIKeyCookie(name=access.cookie(), auto_error=False)
     bearer = HTTPBearer(auto_error=False)
 

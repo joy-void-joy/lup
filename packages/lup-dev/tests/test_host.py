@@ -15,6 +15,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
+from ipaddress import IPv4Address, IPv6Address, ip_address
 from typing import TYPE_CHECKING, Literal, override
 
 import pytest
@@ -91,6 +92,7 @@ from lup_dev.host.service import (
 )
 from lup_dev.host.workers import LaunchJudge, LaunchModules, Offered
 from lup_dev.layout import CopyLayout, HostLayout, Layout
+from lup_dev.settings import LupDevSettings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator
@@ -101,6 +103,7 @@ if TYPE_CHECKING:
 
     from lup.sessions.terminal import Event
     from lup_dev.clock import Clock
+    from lup_dev.settings import Address
 
 runner = CliRunner()
 
@@ -2016,11 +2019,12 @@ from pathlib import Path
 
 record = Path(sys.argv[1])
 token = sys.stdin.readline().strip()
-port = sys.argv[-1]
+port = sys.argv[2]
+rest = " ".join(sys.argv[2:])
 if port == "1":
     sys.exit(3)
 with record.open("a") as kept:
-    kept.write(f"started with {token} on {port}\\n")
+    kept.write(f"started with {token} on {rest}\\n")
 print(f"http://127.0.0.1:{port}", flush=True)
 sys.stdin.read()
 with record.open("a") as kept:
@@ -2028,7 +2032,9 @@ with record.open("a") as kept:
 """
 
 
-def stand_in(tmp_path: Path, port: int = 8766) -> tuple[DashboardProcess, Path]:
+def stand_in(
+    tmp_path: Path, port: int = 8766, addresses: list[Address] | None = None
+) -> tuple[DashboardProcess, Path]:
     """A dashboard whose command is a stand-in script, recording how it was started and that it ended."""
     script = tmp_path / "dashboard.py"
     script.write_text(STAND_IN)
@@ -2036,6 +2042,7 @@ def stand_in(tmp_path: Path, port: int = 8766) -> tuple[DashboardProcess, Path]:
     dashboard = DashboardProcess(
         command=[sys.executable, str(script), str(record)],
         port=port,
+        addresses=addresses or [],
         token=tmp_path / "state" / "dashboard.token",
     )
     return dashboard, record
@@ -2112,3 +2119,64 @@ def test_a_dashboard_that_cant_listen_or_isnt_there_is_said_and_the_service_goes
         "(1, `LUP_DASHBOARD_PORT`); what it said is in the host service's output"
     )
     assert str(missing.value) == "no dashboard here"
+
+
+def test_the_dashboard_listens_on_each_address_named_and_says_where_its_opened_there(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    beyond = [ip_address("10.8.0.2"), ip_address("fd00::2")]
+    dashboard, record = stand_in(tmp_path, addresses=beyond)
+    with served(
+        service(
+            layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard]
+        )
+    ):
+        opened = client(layout, clock).ask(ShowDashboard(), DashboardShown)
+    token = dashboard.token.read_text()
+    assert opened == DashboardShown(
+        address=f"http://127.0.0.1:8766/#token={token}",
+        elsewhere=[
+            f"http://10.8.0.2:8766/#token={token}",
+            f"http://[fd00::2]:8766/#token={token}",
+        ],
+    )
+    assert record.read_text() == (
+        f"started with {token} on 8766 --address 10.8.0.2 --address fd00::2\nended\n"
+    )
+
+
+def test_the_dashboards_addresses_are_read_from_the_environment_each_named_outright(
+    layout: HostLayout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LUP_DASHBOARD_ADDRESSES", "10.8.0.2 fd00::2")
+    settings = LupDevSettings()
+    dashboard = cli.installed_dashboard(settings, layout)
+    monkeypatch.delenv("LUP_DASHBOARD_ADDRESSES")
+    unset = LupDevSettings()
+    every = [str(IPv4Address(0)), str(IPv6Address(0))]
+    loopback = ["127.0.0.1", "::1"]
+    refused: dict[str, str] = {}
+    for value in [*every, *loopback, "wg0"]:
+        monkeypatch.setenv("LUP_DASHBOARD_ADDRESSES", value)
+        with pytest.raises(ValidationError) as failure:
+            LupDevSettings()
+        refused[value] = str(failure.value)
+    assert settings.lup_dashboard_addresses == [
+        ip_address("10.8.0.2"),
+        ip_address("fd00::2"),
+    ]
+    assert dashboard is not None
+    assert dashboard.addresses == settings.lup_dashboard_addresses
+    assert unset.lup_dashboard_addresses == []
+    for value in every:
+        assert (
+            f"`{value}` would offer the dashboard on every network this machine "
+            "joins, with the token as its only wall: name each address it listens "
+            "on, as its WireGuard one"
+        ) in refused[value]
+    for value in loopback:
+        assert (
+            f"`{value}` is localhost, which the dashboard always listens on"
+            in refused[value]
+        )
+    assert "wg0" in refused["wg0"]

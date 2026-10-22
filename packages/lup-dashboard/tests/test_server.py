@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
+from ipaddress import ip_address
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -275,6 +276,56 @@ def test_a_host_name_other_than_its_own_is_refused(page: Path) -> None:
         rebound.post("/api/ask", json={"kind": "list"}, headers=bearing()).status_code
         == 400
     )
+
+
+def elsewhere(host: Host, page: Path, base: str) -> TestClient:
+    """The dashboard listening on two addresses beyond localhost, reached at `base`."""
+    access = Access(
+        token=GIVEN,
+        port=8766,
+        addresses=[ip_address("10.8.0.2"), ip_address("fd00::2")],
+    )
+    return TestClient(application(host, access, page), base_url=base)
+
+
+def test_an_address_the_dashboard_listens_on_beyond_localhost_takes_the_token_as_localhost_does(
+    page: Path,
+) -> None:
+    host = StandIn({"list": [Listed(launches=[])]}, lasting=True)
+    body = ListLaunches().model_dump()
+    served = elsewhere(host, page, "http://10.8.0.2:8766")
+    borne = served.post("/api/ask", json=body, headers=bearing())
+    without = served.post("/api/ask", json=body)
+    own = served.post(
+        "/api/ask", json=body, headers={**bearing(), "Origin": "http://10.8.0.2:8766"}
+    )
+    other = served.post(
+        "/api/ask", json=body, headers={**bearing(), "Origin": "http://10.8.0.3:8766"}
+    )
+    traded = served.post("/api/session", headers=bearing())
+    by_cookie = served.post("/api/ask", json=body)
+    with served.websocket_connect(
+        "ws://10.8.0.2:8766/api/socket", headers={"Origin": "http://10.8.0.2:8766"}
+    ) as socket:
+        socket.send_json(watched(1, ListLaunches()))
+        frame = socket.receive_json()
+    six = elsewhere(host, page, "http://[fd00::2]:8766").post(
+        "/api/ask", json=body, headers={**bearing(), "Origin": "http://[fd00::2]:8766"}
+    )
+    unbound = elsewhere(host, page, "http://10.8.0.3:8766").post(
+        "/api/ask", json=body, headers=bearing()
+    )
+    assert [
+        borne.status_code,
+        without.status_code,
+        own.status_code,
+        other.status_code,
+    ] == [200, 401, 200, 403]
+    assert traded.headers["set-cookie"].startswith("lup-dashboard-8766=")
+    assert by_cookie.status_code == 200
+    assert frame["kind"] == "watched"
+    assert six.status_code == 200
+    assert unbound.status_code == 400
 
 
 def test_a_host_out_of_reach_is_said(page: Path) -> None:
