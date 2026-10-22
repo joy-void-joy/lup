@@ -8,9 +8,17 @@ commands it runs are that runtime's wire spellings, and live in its adapter
 """
 
 from datetime import timedelta
+from ipaddress import IPv4Address, IPv6Address
 from pathlib import Path
+from typing import Annotated
+
+from pydantic import field_validator
+from pydantic_settings import NoDecode
 
 from lup.types import Settings
+
+type Address = IPv4Address | IPv6Address
+"""An address of this machine's, as `LUP_DASHBOARD_ADDRESSES` names them."""
 
 
 class LupDevSettings(Settings):
@@ -31,6 +39,14 @@ class LupDevSettings(Settings):
     lup_dashboard_port: int = 8766
     """`LUP_DASHBOARD_PORT`: the port the dashboard listens on, on localhost
     (`host/dashboard.py`); the same at each start, so a page left open finds it again."""
+    lup_dashboard_addresses: Annotated[list[Address], NoDecode] = []
+    """`LUP_DASHBOARD_ADDRESSES`: the addresses the dashboard listens on beyond
+    localhost, separated by spaces (`10.8.0.2 fd00::2`), each one of this
+    machine's, its WireGuard address among them: what another device reaches it
+    at (`docs/dashboard.md`, *Access*). Each is named outright: `0.0.0.0` is
+    refused, since it would offer the dashboard on every network the machine
+    joins, a café's among them, with the token as its only wall.
+    """
     lup_engine_idle: timedelta = timedelta(minutes=15)
     """`LUP_ENGINE_IDLE`: how long a worktree's engine waits unasked before it stops.
 
@@ -46,6 +62,35 @@ class LupDevSettings(Settings):
     branch's edits to it take effect when they land there. A repository without
     the branch is judged by the declaration each worktree's `HEAD` commit holds.
     """
+
+    @field_validator("lup_dashboard_addresses", mode="before")
+    @classmethod
+    def separated(cls, value: str | list[Address]) -> list[str] | list[Address]:
+        """Read the variable's addresses, one per word, as the environment gives them in one string."""
+        return value.split() if isinstance(value, str) else value
+
+    @field_validator("lup_dashboard_addresses")
+    @classmethod
+    def outright(cls, addresses: list[Address]) -> list[Address]:
+        """Refuse an address standing for every one this machine has, or for localhost, which is always bound.
+
+        >>> LupDevSettings(lup_dashboard_addresses="10.8.0.2 fd00::2").lup_dashboard_addresses
+        [IPv4Address('10.8.0.2'), IPv6Address('fd00::2')]
+        """
+        for each in addresses:
+            if each.is_unspecified:
+                message = (
+                    f"`{each}` would offer the dashboard on every network this machine "
+                    "joins, with the token as its only wall: name each address it "
+                    "listens on, as its WireGuard one"
+                )
+                raise ValueError(message)
+            if each.is_loopback:
+                message = (
+                    f"`{each}` is localhost, which the dashboard always listens on"
+                )
+                raise ValueError(message)
+        return addresses
 
 
 class TerminalVariables(Settings):

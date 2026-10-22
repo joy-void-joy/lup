@@ -9,6 +9,8 @@ import json
 import secrets
 import socket
 import sys
+from ipaddress import IPv6Address, ip_address
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 import uvicorn
@@ -20,35 +22,73 @@ from lup_dashboard.server import Access, application
 from lup_dev.layout import Layout
 from lup_dev.settings import LupDevSettings
 
+if TYPE_CHECKING:
+    from lup_dev.settings import Address
+
 app = typer.Typer(
     no_args_is_help=True, help="lup's dashboard, which lup's host service runs."
 )
 
 
 @app.command()
-def serve(port: int, address: str = "127.0.0.1") -> None:
-    """Serve the dashboard on `address` and `port` until its input closes, printing its address once it listens.
+def serve(
+    port: int,
+    address: Annotated[
+        list[str] | None,
+        typer.Option(
+            help=(
+                "An address of this machine's to listen on beside localhost, as the "
+                "host service passes each of `LUP_DASHBOARD_ADDRESSES`; given again "
+                "for each."
+            )
+        ),
+    ] = None,
+) -> None:
+    """Serve the dashboard on localhost and each `--address`, on `port`, until its input closes, printing its localhost address once it listens.
 
     The host service runs it, writing the token every call to the API carries
     as its input's first line and reading the address it prints, and keeps its
-    input open while it serves. Port 0 takes one that's free.
+    input open while it serves. Port 0 takes one that's free, which every
+    address then listens on. An address the machine doesn't hold yet, as a
+    tunnel's before the tunnel is up, is bound all the same (`freely`), and
+    answers once the machine has it.
     """
     token = sys.stdin.readline().strip()
-    listening = socket.create_server((address, port))
-    bound = listening.getsockname()[1]
-    served = application(
-        Sockets(layout=Layout.of(LupDevSettings()).host),
-        Access(token=token, port=bound),
-        DashboardLayout().page,
+    listening = socket.create_server(("127.0.0.1", port))
+    access = Access(
+        token=token,
+        port=listening.getsockname()[1],
+        addresses=[ip_address(each) for each in address or []],
     )
-    typer.echo(f"http://{address}:{bound}")
+    sockets = [listening, *(freely(each, access.port) for each in access.addresses)]
+    served = application(
+        Sockets(layout=Layout.of(LupDevSettings()).host), access, DashboardLayout().page
+    )
+    typer.echo(f"http://127.0.0.1:{access.port}")
     server = uvicorn.Server(uvicorn.Config(served, log_level="warning"))
-    asyncio.run(until_closed(server, listening))
+    asyncio.run(until_closed(server, sockets))
 
 
-async def until_closed(server: uvicorn.Server, listening: socket.socket) -> None:
-    """Serve on `listening` until the input closes, as the host service's end closes it."""
-    serving = asyncio.create_task(server.serve(sockets=[listening]))
+def freely(address: Address, port: int) -> socket.socket:
+    """Return a socket listening on `address` and `port`, bound whether or not the machine holds the address yet.
+
+    Linux's `IP_FREEBIND`, which binds an address no interface has, so a
+    WireGuard address is served from the moment the tunnel is up, and a
+    dashboard started before it loses nothing; without it, the bind fails and
+    the dashboard with it, on localhost too.
+    """
+    family = socket.AF_INET6 if isinstance(address, IPv6Address) else socket.AF_INET
+    opened = socket.socket(family, socket.SOCK_STREAM)
+    opened.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    opened.setsockopt(socket.IPPROTO_IP, socket.IP_FREEBIND, 1)
+    opened.bind((str(address), port))
+    opened.listen()
+    return opened
+
+
+async def until_closed(server: uvicorn.Server, sockets: list[socket.socket]) -> None:
+    """Serve on `sockets` until the input closes, as the host service's end closes it."""
+    serving = asyncio.create_task(server.serve(sockets=sockets))
     closed = asyncio.create_task(asyncio.to_thread(sys.stdin.read))
     await asyncio.wait([serving, closed], return_when=asyncio.FIRST_COMPLETED)
     server.should_exit = True

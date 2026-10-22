@@ -119,8 +119,9 @@ def host_needs() -> list[Needed]:
     Podman, rootless; git, which pushes and fetches for each room; and,
     optional, `gh`, without which lup's GitHub tools and the gate's issue states
     in a room are off; `notify-send`, without which the inbox raises no
-    desktop notice; and `wl-paste` or `xclip`, without which rooms reach no
-    clipboard.
+    desktop notice; `wl-paste` or `xclip`, without which rooms reach no
+    clipboard; and `qrencode`, without which `lup-dev dashboard` draws no QR
+    code of the dashboard's address for a phone.
     """
     podman = Requirement(
         tool="podman",
@@ -153,12 +154,22 @@ def host_needs() -> list[Needed]:
         why="reads and writes your clipboard for the rooms' sessions",
         install="your system's `wl-clipboard` package under Wayland, `xclip` under X",
     )
+    qr = Requirement(
+        tool="qrencode",
+        optional=True,
+        why=(
+            "draws the dashboard's address as a QR code for your phone to scan, "
+            "where the dashboard listens beyond localhost"
+        ),
+        install="your system's `qrencode` package",
+    )
     return [
         Needed(module="lup-dev launch", requirement=podman),
         Needed(module="lup-dev launch", requirement=git),
         Needed(module="lup-dev launch", requirement=gh),
         Needed(module="lup-dev inbox", requirement=notices),
         Needed(module="lup-dev launch", requirement=clipboard),
+        Needed(module="lup-dev dashboard", requirement=qr),
     ]
 
 

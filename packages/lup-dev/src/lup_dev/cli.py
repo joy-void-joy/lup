@@ -79,6 +79,7 @@ from lup_dev.host.courier import (
 from lup_dev.host.dashboard import (
     DashboardProcess,
     DashboardShown,
+    QrCode,
     ShowDashboard,
     Showing,
 )
@@ -432,6 +433,7 @@ def installed_dashboard(
     return DashboardProcess(
         command=[str(command), "serve"],
         port=settings.lup_dashboard_port,
+        addresses=settings.lup_dashboard_addresses,
         token=layout.dashboard_token,
     )
 
@@ -986,15 +988,36 @@ def dashboard_open(
             help="Open it in your browser, or only print where it is.",
         ),
     ] = True,
+    address: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                "Which of the addresses the dashboard listens on to print: by "
+                "default the first beyond localhost where `LUP_DASHBOARD_ADDRESSES` "
+                "names one, since that's what another device needs."
+            )
+        ),
+    ] = None,
 ) -> None:
     """Open the dashboard: every agent, what each is doing, and your inbox, in one page.
 
     Run it yourself, in your own terminal. It prints the dashboard's address, its
-    token after the `#`, and opens it in your browser; the host service runs the
-    dashboard, starting it again where it's gone.
+    token after the `#`, and opens it in your browser on localhost; the host
+    service runs the dashboard, starting it again where it's gone. Where the
+    dashboard listens on an address of this machine's beyond localhost, as its
+    WireGuard one (`LUP_DASHBOARD_ADDRESSES`), it prints that address instead,
+    drawn as a QR code for your phone to scan where `qrencode` is installed:
+    the page, opened once, keeps the token as its cookie.
     """
     shown = answering("the dashboard").ask(ShowDashboard(), DashboardShown)
-    typer.echo(shown.address)
+    chosen = shown.chosen(address)
+    typer.echo(chosen)
+    if chosen != shown.address:
+        typer.echo(
+            QrCode().drawn(chosen)
+            or "To scan it as a QR code, install `qrencode`, your system's package "
+            "of that name, and run this again."
+        )
     if opened:
         webbrowser.open(shown.address)
 
