@@ -6,21 +6,23 @@
 // their messages to agents and their remarks in the drawers among it, and a line
 // saying what the reply covers and who it reaches: every agent it covers or
 // writes to, each getting all of it. The palette (Ctrl+K) goes to an agent's
-// group. Each agent's record is read at every hook the host hears and every
-// five seconds besides, for its banner and its drawers; what its branch changed
-// since the operator approved it every ten seconds, with the version shown, so
-// what they read never moves until Space `l` brings the latest in
+// group. Each agent's record is read at each of its hooks the host hears, which
+// the listing watched says (`Talker.activity`), and as its trace or conversation
+// drawer opens, for its banner and its drawers; what its branch changed since
+// the operator approved it as a call of its that may have written ends, as its
+// drawer opens, and on Space `l`, with the version shown, so what they read
+// never moves until they bring the latest in; each a minute apart at most
 // (`docs/dashboard.md`, *The review*, *The drawers*).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { doing, everyone, launches, ring, running, type Running } from "./agents";
+import { doing, everyone, launches, ring, running, type Activity, type Running } from "./agents";
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useWatched } from "./hooks";
 import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
 import { Palette } from "./Palette";
-import { Review, type Jump } from "./Review";
+import { Review, type DrawerKind, type Jump } from "./Review";
 import {
     UNREAD,
     answer,
@@ -52,11 +54,8 @@ const SAID = {
     refused: "this page's token is refused: open the dashboard again from `lup-dev dashboard`",
 };
 
-/** How long the page waits between reading each agent's record with no hook heard, in milliseconds: a record written just after its hook is read all the same. */
-const EVERY = 5000;
-
-/** How long the page waits between asking what each agent's branch changed since the operator approved it, in milliseconds: each asking snapshots the worktree. */
-const SINCE_EVERY = 10_000;
+/** How long the page lets each agent's record and branch go unread with no hook heard, in milliseconds: a record written just after its hook, or a write no hook said, is read all the same. */
+const FALLBACK = 60_000;
 
 /** A conversation running, as the review names it: with its launch's ids and its banner's parts. */
 interface Live extends Running {
@@ -308,69 +307,59 @@ export function App() {
         setDrawers((before) => new Map(before).set(key, next(before.get(key) ?? UNREAD)));
     }, []);
 
-    // How many steps of each agent's record the page has, so each asking reads only what came since.
+    // How many steps of each agent's record the page has, so each asking reads only what came since; and which
+    // agents' records are being read, each read again after where it was asked for meanwhile.
     const have = useRef(new Map<string, number>());
-    const reading = useRef(false);
-    const again = useRef(false);
+    const reading = useRef(new Map<string, boolean>());
 
-    /** Read each agent running's record for the steps since those the page has, with its task list and its context, and the items it exchanged; again where a hook was heard meanwhile. */
-    const refresh = useCallback(async () => {
-        if (reading.current) {
-            again.current = true;
-            return;
-        }
-        reading.current = true;
-        try {
-            do {
-                again.current = false;
-                await Promise.all(live.map((agent) => read(agent)));
-            } while (again.current);
-        } finally {
-            reading.current = false;
-        }
-
-        async function read(agent: Live): Promise<void> {
+    /** Read `agent`'s record for the steps since those the page has, with its task list and its context, and the items it exchanged; once at a time, again where asked meanwhile. */
+    const readRecord = useCallback(
+        async (agent: Live): Promise<void> => {
             const { conversation, key } = agent;
-            const since = have.current.get(key) ?? 0;
+            if (reading.current.has(key)) {
+                reading.current.set(key, true);
+                return;
+            }
+            reading.current.set(key, false);
             try {
-                const [steps, listed] = await Promise.all([
-                    ask({ kind: "inbox-show-conversation", runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null, since }),
-                    ask({ kind: "inbox-list-items", conversation }),
-                ]);
-                const exchanged = listed.kind === "inbox-exchanged" ? { sent: listed.sent, received: listed.received } : null;
-                if (steps.kind !== "inbox-conversation") {
-                    drawn(key, (before) => ({ ...before, exchanged }));
-                    return;
+                let more = true;
+                while (more) {
+                    reading.current.set(key, false);
+                    const since = have.current.get(key) ?? 0;
+                    const [steps, listed] = await Promise.all([
+                        ask({ kind: "inbox-show-conversation", runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null, since }),
+                        ask({ kind: "inbox-list-items", conversation }),
+                    ]);
+                    const exchanged = listed.kind === "inbox-exchanged" ? { sent: listed.sent, received: listed.received } : null;
+                    if (steps.kind !== "inbox-conversation") {
+                        drawn(key, (before) => ({ ...before, exchanged }));
+                    } else {
+                        const whole = steps.total < since;
+                        if (whole) {
+                            // The record is shorter than what the page read of it: read it again whole.
+                            have.current.set(key, 0);
+                            reading.current.set(key, true);
+                        } else {
+                            have.current.set(key, since + steps.entries.length);
+                        }
+                        drawn(key, (before) => ({
+                            ...before,
+                            entries: whole ? [] : [...before.entries, ...steps.entries],
+                            tasks: steps.tasks ?? [],
+                            usage: steps.usage ?? null,
+                            exchanged,
+                        }));
+                    }
+                    more = reading.current.get(key) === true;
                 }
-                const whole = steps.total < since;
-                if (whole) {
-                    // The record is shorter than what the page read of it: read it again whole.
-                    have.current.set(key, 0);
-                    again.current = true;
-                } else {
-                    have.current.set(key, since + steps.entries.length);
-                }
-                drawn(key, (before) => ({
-                    ...before,
-                    entries: whole ? [] : [...before.entries, ...steps.entries],
-                    tasks: steps.tasks ?? [],
-                    usage: steps.usage ?? null,
-                    exchanged,
-                }));
             } catch (error) {
                 console.warn("lup's dashboard: an agent's record couldn't be read", error);
+            } finally {
+                reading.current.delete(key);
             }
-        }
-    }, [live, drawn]);
-
-    useEffect(() => {
-        void refresh();
-    }, [reply, refresh]);
-
-    useEffect(() => {
-        const asking = setInterval(() => void refresh(), EVERY);
-        return () => clearInterval(asking);
-    }, [refresh]);
+        },
+        [drawn],
+    );
 
     // What each agent's branch changed since the operator approved it, as the page shows it, by its conversation.
     const shown = useRef(new Map<string, Since>());
@@ -402,15 +391,53 @@ export function App() {
         [drawn],
     );
 
-    const refreshSince = useCallback(async () => {
-        await Promise.all(live.map((agent) => since(agent, false)));
-    }, [live, since]);
+    // What each agent was last seen doing, by its conversation: a change is a hook of its the host heard.
+    const seen = useRef(new Map<string, string>());
 
+    // At each hook of an agent's, its record is read; where the hook ended a call of its that may have written,
+    // a tool's that isn't lup's own, what its branch changed is read too; an agent first seen is read whole.
     useEffect(() => {
-        void refreshSince();
-        const asking = setInterval(() => void refreshSince(), SINCE_EVERY);
+        for (const agent of live) {
+            const now = JSON.stringify(agent.talker.activity ?? null);
+            const before = seen.current.get(agent.key);
+            if (before === now) {
+                continue;
+            }
+            seen.current.set(agent.key, now);
+            void readRecord(agent);
+            const was = before === undefined ? null : (JSON.parse(before) as Activity | null);
+            if (before === undefined || (was?.state === "calling" && !was.lups)) {
+                void since(agent, false);
+            }
+        }
+    }, [live, readRecord, since]);
+
+    // A minute apart at most, each agent's record and branch are read again, for what no hook said.
+    useEffect(() => {
+        const asking = setInterval(() => {
+            for (const agent of live) {
+                void readRecord(agent);
+                void since(agent, false);
+            }
+        }, FALLBACK);
         return () => clearInterval(asking);
-    }, [refreshSince]);
+    }, [live, readRecord, since]);
+
+    /** Read what an agent's drawer shows as it opens: its record for the trace or the conversation, its branch for "since you approved". */
+    const opened = useCallback(
+        (conversation: InboxConversation, kind: DrawerKind) => {
+            const agent = live.find((each) => each.key === whose(conversation));
+            if (agent === undefined) {
+                return;
+            }
+            if (kind === "since") {
+                void since(agent, false);
+            } else if (kind !== "tasks") {
+                void readRecord(agent);
+            }
+        },
+        [live, readRecord, since],
+    );
 
     /** Bring the latest of what an agent's branch changed into its drawer. */
     const bringIn = useCallback(
@@ -591,6 +618,7 @@ export function App() {
                         approveSince={approveSince}
                         latest={bringIn}
                         hold={hold}
+                        opened={opened}
                         jump={jump}
                         say={setSaid}
                         inserting={setInserting}

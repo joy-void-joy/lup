@@ -121,6 +121,8 @@ interface Props {
     latest: (conversation: Conversation) => void;
     /** Turn the operator's switch for an agent: whether each flagged write of it and its subagents is held. */
     hold: (conversation: Conversation) => void;
+    /** Told each drawer the operator opens, so the page reads what it shows. */
+    opened: (conversation: Conversation, kind: DrawerKind) => void;
     /** Where the page asks the review to go, as the palette does: an agent's group. */
     jump: Jump | null;
     /** Say something on the page's line of messages, as why a key did nothing. */
@@ -501,6 +503,7 @@ export function Review({
     approveSince,
     latest,
     hold,
+    opened: told,
     jump,
     say,
     inserting,
@@ -579,6 +582,12 @@ export function Review({
         list,
         pending,
         margin: true,
+        unfolded: (fold) => {
+            const drawer = laidOut.drawers.find((each) => each.folds.some((own) => foldKey(own) === fold.key && own.kind === each.kind));
+            if (drawer !== undefined) {
+                told(drawer.conversation, drawer.kind);
+            }
+        },
     });
     const { view, landing, kept } = editor;
     const before = useRef<Laid | null>(null);

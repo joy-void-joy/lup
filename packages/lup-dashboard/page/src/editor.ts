@@ -816,6 +816,8 @@ interface Config<D, C> {
     list: () => void;
     /** Told the keys of a chord begun, as the list writes them (`␣`, `␣z`), each time they change: none once it's done. */
     pending?: (keys: string) => void;
+    /** Told each fold the operator opens, by its keys or a click, as a view reads what a drawer shows on opening it. */
+    unfolded?: (fold: Folding) => void;
     /** Whether the margin shows each fold's mark and the bars of those the cursor is in (`margin.ts`). */
     margin?: boolean;
     /** Say something in the page's top line, as why a yank didn't reach the clipboard. */
@@ -897,6 +899,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
     following.current = config.moved;
     const chording = useRef(config.pending);
     chording.current = config.pending;
+    const unfolding = useRef(config.unfolded);
+    unfolding.current = config.unfolded;
     // The draft's history, for `u`, Ctrl+R, `g-` and `g+`; and whether the comment being written has its step
     // already, so it's undone whole.
     const history = useRef<History<D>>(begun(config.draft));
@@ -1197,6 +1201,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     return;
                 }
                 kept.current = keptFolds(shown.folds, update.startState, update.state, kept.current);
+                for (const fold of shown.folds) {
+                    if (isFolded(update.startState, fold) && !isFolded(update.state, fold)) {
+                        unfolding.current?.(fold);
+                    }
+                }
             },
             folds: () => shown.folds,
             chord: (keys) => chording.current?.(keys),
