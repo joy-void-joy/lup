@@ -136,7 +136,9 @@ def stamp(arguments: JsonObject, caller: str, call: str) -> JsonObject:
 class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
     """The modules' tools as one launch's session is served them: each call to the module serving its tool."""
 
-    launch: Register
+    launch: Callable[[], Register]
+    """The launch as it stands at each call (`Launches.current`): a rename
+    changes its name and its container while the connection lives."""
     tools: list[RoomTools]
     conversations: Conversations
     """The launch's conversations, as its hooks named them."""
@@ -161,6 +163,7 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
         if not serving:
             return Answer(text=f"lup serves no tool named `{name}`", error=True)
         [owner] = serving
+        launch = self.launch()
         match arguments:
             case dict():
                 try:
@@ -184,7 +187,7 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
                     ),
                     error=True,
                 )
-            return await owner.call(name, given, self.launch, caller, stamped.call)
+            return await owner.call(name, given, launch, caller, stamped.call)
         main = self.conversations.main()
         if main is None:
             return Answer(
@@ -195,7 +198,7 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
                 error=True,
             )
         self.say(
-            f"{self.launch.launch}: a call to `{name}` carried no `caller`, so it's "
+            f"{launch.launch}: a call to `{name}` carried no `caller`, so it's "
             f"taken as the main conversation's, {main.id}"
         )
-        return await owner.call(name, given, self.launch, main, stamped.call)
+        return await owner.call(name, given, launch, main, stamped.call)
