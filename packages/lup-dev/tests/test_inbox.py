@@ -46,6 +46,7 @@ from lup_dev.gate import Passed, Standing
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
+from lup_dev.host.names import container_name
 from lup_dev.host.protocol import (
     Holding,
     HostError,
@@ -2068,14 +2069,16 @@ def named_talkers(
 
 
 def podman_of(*running: str) -> Podman:
-    """A podman having the containers `running` and no other, asked nothing but whether one is there."""
+    """A podman having the containers `running` and no other, asked nothing but whether one is there, and to rename one."""
+    there = list(running)
 
     def answered(process: Process) -> Ran:
         match process.arguments:
             case ["podman", "container", "exists", name]:
-                return Ran(
-                    command=process.arguments, status=0 if name in running else 1
-                )
+                return Ran(command=process.arguments, status=0 if name in there else 1)
+            case ["podman", "rename", before, name] if before in there:
+                there[there.index(before)] = name
+                return Ran(command=process.arguments, status=0)
             case _:
                 message = f"podman asked {process.arguments}"
                 raise AssertionError(message)
@@ -5635,6 +5638,8 @@ class Landings:
         self.feat = self.branched("feat")
         self.ran: list[list[str]] = []
         """Each command run in the launch's room, as the host asked it."""
+        self.containers: list[str] | None = None
+        """The containers podman has, as the host's `podman container exists` is answered; none has every one."""
 
     def branched(self, name: str) -> Path:
         """Add a worktree on a new branch `name` from `dev`, and return its root."""
@@ -5645,9 +5650,12 @@ class Landings:
         return root
 
     async def room(self, program: Program) -> Ran:
-        """Run what the host asks of the launch's room, `podman exec` into it, on this machine instead, where the room's paths are the host's."""
+        """Run what the host asks of the launch's room, `podman exec` into it, on this machine instead, where the room's paths are the host's; and say whether its container is there."""
         self.ran.append(program.command)
         match program.command:
+            case ["podman", "container", "exists", name]:
+                there = self.containers is None or name in self.containers
+                return Ran(command=program.command, status=0 if there else 1)
             case ["podman", "exec", "--workdir", workdir, _, *command]:
                 return await executed(
                     Program(command=command, payload="", directory=Path(workdir))
@@ -5802,19 +5810,126 @@ def test_land_puts_the_branch_on_dev_and_cleans_up_what_it_landed_but_what_s_in_
     assert (kept / "draft.txt").is_file()
     assert landings.shell.git(repository, "branch", "--list", "feat") == ""
     assert landings.ran == [
+        ["podman", "container", "exists", "lup-one"],
+        *(
+            [
+                "podman",
+                "exec",
+                "--workdir",
+                str(landings.dev),
+                "lup-one",
+                "git",
+                "worktree",
+                "remove",
+                str(each),
+            ]
+            for each in [feat, kept]
+        ),
+    ]
+
+
+def test_land_removes_worktrees_in_the_container_the_launch_has_when_it_cleans_up(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    rooms, path = '"""Rooms."""\n', "src/pkg/rooms.py"
+    feat = landings.feat
+    landings.wrote(feat, path, rooms)
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    renamed = container_name(landings.repository, "review-and-plan")
+    with (
+        inboxed(
+            machine,
+            clock,
+            notices,
+            said,
+            rooms=landings.room,
+            podman=podman_of("lup-one"),
+        ) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, started("claude"))
+        landings.flag(path, rooms, session)
+        landing = pool.submit(call, mcp, "land", {})
+        assert delivery.holding.wait(timeout=60)
+        # While the landing waits on the operator, the session renames itself,
+        # and lup renames its container with it.
+        assert call(mcp, "rename", {"name": "review-and-plan"}) == (
+            "This session is `review-and-plan`.",
+            False,
+        )
+        [hold] = [
+            each
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.reason, HeldChange)
+        ]
+        inbox("answer", str(hold.number), "--approve", "--comment", "")
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+    assert f"- removed the worktree {feat}\n" in answer
+    assert not feat.exists()
+    assert f"one: its container lup-one is {renamed}" in said
+    assert landings.ran == [
+        ["podman", "container", "exists", renamed],
         [
             "podman",
             "exec",
             "--workdir",
             str(landings.dev),
-            "lup-one",
+            renamed,
             "git",
             "worktree",
             "remove",
-            str(each),
-        ]
-        for each in [feat, kept]
+            str(feat),
+        ],
     ]
+
+
+def test_land_says_once_where_no_container_is_there_and_names_each_worktree_left(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, repository = landings.feat, landings.repository
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.shell.git(repository, "push", "-q", "origin", "feat")
+    kept = landings.branched("kept")
+    landings.wrote(kept, "src/pkg/kept.py", '"""Kept."""\n')
+    landings.shell.git(landings.dev, "merge", "-q", "--no-ff", "--no-edit", "kept")
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    landings.containers = []
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+    assert not error
+    assert answer == (
+        f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "Cleaned up after it:\n"
+        "- deleted `feat` on `origin`\n"
+        "Left:\n"
+        "- no container named `lup-one`, your room's as lup has it, is there, so no "
+        "worktree was removed\n"
+        f"- the worktree {feat}\n"
+        f"- the local branch `feat`, checked out in {feat}\n"
+        f"- the worktree {kept}\n"
+        f"- the local branch `kept`, checked out in {kept}"
+    )
+    assert landings.ran == [["podman", "container", "exists", "lup-one"]]
+    assert feat.is_dir()
+    assert kept.is_dir()
+    assert landings.on_forge("refs/heads/feat") is None
+    assert landings.on_forge("refs/heads/dev") == tip
 
 
 def test_land_leaves_alone_a_branch_with_nothing_of_its_own_and_a_flag_on_it_holds_nothing(

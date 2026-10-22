@@ -99,7 +99,7 @@ Findings on lines no change touched, in the files a checkpoint judged, come in a
 
 **The call holds until each hold is answered.** Approved, marked read or answered yes, each flag it covers is approved, and once all are, it lands. Commented on without approval, or declined, nothing lands: the call returns how each was answered, with their words, which also reach the conversation landing as a note, so they're told where no call waits. What they approved stays approved, and the next `land` holds the rest again. A later landing's hold on a file supersedes one still waiting from an earlier one.
 
-**Then it pushes and cleans up,** through the host as the room's own push does (`docs/credentials.md`, *Landing through `land`*). A `git push` to a gated branch still runs the gate in the room, and waits on no flag.
+**Then it pushes and cleans up,** through the host as the room's own push does (`docs/credentials.md`, *Landing through `land`*): after each branch it landed, its copy on the remote, its worktree where it's clean and nobody works in it, and its local branch. A worktree is removed in the launch's room, through podman by the name its container has at that moment, read from the launch's record, since `rename` renames the container with the launch (`docs/launch.md`, *Names*) and the call may have waited hours; where that container isn't there, the answer says so once, with its name, and names each worktree and branch left. A `git push` to a gated branch still runs the gate in the room, and waits on no flag.
 
 ## The gate
 

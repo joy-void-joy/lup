@@ -52,11 +52,15 @@ the launch's container, `git worktree remove` without `--force`, so git itself
 keeps one with changes or untracked files, and what it ignores (its `.venv`, its
 scratch) goes with it. Removed on the host, the path would be the one
 `<git directory>/worktrees/<name>/gitdir` names, which the room writes, and the
-host's recursive delete could be aimed outside the repository. Left alone, and
-said: the repository's main worktree, one where the conversation landing works,
-and one where a conversation of a launch still served works, as the judge's
-session index has it (`Holding.works`); the local branch it has checked out
-stays with it.
+host's recursive delete could be aimed outside the repository. The container is
+named as the launch's record has it when the cleanup runs (`reached`), since
+`rename` renames it with the launch and the landing may have waited hours on
+its holds, and podman is asked for it once before any worktree is removed: one
+that isn't there is said once, with its name, and each worktree named as left.
+Left alone, and said: the repository's main worktree, one where the conversation
+landing works, and one where a conversation of a launch still served works, as
+the judge's session index has it (`Holding.works`); the local branch it has
+checked out stays with it.
 
 The tool's docstring's first line is its summary, 50 characters at most, which
 the guidance lists (`launch/guidance.py`); the rest is its description. It
@@ -194,6 +198,13 @@ class Worker(Model):
 
     root: Path
     why: str
+
+
+class Reached(Model):
+    """The launch's room as a landing's cleanup reaches it: its container's name where podman has it, else why no worktree is removed, said once."""
+
+    container: str | None = None
+    unreached: str | None = None
 
 
 class Cleaned(Model):
@@ -718,27 +729,82 @@ class Lander(Model, arbitrary_types_allowed=True):
         places = list(self.delivery.inbox.whereabouts.values())
         working = await asyncio.to_thread(self.working, places)
         main = trees[0].root if trees else None
+        left = {
+            **({} if main is None else {main: "the repository's main worktree"}),
+            **working,
+        }
+        roots = {
+            ref: [each.root for each in trees if each.branch == ref] for ref in landed
+        }
+        removing = [
+            root for each in roots.values() for root in each if root not in left
+        ]
+        room = await self.reached() if removing else Reached()
         return Cleaned.joined(
             [
-                await self.branch_cleaned(
-                    git,
-                    remote,
-                    ref,
-                    commit,
-                    on_remote=ref in listed,
-                    roots=[each.root for each in trees if each.branch == ref],
-                    left={
-                        **(
-                            {}
-                            if main is None
-                            else {main: "the repository's main worktree"}
-                        ),
-                        **working,
-                    },
-                )
-                for ref, commit in landed.items()
+                Cleaned(left=[] if room.unreached is None else [room.unreached]),
+                *[
+                    await self.branch_cleaned(
+                        git,
+                        remote,
+                        ref,
+                        commit,
+                        on_remote=ref in listed,
+                        roots=roots[ref],
+                        left=left,
+                        room=room,
+                    )
+                    for ref, commit in landed.items()
+                ],
             ]
         )
+
+    async def reached(self) -> Reached:
+        """Reach the launch's room for the cleanup: its container, named as the launch's record has it at this moment, where podman has it; else why no worktree is removed.
+
+        `rename` renames the container with the launch (`Launches.moved`),
+        and the launch as this call was given it keeps the name it registered
+        with, while the call may have waited hours on its holds: so the name is
+        read from the record the service keeps current. podman is asked once,
+        before any worktree is removed, so a container that isn't there is said
+        once, with its name, rather than once a worktree.
+        """
+        record = await asyncio.to_thread(
+            recorded, self.layout.host.record(self.launch.launch)
+        )
+        container = (self.launch if record is None else record).container
+        if container is None:
+            return Reached(
+                unreached=(
+                    "lup can't reach your room, its launch naming no container, so "
+                    "no worktree was removed"
+                )
+            )
+        ran = await self.run(
+            Program(
+                command=["podman", "container", "exists", container],
+                payload="",
+                directory=self.launch.repository,
+            )
+        )
+        match ran.status:
+            case 0:
+                return Reached(container=container)
+            case 1:
+                return Reached(
+                    unreached=(
+                        f"no container named `{container}`, your room's as lup has "
+                        "it, is there, so no worktree was removed"
+                    )
+                )
+            case status:
+                said = oneline(ran.said()) or f"it ended with status {status}"
+                return Reached(
+                    unreached=(
+                        "podman couldn't say whether your room's container "
+                        f"`{container}` is there ({said}), so no worktree was removed"
+                    )
+                )
 
     async def branch_cleaned(
         self,
@@ -750,10 +816,13 @@ class Lander(Model, arbitrary_types_allowed=True):
         on_remote: bool,
         roots: list[Path],
         left: dict[Path, str],
+        room: Reached,
     ) -> Cleaned:
-        """Clean up after the branch `ref`, landed at `commit`: its copy on `remote` where it's there, each worktree of `roots` having it checked out but those `left` names, and the local branch where none still has it."""
+        """Clean up after the branch `ref`, landed at `commit`: its copy on `remote` where it's there, each worktree of `roots` having it checked out but those `left` names, in `room` where it's reached, and the local branch where none still has it."""
         deleted = await self.remote_deleted(remote, ref) if on_remote else Cleaned()
-        trees = [await self.worktree_removed(root, left.get(root)) for root in roots]
+        trees = [
+            await self.worktree_removed(root, left.get(root), room) for root in roots
+        ]
         kept = [root for root, each in zip(roots, trees, strict=True) if each.left]
         branch = (
             await asyncio.to_thread(local_deleted, git, ref, commit)
@@ -780,17 +849,20 @@ class Lander(Model, arbitrary_types_allowed=True):
             return Cleaned(left=[f"`{short(ref)}` on `{remote}`: {update.error}"])
         return Cleaned(done=[f"deleted `{short(ref)}` on `{remote}`"])
 
-    async def worktree_removed(self, root: Path, why: str | None) -> Cleaned:
-        """Remove the worktree at `root` in the launch's room, as its session would, unless `why` says why it's left; say how it went.
+    async def worktree_removed(
+        self, root: Path, why: str | None, room: Reached
+    ) -> Cleaned:
+        """Remove the worktree at `root` in the launch's room, `room`, as its session would, unless `why` says why it's left; say how it went.
 
         `git worktree remove` without `--force` keeps a worktree with changes or
-        untracked files, saying so, and takes what git ignores with it.
+        untracked files, saying so, and takes what git ignores with it. Where
+        the room isn't reached, the worktree is named as left, the reason said
+        once for all of them (`reached`).
         """
         if why is not None:
             return Cleaned(left=[f"the worktree {root}: {why}"])
-        container = self.launch.container
-        if container is None:
-            return Cleaned(left=[f"the worktree {root}: lup can't reach your room"])
+        if room.container is None:
+            return Cleaned(left=[f"the worktree {root}"])
         ran = await self.run(
             Program(
                 command=[
@@ -798,7 +870,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                     "exec",
                     "--workdir",
                     str(self.launch.worktree),
-                    container,
+                    room.container,
                     "git",
                     "worktree",
                     "remove",
