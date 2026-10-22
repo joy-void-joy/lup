@@ -554,6 +554,40 @@ async def closed(server: asyncio.Server) -> None:
     await server.wait_closed()
 
 
+type Answering = Callable[
+    [asyncio.StreamReader, asyncio.StreamWriter], Coroutine[None, None, None]
+]
+"""What answers one connection to a server, from its reader and to its writer."""
+
+
+async def unix_server(
+    path: Path, answering: Answering, limit: int = 64 * 1024
+) -> asyncio.Server:
+    """Serve the Unix socket at `path`, as asyncio's `start_unix_server` does, but answering each connection with `answering` in a task held until it ends; `limit` is the longest line its readers read.
+
+    asyncio's loop holds a task weakly, and a connection holds the task
+    answering it only while the loop watches it for what its peer sends. Once the
+    peer has sent everything, as a room's hook does before it waits for its
+    answer, nothing the loop holds reaches the task. One then awaiting what the
+    loop doesn't hold either, such as the reply on a connection it opened, whose
+    reader asyncio holds weakly too, is a cycle of garbage, which Python's
+    collector frees mid-wait: the connection closes unanswered. A hook held for
+    the operator in a launch's process would end so, at once and with no
+    decision, its call going on while the hold waits.
+    """
+    running: list[asyncio.Task[None]] = []
+
+    async def held(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.create_task(answering(reader, writer))
+        running.append(task)
+        try:
+            await task
+        finally:
+            running.remove(task)
+
+    return await asyncio.start_unix_server(held, path=path, limit=limit)
+
+
 class Launches(MutableModel, arbitrary_types_allowed=True):
     """The launches the service serves, each on its own sockets."""
 
@@ -683,15 +717,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 changes=self.changes,
             )
             async with AsyncExitStack() as opening:
-                hooks = await asyncio.start_unix_server(hook, path=sockets.hook)
+                hooks = await unix_server(sockets.hook, hook)
                 opening.push_async_callback(closed, hooks)
-                served = await asyncio.start_unix_server(
-                    tools, path=sockets.mcp, limit=self.line_limit
-                )
+                served = await unix_server(sockets.mcp, tools, self.line_limit)
                 opening.push_async_callback(closed, served)
-                asked = await asyncio.start_unix_server(
-                    requests.connection, path=sockets.request
-                )
+                asked = await unix_server(sockets.request, requests.connection)
                 opening.pop_all()
             self.served[request.launch] = Served(
                 launch=request,
@@ -1688,11 +1718,9 @@ class HostService(Model, arbitrary_types_allowed=True):
         )
         try:
             await launches.reopen()
-            server = await asyncio.start_unix_server(
-                control.connection, path=self.layout.control
-            )
-            watches = await asyncio.start_unix_server(
-                control.watching, path=self.layout.watch, limit=self.line_limit
+            server = await unix_server(self.layout.control, control.connection)
+            watches = await unix_server(
+                self.layout.watch, control.watching, self.line_limit
             )
             self.say(f"The host service listens on {self.layout.control}.")
             try:

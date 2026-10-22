@@ -10,9 +10,9 @@
 | `SubagentStop` | `ConversationEnded` |
 
 A file tool's write that asks is held in `PreToolUse` for the operator's answer
-in their inbox, then let through (`allow`) or denied (`deny`) with it: Claude
-Code's own prompt isn't used, so a hold is answered the same way on every
-runtime. The agent hears a
+in their inbox, then let through (`allow`), their comment told beside the call,
+or denied (`deny`) with it: Claude Code's own prompt isn't used, so a hold is
+answered the same way on every runtime. The agent hears a
 checkpoint's report as `additionalContext` beside the call's result, and what a
 turn's end tells it, the session's or a subagent's, as `additionalContext` of
 `Stop` or `SubagentStop`, which holds the turn: it goes on, the text shown as
@@ -154,6 +154,11 @@ What its judging relies on, from Claude Code's hooks reference
   status code:` and the first line of your hook's stderr", and "The action goes
   ahead"; status 2 alone blocks the call, so the room's hook never ends with it;
 - `systemMessage` is a "Warning message shown to the user";
+- `PreToolUse`'s `permissionDecisionReason` is "For `"deny"`, shown to Claude.
+  For `"allow"` and `"defer"`, written to the debug log only", and its
+  `additionalContext` is "String added to Claude's context alongside the tool
+  result" (read 2026-10-22): what a write let through is told, an approval's
+  comment among it, goes in `additionalContext`;
 - `tool_use_id` is in both `PreToolUse` and `PostToolUse`, so a call's start and
   finish match; a call that fails fires `PostToolUseFailure` instead, with the same
   id;
@@ -245,7 +250,7 @@ from lup_dev.policy.checkpoint import (
     counted,
     first_warning,
 )
-from lup_dev.policy.report import judge_failed
+from lup_dev.policy.report import judge_failed, sections
 from lup_dev.policy.runtime import Runtime
 
 if TYPE_CHECKING:
@@ -711,10 +716,9 @@ class PreToolUse(Payload):
                 return Specific(hook_specific_output=answer)
             case "allow":
                 self.started().apply(bench)
+                told = sections([decision.reason, decision.told])
                 answer = PreToolUseAnswer(
-                    permission_decision="allow",
-                    permission_decision_reason=decision.reason or None,
-                    additional_context=decision.told or None,
+                    permission_decision="allow", additional_context=told or None
                 )
                 return Specific(hook_specific_output=answer)
 
