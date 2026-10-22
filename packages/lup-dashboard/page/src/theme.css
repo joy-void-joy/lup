@@ -24,6 +24,12 @@
     --orange: #ff9933;
     --add-bg: #001b29;
     --del-bg: #3d0100;
+    /* A line that matters, tinted in the colour of what it triggered: the
+       strongest tint of each at which every text colour above keeps 7:1 on it
+       (`--err` is the first to fall under). */
+    --held-bg: #251607;
+    --flagged-bg: #201900;
+    --told-bg: #191919;
 
     /* Each kind of fold's colour, in its mark, its bar, its placeholder and the header. */
     --fold-item: var(--orange);
@@ -784,21 +790,25 @@ kbd {
     padding-left: calc(6px + 8ch);
 }
 
-/* What the judge's reading marks: a line that matters barred at its start, in
-   orange where what it triggered is held for the operator, yellow where it's
-   flagged, the muted colour where it's only told, and saying what it triggered
-   after its text (`data-said`); a file's header barred where what the file asks
-   is about it whole; and an automatic file's header, muted, folded alone. */
+/* What the judge's reading marks: a line that matters barred at its start and
+   tinted, in orange where what it triggered is held for the operator, yellow
+   where it's flagged, the muted colour where it's only told, over what marks
+   it added or removed, and saying what it triggered after its text
+   (`data-said`); a file's header barred where what the file asks is about it
+   whole; and an automatic file's header, muted, folded alone. */
 .buffer .cm-line.code-matters {
     box-shadow: inset 3px 0 0 var(--warn);
+    background: var(--flagged-bg);
 }
 
 .buffer .cm-line.code-held {
     box-shadow: inset 3px 0 0 var(--orange);
+    background: var(--held-bg);
 }
 
 .buffer .cm-line.code-told {
     box-shadow: inset 3px 0 0 var(--muted);
+    background: var(--told-bg);
 }
 
 .buffer .cm-line.code-matters[data-said]::after {
@@ -1184,3 +1194,4 @@ kbd {
 .tok-deleted {
     color: var(--err);
 }
+
