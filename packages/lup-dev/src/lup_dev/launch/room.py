@@ -80,6 +80,7 @@ from lup.rooms.container import Container, Image, Mask, Mount
 from lup.sessions import bridge
 from lup.sessions.terminal import TerminalSettings
 from lup.types import Model
+from lup.programs import ProgramMissingError, run
 from lup_dev.catalog.room import Editor, Editors, RoomBase
 from lup_dev.clipboard import shim
 from lup_dev.declaration.kinds import Package
@@ -111,6 +112,19 @@ if TYPE_CHECKING:
 
 class RoomError(LupDevError):
     """A room the declaration and the machine can't make as they stand."""
+
+
+QRENCODE = Requirement(
+    tool="qrencode",
+    optional=True,
+    why=(
+        "draws the dashboard's address as a QR code for your phone to scan, "
+        "where the dashboard listens beyond localhost"
+    ),
+    install="your system's `qrencode` package",
+)
+"""What draws the dashboard's address for a phone (`qr_code`), an optional
+requirement of the host among `host_needs`."""
 
 
 def host_needs() -> list[Needed]:
@@ -154,23 +168,27 @@ def host_needs() -> list[Needed]:
         why="reads and writes your clipboard for the rooms' sessions",
         install="your system's `wl-clipboard` package under Wayland, `xclip` under X",
     )
-    qr = Requirement(
-        tool="qrencode",
-        optional=True,
-        why=(
-            "draws the dashboard's address as a QR code for your phone to scan, "
-            "where the dashboard listens beyond localhost"
-        ),
-        install="your system's `qrencode` package",
-    )
     return [
         Needed(module="lup-dev launch", requirement=podman),
         Needed(module="lup-dev launch", requirement=git),
         Needed(module="lup-dev launch", requirement=gh),
         Needed(module="lup-dev inbox", requirement=notices),
         Needed(module="lup-dev launch", requirement=clipboard),
-        Needed(module="lup-dev dashboard", requirement=qr),
+        Needed(module="lup-dev dashboard", requirement=QRENCODE),
     ]
+
+
+def qr_code(text: str, requirement: Requirement = QRENCODE) -> str | None:
+    """Return `text` as a QR code of block characters, which a terminal shows and a phone's camera reads; none where `requirement`'s program isn't installed.
+
+    `lup-dev dashboard` draws the dashboard's address with it, the token in
+    the address, so one visit is enough; where it's missing, the command says
+    how to get it in the requirement's own words.
+    """
+    try:
+        return run(requirement.tool, "-t", "ANSIUTF8", text).text()
+    except ProgramMissingError:
+        return None
 
 
 class Repository(Model):

@@ -90,24 +90,6 @@ class DashboardShown(Reply):
         raise HostError(message)
 
 
-class QrCode(Model):
-    """The dashboard's address as a QR code in the terminal, which a phone's camera reads with the token in it, so one visit is enough.
-
-    Drawn by `qrencode`, an optional requirement of the host (`launch/room.py`,
-    `host_needs`): where it isn't installed, `lup-dev dashboard` says how to get
-    it, in one line.
-    """
-
-    executable: str = "qrencode"
-
-    def drawn(self, text: str) -> str | None:
-        """Return `text` as a QR code of block characters, which a terminal shows; none where `qrencode` isn't installed."""
-        try:
-            return run(self.executable, "-t", "ANSIUTF8", text).text()
-        except ProgramMissingError:
-            return None
-
-
 class DashboardProcess(MutableModel, Companion, arbitrary_types_allowed=True):
     """The dashboard as a process of its own: `command`, the port and each address appended, the service's child, begun and ended with it."""
 

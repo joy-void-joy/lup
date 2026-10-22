@@ -79,7 +79,6 @@ from lup_dev.host.courier import (
 from lup_dev.host.dashboard import (
     DashboardProcess,
     DashboardShown,
-    QrCode,
     ShowDashboard,
     Showing,
 )
@@ -153,6 +152,8 @@ from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
+    QRENCODE,
+    qr_code,
     Lent,
     OperatorsEditor,
     RoomClipboard,
@@ -1014,9 +1015,9 @@ def dashboard_open(
     typer.echo(chosen)
     if chosen != shown.address:
         typer.echo(
-            QrCode().drawn(chosen)
-            or "To scan it as a QR code, install `qrencode`, your system's package "
-            "of that name, and run this again."
+            qr_code(chosen)
+            or f"To scan it as a QR code, install `{QRENCODE.tool}`: "
+            f"{QRENCODE.install}, then run this again."
         )
     if opened:
         webbrowser.open(shown.address)

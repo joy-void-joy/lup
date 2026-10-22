@@ -17,7 +17,9 @@ from lup_dev.declaration.modules.code_rules import lup_default
 from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.forge.protocol import IssueState, Stated
 from lup_dev.host.client import RoomClient
-from lup_dev.host.dashboard import DashboardShown, QrCode, ShowDashboard
+from lup_dev import Requirement
+from lup_dev.host.dashboard import DashboardShown, ShowDashboard
+from lup_dev.launch.room import qr_code
 from lup_dev.host.protocol import HostError, Refused, Reply, Request
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import Verdict, VerdictLog
@@ -561,7 +563,12 @@ def dashboard_command(
         drawing.write_text('#!/bin/sh\nprintf "QR[%s %s %s]\\n" "$@"\n')
         drawing.chmod(0o755)
     monkeypatch.setattr(cli, "answering", showing(shown))
-    monkeypatch.setattr(cli, "QrCode", lambda: QrCode(executable=str(drawing)))
+    stand_in = Requirement(
+        tool=str(drawing), optional=True, why="a stand-in", install="nothing"
+    )
+    monkeypatch.setattr(
+        cli, "qr_code", lambda text: qr_code(text, requirement=stand_in)
+    )
     result = runner.invoke(cli.app, ["dashboard", "--no-open", *arguments])
     assert result.exit_code == 0, result.output
     return result.output.splitlines()
