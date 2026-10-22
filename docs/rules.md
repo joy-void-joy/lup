@@ -1740,9 +1740,9 @@ def merged(counts: dict[str, int], extra: dict[str, int]) -> dict[str, int]:
 
 ## `constant-home`
 
-A constant outside its home is frozen where a caller can't change it, or spread where nobody can find it.
+A constant outside its home is frozen where a caller can't change it, spread where nobody can find it, or kept as data pyright can't check its uses against.
 
-**Steer:** A number or duration becomes an overridable default (a parameter default or a model field default); a path goes in the package's `layout.py`, an environment variable's name in its `settings.py`, a runtime's wire spelling in its adapter's `Spellings`.
+**Steer:** A number or a duration becomes a default a caller can override, a parameter's or a field's, and a list a caller might change a field's default on the model that uses it; a closed set of options becomes a `Literal` type, its members read with `typing.get_args`, and a fixed table from one vocabulary to another a function that `match`es; a path goes in the package's `layout.py`, an environment variable's name in its `settings.py`, and a runtime's wire spelling in its adapter, as a field of the adapter's model or a `Literal`.
 
 **Flags:**
 
@@ -1770,6 +1770,84 @@ def fetch(retries: int = 3) -> None:
         time.sleep(0)
 ```
 
+```python
+from lup.types import Model
+
+RETRIED = [429, 502, 503]
+
+
+class Retrying(Model):
+    """When a failed request is tried again."""
+
+    def transient(self, status: int) -> bool:
+        """Say whether a failure with this status may pass when tried again."""
+        return status in RETRIED
+```
+
+Done the steer's way:
+
+```python
+from lup.types import Model
+
+
+class Retrying(Model):
+    """When a failed request is tried again."""
+
+    statuses: list[int] = [429, 502, 503]
+
+    def transient(self, status: int) -> bool:
+        """Say whether a failure with this status may pass when tried again."""
+        return status in self.statuses
+```
+
+```python
+FORMATS = ["json", "toml"]
+
+
+def known(name: str) -> bool:
+    """Say whether a configuration's format is one we read."""
+    return name in FORMATS
+```
+
+Done the steer's way:
+
+```python
+from typing import Literal, get_args
+
+type Format = Literal["json", "toml"]
+
+
+def known(name: str) -> bool:
+    """Say whether a configuration's format is one we read."""
+    return name in get_args(Format.__value__)
+```
+
+```python
+SUFFIXES = {"json": ".json", "toml": ".toml"}
+
+
+def suffix(kind: str) -> str:
+    """Return the suffix a configuration's file takes in a format."""
+    return SUFFIXES[kind]
+```
+
+Done the steer's way:
+
+```python
+from typing import Literal
+
+type Format = Literal["json", "toml"]
+
+
+def suffix(kind: Format) -> str:
+    """Return the suffix a configuration's file takes in a format."""
+    match kind:
+        case "json":
+            return ".json"
+        case "toml":
+            return ".toml"
+```
+
 **Leaves alone:**
 
 ```python
@@ -1779,6 +1857,34 @@ GREETING = "hello"
 def greet() -> str:
     """Return the greeting."""
     return GREETING
+```
+
+```python
+__all__ = ["greet"]
+
+
+def greet() -> str:
+    """Return a greeting."""
+    return "hello"
+```
+
+```python
+from lup.types import Model
+
+
+class Tool(Model):
+    """A tool an agent may call."""
+
+    name: str
+
+
+TOOLS = [Tool(name="read"), Tool(name="write")]
+```
+
+```python
+from typing import Literal
+
+type Mode = Literal["fast", "slow"]
 ```
 
 
