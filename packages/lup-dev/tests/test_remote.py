@@ -39,7 +39,7 @@ from lup_dev.host.protocol import (
     Reply,
     Stop,
 )
-from lup_dev.host.service import Answerer, Asked, HostService, Judged, judged
+from lup_dev.host.service import Answerer, HostService, Program, executed
 from lup_dev.host.workers import LaunchJudge
 from lup_dev.launch.room import RoomError, RoomGit, programs, refreshed, room_git
 from lup_dev.layout import ROOM_PATH, HostLayout, LaunchLayout, LaunchSockets, Layout
@@ -69,6 +69,7 @@ if TYPE_CHECKING:
 
     from conftest import FakeClock, InProcess, StubFacts
 
+    from lup.programs import Ran as Ended
     from lup_dev.forge.github import Visibility
     from lup_dev.host.workers import LaunchModules
 
@@ -244,7 +245,7 @@ class World:
         clock: FakeClock,
         limits: Limits = DEFAULT,
         modules: LaunchModules | None = None,
-        run: Callable[[Asked], Awaitable[Judged]] = judged,
+        run: Callable[[Program], Awaitable[Ended]] = executed,
     ) -> Generator[None]:
         remotes = Remotes(
             say=self.said.append, landed=self.landing, modules=modules, run=run
@@ -1016,12 +1017,12 @@ def test_a_branch_that_moves_after_its_check_isnt_deleted(
     ahead = world.commit("not landed")
     pushes: list[list[str]] = []
 
-    async def moving(asked: Asked) -> Judged:
+    async def moving(program: Program) -> Ended:
         """Move `feat` on the forge just before its deletion is pushed, as another push between the check and it would."""
-        if ":refs/heads/feat" in asked.command:
-            pushes.append(asked.command)
+        if ":refs/heads/feat" in program.command:
+            pushes.append(program.command)
             git(world.forge, "update-ref", "refs/heads/feat", ahead)
-        return await judged(asked)
+        return await executed(program)
 
     with world.served(clock, MERGING, run=moving):
         assert world.room_git("push", "origin", "HEAD:refs/heads/ahead").exit_code == 0
@@ -1495,7 +1496,7 @@ def test_host_git_reads_the_repository_s_own_config_past_a_planted_commondir(
     async def read() -> list[str]:
         probe = await remotes.git(launch, "config", "lup.probe")
         return [
-            probe.output.strip(),
+            probe.text(),
             await remotes.url(launch, "origin", push=True),
             await remotes.url(launch, "origin", push=False),
         ]

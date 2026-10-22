@@ -267,6 +267,7 @@ class SessionDefaults(Model):
     back to its conversation as it was rather than to a summary made
     meanwhile. Compaction when the context fills stays the runtime's own: off,
     a full session would stop."""
+    # lup: defer(issue=117, why="the native `SendMessage`, `ListAgents` and `Agent` stay off this list until lup's spawn exists: a session resumes a subagent it started through `SendMessage`")
     removed_tools: list[str] = [
         "Artifact",
         "SendFeedback",

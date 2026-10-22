@@ -117,6 +117,7 @@ class Fixes(Model):
     ]
 
 
+# lup: defer(issue=146, why="a pass is found by the tree and the person's layer alone, so one recorded before the list of values never published changed is reused, though its `private` step would fail now")
 class Standing(Model):
     """A worktree's files as they stand: what the gate passes on, and a pass is found by."""
 

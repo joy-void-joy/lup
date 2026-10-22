@@ -15,12 +15,12 @@ address, the token in its fragment (`ShowDashboard`), starting the dashboard
 again where it's gone.
 """
 
-import asyncio
 import secrets
 import shlex
 from pathlib import Path
 from typing import Literal, override
 
+from lup.programs import ProgramError, Running, started
 from lup.types import MutableModel
 from lup_dev.host.protocol import HostError, Reply, Request
 from lup_dev.host.service import Companion, Handler
@@ -49,7 +49,7 @@ class DashboardProcess(MutableModel, Companion, arbitrary_types_allowed=True):
     page left open finds it again."""
     token: Path
     """The file keeping its token, made the first time, readable by its owner alone."""
-    process: asyncio.subprocess.Process | None = None
+    process: Running | None = None
     address: str | None = None
 
     @override
@@ -59,18 +59,16 @@ class DashboardProcess(MutableModel, Companion, arbitrary_types_allowed=True):
     @override
     async def end(self) -> None:
         process = self.process
-        if process is None or process.returncode is not None:
+        if process is None or process.status is not None:
             return
-        if process.stdin is not None:
-            process.stdin.close()
-        await process.wait()
+        await process.ended()
 
     async def start(self) -> str:
         """Start the dashboard where it isn't running, and return the address it's opened at, its token in the fragment.
 
         Raise `HostError` where it can't start, saying why.
         """
-        if self.process is None or self.process.returncode is not None:
+        if self.process is None or self.process.status is not None:
             self.address = await self.spawned()
         return f"{self.address}/#token={self.kept()}"
 
@@ -78,23 +76,14 @@ class DashboardProcess(MutableModel, Companion, arbitrary_types_allowed=True):
         """Start the dashboard, its token its input's first line, and return the address its output's first line says it listens on."""
         command = [*self.command, str(self.port)]
         try:
-            # lup: ignore("subprocess", why="the host service keeps the dashboard running beside its event loop, its input held open so it ends with the service, which sh can't: it forks, and holds a thread per program")
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-            )
-        except OSError as missing:
-            message = f"`{shlex.join(command)}` doesn't run: {missing}"
-            raise HostError(message) from missing
-        if process.stdin is None or process.stdout is None:
-            message = f"`{shlex.join(command)}` started without its pipes"
-            raise HostError(message)
-        process.stdin.write(f"{self.kept()}\n".encode())
-        await process.stdin.drain()
-        listening = (await process.stdout.readline()).decode().strip()
+            process = await started(*command)
+        except ProgramError as unstarted:
+            raise HostError(str(unstarted)) from unstarted
+        process.input.write(f"{self.kept()}\n".encode())
+        await process.input.drain()
+        listening = (await process.output.readline()).decode().strip()
         if not listening:
-            status = await process.wait()
+            status = await process.ended()
             message = (
                 f"`{shlex.join(command)}` ended with status {status} before listening, "
                 f"as on a port another program holds ({self.port}, "

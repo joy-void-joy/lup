@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from datetime import timedelta
 from typing import TYPE_CHECKING, Literal, override
 
+from lup.programs import ProgramMissingError, ProgramOverflowError, awaited
 from lup.types import Model
 from lup_dev.host.protocol import HostError
 
@@ -134,44 +135,25 @@ class Desktop(Model, Clipboard):
         """
         said = shlex.join(command)
         try:
-            # lup: ignore("subprocess", why="the host service runs the desktop's clipboard programs on its event loop, its output read bounded, which `programs` reads whole")
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except OSError as missing:
+            async with asyncio.timeout(self.timeout.total_seconds()):
+                ran = await awaited(*command, checked=False, limit=self.limit)
+        except ProgramMissingError as missing:
             message = f"`{said}` doesn't run on the host: {missing}"
             raise HostError(message) from missing
-        if process.stdout is None or process.stderr is None:
-            message = f"`{said}` started without its output"
-            raise HostError(message)
-        try:
-            async with asyncio.timeout(self.timeout.total_seconds()):
-                printed = bytearray()
-                while chunk := await process.stdout.read(64 * 1024):
-                    printed += chunk
-                    if len(printed) > self.limit:
-                        process.kill()
-                        await process.wait()
-                        message = (
-                            f"the clipboard holds more than {self.limit} bytes, "
-                            "which a room isn't given"
-                        )
-                        raise HostError(message)
-                error = await process.stderr.read()
-                status = await process.wait()
+        except ProgramOverflowError as overflowing:
+            message = (
+                f"the clipboard holds more than {self.limit} bytes, which a room "
+                "isn't given"
+            )
+            raise HostError(message) from overflowing
         except TimeoutError as slow:
-            process.kill()
-            await process.wait()
             message = f"`{said}` didn't answer within {self.timeout}"
             raise HostError(message) from slow
-        if status != 0:
-            reason = error.decode(errors="replace").strip() or f"status {status}"
+        if ran.status != 0:
+            reason = ran.said() or f"status {ran.status}"
             message = f"`{said}` failed: {reason}"
             raise HostError(message)
-        return bytes(printed)
+        return ran.output
 
     async def given(self, command: list[str], data: bytes) -> None:
         """Run `command` with `data` on its input, within `timeout`.
@@ -182,24 +164,14 @@ class Desktop(Model, Clipboard):
         """
         said = shlex.join(command)
         try:
-            # lup: ignore("subprocess", why="the host service runs the desktop's clipboard programs on its event loop, their output going nowhere since each leaves a process serving the clipboard")
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-        except OSError as missing:
+            async with asyncio.timeout(self.timeout.total_seconds()):
+                ran = await awaited(*command, stdin=data, checked=False, discarded=True)
+        except ProgramMissingError as missing:
             message = f"`{said}` doesn't run on the host: {missing}"
             raise HostError(message) from missing
-        try:
-            async with asyncio.timeout(self.timeout.total_seconds()):
-                await process.communicate(data)
         except TimeoutError as slow:
-            process.kill()
-            await process.wait()
             message = f"`{said}` didn't answer within {self.timeout}"
             raise HostError(message) from slow
-        if process.returncode != 0:
-            message = f"`{said}` failed with status {process.returncode}"
+        if ran.status != 0:
+            message = f"`{said}` failed with status {ran.status}"
             raise HostError(message)

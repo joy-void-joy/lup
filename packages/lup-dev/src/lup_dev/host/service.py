@@ -58,6 +58,7 @@ from typing import TYPE_CHECKING, Self, override
 from filelock import FileLock, Timeout
 from pydantic import Field, JsonValue, ValidationError, model_validator
 
+from lup.programs import ProgramMissingError, Ran, awaited
 from lup.rooms.engine import ContainerError, Podman
 from lup.tools import speaking
 from lup.tools.serving import Answer, Outbox, serve
@@ -137,8 +138,8 @@ class Answerer(ABC):
         """
 
 
-class Asked(Model):
-    """One program the service runs: `gh` for a launch, or git for its room; its command, and what goes on its input."""
+class Program(Model):
+    """One program the service runs: `gh` for a launch, or git for its room; its command, what goes on its input, and where it runs."""
 
     command: list[str]
     payload: str
@@ -147,51 +148,26 @@ class Asked(Model):
     """Where it runs; none for the service's own directory."""
 
 
-class Judged(Model):
-    """How a program the service ran ended: its status, what it printed, and what it said beside."""
+async def executed(program: Program) -> Ran:
+    """Run `program` to its end on the service's event loop, and return how it ended, whatever its status.
 
-    status: int
-    output: str
-    """What it printed."""
-    error: str
-    """What it wrote to its standard error, or why it couldn't run."""
-
-
-async def judged(asked: Asked) -> Judged:
-    """Run the program to its end, `asked.payload` on its input; kill it where the wait is cancelled.
-
-    Spawned rather than forked: `sh` forks from the service's process and runs
-    Python in the child before the program starts, which can deadlock in a
-    process with threads, and it would hold a thread per program for as long as
-    it runs: `gh` for GitHub's answer, git for a room's push
-    (`remote/protocol.py`).
+    Awaited (`lup.programs`, `awaited`), so it holds no thread for as long as it
+    runs, `gh` waiting on GitHub's answer or git on a room's push
+    (`remote/protocol.py`), and it's killed where the wait is cancelled. One
+    that can't be started ends with status 127, as a shell says it, why on its
+    standard error.
     """
-    program, *arguments = asked.command
+    name, *arguments = program.command
     try:
-        # lup: ignore("subprocess", why="the host service awaits each gh and git for a room on its event loop, which sh can't: it forks, and holds a thread per program")
-        process = await asyncio.create_subprocess_exec(
-            program,
+        return await awaited(
+            name,
             *arguments,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=asked.directory,
+            cwd=program.directory,
+            stdin=program.payload,
+            checked=False,
         )
-    except OSError as missing:
-        return Judged(
-            status=127, output="", error=f"`{program}` doesn't run: {missing}"
-        )
-    try:
-        output, error = await process.communicate(asked.payload.encode())
-    finally:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
-    return Judged(
-        status=await process.wait(),
-        output=output.decode(errors="replace"),
-        error=error.decode(errors="replace"),
-    )
+    except ProgramMissingError as missing:
+        return Ran(command=program.command, status=127, error=str(missing).encode())
 
 
 class Handler[R: Request](ABC):

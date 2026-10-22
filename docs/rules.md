@@ -298,7 +298,7 @@ def price(prices: dict[str, int], item: str, first: list[int]) -> int:
 
 A second library for running programs, beside the one the rest of the code uses, splits how commands are run, checked and reported.
 
-**Steer:** Run programs with `lup.programs`: `run("git", "status", cwd=root)`, which starts them safely beside threads and raises on a status the caller doesn't accept, or `detached(…)` for one that outlives its caller.
+**Steer:** Run programs with `lup.programs`: `run("git", "status", cwd=root)`, which starts them safely beside threads and raises on a status the caller doesn't accept; on an event loop, `await awaited(…)`, which holds no thread, or `started(…)` for one the caller talks to while it runs; or `detached(…)` for one that outlives its caller.
 
 **Flags:**
 
@@ -320,6 +320,30 @@ from lup.programs import run
 def status() -> str:
     """Return the working tree's status."""
     return run("git", "status").text()
+```
+
+```python
+import asyncio
+
+
+async def status() -> bytes:
+    """Return the working tree's status."""
+    process = await asyncio.create_subprocess_exec(
+        "git", "status", stdout=asyncio.subprocess.PIPE
+    )
+    output, _ = await process.communicate()
+    return output
+```
+
+Done the steer's way:
+
+```python
+from lup.programs import awaited
+
+
+async def status() -> bytes:
+    """Return the working tree's status."""
+    return (await awaited("git", "status")).output
 ```
 
 **Leaves alone:**

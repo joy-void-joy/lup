@@ -26,7 +26,8 @@ from mcp.types import TextContent, jsonrpc_message_adapter
 from pydantic import JsonValue, ValidationError
 from typer.testing import CliRunner
 
-from lup.rooms.engine import Exited, Podman, Process
+from lup.programs import Ran
+from lup.rooms.engine import Podman, Process
 from lup.tools.hook import lup_hook
 from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec, lup_tool
@@ -80,14 +81,13 @@ from lup_dev.host.rooms import RoomHandler, RoomRoute, RoomTools
 from lup_dev.host.service import (
     UNDECIDED,
     Answerer,
-    Asked,
     Companion,
     Handler,
     HostService,
-    Judged,
+    Program,
     Reading,
     Route,
-    judged,
+    executed,
 )
 from lup_dev.host.workers import LaunchJudge, LaunchModules, Offered
 from lup_dev.layout import CopyLayout, HostLayout, Layout
@@ -1283,15 +1283,15 @@ def test_a_program_the_service_runs_is_a_process_of_its_own(tmp_path: Path) -> N
     program.chmod(0o755)
 
     ran = asyncio.run(
-        judged(Asked(command=[str(program), "api", "user"], payload="the body"))
+        executed(Program(command=[str(program), "api", "user"], payload="the body"))
     )
 
-    assert ran == Judged(status=3, output="api user\nthe body", error="said\n")
+    assert (ran.status, ran.output, ran.error) == (3, b"api user\nthe body", b"said\n")
     missing = asyncio.run(
-        judged(Asked(command=[str(tmp_path / "gone"), "api"], payload=""))
+        executed(Program(command=[str(tmp_path / "gone"), "api"], payload=""))
     )
     assert missing.status == 127
-    assert "gone" in missing.error
+    assert "gone" in missing.said()
 
 
 def test_a_program_whose_wait_is_cancelled_is_killed(tmp_path: Path) -> None:
@@ -1304,7 +1304,7 @@ def test_a_program_whose_wait_is_cancelled_is_killed(tmp_path: Path) -> None:
 
     async def cancelled() -> int:
         waiting = asyncio.create_task(
-            judged(Asked(command=[str(program), "api"], payload=""))
+            executed(Program(command=[str(program), "api"], payload=""))
         )
         pid = int(await asyncio.to_thread(started.read_text))
         waiting.cancel()
@@ -1610,22 +1610,24 @@ class Containers:
         """Whether podman fails at every question, as where it's misconfigured."""
         self.asked: list[list[str]] = []
 
-    def __call__(self, process: Process) -> Exited:
+    def __call__(self, process: Process) -> Ran:
         program, *arguments = process.arguments
         assert program == "podman"
         self.asked.append(arguments)
         match arguments:
             case ["container", "exists", _] if self.broken:
-                return Exited(status=125)
+                return Ran(command=process.arguments, status=125)
             case ["container", "exists", name]:
-                return Exited(status=0 if name in self.running else 1)
+                return Ran(
+                    command=process.arguments, status=0 if name in self.running else 1
+                )
             case ["rename", before, after] if not self.refusing:
                 self.running = [
                     after if each == before else each for each in self.running
                 ]
-                return Exited(status=0)
+                return Ran(command=process.arguments, status=0)
             case ["rename", *_]:
-                return Exited(status=125)
+                return Ran(command=process.arguments, status=125)
             case _:
                 message = f"podman asked {process.arguments}"
                 raise AssertionError(message)
@@ -2079,10 +2081,9 @@ def test_a_dashboard_gone_is_started_again_when_its_address_is_asked(
     ):
         process = dashboard.process
         assert process is not None
-        assert process.stdin is not None
-        process.stdin.close()
+        process.input.close()
         own = client(layout, clock)
-        while process.returncode is None:
+        while process.status is None:
             own.listed()
         again = own.ask(ShowDashboard(), DashboardShown)
     assert again.address.startswith("http://127.0.0.1:8766/#token=")

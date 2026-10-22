@@ -17,7 +17,7 @@ agent hears what deferred work came due as `additionalContext` of `SessionStart`
 and a checkpoint's report as `additionalContext` beside the call's result, and the
 result reaches it untouched.
 
-A Codex session holds only the worktree it started in, a declared gap until rooms
+A Codex session holds only the worktree it started in, in a room as outside one
 (`docs/judging-writes.md`, *Every worktree of the repository*): its hooks' `cwd` is
 the "Working directory for the session", and `Bash` and `apply_patch` carry only
 `tool_input.command` (its hooks docs), which lup doesn't parse. Under its
@@ -81,8 +81,9 @@ end is held (`decision: "block"`). From the source at `rust-v0.162.1`:
   the hook's outcome holds nothing else of it (`hooks/src/engine/output_parser.rs`,
   `parse_pre_tool_use`, `hooks/src/events/pre_tool_use.rs`). The first lup
   measured on 0.158.0 that the rewrite reached the server so, and that without
-  `allow` it "was dropped — the call ran as the model wrote it"; owed live on
-  0.162.1 (`docs/field-notes.md`, *Piece 2, live*);
+  `allow` it "was dropped — the call ran as the model wrote it"; on 0.162.1 the
+  rewrite beside `allow` was seen reaching the server live (`docs/field-notes.md`,
+  *Piece 2, live*);
 - `PreToolUse`'s `additionalContext` is collected for the model unless the
   answer is one it refuses (`pre_tool_use.rs`, `parse_completed`), as are
   `SessionStart`'s and `PostToolUse`'s; `Stop` and `SubagentStop` hold the turn
@@ -261,6 +262,7 @@ if TYPE_CHECKING:
     from lup.sessions.terminal import Event
 
 
+# lup: defer(issue=52, why="Codex's spelling of a tool's name in a hook, a module constant until a `Spellings` each adapter implements gives it its home")
 TOOL_PREFIX = f"mcp__{SERVER}__"
 """What Codex names each of lup's tools by in a hook: `mcp__lup__blocked`."""
 
@@ -287,6 +289,11 @@ class Codex(Runtime):
     @override
     def inside(self) -> bool:
         return bool(Variables().codex_thread_id)
+
+    @override
+    def settings(self) -> PurePosixPath:
+        """Return `.codex`: a project's own layer of Codex's configuration."""
+        return PurePosixPath(".codex")
 
 
 class Output(Model, alias_generator=to_camel, populate_by_name=True):
@@ -373,6 +380,7 @@ def context(said: Said, event: str, items: list[str]) -> Said:
     return said.model_copy(update={"hook_specific_output": added})
 
 
+# lup: defer(issue=245, why="a turn's end tells through a block, Codex's `Stop` and `SubagentStop` taking no `additionalContext` at `rust-v0.163.0`")
 def held(said: Said, items: list[str]) -> Said:
     """Return `said` holding a turn's end on `items`, after any reason it holds it for."""
     if not items:

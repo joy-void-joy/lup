@@ -45,7 +45,6 @@ any state, running included, freeing its old name (`podman-rename(1)`).
 
 import csv
 import io
-import subprocess  # lup: ignore("subprocess", why="the library runs podman through the standard library, since `sh` isn't one of its dependencies")
 import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -56,6 +55,7 @@ from pydantic import TypeAdapter, model_validator
 from pydantic.alias_generators import to_pascal
 
 from lup.errors import LupError
+from lup.programs import ProgramMissingError, Ran, run
 from lup.rooms.container import AbsolutePath, Container, Image, Mask, Mount
 from lup.sessions.contract import guarded
 from lup.sessions.errors import RealCallInTestError
@@ -112,34 +112,36 @@ class Process(Model):
 
     arguments: list[str]
     input: str | None = None
-    """Written to its input, which is closed after; none leaves this process's own."""
+    """Written to its input, which is closed after; none leaves it this
+    process's own where its output isn't kept, and gives it none where it is."""
     capture: bool = False
-    """Keep what it prints, rather than letting it reach this process's output."""
+    """Keep what it prints and what it says beside, rather than letting them
+    reach this process's terminal."""
 
 
-class Exited(Model):
-    """How a program ended: its exit status, and what it printed where that was kept."""
+def run_process(process: Process) -> Ran:
+    """Run `process` to its end through `lup.programs`, whatever its status, unless real runs are refused, as in tests.
 
-    status: int
-    output: str = ""
-
-
-def run_process(process: Process) -> Exited:
-    """Run `process` to its end, unless real runs are refused, as in tests."""
+    Raise `ContainerError` where the program isn't there, as where podman isn't
+    installed.
+    """
     if guarded.get():
         message = (
             "a test reached podman: give the engine a recording `execute`, or the "
             "room a recording engine"
         )
         raise RealCallInTestError(message)
-    completed = subprocess.run(
-        process.arguments,
-        input=process.input,
-        stdout=subprocess.PIPE if process.capture else None,
-        text=True,
-        check=False,
-    )
-    return Exited(status=completed.returncode, output=completed.stdout or "")
+    program, *arguments = process.arguments
+    try:
+        return run(
+            program,
+            *arguments,
+            stdin=process.input,
+            checked=False,
+            shown=not process.capture,
+        )
+    except ProgramMissingError as missing:
+        raise ContainerError(str(missing)) from missing
 
 
 class StoredImage(Model, alias_generator=to_pascal, populate_by_name=True):
@@ -165,7 +167,7 @@ class Podman(Model, ContainerEngine):
     """Runs containers with rootless podman."""
 
     program: str = "podman"
-    execute: Callable[[Process], Exited] = run_process
+    execute: Callable[[Process], Ran] = run_process
     """Runs each podman command; a test gives a recording one."""
 
     @override
@@ -393,8 +395,11 @@ class Podman(Model, ContainerEngine):
             )
         )
         if listed.status != 0:
+            said = listed.said()
+            told = f": {said}" if said else ""
             message = (
                 f"podman couldn't list {project}'s images (status {listed.status})"
+                f"{told}"
             )
             raise ContainerError(message)
         return TypeAdapter(list[StoredImage]).validate_json(listed.output)

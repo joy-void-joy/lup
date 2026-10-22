@@ -177,6 +177,7 @@ if TYPE_CHECKING:
     from lup.adapters.claude import Effort
     from lup.sessions.terminal import Event, Hook, TerminalSettings, ToolServer
 
+# lup: defer(issue=52, why="Claude Code's variable, shared with an ask, a module constant until a `Spellings` each adapter implements gives it its home")
 AUTO_MEMORY_OFF = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
 """The variable turning Claude Code's auto memory off (`1`) or on (`0`); an ask
 sets it too, since auto memory loads whatever the settings sources say."""
@@ -438,6 +439,7 @@ def compiled(
                 if settings.servers
                 else []
             ),
+            # lup: defer(issue=244, why="the binary skips the socket in a session it counts as restricted, or where a server-side gate is off, neither checked in a room")
             *(
                 []
                 if settings.messages is None

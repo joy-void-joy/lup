@@ -109,7 +109,7 @@ The rule reads a constant's type, and how a collection is written: a number or a
 
 | Job | Use | Not |
 |---|---|---|
-| Running a program | `lup.programs` (`run`, `detached`), which starts a program from C, as `subprocess` does, never by forking Python, so it's safe beside threads | `sh`, `subprocess`, `os.system`, `os.popen`, `os.exec*` |
+| Running a program | `lup.programs` (`run`; on an event loop, `awaited` and `started`; `detached`), which starts a program from C, as `subprocess` does, never by forking Python, so it's safe beside threads | `sh`, `subprocess`, `asyncio`'s subprocesses, `os.system`, `os.popen`, `os.exec*` |
 | A command line | `typer` | `argparse` |
 | Paths and files | `pathlib` | `os.path`, `os`'s file functions |
 | Configuration and environment | `pydantic-settings` | `os.environ`, `os.getenv`, `dotenv` for reading |

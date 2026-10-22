@@ -6,6 +6,10 @@ command line (`lup_dev.cli`) lists the adapters.
 """
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import PurePosixPath
 
 
 class Runtime(ABC):
@@ -21,4 +25,13 @@ class Runtime(ABC):
 
         It reads the variables the runtime sets in the commands it runs, so that an
         agent can't answer its own hold by mistake.
+        """
+
+    @abstractmethod
+    def settings(self) -> PurePosixPath:
+        """Return the directory, from a worktree's root, holding the runtime's own settings for the project.
+
+        What's there runs outside the agent's reach, so lup's default protected
+        paths list it (`CorePaths.protected`), a project's declaration free to
+        take it off; a test keeps that list in step with each adapter.
         """

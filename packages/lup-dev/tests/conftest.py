@@ -17,7 +17,7 @@ import sys
 import time
 import tokenize
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
 import pytest
@@ -491,6 +491,9 @@ class FakeRuntime(Runtime):
 
     def inside(self) -> bool:
         return self.within
+
+    def settings(self) -> PurePosixPath:
+        return PurePosixPath(f".{self.called}")
 
 
 def git(root: Path, *arguments: str) -> str:

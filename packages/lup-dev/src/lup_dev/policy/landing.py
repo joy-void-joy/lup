@@ -67,6 +67,7 @@ from typing import override
 
 from pydantic import Field, JsonValue, ValidationError
 
+from lup.programs import Ran
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused, ToolSpec, bound, declared, lup_tool
 from lup.types import Model
@@ -76,7 +77,7 @@ from lup_dev.git import LISTED, Git, Tracked, nul_separated
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.protocol import HostError, Register
 from lup_dev.host.rooms import RoomTools
-from lup_dev.host.service import Asked, Judged, judged
+from lup_dev.host.service import Program, executed
 from lup_dev.inbox.delivery import Delivery, who
 from lup_dev.inbox.store import (
     AtLanding,
@@ -368,7 +369,7 @@ class Lander(Model, arbitrary_types_allowed=True):
     """The runtime's id for the call, which each hold it makes keeps."""
     integration: str
     """The integration branch's name: what lands, and where, unless the call says."""
-    run: Callable[[Asked], Awaitable[Judged]] = judged
+    run: Callable[[Program], Awaitable[Ran]] = executed
     """Runs one program on the host: `podman exec` into the launch's room."""
 
     @property
@@ -746,7 +747,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         if container is None:
             return Cleaned(left=[f"the worktree {root}: lup can't reach your room"])
         ran = await self.run(
-            Asked(
+            Program(
                 command=[
                     "podman",
                     "exec",
@@ -763,7 +764,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             )
         )
         if ran.status != 0:
-            said = oneline(ran.error) or f"it ended with status {ran.status}"
+            said = oneline(ran.said()) or f"it ended with status {ran.status}"
             return Cleaned(left=[f"the worktree {root}: `git worktree remove`: {said}"])
         return Cleaned(done=[f"removed the worktree {root}"])
 
@@ -884,7 +885,7 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
     """lup's state on the host."""
     integration: str
     """The integration branch's name."""
-    run: Callable[[Asked], Awaitable[Judged]] = judged
+    run: Callable[[Program], Awaitable[Ran]] = executed
     """Runs one program on the host: `podman exec` into a launch's room."""
 
     @override
