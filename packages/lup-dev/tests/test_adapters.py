@@ -11,12 +11,21 @@ from pydantic import TypeAdapter
 from lup.adapters.claude.terminal import spelled
 from lup.sessions.terminal import Hook
 from lup_dev.adapters import claude, codex
-from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
+from lup_dev.codescan.contract import (
+    Checker,
+    Due,
+    FileReport,
+    Finding,
+    Position,
+    Rule,
+    Source,
+    Span,
+)
 from lup_dev.host.courier import Conversations, Heard, Spawned, Telling
 from lup_dev.inbox.store import Text
 from lup_dev.policy.checkpoint import Bench, Running, Services, Worktree
 from lup_dev.policy.holds import Response
-from lup_dev.stored import read_model
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -2006,6 +2015,77 @@ def test_codex_adds_what_a_conversation_is_told_to_every_answer() -> None:
         "decision": "block",
         "reason": BOTH,
     }
+
+
+DUE = (
+    "Work deferred in this repository came due, as the gate last found it (it "
+    "doesn't fail the gate):\n- src/pkg/core.py:3: issue #12 is closed; finish the "
+    "work here"
+)
+
+
+def came_due(repo: Path) -> None:
+    """Keep a deferral the gate found due, as `lup-dev rules check` over every file does."""
+    reminder = Finding(
+        path=CORE,
+        span=Span(start=Position(line=3, column=1), end=Position(line=3, column=1)),
+        owner="lup",
+        rule="defer-closed",
+        message="issue #12 is closed",
+        steer="finish the work here",
+        reminder=True,
+    )
+    write_model(repo / ".git" / "lup" / "due.json", Due(reminders=[reminder]))
+
+
+def test_claude_tells_what_came_due_as_a_session_starts_before_its_items_and_titles_it(
+    on_claude: Bench, repo: Path
+) -> None:
+    came_due(repo)
+    raw = payload(repo, "SessionStart", source="startup")
+
+    answer = claude.hook(raw, on_claude)
+    both = Telling(caller="c1", items=ITEMS.items, title="parser-work")
+
+    assert json.loads(answer) == {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": DUE,
+        }
+    }
+    assert json.loads(claude.told(raw, answer, both) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": f"{DUE}\n\n{BOTH}",
+            "sessionTitle": "parser-work",
+        }
+    }
+    subagent = payload(repo, "SessionStart", source="startup", agent_id="a1")
+    assert claude.hook(subagent, on_claude) == ""
+
+
+def test_codex_tells_what_came_due_as_a_session_starts_before_its_items(
+    on_codex: Bench, repo: Path
+) -> None:
+    came_due(repo)
+    raw = payload(repo, "SessionStart", source="startup")
+
+    answer = codex.hook(raw, on_codex)
+
+    assert json.loads(answer) == {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": DUE,
+        }
+    }
+    assert json.loads(codex.told(raw, answer, ITEMS) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": f"{DUE}\n\n{BOTH}",
+        }
+    }
+    subagent = payload(repo, "SessionStart", source="startup", agent_id="a1")
+    assert codex.hook(subagent, on_codex) == ""
 
 
 def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(

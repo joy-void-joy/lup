@@ -13,12 +13,12 @@ A file tool's write that asks is held in `PreToolUse` for the operator's answer
 in their inbox, then let through (`allow`), told beside the call that lup held
 it and they approved it, with their comment, or denied (`deny`) with it: Claude
 Code's own prompt isn't used, so a hold is answered the same way on every
-runtime. The agent hears a
-checkpoint's report as `additionalContext` beside the call's result, and what a
-turn's end tells it, the session's or a subagent's, as `additionalContext` of
-`Stop` or `SubagentStop`, which holds the turn: it goes on, the text shown as
-hook feedback rather than a hook error. `stop_hook_active` says a turn's end
-follows such a hold. When judging itself fails at a turn's end, the turn ends,
+runtime. The agent hears what deferred work came due as `additionalContext` of
+`SessionStart`, a checkpoint's report as `additionalContext` beside the call's
+result, and what a turn's end tells it, the session's or a subagent's, as
+`additionalContext` of `Stop` or `SubagentStop`, which holds the turn: it goes
+on, the text shown as hook feedback rather than a hook error.
+`stop_hook_active` says a turn's end follows such a hold. When judging itself fails at a turn's end, the turn ends,
 and the operator is warned once in `systemMessage`, which also carries what the
 session's turn's end tells without holding it.
 
@@ -347,6 +347,13 @@ class Output(Model, alias_generator=to_camel, populate_by_name=True):
     """What a hook prints for Claude Code, its fields in camel case."""
 
 
+class SessionStartAnswer(Output):
+    """What `SessionStart` adds to the conversation's context as it starts."""
+
+    hook_event_name: Literal["SessionStart"] = "SessionStart"
+    additional_context: str
+
+
 class PreToolUseAnswer(Output):
     """`PreToolUse`'s decision on the call."""
 
@@ -377,7 +384,9 @@ class StopAnswer(Output):
 class Specific(Output):
     """An answer in the `hookSpecificOutput` field."""
 
-    hook_specific_output: PreToolUseAnswer | PostToolUseAnswer | StopAnswer
+    hook_specific_output: (
+        SessionStartAnswer | PreToolUseAnswer | PostToolUseAnswer | StopAnswer
+    )
 
 
 class OperatorWarning(Output):
@@ -508,10 +517,14 @@ class SessionStart(Payload):
 
     @override
     def answer(self, bench: Bench) -> Output | None:
-        SessionStarted(
+        """Begin the session again in each worktree it holds, and tell its conversation what came due as it starts; the service adds its items and title after (`told`)."""
+        reply = SessionStarted(
             session=self.session_id, agent=self.agent_id, cwd=self.cwd
         ).apply(bench)
-        return None
+        if not reply.context:
+            return None
+        said = SessionStartAnswer(additional_context=reply.context)
+        return Specific(hook_specific_output=said)
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
