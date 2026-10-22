@@ -128,6 +128,7 @@ from lup_dev.inbox.store import (
     Approval,
     ChangedFile,
     Comment,
+    Ended,
     Flagged,
     Friction,
     HeldChange,
@@ -745,6 +746,7 @@ def shown(item: Item) -> str:
             | Friction(text=text)
             | HowItWent(text=text)
             | Stop(text=text)
+            | Ended(text=text)
         ):
             body = [text]
         case Question(text=text, decisions=decisions):

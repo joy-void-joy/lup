@@ -179,11 +179,19 @@ class Post(ABC):
 
     @abstractmethod
     async def telling(
-        self, launch: Register, conversation: Conversation, heard: Heard, room: int
+        self,
+        launch: Register,
+        conversation: Conversation,
+        parent: Conversation | None,
+        heard: Heard,
+        room: int,
     ) -> Posted:
         """Note the hook `heard`, and return what `conversation` of `launch` is told in its answer, in `room` bytes at most.
 
-        What's returned is counted told, unless it's put back (`returned`).
+        `parent` is the conversation that spawned it, for a subagent a
+        conversation spawned; none for a session's own, and for the runtime's
+        own agents (`Spawned.internal`). What's returned is counted told,
+        unless it's put back (`returned`).
         """
 
     @abstractmethod
@@ -253,6 +261,12 @@ class Conversation(Model):
     holding: bool = False
     """Whether the operator holds each flagged write of it: their switch, "hold
     each flagged write", which the judge asks (`ShowHolding`)."""
+
+    def own(self, launch: str) -> str:
+        """Say its own part of its path: its launch's name, `launch`, for the session's own; a subagent's name; an unnamed one by its kind and its runtime's id."""
+        if self.agent is None:
+            return launch
+        return self.name or f"{self.kind or 'subagent'}·{self.agent}"
 
 
 class Conversations(MutableModel):
@@ -331,16 +345,7 @@ class Conversations(MutableModel):
             None if conversation.parent is None else self.calling(conversation.parent)
         )
         above = launch if parent is None else self.path(parent, launch)
-        return f"{above}/{self.own(conversation, launch)}"
-
-    def own(self, conversation: Conversation, launch: str) -> str:
-        """Say a conversation's own part of its path: its launch's name for the session's own, a subagent's name, an unnamed one by its kind and its runtime's id."""
-        if conversation.agent is None:
-            return launch
-        return (
-            conversation.name
-            or f"{conversation.kind or 'subagent'}·{conversation.agent}"
-        )
+        return f"{above}/{conversation.own(launch)}"
 
     def holder(self, name: str, asking: str) -> Conversation | None:
         """Return the subagent other than `asking` named `name` in this launch, or none."""

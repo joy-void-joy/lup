@@ -186,7 +186,8 @@ function labelled(opening: string, parts: Record<string, string>): string {
 
 /**
  * Return an item's own text as the review shows it: a message's or a question's words with its decisions, an
- * approval's question and summary; a friction's or how the work went's parts, each labelled, as the host says them.
+ * approval's question and summary; a friction's or how the work went's parts, each labelled, as the host says them; a
+ * subagent's end's last message, where lup passed it on.
  */
 export function body(item: Item): string {
     const reason = item.reason;
@@ -206,6 +207,8 @@ export function body(item: Item): string {
         }
         case "stop":
             return reason.why;
+        case "ended":
+            return reason.said ?? "";
         case "question": {
             const decisions = reason.decisions.map(
                 (each, at) => `${at + 1}. ${each.text}\n   lean: ${each.lean}`,

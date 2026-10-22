@@ -12,8 +12,9 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   agent's lean; with `wait` it holds until they answer;
 - `send` is the inbox's general verb, a message of a kind to a party's inbox:
   the operator's, in this piece;
-- `wait_inbox` holds until something reaches the agent's inbox. It isn't called
-  `wait`, a name a runtime has for a tool of its own;
+- `wait_inbox` holds until something reaches the agent's inbox, one of its own
+  subagents' ends among it. It isn't called `wait`, a name a runtime has for a
+  tool of its own;
 - `inbox` reads the inbox of the agent's repository, changing nothing: each
   item in a line, and the agent's own read whole;
 - `withdraw` takes back a message or question the agent sent that the
@@ -291,10 +292,18 @@ class Speaker(Model, arbitrary_types_allowed=True):
     async def wait_inbox(self, nothing: Nothing) -> Said:
         """Wait until something reaches your inbox.
 
-        Holds this call until an item reaches your inbox, an answer or a
-        message, and returns everything waiting there, each whole: what a hook
-        announced as too long to tell is read here. Something already waiting
-        is returned at once.
+        Holds this call until an item reaches your inbox, and returns
+        everything waiting there, each whole: what a hook announced as too
+        long to tell is read here. An item is the operator's answer or
+        message, or one of your own subagents ending its turn, or stopped,
+        which names it. Something already waiting, a subagent that ended since
+        your last call among it, is returned at once; each is told once, here
+        or beside another call.
+
+        It doesn't return for what no item says: a background command's end,
+        another session's or another conversation's subagents, the operator
+        marking something read. Nor for a subagent stopped or failing where
+        its runtime doesn't report that, as some don't.
         """
         del nothing
         inbox = self.delivery.inbox
