@@ -54,6 +54,10 @@ class LupDevelopment(Module):
     - Chromium is in the room alone, for sessions to drive the dashboard's page
       headless with Playwright, looking at what they build; nothing on the host
       needs it, so it's a package of the room's image rather than a requirement.
+    - A virtual display is beside it, so a windowed Chromium takes real key
+      events, a keyboard layout's dead keys among them, which headless Chromium
+      never sees and the DevTools protocol only imitates (#95). No input method:
+      Chromium's own handling composes a dead key without one.
     """
 
     name = "lup-development"
@@ -67,7 +71,19 @@ class LupDevelopment(Module):
     ]
 
     packages: Packages = Packages.of(
-        Package(name="chromium", why="Playwright drives it to look at the dashboard")
+        Package(name="chromium", why="Playwright drives it to look at the dashboard"),
+        Package(
+            name="xorg-server-xvfb",
+            why="`Xvfb`, a virtual display for a windowed Chromium to take key events",
+        ),
+        Package(
+            name="xdotool",
+            why="types into the virtual display as a keyboard does, dead keys and all",
+        ),
+        Package(
+            name="xorg-setxkbmap",
+            why="sets the virtual display's keyboard layout, US-International's among them",
+        ),
     )
     paths: Paths = Paths.of(
         protected=["packages/lup-dev/src/lup_dev/catalog/**"],
