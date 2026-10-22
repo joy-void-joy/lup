@@ -17,7 +17,7 @@ agent hears what deferred work came due as `additionalContext` of `SessionStart`
 and a checkpoint's report as `additionalContext` beside the call's result, and the
 result reaches it untouched.
 
-A Codex session holds only the worktree it started in, a declared gap until rooms
+A Codex session holds only the worktree it started in, in a room as outside one
 (`docs/judging-writes.md`, *Every worktree of the repository*): its hooks' `cwd` is
 the "Working directory for the session", and `Bash` and `apply_patch` carry only
 `tool_input.command` (its hooks docs), which lup doesn't parse. Under its
@@ -81,8 +81,9 @@ end is held (`decision: "block"`). From the source at `rust-v0.162.1`:
   the hook's outcome holds nothing else of it (`hooks/src/engine/output_parser.rs`,
   `parse_pre_tool_use`, `hooks/src/events/pre_tool_use.rs`). The first lup
   measured on 0.158.0 that the rewrite reached the server so, and that without
-  `allow` it "was dropped — the call ran as the model wrote it"; owed live on
-  0.162.1 (`docs/field-notes.md`, *Piece 2, live*);
+  `allow` it "was dropped — the call ran as the model wrote it"; on 0.162.1 the
+  rewrite beside `allow` was seen reaching the server live (`docs/field-notes.md`,
+  *Piece 2, live*);
 - `PreToolUse`'s `additionalContext` is collected for the model unless the
   answer is one it refuses (`pre_tool_use.rs`, `parse_completed`), as are
   `SessionStart`'s and `PostToolUse`'s; `Stop` and `SubagentStop` hold the turn

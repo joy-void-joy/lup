@@ -43,9 +43,8 @@ git runs with replace refs ignored, automatic maintenance, hooks and
 `core.fsmonitor` off, and submodules never followed. `core.sshCommand` is left
 as the repository's `config` sets it: pinned, that `config` is the only one of
 the repository's git reads, read-only in every room and the operator's to
-write, so a project's own `core.sshCommand` there holds. Each git is spawned
-through asyncio and awaited on the service's event loop, as each judge is
-(`host/service.py`, `executed`). The operator's credentials are the service's
+write, so a project's own `core.sshCommand` there holds. Each git is awaited on
+the service's event loop, as each judge is (`host/service.py`, `executed`). The operator's credentials are the service's
 environment. Each push and fetch is said in the service's log, with git's
 standard error once.
 """

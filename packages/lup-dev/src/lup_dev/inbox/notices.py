@@ -7,10 +7,8 @@ rank says it notifies, as what waits on them does and news doesn't
 requirement of the host (`launch/room.py`, `host_needs`): where it isn't
 installed, no notice is raised, and a launch says so once.
 
-A notice is raised through asyncio, as the host service runs every program, and
-awaited: `sh` forks, running Python in the child before the program starts,
-which can deadlock a process with threads (#23), and the service's event loop
-mustn't wait on it.
+A notice is raised as the host service runs every program, awaited on its event
+loop (`lup.programs`, `awaited`), which goes on serving meanwhile.
 """
 
 import shutil

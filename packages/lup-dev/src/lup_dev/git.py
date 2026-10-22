@@ -14,7 +14,7 @@ content to the host. git's `-z` output is read by splitting it on its NUL separa
 
 git run in a repository's own git directory is pinned there (`pinning`,
 `Git.pinned`): run through `env`, `GIT_DIR` and `GIT_COMMON_DIR` both naming it,
-since `sh` and asyncio replace a program's environment whole where they're given
+since `lup.programs` replaces a program's environment whole where it's given
 one. Named any other way (`--git-dir`, `-C`, `GIT_DIR` alone, or run inside it),
 git follows a `commondir` file at its top, which a common git directory never
 has and a room can write, to the git directory that file names, and reads that
