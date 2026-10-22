@@ -455,7 +455,7 @@ export function Review({
             // above it: the cursor moves with its text, and the view only follows a landing of their own.
             const head = current.state.selection.main.head;
             const made = changes(doc, laidOut.text);
-            // A comment being written keeps the cursor, though what arrived moved it, as its agent's group comes first;
+            // A comment being written keeps the cursor, as far into it as it was, wherever what arrived moved it;
             // one just opened takes it, though vim moved it into another under the same line, as `S` does.
             const writing = arriving === null && editor.writing() ? writtenAt(before.current, laidOut, head) : undefined;
             // What it was on gone, as a reply sent takes what it covered, it goes back to what that was about.
@@ -479,11 +479,11 @@ export function Review({
                 annotations: rebuilt.of(true),
             });
             refold(current, laidFor.folds, kept.current);
+            // Restored after the folds, whose heights it takes in. It keeps a comment being written where it is on
+            // screen too, as only what arrives above moves it; a scroll to the cursor after it would replace it, since
+            // CodeMirror keeps the last scroll asked of it alone.
             if (!landed && scrolled !== undefined) {
                 current.dispatch({ effects: scrolled });
-            }
-            if (writing !== undefined) {
-                current.dispatch({ effects: EditorView.scrollIntoView(writing, { y: "nearest" }) });
             }
         } else {
             // What folds can change with the text the same, as an item marked read folds.
