@@ -525,10 +525,16 @@ type ApiKind = Literal[
     "class-removed",
     "function-added",
     "function-removed",
+    "signature-changed",
 ]
 """How a change touches what other code can depend on, as the judge finds it
 (`lup_dev.policy.surface`) and the review says it: a package root's name, a
-class, or a function or method, added or removed."""
+class, or a function or method, added or removed. `signature-changed` is one
+the judge doesn't find (`docs/judging-writes.md`, *The public-API ask*): copies
+before found it, and the holds and the files beside items they wrote keep it.
+Every value a stored model once accepted stays read: dropped, a copy approved
+later can't read a store the one before wrote, and `judged` refuses every
+call."""
 
 type Held = Literal["held", "flagged"]
 """How the declaration takes what a change asks: held for the operator's answer,

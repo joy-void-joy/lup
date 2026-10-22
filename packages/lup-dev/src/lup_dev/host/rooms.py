@@ -10,7 +10,11 @@ mounts at `/run/lup`:
   calling is the `caller` the hook stamped into the call's arguments, the one
   field of them the server reads, taken out before the tool sees them. A call
   with none, whose hook didn't run, is taken as the launch's main conversation's,
-  and the service says so; one naming a conversation no hook named isn't run.
+  and the service says so; one naming a conversation no hook named isn't run. A
+  tool that fails answers its failure as an error naming the tool, and the
+  service says the traceback: left to `mcp`, a pydantic `ValidationError` a
+  tool raises is answered as JSON-RPC's bare "Invalid request parameters", with
+  nothing logged, and anything else as "Internal server error".
 - `request.sock` takes one JSON request per connection, told apart by its
   `kind`, and gives one JSON reply, as the control socket does, from the room's
   programs rather than the agent's tools. Its routes are the modules'
@@ -24,6 +28,7 @@ Both open and close with the launch, and are served again after a restart, as
 `hook.sock` is (`host/service.py`).
 """
 
+import traceback
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, override
@@ -153,7 +158,8 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
         """Route the call to the module serving `name`, with the launch and the conversation its `caller` names.
 
         A call with no `caller` is taken as the launch's main conversation's, and
-        said; one whose `caller` no hook of the launch minted isn't run.
+        said; one whose `caller` no hook of the launch minted isn't run. A tool
+        that fails answers its failure (`answered`).
         """
         serving = [
             tools
@@ -187,7 +193,14 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
                     ),
                     error=True,
                 )
-            return await owner.call(name, given, launch, caller, stamped.call)
+            return await self.answered(
+                owner,
+                name,
+                arguments=given,
+                launch=launch,
+                caller=caller,
+                call=stamped.call,
+            )
         main = self.conversations.main()
         if main is None:
             return Answer(
@@ -201,4 +214,37 @@ class LaunchTools(Model, Toolset, arbitrary_types_allowed=True):
             f"{launch.launch}: a call to `{name}` carried no `caller`, so it's "
             f"taken as the main conversation's, {main.id}"
         )
-        return await owner.call(name, given, launch, main, stamped.call)
+        return await self.answered(
+            owner, name, arguments=given, launch=launch, caller=main, call=stamped.call
+        )
+
+    async def answered(
+        self,
+        owner: RoomTools,
+        name: str,
+        *,
+        arguments: JsonValue,
+        launch: Register,
+        caller: Conversation,
+        call: str | None,
+    ) -> Answer:
+        """Run the call to `name` on `owner`, for `caller` of `launch` as it stands, and return what the model reads: the tool's answer, or its failure as an error, said with its traceback.
+
+        A failure left to `mcp` reaches the model as JSON-RPC's bare "Invalid
+        request parameters" where it's a pydantic `ValidationError`, which `mcp`
+        maps there without logging it, and "Internal server error" otherwise:
+        three sessions read the first of `judged` reading a store a copy before
+        wrote, and looked for a fault in the call.
+        """
+        try:
+            return await owner.call(name, arguments, launch, caller, call)
+        except Exception as failure:
+            told = "".join(traceback.format_exception(failure))
+            self.say(f"{launch.launch}: `{name}` failed:\n{told}")
+            return Answer(
+                text=(
+                    f"`{name}` failed, which is lup's fault, not the call's; the host "
+                    f"service's output has the traceback: {failure!r}"
+                ),
+                error=True,
+            )

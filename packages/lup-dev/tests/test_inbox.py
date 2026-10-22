@@ -96,6 +96,7 @@ from lup_dev.inbox.protocol import (
 from lup_dev.inbox.store import (
     Answer,
     Answered,
+    ApiChanged,
     Approval,
     AtLanding,
     Binary,
@@ -163,7 +164,7 @@ from lup_dev.stored import write_model
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
 
-    from conftest import FakeClock, Kit, Shell
+    from conftest import FakeClock, InProcess, Kit, Shell
     from mcp.client._transport import TransportStreams
     from pydantic import JsonValue
 
@@ -6622,3 +6623,133 @@ def test_lup_s_tools_say_which_may_be_sent_again_across_a_restart(
         "find_issues",
     }
     assert not any(again for _, again in github.values())
+
+
+def test_judged_and_the_review_read_a_hold_and_an_item_s_files_a_copy_before_wrote(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A copy before found `signature-changed`, which the holds and the files beside items it wrote keep: a value a stored model once accepted stays read, since `judged` reads every store's holds whole and the review an item's files (`ApiKind`)."""
+    worktree = tmp_path / "w"
+    worktree.mkdir()
+    repository = tmp_path / ".git"
+    core = Path("src/core.py")
+    reading = Reading(
+        role="production",
+        asks=[
+            Ask(
+                name="public-api",
+                taken="flagged",
+                line=1,
+                api=ApiChanged(kind="signature-changed", name="f"),
+            )
+        ],
+    )
+    verdict = Verdict(
+        key="v1",
+        time=clock.now(),
+        session="s1",
+        runtime="claude",
+        tool="Write",
+        worktree=worktree,
+        path=core,
+        role="production",
+        outcome="hold",
+        reasons=["whole-file"],
+    )
+    holds = Holds(layout=machine.store(worktree))
+    hold = holds.put(
+        Hold(
+            key=holds.unused(),
+            worktree=worktree,
+            session="s1",
+            created=clock.now(),
+            files=[
+                HeldFile(
+                    path=core,
+                    role="production",
+                    blob="abc",
+                    reasons=["whole-file"],
+                    asks=["src/core.py is rewritten whole"],
+                    reading=reading,
+                )
+            ],
+            diff="-def f(): ...\n+def f(x): ...\n",
+            verdicts=[verdict],
+        )
+    )
+    VerdictLog(path=machine.verdicts(repository)).append([verdict])
+    whole = ChangedFile(
+        path=core,
+        before=Text(text="def f(): ...\n"),
+        after=Text(text="def f(x): ...\n"),
+        reading=reading,
+    )
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        InboxAnnouncing(layout=machine.host, clock=clock).announced(
+            hold, "claude", repository, [whole]
+        )
+        [item] = delivery.inbox.waiting(Operator())
+        listed, error = call(machine.host.launch("one").mcp, "judged", {})
+        files = client(machine.host, clock).ask(ShowFiles(number=item.number), Files)
+    assert not error, listed
+    assert f"{worktree / core}  Write  hold (whole-file), no answer yet" in listed
+    assert f"  {worktree / core}: whole-file" in listed
+    assert files.files == [whole]
+
+
+def test_a_tool_of_lup_s_that_fails_answers_its_failure_and_the_service_says_the_traceback(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Left to `mcp`, a pydantic `ValidationError` a tool raises reaches the session as JSON-RPC's bare "Invalid request parameters", logged nowhere (`LaunchTools.answered`)."""
+    log = machine.verdicts(tmp_path / ".git")
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text('{"key": "v1", "time": "yesterday"}\n')
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        text, error = call(machine.host.launch("one").mcp, "judged", {})
+    assert error
+    assert text.startswith(
+        "`judged` failed, which is lup's fault, not the call's; the host service's "
+        "output has the traceback: "
+    )
+    assert "validation error" in text
+    assert "Verdict" in text
+    [told] = [line for line in said if line.startswith("one: `judged` failed:\n")]
+    assert "Traceback (most recent call last):" in told
+    assert "ValidationError" in told
+
+
+def test_the_github_module_s_tools_answer_through_the_server_with_and_without_arguments(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    tmp_path: Path,
+    in_process: type[InProcess],
+) -> None:
+    """Each call reaches the module's tool through lup's server and the launch's modules, which validate it and refuse what the launch's limits leave out, before anything reaches GitHub."""
+    modules = in_process(resolved=resolve(Project()), layout=machine)
+    with inboxed(machine, clock, notices, said, modules=modules):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        mcp = machine.host.launch("one").mcp
+        bare = call(mcp, "read_issue", {})
+        numbered = call(mcp, "read_issue", {"number": 1})
+        searched = call(mcp, "find_issues", {"query": "is:open"})
+        filed = call(mcp, "file_issue", {"title": "A bug", "body": "It bites."})
+    refused = (
+        "`{}` didn't run: the project's declaration doesn't allow `{}` with the "
+        "operator's credentials (`Core.credentials`), and allowing it is the "
+        "operator's call"
+    )
+    assert bare[1]
+    assert bare[0].startswith(
+        "`read_issue` refused the call: 1 validation error for Numbered\nnumber\n"
+    )
+    assert numbered == (refused.format("read_issue", "read-issues"), True)
+    assert searched == (refused.format("find_issues", "read-issues"), True)
+    assert filed == (refused.format("file_issue", "file-issue"), True)
