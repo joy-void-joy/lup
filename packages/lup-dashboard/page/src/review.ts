@@ -5,7 +5,9 @@
 // write that landed flagged, each file it changes, whole (`code.ts`), its lines
 // commented on as the item's own are, the lines that matter in it, by the judge's
 // reading, kept in order for the keys to walk; under each item its context. Its
-// items by their kind's rank, which the host gives. Each fold has a kind: the
+// groups and items in the order they arrived, never sorted again, so what the
+// operator reads stays put as items come; their kind's rank, which the host
+// gives, says only which `]a` and `[a` stop at. Each fold has a kind: the
 // item whole, a file, a function's or a class's body, a run of unchanged lines,
 // the context. What's folded by default: the context, each run of a file's
 // unchanged lines away from its changes and the lines that matter, so a held
@@ -409,27 +411,21 @@ export function answering(item: Item, approved: boolean): Answering {
 }
 
 /**
- * Return `items` in groups, one per agent, and one per banner of lup's approvals: the group whose first item ranks
- * first first (`Item.rank`: what's waiting on the operator, then news, then flags), then the group with the newest item
- * first; in each, its items by their rank, each rank's in their own order.
+ * Return `items` in groups, one per agent, and one per banner of lup's approvals, in the order they arrived: each
+ * group where its first item came, by that item's number, and its items by theirs. A later item comes after every
+ * earlier one, at the end of its group or in a group of its own after the others, and a change of an item's rank or
+ * state moves nothing: `Item.rank` orders nothing here, saying only which items `]a` and `[a` stop at (`toAnswer`).
  */
 function grouped(items: Item[], banner: (item: Item) => string): Grouping[] {
     const groups = new Map<string, Grouping>();
-    for (const item of items) {
+    for (const item of items.toSorted((a, b) => a.number - b.number)) {
         const sender = item.sender;
         const conversation = sender.party === "conversation" ? sender : null;
         const key = conversation === null ? `lup ${banner(item)}` : whose(conversation);
         const group = groups.get(key) ?? { key, conversation, head: { item }, items: [] };
         groups.set(key, { ...group, items: [...group.items, item] });
     }
-    const ranked = [...groups.values()].map((group) => ({
-        ...group,
-        items: group.items.toSorted((a, b) => a.rank.order - b.rank.order),
-    }));
-    const first = (group: Grouping) => Math.min(...group.items.map((each) => each.rank.order));
-    const made = (group: Grouping) => Math.max(...group.items.map((each) => new Date(each.made).getTime()));
-    const numbered = (group: Grouping) => Math.max(...group.items.map((each) => each.number));
-    return ranked.sort((a, b) => first(a) - first(b) || made(b) - made(a) || numbered(b) - numbered(a));
+    return [...groups.values()];
 }
 
 /** Return what names a group's place across layouts: `key`, whose it is, and whether it's of what's left for later. */
@@ -462,18 +458,21 @@ export function fresh(item: Item, reviewed: string | null | undefined): boolean 
 }
 
 /**
- * Lay `items` out as one text, in groups, one per agent, each under its banner: those with items now first, by the
- * rank of their first item (`Item.rank`), the newest first; then a group for each agent of `agents` (those running, in
- * the tree's order) with none, and for each the draft writes to with none; then the parked items' groups. Under each
- * banner but the parked ones', the draft's messages to its agent; then each item, by its rank, under a header naming
- * it, each comment of the draft on it under the
- * line it's on: a comment on a passage under the passage's last line, one on the item whole under its header. Under
- * each item's own text, what the host has answered of it: each file it changes (`changing`), its header
- * then its lines, each run of unchanged ones folding under a summary line; then the item's context, a summary line
- * with the lines that fold under it. Where the host showed none, a line says why.
+ * Lay `items` out as one text, in groups, one per agent, each under its banner, in the order they arrived: those with
+ * items now first, each where its first item came (`grouped`); then a group for each agent of `agents` (those running,
+ * in the tree's order) with none, and for each the draft writes to with none; then the parked items' groups, each
+ * where its first item came. Under each banner but the parked ones', the draft's messages to its agent; then each
+ * item, in the order they came, under a header naming it, each comment of the draft on it under the line it's on: a
+ * comment on a passage under the passage's last line, one on the item whole under its header. Under each item's own
+ * text, what the host has answered of it: each file it changes (`changing`), its header then its lines, each run of
+ * unchanged ones folding under a summary line; then the item's context, a summary line with the lines that fold under
+ * it. Where the host showed none, a line says why.
  *
  * `places` are where the groups were laid out before in this sitting (`Group.place`, in order): each among them keeps
- * its place, items coming and going, and any other comes after them, in the order above.
+ * its place, items coming and going, and any other comes after them, in the order above. So a group appears where its
+ * first item puts it, or after every group with items as its conversation is first seen, and stays there while
+ * anything's waiting; laid out anew from the items alone, as on reload, the order is the same but for a group that
+ * emptied meanwhile.
  */
 export function laid(
     items: Item[],
@@ -685,6 +684,53 @@ export function arrival(region: Region): number {
 /** Return the stop after the line starting at `line`, or before it, of `stops`, in the text's order; none past the last, or before the first. */
 export function stepped(stops: number[], line: number, forward: boolean): number | undefined {
     return forward ? stops.find((each) => each > line) : [...stops].reverse().find((each) => each < line);
+}
+
+/**
+ * Whether an item is to answer rather than to read: ranked as waiting on the operator (`Item.rank`, which the host
+ * gives), a question, a held change, an approval or a hold at landing, and neither marked read nor left for later in
+ * `draft`, which settles it until the reply is sent.
+ */
+export function toAnswer(item: Item, draft: Draft): boolean {
+    const settled = [...(draft.done ?? []), ...(draft.parked ?? [])];
+    return item.rank.name === "waiting on you" && !settled.includes(item.number);
+}
+
+/**
+ * Return where `]a` or `[a` goes from `head`: the next (`forward`) or previous item to answer (`toAnswer`), in the
+ * order they came, by their numbers, whatever order the text lays them out in, so each is reached once. From the item
+ * the cursor is in, the one after or before it among them; from a banner or a line of no item, the first item laid
+ * out after the cursor, that one counting, or going back the last before it. None past the last, or before the first.
+ */
+export function answerAfter(laidOut: Laid, draft: Draft, head: number, forward: boolean): Region | undefined {
+    const inside = regionAt(laidOut, head);
+    const beside = forward
+        ? laidOut.regions.find((each) => each.header.from > head)
+        : laidOut.regions.findLast((each) => each.header.from < head);
+    const from = inside ?? beside;
+    if (from === undefined) {
+        return undefined;
+    }
+    const number = from.item.number;
+    const bound = inside === undefined ? number : forward ? number + 1 : number - 1;
+    const walk = laidOut.regions.filter((each) => toAnswer(each.item, draft)).toSorted((a, b) => a.item.number - b.item.number);
+    return forward ? walk.find((each) => each.item.number >= bound) : walk.findLast((each) => each.item.number <= bound);
+}
+
+/**
+ * Say what waits below, for the header over the review, so the operator knows without the text moving to show it: how
+ * many items are to answer (`toAnswer`), and how many are new since they last sent (`fresh`) among those neither
+ * marked read nor left for later; nothing where no item waits.
+ */
+export function tallied(items: Item[], draft: Draft, reviewed: string | null | undefined): string {
+    if (items.length === 0) {
+        return "";
+    }
+    const settled = [...(draft.done ?? []), ...(draft.parked ?? [])];
+    const open = items.filter((each) => !settled.includes(each.number));
+    const answering = open.filter((each) => toAnswer(each, draft)).length;
+    const arrived = open.filter((each) => fresh(each, reviewed)).length;
+    return [`${answering} to answer`, ...(arrived === 0 ? [] : [`${arrived} new`])].join(" · ");
 }
 
 /** Return the last of `spans`, in the text's order, starting at or before `position`. */
