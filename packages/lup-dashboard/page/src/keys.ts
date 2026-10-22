@@ -89,6 +89,7 @@ const WRITING: Part<"insert">[] = [
         title: "Writing a comment",
         keys: [
             { keys: "^⏎", does: "end it, back on what it's about", short: "end it", at: ["insert"] },
+            { keys: "⏎", does: "in a list, the next item at the same indentation, with its bullet or the next number; on an empty item, the list's end", short: "next item", at: [] },
             { keys: "Esc", does: "end it where it is", short: "end it here", at: ["insert"] },
             { keys: "Esc u", does: "end it and drop it", short: "drop it", at: ["insert"] },
         ],

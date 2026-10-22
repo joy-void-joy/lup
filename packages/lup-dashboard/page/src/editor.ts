@@ -24,7 +24,10 @@
 // search backward; once a chord is begun, as with Space, the view is told what's
 // pressed, to show what may follow. `"+` and `"*` are the system clipboard, and a
 // yank or a put the clipboard refused is said in the page's top line
-// (`clipboard.ts`). Each view says what else its keys do, lays
+// (`clipboard.ts`). What's written, an agent's text and a comment, is
+// Markdown, shown as such, Enter in a comment continuing the list it's in
+// (`markdown.ts`); each view says which stretches of its text those are, in the
+// transaction that lays the text out. Each view says what else its keys do, lays
 // its own text out and draws it, and may paint the lines in view as well, as the
 // review paints a changed file's, and draw its folds' marks and bars in the
 // margin (`margin.ts`; `Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
@@ -47,6 +50,7 @@ import { defineClipboard } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, foldEdge, levelled, nextFold } from "./folds";
 import { FOLD_KINDS, type FoldKind } from "./keys";
+import { continued, markdown } from "./markdown";
 import { margin, placeheld, type Margined } from "./margin";
 
 /** What the vim keys and the editor's own events do, as a view stands: replaced at each render. */
@@ -492,9 +496,10 @@ const deadKeys = ViewPlugin.fromClass(
 
 /**
  * The keys that vim's keymap can't say, read ahead of vim, which takes every key it's given before a keymap would:
- * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere. Every key is noted first, for what vim makes of
- * it (`Keyed`): one with no key of vim's pending begins what it notes, `c` or `C` in normal mode beginning vim's
- * change. A composition outside insert mode is a dead key's, as some browsers give one with no dead key pressed
+ * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere; Enter in insert mode, which continues the list
+ * the cursor is in, where it's in one (`continued`), and is vim's otherwise. Every key is noted first, for what vim
+ * makes of it (`Keyed`): one with no key of vim's pending begins what it notes, `c` or `C` in normal mode beginning
+ * vim's change. A composition outside insert mode is a dead key's, as some browsers give one with no dead key pressed
  * first, and what it ends with is what vim gets of it, where nothing it typed was given first (`deadTyped`).
  */
 const keys = Prec.highest(
@@ -543,6 +548,10 @@ const keys = Prec.highest(
                 } else {
                     bound.actions?.send();
                 }
+                event.preventDefault();
+                return true;
+            }
+            if (event.key === "Enter" && !modified && !event.isComposing && cm.state.vim.insertMode && continued(view)) {
                 event.preventDefault();
                 return true;
             }
@@ -914,6 +923,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     config.margin === true ? margin(margined) : [],
                     drawing,
                     painting,
+                    markdown(),
                     EditorView.updateListener.of((update) => {
                         const actions = bound.current.actions;
                         const replaced = update.transactions.some((each) => each.annotation(rebuilt) === true);

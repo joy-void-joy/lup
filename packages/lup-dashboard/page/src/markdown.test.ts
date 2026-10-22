@@ -1,0 +1,210 @@
+import { syntaxTree } from "@codemirror/language";
+import { EditorState, type Range, type Transaction } from "@codemirror/state";
+import type { Decoration } from "@codemirror/view";
+import { describe, expect, it } from "vitest";
+
+import type { Span } from "./comments";
+import { continued, decorate, markdown, revealing, source, sourced, sources, treeOf, without, type Source } from "./markdown";
+
+/** The lines of `text` from the one holding `first` to the one holding `last`, each with its line break, as a source is read from them. */
+function lined(text: string, first: string, last: string = first): Span[] {
+    const start = text.lastIndexOf("\n", text.indexOf(first)) + 1;
+    const end = text.indexOf("\n", text.indexOf(last, start));
+    const found: Span[] = [];
+    for (let at = start; at <= end; ) {
+        const to = text.indexOf("\n", at);
+        found.push({ from: at, to: Math.min(to + 1, text.length) });
+        at = to + 1;
+    }
+    return found;
+}
+
+/** Return `text` laid out with `found` written in Markdown, as a view lays it out: the text and its sources in one transaction, read in it. */
+function laid(text: string, found: Source[]): EditorState {
+    const empty = EditorState.create({ extensions: markdown() });
+    return empty.update({ changes: { from: 0, insert: text }, effects: sourced.of(found) }).state;
+}
+
+/** The names of the nodes around `position`, innermost first. */
+function around(state: EditorState, position: number): string[] {
+    const names: string[] = [];
+    for (let node: ReturnType<typeof syntaxTree>["topNode"] | null = syntaxTree(state).resolveInner(position, 1); node !== null; node = node.parent) {
+        names.push(node.name);
+    }
+    return names;
+}
+
+/** What `made` hides of `state`'s text, in order. */
+function hidden(state: EditorState, made: Range<Decoration>[]): string[] {
+    return made
+        .filter((each) => each.from < each.to && each.value.spec.widget === undefined && each.value.spec.attributes === undefined)
+        .sort((a, b) => a.from - b.from)
+        .map((each) => state.sliceDoc(each.from, each.to));
+}
+
+/** What `made` draws beside `state`'s text, by where, in order: each widget's text, and whether it's drawn after what's there. */
+function drawn(state: EditorState, made: Range<Decoration>[]): { at: string; text: string; after: boolean }[] {
+    return made
+        .filter((each) => each.value.spec.widget !== undefined)
+        .sort((a, b) => a.from - b.from || a.value.startSide - b.value.startSide)
+        .map((each) => ({
+            at: state.sliceDoc(each.from, state.doc.lineAt(each.from).to),
+            text: (each.value.spec.widget as { text: string }).text,
+            after: each.value.spec.side > 0,
+        }));
+}
+
+const WHOLE = [{ from: 0, to: 1_000_000 }];
+
+describe("what's written in Markdown", () => {
+    it("joins the lines that touch into one source, and keeps an empty comment as a source of one empty line", () => {
+        expect(source("text", [{ from: 0, to: 5 }, { from: 5, to: 9 }, { from: 20, to: 24 }])).toEqual({
+            kind: "text",
+            from: 0,
+            to: 24,
+            lines: [{ from: 0, to: 9 }, { from: 20, to: 24 }],
+        });
+        expect(source("comment", [{ from: 7, to: 7 }])).toEqual({ kind: "comment", from: 7, to: 7, lines: [{ from: 7, to: 7 }] });
+        expect(source("text", [])).toBeNull();
+        expect(without({ from: 0, to: 10 }, [{ from: 3, to: 5 }, { from: 8, to: 12 }])).toEqual([{ from: 0, to: 3 }, { from: 5, to: 8 }]);
+    });
+
+    it("builds a tree of the sources, a comment under an item's lines inside the item's node", () => {
+        const text: Source = { kind: "text", from: 10, to: 40, lines: [{ from: 10, to: 20 }, { from: 30, to: 40 }] };
+        const comment: Source = { kind: "comment", from: 20, to: 29, lines: [{ from: 20, to: 29 }] };
+        const tree = treeOf([comment, text, { kind: "comment", from: 50, to: 60, lines: [{ from: 50, to: 60 }] }], 70);
+        const top = tree.topNode;
+        expect(top.name).toBe("Text");
+        expect(tree.length).toBe(70);
+        const children = top.getChildren("Markdown").map((each) => [each.from, each.to]);
+        expect(children).toEqual([[10, 40], [50, 60]]);
+        expect(top.firstChild?.getChildren("Markdown").map((each) => [each.from, each.to])).toEqual([[20, 29]]);
+    });
+});
+
+describe("a table", () => {
+    const text = ["── @61 note ──", "| kind | n |", "|---|---:|", "| `user` | 412 |", "a comment on the row", "| x | 3 |", ""].join("\n");
+    const found = [
+        source("text", [...lined(text, "| kind | n |", "| `user` | 412 |"), ...lined(text, "| x | 3 |")]),
+        source("comment", [{ from: text.indexOf("a comment"), to: text.indexOf("a comment") + "a comment on the row".length }]),
+    ].flatMap((each) => (each === null ? [] : [each]));
+
+    it("is read as one past the comment under its row, which is read on its own, the header read as neither", () => {
+        const state = laid(text, found);
+        expect(around(state, text.indexOf("| x"))).toContain("Table");
+        expect(around(state, text.indexOf("412"))).toContain("TableRow");
+        expect(around(state, text.indexOf("comment"))).toEqual(["Paragraph", "Document", "Markdown", "Markdown", "Text"]);
+        expect(around(state, text.indexOf("comment"))).not.toContain("Table");
+        expect(around(state, 3)).toEqual(["Text"]);
+    });
+
+    it("is padded so its columns line up, each cell as wide as it shows, the row under the header drawn out, by decorations and never text", () => {
+        const state = laid(text, found);
+        const made = decorate(state, WHOLE, () => false);
+        // ` kind ` and ` `user` `, shown without its backticks, fill the first column, 6 wide between its pipes, so
+        // `x` is padded by 3 after it and the dashes under them by 3; ` 412 ` fills the second, right-aligned by its
+        // colon, so `n` and `3` are padded before them, and its dashes by one before the colon.
+        expect(drawn(state, made)).toEqual([
+            { at: "n |", text: "  ", after: false },
+            { at: "|---:|", text: "---", after: true },
+            { at: ":|", text: "-", after: true },
+            { at: " | 3 |", text: "   ", after: true },
+            { at: "3 |", text: "  ", after: false },
+        ]);
+        expect(hidden(state, made)).toEqual(["`", "`"]);
+        expect(state.doc.toString()).toBe(text);
+    });
+});
+
+describe("a construct's marks", () => {
+    const text = ["# Title", "", "**bold** and *soft* and `code` and [a link](http://x) and ~~gone~~ and \\*kept\\*", "", "```python", "x = 1", "```", ""].join("\n");
+    const found = [source("text", lined(text, "# Title", "```\n"))].flatMap((each) => (each === null ? [] : [each]));
+
+    it("are hidden, the heading's with its space, a link's with its address, which its text says on hover", () => {
+        const state = laid(text, found);
+        const made = decorate(state, WHOLE, () => false);
+        expect(hidden(state, made)).toEqual(["# ", "**", "**", "*", "*", "`", "`", "[", "]", "(", "http://x", ")", "~~", "~~", "\\", "\\", "```", "```"]);
+        const titled = made.find((each) => each.value.spec.attributes?.title !== undefined);
+        expect(titled === undefined ? null : state.sliceDoc(titled.from, titled.to)).toBe("[a link](http://x)");
+        const barred = made.filter((each) => each.value.spec.class === "md-code").map((each) => state.doc.lineAt(each.from).text);
+        expect(barred).toEqual(["```python", "x = 1", "```"]);
+    });
+
+    it("show on the line the cursor is on in a comment, and on no line of an item's text", () => {
+        const comment = "**bold** here";
+        const text = ["an item's **own** line", comment, "another *own* line", ""].join("\n");
+        const found = [
+            source("text", [...lined(text, "an item's **own** line"), ...lined(text, "another *own* line")]),
+            source("comment", [{ from: text.indexOf(comment), to: text.indexOf(comment) + comment.length }]),
+        ].flatMap((each) => (each === null ? [] : [each]));
+        const state = laid(text, found);
+        const inComment = state.update({ selection: { anchor: text.indexOf("here") } }).state;
+        expect(revealing(inComment)).toBe(text.indexOf(comment));
+        const revealed = revealing(inComment);
+        expect(hidden(inComment, decorate(inComment, WHOLE, (line) => line === revealed))).toEqual(["**", "**", "*", "*"]);
+        const inText = state.update({ selection: { anchor: text.indexOf("own") } }).state;
+        expect(revealing(inText)).toBeNull();
+        expect(hidden(inText, decorate(inText, WHOLE, () => false))).toEqual(["**", "**", "**", "**", "*", "*"]);
+    });
+});
+
+describe("Enter in a comment", () => {
+    /** What `continued` makes of `text` with the cursor at `at`, the comment being `comment`; none where it does nothing. */
+    function entered(text: string, comment: string, at: number): string | null {
+        const from = text.indexOf(comment);
+        const found = [
+            source("text", lined(text, "an item's line")),
+            source("comment", [{ from, to: from + comment.length }]),
+        ].flatMap((each) => (each === null ? [] : [each]));
+        const state = laid(text, found).update({ selection: { anchor: at } }).state;
+        let made: string | null = null;
+        const did = continued({ state, dispatch: (transaction: Transaction) => (made = transaction.state.doc.toString()) });
+        return did ? made : null;
+    }
+
+    it("continues the list the cursor is in, at its indentation, with its bullet or the next number", () => {
+        const text = "an item's line\n- a\n  - b\n";
+        expect(entered(text, "- a\n  - b", text.indexOf("- b") + 3)).toBe("an item's line\n- a\n  - b\n  - \n");
+        const numbered = "an item's line\n1. a\n2. b\n";
+        expect(entered(numbered, "1. a\n2. b", numbered.indexOf("2. b") + 4)).toBe("an item's line\n1. a\n2. b\n3. \n");
+    });
+
+    it("ends the list on an empty item, and is vim's own elsewhere", () => {
+        const text = "an item's line\n- a\n- \n";
+        expect(entered(text, "- a\n- ", text.indexOf("- \n") + 2)).toBe("an item's line\n- a\n\n");
+        const plain = "an item's line\nsome words\n";
+        expect(entered(plain, "some words", plain.indexOf("words") + 2)).toBeNull();
+        expect(entered(plain, "some words", 3)).toBeNull();
+    });
+});
+
+describe("the sources as the text changes", () => {
+    it("read a comment opened empty once something is typed in it", () => {
+        const text = "a line\n\nanother line\n";
+        const found = [source("text", [{ from: 0, to: 7 }]), source("comment", [{ from: 7, to: 7 }]), source("text", [{ from: 8, to: 21 }])].flatMap(
+            (each) => (each === null ? [] : [each]),
+        );
+        const state = laid(text, found);
+        expect(around(state, 7)).toEqual(["Text"]);
+        const typed = state.update({ changes: { from: 7, insert: "- a" } }).state;
+        expect(typed.field(sources)[1]).toEqual({ kind: "comment", from: 7, to: 10, lines: [{ from: 7, to: 10 }] });
+        expect(around(typed, 9)).toContain("ListItem");
+    });
+
+    it("carry what's typed at a comment's end into it, and what's typed at a text's end out of it", () => {
+        const text = "a line\na comment\nanother line\n";
+        const found = [
+            source("text", [{ from: 0, to: 7 }]),
+            source("comment", [{ from: 7, to: 16 }]),
+            source("text", [{ from: 17, to: 30 }]),
+        ].flatMap((each) => (each === null ? [] : [each]));
+        const state = laid(text, found);
+        const typed = state.update({ changes: [{ from: 16, insert: "!" }, { from: 7, insert: "<" }] }).state;
+        expect(typed.field(sources)).toEqual([
+            { kind: "text", from: 0, to: 7, lines: [{ from: 0, to: 7 }] },
+            { kind: "comment", from: 7, to: 18, lines: [{ from: 7, to: 18 }] },
+            { kind: "text", from: 19, to: 32, lines: [{ from: 19, to: 32 }] },
+        ]);
+        expect(typed.sliceDoc(7, 18)).toBe("<a comment!");
+    });
+});

@@ -130,7 +130,7 @@ interface Inboxed {
 type Turn = { step: number; entry: Entry } | { inboxed: Inboxed };
 
 /** How an item's text is set in under its line. */
-const ITEM_INDENT = "  ";
+export const ITEM_INDENT = "  ";
 
 /** Return an item's text as the lines it's shown in under its line: its paragraphs kept, each line set in. */
 function setIn(text: string): string[] {
