@@ -223,6 +223,7 @@ if TYPE_CHECKING:
     from lup_dev.host.rooms import RoomTools
     from lup_dev.policy.runtime import Runtime
 
+# lup: defer(issue=114, why="`lup-dev` stands in for the `lup` command tree until the declaration and command line piece builds it, which names its commands")
 app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 host = typer.Typer(help="lup's host service, which rooms call.")

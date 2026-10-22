@@ -118,12 +118,15 @@ from lup.types import Model
 if TYPE_CHECKING:
     from claude_agent_sdk import HookContext, HookInput, HookJSONOutput, Message
 
+# lup: defer(issue=52, why="the name an ask's tool server goes by in Claude Code, a module constant until a `Spellings` each adapter implements gives it its home")
 SERVER = "lup"
 """The name lup's tool server goes by in Claude Code."""
 
+# lup: defer(issue=52, why="Claude Code's spelling of a tool's name, a module constant until a `Spellings` each adapter implements gives it its home")
 TOOL_PREFIX = f"mcp__{SERVER}__"
 """What Claude Code puts before the name of each of the server's tools: `mcp__lup__submit`."""
 
+# lup: defer(issue=52, why="Claude Code's flag, a module constant until a `Spellings` each adapter implements gives it its home")
 NO_PERSISTENCE = "no-session-persistence"
 """The flag that keeps Claude Code from writing the session to the operator's history."""
 

@@ -315,6 +315,7 @@ type TitledStart = Literal["startup", "resume", "fork"]
 (its `hooks` docs, *SessionStart decision control*): a compaction or a `/clear`
 takes none, so lup gives the title at the next prompt instead."""
 
+# lup: defer(issue=52, why="Claude Code's spelling of a tool's name in a hook, a module constant until a `Spellings` each adapter implements gives it its home")
 TOOL_PREFIX = f"mcp__{SERVER}__"
 """What Claude Code names each of lup's tools by in a hook: `mcp__lup__blocked`."""
 
@@ -988,6 +989,7 @@ class Subagented(Model, extra="ignore"):
     transcript_path: Path | None = None
 
 
+# lup: defer(issue=52, why="Claude Code's spelling of a fork's agent type, a module constant until a `Spellings` each adapter implements gives it its home")
 FORK = "fork"
 """The type of a subagent spawned with the conversation so far: its record's
 `agentType` (measured on 2.1.303, `docs/field-notes.md`, *Subagents' records*).
@@ -1118,6 +1120,7 @@ class Frame(Model):
     """The session it's for: one whose id differs drops it."""
 
 
+# lup: defer(issue=244, why="the frame's details, a non-empty `content`, a `session_id` other than the session's own dropped and a missing `priority` interrupting nothing, are read from the binary, owed live on the version a launch runs")
 def woken(session: str, text: str) -> str:
     """Return the line that starts a turn of the idle Claude Code session `session` with `text`, on its messaging socket.
 
@@ -1136,6 +1139,7 @@ class ChannelMessage(Model):
     digits and underscores is dropped."""
 
 
+# lup: defer(issue=52, why="Claude Code's spelling of the channel capability, a module constant until a `Spellings` each adapter implements gives it its home")
 CHANNEL = "claude/channel"
 """The experimental capability a server declares to be a channel."""
 

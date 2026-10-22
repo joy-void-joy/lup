@@ -262,6 +262,7 @@ if TYPE_CHECKING:
     from lup.sessions.terminal import Event
 
 
+# lup: defer(issue=52, why="Codex's spelling of a tool's name in a hook, a module constant until a `Spellings` each adapter implements gives it its home")
 TOOL_PREFIX = f"mcp__{SERVER}__"
 """What Codex names each of lup's tools by in a hook: `mcp__lup__blocked`."""
 
@@ -379,6 +380,7 @@ def context(said: Said, event: str, items: list[str]) -> Said:
     return said.model_copy(update={"hook_specific_output": added})
 
 
+# lup: defer(issue=245, why="a turn's end tells through a block, Codex's `Stop` and `SubagentStop` taking no `additionalContext` at `rust-v0.163.0`")
 def held(said: Said, items: list[str]) -> Said:
     """Return `said` holding a turn's end on `items`, after any reason it holds it for."""
     if not items:

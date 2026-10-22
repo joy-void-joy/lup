@@ -183,6 +183,7 @@ class Roles(Model):
             return False
         named = PurePath(path.name)
         declared = self.declaration.tests
+        # lup: defer(issue=176, why="where the declaration keeps lup's default, pytest's configuration decides the test roots, until the gate checks `testpaths` against the declared roots")
         roots = declared if declared is not None else self.configured(path)
         for pytest in roots:
             if not path.full_match(str(pytest.root / "**")):
