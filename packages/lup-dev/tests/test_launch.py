@@ -258,6 +258,8 @@ class Engine:
         self.processes: list[Process] = []
         self.guidance: str | None = None
         self.gitconfig: str | None = None
+        self.linked: dict[str, Path] = {}
+        """The links among the launch's commands while the room ran, by name."""
         self.unshared: list[list[str]] = []
 
     def __call__(self, process: Process) -> Exited:
@@ -285,6 +287,12 @@ class Engine:
                     if each.startswith("--env=GIT_CONFIG_GLOBAL=")
                 ]
                 self.gitconfig = Path(global_config).read_text()
+                commands = Path(global_config).parent / "bin"
+                self.linked = {
+                    each.name: each.readlink()
+                    for each in commands.iterdir()
+                    if each.is_symlink()
+                }
                 return Exited(status=self.ran)
             case _:
                 message = f"podman asked {process.arguments}"
@@ -678,6 +686,43 @@ def test_a_launch_says_once_that_desktop_notices_are_off_without_notify_send(
             "the `PATH`. Install: your system's `libnotify` package."
         )
     ]
+
+
+def editing(machine: Machine, **variables: str) -> None:
+    """Give the launch's terminal these editor variables."""
+    terminal = machine.launcher.terminal.model_copy(update=variables)
+    machine.launcher = machine.launcher.model_copy(update={"terminal": terminal})
+
+
+def test_a_launch_says_once_that_it_doesnt_know_the_operator_s_editor(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    editing(machine, editor="nvim", visual="kak -n")
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    assert [each for each in machine.events.said if "editor" in each] == [
+        (
+            "Your editor, `kak` (`$VISUAL`, else `$EDITOR`), isn't one lup knows "
+            "the package of, so the room doesn't install it, and Ctrl+G there "
+            "won't find it unless your own layer, `lup_project.local.py`, adds its "
+            "package to `Core`. Every room has `nano`."
+        )
+    ]
+    assert machine.engine.linked == {}
+
+
+def test_a_launch_says_nothing_of_an_editor_it_knows_and_links_hx_to_helix(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    editing(machine, editor="hx")
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    assert not [each for each in machine.events.said if "editor" in each]
+    assert machine.engine.linked == {"hx": Path("/usr/bin/helix")}
 
 
 def test_a_launch_without_gh_says_so_once_and_names_no_repository(

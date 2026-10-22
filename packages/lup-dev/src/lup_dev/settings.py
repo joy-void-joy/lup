@@ -66,9 +66,9 @@ class TerminalVariables(Settings):
     tz: str | None = None
     """`TZ`: the time zone, where it's set beside `/etc/localtime`."""
     editor: str | None = None
-    """`EDITOR`: the editor Ctrl+G opens."""
+    """`EDITOR`: the editor Ctrl+G opens where `VISUAL` names none."""
     visual: str | None = None
-    """`VISUAL`: the editor for a full screen, which some programs prefer to `EDITOR`."""
+    """`VISUAL`: the editor for a full screen, which Ctrl+G and most programs prefer to `EDITOR`."""
 
     def passed(self) -> dict[str, str]:
         """Return each variable set, by its name, as a room sets it.

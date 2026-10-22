@@ -49,7 +49,8 @@ class Core(Module):
     excluded unless the project says."""
     packages: Packages = standard_machine()
     """The standard machine, every room's whatever the host: the shell and the
-    usual tools, an agent's everyday work, what the runtimes call on, and editors
+    usual tools, an agent's everyday work, what the runtimes call on, and `nano`,
+    beside which a launch installs the operator's own editor
     (`lup_dev.catalog.room`)."""
     session: Session = Session()
     """How every session runs: the subagents' prompt cache, auto memory, idle

@@ -1,8 +1,8 @@
 """The maintaining session's room, from a resolved declaration and the worktree it's launched in.
 
 A `lup.rooms.Container` on the host's network, its image the declaration's
-(`launch/images.py`), with these mounted, each at its host path (`docs/launch.md`,
-*The mounts*):
+packages and the operator's editor's (`launch/images.py`), with these mounted,
+each at its host path (`docs/launch.md`, *The mounts*):
 - the repository as one tree, read-write: its git directory and every worktree,
   so `git worktree add` and `remove` work as on the host, and an agent reads any
   other worktree it's pointed at. The tree is the nearest directory holding them
@@ -22,8 +22,8 @@ A `lup.rooms.Container` on the host's network, its image the declaration's
 - pyright's source in lup's cache, read-write, which the gate builds the engine
   from. Only that part: the cache holds the CLIs rooms run, which a room
   mustn't rewrite;
-- the configuration of the editor `$EDITOR` or `$VISUAL` names, read-only, where
-  it exists, so Ctrl+G opens it as the operator knows it;
+- the configuration of the operator's editor, read-only, where it exists, so
+  Ctrl+G opens it as the operator knows it;
 - `/etc/localtime`, read-only, so the room's clock reads in the operator's zone;
 - after the project's own, each other repository named for its sessions to
   read (`related`), whole and read-only, where it's on the host: a bare
@@ -43,6 +43,10 @@ source where it's mounted: the build takes the path from the same layout. What
 the launch adds is the terminal compile's
 and the launch command's: the launch's directory, its socket directory, the CLI
 and the runtime's home.
+
+The operator's editor is the one `$VISUAL` names, else `$EDITOR`, which Ctrl+G
+opens (`OperatorsEditor`): where lup knows it (`Editors`), the room installs its
+package, unless the declaration has it already, and mounts its configuration.
 
 The environment's interpreter must resolve under the room's mounts, or the room
 refuses with the runner's remedy: without it, `uv run` in the room set about
@@ -76,8 +80,9 @@ from lup.rooms.container import Container, Image, Mask, Mount
 from lup.sessions import bridge
 from lup.sessions.terminal import TerminalSettings
 from lup.types import Model
-from lup_dev.catalog.room import Editors, RoomBase
+from lup_dev.catalog.room import Editor, Editors, RoomBase
 from lup_dev.clipboard import shim
+from lup_dev.declaration.kinds import Package
 from lup_dev.declaration.requirements import Needed, Requirement
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM
@@ -297,6 +302,60 @@ def related(named: list[kinds.Repository], worktree: Path) -> list[RelatedReposi
     return [found(each) for each in named]
 
 
+class OperatorsEditor(Model):
+    """The editor the operator uses: the program `$VISUAL` names on the host, else `$EDITOR`, as Ctrl+G opens it, and the editor lup knows by that name."""
+
+    program: str | None
+    """The program's name, a path's last part; none where neither variable
+    names one."""
+    known: Editor | None
+    """The editor lup knows by that name (`Editors`), which the room installs;
+    none where lup knows none."""
+
+    @classmethod
+    def of(cls, terminal: TerminalVariables) -> OperatorsEditor:
+        """Return the editor `terminal`'s `$VISUAL` names, else its `$EDITOR`.
+
+        Raise `RoomError` where that variable isn't a command line.
+
+        >>> from lup_dev.settings import TerminalVariables
+        >>> named = OperatorsEditor.of(TerminalVariables(term=None, colorterm=None,
+        ...     lang=None, tz=None, editor="vim", visual="/usr/bin/nvim --clean"))
+        >>> named.program, named.known and named.known.package
+        ('nvim', 'neovim')
+        """
+        variable, command = (
+            ("$VISUAL", terminal.visual)
+            if terminal.visual
+            else ("$EDITOR", terminal.editor)
+        )
+        try:
+            words = split(command or "")
+        except ValueError as failed:
+            message = (
+                f"`{variable}` isn't a command line ({failed}), so lup can't tell "
+                "which editor the room installs and whose configuration it mounts"
+            )
+            raise RoomError(message) from failed
+        if not words:
+            return cls(program=None, known=None)
+        program = Path(words[0]).name
+        known = next(
+            (each for each in Editors().editors if program in each.programs), None
+        )
+        return cls(program=program, known=known)
+
+    def link(self, launch: LaunchLayout) -> None:
+        """Link the name the operator runs their editor by to the program its package installs, among the launch's commands, where the two differ: `hx`, which Arch's helix installs as `helix`."""
+        if self.known is None or self.program is None:
+            return
+        installed = self.known.links.get(self.program)
+        if installed is None:
+            return
+        launch.bin.mkdir(parents=True, exist_ok=True)
+        (launch.bin / self.program).symlink_to(installed)
+
+
 def apart(other: RelatedRepository, mounts: list[Mount]) -> None:
     """Raise `RoomError` where another repository overlaps one of the room's own mounts: inside it, as the project itself is, or holding it."""
     overlapping = [
@@ -337,11 +396,12 @@ def maintaining_room(
     its path, read-only unless the module says. `lent` are the directories the
     operator lends this launch from its command line, each mounted at its path,
     last. Raise `RoomError` where the
-    repository's tree would hold the operator's home, where `$EDITOR` or
-    `$VISUAL` isn't a command line, where the environment's interpreter doesn't
+    repository's tree would hold the operator's home, where the operator's
+    editor isn't a command line, where the environment's interpreter doesn't
     resolve under the room's mounts, or where another repository overlaps them.
     """
     home = Path.home()
+    editor = OperatorsEditor.of(terminal).known
     held = repository(worktree)
     git = Git(cwd=worktree)
     needs = resolved.runner.room(worktree, tools)
@@ -349,28 +409,6 @@ def maintaining_room(
     def configured(key: str) -> str | None:
         found = git.run("config", "--get", key, ok=[0, 1])
         return found.output.decode().strip() if found.status == 0 else None
-
-    def editors() -> list[Mount]:
-        named = [command for command in [terminal.editor, terminal.visual] if command]
-        try:
-            programs = [Path(words[0]).name for words in map(split, named) if words]
-        except ValueError as failed:
-            message = (
-                f"`$EDITOR` or `$VISUAL` isn't a command line ({failed}), so lup "
-                "can't tell which editor's configuration the room mounts"
-            )
-            raise RoomError(message) from failed
-        configuration = dict.fromkeys(
-            home / path
-            for editor in Editors().editors
-            if any(program in editor.programs for program in programs)
-            for path in editor.configuration
-        )
-        return [
-            Mount(source=path, read_only=True)
-            for path in configuration
-            if path.exists()
-        ]
 
     def reached(interpreter: Interpreter, mounts: list[Mount]) -> None:
         resolved_path = interpreter.path.resolve()
@@ -403,7 +441,11 @@ def maintaining_room(
         Mount(source=hooks, read_only=True),
         *needs.mounts,
         Mount(source=pyright),
-        *editors(),
+        *(
+            Mount(source=home / path, read_only=True)
+            for path in ([] if editor is None else editor.configuration)
+            if (home / path).exists()
+        ),
         *([Mount(source=LOCALTIME, read_only=True)] if LOCALTIME.exists() else []),
         *(
             Mount(source=place, read_only=each.read_only)
@@ -429,11 +471,11 @@ def maintaining_room(
             else {"GIT_AUTHOR_EMAIL": email, "GIT_COMMITTER_EMAIL": email}
         ),
     }
+    packages = resolved.packages
+    if editor is not None and editor.package not in [each.name for each in packages]:
+        packages = [*packages, Package(name=editor.package, why=editor.why)]
     return Container(
-        image=Image(
-            definition=definition(resolved.packages, RoomBase()),
-            project=str(held.git),
-        ),
+        image=Image(definition=definition(packages, RoomBase()), project=str(held.git)),
         mounts=[
             *mounts,
             *(
