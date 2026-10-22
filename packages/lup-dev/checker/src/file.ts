@@ -4,11 +4,20 @@
 
 import * as AnalyzerNodeInfo from 'pyright/analyzer/analyzerNodeInfo';
 import { AnalyzerFileInfo } from 'pyright/analyzer/analyzerFileInfo';
+import { Declaration, DeclarationType } from 'pyright/analyzer/declaration';
+import { getParamListDetails, ParamKind } from 'pyright/analyzer/parameterUtils';
 import * as ParseTreeUtils from 'pyright/analyzer/parseTreeUtils';
 import { ParseTreeWalker } from 'pyright/analyzer/parseTreeWalker';
 import { Program } from 'pyright/analyzer/program';
 import { TypeEvaluator } from 'pyright/analyzer/typeEvaluatorTypes';
-import { isClassInstance, isInstantiableClass } from 'pyright/analyzer/types';
+import {
+    FunctionType,
+    isClassInstance,
+    isFunction,
+    isInstantiableClass,
+    isOverloaded,
+    OverloadedType,
+} from 'pyright/analyzer/types';
 import { doForEachSubtype } from 'pyright/analyzer/typeUtils';
 import { TextRange } from 'pyright/common/textRange';
 import {
@@ -25,7 +34,9 @@ import {
     ImportAsNode,
     ImportFromNode,
     IndexNode,
+    isExpressionNode,
     LambdaNode,
+    ListNode,
     MemberAccessNode,
     NameNode,
     ParseNode,
@@ -37,6 +48,7 @@ import {
     StatementNode,
     StringNode,
     SuiteNode,
+    TupleNode,
     TypeParameterListNode,
 } from 'pyright/parser/parseNodes';
 import { ParseFileResults } from 'pyright/parser/parser';
@@ -189,6 +201,44 @@ export interface Sliced {
     step: ExpressionNode | undefined;
 }
 
+// A bound fixed where the code is written, rather than given by a call: a literal, a
+// constant, or a field of what a method is bound to.
+export interface Bound {
+    // `literal`: written in place (`200`); `constant`: a name bound to a literal, at a
+    // module's top level, in a class as a class variable, or in a function and never
+    // bound otherwise (`LIMIT`); `field`: read off what the method is bound to
+    // (`self.listed`, `self.module.limit`).
+    source: 'literal' | 'constant' | 'field';
+    // The bound as written: `200`, `LIMIT`, `self.listed`.
+    text: string;
+    // Its value, where the code writes it; none for a field.
+    value: number | undefined;
+    // Whether it counts from the end: a negative value, or one written negated.
+    fromEnd: boolean;
+}
+
+// A cut keeping the head or the tail of something at a fixed bound: `rows[:200]`,
+// `rows[-LIMIT:]`, `islice(rows, self.listed)`.
+export interface Cut {
+    // The slice, or the `islice` call.
+    node: ExpressionNode;
+    text: string;
+    // What a slice cuts; none for `islice`, which cuts any iterable.
+    receiver: ExpressionNode | undefined;
+    bound: Bound;
+}
+
+// An argument saying how many of something a call returns at most, given a fixed
+// bound: `search(query, limit=100)`, `latest(items, when, self.listed)`, `"--limit=100"`,
+// `f"--max-count={LIMIT}"`.
+export interface LimitGiven {
+    // The argument, or the string naming the command-line option.
+    node: ExpressionNode;
+    // The parameter or the option it gives: `limit`, `--max-count`.
+    name: string;
+    bound: Bound;
+}
+
 export interface Caught {
     // The class as written in the clause.
     node: ExpressionNode;
@@ -221,6 +271,7 @@ class Gathered extends ParseTreeWalker {
     readonly scopes: ParseNode[] = [];
     readonly suites: SuiteNode[] = [];
     readonly patterns: PatternClassNode[] = [];
+    readonly sequences: (ListNode | TupleNode)[] = [];
 
     override visitCall(node: CallNode) {
         this.calls.push(node);
@@ -243,6 +294,14 @@ class Gathered extends ParseTreeWalker {
     }
     override visitSet(node: SetNode) {
         this.sets.push(node);
+        return true;
+    }
+    override visitList(node: ListNode) {
+        this.sequences.push(node);
+        return true;
+    }
+    override visitTuple(node: TupleNode) {
+        this.sequences.push(node);
         return true;
     }
     override visitImportAs(node: ImportAsNode) {
@@ -313,6 +372,7 @@ export class File {
     readonly reported: Reported[] = [];
     private rule = '';
     private gathered: Gathered | undefined;
+    private served: Map<ParseNode, string> | undefined;
 
     constructor(
         readonly program: Program,
@@ -888,6 +948,277 @@ export class File {
         });
     }
 
+    // The cuts keeping a head or a tail at a fixed bound (`Bound`): a slice with no step
+    // from the start to a bound (`rows[:200]`, `rows[0:LIMIT]`), or from a bound counted
+    // from the end to the end (`rows[-LIMIT:]`); and `islice(rows, stop)`.
+    cuts(): Cut[] {
+        const slices = this.slices().flatMap((sliced): Cut[] => {
+            const cut = (bound: Bound | undefined) =>
+                bound ? [{ node: sliced.node, text: sliced.text, receiver: sliced.receiver, bound }] : [];
+            if (sliced.step) {
+                return [];
+            }
+            const fromStart = sliced.start === undefined || this.integerLiteral(sliced.start) === 0;
+            const end = fromStart ? this.fixedBound(sliced.end) : undefined;
+            if (end && !end.fromEnd && end.value !== 0) {
+                return cut(end);
+            }
+            const start = sliced.end === undefined ? this.fixedBound(sliced.start) : undefined;
+            return start?.fromEnd ? cut(start) : [];
+        });
+        const islices = this.callsTo(['itertools.islice']).flatMap((call): Cut[] => {
+            const bound = call.node.d.args.length === 2 ? this.fixedBound(call.argument('stop', 1)) : undefined;
+            return bound && !bound.fromEnd ? [{ node: call.node, text: this.text(call.node), receiver: undefined, bound }] : [];
+        });
+        return [...slices, ...islices];
+    }
+
+    // The bound an expression fixes where the code is written (`Bound`): an integer
+    // literal; a name bound to one, or to another fixed bound, wherever it's bound; or a
+    // field of what the method is bound to. None for a bound from anywhere else: a
+    // parameter, a call, the data.
+    fixedBound(node: ExpressionNode | undefined): Bound | undefined {
+        return this.boundAt(node, 0);
+    }
+
+    // The fixed bound an expression gives, `depth` names away from where it's read.
+    private boundAt(node: ExpressionNode | undefined, depth: number): Bound | undefined {
+        if (!node || depth > 3) {
+            return undefined;
+        }
+        const text = this.text(node);
+        const literal = this.integerLiteral(node);
+        if (literal !== undefined) {
+            return { source: 'literal', text, value: literal, fromEnd: literal < 0 };
+        }
+        if (node.nodeType === ParseNodeType.UnaryOperation && node.d.operator === OperatorType.Subtract) {
+            const negated = this.boundAt(node.d.expr, depth);
+            const value = negated?.value === undefined ? undefined : -negated.value;
+            return negated && { ...negated, text, value, fromEnd: !negated.fromEnd };
+        }
+        if (node.nodeType !== ParseNodeType.Name && node.nodeType !== ParseNodeType.MemberAccess) {
+            return undefined;
+        }
+        const name = node.nodeType === ParseNodeType.Name ? node : node.d.member;
+        const declarations = (this.evaluator.getDeclInfoForNameNode(name)?.decls ?? []).flatMap((declaration) => {
+            const resolved = this.evaluator.resolveAliasDeclaration(declaration, /* resolveLocalNames */ true);
+            return resolved ? [resolved] : [];
+        });
+        const bound = declarations.map((declaration) => this.boundBy(declaration, depth));
+        const [first] = bound;
+        if (first && bound.every((each) => each !== undefined)) {
+            return first.source === 'literal' ? { ...first, source: 'constant', text } : first;
+        }
+        if (node.nodeType === ParseNodeType.MemberAccess && this.isBindingField(node)) {
+            return { source: 'field', text, value: undefined, fromEnd: false };
+        }
+        return undefined;
+    }
+
+    // The fixed bound a variable's binding gives it: what it's assigned, where that's
+    // fixed. None for a field a class declares for its instances, or a parameter.
+    private boundBy(declaration: Declaration, depth: number): Bound | undefined {
+        if (declaration.type !== DeclarationType.Variable || declaration.isDefinedByMemberAccess) {
+            return undefined;
+        }
+        const owner = ParseTreeUtils.getEnclosingClassOrFunction(declaration.node);
+        const annotation = declaration.typeAnnotationNode;
+        const classVariable =
+            !annotation ||
+            declaration.isFinal ||
+            (annotation.nodeType === ParseNodeType.Index && this.namesOf(annotation.d.leftExpr).includes('typing.ClassVar'));
+        if (owner?.nodeType === ParseNodeType.Class && !classVariable) {
+            return undefined;
+        }
+        const source = declaration.inferredTypeSource;
+        return source && isExpressionNode(source) ? this.boundAt(source, depth + 1) : undefined;
+    }
+
+    // Whether a member access reads off what a method is bound to: `self.listed`,
+    // `self.module.limit`.
+    private isBindingField(node: MemberAccessNode): boolean {
+        let root: ExpressionNode = node;
+        while (root.nodeType === ParseNodeType.MemberAccess) {
+            root = root.d.leftExpr;
+        }
+        if (root.nodeType !== ParseNodeType.Name) {
+            return false;
+        }
+        return (this.evaluator.getDeclInfoForNameNode(root)?.decls ?? []).some((declaration) => {
+            if (declaration.type !== DeclarationType.Param) {
+                return false;
+            }
+            const method = declaration.node.parent;
+            return (
+                method?.nodeType === ParseNodeType.Function &&
+                method.d.params[0] === declaration.node &&
+                ParseTreeUtils.getEnclosingClass(method, /* stopAtFunction */ true) !== undefined &&
+                !method.d.decorators.some((decorator) => this.namesOf(decorator.d.expr).includes('builtins.staticmethod'))
+            );
+        });
+    }
+
+    // The arguments saying how many of something a call returns at most, each given a
+    // fixed bound (`LimitGiven`): one for a parameter whose name says so (`namesALimit`),
+    // by keyword or by position; and a command-line option whose name says so, in a list,
+    // a tuple or a call's arguments, its value after `=` or as the next item
+    // (`"--limit=100"`, `f"--limit={LIMIT}"`, `"--max-count", str(self.listed)`).
+    limitsGiven(): LimitGiven[] {
+        const byParameter = this.nodes.calls.flatMap((call) => {
+            const parameters = this.parameterNames(call);
+            return call.d.args.flatMap((arg, index): LimitGiven[] => {
+                const name = arg.d.name?.d.value ?? parameters[index];
+                const bound = name !== undefined && namesALimit(name) ? this.fixedBound(arg.d.valueExpr) : undefined;
+                return name !== undefined && bound && !bound.fromEnd ? [{ node: arg.d.valueExpr, name, bound }] : [];
+            });
+        });
+        const runs = [
+            ...this.nodes.sequences.map((sequence) => sequence.d.items),
+            ...this.nodes.calls.map((call) => call.d.args.filter((arg) => !arg.d.name).map((arg) => arg.d.valueExpr)),
+        ];
+        const byOption = runs.flatMap((items) => items.flatMap((item, index) => this.optionGiven(item, items[index + 1])));
+        return [...byParameter, ...byOption];
+    }
+
+    // The limit a command-line option gives, where `item` names one: its value after
+    // `=`, written out or interpolated, or `next`, where `item` is the option alone.
+    private optionGiven(item: ExpressionNode, next: ExpressionNode | undefined): LimitGiven[] {
+        if (item.nodeType !== ParseNodeType.StringList || item.d.strings.length !== 1) {
+            return [];
+        }
+        const [part] = item.d.strings;
+        const given = (name: string, bound: Bound | undefined): LimitGiven[] =>
+            name.startsWith('--') && namesALimit(name) && bound && !bound.fromEnd ? [{ node: item, name, bound }] : [];
+        if (part.nodeType === ParseNodeType.FormatString) {
+            const [middle, ...more] = part.d.middleTokens;
+            const [field] = part.d.fieldExprs;
+            const opening = middle && middle.start === part.d.token.start + part.d.token.length;
+            if (!opening || more.length > 0 || part.d.fieldExprs.length !== 1 || !middle.escapedValue.endsWith('=')) {
+                return [];
+            }
+            return given(middle.escapedValue.slice(0, -1), this.fixedBound(field));
+        }
+        const [name, value, ...rest] = part.d.value.split('=');
+        if (value === undefined) {
+            return next ? given(name, this.fixedBound(this.stringOf(next))) : [];
+        }
+        const digits = value !== '' && rest.length === 0 && [...value].every((char) => char >= '0' && char <= '9');
+        return given(name, digits ? { source: 'literal', text: this.text(item), value: Number(value), fromEnd: false } : undefined);
+    }
+
+    // What `str(…)` turns into text, where an expression is that call; else the expression.
+    private stringOf(node: ExpressionNode): ExpressionNode {
+        const [only, ...more] = node.nodeType === ParseNodeType.Call ? node.d.args : [];
+        const converted =
+            node.nodeType === ParseNodeType.Call &&
+            only &&
+            more.length === 0 &&
+            !only.d.name &&
+            this.namesOf(node.d.leftExpr).includes('builtins.str');
+        return converted ? only.d.valueExpr : node;
+    }
+
+    // The name of the parameter each argument of a call is given to by position, where
+    // pyright knows the function called; none for one given by keyword, or after an
+    // unpacked one.
+    private parameterNames(call: CallNode): (string | undefined)[] {
+        const type = this.evaluator.getType(call.d.leftExpr);
+        const signatures = !type ? [] : isFunction(type) ? [type] : isOverloaded(type) ? OverloadedType.getOverloads(type) : [];
+        let position = 0;
+        let unpacked = false;
+        return call.d.args.map((arg) => {
+            unpacked = unpacked || arg.d.argCategory !== ArgCategory.Simple;
+            if (arg.d.name || unpacked) {
+                return undefined;
+            }
+            const at = position++;
+            return signatures.map((signature) => positionalName(signature, at)).find((name) => name !== undefined);
+        });
+    }
+
+    // The tool a node serves, by the name of the function that serves it, where the node
+    // is within one (`serving`); none elsewhere.
+    servedTool(node: ParseNode): string | undefined {
+        const serving = this.serving();
+        for (let current: ParseNode | undefined = node; current; current = current.parent) {
+            const tool = serving.get(current);
+            if (tool !== undefined) {
+                return tool;
+            }
+        }
+        return undefined;
+    }
+
+    // The functions serving a tool of lup's library (`lup.tools`), each with the name of
+    // the tool's own: a function decorated `@lup_tool` or handed to `lup_tool(…)`; a
+    // `Tool`'s `function`; the `call` of a class implementing `AgentTool` or `Toolset`;
+    // and each function of this file one of them names, which serves the same tool.
+    private serving(): Map<ParseNode, string> {
+        if (this.served) {
+            return this.served;
+        }
+        const functions = new Set<ParseNode>(
+            this.nodes.scopes.filter(
+                (node) => node.nodeType === ParseNodeType.Function || node.nodeType === ParseNodeType.Lambda
+            )
+        );
+        const named = (node: ExpressionNode | undefined): (FunctionNode | LambdaNode)[] => {
+            if (node?.nodeType === ParseNodeType.Lambda) {
+                return [node];
+            }
+            const name =
+                node?.nodeType === ParseNodeType.Name
+                    ? node
+                    : node?.nodeType === ParseNodeType.MemberAccess
+                    ? node.d.member
+                    : undefined;
+            return (name ? this.evaluator.getDeclInfoForNameNode(name)?.decls ?? [] : []).flatMap((declaration) => {
+                const resolved = this.evaluator.resolveAliasDeclaration(declaration, /* resolveLocalNames */ true);
+                return resolved?.type === DeclarationType.Function && functions.has(resolved.node) ? [resolved.node] : [];
+            });
+        };
+        const decorated = this.nodes.scopes.filter(
+            (node): node is FunctionNode =>
+                node.nodeType === ParseNodeType.Function &&
+                node.d.decorators.some((decorator) => this.namesOf(decorator.d.expr).includes(toolMaker))
+        );
+        const handed = this.callsTo([toolMaker]).flatMap((call) => named(call.argument('function', 0)));
+        const functionOfTool = this.nodes.calls
+            .filter((call) => this.buildsTool(call))
+            .flatMap((call) => named(argumentOf(call, 'function')));
+        const calls = this.classes()
+            .filter((declared) => declared.ancestors.some((ancestor) => toolInterfaces.includes(ancestor)))
+            .flatMap((declared) => declared.concrete.filter((method) => method.d.name.d.value === 'call'));
+        const pending = [...decorated, ...handed, ...functionOfTool, ...calls].map((node) => ({
+            node,
+            tool: node.nodeType === ParseNodeType.Function ? node.d.name.d.value : 'lambda',
+        }));
+        const served = new Map<ParseNode, string>();
+        for (let next = pending.pop(); next; next = pending.pop()) {
+            const { node, tool } = next;
+            if (served.has(node)) {
+                continue;
+            }
+            served.set(node, tool);
+            const within = this.nodes.references.filter((reference) => TextRange.containsRange(node, reference));
+            pending.push(...within.flatMap((reference) => named(reference).map((reached) => ({ node: reached, tool }))));
+        }
+        this.served = served;
+        return served;
+    }
+
+    // Whether a call makes one of lup's `Tool`s: `Tool[Query, str](…)`, or a class
+    // deriving from it.
+    private buildsTool(call: CallNode): boolean {
+        const callee = call.d.leftExpr.nodeType === ParseNodeType.Index ? call.d.leftExpr.d.leftExpr : call.d.leftExpr;
+        const type = this.evaluator.getType(callee);
+        return (
+            type !== undefined &&
+            isInstantiableClass(type) &&
+            [type.shared.fullName, ...ancestorsOf(type)].includes('lup.tools.tool.Tool')
+        );
+    }
+
     // Every item read by a single key, as opposed to assigned or deleted:
     // `payload["name"]`.
     itemReads(): ItemRead[] {
@@ -949,6 +1280,44 @@ export class File {
 }
 
 const emptyBuilders = ['builtins.list', 'builtins.dict', 'builtins.set'];
+
+// What marks a function as a tool in lup's library (`lup.tools`): the decorator, which
+// also takes a function as its argument; and the interfaces a class serving tools
+// implements, whose `call` serves one.
+const toolMaker = 'lup.tools.tool.lup_tool';
+const toolInterfaces = ['lup.tools.tool.AgentTool', 'lup.tools.serving.Toolset'];
+
+// What follows `max_` in a parameter's or an option's name saying how many of something
+// a call returns at most: `max_results`, `--max-count`.
+const counted = ['count', 'results', 'items', 'lines', 'rows', 'entries', 'matches', 'hits', 'records', 'chars', 'bytes', 'tokens'];
+
+// Whether a parameter's or a command-line option's name says how many of something a
+// call returns at most: `limit`, `holds_limit`, `--limit`, `most`, `maxlen`,
+// `max_results`, `--max-count`.
+function namesALimit(name: string): boolean {
+    const words = name
+        .toLowerCase()
+        .split('-')
+        .flatMap((part) => part.split('_'))
+        .filter((word) => word !== '');
+    if (words.includes('limit')) {
+        return true;
+    }
+    if (words.length === 1) {
+        return ['most', 'maxlen'].includes(words[0]);
+    }
+    return words.length === 2 && words[0] === 'max' && counted.includes(words[1]);
+}
+
+// The name of the parameter a function takes at `position` among its arguments given by
+// position; none past them.
+function positionalName(signature: FunctionType, position: number): string | undefined {
+    const details = getParamListDetails(signature);
+    const parameter = details.params[position];
+    return parameter && position < details.positionParamCount && parameter.kind !== ParamKind.Keyword
+        ? parameter.param.name
+        : undefined;
+}
 
 // The constructors of the collections a constant can be written as, and the
 // collection each builds.
