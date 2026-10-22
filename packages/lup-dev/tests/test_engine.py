@@ -962,46 +962,62 @@ def test_other_comments_are_no_directives(project: Project) -> None:
 # The public surface and the imports.
 
 
-def test_a_modules_surface_holds_its_classes_and_signatures(project: Project) -> None:
+def test_a_modules_surface_holds_its_public_classes_functions_and_methods(
+    project: Project,
+) -> None:
     body = (
         "class Outer:\n"
         '    """A class."""\n\n'
         "    class Inner:\n"
         '        """A nested class."""\n\n'
-        "    def method(\n"
-        "        self, first: int, /, second: str = 'x', *rest: int, flag: bool,\n"
-        "        **extra: float,\n"
-        "    ) -> str | None:\n"
+        "    def __init__(self) -> None:\n"
+        '        """A dunder counts."""\n\n'
+        "    async def method(self, first: int, /, *rest: int) -> str | None:\n"
         '        """A method."""\n'
-        "        return None\n\n\n"
+        "        return None\n\n"
+        "    def _hidden(self) -> None:\n"
+        '        """Private: not listed."""\n\n\n'
+        "class _Private:\n"
+        '    """Private: not listed, nor its members."""\n\n'
+        "    def method(self) -> None:\n"
+        '        """Not listed."""\n\n\n'
         "def function(value: list[int]) -> int:\n"
-        '    """A function."""\n'
-        "    return len(value)\n"
+        '    """A function."""\n\n'
+        "    def nested() -> int:\n"
+        "        return len(value)\n\n"
+        "    return nested()\n\n\n"
+        "def _helper() -> None:\n"
+        '    """Private: not listed."""\n'
     )
     surface = project.check("surface.py", on_disk=DOCSTRING + body).surface
     assert surface.exported == []
     assert surface.classes == ["Outer", "Outer.Inner"]
-    [method, function] = surface.signatures
-    assert method.name == "Outer.method"
-    assert [
-        (p.name, p.kind, p.annotation, p.has_default) for p in method.parameters
-    ] == [
-        ("self", "positional-only", "", False),
-        ("first", "positional-only", "int", False),
-        ("second", "positional-or-keyword", "str", True),
-        ("rest", "variadic", "int", False),
-        ("flag", "keyword-only", "bool", False),
-        ("extra", "variadic-keyword", "float", False),
-    ]
-    assert method.returns == "str | None"
-    assert (function.name, function.returns) == ("function", "int")
+    assert surface.functions == ["Outer.__init__", "Outer.method", "function"]
     start = DOCSTRING.count("\n")
     assert [(each.kind, each.name, each.line - start) for each in surface.places] == [
         ("class", "Outer", 1),
         ("class", "Outer.Inner", 4),
-        ("signature", "Outer.method", 7),
-        ("signature", "function", 15),
+        ("function", "Outer.__init__", 7),
+        ("function", "Outer.method", 10),
+        ("function", "function", 25),
     ]
+
+
+def test_a_name_defined_in_each_branch_is_listed_once_where_it_is_first(
+    project: Project,
+) -> None:
+    body = (
+        "import sys\n\n"
+        "if sys.platform == 'win32':\n"
+        "    def chosen() -> int:\n"
+        "        return 1\n"
+        "else:\n"
+        "    def chosen() -> int:\n"
+        "        return 2\n"
+    )
+    surface = project.check("branches.py", on_disk=DOCSTRING + body).surface
+    assert surface.functions == ["chosen"]
+    assert surface.place("function", "chosen") == DOCSTRING.count("\n") + 4
 
 
 def test_a_package_root_exports_its_names_or_its_all(project: Project) -> None:
@@ -1057,23 +1073,10 @@ def test_a_file_read_from_its_parse_alone_has_what_a_check_finds_but_types(
     )
     assert parsed.path == Path("example/parsed.py")
     assert parsed.directives == checked.directives
-    assert parsed.surface.classes == checked.surface.classes
-    assert parsed.surface.places == checked.surface.places
-    assert [each.name for each in parsed.surface.signatures] == [
-        each.name for each in checked.surface.signatures
-    ]
+    assert parsed.surface == checked.surface
+    assert parsed.surface.classes == ["Outer"]
+    assert parsed.surface.functions == ["Outer.method", "function"]
     assert (parsed.findings, parsed.imports) == ([], [])
-    [method, function] = parsed.surface.signatures
-    # As written, its spacing aside, where the check prints the type it declares.
-    assert [each.annotation for each in method.parameters] == [
-        "",
-        "int",
-        "Sequence[str]",
-        "bool",
-    ]
-    assert function.parameters[0].annotation == "'list[int]'"
-    [_, checked_function] = checked.surface.signatures
-    assert checked_function.parameters[0].annotation == "list[int]"
 
 
 def test_a_package_root_read_from_its_parse_alone_exports_what_it_binds_or_its_all(

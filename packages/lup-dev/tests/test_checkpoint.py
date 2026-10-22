@@ -453,7 +453,8 @@ def test_a_write_committed_in_the_same_call_is_judged_once_as_the_commits(
     assert shell.git(repo, "status", "--porcelain") == ""
     [verdict] = log(kit, repo).read()
     assert (verdict.tool, verdict.session, verdict.outcome) == ("move", None, "allow")
-    assert verdict.reasons == ["regex"]
+    # The commit takes out the class, its method and the function: each flags.
+    assert verdict.reasons == ["public-api", "public-api", "public-api"]
     call(kit, repo, "c2")
     assert finish(kit, repo, "c2").context == ""
 
@@ -1165,15 +1166,9 @@ def test_a_write_flagged_at_the_checkpoint_is_put_before_the_operator_holding_no
     assert made.flagged.summary == "src/pkg/new.py is a new production file"
     # Joined, the file is judged whole since the item was made.
     assert (joined.joining, joined.call, joined.file.before) == (1, "p2", None)
-    assert joined.flagged.summary.splitlines() == [
-        "src/pkg/new.py is a new production file",
-        "src/pkg/new.py adds the class `Room`",
-    ]
+    assert joined.flagged.summary == "src/pkg/new.py is a new production file"
     assert joined.file.reading is not None
-    assert [each.name for each in joined.file.reading.asks] == [
-        "new-file",
-        "public-api",
-    ]
+    assert [each.name for each in joined.file.reading.asks] == ["new-file"]
 
 
 def test_a_patch_flagging_nothing_refreshes_its_conversations_item_at_the_checkpoint(

@@ -1,72 +1,65 @@
 // What other code can depend on in one file, for the judge's public-API ask: a
-// package root's names, every class the module defines, and each function's and
-// method's signature, each placed on the line its name is on, which the review
-// marks (`docs/judging-writes.md`, *The public-API ask*).
+// package root's names, and the public classes, functions and methods the module
+// defines, each placed on the line its name is on, which the review marks
+// (`docs/judging-writes.md`, *The public-API ask*).
 //
 // The same walk serves a checked file and one read from its parse alone
-// (`parsed.ts`): what tells them apart is how an annotation is said, the type it
-// declares as pyright prints it or the annotation as written, and which binding
-// the package root's names come from.
+// (`parsed.ts`): what tells them apart is which binding the package root's names
+// come from.
 
 import * as AnalyzerNodeInfo from 'pyright/analyzer/analyzerNodeInfo';
 import { DeclarationType } from 'pyright/analyzer/declaration';
-import { printExpression } from 'pyright/analyzer/parseTreeUtils';
-import { TypeEvaluator } from 'pyright/analyzer/typeEvaluatorTypes';
-import {
-    ClassNode,
-    ExpressionNode,
-    FunctionNode,
-    ModuleNode,
-    ParamCategory,
-    ParameterNode,
-    ParseNode,
-    ParseNodeType,
-    StatementNode,
-} from 'pyright/parser/parseNodes';
+import { ModuleNode, ParseNode, ParseNodeType, StatementNode } from 'pyright/parser/parseNodes';
 import { ParseFileResults } from 'pyright/parser/parser';
 
-import { Parameter, ParameterKind, Placed, Signature, Surface } from './protocol';
+import { Placed, Surface } from './protocol';
 import { positionOf } from './spans';
-
-// How an annotation is said in a signature.
-export type Printer = (annotation: ExpressionNode) => string;
-
-// The type an annotation declares, as pyright prints it: a checked file's.
-export function byType(evaluator: TypeEvaluator): Printer {
-    return (annotation) => evaluator.printType(evaluator.getTypeOfAnnotation(annotation));
-}
-
-// The annotation as written, through pyright's own printer of expressions, so
-// spacing and line breaks inside it don't count: a file read from its parse alone.
-export const asWritten: Printer = (annotation) => printExpression(annotation);
 
 // The file's surface. `reader` holds the file's binding, which a package root's
 // names are read from: the program's, or one made of the parse alone.
+//
+// A class or function is public where its name has no leading underscore, a
+// dunder's (`__init__`) counting as public, and so is a method of a public class
+// whose name is public. A private class takes its members with it. A function
+// nested in another never counts, nor does a class defined inside a function. A
+// name defined twice, an overload or one `def` in each branch of an `if`, is
+// listed once, where it's first.
 export function surfaceOf(
     parse: ParseFileResults,
-    print: Printer,
     reader: AnalyzerNodeInfo.AnalyzerNodeInfoReader,
     isPackageRoot: boolean
 ): Surface {
     const module = parse.parserOutput.parseTree;
     const classes: string[] = [];
-    const signatures: Signature[] = [];
+    const functions: string[] = [];
     const places: Placed[] = [];
     const place = (kind: Placed['kind'], name: string, node: ParseNode) => {
         places.push({ kind, name, line: positionOf(parse, node.start).line });
     };
+    const listed = (into: string[], kind: Placed['kind'], name: string, node: ParseNode) => {
+        if (into.includes(name)) {
+            return;
+        }
+        into.push(name);
+        place(kind, name, node);
+    };
     const visit = (statements: StatementNode[], prefix: string) => {
         for (const statement of statements) {
             switch (statement.nodeType) {
-                case ParseNodeType.Class:
-                    classes.push(prefix + statement.d.name.d.value);
-                    place('class', prefix + statement.d.name.d.value, statement.d.name);
-                    visit(statement.d.suite.d.statements, `${prefix}${statement.d.name.d.value}.`);
+                case ParseNodeType.Class: {
+                    const name = statement.d.name.d.value;
+                    if (!isPublic(name)) {
+                        break;
+                    }
+                    listed(classes, 'class', prefix + name, statement.d.name);
+                    visit(statement.d.suite.d.statements, `${prefix}${name}.`);
                     break;
+                }
                 case ParseNodeType.Function: {
-                    const signature = signatureOf(statement, prefix, print);
-                    signatures.push(signature);
-                    place('signature', signature.name, statement.d.name);
+                    const name = statement.d.name.d.value;
+                    if (isPublic(name)) {
+                        listed(functions, 'function', prefix + name, statement.d.name);
+                    }
                     break;
                 }
                 case ParseNodeType.If:
@@ -95,7 +88,13 @@ export function surfaceOf(
             place('export', each.name, each.node);
         }
     }
-    return { exported: exported.map((each) => each.name), classes, signatures, places };
+    return { exported: exported.map((each) => each.name), classes, functions, places };
+}
+
+// Whether a name is one other code may depend on: no leading underscore, but for
+// a dunder, which is a protocol's name rather than a private one.
+function isPublic(name: string): boolean {
+    return !name.startsWith('_') || (name.startsWith('__') && name.endsWith('__') && name.length > 4);
 }
 
 // A name a package's root exports, and the node naming it there: none for a name
@@ -126,55 +125,4 @@ function exportedBy(module: ModuleNode, reader: AnalyzerNodeInfo.AnalyzerNodeInf
         }
     });
     return bound.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-}
-
-function signatureOf(node: FunctionNode, prefix: string, print: Printer): Signature {
-    const kinds = parameterKinds(node.d.params);
-    return {
-        name: prefix + node.d.name.d.value,
-        parameters: node.d.params.flatMap((parameter, index) => {
-            const kind = kinds[index];
-            if (!parameter.d.name || !kind) {
-                return [];
-            }
-            const written: Parameter = {
-                name: parameter.d.name.d.value,
-                kind,
-                annotation: printed(parameter.d.annotation ?? parameter.d.annotationComment, print),
-                has_default: parameter.d.defaultValue !== undefined,
-            };
-            return [written];
-        }),
-        returns: printed(node.d.returnAnnotation, print),
-    };
-}
-
-// Each parameter's kind as callers see it, or none for the `/` and `*` separators.
-function parameterKinds(parameters: ParameterNode[]): (ParameterKind | undefined)[] {
-    const slash = parameters.findIndex(
-        (parameter) => parameter.d.category === ParamCategory.Simple && !parameter.d.name
-    );
-    let keywordOnly = false;
-    return parameters.map((parameter, index) => {
-        switch (parameter.d.category) {
-            case ParamCategory.ArgsList:
-                keywordOnly = true;
-                return parameter.d.name ? 'variadic' : undefined;
-            case ParamCategory.KwargsDict:
-                return 'variadic-keyword';
-            default:
-                if (!parameter.d.name) {
-                    return undefined;
-                }
-                if (keywordOnly) {
-                    return 'keyword-only';
-                }
-                return index < slash ? 'positional-only' : 'positional-or-keyword';
-        }
-    });
-}
-
-// An annotation as `print` says it, or nothing where none is declared.
-function printed(annotation: ExpressionNode | undefined, print: Printer): string {
-    return annotation ? print(annotation) : '';
 }

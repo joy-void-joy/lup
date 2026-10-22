@@ -588,7 +588,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 number=60,
                 reason=Flagged(
                     text=f"{clock} landed, flagged for the operator's review.",
-                    summary=f"{clock} changes the signature of `Clock.sleep`",
+                    summary=f"{clock} adds the method `Clock.why`",
                     worktree=dev,
                     path=clock,
                 ),
@@ -687,7 +687,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ],
             60: [
                 operator("Let the tests say why they wait.", 4),
-                agent("The clock's `sleep` takes the reason.", 2.7),
+                agent("The clock says why its last wait waited.", 2.7),
                 called("Edit", 2.5, "call-60"),
             ],
         }
@@ -1078,8 +1078,12 @@ class Clock(ABC):
 CLOCK_BEFORE = '''    def sleep(self, seconds: float) -> None:
         """Wait `seconds`."""
 '''
-CLOCK_AFTER = '''    def sleep(self, seconds: float, *, why: str = "") -> None:
-        """Wait `seconds`, for `why`, which a test's clock says."""
+CLOCK_AFTER = '''    def sleep(self, seconds: float) -> None:
+        """Wait `seconds`."""
+
+    @abstractmethod
+    def why(self) -> str:
+        """Say why the last wait waited, which a test's clock reads."""
 '''
 
 
@@ -1094,7 +1098,7 @@ def line(content: Text, written: str) -> int:
 
 
 def files(number: int, *, typed: bool = True) -> Files | Refused:
-    """Return the stand-in files of the approval (54), the held change (55) and the flagged writes (59, 60): Python, TypeScript, TOML, Markdown and JSON, changed, created, and one binary; each with a stand-in of the judge's reading of it, two of the approval's automatic, the rest open for what they ask, a production change, or a finding told, which only the approval's reading with types, once `typed`, holds; a new module's public names and a signature changed, flagged."""
+    """Return the stand-in files of the approval (54), the held change (55) and the flagged writes (59, 60): Python, TypeScript, TOML, Markdown and JSON, changed, created, and one binary; each with a stand-in of the judge's reading of it, two of the approval's automatic, the rest open for what they ask, a production change, or a finding told, which only the approval's reading with types, once `typed`, holds; a new module and a method added, flagged."""
     created = Reading(role="production", asks=[Ask(name="new-file", taken="flagged")])
     match number:
         case 54:
@@ -1160,26 +1164,7 @@ def files(number: int, *, typed: bool = True) -> Files | Refused:
                         ),
                         after=cli,
                         reading=Reading(
-                            role="production",
-                            asks=[
-                                Ask(
-                                    name="public-api",
-                                    taken="flagged",
-                                    line=line(cli, "def inbox_show("),
-                                    api=ApiChanged(
-                                        kind="signature-changed", name="inbox_show"
-                                    ),
-                                ),
-                                Ask(
-                                    name="public-api",
-                                    taken="flagged",
-                                    line=line(cli, "async def proposed_after("),
-                                    api=ApiChanged(
-                                        kind="signature-changed", name="proposed_after"
-                                    ),
-                                ),
-                            ],
-                            findings=told if typed else [],
+                            role="production", findings=told if typed else []
                         ),
                     ),
                     ChangedFile(
@@ -1244,18 +1229,7 @@ def files(number: int, *, typed: bool = True) -> Files | Refused:
                         after=reader,
                         reading=Reading(
                             role="production",
-                            asks=[
-                                Ask(name="new-file", taken="flagged"),
-                                *(
-                                    Ask(
-                                        name="public-api",
-                                        taken="flagged",
-                                        line=line(reader, f"class {name}(BaseModel):"),
-                                        api=ApiChanged(kind="class-added", name=name),
-                                    )
-                                    for name in ["Turn", "Reader"]
-                                ),
-                            ],
+                            asks=[Ask(name="new-file", taken="flagged")],
                             findings=[
                                 Found(
                                     rule="string-split",
@@ -1289,12 +1263,9 @@ def files(number: int, *, typed: bool = True) -> Files | Refused:
                                 Ask(
                                     name="public-api",
                                     taken="flagged",
-                                    line=line(
-                                        clock,
-                                        '    def sleep(self, seconds: float, *, why: str = "") -> None:',
-                                    ),
+                                    line=line(clock, "    def why(self) -> str:"),
                                     api=ApiChanged(
-                                        kind="signature-changed", name="Clock.sleep"
+                                        kind="function-added", name="Clock.why"
                                     ),
                                 )
                             ],

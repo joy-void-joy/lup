@@ -805,12 +805,6 @@ def test_an_approval_carries_each_file_changed_whole_a_binary_by_its_size(
                 asks=[
                     Asked(name="protected", taken="held"),
                     Asked(name="new-file", taken="flagged"),
-                    Asked(
-                        name="public-api",
-                        taken="flagged",
-                        line=8,
-                        api=ApiChanged(kind="class-added", name="Mine"),
-                    ),
                 ],
             ),
         ),
@@ -834,30 +828,34 @@ CORE_CHANGED = (
     "    def ask(self, prompt: str, quiet: bool = False) -> str:\n"
     "        return prompt\n"
     "\n"
+    "    def tell(self, text: str) -> None:\n"
+    "        return None\n"
+    "\n"
     "\n"
     "class Room:\n"
     '    # lup: ignore("tuple-shape", why="kept")\n'
     "    pass\n"
 )
-"""`CORE` with a finding of lup's on line 3, a signature changed on line 7, a
-class added on line 11 and an `ignore` added on line 12."""
+"""`CORE` with a finding of lup's on line 3, a signature changed on line 7, which
+asks nothing, a method added on line 10, a class added on line 14 and an
+`ignore` added on line 15."""
 
 CORE_PATH = "packages/lup-dev/src/environment/core.py"
 
 
 CORE_ASKS = [
-    Asked(name="ignore", taken="held", line=12),
+    Asked(name="ignore", taken="held", line=15),
     Asked(
         name="public-api",
         taken="flagged",
-        line=11,
+        line=14,
         api=ApiChanged(kind="class-added", name="Room"),
     ),
     Asked(
         name="public-api",
         taken="flagged",
-        line=7,
-        api=ApiChanged(kind="signature-changed", name="Client.ask"),
+        line=10,
+        api=ApiChanged(kind="function-added", name="Client.tell"),
     ),
 ]
 """What `CORE_CHANGED` asks, each on its line."""

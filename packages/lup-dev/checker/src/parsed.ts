@@ -2,8 +2,7 @@
 // approval's first reading needs, which comes before the type check that would
 // hold it up (`Trust.read`, `lup_dev/launch/trust.py`; `docs/trust.md`). It's
 // the file's `# lup:` directives, read as a check reads them, and
-// its public surface, each annotation as written and a package root's names from
-// a binding of the file alone. No rule runs, and no import is resolved: an import
+// its public surface, a package root's names from a binding of the file alone. No rule runs, and no import is resolved: an import
 // binds its names all the same, but a package root's `from x import *`, or an
 // `__all__` extended with another module's, adds nothing to its names here.
 
@@ -26,7 +25,7 @@ import { ParseFileResults, ParseOptions, Parser } from 'pyright/parser/parser';
 
 import { readDirectives } from './directives';
 import { FileReport, ParsedSource } from './protocol';
-import { asWritten, surfaceOf } from './surface';
+import { surfaceOf } from './surface';
 
 // A file is named by the path it's given, never looked up on disk.
 const named = { isCaseSensitive: () => true };
@@ -41,7 +40,7 @@ export function parsedReport(source: ParsedSource): FileReport {
         path: source.path,
         findings: [],
         directives: readDirectives(parse),
-        surface: surfaceOf(parse, asWritten, bound(parse, source.path, options.isStubFile), isPackageRoot),
+        surface: surfaceOf(parse, bound(parse, source.path, options.isStubFile), isPackageRoot),
         imports: [],
     };
 }
