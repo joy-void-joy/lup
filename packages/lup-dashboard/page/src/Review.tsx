@@ -243,18 +243,25 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
     return builder.finish();
 }
 
-/** Say what an item is in its header: a message by its kind, or as a turn's end; a held change, a stop by choice, a write that landed flagged, with how many writes it gathers, or the reason's own name. */
+/**
+ * Say what an item is in its header: a message by its kind, or as a turn's end; a held change, or one holding a
+ * landing; a stop by choice; a write that landed flagged, with how many writes it gathers and, where it keeps its
+ * branch, that it holds that branch's landing; or the reason's own name.
+ */
 function what(item: Item): string {
     const reason = item.reason;
     switch (reason.reason) {
         case "message":
             return reason.ending === true ? "turn ended" : reason.kind;
         case "held":
-            return "held change";
+            return reason.landing == null ? "held change" : "holds a landing";
         case "stop":
             return "stopped";
-        case "flagged":
-            return reason.writes > 1 ? `landed, flagged · ${reason.writes} writes` : "landed, flagged";
+        case "flagged": {
+            const writes = reason.writes > 1 ? ` · ${reason.writes} writes` : "";
+            const landing = reason.branch == null ? "" : " · holds at landing";
+            return `landed, flagged${writes}${landing}`;
+        }
         default:
             return reason.reason;
     }

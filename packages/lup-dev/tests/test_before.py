@@ -205,10 +205,14 @@ def test_a_flagged_write_is_put_before_the_operator_as_it_lands_holding_no_one(
     )
     # Each summary line is the reason alone, naming the file from the worktree's root: the file's header names it.
     assert asked.flagged == Flagged(
-        text="src/pkg/rooms.py landed, flagged for the operator's review.",
+        text=(
+            "src/pkg/rooms.py landed, flagged for the operator's review. It holds at "
+            "landing: `main` lands once they approve it."
+        ),
         summary="src/pkg/rooms.py is a new production file",
         worktree=repo,
         path=ROOMS,
+        branch="main",
     )
     assert asked.file == ChangedFile(
         path=ROOMS,

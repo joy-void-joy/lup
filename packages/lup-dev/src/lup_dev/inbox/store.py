@@ -331,12 +331,35 @@ class Approval(Model):
     replaces it, or the summary's last line says why it couldn't."""
 
 
+class AtLanding(Model):
+    """What a hold at landing waits on: one file the landing changes, flagged on a branch it lands and not yet approved, and the landing it holds (`lup_dev.policy.landing`)."""
+
+    onto: str
+    """The gated branch the landing moves, by its full name: `refs/heads/dev`."""
+    tip: str
+    """The commit the landing puts there."""
+    path: Path
+    """The file, from the repository's root."""
+    branches: list[str]
+    """The branches landed whose flags on the file it covers."""
+    flags: list[int]
+    """The flagged writes it covers, each approved with it."""
+    since: int | None = None
+    """The item whose version of the file its diff starts from: the latest the
+    operator saw of it on those branches, a flagged write or a hold at landing
+    they approved, read or commented on, so what changed in answer to a comment
+    is what they read; none where they saw none, and it starts from the file at
+    the gated branch's tip."""
+
+
 class HeldChange(Model):
     """A change held for the operator's answer, yes or no: what's held and why, its diff and each file held kept beside the item (`Inbox.diff`, `Inbox.files`).
 
     The judge's (`lup_dev.policy.holds`): a write that asks waits for the
     answer inside its hook, or, for what a move of `HEAD` brought, is asked
-    after the fact, no agent waiting.
+    after the fact, no agent waiting. Or a landing's (`lup_dev.policy.landing`):
+    a file flagged on a branch it lands, which the landing waits on, its answer
+    the item's own state.
     """
 
     reason: Literal["held"] = "held"
@@ -345,11 +368,14 @@ class HeldChange(Model):
     summary: str
     """Each file held, and what it asks."""
     worktree: Path
-    key: str
-    """The hold's key in the worktree's store, which the answer is written to."""
+    key: str | None = None
+    """The hold's key in the worktree's store, which the answer is written to;
+    none for a hold at landing."""
     commit: str | None = None
     """The commit a move of `HEAD` reached, where it's asked after the fact; none
     where an agent waits on it."""
+    landing: AtLanding | None = None
+    """What it holds at landing, for a landing's hold; none for the judge's."""
 
 
 class Flagged(Model):
@@ -358,6 +384,9 @@ class Flagged(Model):
     The judge's (`lup_dev.policy.flags`). A later write to the same file by the
     same conversation, flagged or not, joins the item while it gathers them
     (`Inbox.gathering`), the file kept whole since the first and as it stands.
+    Marked read with nothing to add, it's approved (`Decided`); commented on or
+    replied to, it's read and not approved (`Done`), and the landing of its
+    branch waits on it (`lup_dev.policy.landing`).
     """
 
     reason: Literal["flagged"] = "flagged"
@@ -372,6 +401,11 @@ class Flagged(Model):
     commit: str | None = None
     """The commit a move of `HEAD` reached, where the write came with it; none
     where a conversation's call made it."""
+    branch: str | None = None
+    """The branch its worktree had checked out, whose landing waits on it until
+    the operator approves it (`lup_dev.policy.landing`); none on a detached
+    `HEAD`, and for a flag kept before landings waited on flags, which holds
+    none."""
     writes: int = 1
     """How many writes it gathers, the flagged one that made it and each by the
     same conversation to the file since: the page reads its file again as it
@@ -617,7 +651,7 @@ class Done(Model):
 
 
 class Decided(Model):
-    """An approval or a held change the operator answered, wherever they answered it: yes or no, and what they add."""
+    """An approval or a held change the operator answered, wherever they answered it: yes or no, and what they add; or a flagged write they approved, marking it read with nothing to add."""
 
     state: Literal["decided"] = "decided"
     at: datetime
@@ -626,12 +660,12 @@ class Decided(Model):
 
 
 class Superseded(Model):
-    """An approval of a host zone a later approval of the same repository replaced, the integration branch's tip having moved."""
+    """An approval of a host zone a later approval of the same repository replaced, the integration branch's tip having moved; or a hold at landing a later landing's hold on the same file replaced."""
 
     state: Literal["superseded"] = "superseded"
     at: datetime
     by: int
-    """The approval replacing it."""
+    """The approval, or the hold, replacing it."""
 
 
 class Withdrawn(Model):

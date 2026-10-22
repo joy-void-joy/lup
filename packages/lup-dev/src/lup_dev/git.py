@@ -161,6 +161,13 @@ class Git(Model):
         [main, *_] = self.worktrees()
         return main
 
+    def branch(self) -> str | None:
+        """Return the branch the work tree has checked out, by its short name; none on a detached `HEAD`."""
+        found = self.run("symbolic-ref", "--short", "-q", "HEAD", ok=[0, 1])
+        if found.status != 0:
+            return None
+        return found.output.decode().strip() or None
+
     def ignored(self, path: Path) -> bool:
         """Say whether the repository ignores `path`, from the work tree's root: a tracked file never is."""
         found = self.run("check-ignore", "--quiet", "--", str(path), ok=[0, 1])

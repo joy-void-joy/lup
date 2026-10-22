@@ -108,6 +108,7 @@ from lup_dev.inbox.store import (
     Answer,
     Answered,
     Approval,
+    AtLanding,
     ChangedFile,
     Comment,
     Conversation,
@@ -450,24 +451,63 @@ def unanswered(item: Item, comments: str) -> str:
     )
 
 
+def landing_held(item: Item) -> AtLanding:
+    """Return what hold at landing `item` holds, or say it isn't one."""
+    match item.reason:
+        case HeldChange(landing=AtLanding() as landing):
+            return landing
+        case _:
+            message = f"{cited(item.number)} is {what(item)}, not a hold at landing"
+            raise InboxError(message)
+
+
+def answered_hold(item: Item, did: str, comment: str) -> str:
+    """Say the operator's answer to hold at landing `item`, for the conversation landing: what they `did`, then their comment, where they gave one.
+
+    >>> from datetime import UTC, datetime
+    >>> from pathlib import Path
+    >>> held = HeldChange(text="Land src/a.py on dev?", summary="", worktree=Path("/w"),
+    ...     landing=AtLanding(onto="refs/heads/dev", tip="1a2b3c4d5e6f7a8b", path=Path("src/a.py"),
+    ...     branches=["feat"], flags=[3]))
+    >>> item = Item(number=7, reason=held, sender=Operator(), recipient=Operator(),
+    ...     made=datetime(2026, 1, 1, tzinfo=UTC))
+    >>> print(answered_hold(item, "commented on it without approving it", "Name it Chamber."))
+    The operator commented on it without approving it: @7, the hold on `src/a.py` at the landing of 1a2b3c4d5e6f7a8b on `dev`. Their comment:
+    Name it Chamber.
+    """
+    landing = landing_held(item)
+    onto = landing.onto.removeprefix("refs/heads/")
+    said = (
+        f"The operator {did}: {cited(item.number)}, the hold on `{landing.path}` at "
+        f"the landing of {landing.tip} on `{onto}`."
+    )
+    return f"{said} Their comment:\n{comment}" if comment.strip() else said
+
+
 class Dispatched(Model):
-    """What sending the operator's draft did: the reviews it was sent as, what it approved, and what it did with comments on approvals it left unanswered."""
+    """What sending the operator's draft did: the reviews it was sent as, what it approved, and what it did with comments on approvals and holds at landing it left unapproved."""
 
     reviews: list[Item] = []
     """One to each conversation with a comment on its messages or questions, a question among them, or a message to it."""
     approved: list[Item] = []
-    """The approvals and held changes it approved: each marked read alone, and each held change commented on, with the comments."""
+    """The approvals and held changes it approved: each marked read alone, and each held change commented on, with the comments, but for a hold at landing."""
     noted: list[Item] = []
-    """The notes it left with each session whose push asked an approval the operator commented on, which stays unanswered."""
+    """The notes it left with each session whose push asked an approval the operator commented on, which stays unanswered, and with each conversation whose landing a hold commented on held back."""
     kept: list[int] = []
     """The approvals commented on whose push no known session made: their comments stay drafted."""
 
 
-def settled(item: Item, review: Item, at: datetime) -> Answered | Done:
-    """Return where an item a review covers stands once it's sent: a question answered by it, a message done."""
-    if isinstance(item.reason, Question):
-        return Answered(at=at, answer=review.number)
-    return Done(at=at)
+def settled(
+    item: Item, review: Item | None, at: datetime, *, commented: bool
+) -> Answered | Done | Decided:
+    """Return where an item a review covers stands once it's sent: a question answered by `review`, the review its asker gets; a flagged write marked read with nothing to add approved, "looks good"; anything else done, a flagged write `commented` on among it."""
+    match item.reason:
+        case Question() if review is not None:
+            return Answered(at=at, answer=review.number)
+        case Flagged() if not commented:
+            return Decided(at=at, approved=True)
+        case _:
+            return Done(at=at)
 
 
 def ruled(verdict: Verdict) -> str:
@@ -909,10 +949,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         An approval or a held change marked read alone is approved. A held
         change commented on is approved with the comments, which its agent
-        reads with the answer: "yes, but…" rather than a refusal. An approval
-        commented on stays unanswered, the comments going as a note to the
-        session whose push asked it, whose next push supersedes it; where no
-        known session pushed, they stay drafted (`Dispatched`). Refused where
+        reads with the answer: "yes, but…" rather than a refusal; but a hold
+        at landing commented on isn't approved, since a comment usually asks
+        for a change: it's done, the comments going as a note to the
+        conversation landing, whose landing goes no further (`held_back`). An
+        approval commented on stays unanswered, the comments going as a note to
+        the session whose push asked it, whose next push supersedes it; where
+        no known session pushed, they stay drafted (`Dispatched`). Refused where
         the draft covers no item and writes to no agent, covers a message or
         question no conversation sent, or writes to a conversation lup's inbox
         has never heard of.
@@ -976,7 +1019,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 ),
                 None,
             )
-            settling = Done(at=at) if answer is None else settled(item, answer, at)
+            settling = settled(item, answer, at, commented=item.number in commented)
             self.inbox.kept(item.model_copy(update={"state": settling}))
         return sent
 
@@ -992,6 +1035,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             )
         )
         match item.reason:
+            case HeldChange(landing=AtLanding()) if comments:
+                note = await self.held_back(item, comments)
+                return dispatched.model_copy(
+                    update={"noted": [*dispatched.noted, note]}
+                )
             case HeldChange():
                 approved = await self.decided(
                     item.number, approved=True, comment=comments
@@ -1403,15 +1451,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return reply
 
     def done(self, number: int) -> Item:
-        """Take the message item `number` off the operator's list.
+        """Take the message item `number` off the operator's list: a flagged write approved, read with nothing to add.
 
         A question is answered instead, and an item that isn't the operator's,
         or isn't waiting, is refused.
         """
         item = self.inbox.item(number)
         match item:
+            case Item(reason=Flagged(), recipient=Operator(), state=Waiting()):
+                approved = Decided(at=self.clock.now(), approved=True)
+                return self.inbox.kept(item.model_copy(update={"state": approved}))
             case Item(
-                reason=Message() | Friction() | HowItWent() | Stop() | Flagged(),
+                reason=Message() | Friction() | HowItWent() | Stop(),
                 recipient=Operator(),
                 state=Waiting(),
             ):
@@ -1557,13 +1608,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         A comment on an approval a push asked is told to the session that
         pushed (`commented`); a held change's reaches its agent with the hold's
-        answer. One answered already keeps its answer, whichever came first,
-        and is returned as it stands.
+        answer. A hold at landing has no hook: approved, each flagged write it
+        covers is approved with it; and its answer reaches the conversation
+        landing, a note where it was declined or commented, so it's told even
+        where no call waits on it (`landing_decided`). One answered
+        already keeps its answer, whichever came first, and is returned as it
+        stands.
         """
         item = self.approval(number)
         if not isinstance(item.state, Waiting):
             return item
-        if isinstance(item.reason, HeldChange):
+        if isinstance(item.reason, HeldChange) and item.reason.landing is None:
             if self.settle_hold is None:
                 message = (
                     f"{cited(number)} is a held change, which this service can't answer"
@@ -1583,9 +1638,67 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     pusher,
                     None,
                 )
+            case HeldChange(landing=AtLanding() as landing):
+                await self.landing_decided(
+                    answered, landing, approved=approved, comment=comment
+                )
             case _:
                 pass
         return answered
+
+    async def landing_decided(
+        self, item: Item, landing: AtLanding, *, approved: bool, comment: str
+    ) -> None:
+        """Carry the operator's answer to hold at landing `item` on: each flagged write it covers approved with it, where it's approved; and the answer to the conversation landing, its sender, a note where it was declined or carries a comment, else a wake for its call.
+
+        A flagged write approved already, or taken off the list since, keeps
+        its state but for an approval.
+        """
+        at = self.clock.now()
+        if approved:
+            for number in landing.flags:
+                flag = self.inbox.items.get(number)
+                if flag is None or not isinstance(flag.reason, Flagged):
+                    continue
+                if isinstance(flag.state, Decided) and flag.state.approved:
+                    continue
+                kept = Decided(at=at, approved=True, comment=comment)
+                self.inbox.kept(flag.model_copy(update={"state": kept}))
+        lander = item.sender
+        if not isinstance(lander, Conversation):
+            return
+        if approved and not comment.strip():
+            self.arrive(lander)
+            return
+        did = "approved it" if approved else "declined it"
+        await self.posted(
+            Message(kind="note", text=answered_hold(item, did, comment)),
+            Operator(),
+            lander,
+            None,
+        )
+
+    async def held_back(self, item: Item, comments: str) -> Item:
+        """Settle hold at landing `item`, which the operator commented on without approving it, as done, and send the comments to the conversation landing as a note; return the note.
+
+        A comment usually asks for a change, so the landing goes no further:
+        the conversation answers it and lands again, and the flagged writes the
+        hold covers wait for their approval at that landing.
+        """
+        done = Done(at=self.clock.now())
+        self.inbox.kept(item.model_copy(update={"state": done}))
+        self.say(f"{cited(item.number)}, a hold at landing, was commented on")
+        return await self.posted(
+            Message(
+                kind="note",
+                text=answered_hold(
+                    item, "commented on it without approving it", comments
+                ),
+            ),
+            Operator(),
+            item.sender,
+            None,
+        )
 
     async def held_change(
         self,
@@ -1601,6 +1714,64 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             change, sender, Operator(), change.worktree, self.clock.now(), call=call
         )
         self.inbox.attached(item.number, diff, files)
+        await self.noticed(item)
+        return item
+
+    async def held_at_landing(
+        self,
+        change: HeldChange,
+        sender: Conversation,
+        diff: str,
+        files: list[ChangedFile],
+        *,
+        call: str | None = None,
+    ) -> Item:
+        """Put a hold at landing in the operator's inbox from the conversation landing, its diff and file kept beside it, anchored to `call`, and raise its notice; return it.
+
+        A hold of the same repository's still waiting on the same file at a
+        landing onto the same branch, from an earlier landing whose call may be
+        gone, is joined where it holds the same tip and flags, and superseded
+        by this one otherwise, waking the call waiting on it.
+        """
+        landing = change.landing
+        if landing is None:
+            message = "a hold at landing says what it holds at landing"
+            raise InboxError(message)
+        earlier = [
+            item
+            for item in self.inbox.waiting(Operator())
+            if isinstance(item.sender, Conversation)
+            and item.sender.repository == sender.repository
+            and isinstance(item.reason, HeldChange)
+            and item.reason.landing is not None
+            and item.reason.landing.onto == landing.onto
+            and item.reason.landing.path == landing.path
+        ]
+        same = next(
+            (
+                item
+                for item in earlier
+                if isinstance(item.reason, HeldChange)
+                and item.reason.landing == landing
+                and item.sender == sender
+            ),
+            None,
+        )
+        if same is not None:
+            return same
+        item = self.inbox.made(
+            change, sender, Operator(), change.worktree, self.clock.now(), call=call
+        )
+        self.inbox.attached(item.number, diff, files)
+        superseded = Superseded(at=self.clock.now(), by=item.number)
+        for each in earlier:
+            self.inbox.kept(each.model_copy(update={"state": superseded}))
+            if isinstance(each.sender, Conversation):
+                self.arrive(each.sender)
+            self.say(
+                f"{cited(each.number)}, a hold at landing, is superseded by "
+                f"{cited(item.number)}"
+            )
         await self.noticed(item)
         return item
 

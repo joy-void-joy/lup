@@ -25,7 +25,14 @@ Beyond the limits, an action is refused, saying that allowing it is the operator
 - **Each update is checked against the limits** before git runs (a force, a deletion, a protected destination), since a room can speak to the socket directly, and a deletion resting on `delete-merged` against the remote (*Deleting a branch that has landed*). Then what it would publish goes through the `publishing` moment, where the `Private` module refuses a value never published (`docs/private.md`).
 - **It pushes by object id,** `git push <url> <oid>:<dst>`, one update at a time or an `--atomic` batch as one; an update git didn't force is never forced. The objects are already in the shared store, so none crosses the socket: only their ids, with the remote's name, the destinations and git's options.
 - **The operator's credentials are the service's environment:** their SSH agent and git's credential helpers as the terminal had them when a launch started the service. Every push and fetch is said in the service's log.
-- **A push that moves the integration branch** asks trust's approval of its tip, where it isn't the one approved (`docs/trust.md`).
+- **A push that moves the integration branch** asks trust's approval of its tip, where it isn't the one approved (`docs/trust.md`), whether the room's git or `land` pushed it (*Landing through `land`*).
+
+## Landing through `land`
+
+`land` (`docs/judging-writes.md`, *Landing a branch*) pushes on the host as the room's push does, through the same handler (`PushHandler`, `remote/protocol.py`): the gated branch's tip on the remote listed and fetched, writing no ref; the tip pushed by object id within the limits, never forced; what it publishes put to the `publishing` moment; and trust's approval asked where it moves the integration branch. Then, for each branch it landed but those gated or protected (`policy/landing.py`):
+- **its copy on the remote** is deleted where the remote holds it, as a deletion from the room is (*Deleting a branch that has landed*), so where the declaration withholds `delete-merged`, it stays, and is said;
+- **its worktree is removed in the launch's room,** through `podman exec` into its container, by `git worktree remove` without `--force`: git keeps one with changes or untracked files, saying so, and takes what it ignores, the worktree's `.venv` and scratch. Never on the host: the path is the one `<git directory>/worktrees/<name>/gitdir` names, which the room writes, so the host's recursive delete could be aimed outside the repository. Left alone, and said: the repository's main worktree, one the conversation landing works in, and one a conversation of a launch still served works in, as the judge's session index has it (`Holding.works`, `policy/worktrees.py`);
+- **the local branch** is deleted on the host, `git update-ref -d` at the tip it landed at, where no worktree still has it checked out.
 
 ## Deleting a branch that has landed
 

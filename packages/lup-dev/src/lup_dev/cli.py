@@ -196,6 +196,7 @@ from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import InboxAnnouncing, Response, answer
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
+from lup_dev.policy.landing import LandingTools
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.tools import JudgeTools
 from lup_dev.policy.verdicts import VerdictLog
@@ -493,6 +494,9 @@ def host_serve(context: typer.Context) -> None:
         say=typer.echo,
         running=workers.commands,
     )
+    remotes = Remotes(
+        say=typer.echo, landed=partial(proposed_after, delivery), modules=workers
+    )
     service = HostService(
         layout=layout.host,
         answerer=known,
@@ -501,17 +505,8 @@ def host_serve(context: typer.Context) -> None:
         spawns=SpawnRecords(adapters=known),
         post=delivery,
         routes=control_routes(delivery, recorded(), dashboard),
-        tools=room_tools(delivery, layout),
-        room_routes=[
-            *remote_routes(
-                Remotes(
-                    say=typer.echo,
-                    landed=partial(proposed_after, delivery),
-                    modules=workers,
-                )
-            ),
-            *clipboard_routes(Desktop.of(settings)),
-        ],
+        tools=room_tools(delivery, layout, remotes),
+        room_routes=[*remote_routes(remotes), *clipboard_routes(Desktop.of(settings))],
         modules=workers,
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
@@ -571,11 +566,17 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
         )
 
 
-def room_tools(delivery: Delivery, layout: Layout) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's, and the judge's, reading lup's state at `layout` by the delivery's clock."""
+def room_tools(delivery: Delivery, layout: Layout, remotes: Remotes) -> list[RoomTools]:
+    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock; and `land`, pushing through `remotes` onto the integration branch the settings name."""
     return [
         InboxTools(delivery=delivery),
         JudgeTools(layout=layout, clock=delivery.clock),
+        LandingTools(
+            delivery=delivery,
+            remotes=remotes,
+            layout=layout,
+            integration=LupDevSettings().lup_integration_branch,
+        ),
     ]
 
 
@@ -583,14 +584,17 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
     """List what a launched session is told of each of lup's tools, which its guidance lists: the core's, then its modules'.
 
     The core's are read from the tools the service is handed, made over a
-    delivery with nothing but its clock and a layout without its fields: what a
-    tool is doesn't depend on whom it delivers to or where lup's state is. The
+    delivery with nothing but its clock, and a layout and remotes without their
+    fields: what a tool is doesn't depend on whom it delivers to, where lup's
+    state is, or how it pushes. The
     modules' are read from their classes, with no instance.
     """
     unread = Delivery.model_construct(clock=SystemClock())
     core = [
         spec
-        for tools in room_tools(unread, Layout.model_construct())
+        for tools in room_tools(
+            unread, Layout.model_construct(), Remotes.model_construct()
+        )
         for spec in tools.specs()
     ]
     naming = Naming.model_construct().specs()
@@ -729,7 +733,9 @@ def heading(item: Item) -> str:
 def hold_answered(
     layout: Layout, change: HeldChange, *, approved: bool, comment: str
 ) -> None:
-    """Write the operator's answer to a held change where its hook waits for it, or a later checkpoint tells it."""
+    """Write the operator's answer to a held change where its hook waits for it, or a later checkpoint tells it; a hold at landing has no hook, its answer its item's own state."""
+    if change.key is None:
+        return
     answer(
         layout,
         change.key,
