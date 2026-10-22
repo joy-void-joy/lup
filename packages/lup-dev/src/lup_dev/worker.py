@@ -65,7 +65,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.host.protocol import HostError, Register, Reply
 from lup_dev.host.publishing import Place, Published, Refusal
 from lup_dev.host.records import Records
-from lup_dev.host.service import Dispatcher, Handler, Reading, Route
+from lup_dev.host.service import Dispatcher, Handler, Reading, Route, unix_server
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
     Called,
@@ -448,7 +448,7 @@ async def serve(
         say=say,
         changes=Changes(),
     )
-    server = await asyncio.start_unix_server(dispatcher.connection, path=socket)
+    server = await unix_server(socket, dispatcher.connection)
     sys.stdout.write("ready\n")
     sys.stdout.flush()
     try:

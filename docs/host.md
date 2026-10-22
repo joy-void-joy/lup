@@ -41,6 +41,7 @@ On the host alone:
 - **Which hooks the judge reads** is each adapter's word (`heard`): every one, but on Claude Code a call's start and finish to lup's own tools or to a tool that only reads (`READING`, `adapters/claude.py`). The service answers the rest itself, in about 4.5 ms; one the judge reads where nothing changed takes 8 to 21 ms, the judgement and a hop to the launch's process (`docs/field-notes.md`, *A hook the judge doesn't read, and one it does*).
 - **A hook the judge can't answer goes on,** since the judge steers and doesn't guard. Where the service is up, it refuses only a file tool's write on Claude Code, since let through unjudged it would land unseen; where the service can't be reached, even that write goes ahead, with the runtime's error shown.
 - **`socat` waits 25 hours** for the answer, above a hold's day, and the hook never ends with status 2, which would block the call on both runtimes.
+- **The service holds each connection's task until it's answered,** on every socket it serves and in each launch's process (`unix_server`, `host/service.py`). asyncio holds a task only weakly, and once a room's hook has sent its payload, the task waiting on the launch's process for a hold's answer is reachable from nothing: Python's collector would free it mid-wait, closing the hook unanswered, which both runtimes take as no decision, so the call went on while the hold waited.
 
 ## Who's calling
 

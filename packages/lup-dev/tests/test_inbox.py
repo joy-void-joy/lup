@@ -8,8 +8,10 @@ otherwise hang.
 """
 
 import asyncio
+import gc
 import json
 import socket
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
@@ -56,7 +58,7 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded, Said
 from lup_dev.host.service import HostService, Naming
 from lup_dev.host.watch import Changes
-from lup_dev.host.workers import LaunchJudge
+from lup_dev.host.workers import LaunchJudge, LaunchModules, WorkerJudge, Workers
 from lup_dev.inbox.delivery import Delivery, clocked, opening
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.protocol import (
@@ -135,14 +137,21 @@ from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import Bench, CallFinished, CallStarted
 from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import Answer as HoldAnswer
-from lup_dev.policy.holds import HeldFile, Hold, Holds, InboxAnnouncing, Response
+from lup_dev.policy.holds import (
+    HeldFile,
+    Hold,
+    Holds,
+    InboxAnnouncing,
+    Response,
+    stores,
+)
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator
 
-    from conftest import FakeClock, Kit
+    from conftest import FakeClock, Kit, Shell
     from mcp.client._transport import TransportStreams
     from pydantic import JsonValue
 
@@ -347,8 +356,10 @@ def inboxed(
     spawns: Spawns | None = None,
     patience: timedelta = timedelta(seconds=30),
     podman: Podman | None = None,
+    judge: LaunchJudge | None = None,
+    modules: LaunchModules | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given."""
+    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     wakers = cli.Wakers(adapters=known)
@@ -378,7 +389,8 @@ def inboxed(
         post=delivery,
         routes=cli.control_routes(delivery, recorded or {}, None),
         tools=cli.room_tools(delivery, judging or machine),
-        judge=Quiet(),
+        judge=judge or Quiet(),
+        modules=modules,
         say=said.append,
         changes=changes,
         waker=wakers,
@@ -3058,6 +3070,194 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
     assert isinstance(state, Decided)
     assert state.comment == "not this one"
     assert not unserved
+
+
+# A hold on the room's path: each hook sent to the launch's socket, judged by this
+# `lup-dev` in the launch's own process, the hold put in the inbox and answered
+# there. While it waits, the test collects Python's garbage in the service's
+# process, as a busy service does at any moment: a hook whose wait nothing held
+# was freed then, ending unanswered (#211, #213).
+
+PATIENCE = 60
+"""How long a wait that should end at once may take before the test fails."""
+
+
+@contextmanager
+def judged_in_its_process(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
+    *,
+    runtime: str,
+) -> Generator[Watched]:
+    """The host service with lup's inbox, serving launch `one` of `runtime` in `repo`, judged by this `lup-dev` in the launch's own process; each held change answered in the inbox reaches its hold."""
+    workers = Workers(layout=machine.host, say=said.append)
+    with inboxed(
+        machine,
+        clock,
+        notices,
+        said,
+        judge=WorkerJudge(modules=workers),
+        modules=workers,
+    ) as delivery:
+        delivery.settle_hold = lambda change, approved, comment: cli.hold_answered(
+            machine, change, approved=approved, comment=comment
+        )
+        launch = Register(
+            launch="one",
+            runtime=runtime,
+            worktree=repo,
+            repository=repo / ".git",
+            judge=Path(sys.executable).parent / "lup-dev",
+            container="lup-one",
+            limits=Limits(actions=[], protected=[]),
+            github=None,
+        )
+        client(machine.host, clock).register(launch)
+        yield delivery
+
+
+def held_item(delivery: Watched, notices: Raised) -> Item:
+    """The held change the operator's inbox raised a notice for, once it has."""
+    assert notices.arrived.wait(PATIENCE)
+    [item] = delivery.inbox.waiting(Operator())
+    assert isinstance(item.reason, HeldChange)
+    return item
+
+
+def collected(machine: Layout, clock: FakeClock) -> None:
+    """Collect Python's garbage, then ask the service something, so its loop has run since."""
+    gc.collect()
+    client(machine.host, clock).listed()
+
+
+def documented(repo: Path, shell: Shell) -> Path:
+    """Commit an operator's document in `repo`, and return it."""
+    agents = repo / "AGENTS.md"
+    agents.write_text("# Agents\n")
+    shell.commit(repo, "agents")
+    return agents
+
+
+@pytest.mark.parametrize(
+    ("runtime", "hooked", "turn"),
+    [("claude", claude, {}), ("codex", codex, {"turn_id": "u1"})],
+    ids=["claude", "codex"],
+)
+def test_a_held_shell_write_holds_its_call_until_the_operator_answers_and_tells_it(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+    runtime: str,
+    hooked: Callable[..., str],
+    turn: dict[str, str],
+) -> None:
+    agents = documented(repo, shell)
+    where = {"cwd": str(repo), **turn}
+    command = {"command": "printf 'More.\\n' >> AGENTS.md"}
+    with (
+        judged_in_its_process(
+            machine, clock, notices, said, repo, runtime=runtime
+        ) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        hook = machine.host.launch("one").hook
+        send(hook, hooked("SessionStart", source="startup", **where))
+        started = hooked(
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input=command,
+            tool_use_id="b1",
+            **where,
+        )
+        assert send(hook, started) == ""
+        agents.write_text("# Agents\nMore.\n")
+        finishing = hooked(
+            "PostToolUse",
+            tool_name="Bash",
+            tool_input=command,
+            tool_use_id="b1",
+            tool_response="",
+            **where,
+        )
+        finished = pool.submit(send, hook, finishing)
+        item = held_item(delivery, notices)
+        collected(machine, clock)
+        assert not finished.done()
+        inbox("answer", str(item.number), "--approve", "--comment", "keep it")
+        told = context(finished.result(timeout=PATIENCE))
+    assert told == f"The operator approved the held change to {agents}: keep it"
+    assert agents.read_text() == "# Agents\nMore.\n"
+
+
+def test_a_subagents_held_edit_waits_unlanded_until_the_operator_answers_making_one_hold(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    *,
+    repo: Path,
+    shell: Shell,
+    tmp_path: Path,
+) -> None:
+    """A subagent edits an operator's document in a worktree of its own, its hooks naming the session's (#213)."""
+    documented(repo, shell)
+    feat = tmp_path / "feat"
+    shell.git(repo, "worktree", "add", "-q", "-b", "feat", str(feat))
+    agents = feat / "AGENTS.md"
+    edit = {
+        "file_path": str(agents),
+        "old_string": "# Agents\n",
+        "new_string": "# Agents\n\nA line.\n",
+    }
+    subagent = {"cwd": str(repo), "agent_id": "a1", "agent_type": "general-purpose"}
+    with (
+        judged_in_its_process(
+            machine, clock, notices, said, repo, runtime="claude"
+        ) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup", cwd=str(repo)))
+        starting = claude(
+            "PreToolUse",
+            tool_name="Edit",
+            tool_input=edit,
+            tool_use_id="e1",
+            **subagent,
+        )
+        started = pool.submit(send, hook, starting)
+        item = held_item(delivery, notices)
+        collected(machine, clock)
+        assert not started.done()
+        assert agents.read_text() == "# Agents\n"
+        inbox("answer", str(item.number), "--approve", "--comment", "fine by me")
+        let = json.loads(started.result(timeout=PATIENCE))["hookSpecificOutput"]
+        agents.write_text("# Agents\n\nA line.\n")
+        send(
+            hook,
+            claude(
+                "PostToolUse",
+                tool_name="Edit",
+                tool_input=edit,
+                tool_use_id="e1",
+                tool_response={},
+                **subagent,
+            ),
+        )
+        left = delivery.inbox.waiting(Operator())
+    assert let["permissionDecision"] == "allow"
+    [hold] = [each for holds in stores(machine) for each in holds.all()]
+    assert hold.agent == "a1"
+    assert hold.answer is not None
+    assert (hold.answer.approved, hold.answer.comment) == (True, "fine by me")
+    assert left == []
 
 
 def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_agent(
