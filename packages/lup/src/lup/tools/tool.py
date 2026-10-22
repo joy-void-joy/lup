@@ -19,6 +19,14 @@ description, as long as it needs. A session that finds tools by searching for
 them lists each by its name and summary, so the agent knows what's there. A tool
 whose description has no such line is refused when it's made, naming it.
 
+**A tool's marks** say whether a call to it may be sent again: `reads` where it
+only reads, changing nothing, and `idempotent` where a call sent again with the
+same arguments adds nothing to what the first did, as one that finds its wait
+again. `@lup_tool(reads=True)` and `@lup_tool(idempotent=True)` set them;
+unmarked, a tool acts. They're MCP's `readOnlyHint` and `idempotentHint`, which
+the server publishes with each tool and lup's bridge reads, to send a call again
+across a restart of the server (`lup.sessions.bridge`) only where it's safe.
+
 A tool runs in the caller's process; each adapter delivers it its runtime's way,
 through what `AgentTool` says about it: its description and its call.
 """
@@ -93,6 +101,11 @@ class ToolSpec(Model):
     """What the model reads about the tool, its summary line first."""
     input_schema: JsonObject
     """The input model's JSON Schema."""
+    reads: bool = False
+    """Whether the tool only reads, changing nothing: MCP's `readOnlyHint`."""
+    idempotent: bool = False
+    """Whether a call sent again with the same arguments adds nothing to what
+    the first did: MCP's `idempotentHint`."""
 
     @model_validator(mode="after")
     def summarized(self) -> Self:
@@ -152,6 +165,10 @@ class Tool[I: BaseModel, O: BaseModel | str](
     input: type[I]
     function: Callable[[I], Awaitable[O]]
     before: list[Hook[I]] = []
+    reads: bool = False
+    """Whether the tool only reads (`ToolSpec.reads`)."""
+    idempotent: bool = False
+    """Whether a call sent again adds nothing (`ToolSpec.idempotent`)."""
 
     @model_validator(mode="after")
     def summarized(self) -> Self:
@@ -160,11 +177,13 @@ class Tool[I: BaseModel, O: BaseModel | str](
         return self
 
     def spec(self) -> ToolSpec:
-        """Return the tool's name, description and input model's schema."""
+        """Return the tool's name, description, input model's schema and marks."""
         return ToolSpec(
             name=self.name,
             description=self.description,
             input_schema=self.input.model_json_schema(),
+            reads=self.reads,
+            idempotent=self.idempotent,
         )
 
     async def call(self, arguments: JsonValue) -> Accepted | Refused:
@@ -203,17 +222,25 @@ def answered(output: BaseModel | str) -> str:
 
 
 class Shape(Model, arbitrary_types_allowed=True):
-    """What a tool's function says of the tool: its name, its description, and the parameter taking its model."""
+    """What a tool's function says of the tool, its name, its description and the parameter taking its model, with the marks its declaration gives it."""
 
     name: str
     description: str
     parameter: inspect.Parameter
     """The function's one parameter besides `self`, annotated with the model the
     tool takes."""
+    reads: bool = False
+    idempotent: bool = False
 
     @classmethod
-    def of(cls, function: Callable[..., Awaitable[BaseModel | str]]) -> Shape:
-        """Read the tool's shape off its function, a method's `self` left out.
+    def of(
+        cls,
+        function: Callable[..., Awaitable[BaseModel | str]],
+        *,
+        reads: bool = False,
+        idempotent: bool = False,
+    ) -> Shape:
+        """Read the tool's shape off its function, a method's `self` left out, marked as `reads` and `idempotent` say.
 
         Raise `ToolError` naming the function where it has no docstring, where it
         takes other than one pydantic model besides `self`, or where it returns
@@ -243,7 +270,13 @@ class Shape(Model, arbitrary_types_allowed=True):
             )
             raise ToolError(message)
         summary_of(name, description)
-        return cls(name=name, description=description, parameter=parameter)
+        return cls(
+            name=name,
+            description=description,
+            parameter=parameter,
+            reads=reads,
+            idempotent=idempotent,
+        )
 
 
 class Method[S, I: BaseModel, O: BaseModel | str](property):
@@ -271,6 +304,8 @@ class Method[S, I: BaseModel, O: BaseModel | str](property):
             description=self.shape.description,
             input=self.shape.parameter.annotation,
             function=partial(self.function, instance),
+            reads=self.shape.reads,
+            idempotent=self.shape.idempotent,
         )
 
     @overload
@@ -286,11 +321,13 @@ class Method[S, I: BaseModel, O: BaseModel | str](property):
         return self.bound(instance)
 
     def spec(self) -> ToolSpec:
-        """Return the tool's name, description and input model's schema, with no instance."""
+        """Return the tool's name, description, input model's schema and marks, with no instance."""
         return ToolSpec(
             name=self.shape.name,
             description=self.shape.description,
             input_schema=self.shape.parameter.annotation.model_json_schema(),
+            reads=self.shape.reads,
+            idempotent=self.shape.idempotent,
         )
 
 
@@ -336,26 +373,67 @@ def bound(instance: BaseModel) -> list[AgentTool]:
     ]
 
 
+class Marks(Model):
+    """What `@lup_tool(...)` was told of a tool before it's applied to the function: whether it only reads, and whether a call sent again adds nothing."""
+
+    reads: bool = False
+    idempotent: bool = False
+
+    @overload
+    def __call__[I: BaseModel, O: BaseModel | str](
+        self, function: Callable[[I], Awaitable[O]], /
+    ) -> Tool[I, O]: ...
+    @overload
+    def __call__[S, I: BaseModel, O: BaseModel | str](
+        self, function: Callable[[S, I], Awaitable[O]], /
+    ) -> Method[S, I, O]: ...
+    def __call__[S, I: BaseModel, O: BaseModel | str](
+        self,
+        function: Callable[[I], Awaitable[O]] | Callable[[S, I], Awaitable[O]],
+        /,
+    ) -> Tool[I, O] | Method[S, I, O]:
+        """Return `function` as a tool carrying these marks (`lup_tool`)."""
+        return lup_tool(function, reads=self.reads, idempotent=self.idempotent)
+
+
 @overload
 def lup_tool[I: BaseModel, O: BaseModel | str](
     function: Callable[[I], Awaitable[O]],
+    /,
+    *,
+    reads: bool = False,
+    idempotent: bool = False,
 ) -> Tool[I, O]: ...
 @overload
 def lup_tool[S, I: BaseModel, O: BaseModel | str](
     function: Callable[[S, I], Awaitable[O]],
+    /,
+    *,
+    reads: bool = False,
+    idempotent: bool = False,
 ) -> Method[S, I, O]: ...
+@overload
+def lup_tool(*, reads: bool = False, idempotent: bool = False) -> Marks: ...
 def lup_tool[S, I: BaseModel, O: BaseModel | str](
-    function: Callable[..., Awaitable[O]],
+    function: Callable[..., Awaitable[O]] | None = None,
+    /,
+    *,
+    reads: bool = False,
+    idempotent: bool = False,
     # lup: ignore("reportInvalidTypeVarUse", why="the implementation of two overloads: `S` is what the second binds from a method's `self`, which the implementation takes as any callable")
-) -> Tool[I, O] | Method[S, I, O]:
-    """Return `function` as a tool, named for it and described by its docstring.
+) -> Tool[I, O] | Method[S, I, O] | Marks:
+    """Return `function` as a tool, named for it and described by its docstring; given no function, the marks to apply to one.
 
     The function is async, takes one pydantic model and returns another, or `str`
     for an answer in words. Its docstring's first line, standing alone, is the
     tool's summary, 50 characters at most (`summary_of`). A method, taking `self`
-    first, becomes a `Method`, each instance's own tool.
+    first, becomes a `Method`, each instance's own tool. `reads` marks a tool
+    that only reads, `idempotent` one a call sent again adds nothing to
+    (`ToolSpec`); `@lup_tool(reads=True)` marks as `@lup_tool` does.
     """
-    shape = Shape.of(function)
+    if function is None:
+        return Marks(reads=reads, idempotent=idempotent)
+    shape = Shape.of(function, reads=reads, idempotent=idempotent)
     if "self" in inspect.signature(function).parameters:
         return Method[S, I, O](shape, function)
     return Tool[I, O](
@@ -363,4 +441,6 @@ def lup_tool[S, I: BaseModel, O: BaseModel | str](
         description=shape.description,
         input=shape.parameter.annotation,
         function=function,
+        reads=reads,
+        idempotent=idempotent,
     )

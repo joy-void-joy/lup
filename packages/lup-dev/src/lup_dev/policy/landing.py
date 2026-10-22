@@ -377,7 +377,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         """Return the inbox's party for the conversation landing."""
         return Delivery.party(self.launch, self.caller)
 
-    @lup_tool
+    @lup_tool(idempotent=True)
     async def land(self, landing: Landing) -> str:
         """Land a branch on the integration branch.
 

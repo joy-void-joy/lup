@@ -106,9 +106,19 @@ def tool_server(toolset: Toolset, name: str = "lup") -> Server:
 
     A call reaches the toolset with its arguments as the model sent them, valid
     or not: the toolset validates them. Its answer is the result's one text block.
+    Each tool is listed with its marks as MCP's annotations, `readOnlyHint` and
+    `idempotentHint` (`ToolSpec.reads`, `ToolSpec.idempotent`), both said
+    whichever way they stand, which lup's bridge reads off the list to send a
+    call again across a restart where the tool allows it.
     """
     from mcp.server import Server
-    from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+    from mcp.types import (
+        CallToolResult,
+        ListToolsResult,
+        TextContent,
+        Tool,
+        ToolAnnotations,
+    )
 
     async def listed(
         context: ServerRequestContext, params: PaginatedRequestParams | None
@@ -119,6 +129,9 @@ def tool_server(toolset: Toolset, name: str = "lup") -> Server:
                 name=spec.name,
                 description=spec.description,
                 input_schema=spec.input_schema,
+                annotations=ToolAnnotations(
+                    read_only_hint=spec.reads, idempotent_hint=spec.idempotent
+                ),
             )
             for spec in toolset.specs()
         ]
