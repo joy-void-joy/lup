@@ -448,37 +448,6 @@ class Speaker(Model, arbitrary_types_allowed=True):
         return Said(text="\n".join(lines))
 
     @lup_tool
-    async def reply(self, replying: Replies) -> Said:
-        """Reply to the operator's comments, each by its id.
-
-        Each `<reply id="546.2">` or `<comment id>` in a review, a message or
-        an answer sent to you can be answered by its id, and one call carries
-        every reply of a round. Each is kept on the operator's item under what
-        it answers, never as an item of its own, and the dashboard shows it
-        there, under their comment, so the exchange reads as a thread: the
-        item of yours their comment was on comes back before them with the
-        thread, and their next comment on your reply reaches you as an `<on>`
-        naming the reply's id. An id naming no part, a comment on another
-        agent's item, or a reply of your own is refused, naming what you may
-        answer, and nothing of the call is kept. What answers no point of
-        theirs is your turn's last words, which reach them as a note; `note`
-        is for what they didn't say.
-        """
-        try:
-            replies = [
-                Replying(to=PartId.parsed(each.to), text=each.text)
-                for each in replying.replies
-            ]
-            kept = await self.delivery.replied_by(self.party, replies)
-        except (ValueError, InboxError) as refused:
-            return Said(text=f"Not replied: {refused}")
-        said = [
-            replied_to([reply], self.delivery.anchored(self.party, each))
-            for reply, each in zip(kept, replies, strict=True)
-        ]
-        return Said(text=f"Your replies are with the operator: {'; '.join(said)}.")
-
-    @lup_tool
     async def withdraw(self, withdrawing: Withdrawing) -> Said:
         """Take back an item the operator needn't see.
 
@@ -570,6 +539,37 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 parts=[reply.text],
             ).written()
         return f"{cited(wanted.item)} has no part {wanted.cited()}."
+
+    @lup_tool
+    async def reply(self, replying: Replies) -> Said:
+        """Reply to the operator's comments, each by its id.
+
+        Each `<reply id="546.2">` or `<comment id>` in a review, a message or
+        an answer sent to you can be answered by its id, and one call carries
+        every reply of a round. Each is kept on the operator's item under what
+        it answers, never as an item of its own, and the dashboard shows it
+        there, under their comment, so the exchange reads as a thread: the
+        item of yours their comment was on comes back before them with the
+        thread, and their next comment on your reply reaches you as an `<on>`
+        naming the reply's id. An id naming no part, a comment on another
+        agent's item, or a reply of your own is refused, naming what you may
+        answer, and nothing of the call is kept. What answers no point of
+        theirs is your turn's last words, which reach them as a note; `note`
+        is for what they didn't say.
+        """
+        try:
+            replies = [
+                Replying(to=PartId.parsed(each.to), text=each.text)
+                for each in replying.replies
+            ]
+            kept = await self.delivery.replied_by(self.party, replies)
+        except (ValueError, InboxError) as refused:
+            return Said(text=f"Not replied: {refused}")
+        said = [
+            replied_to([reply], self.delivery.anchored(self.party, each))
+            for reply, each in zip(kept, replies, strict=True)
+        ]
+        return Said(text=f"Your replies are with the operator: {'; '.join(said)}.")
 
     def tools(self) -> list[AgentTool]:
         """Return the inbox's tools, each calling this conversation's function: the speaking tools, as the library serves them, then the inbox's own, as declared (`bound`)."""
