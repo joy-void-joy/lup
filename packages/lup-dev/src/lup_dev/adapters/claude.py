@@ -57,6 +57,25 @@ undercount, and an item past it is announced instead. A turn's end following a
 hold, the session's or a subagent's, carries `stop_hook_active`, so the next
 end is let through.
 
+**The session's title in Claude Code,** the one `/rename` sets, is heard and
+given at its start and at each prompt of its own conversation (`docs/launch.md`,
+*Names*): the payload's `session_title` is read (`Heard.title`), so a title the
+operator gave becomes the launch's name, and the service gives the launch's name
+back as `sessionTitle` where the two differ, so a rename through lup reaches
+Claude Code at the next prompt. From the hooks reference (read 2026-10-22):
+`SessionStart`'s `sessionTitle` "Sets the session title, with the same effect as
+`/rename`. Applies when `source` is `"startup"`, `"resume"`, or `"fork"`"
+(`TITLED_STARTS`), and `UserPromptSubmit`'s "Sets the session title"; both hooks
+receive `session_title`, "The session's custom title, present when one is set,
+for example with `--name`, `/rename`, a hook's `sessionTitle` output". A
+`UserPromptSubmit` hook defaults to a 30-second timeout, past which its output
+is discarded; the room's waits as long as every other hook of the room does.
+Measured on 2.1.303 (`docs/field-notes.md`, *A session's title*): `sessionTitle`
+at either hook writes the two lines `/rename` writes, and the next prompt and a
+resume carry the title back, a resume the one lup gave at the session's first
+start included, so the service tells the titles it gave from the operator's
+(`Names.title`).
+
 An idle session is woken first through lup's tool server, as a channel's
 message (`pushed`, `CHANNEL`), which the launch loads with
 `--dangerously-load-development-channels server:lup`. Claude Code 2.1.304 queues
@@ -270,6 +289,11 @@ read 2026-10-21), with what each does beside it. On Linux, `Glob` and `Grep`
 are absent by default, and Claude searches with `find` and `grep` through
 `Bash`, which is judged."""
 
+TITLED_STARTS = ["startup", "resume", "fork"]
+"""The starts (`SessionStart`'s `source`) whose `sessionTitle` Claude Code applies
+(its `hooks` docs, *SessionStart decision control*): a compaction or a `/clear`
+takes none, so lup gives the title at the next prompt instead."""
+
 TOOL_PREFIX = f"mcp__{SERVER}__"
 """What Claude Code names each of lup's tools by in a hook: `mcp__lup__blocked`."""
 
@@ -373,9 +397,8 @@ class Context(Output, extra="allow"):
     additional_context: str | None = None
     updated_input: JsonObject | None = None
     session_title: str | None = None
-    """At a session's start, the name Claude Code gives the session, as `/rename`
-    does (its `hooks` docs: "Sets the session title, with the same effect as
-    `/rename`")."""
+    """At a session's start or a prompt, the title Claude Code gives the
+    session, as `/rename` does."""
 
 
 class Said(Output, extra="allow"):
@@ -404,6 +427,15 @@ def context(said: Said, event: str, items: list[str]) -> Said:
         update={"additional_context": joined(given.additional_context, items)}
     )
     return said.model_copy(update={"hook_specific_output": added})
+
+
+def titled(said: Said, event: str, title: str | None) -> Said:
+    """Return `said` giving the session `title` as its title for `event` (`sessionTitle`); as it is where `title` is none."""
+    if title is None:
+        return said
+    given = said.hook_specific_output or Context(hook_event_name=event)
+    named = given.model_copy(update={"session_title": title})
+    return said.model_copy(update={"hook_specific_output": named})
 
 
 def held(event: TurnEnd, told: str) -> Specific:
@@ -444,12 +476,14 @@ class SessionStart(Payload):
     """`SessionStart`: a session starts, resumes, or is cleared or compacted."""
 
     hook_event_name: Literal["SessionStart"]
+    source: str | None = None
+    """How it started: `startup`, `resume`, `clear`, `compact` or `fork`."""
     session_title: str | None = None
     """The session's custom title, where one is set (`--name`, `/rename`, a
     hook's `sessionTitle`); not the title Claude Code generates."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the session's start, and the name the operator gave it in Claude Code: the judge reads it."""
+        """Read the session's start and its title in Claude Code, a start `sessionTitle` applies at (`TITLED_STARTS`) taking a new one: the judge reads it."""
         return Heard(
             event="session-started",
             session=self.session_id,
@@ -457,18 +491,13 @@ class SessionStart(Payload):
             judged=True,
             fits=fits,
             title=self.session_title,
+            takes_title=self.source in TITLED_STARTS and not self.agent_id,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items as it starts, and name the session as its launch is named."""
+        """Tell the conversation its items as it starts, and title the session as its launch is named, where the service says to."""
         told = context(said, self.hook_event_name, telling.items)
-        if telling.title is None:
-            return told
-        given = told.hook_specific_output or Context(
-            hook_event_name=self.hook_event_name
-        )
-        titled = given.model_copy(update={"session_title": telling.title})
-        return told.model_copy(update={"hook_specific_output": titled})
+        return titled(told, self.hook_event_name, telling.title)
 
     @override
     def answer(self, bench: Bench) -> Output | None:
@@ -498,9 +527,11 @@ class UserPromptSubmit(Payload):
 
     hook_event_name: Literal["UserPromptSubmit"]
     prompt: str
+    session_title: str | None = None
+    """The session's custom title, where one is set, as `SessionStart` carries it."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the turn's start, and the prompt it starts on: the judge reads it."""
+        """Read the turn's start, the prompt it starts on and the session's title in Claude Code, a prompt of the session's own conversation taking a new one: the judge reads it."""
         return Heard(
             event="turn-started",
             session=self.session_id,
@@ -508,11 +539,14 @@ class UserPromptSubmit(Payload):
             judged=True,
             fits=fits,
             prompt=self.prompt,
+            title=self.session_title,
+            takes_title=not self.agent_id,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items beside the prompt."""
-        return context(said, self.hook_event_name, telling.items)
+        """Tell the conversation its items beside the prompt, and title the session as its launch is named, where the service says to."""
+        told = context(said, self.hook_event_name, telling.items)
+        return titled(told, self.hook_event_name, telling.title)
 
     @override
     def answer(self, bench: Bench) -> Output | None:

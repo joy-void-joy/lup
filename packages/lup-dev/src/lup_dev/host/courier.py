@@ -71,9 +71,14 @@ class Heard(Model):
     """The most this hook's answer tells the model whole, in bytes of UTF-8: past
     it, the runtime keeps the text in a file the model isn't asked to read."""
     title: str | None = None
-    """At a session's start, the name the runtime has for it, where the operator
-    gave one in the runtime (a rename there), and the runtime says so; none
-    otherwise."""
+    """At a session's start or a prompt, the runtime's own title for the
+    session, where it has one and says so: one the operator gave it there (a
+    rename in the runtime), or one lup gave it; none otherwise."""
+    takes_title: bool = False
+    """Whether the runtime takes a title for the session from this hook's
+    answer (`Telling.title`): at the session's own start or prompt, where its
+    runtime has a way. Where it doesn't, lup's name stays lup's, and the
+    runtime's title its own."""
     said: str | None = None
     """At a turn's end, the agent's last message before it, as the runtime hands
     it to the hook; none for any other hook, or where it has none."""
@@ -93,8 +98,9 @@ class Telling(Model):
     context beside the call or the session's start, or as the reason its turn's
     end is held. When to tell what is the inbox's; none adds nothing."""
     title: str | None = None
-    """At a session's start, its launch's name, which the runtime takes as its
-    own name for the session where it has a way; none leaves it."""
+    """The title the runtime gives the session from now on, its launch's name,
+    at a hook that takes one (`Heard.takes_title`) where the runtime's own
+    differs; none leaves it."""
 
 
 class Courier(ABC):

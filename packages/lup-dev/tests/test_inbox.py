@@ -991,17 +991,26 @@ def test_an_idle_claude_session_is_pushed_what_waits_and_takes_it_at_its_turns_s
         hook = machine.host.launch("one").hook
         messages = Socket(machine.host.launch("one").messages)
         session = Session(machine.host.launch("one").mcp)
-        send(hook, claude("SessionStart", source="startup"))
+        started = send(hook, claude("SessionStart", source="startup"))
+        _, title = named_at_start(started)
         assert send(hook, claude("Stop", stop_hook_active=False)) == ""
         inbox("send", "one", "Wake up.")
         notice = session.pushed()
         pushed = ChannelMessage.model_validate(notice.params)
         pending = delivery.inbox.item(1).state
         # A hook while the push is pending tells nothing of it.
-        between = send(hook, claude("UserPromptSubmit", prompt="Typed meanwhile."))
+        between = send(
+            hook,
+            claude("UserPromptSubmit", prompt="Typed meanwhile.", session_title=title),
+        )
         token = pushed.meta["wake"]
         taken = send(
-            hook, claude("UserPromptSubmit", prompt=channel(pushed.content, token))
+            hook,
+            claude(
+                "UserPromptSubmit",
+                prompt=channel(pushed.content, token),
+                session_title=title,
+            ),
         )
         state = delivery.inbox.item(1).state
         after = send(hook, bash("b1"))
@@ -1066,13 +1075,15 @@ def test_a_turns_start_tells_what_waits_beside_its_prompt(
     tmp_path: Path,
 ) -> None:
     payload = {"claude": claude, "codex": codex}[runtime]
+    # Claude Code's prompts carry the title lup gave the session at its start.
+    shown = {"claude": {"session_title": tmp_path.name}, "codex": {}}[runtime]
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", runtime)
         hook = machine.host.launch("one").hook
         send(hook, payload("SessionStart", source="startup"))
         inbox("send", "one", "Read this first.")
-        told = send(hook, payload("UserPromptSubmit", prompt="Go on."))
-        again = send(hook, payload("UserPromptSubmit", prompt="And then?"))
+        told = send(hook, payload("UserPromptSubmit", prompt="Go on.", **shown))
+        again = send(hook, payload("UserPromptSubmit", prompt="And then?", **shown))
         state = delivery.inbox.item(1).state
     assert json.loads(told)["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
     assert context(told) == first_note("Read this first.")
@@ -1605,6 +1616,200 @@ def test_a_title_the_operator_gave_in_the_runtime_is_taken_in_a_name_s_shape(
             claude("SessionStart", source="resume", session_title="Naming Review"),
         )
     assert named_at_start(started) == ("naming-review", "naming-review")
+
+
+def given(answer: str) -> str | None:
+    """The title a hook's answer gives the session in Claude Code; none where it gives none."""
+    if not answer:
+        return None
+    title = json.loads(answer)["hookSpecificOutput"].get("sessionTitle")
+    assert title is None or isinstance(title, str)
+    return title
+
+
+def prompt(title: str | None, **fields: object) -> str:
+    """A Claude Code prompt of session `s1`, carrying the session's title where it has one."""
+    shown = {} if title is None else {"session_title": title}
+    return claude("UserPromptSubmit", prompt="Go on.", **shown, **fields)
+
+
+def test_a_prompt_with_the_title_lup_gave_gives_none(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "claude")
+        hook = machine.host.launch("one").hook
+        _, title = named_at_start(send(hook, claude("SessionStart", source="startup")))
+        answered = send(hook, prompt(title))
+    assert title == "a"
+    assert answered == ""
+
+
+def test_a_prompt_after_a_rename_through_lup_gives_the_new_title_once(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        _, title = named_at_start(send(hook, claude("SessionStart", source="startup")))
+        call(mcp, "rename", {"name": "parser-work"})
+        first = send(hook, prompt(title))
+        then = send(hook, prompt(given(first)))
+        # A subagent's prompt never titles the session.
+        call(mcp, "rename", {"name": "gate-on-push"})
+        subagent = send(hook, prompt("parser-work", agent_id="a1"))
+    assert given(first) == "parser-work"
+    assert then == ""
+    assert given(subagent) is None
+
+
+def test_a_session_resumed_after_a_rename_through_lup_keeps_lups_name(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "claude")
+        first = machine.host.launch("one")
+        _, title = named_at_start(
+            send(first.hook, claude("SessionStart", source="startup"))
+        )
+        call(first.mcp, "rename", {"name": "parser-work"})
+        HostClient(layout=machine.host, clock=clock, starter=Unstarted()).unregister(
+            "one"
+        )
+        launched(machine, clock, tmp_path / "b", "two", "claude")
+        # The resume carries the title lup gave at the session's first start.
+        resumed = send(
+            machine.host.launch("two").hook,
+            claude("SessionStart", source="resume", session_title=title),
+        )
+    assert named_at_start(resumed) == ("parser-work", "parser-work")
+
+
+def test_an_operators_rename_in_the_runtime_is_taken_at_the_next_prompt(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        renamed = send(hook, prompt("Naming Review"))
+        then = send(hook, prompt(given(renamed)))
+        listed = HostClient(
+            layout=machine.host, clock=clock, starter=Unstarted()
+        ).listed()
+    assert given(renamed) == "naming-review"
+    assert context(renamed) == (
+        "lup: the operator renamed this session `naming-review`: how they, lup's "
+        "commands and other sessions call it from now on. Keep the name they gave."
+    )
+    assert then == ""
+    assert {each.launch: each.name for each in listed.launches} == {
+        "one": "naming-review"
+    }
+    assert listed.sessions == {"s1": "naming-review"}
+
+
+def test_an_operators_title_another_launch_holds_is_given_lups_name_back(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "claude")
+        launched(machine, clock, tmp_path / "b", "two", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        answered = send(hook, prompt("b"))
+    assert given(answered) == "a"
+    assert (
+        "one: its session's title in its runtime, `b`, can't be its name (not a "
+        "name's shape, or another launch's), so the runtime is given `a`"
+    ) in said
+
+
+def test_a_title_lup_found_is_never_taken_over_a_later_rename_through_lup(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        call(mcp, "rename", {"name": "parser-work"})
+        # The operator gives the session in the runtime the name it has in lup.
+        same = send(hook, prompt("parser-work"))
+        call(mcp, "rename", {"name": "gate-on-push"})
+        later = send(hook, prompt("parser-work"))
+    assert same == ""
+    assert given(later) == "gate-on-push"
+
+
+class Awaited(list[str]):
+    """What the service says, with an event set once a line says `awaited`."""
+
+    def __init__(self, awaited: str) -> None:
+        super().__init__()
+        self.awaited = awaited
+        self.arrived = threading.Event()
+
+    @override
+    def append(self, line: str) -> None:
+        super().append(line)
+        if self.awaited in line:
+            self.arrived.set()
+
+
+def abandoned(path: Path, payload: str) -> None:
+    """Send `payload` on the socket at `path` and close before the answer, as a hook its runtime ended does."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.connect(str(path))
+        connection.sendall(payload.encode())
+
+
+def test_a_title_whose_answer_never_reached_its_hook_is_given_again(
+    machine: Layout, clock: FakeClock, notices: Raised, tmp_path: Path
+) -> None:
+    said = Awaited("the hook was gone before its answer")
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        _, title = named_at_start(send(hook, claude("SessionStart", source="startup")))
+        call(mcp, "rename", {"name": "parser-work"})
+        abandoned(hook, prompt(title))
+        assert said.arrived.wait(timeout=60)
+        # The runtime never took the new title, so it still has the one before.
+        again = send(hook, prompt(title))
+    assert given(again) == "parser-work"
+
+
+def test_an_operator_naming_the_session_back_after_a_rename_through_lup_is_taken(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        _, title = named_at_start(send(hook, claude("SessionStart", source="startup")))
+        call(mcp, "rename", {"name": "parser-work"})
+        renamed = send(hook, prompt(title))
+        # The operator gives it back the title it had before lup's rename.
+        back = send(hook, prompt(title))
+        listed = HostClient(
+            layout=machine.host, clock=clock, starter=Unstarted()
+        ).listed()
+    assert given(renamed) == "parser-work"
+    assert given(back) is None
+    assert context(back).startswith("lup: the operator renamed this session `a`")
+    assert listed.sessions == {"s1": "a"}
+
+
+def test_a_codex_session_is_never_given_a_title(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "codex")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        started = send(hook, codex("SessionStart", source="startup"))
+        call(mcp, "rename", {"name": "parser-work"})
+        prompted = send(hook, codex("UserPromptSubmit", prompt="Go on."))
+    assert "sessionTitle" not in json.loads(started)["hookSpecificOutput"]
+    assert prompted == ""
 
 
 def test_lup_dev_rename_and_send_name_a_launch_by_its_name(
