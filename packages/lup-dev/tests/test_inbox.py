@@ -2865,6 +2865,64 @@ def test_a_stored_item_that_doesnt_read_is_named(tmp_path: Path) -> None:
         Inbox.opened(layout)
 
 
+def test_a_friction_and_how_it_went_kept_in_labelled_parts_read_as_the_one_text_shown(
+    tmp_path: Path,
+) -> None:
+    layout = InboxLayout(home=tmp_path / "inbox")
+    labelled: list[dict[str, JsonValue]] = [
+        {
+            "reason": "friction",
+            "got_in_the_way": "`ls` printed: Permission denied",
+            "trying": "look for the config",
+            "would_change": "",
+        },
+        {
+            "reason": "how it went",
+            "got_in_the_way": "The judge, twice.",
+            "smooth": "The brief.",
+            "would_change": "",
+            "felt": "Steady.",
+        },
+        {
+            "reason": "how it went",
+            "got_in_the_way": "",
+            "smooth": "",
+            "would_change": "",
+            "felt": "",
+        },
+    ]
+    for number, reason in enumerate(labelled, start=1):
+        item = Item(
+            number=number,
+            reason=Message(kind="note", text=""),
+            sender=Conversation(
+                repository=Path("/r/.git"), runtime="claude", session="s"
+            ),
+            recipient=Operator(),
+            made=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        stored = {**json.loads(item.model_dump_json()), "reason": reason}
+        layout.items.mkdir(parents=True, exist_ok=True)
+        layout.item(number).write_text(json.dumps(stored))
+    inbox = Inbox.opened(layout)
+    read = [inbox.item(number) for number in (1, 2, 3)]
+    assert [each.reason for each in read] == [
+        Friction(text="`ls` printed: Permission denied\nTrying: look for the config"),
+        HowItWent(
+            text="Got in the way: The judge, twice.\nSmooth: The brief.\nFelt: Steady."
+        ),
+        HowItWent(text="Nothing notable."),
+    ]
+    # Kept again, it's kept as the one text, and reads back as it was.
+    inbox.kept(read[0])
+    rewritten = json.loads(layout.item(1).read_text())["reason"]
+    assert rewritten == {
+        "reason": "friction",
+        "text": "`ls` printed: Permission denied\nTrying: look for the config",
+    }
+    assert Inbox.opened(layout).item(1) == read[0]
+
+
 def test_a_desktop_notice_goes_through_notify_send_where_its_installed(
     tmp_path: Path,
 ) -> None:

@@ -38,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, ValidationError, computed_field
+from pydantic import Field, JsonValue, ValidationError, computed_field, model_validator
 
 from lup.sessions import results
 from lup.tools import speaking
@@ -132,16 +132,86 @@ class Message(Model):
     than sent by the agent: the conversation already shows them as its words."""
 
 
+def labelled(opening: str, parts: dict[str, str]) -> str:
+    """Return `opening`, then each of `parts` that says something, after its label, a line each.
+
+    >>> print(labelled("The gate hung.", {"Trying": "check", "Would change": ""}))
+    The gate hung.
+    Trying: check
+    """
+    said = [f"{label}: {text}" for label, text in parts.items() if text.strip()]
+    return "\n".join([opening, *said] if opening.strip() else said)
+
+
+class Labelled(Model):
+    """A friction or how it went as the inbox kept it before each was one text in the agent's own words: each part in a field of its own, which the operator read after its label.
+
+    Items kept then still read: each is read as the one text it was shown as
+    (`Friction.unlabelled`, `HowItWent.unlabelled`).
+    """
+
+    got_in_the_way: str = ""
+    trying: str = ""
+    smooth: str = ""
+    would_change: str = ""
+    felt: str = ""
+
+    def friction(self) -> str:
+        """Say a friction as the operator read it: what got in the way, then what the agent was trying and would change, where it said."""
+        parts = {"Trying": self.trying, "Would change": self.would_change}
+        return labelled(self.got_in_the_way, parts)
+
+    def how_it_went(self) -> str:
+        """Say how it went as the operator read it: each part the agent filled, after its label; "Nothing notable." where it filled none."""
+        parts = {
+            "Got in the way": self.got_in_the_way,
+            "Smooth": self.smooth,
+            "Would change": self.would_change,
+            "Felt": self.felt,
+        }
+        return labelled("", parts) or "Nothing notable."
+
+
 class Friction(results.Friction):
     """What got in a conversation's way, which it told the operator at the moment it did (`friction`), in its own words: news to read, never a question."""
 
     reason: Literal["friction"] = "friction"
+
+    @model_validator(mode="before")
+    @classmethod
+    def unlabelled(cls, stored: JsonValue) -> JsonValue:
+        """Read a friction kept before it was one text, its parts each in a field of its own, as the one text the operator read (`Labelled.friction`).
+
+        >>> kept = {"got_in_the_way": "The gate hung.", "trying": "check"}
+        >>> print(Friction.model_validate(kept).text)
+        The gate hung.
+        Trying: check
+        """
+        match stored:
+            case {"got_in_the_way": str()} if "text" not in stored:
+                return {"text": Labelled.model_validate(stored).friction()}
+            case _:
+                return stored
 
 
 class HowItWent(results.HowItWent):
     """How a piece of work went as a whole, and how it felt, as a conversation told the operator once near its end (`how_it_went`), in its own words: news to read."""
 
     reason: Literal["how it went"] = "how it went"
+
+    @model_validator(mode="before")
+    @classmethod
+    def unlabelled(cls, stored: JsonValue) -> JsonValue:
+        """Read one kept before how it went was one text, its parts each in a field of its own, as the one text the operator read (`Labelled.how_it_went`).
+
+        >>> HowItWent.model_validate({"got_in_the_way": "", "felt": "Calm."}).text
+        'Felt: Calm.'
+        """
+        match stored:
+            case {"got_in_the_way": str()} if "text" not in stored:
+                return {"text": Labelled.model_validate(stored).how_it_went()}
+            case _:
+                return stored
 
 
 class Stop(speaking.Stop):
