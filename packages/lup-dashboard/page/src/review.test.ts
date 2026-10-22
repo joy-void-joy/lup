@@ -5,6 +5,7 @@ import {
     EMPTY,
     aboutAt,
     answer,
+    answerAfter,
     answering,
     arrival,
     blockAt,
@@ -35,6 +36,8 @@ import {
     stepped,
     steps,
     stranded,
+    tallied,
+    toAnswer,
     toggled,
     waited,
     whose,
@@ -156,6 +159,11 @@ function onItem(written: Written | undefined): Comment | undefined {
     return written === undefined || isLetter(written) ? undefined : written;
 }
 
+/** The banners and headers of a layout, in order: its groups and items as laid out. */
+function heads(out: { text: string }): string[] {
+    return out.text.split("\n").filter((line) => line.startsWith("━━") || line.startsWith("──"));
+}
+
 describe("laid", () => {
     it("folds each item whole under its header, folded once it's marked read, and nothing else", () => {
         const out = laid([QUESTION, NOTE], [], banner, header, { ...EMPTY, done: [52] }, NOTHING);
@@ -180,27 +188,23 @@ describe("laid", () => {
         const back = laid([QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
         expect(back.regions.flatMap((each) => each.folds).map((each) => each.closed)).toEqual([false, false]);
         // Its own fold is named the same, read, left for later or neither, which says how it's folded.
-        expect(back.regions.map((each) => foldKey(each.folds[0]!))).toEqual(["52 item ", "51 item "]);
+        expect(back.regions.map((each) => foldKey(each.folds[0]!))).toEqual(["51 item ", "52 item "]);
     });
 
-    it("puts the group with the newest item first, each group's items in their order", () => {
+    it("lays groups and items in the order they arrived: each group where its first item came, each item at the end of its group", () => {
         const later: Item = { ...QUESTION, number: 53, reason: { ...NOTE.reason } };
-        const out = laid([QUESTION, NOTE, later], [], banner, header, EMPTY, NOTHING);
-        expect(out.text.split("\n").filter((line) => line.startsWith("━━") || line.startsWith("──"))).toEqual([
-            "━━ s1 ━━",
-            "── #51 ──",
-            "── #53 ──",
-            "━━ s2 ━━",
-            "── #52 ──",
-        ]);
-        const two = laid([QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
-        expect(two.text.startsWith("━━ s2 ━━")).toBe(true);
+        const fourth: Item = { ...NOTE, number: 54 };
+        const out = laid([fourth, QUESTION, NOTE, later], [], banner, header, EMPTY, NOTHING);
+        expect(heads(out)).toEqual(["━━ s1 ━━", "── #51 ──", "── #53 ──", "━━ s2 ━━", "── #52 ──", "── #54 ──"]);
+        // Given in any order, and however new, the first item's number places the group.
+        const two = laid([{ ...NOTE, made: "2026-10-17T13:00:00Z" }, QUESTION], [], banner, header, EMPTY, NOTHING);
+        expect(two.text.startsWith("━━ s1 ━━")).toBe(true);
     });
 
-    it("ranks news below what's to answer: after it in a group, and a group of news alone after the others", () => {
+    it("lays news where it came, before what's to answer where it came first: its rank orders nothing", () => {
         const friction: Item = {
             ...NOTE,
-            number: 60,
+            number: 50,
             reason: { reason: "friction", text: "`ls` failed" },
             sender: from("s1", "a1"),
             rank: NEWS,
@@ -213,21 +217,13 @@ describe("laid", () => {
             rank: NEWS,
         };
         const out = laid([friction, QUESTION, NOTE, ended], [], banner, header, EMPTY, NOTHING);
-        expect(out.text.split("\n").filter((line) => line.startsWith("━━") || line.startsWith("──"))).toEqual([
-            "━━ s1 ━━",
-            "── #51 ──",
-            "── #60 ──",
-            "━━ s2 ━━",
-            "── #52 ──",
-            "━━ s3 ━━",
-            "── #61 ──",
-        ]);
+        expect(heads(out)).toEqual(["━━ s1 ━━", "── #50 ──", "── #51 ──", "━━ s2 ━━", "── #52 ──", "━━ s3 ━━", "── #61 ──"]);
         expect(news(friction)).toBe(true);
         expect(news(ended)).toBe(true);
         expect([news(QUESTION), news(NOTE), news(APPROVAL)]).toEqual([false, false, false]);
     });
 
-    it("ranks flags last: after the news in a group, and a group of flags alone after a group of news", () => {
+    it("lays a flag where it came too, before news and what's to answer where it came first", () => {
         const flagged = (number: number, sender: Conversation): Item => ({ ...FLAGGED, number, sender });
         const ended: Item = {
             ...NOTE,
@@ -242,18 +238,91 @@ describe("laid", () => {
             reason: { reason: "how it went", text: "Good." },
             rank: NEWS,
         };
-        const out = laid([flagged(70, from("s2")), flagged(71, from("s4")), went, NOTE, ended], [], banner, header, EMPTY, NOTHING);
-        expect(out.text.split("\n").filter((line) => line.startsWith("━━") || line.startsWith("──"))).toEqual([
+        const out = laid([flagged(50, from("s2")), flagged(71, from("s4")), went, NOTE, ended], [], banner, header, EMPTY, NOTHING);
+        expect(heads(out)).toEqual([
             "━━ s2 ━━",
+            "── #50 ──",
             "── #52 ──",
             "── #62 ──",
-            "── #70 ──",
             "━━ s3 ━━",
             "── #61 ──",
             "━━ s4 ━━",
             "── #71 ──",
         ]);
         expect([flag(FLAGGED), flag(NOTE), news(FLAGGED)]).toEqual([true, false, false]);
+    });
+
+    it("moves nothing as items come, as an item's rank changes, or as one is marked read: parking alone moves one, to the end", () => {
+        const first = laid([QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
+        expect(heads(first)).toEqual(["━━ s1 ━━", "── #51 ──", "━━ s2 ━━", "── #52 ──"]);
+        // A later item for s1, to answer, goes at the end of s1's group; one for a new agent, after every group.
+        const later: Item = { ...QUESTION, number: 53 };
+        const ninth: Item = { ...NOTE, number: 54, sender: from("s9") };
+        const more = laid([later, ninth, QUESTION, NOTE], [], banner, header, EMPTY, NOTHING);
+        expect(heads(more)).toEqual(["━━ s1 ━━", "── #51 ──", "── #53 ──", "━━ s2 ━━", "── #52 ──", "━━ s9 ━━", "── #54 ──"]);
+        // The note's rank changed, and the question marked read: the same places.
+        const changed = laid([later, ninth, QUESTION, { ...NOTE, rank: NEWS }], [], banner, header, { ...EMPTY, done: [51] }, NOTHING);
+        expect(heads(changed)).toEqual(heads(more));
+        expect(changed.regions[0]?.folds.find((each) => each.kind === "item")?.closed).toBe(true);
+        // Parked, the question goes to the end, its group staying where it was this sitting.
+        const places = more.groups.map((each) => each.place);
+        const parked = laid([later, ninth, QUESTION, NOTE], [], banner, header, { ...EMPTY, parked: [51] }, NOTHING, places);
+        expect(heads(parked)).toEqual([
+            "━━ s1 ━━",
+            "── #53 ──",
+            "━━ s2 ━━",
+            "── #52 ──",
+            "━━ s9 ━━",
+            "── #54 ──",
+            "━━ s1 · later ━━",
+            "── #51 · later ──",
+        ]);
+    });
+
+    it("walks to what's to answer with ]a and [a, in the order it came, passing over news, flags and what's settled", () => {
+        const friction: Item = { ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed" }, sender: from("s1", "a1"), rank: NEWS };
+        const out = laid([QUESTION, NOTE, friction, FLAGGED, APPROVAL], [], banner, header, EMPTY, NOTHING);
+        expect(heads(out)).toEqual(["━━ s1 ━━", "── #51 ──", "── #60 ──", "━━ s2 ━━", "── #52 ──", "── #70 ──", "━━ lup ━━", "── #54 ──"]);
+        const at = (text: string) => out.text.indexOf(text);
+        const number = (region: ReturnType<typeof answerAfter>) => region?.item.number;
+        expect([toAnswer(QUESTION, EMPTY), toAnswer(NOTE, EMPTY), toAnswer(friction, EMPTY), toAnswer(FLAGGED, EMPTY), toAnswer(APPROVAL, EMPTY)]).toEqual([
+            true,
+            true,
+            false,
+            false,
+            true,
+        ]);
+        // From the top, each in turn, the news and the flag passed over, wherever they're laid out; then nothing.
+        expect(number(answerAfter(out, EMPTY, 0, true))).toBe(51);
+        expect(number(answerAfter(out, EMPTY, at("── #51"), true))).toBe(52);
+        expect(number(answerAfter(out, EMPTY, at("Which parser?"), true))).toBe(52);
+        expect(number(answerAfter(out, EMPTY, at("── #52"), true))).toBe(54);
+        expect(number(answerAfter(out, EMPTY, at("── #54"), true))).toBeUndefined();
+        // And back; none before the first.
+        expect(number(answerAfter(out, EMPTY, at("── #54"), false))).toBe(52);
+        expect(number(answerAfter(out, EMPTY, at("── #52"), false))).toBe(51);
+        expect(number(answerAfter(out, EMPTY, at("── #51"), false))).toBeUndefined();
+        // From news or a flag, the next that came after it, and the last that came before it.
+        expect(number(answerAfter(out, EMPTY, at("── #60"), true))).toBeUndefined();
+        expect(number(answerAfter(out, EMPTY, at("── #60"), false))).toBe(54);
+        expect(number(answerAfter(out, EMPTY, at("── #70"), false))).toBe(54);
+        // From a banner, the first item laid out after it counts, as the top's does.
+        expect(number(answerAfter(out, EMPTY, at("━━ s2"), true))).toBe(52);
+        expect(number(answerAfter(out, EMPTY, at("━━ lup"), true))).toBe(54);
+        // Marked read or left for later, an item is passed over, as the draft settles it.
+        expect(number(answerAfter(out, { ...EMPTY, done: [52] }, at("── #51"), true))).toBe(54);
+        expect(number(answerAfter(out, { ...EMPTY, parked: [54] }, at("── #52"), true))).toBeUndefined();
+        expect(toAnswer(NOTE, { ...EMPTY, done: [52] })).toBe(false);
+    });
+
+    it("counts what's to answer and what's new for the header over the review, those settled in the draft left out", () => {
+        const friction: Item = { ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed" }, rank: NEWS };
+        const items = [QUESTION, NOTE, friction, FLAGGED];
+        expect(tallied(items, EMPTY, null)).toBe("2 to answer");
+        expect(tallied(items, EMPTY, "2026-10-17T11:00:00Z")).toBe("2 to answer · 4 new");
+        expect(tallied(items, { ...EMPTY, done: [51], parked: [70] }, "2026-10-17T11:00:00Z")).toBe("1 to answer · 2 new");
+        expect(tallied([friction], EMPTY, "2026-10-17T13:00:00Z")).toBe("0 to answer");
+        expect(tallied([], EMPTY, "2026-10-17T11:00:00Z")).toBe("");
     });
 
     it("shows a friction, how the work went and a stop as written", () => {
@@ -324,7 +393,7 @@ describe("laid", () => {
             text: "",
         });
         expect(opened(out, out.text.indexOf("── #51"))).toEqual({ item: 51, quote: null, text: "" });
-        expect(opened(out, 2)).toEqual({ to: from("s2"), text: "" });
+        expect(opened(out, 2)).toEqual({ to: from("s1", "a1"), text: "" });
     });
 
     it("quotes a passage within one item's own lines, and not across items", () => {
@@ -402,17 +471,17 @@ describe("what folds under an item", () => {
     it("lays an approval's files, then the item's context, under its own text, a file's unchanged runs and the context folding", () => {
         const out = laid([QUESTION, APPROVAL], [], banner, header, EMPTY, around);
         expect(out.text).toBe(
-            "━━ lup ━━\n── #54 ──\nApprove?\n a.py | 2 +-\n" +
+            "━━ s1 ━━\n── #51 ──\nWhich parser?\n1. Use lark\n   lean: yes\n2. Keep the cache\n   lean: no\n" +
+                "context · 7 steps, from your words 9m before this item\n" +
+                "you: Build the reader.\n     Ask me first.\nReading the records.\n" +
+                "· called Bash ×2, Read\n→ called mcp__lup__ask · this item\n· called Grep\n\n" +
+                "━━ lup ━━\n── #54 ──\nApprove?\n a.py | 2 +-\n" +
                 "a.py · changed · +1 −1\n" +
                 "3 unchanged lines, 1–3\nl1\nl2\nl3\nl4\nl5\nl6\nl7\nL7\nl8\nl9\nl10\n" +
                 "2 unchanged lines, 11–12\nl11\nl12\n" +
-                "no context: item 54 was made by no agent's call\n\n" +
-                "━━ s1 ━━\n── #51 ──\nWhich parser?\n1. Use lark\n   lean: yes\n2. Keep the cache\n   lean: no\n" +
-                "context · 7 steps, from your words 9m before this item\n" +
-                "you: Build the reader.\n     Ask me first.\nReading the records.\n" +
-                "· called Bash ×2, Read\n→ called mcp__lup__ask · this item\n· called Grep\n\n",
+                "no context: item 54 was made by no agent's call\n\n",
         );
-        const [approval, question] = out.regions;
+        const [question, approval] = out.regions;
         const shown = (from: number, to: number) => out.text.slice(from, to);
 
         const runs = approval!.folds.filter((each) => each.kind === "lines");
@@ -482,7 +551,7 @@ describe("what folds under an item", () => {
             ]),
         };
         const out = laid([APPROVAL, NOTE], [], banner, header, EMPTY, read);
-        const [approval, note] = out.regions;
+        const [note, approval] = out.regions;
         const shown = (from: number, to: number) => out.text.slice(from, to);
         const [file, created] = approval!.folds.filter((each) => each.kind === "file");
         expect(file).toMatchObject({ item: 54, kind: "file", name: "t.py", closed: true });
@@ -895,19 +964,24 @@ describe("every agent's group, and the messages under its banner", () => {
         const S1 = from("s1", "a1");
         const first = laid([QUESTION, NOTE], [S1, S3], banner, header, EMPTY, NOTHING);
         const heads = (out: typeof first) => out.text.split("\n").filter((line) => line.startsWith("━━"));
-        expect(heads(first)).toEqual(["━━ s2 ━━", "━━ s1 ━━", "━━ s3 ━━"]);
+        expect(heads(first)).toEqual(["━━ s1 ━━", "━━ s2 ━━", "━━ s3 ━━"]);
         const places = first.groups.map((each) => each.place);
-        // s2's note answered and a newer item for s1: unsorted again, they keep their places, and s4's comes after.
+        // s2's note answered, its agent running, and a newer item for s1: they keep their places, and s4's comes after.
         const newer: Item = { ...QUESTION, number: 60, made: "2026-10-17T13:00:00Z" };
         const fourth: Item = { ...NOTE, number: 61, sender: S4 };
         const next = laid([QUESTION, newer, fourth], [S1, S3, from("s2")], banner, header, EMPTY, NOTHING, places);
-        expect(heads(next)).toEqual(["━━ s2 ━━", "━━ s1 ━━", "━━ s3 ━━", "━━ s4 ━━"]);
+        expect(heads(next)).toEqual(["━━ s1 ━━", "━━ s2 ━━", "━━ s3 ━━", "━━ s4 ━━"]);
+        // Laid out anew from the items alone, as on reload: s4's where its first item came, the empty ones after.
         expect(heads(laid([QUESTION, newer, fourth], [S1, S3, from("s2")], banner, header, EMPTY, NOTHING))).toEqual([
             "━━ s1 ━━",
             "━━ s4 ━━",
             "━━ s3 ━━",
             "━━ s2 ━━",
         ]);
+        // A group's first item answered: it keeps its place this sitting, though anew it would come after.
+        const third: Item = { ...QUESTION, number: 53 };
+        expect(heads(laid([third, NOTE], [S1], banner, header, EMPTY, NOTHING, places))).toEqual(["━━ s1 ━━", "━━ s2 ━━"]);
+        expect(heads(laid([third, NOTE], [S1], banner, header, EMPTY, NOTHING))).toEqual(["━━ s2 ━━", "━━ s1 ━━"]);
         // What's left for later has places of its own.
         const parked = laid([QUESTION, NOTE], [S1, S3], banner, header, { ...EMPTY, parked: [52] }, NOTHING, places);
         expect(heads(parked)).toEqual(["━━ s1 ━━", "━━ s3 ━━", "━━ s2 · later ━━"]);

@@ -110,6 +110,12 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """How long the approval's types take to read."""
     reading: asyncio.TimerHandle | None = None
     """The reading of the approval's types under way, once the page asked for its files."""
+    arrives: timedelta = timedelta(seconds=10)
+    """How long after the page first asks for the inbox a question of the parser subagent's arrives, so a session can watch the review keep its place as an item comes to a group above."""
+    arriving: asyncio.TimerHandle | None = None
+    """The arrival under way, once the page asked for the inbox."""
+    arrived: datetime | None = None
+    """When the late question arrived; none until it has."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -127,6 +133,10 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 self.changed = asyncio.Event()
                 return Holding(on=on)
             case ListInbox():
+                if self.arriving is None:
+                    self.arriving = asyncio.get_running_loop().call_later(
+                        self.arrives.total_seconds(), self.arrive
+                    )
                 return self.items()
             case ShowDraft():
                 return Drafted(draft=self.draft)
@@ -176,6 +186,12 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     def typed(self) -> None:
         """End the reading of the approval's types: its files carry their whole reading, and each watch answers again."""
         self.typing = False
+        self.changed.set()
+        self.changed = asyncio.Event()
+
+    def arrive(self) -> None:
+        """Let the parser subagent's late question arrive, made at the clock's time, and each watch answer again."""
+        self.arrived = self.clock.now()
         self.changed.set()
         self.changed = asyncio.Event()
 
@@ -359,7 +375,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def every(self) -> list[Item]:
-        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to its session; and the messages sent from the page."""
+        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to its session; the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         parser = Conversation(repository=lup, runtime=first, session="s1", agent="a02")
@@ -597,6 +613,32 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 worktree=dev,
                 call="call-60",
                 made=self.ago(2.5),
+            ),
+            *(
+                []
+                if self.arrived is None
+                else [
+                    Item(
+                        number=61,
+                        reason=Question(
+                            text=(
+                                "The reader is done but for its name. Which, for "
+                                "the module and the class?"
+                            ),
+                            decisions=[
+                                Decision(
+                                    text="`transcripts.reader`, as the first lup called it",
+                                    lean="yes: sessions looking for it will look there first",
+                                )
+                            ],
+                        ),
+                        sender=parser,
+                        recipient=Operator(),
+                        worktree=dev,
+                        call="call-61",
+                        made=self.arrived,
+                    )
+                ]
             ),
             *self.sent,
         ]

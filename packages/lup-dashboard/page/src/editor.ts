@@ -57,6 +57,7 @@ interface Actions {
     finish: (cm: CodeMirrorV) => void;
     toggle: (list: "done" | "parked") => void;
     move: (forward: boolean) => void;
+    answer: (forward: boolean) => void;
     matter: (forward: boolean) => void;
     written: (forward: boolean) => void;
     approve: (approved: boolean) => void;
@@ -349,6 +350,8 @@ function mapKeys(): void {
     action("lupLater", (actions) => actions.toggle("parked"));
     action("lupNext", (actions) => actions.move(true));
     action("lupPrevious", (actions) => actions.move(false));
+    action("lupNextAnswer", (actions) => actions.answer(true));
+    action("lupPreviousAnswer", (actions) => actions.answer(false));
     action("lupNextMatter", (actions) => actions.matter(true));
     action("lupPreviousMatter", (actions) => actions.matter(false));
     action("lupNextWritten", (actions) => actions.written(true));
@@ -412,6 +415,8 @@ function mapKeys(): void {
     map("g+", "lupLaterState", "normal");
     map("]]", "lupNext", "normal");
     map("[[", "lupPrevious", "normal");
+    map("]a", "lupNextAnswer", "normal");
+    map("[a", "lupPreviousAnswer", "normal");
     map("]c", "lupNextMatter", "normal");
     map("[c", "lupPreviousMatter", "normal");
     map("]n", "lupNextWritten", "normal");
@@ -812,6 +817,8 @@ export interface Own<C> {
     /** Where the cursor goes back to once `comment`, shown at `block`, ends: what it's about; `opener` is where the key that opened it was pressed, where it was opened since insert mode began. */
     about: (comment: C, block: Block, opener: number | null) => number | undefined;
     move: (forward: boolean) => void;
+    /** Go to the next or previous item to answer, as the review's `]a` and `[a` do; none where the view has none. */
+    answer?: (forward: boolean) => void;
     send: () => void;
     toggle?: (list: "done" | "parked") => void;
     /** Go to the next or previous line that matters, as the review's are by the judge's reading, opening what folds it on the way. */
@@ -1097,6 +1104,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             },
             toggle: (list) => own.toggle?.(list),
             move: own.move,
+            answer: (forward) => own.answer?.(forward),
             matter: (forward) => own.matter?.(forward),
             written: (forward) => {
                 const editor = view.current;

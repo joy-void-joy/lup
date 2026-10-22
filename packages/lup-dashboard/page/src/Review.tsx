@@ -6,7 +6,8 @@
 // or a message sends. Space `d` marks an item read, Space `p` parks it,
 // leaving it for later, Space `a` or `x` answers an approval or a held change;
 // `]]` and `[[` go to the next and previous item, landing on its first line that
-// matters, `]c` and `[c` to the next and previous such line. Under an approval or
+// matters, `]a` and `[a` to the next and previous item to answer, in the order
+// they came, `]c` and `[c` to the next and previous such line. Under an approval or
 // a held change, each file it changes, whole, its lines numbered, marked and
 // highlighted as they come into view, each line that matters by the judge's
 // reading barred and saying what it triggered; the item's header counts its files
@@ -17,7 +18,8 @@
 // `zr`, `zm`, `zR`, `zM` and Space `z` act on the item the cursor is in. The
 // header over the review says where the cursor is: the group, the item, the
 // file and the folds it's in, and, while a comment is being written, whom it
-// goes to (`docs/dashboard.md`, *The review*).
+// goes to; at its end, how many items are to answer and how many are new
+// (`docs/dashboard.md`, *The review*).
 import { RangeSetBuilder, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +31,7 @@ import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type ReviewPlace } from "./keys";
 import {
     aboutAt,
+    answerAfter,
     answering,
     arrival,
     blockAt,
@@ -51,6 +54,7 @@ import {
     showing,
     stepped,
     stranded,
+    tallied,
     toggled,
     waited,
     withWritten,
@@ -278,8 +282,8 @@ function itemNamed(header: string): string {
     return inner.split(" · ")[0] ?? inner;
 }
 
-/** The header over the review: where the cursor is, each part marked by its kind, and whom what's being written goes to. */
-function Heading({ parts }: { parts: Where[] }) {
+/** The header over the review: where the cursor is, each part marked by its kind, and whom what's being written goes to; at its end, what waits below (`tallied`). */
+function Heading({ parts, tally }: { parts: Where[]; tally: string }) {
     const letter = (kind: Where["kind"]) => FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? null;
     // A body around another, which a narrow screen leaves out for the innermost.
     const inner = parts.findLast((each) => each.kind === "body");
@@ -304,6 +308,7 @@ function Heading({ parts }: { parts: Where[] }) {
                 <>
                     <span className="where-who">{who.map(shown)}</span>
                     <span className="where-path">{path.map(shown)}</span>
+                    {tally === "" ? null : <span className="where-tally">{tally}</span>}
                 </>
             )}
         </div>
@@ -450,7 +455,7 @@ export function Review({
             // above it: the cursor moves with its text, and the view only follows a landing of their own.
             const head = current.state.selection.main.head;
             const made = changes(doc, laidOut.text);
-            // A comment being written keeps the cursor, though what arrived moved it, as its agent's group comes first;
+            // A comment being written keeps the cursor, as far into it as it was, wherever what arrived moved it;
             // one just opened takes it, though vim moved it into another under the same line, as `S` does.
             const writing = arriving === null && editor.writing() ? writtenAt(before.current, laidOut, head) : undefined;
             // What it was on gone, as a reply sent takes what it covered, it goes back to what that was about.
@@ -474,11 +479,11 @@ export function Review({
                 annotations: rebuilt.of(true),
             });
             refold(current, laidFor.folds, kept.current);
+            // Restored after the folds, whose heights it takes in. It keeps a comment being written where it is on
+            // screen too, as only what arrives above moves it; a scroll to the cursor after it would replace it, since
+            // CodeMirror keeps the last scroll asked of it alone.
             if (!landed && scrolled !== undefined) {
                 current.dispatch({ effects: scrolled });
-            }
-            if (writing !== undefined) {
-                current.dispatch({ effects: EditorView.scrollIntoView(writing, { y: "nearest" }) });
             }
         } else {
             // What folds can change with the text the same, as an item marked read folds.
@@ -523,6 +528,27 @@ export function Review({
         }
     }
 
+    /** Go to `region`'s item, where there's one: onto where it lands (`arrival`), its header kept in view above the line where both fit. */
+    function goTo(region: Region | undefined) {
+        const current = view.current;
+        if (current === null || region === undefined) {
+            return;
+        }
+        const at = arrival(region);
+        opening(current, at);
+        if (at === region.header.from) {
+            current.dispatch({ selection: { anchor: at }, scrollIntoView: true });
+            return;
+        }
+        // Its header stays in view above the line it lands on, where both fit.
+        const top = current.lineBlockAt(region.header.from).top;
+        const fits = current.lineBlockAt(at).bottom - top < current.scrollDOM.clientHeight * 0.8;
+        current.dispatch({
+            selection: { anchor: at },
+            effects: fits ? EditorView.scrollIntoView(region.header.from, { y: "start" }) : EditorView.scrollIntoView(at, { y: "center" }),
+        });
+    }
+
     editor.bind({
         whole: (position) => {
             // On a group, a message to its agent; on an item, a comment on it whole.
@@ -537,33 +563,14 @@ export function Review({
         about: (comment, block) => aboutAt(laidOut, comment, block),
         toggle,
         move: (forward) => {
-            const current = view.current;
-            if (current === null) {
-                return;
-            }
             const head = editor.head();
             const landings = laidOut.regions.map((region) => ({ region, at: arrival(region) }));
             const target = forward
                 ? landings.find((each) => each.at > head)
                 : [...landings].reverse().find((each) => each.at < head);
-            if (target === undefined) {
-                return;
-            }
-            opening(current, target.at);
-            if (target.at === target.region.header.from) {
-                current.dispatch({ selection: { anchor: target.at }, scrollIntoView: true });
-                return;
-            }
-            // Its header stays in view above the line it lands on, where both fit.
-            const top = current.lineBlockAt(target.region.header.from).top;
-            const fits = current.lineBlockAt(target.at).bottom - top < current.scrollDOM.clientHeight * 0.8;
-            current.dispatch({
-                selection: { anchor: target.at },
-                effects: fits
-                    ? EditorView.scrollIntoView(target.region.header.from, { y: "start" })
-                    : EditorView.scrollIntoView(target.at, { y: "center" }),
-            });
+            goTo(target?.region);
         },
+        answer: (forward) => goTo(answerAfter(laidOut, draft, editor.head(), forward)),
         matter: (forward) => {
             const current = view.current;
             if (current === null) {
@@ -630,7 +637,7 @@ export function Review({
     };
     return (
         <>
-            <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, written(draft), naming)} />
+            <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, written(draft), naming)} tally={tallied(items, draft, reviewed)} />
             <div className="buffer review-buffer" ref={editor.parent} />
         </>
     );

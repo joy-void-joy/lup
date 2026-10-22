@@ -162,6 +162,12 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
         keys: [
             { keys: "]] [[", does: "next and previous item, on its first line that matters", short: "items", at: ["banner", "approvals", "item", "aside", "written"] },
             {
+                keys: "]a [a",
+                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; news, flags and what's marked read or left for later are passed over",
+                short: "to answer",
+                at: ["banner", "approvals", "item", "change", "aside", "written"],
+            },
+            {
                 keys: "]c [c",
                 does: "next and previous line that matters, in what an approval, a held change or a flagged write changes",
                 short: "what matters",

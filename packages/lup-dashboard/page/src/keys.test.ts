@@ -7,12 +7,22 @@ const shown = (place: ReviewPlace) => barOf(REVIEW_KEYS, place).map((key) => key
 describe("the line of keys", () => {
     it("shows the keys that apply where the cursor is, in the list's order", () => {
         expect(shown("insert")).toEqual(["^⏎", "Esc", "Esc u"]);
-        expect(shown("change")).toEqual(["␣a", "␣x", "␣d", "o", "c…", "␣c", "]c [c", "]n [n", "za"]);
-        expect(shown("item")).toEqual(["␣d", "␣p", "o", "c…", "C", "␣c", "]] [[", "]n [n", "za"]);
-        expect(shown("banner")).toEqual(["o ␣c", "]] [[", "]n [n", "␣h"]);
-        expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]n [n"]);
-        expect(shown("aside")).toEqual(["]] [[", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
+        expect(shown("change")).toEqual(["␣a", "␣x", "␣d", "o", "c…", "␣c", "]a [a", "]c [c", "]n [n", "za"]);
+        expect(shown("item")).toEqual(["␣d", "␣p", "o", "c…", "C", "␣c", "]] [[", "]a [a", "]n [n", "za"]);
+        expect(shown("banner")).toEqual(["o ␣c", "]] [[", "]a [a", "]n [n", "␣h"]);
+        expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]a [a", "]n [n"]);
+        expect(shown("aside")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
         expect(barOf(CONVERSATION_KEYS, "normal").map((key) => key.keys)).toEqual(["o", "c…", "␣c", "]] [[", "]n [n", "␣r", "za"]);
+    });
+
+    it("lists the jump to what's to answer beside the jump to any item, and shows it where either applies", () => {
+        const moving = REVIEW_KEYS.find((part) => part.title === "Moving");
+        const keys = moving?.keys.map((key) => key.keys) ?? [];
+        expect(keys.indexOf("]a [a")).toBe(keys.indexOf("]] [[") + 1);
+        const jump = moving?.keys.find((key) => key.keys === "]a [a");
+        expect(jump?.short).toBe("to answer");
+        expect(jump?.at).toEqual(["banner", "approvals", "item", "change", "aside", "written"]);
+        expect(shown("flagged")).not.toContain("]a [a");
     });
 
     it("offers a flagged write's file reading it, never approving or declining it", () => {
