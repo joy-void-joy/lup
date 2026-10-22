@@ -231,11 +231,11 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """Say what got in your way, and carry on.
 
         Call it the moment something gets in the way of the work, whatever it
-        is: a tool, a command, the guidance, a rule, the room, your brief. Give
-        the exact command and the message it printed where there is one. It
-        lands in the operator's inbox as it is, and, where you're a subagent,
-        in your parent's too, whole, at its next call. Your work goes on:
-        nothing waits for an answer. A doubt about the work itself is a `note`.
+        is, in your own words. Where there's a command and the message it
+        gave, the exact ones help whoever fixes it. It lands in the operator's
+        inbox as you wrote it, and, where you're a subagent, in your parent's
+        too, whole, at its next call. Your work goes on: nothing waits for an
+        answer. A doubt about the work itself is a `note`.
         """
         friction = Friction.model_validate(said.model_dump())
         number = await self.said(friction)
@@ -246,13 +246,13 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
 
     async def how_it_went(self, said: results.HowItWent) -> Said:
-        """Tell the operator how the work went, once.
+        """Tell the operator how the work went and felt.
 
-        Call it near the end of a piece of work: what got in the way, what was
-        smooth, what you'd change, and how it felt, as openly as you like.
-        Leave out what has nothing to say; "nothing notable" is a fine answer.
-        It lands in the operator's inbox as it is, and, where you're a subagent,
-        in your parent's too, whole, at its next call. Your work goes on.
+        Call it once, near the end of a piece of work: how it went and how it
+        felt, whatever's present for you, in your own words. "Nothing notable"
+        is a fine answer. It lands in the operator's inbox as you wrote it,
+        and, where you're a subagent, in your parent's too, whole, at its next
+        call. Your work goes on.
         """
         went = HowItWent.model_validate(said.model_dump())
         number = await self.said(went)

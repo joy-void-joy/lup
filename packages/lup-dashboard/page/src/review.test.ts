@@ -201,7 +201,7 @@ describe("laid", () => {
         const friction: Item = {
             ...NOTE,
             number: 60,
-            reason: { reason: "friction", got_in_the_way: "`ls` failed", trying: "", would_change: "" },
+            reason: { reason: "friction", text: "`ls` failed" },
             sender: from("s1", "a1"),
             rank: NEWS,
         };
@@ -239,7 +239,7 @@ describe("laid", () => {
         const went: Item = {
             ...NOTE,
             number: 62,
-            reason: { reason: "how it went", got_in_the_way: "", smooth: "", would_change: "", felt: "Good." },
+            reason: { reason: "how it went", text: "Good." },
             rank: NEWS,
         };
         const out = laid([flagged(70, from("s2")), flagged(71, from("s4")), went, NOTE, ended], [], banner, header, EMPTY, NOTHING);
@@ -256,31 +256,20 @@ describe("laid", () => {
         expect([flag(FLAGGED), flag(NOTE), news(FLAGGED)]).toEqual([true, false, false]);
     });
 
-    it("shows a friction, how the work went and a stop by their parts, each labelled where it says something", () => {
+    it("shows a friction, how the work went and a stop as written", () => {
         const friction: Item = {
             ...NOTE,
             number: 62,
-            reason: {
-                reason: "friction",
-                got_in_the_way: "`uv run lup-dev check` printed: engine stale",
-                trying: "run the gate",
-                would_change: "",
-            },
+            reason: { reason: "friction", text: "`uv run lup-dev check` printed: engine stale\nI was running the gate." },
         };
         const went: Item = {
             ...NOTE,
             number: 63,
-            reason: { reason: "how it went", got_in_the_way: "", smooth: "The brief.", would_change: "", felt: "Good." },
-        };
-        const quiet: Item = {
-            ...NOTE,
-            number: 64,
-            reason: { reason: "how it went", got_in_the_way: "", smooth: "", would_change: "", felt: "" },
+            reason: { reason: "how it went", text: "The brief was clear, and it felt good." },
         };
         const stopped: Item = { ...NOTE, number: 65, reason: { reason: "stop", why: "Nothing more is worth doing." } };
-        expect(body(friction)).toBe("`uv run lup-dev check` printed: engine stale\nTrying: run the gate");
-        expect(body(went)).toBe("Smooth: The brief.\nFelt: Good.");
-        expect(body(quiet)).toBe("Nothing notable.");
+        expect(body(friction)).toBe("`uv run lup-dev check` printed: engine stale\nI was running the gate.");
+        expect(body(went)).toBe("The brief was clear, and it felt good.");
         expect(body(stopped)).toBe("Nothing more is worth doing.");
     });
 

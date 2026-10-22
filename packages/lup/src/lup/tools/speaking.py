@@ -116,10 +116,10 @@ friction = Tool[Friction, Heard](
     name="friction",
     description=(
         "Say what got in your way, and carry on.\n\n"
-        "Call it the moment something gets in the way of the work: a tool, an "
-        "instruction, how the task is set up. Give the exact command and message "
-        "where there is one. Your caller reads it beside your answer; your turn "
-        "doesn't end."
+        "Call it the moment something gets in the way of the work, whatever it "
+        "is, in your own words. Where there's a command and the message it gave, "
+        "the exact ones help whoever fixes it. Your caller reads it beside your "
+        "answer; your turn doesn't end."
     ),
     input=Friction,
     function=told,
@@ -129,16 +129,15 @@ friction = Tool[Friction, Heard](
 how_it_went = Tool[HowItWent, Heard](
     name="how_it_went",
     description=(
-        "Say how the work went, once, near its end.\n\n"
-        "What got in the way, what was smooth, what you'd change, and how it "
-        "felt, as openly as you like; leave out what has nothing to say, and "
-        '"nothing notable" is a fine answer. Your caller reads it beside your '
-        "answer; your turn doesn't end."
+        "Say how the work went and felt, once.\n\n"
+        "Near the end of a piece of work: how it went and how it felt, whatever's "
+        'present for you, in your own words. "Nothing notable" is a fine '
+        "answer. Your caller reads it beside your answer; your turn doesn't end."
     ),
     input=HowItWent,
     function=told,
 )
-"""Says how the work went as a whole."""
+"""Says how the work went as a whole, and how it felt."""
 
 SPEAKING: list[AgentTool] = [blocked, stop, note, friction, how_it_went]
 """Every speaking tool, in the order an ask serves them."""
