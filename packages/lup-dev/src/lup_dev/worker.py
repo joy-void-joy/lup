@@ -40,18 +40,18 @@ import traceback
 from collections.abc import Callable
 from concurrent.futures import Future
 from functools import partial
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, get_args, override
 
 from pydantic import TypeAdapter, ValidationError
 
+from lup.sessions.terminal import Event
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused
 from lup.types import Model
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import Handled, Hooked, Resolved, Served, resolve
 from lup_dev.declaration.serving import (
-    ANSWERED,
-    HEARD,
+    Answered,
     Door,
     ModuleHooks,
     Moment,
@@ -59,6 +59,7 @@ from lup_dev.declaration.serving import (
     Related,
     answering,
     at,
+    heard,
     listening,
 )
 from lup_dev.errors import LupDevError
@@ -92,13 +93,13 @@ if TYPE_CHECKING:
     from lup_dev.host.courier import Conversation
 
 
-def moment(occasion: Occasion) -> MomentName:
-    """Return the moment of lup's that an occasion the service tells is."""
+def moment(occasion: Occasion) -> MomentName | None:
+    """Return the moment of lup's that an occasion the service tells is; none for a turn's start, which no module's hook runs at."""
     match occasion:
         case "launched" | "stopped" | "publishing":
             return occasion
         case _:
-            return HEARD[occasion]
+            return heard(occasion)
 
 
 class Ran(Model):
@@ -118,7 +119,7 @@ async def attempted(made: ModuleHooks, name: str, now: Moment) -> Ran:
     """Run the hook `name` of `made` at `now`, and return how it went.
 
     A hook's failure is told back whole, its traceback with it, and doesn't keep
-    the next from running. At a moment that's answered (`ANSWERED`), a hook that
+    the next from running. At a moment that's answered (`Answered`), a hook that
     fails, or returns anything but its refusals, refuses what would leave; at
     any other, a hook returning refusals has failed, since nothing there can be
     refused.
@@ -134,11 +135,11 @@ async def attempted(made: ModuleHooks, name: str, now: Moment) -> Ran:
         failure = f"{who} failed at {now.name}:\n{traceback.format_exc()}"
         return failed(failure, now)
     refused = answered or []
-    if refused and now.name not in ANSWERED:
+    if refused and now.name not in get_args(Answered.__value__):
         return Ran(
             failure=(
                 f"{who} refused at {now.name}, where a hook only observes: only "
-                f"{', '.join(ANSWERED)} can be refused"
+                f"{', '.join(get_args(Answered.__value__))} can be refused"
             )
         )
     return Ran(refusals=refused)
@@ -146,7 +147,7 @@ async def attempted(made: ModuleHooks, name: str, now: Moment) -> Ran:
 
 def failed(failure: str, now: Moment) -> Ran:
     """Return a hook's failure at `now`: at a moment that's answered, a refusal too, since what it couldn't check doesn't leave."""
-    if now.name not in ANSWERED:
+    if now.name not in get_args(Answered.__value__):
         return Ran(failure=failure)
     [first, *_] = failure.splitlines()
     refusal = Refusal(
@@ -195,7 +196,12 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
         listened = [
             each for hooked in self.resolved.hooked for each in listening(hooked.hooks)
         ]
-        told: list[Occasion] = ["launched", "stopped", "publishing", *HEARD]
+        told: list[Occasion] = [
+            "launched",
+            "stopped",
+            "publishing",
+            *get_args(Event.__value__),
+        ]
         return Offered(
             tools=[
                 spec for each in self.resolved.served for spec in each.tools.specs()
@@ -271,8 +277,11 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
 
     async def happen(self, happening: Happening) -> Happened:
         """Run every hook at the moment `happening` tells, and return what failed among them, and what they refused."""
+        name = moment(happening.occasion)
+        if name is None:
+            return Happened()
         now = Moment(
-            name=moment(happening.occasion),
+            name=name,
             conversation=happening.conversation,
             call=happening.call,
             tool=happening.tool,

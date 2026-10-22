@@ -20,7 +20,7 @@ those its `on` names. lup's moments are its own three, a launch opening, a launc
 ending once its session has fully stopped, and `publishing`, before anything
 leaves under the operator's name; and the five each runtime's hooks are read as
 (`lup.sessions.terminal.Event`). A hook observes, but at a moment that's
-answered (`ANSWERED`: `publishing`) it may refuse, returning its refusals
+answered (`Answered`: `publishing`) it may refuse, returning its refusals
 (`lup_dev.host.publishing`), each naming what it found and where; one refusal
 keeps what would leave from leaving. Through `self` it reaches its module, the
 launch, where the launch's runtime keeps its sessions' records, the module's own
@@ -200,18 +200,26 @@ type MomentName = Literal[
 its session fully stopped; something about to leave under the operator's name;
 and the five each runtime's hooks are read as."""
 
-ANSWERED: list[MomentName] = ["publishing"]
+type Answered = Literal["publishing"]
 """The moments a hook may answer: at `publishing` it returns its refusals. At
 every other one it observes, returning nothing."""
 
-HEARD: dict[Event, MomentName] = {
-    "session-started": "session_started",
-    "call-started": "call_started",
-    "call-finished": "call_finished",
-    "turn-ended": "turn_ended",
-    "conversation-ended": "conversation_ended",
-}
-"""The moment each of the events a runtime's hooks are read as is."""
+
+def heard(event: Event) -> MomentName | None:
+    """Return the moment of lup's that an event a runtime's hooks are read as is; none for a turn's start, which no module's hook runs at."""
+    match event:
+        case "session-started":
+            return "session_started"
+        case "call-started":
+            return "call_started"
+        case "call-finished":
+            return "call_finished"
+        case "turn-ended":
+            return "turn_ended"
+        case "conversation-ended":
+            return "conversation_ended"
+        case "turn-started":
+            return None
 
 
 class Moment(Model):
