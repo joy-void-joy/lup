@@ -14,7 +14,7 @@ import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
 import { Conversation } from "./Conversation";
 import { Details } from "./Details";
-import { useNow, useWatched } from "./hooks";
+import { useNow, useSame, useWatched } from "./hooks";
 import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
 import { Palette } from "./Palette";
@@ -72,10 +72,16 @@ export function App() {
     const [chord, setChord] = useState("");
     const [epoch, setEpoch] = useState(0);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const served = reply?.kind === "listed" ? launches(reply) : [];
-    const agents = everyone(served);
+    const served = useMemo(() => (reply?.kind === "listed" ? launches(reply) : []), [reply]);
+    const agents = useMemo(() => everyone(served), [served]);
     const shown = found(served, agents, selected);
-    const talkers = useMemo(() => agents.map((each) => each.talker), [agents]);
+    // What the review reads of the tree stays the same object while it says the same (`useSame`): the host answers
+    // the watch again at every hook, with what each conversation is doing, and the review lays nothing out anew
+    // for a reply that changed only that (`docs/host.md`, *Watching*).
+    const talkers = useSame(
+        useMemo(() => agents.map((each) => each.talker), [agents]),
+        (list) => list.map((each) => `${each.session} ${each.agent ?? ""} ${each.path}`).join("\n"),
+    );
 
     // A party as it's called: a conversation by its path in the tree, else by its runtime's ids.
     const called = useCallback(
@@ -93,19 +99,22 @@ export function App() {
     const named = useCallback((item: Item) => called(item.sender), [called]);
 
     // The conversations running, in the tree's order, each with its banner: the review gives each a group.
-    const live = useMemo(
-        () =>
-            running(reply?.kind === "listed" ? launches(reply) : []).map(({ launch, talker }) => {
-                const conversation: InboxConversation = {
-                    party: "conversation",
-                    repository: launch.repository,
-                    runtime: launch.runtime,
-                    session: talker.session,
-                    agent: talker.agent ?? null,
-                };
-                return { conversation, banner: [last(launch.repository), last(launch.worktree), talker.path].join(" · ") };
-            }),
-        [reply],
+    const live = useSame(
+        useMemo(
+            () =>
+                running(served).map(({ launch, talker }) => {
+                    const conversation: InboxConversation = {
+                        party: "conversation",
+                        repository: launch.repository,
+                        runtime: launch.runtime,
+                        session: talker.session,
+                        agent: talker.agent ?? null,
+                    };
+                    return { conversation, banner: [last(launch.repository), last(launch.worktree), talker.path].join(" · ") };
+                }),
+            [served],
+        ),
+        (list) => JSON.stringify(list),
     );
     const agentsRunning = useMemo(() => live.map((each) => each.conversation), [live]);
 
