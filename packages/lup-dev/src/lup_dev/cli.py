@@ -153,6 +153,7 @@ from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
     Lent,
+    OperatorsEditor,
     RoomClipboard,
     RoomError,
     host_needs,
@@ -1569,10 +1570,12 @@ def launched(
     one off said; the repository named on GitHub, or why not said; the host
     service; the latest CLI, a fallback said; the other repositories the
     declaration names for its sessions to read, each missing one said; the
-    room, its image built where it's missing; the terminal settings; the
-    repository's `config` checked for the room's git; the sweep, then the
-    launch registered, under its launcher's lock; the room's git configuration
-    and helper written; the CLI in the room, with `arguments` after lup's own.
+    operator's editor, said where lup doesn't know it; the room, its image
+    built where it's missing; the terminal settings; the repository's `config`
+    checked for the room's git; the sweep, then the launch registered, under
+    its launcher's lock; the room's git configuration and helper, the
+    clipboard's programs and the editor's link written; the CLI in the room,
+    with `arguments` after lup's own.
     The registration ends, and the launch's directory goes, whatever the CLI
     did.
     """
@@ -1620,6 +1623,15 @@ def launched(
                     "mount it, and its guidance says it's missing."
                 )
         withheld_at_launch(launcher, declared.resolved, worktree)
+        editor = OperatorsEditor.of(launcher.terminal)
+        if editor.program is not None and editor.known is None:
+            launcher.say(
+                f"Your editor, `{editor.program}` (`$VISUAL`, else `$EDITOR`), isn't "
+                "one lup knows the package of, so the room doesn't install it, and "
+                "Ctrl+G there won't find it unless your own layer, "
+                "`lup_project.local.py`, adds its package to `Core`. Every room "
+                "has `nano`."
+            )
         lendable = [each.module for each in declared.resolved.shared]
         unknown = [each for each in modules or [] if each not in lendable]
         if unknown:
@@ -1696,6 +1708,7 @@ def launched(
                     git.write()
                     clipboard = RoomClipboard(launch=own)
                     clipboard.write()
+                    editor.link(own)
                     receives = receiving(launcher.podman, own)
                     walled = room.model_copy(
                         update={

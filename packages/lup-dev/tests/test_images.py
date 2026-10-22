@@ -12,6 +12,7 @@ import pytest
 
 from lup.rooms.container import Image
 from lup.rooms.engine import ContainerError, Exited, Podman, Process
+from lup_dev import Core, Modules, Packages
 from lup_dev.catalog.room import RoomBase
 from lup_dev.declaration.kinds import Package
 from lup_dev.declaration.project import Project
@@ -49,6 +50,42 @@ def test_the_definition_installs_every_package_from_the_pinned_day() -> None:
     )
 
 
+def test_with_man_db_the_man_pages_are_kept_the_base_s_extracted_and_indexed() -> None:
+    packages = [
+        Package(name="git", why="version control"),
+        Package(name="man-db", why="reads a manual"),
+    ]
+
+    assert definition(packages, RoomBase()) == (
+        f"FROM {RoomBase().image}\n"
+        "RUN echo 'Server = https://archive.archlinux.org/repos/2026/08/15/$repo/os/$arch'"
+        " > /etc/pacman.d/mirrorlist \\\n"
+        "    && echo 'NoExtract = !usr/share/man/man*' >> /etc/pacman.conf \\\n"
+        "    && pacman -Syu --noconfirm --needed -- git man-db \\\n"
+        "    && missing=$(pacman -Qkq"
+        """ | awk '$2 ~ "^/usr/share/man/man" { print $1 }' | sort -u) \\\n"""
+        "    && pacman -Sw --noconfirm -- $missing \\\n"
+        "    && pacman -Sp --print-format /var/cache/pacman/pkg/%f -- $missing"
+        " | xargs -I {} bsdtar -xf {} -C / 'usr/share/man/man*' \\\n"
+        "    && mandb --quiet \\\n"
+        "    && echo 'en_US.UTF-8 UTF-8' > /etc/locale.gen \\\n"
+        "    && locale-gen \\\n"
+        "    && rm -rf /var/cache/pacman/pkg/*\n"
+    )
+
+
+def test_the_man_pages_steps_follow_the_install_and_precede_the_cache_s_end() -> None:
+    text = definition([Package(name="man-db", why="reads a manual")], RoomBase())
+    steps = [line.strip().removeprefix("&& ") for line in text.splitlines()[1:]]
+
+    order = ["echo 'NoExtract", "pacman -Syu", "missing=", "mandb", "rm -rf"]
+    places = [
+        next(at for at, step in enumerate(steps) if step.startswith(each))
+        for each in order
+    ]
+    assert places == sorted(places)
+
+
 def test_the_default_modules_packages_are_installed() -> None:
     packages = resolve(Project()).packages
     text = definition(packages, RoomBase())
@@ -58,6 +95,24 @@ def test_the_default_modules_packages_are_installed() -> None:
         assert f" {each.name} " in f"{installing} "
     assert "nodejs" in installing
     assert "uv" in installing
+    assert "mandb --quiet" in text
+
+
+def test_a_room_without_man_db_keeps_no_man_pages() -> None:
+    project = Project(
+        modules=Modules.default().edit(
+            Core(
+                packages=Packages()
+                .drop("man-db", why="nobody reads them here")
+                .drop("man-pages", why="nor these")
+            )
+        )
+    )
+    text = definition(resolve(project).packages, RoomBase())
+
+    assert "NoExtract" not in text
+    assert "mandb" not in text
+    assert "bsdtar" not in text
 
 
 def test_a_name_the_shell_would_read_is_quoted() -> None:

@@ -925,12 +925,12 @@ def test_a_requirement_without_a_package_brings_none() -> None:
 def test_a_layer_changes_core_s_packages_where_they_stand() -> None:
     layer = Core(
         packages=Packages()
-        .drop("emacs-nox", why="nobody here uses it")
+        .drop("gcc", why="nothing here builds from source")
         .add(Package(name="graphviz", why="draws the pipeline"))
     )
     resolved = resolve(Project(modules=Modules.default().edit(layer)))
     names = [each.name for each in resolved.packages]
-    kept = [name for name in machine() if name != "emacs-nox"]
+    kept = [name for name in machine() if name != "gcc"]
     assert names == [*kept, "graphviz", "nodejs", "uv"]
 
 

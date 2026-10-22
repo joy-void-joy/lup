@@ -11,13 +11,14 @@ import pytest
 
 from lup.programs import run
 from lup.rooms.container import Container, Image, Mount
-from lup_dev import Modules, Plain, Project, Python, Repository
-from lup_dev.catalog.room import RoomBase
+from lup_dev import Core, Modules, Package, Packages, Plain, Project, Python, Repository
+from lup_dev.catalog.room import Editors, RoomBase
 from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import resolve
 from lup_dev.launch.images import definition
 from lup_dev.launch.room import (
     Lent,
+    OperatorsEditor,
     RelatedRepository,
     RoomError,
     lent,
@@ -25,7 +26,7 @@ from lup_dev.launch.room import (
     related,
     repository,
 )
-from lup_dev.layout import LOCALTIME, Layout
+from lup_dev.layout import LOCALTIME, LaunchLayout, Layout
 from lup_dev.settings import TerminalVariables
 
 REMEDY = "uv sync --managed-python"
@@ -183,10 +184,10 @@ def test_the_maintaining_room_mounts_and_sets_what_the_note_lists(
     )
 
     localtime = [Mount(source=LOCALTIME, read_only=True)] if LOCALTIME.exists() else []
+    [vim] = [each for each in Editors().editors if each.package == "vim"]
+    packages = [*resolved.packages, Package(name="vim", why=vim.why)]
     assert room == Container(
-        image=Image(
-            definition=definition(resolved.packages, RoomBase()), project=str(bare)
-        ),
+        image=Image(definition=definition(packages, RoomBase()), project=str(bare)),
         mounts=[
             Mount(source=bare),
             Mount(source=bare / "config", read_only=True),
@@ -195,7 +196,6 @@ def test_the_maintaining_room_mounts_and_sets_what_the_note_lists(
             Mount(source=machine.cache),
             Mount(source=tmp_path / "cache" / "lup" / "pyright"),
             Mount(source=home / ".vim", read_only=True),
-            Mount(source=home / ".config" / "nvim", read_only=True),
             *localtime,
         ],
         env={
@@ -381,9 +381,7 @@ def test_an_editor_that_isnt_a_command_line_is_refused(
     worktree = bare / "tree" / "main"
     machine = Machine(tmp_path, worktree)
 
-    with pytest.raises(
-        RoomError, match=r"`\$EDITOR` or `\$VISUAL` isn't a command line"
-    ):
+    with pytest.raises(RoomError, match=r"`\$EDITOR` isn't a command line"):
         maintaining_room(
             resolve(Project()),
             worktree,
@@ -392,6 +390,110 @@ def test_an_editor_that_isnt_a_command_line_is_refused(
             machine.tools(),
             neighbours=[],
         )
+
+
+# The operator's editor
+
+
+def installed(room: Container) -> list[str]:
+    """The packages the room's image installs, by name."""
+    [line] = [
+        each for each in room.image.definition.splitlines() if "pacman -Syu" in each
+    ]
+    return line.split(" -- ")[1].removesuffix(" \\").split()
+
+
+@pytest.mark.parametrize(
+    ("variables", "package"),
+    [
+        ({"editor": "nvim"}, "neovim"),
+        ({"editor": "nvim", "visual": "emacs -nw"}, "emacs-nox"),
+        ({"editor": "vim", "visual": ""}, "vim"),
+        ({"editor": "/usr/local/bin/hx"}, "helix"),
+    ],
+)
+def test_the_room_installs_the_editor_visual_names_else_editor(
+    bare: Path, tmp_path: Path, home: Path, variables: dict[str, str], package: str
+) -> None:
+    worktree = bare / "tree" / "main"
+    machine = Machine(tmp_path, worktree)
+
+    room = maintaining_room(
+        resolve(Project()),
+        worktree,
+        machine.layout,
+        terminal(**variables),
+        machine.tools(),
+        neighbours=[],
+    )
+
+    editors = {each.package for each in Editors().editors}
+    assert [name for name in installed(room) if name in editors] == ["nano", package]
+
+
+def test_an_editor_lup_doesnt_know_adds_nothing_beside_nano(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    machine = Machine(tmp_path, worktree)
+    (home / ".config" / "kak").mkdir(parents=True)
+    resolved = resolve(Project())
+
+    room = maintaining_room(
+        resolved,
+        worktree,
+        machine.layout,
+        terminal(editor="kak"),
+        machine.tools(),
+        neighbours=[],
+    )
+
+    assert room.image.definition == definition(resolved.packages, RoomBase())
+    assert not [
+        each
+        for each in room.mounts
+        if isinstance(each, Mount) and each.source.is_relative_to(home)
+    ]
+
+
+def test_an_editor_the_declaration_installs_already_is_installed_once(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    machine = Machine(tmp_path, worktree)
+    layer = Core(packages=Packages().add(Package(name="vim", why="the project's own")))
+    resolved = resolve(Project(modules=Modules.default().edit(layer)))
+
+    for named in ["nano", "vim"]:
+        room = maintaining_room(
+            resolved,
+            worktree,
+            machine.layout,
+            terminal(editor=named),
+            machine.tools(),
+            neighbours=[],
+        )
+        assert room.image.definition == definition(resolved.packages, RoomBase())
+    assert installed(room).count("vim") == 1
+
+
+def test_hx_is_linked_to_helix_among_the_launch_s_commands(tmp_path: Path) -> None:
+    launch = LaunchLayout(directory=tmp_path / "launch")
+
+    OperatorsEditor.of(terminal(visual="hx")).link(launch)
+
+    assert (launch.bin / "hx").readlink() == Path("/usr/bin/helix")
+
+
+@pytest.mark.parametrize("named", ["helix", "nvim", "kak", ""])
+def test_an_editor_run_by_its_package_s_own_name_is_linked_to_nothing(
+    tmp_path: Path, named: str
+) -> None:
+    launch = LaunchLayout(directory=tmp_path / "launch")
+
+    OperatorsEditor.of(terminal(editor=named)).link(launch)
+
+    assert not launch.bin.exists()
 
 
 # Other repositories, read-only

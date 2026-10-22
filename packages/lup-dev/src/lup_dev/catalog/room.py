@@ -59,7 +59,10 @@ class StandardMachine(Model):
     user's shell, aliases included. The set starts from the first lup's, which its
     sessions used for months, less three: bun, a project's own where it uses one;
     github-cli, since the room holds no GitHub login; and the virtual display behind
-    the first lup's clipboard, which waits for the clipboard's own piece.
+    the first lup's clipboard, which the host's clipboard replaced. To it are added
+    what agents in rooms reached for and didn't find: `man`, `time` and `tmux`
+    (`docs/field-notes.md`, *What agents reached for in rooms*). Its one editor is
+    `nano`: a launch adds the operator's own (`Editors`).
     """
 
     groups: list[Group] = [
@@ -109,11 +112,37 @@ class StandardMachine(Model):
         ),
         Group(
             why=(
-                "measuring and debugging: timing a command properly, arithmetic in "
-                "the shell, tracing what a process does, waiting on a file to "
-                "change rather than polling it"
+                "measuring and debugging: timing a command properly, a command's "
+                "peak memory through `/usr/bin/time`, arithmetic in the shell, "
+                "tracing what a process does, waiting on a file to change rather "
+                "than polling it"
             ),
-            names=["hyperfine", "bc", "strace", "inotify-tools"],
+            names=["hyperfine", "time", "bc", "strace", "inotify-tools"],
+        ),
+        Group(
+            why=(
+                "reads a program's manual with `man`, as `git help` does: the image "
+                "keeps every package's English man pages, and indexes them"
+            ),
+            names=["man-db"],
+        ),
+        Group(
+            why="the manual of Linux's system calls and C library",
+            names=["man-pages"],
+        ),
+        Group(
+            why=(
+                "runs a program that needs a terminal and drives it from commands, "
+                "as `git add -p` needs"
+            ),
+            names=["tmux"],
+        ),
+        Group(
+            why=(
+                "`sqlite3`, to read a SQLite database by hand; the base has it "
+                "already, for its own libraries"
+            ),
+            names=["sqlite"],
         ),
         Group(why="runs a project's Makefile", names=["make"]),
         Group(why="runs a script outside a project's environment", names=["python"]),
@@ -130,47 +159,85 @@ class StandardMachine(Model):
             names=["ttf-liberation"],
         ),
         Group(
-            why="the editors Ctrl+G opens as `$EDITOR`, whichever the operator uses",
-            names=["vim", "neovim", "nano", "emacs-nox", "helix"],
+            why=(
+                "an editor every room has, whatever the operator's own: small, and "
+                "one anybody at the keyboard can use"
+            ),
+            names=["nano"],
+        ),
+        Group(
+            why=(
+                "compiles a Python package built from source, whose C extension "
+                "needs a compiler"
+            ),
+            names=["gcc"],
         ),
     ]
     """The packages, each group with its reason, which each of its packages carries."""
 
 
 class Editor(Model):
-    """An editor of the standard machine, and where the operator keeps its configuration."""
+    """An editor lup knows: its package, the names it's run by, and where the operator keeps its configuration."""
 
+    package: str
+    """Its package in Arch Linux's repositories, which a room installs where
+    it's the operator's editor."""
+    why: str = "the operator's editor, which Ctrl+G opens"
+    """Its package's reason in the room's image."""
     programs: list[str]
-    """The names `$EDITOR` or `$VISUAL` may give it by, as a program's name or a
+    """The names `$VISUAL` or `$EDITOR` may give it by, as a program's name or a
     path's last part."""
+    links: dict[str, Path] = {}
+    """Each name it's run by that its package doesn't install, with the program
+    it does install, which the launch links that name to among the room's
+    commands."""
     configuration: list[Path]
     """Its configuration, from the operator's home."""
 
 
 class Editors(Model):
-    """The standard machine's editors, whose configuration a room mounts read-only for the one the operator names.
+    """The editors lup knows: a room installs the operator's, and mounts its configuration read-only.
 
-    Ctrl+G opens `$EDITOR` in the room, so it opens as the operator knows it
-    (`docs/launch.md`, *The mounts*). Only what exists on the host is mounted.
-    Each program is one the image installs: Arch's helix installs `helix`, not
-    upstream's `hx`, and its vim installs no `vi`.
+    The operator's editor is the one `$VISUAL` names on the host, else
+    `$EDITOR`, the one Ctrl+G opens, so it opens in the room as the operator
+    knows it (`docs/launch.md`, *The image* and *The mounts*).
+    Only that one is installed, where all five in every room took about 818 MiB,
+    `emacs-nox` 529 of it. One lup doesn't know installs nothing, and the launch
+    says so: a person's own layer adds its package. Only configuration that
+    exists on the host is mounted. Each program is one its package installs, or
+    one the launch links: Arch's helix installs `helix`, not upstream's `hx`, and
+    its vim installs no `vi`.
     """
 
     editors: list[Editor] = [
         Editor(
+            package="vim",
+            why=(
+                "the operator's editor, which Ctrl+G opens; `xxd`, the hex dump, "
+                "comes with it, and goes with it"
+            ),
             programs=["vim", "vimdiff", "rvim"],
             configuration=[Path(".vimrc"), Path(".vim"), Path(".config/vim")],
         ),
-        Editor(programs=["nvim"], configuration=[Path(".config/nvim")]),
         Editor(
+            package="neovim", programs=["nvim"], configuration=[Path(".config/nvim")]
+        ),
+        Editor(
+            package="nano",
             programs=["nano", "rnano"],
             configuration=[Path(".nanorc"), Path(".config/nano")],
         ),
         Editor(
+            package="emacs-nox",
             programs=["emacs", "emacsclient"],
             configuration=[Path(".emacs"), Path(".emacs.d"), Path(".config/emacs")],
         ),
-        Editor(programs=["helix"], configuration=[Path(".config/helix")]),
+        Editor(
+            package="helix",
+            programs=["helix", "hx"],
+            links={"hx": Path("/usr/bin/helix")},
+            configuration=[Path(".config/helix")],
+        ),
     ]
 
 
