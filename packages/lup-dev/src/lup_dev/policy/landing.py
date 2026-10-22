@@ -27,11 +27,17 @@ gated branch, `dev` by default, to a local branch's tip:
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
    it's clean and nobody works in it; then the local branch deleted.
 
-**Which branches it lands:** the local branches in the history of the tip and not
-in that of the gated branch's tip on the remote, the branch landed among them.
-A flag keeps the branch its worktree had checked out (`Flagged.branch`): one on a
-branch renamed or deleted since holds nothing, and a stale one on a branch name
-used again holds that branch's landing.
+**Which branches it lands:** of the local branches in the history of the tip and
+not in that of the gated branch's tip on the remote, those the landing merged
+(`landed_branches`): the branch landed, and each whose tip is a parent beyond the
+first of a merge on the first-parent line from the tip down to the remote's. A
+branch whose tip is one of that line's own commits, just made from the
+integration branch say, has nothing of its own in the landing: it's left alone,
+its worktree with it, holds the landing on no flag, and the answer names it, so
+the session landing isn't surprised to find it there. A flag keeps the branch
+its worktree had checked out (`Flagged.branch`): one on a branch renamed or
+deleted since holds nothing, and a stale one on a branch name used again holds
+that branch's landing.
 
 **The version a hold starts from** is the latest the operator saw of the file on
 the branches landed: a flagged write or a hold at landing they approved, read or
@@ -214,8 +220,33 @@ def short(ref: str) -> str:
     return ref.removeprefix("refs/heads/")
 
 
-def landed_branches(git: Git, tip: str, old: str | None) -> dict[str, str]:
-    """Return the local branches a landing of `tip` lands, each ref's full name with its tip: those in `tip`'s history and not in `old`'s, the gated branch's tip on the remote, where it has one."""
+class Branches(Model):
+    """The local branches in a landing's history and not in the remote's: those it lands, each ref's full name with its tip, and those it leaves alone, having merged none of them."""
+
+    landed: dict[str, str] = {}
+    alone: list[str] = []
+
+
+def landed_branches(git: Git, tip: str, old: str | None, source: str) -> Branches:
+    """Return the local branches a landing of `tip`, the branch `source`'s, lands, and those it leaves alone.
+
+    Of the local branches in `tip`'s history and not in `old`'s, the gated
+    branch's tip on the remote where it has one, it lands those the landing
+    merged: `source` itself, and each whose tip is a parent beyond the first
+    of a merge on the first-parent line from `tip` down to `old`. The rest
+    have nothing of their own in it, their tip being one of that line's own
+    commits: a branch just made from the integration branch, say, whose
+    worktree a session may be about to work in.
+    """
+    excluded = [] if old is None else [f"^{old}"]
+    walked = git.text("rev-list", "--first-parent", "--parents", tip, *excluded)
+    # Each tip merged on the line, with the merge that merged it.
+    merged = {
+        parent: merge
+        for line in walked.splitlines()
+        for merge, *parents in [line.split()]
+        for parent in parents[1:]
+    }
     listed = git.run(
         "for-each-ref",
         "--format=%(refname)%00%(objectname)",
@@ -223,8 +254,19 @@ def landed_branches(git: Git, tip: str, old: str | None) -> dict[str, str]:
         *([] if old is None else [f"--no-merged={old}"]),
         "refs/heads/",
     )
-    found = [nul_separated(line) for line in listed.output.splitlines()]
-    return dict(found)
+    found = dict(nul_separated(line) for line in listed.output.splitlines())
+    return Branches(
+        landed={
+            ref: commit
+            for ref, commit in found.items()
+            if ref == source or commit in merged
+        },
+        alone=[
+            ref
+            for ref, commit in found.items()
+            if ref != source and commit not in merged
+        ],
+    )
 
 
 def changed_files(git: Git, old: str | None, tip: str) -> list[Path]:
@@ -435,8 +477,10 @@ class Lander(Model, arbitrary_types_allowed=True):
         unpassed = await asyncio.to_thread(self.unpassed, git, tip, source)
         if unpassed is not None:
             return unpassed
-        branches = await asyncio.to_thread(landed_branches, git, tip, old)
-        holds = await self.holds(git, onto, tip, old, branches)
+        branches = await asyncio.to_thread(
+            landed_branches, git, tip, old, f"refs/heads/{source}"
+        )
+        holds = await self.holds(git, onto, tip, old, branches.landed)
         waited = await self.waited(holds)
         if not all(each.approved for each in waited.outcomes):
             return unapproved(waited)
@@ -452,13 +496,14 @@ class Lander(Model, arbitrary_types_allowed=True):
             kept = " What the operator approved stays approved." if holds else ""
             refusals = f"\n{reply.said}" if reply.said else ""
             return f"Not landed: {update.error}.{kept}{refusals}"
-        cleaned = await self.cleaned(git, remote, refs, branches, onto)
+        cleaned = await self.cleaned(git, remote, refs, branches.landed, onto)
         was = "new there" if old is None else f"which was at {old}"
         return "\n".join(
             [
                 f"Landed {tip} on `{short(onto)}` at `{remote}`, {was}.",
                 *approvals(waited),
                 *said(cleaned),
+                *left_alone(source, branches.alone),
             ]
         )
 
@@ -874,6 +919,14 @@ def said(cleaned: Cleaned) -> list[str]:
     )
     left = ["Left:", *(f"- {line}" for line in cleaned.left)] if cleaned.left else []
     return [*done, *left]
+
+
+def left_alone(source: str, alone: list[str]) -> list[str]:
+    """Say which branches in the landing's history it left alone, the branch `source` having merged none of them, in a line; nothing where there's none."""
+    if not alone:
+        return []
+    named = ", ".join(f"`{short(ref)}`" for ref in alone)
+    return [f"Left alone, `{source}` having merged none of them: {named}."]
 
 
 class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):

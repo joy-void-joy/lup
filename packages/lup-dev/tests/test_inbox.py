@@ -5664,8 +5664,8 @@ class Landings:
         self.shell.commit(root, f"write {path}")
 
     def merged(self, branch: str = "feat") -> str:
-        """Merge `branch` into `dev` in its worktree, record the gate's pass on the result, as `lup-dev check` would, and return its tip."""
-        self.shell.git(self.dev, "merge", "-q", "--no-edit", branch)
+        """Merge `branch` into `dev` in its worktree with a merge commit, as a session lands work, record the gate's pass on the result, as `lup-dev check` would, and return its tip."""
+        self.shell.git(self.dev, "merge", "-q", "--no-ff", "--no-edit", branch)
         tip = self.shell.git(self.dev, "rev-parse", "HEAD")
         self.passing(tip)
         return tip
@@ -5773,7 +5773,9 @@ def test_land_puts_the_branch_on_dev_and_cleans_up_what_it_landed_but_what_s_in_
     busy = landings.branched("busy")
     landings.wrote(busy, "src/pkg/busy.py", '"""Busy."""\n')
     old = landings.on_forge("refs/heads/dev")
-    landings.shell.git(landings.dev, "merge", "-q", "--no-edit", "kept", "busy")
+    landings.shell.git(
+        landings.dev, "merge", "-q", "--no-ff", "--no-edit", "kept", "busy"
+    )
     tip = landings.merged()
     with inboxed(machine, clock, notices, said, rooms=landings.room):
         landings.launched("claude")
@@ -5813,6 +5815,62 @@ def test_land_puts_the_branch_on_dev_and_cleans_up_what_it_landed_but_what_s_in_
         ]
         for each in [feat, kept]
     ]
+
+
+def test_land_leaves_alone_a_branch_with_nothing_of_its_own_and_a_flag_on_it_holds_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    rooms = '"""Rooms."""\n'
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", rooms)
+    shell.git(dev, "merge", "-q", "--no-ff", "--no-edit", "feat")
+    # Made from `dev` once `feat` was merged, as a worker's worktree is, with no
+    # commit of their own: `mid`'s tip is a commit of `dev`'s own line, and
+    # `fresh`'s the tip landed itself.
+    mid = landings.branched("mid")
+    later = landings.branched("later")
+    landings.wrote(later, "src/pkg/later.py", '"""Later."""\n')
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged("later")
+    fresh = landings.branched("fresh")
+    session = lander(landings, "claude")
+    with inboxed(machine, clock, notices, said, rooms=landings.room) as delivery:
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        flags = [
+            landings.flag("src/pkg/rooms.py", rooms, session, branch="mid"),
+            landings.flag("src/pkg/rooms.py", rooms, session, branch="fresh"),
+        ]
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+        holds = [
+            item
+            for item in delivery.inbox.items.values()
+            if isinstance(item.reason, HeldChange)
+        ]
+        states = [delivery.inbox.item(each).state for each in flags]
+    assert not error
+    assert answer == (
+        f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "Cleaned up after it:\n"
+        f"- removed the worktree {feat}\n"
+        "- deleted the local branch `feat`\n"
+        f"- removed the worktree {later}\n"
+        "- deleted the local branch `later`\n"
+        "Left alone, `dev` having merged none of them: `fresh`, `mid`."
+    )
+    assert holds == []
+    assert states == [Waiting(), Waiting()]
+    assert landings.on_forge("refs/heads/dev") == tip
+    assert mid.is_dir()
+    assert fresh.is_dir()
+    assert shell.git(dev, "rev-parse", "fresh") == tip
+    assert shell.git(dev, "rev-parse", "mid") == shell.git(dev, "rev-parse", f"{tip}^")
+    assert not feat.exists()
+    assert not later.exists()
 
 
 def test_land_refuses_a_branch_without_a_pass_of_the_gate_one_behind_the_remote_and_a_branch_not_gated(
