@@ -26,7 +26,8 @@ from mcp.types import TextContent, jsonrpc_message_adapter
 from pydantic import JsonValue, ValidationError
 from typer.testing import CliRunner
 
-from lup.rooms.engine import Exited, Podman, Process
+from lup.programs import Ran
+from lup.rooms.engine import Podman, Process
 from lup.tools.hook import lup_hook
 from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec, lup_tool
@@ -1609,22 +1610,22 @@ class Containers:
         """Whether podman fails at every question, as where it's misconfigured."""
         self.asked: list[list[str]] = []
 
-    def __call__(self, process: Process) -> Exited:
+    def __call__(self, process: Process) -> Ran:
         program, *arguments = process.arguments
         assert program == "podman"
         self.asked.append(arguments)
         match arguments:
             case ["container", "exists", _] if self.broken:
-                return Exited(status=125)
+                return Ran(command=process.arguments, status=125)
             case ["container", "exists", name]:
-                return Exited(status=0 if name in self.running else 1)
+                return Ran(command=process.arguments, status=0 if name in self.running else 1)
             case ["rename", before, after] if not self.refusing:
                 self.running = [
                     after if each == before else each for each in self.running
                 ]
-                return Exited(status=0)
+                return Ran(command=process.arguments, status=0)
             case ["rename", *_]:
-                return Exited(status=125)
+                return Ran(command=process.arguments, status=125)
             case _:
                 message = f"podman asked {process.arguments}"
                 raise AssertionError(message)

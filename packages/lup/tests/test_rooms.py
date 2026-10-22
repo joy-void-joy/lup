@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from lup.adapters.claude import Claude
+from lup.programs import Ran
 from lup.rooms import (
     Container,
     ContainerEngine,
@@ -22,33 +23,39 @@ from lup.rooms import (
     Podman,
     Room,
 )
-from lup.rooms.engine import Exited, Invocation, Process, StoredImage
+from lup.rooms.engine import Invocation, Process, StoredImage
+from lup.sessions.contract import guarded
 from lup.sessions.errors import RealCallInTestError
 from lup.sessions.terminal import Cli, TerminalSettings
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 IMAGE = Image(
     definition="FROM archlinux\nRUN pacman -Sy --noconfirm git\n", project="lup"
 )
 
 
+def exited(status: int, output: str = "") -> Ran:
+    """Return how a scripted podman ended: its status, and what it printed."""
+    return Ran(command=["podman"], status=status, output=output.encode())
+
+
 class Recorder:
     """Runs nothing: records each process, and answers with the next scripted exit."""
 
-    def __init__(self, *exits: Exited) -> None:
+    def __init__(self, *exits: Ran) -> None:
         self.exits = list(exits)
         self.processes: list[Process] = []
         self.contexts: list[bool] = []
 
-    def __call__(self, process: Process) -> Exited:
+    def __call__(self, process: Process) -> Ran:
         self.processes.append(process)
         self.contexts.append(Path(process.arguments[-1]).is_dir())
         return self.exits.pop(0)
 
 
-def podman(*exits: Exited) -> tuple[Podman, Recorder]:
+def podman(*exits: Ran) -> tuple[Podman, Recorder]:
     recorder = Recorder(*exits)
     return Podman(execute=recorder), recorder
 
@@ -214,7 +221,7 @@ def test_a_directory_shared_then_lent_read_only_is_made_so_before_it_spreads(
     at = lent / "atlas"
     for each in [lent, stage, at]:
         each.mkdir()
-    engine, recorder = podman(*[Exited(status=0)] * 10)
+    engine, recorder = podman(*[exited(0)] * 10)
 
     engine.shared(lent)
     engine.private(stage)
@@ -239,7 +246,7 @@ def test_a_directory_shared_then_lent_read_only_is_made_so_before_it_spreads(
 def test_a_directory_lent_writable_is_mounted_where_it_spreads_at_once(
     tmp_path: Path,
 ) -> None:
-    engine, recorder = podman(Exited(status=0))
+    engine, recorder = podman(exited(0))
     engine.lend(Path("/src/atlas"), tmp_path / "atlas", tmp_path, read_only=False)
     assert unshared(recorder) == [
         ["mount", "--bind", "/src/atlas", str(tmp_path / "atlas")]
@@ -247,7 +254,7 @@ def test_a_directory_lent_writable_is_mounted_where_it_spreads_at_once(
 
 
 def test_a_command_in_podman_s_namespace_that_fails_raises(tmp_path: Path) -> None:
-    engine, _ = podman(Exited(status=32))
+    engine, _ = podman(exited(32))
     with pytest.raises(ContainerError, match="`podman unshare umount --recursive"):
         engine.released(tmp_path)
 
@@ -278,7 +285,7 @@ def test_a_mount_at_a_directory_inside_the_home_isnt_a_tmpfs_too() -> None:
 
 
 def test_ensure_builds_a_missing_image_with_its_projects_label() -> None:
-    engine, recorder = podman(Exited(status=1), Exited(status=0))
+    engine, recorder = podman(exited(1), exited(0))
 
     assert engine.ensure(IMAGE) is True
 
@@ -300,7 +307,7 @@ def test_ensure_builds_a_missing_image_with_its_projects_label() -> None:
 
 
 def test_ensure_leaves_an_image_already_built() -> None:
-    engine, recorder = podman(Exited(status=0))
+    engine, recorder = podman(exited(0))
 
     assert engine.ensure(IMAGE) is False
     assert len(recorder.processes) == 1
@@ -308,10 +315,10 @@ def test_ensure_leaves_an_image_already_built() -> None:
 
 @pytest.mark.parametrize(
     "exits",
-    [[Exited(status=125)], [Exited(status=1), Exited(status=1)]],
+    [[exited(125)], [exited(1), exited(1)]],
     ids=["exists-failed", "build-failed"],
 )
-def test_ensure_refuses_when_podman_fails(exits: list[Exited]) -> None:
+def test_ensure_refuses_when_podman_fails(exits: list[Ran]) -> None:
     engine, _ = podman(*exits)
 
     with pytest.raises(ContainerError, match=IMAGE.tag):
@@ -325,7 +332,7 @@ def test_run_returns_the_programs_status_and_refuses_podmans_own_failure() -> No
         workdir=Path("/srv/repo"),
         home=Path("/home/op"),
     )
-    engine, recorder = podman(Exited(status=3), Exited(status=125))
+    engine, recorder = podman(exited(3), exited(125))
 
     assert engine.run(invocation) == 3
     assert recorder.processes[0] == Process(arguments=engine.command(invocation))
@@ -348,7 +355,7 @@ def test_a_projects_images_are_listed_and_one_removed() -> None:
         {"Id": "0a1b2c3d4e5f", "Size": 1, "Containers": 2, "Created": 1791846000},
     ]
     engine, recorder = podman(
-        Exited(status=0, output=json.dumps(listed)), Exited(status=0)
+        exited(0, json.dumps(listed)), exited(0)
     )
 
     images = engine.images("lup")
@@ -386,7 +393,7 @@ def test_a_projects_images_are_listed_and_one_removed() -> None:
 
 
 def test_listing_and_removing_refuse_when_podman_fails() -> None:
-    engine, _ = podman(Exited(status=125), Exited(status=2))
+    engine, _ = podman(exited(125), exited(2))
     stored = StoredImage(
         id="f98ed7c489b3", created=datetime.now(UTC), size=1, containers=1
     )
@@ -398,7 +405,7 @@ def test_listing_and_removing_refuse_when_podman_fails() -> None:
 
 
 def test_a_named_container_is_run_by_its_name_and_asked_after() -> None:
-    engine, recorder = podman(Exited(status=0), Exited(status=1), Exited(status=125))
+    engine, recorder = podman(exited(0), exited(1), exited(125))
     invocation = Invocation(
         container=Container(
             image=IMAGE, mounts=[Mount(source=Path("/srv/repo"))], name="lup-1a2b"
@@ -427,7 +434,7 @@ def test_a_named_container_is_run_by_its_name_and_asked_after() -> None:
 
 
 def test_a_container_is_renamed_and_a_rename_podman_refuses_raises() -> None:
-    engine, recorder = podman(Exited(status=0), Exited(status=125))
+    engine, recorder = podman(exited(0), exited(125))
 
     engine.rename("lup-1a2b", "lup-atlas-dev")
     with pytest.raises(ContainerError, match="rename the container lup-1a2b"):
@@ -442,6 +449,30 @@ def test_a_container_is_renamed_and_a_rename_podman_refuses_raises() -> None:
 def test_podman_itself_is_refused_in_tests() -> None:
     with pytest.raises(RealCallInTestError, match="podman"):
         Podman().ensure(IMAGE)
+
+
+@pytest.fixture
+def unguarded() -> Iterator[None]:
+    """Let the test run a stand-in for podman, which the guard refuses otherwise."""
+    token = guarded.set(False)
+    yield
+    guarded.reset(token)
+
+
+@pytest.mark.usefixtures("unguarded")
+def test_a_podman_that_isnt_there_is_the_engine_s_error(tmp_path: Path) -> None:
+    with pytest.raises(ContainerError, match="can't be run"):
+        Podman(program=str(tmp_path / "podman")).images("lup")
+
+
+@pytest.mark.usefixtures("unguarded")
+def test_a_kept_run_s_failure_says_what_podman_said(tmp_path: Path) -> None:
+    program = tmp_path / "podman"
+    # It reads its input to the end, which a kept run closes, so it doesn't wait.
+    program.write_text("#!/bin/sh\ncat\necho 'Error: no store' >&2\nexit 125\n")
+    program.chmod(0o755)
+    with pytest.raises(ContainerError, match=r"\(status 125\): Error: no store"):
+        Podman(program=str(program)).images("lup")
 
 
 # A launch

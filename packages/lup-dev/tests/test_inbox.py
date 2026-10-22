@@ -34,8 +34,8 @@ from pydantic import Field
 from typer.testing import CliRunner
 
 from lup.github.tools import GitHubTools
+from lup.programs import Ran
 from lup.rooms import Podman
-from lup.rooms.engine import Exited, Process
 from lup.tools.speaking import SPEAKING
 from lup_dev import Modules, Project, cli
 from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
@@ -163,7 +163,7 @@ if TYPE_CHECKING:
     from mcp.client._transport import TransportStreams
     from pydantic import JsonValue
 
-    from lup.programs import Ran
+    from lup.rooms.engine import Process
     from lup_dev.layout import HostLayout
 
 runner = CliRunner()
@@ -1993,10 +1993,10 @@ def named_talkers(
 def podman_of(*running: str) -> Podman:
     """A podman having the containers `running` and no other, asked nothing but whether one is there."""
 
-    def answered(process: Process) -> Exited:
+    def answered(process: Process) -> Ran:
         match process.arguments:
             case ["podman", "container", "exists", name]:
-                return Exited(status=0 if name in running else 1)
+                return Ran(command=process.arguments, status=0 if name in running else 1)
             case _:
                 message = f"podman asked {process.arguments}"
                 raise AssertionError(message)
@@ -2585,9 +2585,9 @@ def test_lup_dev_mount_lends_a_directory_to_a_running_room_and_tells_its_session
 ) -> None:
     ran: list[list[str]] = []
 
-    def recorded(process: Process) -> Exited:
+    def recorded(process: Process) -> Ran:
         ran.append(process.arguments)
-        return Exited(status=0)
+        return Ran(command=process.arguments, status=0)
 
     monkeypatch.setattr(cli, "Podman", lambda: Podman(execute=recorded))
     own = machine.launch("one")

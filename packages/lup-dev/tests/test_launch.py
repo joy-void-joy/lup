@@ -22,7 +22,7 @@ from typer.testing import CliRunner
 
 import lup
 from lup.programs import Ran, run
-from lup.rooms.engine import Exited, Podman, Process
+from lup.rooms.engine import Podman, Process
 from lup.sessions.bridge import Bridge
 from lup.sessions.terminal import (
     Cli,
@@ -266,20 +266,20 @@ class Engine:
         """The links among the launch's commands while the room ran, by name."""
         self.unshared: list[list[str]] = []
 
-    def __call__(self, process: Process) -> Exited:
+    def __call__(self, process: Process) -> Ran:
         self.processes.append(process)
         program, command, *rest = process.arguments
         assert program == "podman"
         match [command, *rest]:
             case ["image", "exists", _]:
                 self.record("image")
-                return Exited(status=0)
+                return Ran(command=process.arguments, status=0)
             case ["container", "exists", name]:
                 self.record(f"container {name}")
-                return Exited(status=1 if name in self.gone else 0)
+                return Ran(command=process.arguments, status=1 if name in self.gone else 0)
             case ["unshare", *unshared]:
                 self.unshared.append(unshared)
-                return Exited(status=0)
+                return Ran(command=process.arguments, status=0)
             case ["run", *_]:
                 self.record("run")
                 flag = "--append-system-prompt-file"
@@ -297,7 +297,7 @@ class Engine:
                     for each in commands.iterdir()
                     if each.is_symlink()
                 }
-                return Exited(status=self.ran)
+                return Ran(command=process.arguments, status=self.ran)
             case _:
                 message = f"podman asked {process.arguments}"
                 raise AssertionError(message)

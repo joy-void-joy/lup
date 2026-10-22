@@ -10,8 +10,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from lup.programs import Ran
 from lup.rooms.container import Image
-from lup.rooms.engine import ContainerError, Exited, Podman, Process
+from lup.rooms.engine import ContainerError, Podman, Process
 from lup_dev import Core, Modules, Packages
 from lup_dev.catalog.room import RoomBase
 from lup_dev.declaration.kinds import Package
@@ -137,19 +138,23 @@ class Script:
         self.removal = removal
         self.commands: list[list[str]] = []
 
-    def __call__(self, process: Process) -> Exited:
+    def __call__(self, process: Process) -> Ran:
         arguments = process.arguments[1:]
         self.commands.append(arguments)
         match arguments:
             case ["image", "exists", *_]:
-                return Exited(status=0 if self.exists else 1)
+                return Ran(command=process.arguments, status=0 if self.exists else 1)
             case ["build", *_]:
                 self.clock.sleep(50)
-                return Exited(status=0)
+                return Ran(command=process.arguments, status=0)
             case ["images", *_]:
-                return Exited(status=0, output=json.dumps(self.listed))
+                return Ran(
+                    command=process.arguments,
+                    status=0,
+                    output=json.dumps(self.listed).encode(),
+                )
             case ["image", "rm", *_]:
-                return Exited(status=self.removal)
+                return Ran(command=process.arguments, status=self.removal)
             case _:
                 pytest.fail(f"podman asked {arguments}")
 
