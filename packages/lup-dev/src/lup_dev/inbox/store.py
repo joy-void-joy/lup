@@ -358,6 +358,9 @@ class Flagged(Model):
     The judge's (`lup_dev.policy.flags`). A later write to the same file by the
     same conversation, flagged or not, joins the item while it gathers them
     (`Inbox.gathering`), the file kept whole since the first and as it stands.
+    Marked read with nothing to add, it's approved (`Decided`); commented on or
+    replied to, it's read and not approved (`Done`), and the landing of its
+    branch waits on it (`lup_dev.policy.landing`).
     """
 
     reason: Literal["flagged"] = "flagged"
@@ -372,6 +375,11 @@ class Flagged(Model):
     commit: str | None = None
     """The commit a move of `HEAD` reached, where the write came with it; none
     where a conversation's call made it."""
+    branch: str | None = None
+    """The branch its worktree had checked out, whose landing waits on it until
+    the operator approves it (`lup_dev.policy.landing`); none on a detached
+    `HEAD`, and for a flag kept before landings waited on flags, which holds
+    none."""
     writes: int = 1
     """How many writes it gathers, the flagged one that made it and each by the
     same conversation to the file since: the page reads its file again as it
@@ -617,7 +625,7 @@ class Done(Model):
 
 
 class Decided(Model):
-    """An approval or a held change the operator answered, wherever they answered it: yes or no, and what they add."""
+    """An approval or a held change the operator answered, wherever they answered it: yes or no, and what they add; or a flagged write they approved, marking it read with nothing to add."""
 
     state: Literal["decided"] = "decided"
     at: datetime

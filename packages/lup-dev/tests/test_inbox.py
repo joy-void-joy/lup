@@ -3945,13 +3945,17 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
     assert notices.raised == []
     assert item.sender == sender
     assert item.reason == Flagged(
-        text="src/pkg/rooms.py landed, flagged for the operator's review.",
+        text=(
+            "src/pkg/rooms.py landed, flagged for the operator's review. It holds at "
+            "landing: `main` lands once they approve it."
+        ),
         summary=(
             "src/pkg/rooms.py is a new production file\n"
             "src/pkg/rooms.py adds the class `Room`"
         ),
         worktree=repo,
         path=Path("src/pkg/rooms.py"),
+        branch="main",
         writes=2,
     )
     assert item.rank.name == "flag"
@@ -3969,16 +3973,16 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
     assert context(reviewed) == (
         '<review item="3" from="operator" covers="1">\n'
         '<on item="1" kind="flagged write">\n'
-        "<opening>src/pkg/rooms.py landed, flagged for the operator's review."
-        "</opening>\n"
+        "<opening>src/pkg/rooms.py landed, flagged for the operator's review. It "
+        "holds at landing: `main` lands once they approve it.</opening>\n"
         "<comment>Yes, but call it Chamber.</comment>\n"
         "</on>\n"
         "</review>"
     )
-    # Marked read, it tells its agent nothing.
+    # Marked read, it tells its agent nothing, and it's approved: commented on, it's read and not approved.
     assert marked == []
     assert "<review" not in quiet
-    assert [type(each) for each in states] == [Done, Done]
+    assert states == [Done(at=clock.now()), Decided(at=clock.now(), approved=True)]
     with pytest.raises(InboxError, match="it isn't withdrawn"):
         delivery.withdrawn(2, sender, "never mind")
 
@@ -4053,17 +4057,21 @@ def test_an_edit_flagging_nothing_refreshes_the_open_item_and_makes_none_once_it
         items = sorted(delivery.inbox.items)
     # The edit flags nothing of its own: the item shows the file as it stands, its whole change judged again.
     assert item.reason == Flagged(
-        text="src/pkg/rooms.py landed, flagged for the operator's review.",
+        text=(
+            "src/pkg/rooms.py landed, flagged for the operator's review. It holds at "
+            "landing: `main` lands once they approve it."
+        ),
         summary="src/pkg/rooms.py is a new production file",
         worktree=repo,
         path=Path("src/pkg/rooms.py"),
+        branch="main",
         writes=2,
     )
     assert (file.before, file.after) == (None, Text(text=f"{first}LIMIT = 3\n"))
     assert notices.raised == []
     # Read, the item gathers no more: an edit flagging nothing makes no item.
     assert items == [1]
-    assert (late.item.number, type(late.item.state)) == (1, Done)
+    assert (late.item.number, type(late.item.state)) == (1, Decided)
 
 
 def test_with_no_host_service_nothing_is_held_for_the_operators_switch(

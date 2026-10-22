@@ -17,6 +17,10 @@ inbox only for a file the session's record says an item may gather
 operator holds each flagged write of a conversation, its writes are held
 instead (`Judge.holding`), and none is flagged.
 
+Each flag keeps the branch its worktree has checked out (`Flagged.branch`), and
+says so: the landing of that branch waits on it until the operator approves it
+(`lup_dev.policy.landing`).
+
 A write lands whatever fails here: what couldn't be put before the operator is
 said to the agent, to pass on.
 """
@@ -28,6 +32,7 @@ from typing import override
 from lup.types import Model
 from lup_dev.clock import Clock
 from lup_dev.errors import LupDevError
+from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.inbox.protocol import AskFlag, Gathering, ShowGathering, Shown
 from lup_dev.inbox.store import ChangedFile, Conversation, Flagged, Text
@@ -103,11 +108,14 @@ def gathered(judge: Judge, landed: Landed, gathering: Gathering) -> Landed | Non
     return landed.model_copy(update={"change": change, "judgement": judgement})
 
 
-def asking(landed: Landed, root: Path, sender: Conversation) -> AskFlag:
-    """Return the request putting `landed` before the operator, its file whole as its change has it, from `sender`, in the worktree at `root`.
+def asking(
+    landed: Landed, root: Path, sender: Conversation, branch: str | None = None
+) -> AskFlag:
+    """Return the request putting `landed` before the operator, its file whole as its change has it, from `sender`, in the worktree at `root`, which has `branch` checked out.
 
     Its summary is what that change asks, a line each; where a later write took
-    out all it flagged, it says so.
+    out all it flagged, it says so. Its text says the branch's landing waits on
+    it, where there's a branch.
     """
     change = landed.change
     path = change.path
@@ -115,13 +123,19 @@ def asking(landed: Landed, root: Path, sender: Conversation) -> AskFlag:
     brought = "" if landed.commit is None else f" with commit {landed.commit}"
     asks = [ask.reason for ask in [*judgement.asks, *judgement.flags]]
     summary = "\n".join(asks) or f"{path}'s whole change flags nothing any more"
+    holding = (
+        ""
+        if branch is None
+        else f" It holds at landing: `{branch}` lands once they approve it."
+    )
     return AskFlag(
         flagged=Flagged(
-            text=f"{path} landed{brought}, flagged for the operator's review.",
+            text=f"{path} landed{brought}, flagged for the operator's review.{holding}",
             summary=summary,
             worktree=root,
             path=path,
             commit=landed.commit,
+            branch=branch,
         ),
         sender=sender,
         diff=unified(path, change.before, change.after),
@@ -159,9 +173,15 @@ def flagged(
     A write its judgement flags joins the item gathering its conversation's
     writes to its file, or makes one. One it flags nothing in only refreshes
     that item, so it shows the file as it stands: where none gathers them, the
-    operator having read it, it makes none, and says so (`Put.read`).
+    operator having read it, it makes none, and says so (`Put.read`). Each
+    keeps the branch the worktree has checked out (`Flagged.branch`): where git
+    can't say it, the flag holds no landing.
     """
     root = judge.root
+    try:
+        branch = Git(cwd=root).branch() if landed else None
+    except LupDevError:
+        branch = None
 
     def one(each: Landed) -> Put:
         path = each.change.path
@@ -179,7 +199,7 @@ def flagged(
             whole = gathered(judge, each, found)
             if refreshing and whole is None:
                 return Put(read=[path] if found.number is None else [])
-            request = asking(whole or each, root, sender)
+            request = asking(whole or each, root, sender, branch)
             joining = None if whole is None else found.number
             flagging.flagged(
                 request.model_copy(

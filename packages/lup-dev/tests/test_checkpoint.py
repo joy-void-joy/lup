@@ -1167,9 +1167,11 @@ def test_what_a_move_brought_flagged_is_put_before_the_operator_naming_its_commi
     head = shell.git(repo, "rev-parse", "HEAD")
     [asked] = kit.flags.asked
     assert asked.flagged.text == (
-        f"src/pkg/new.py landed with commit {head}, flagged for the operator's review."
+        f"src/pkg/new.py landed with commit {head}, flagged for the operator's review. "
+        "It holds at landing: `main` lands once they approve it."
     )
-    assert (asked.flagged.commit, asked.sender.agent, asked.call) == (head, None, None)
+    assert (asked.flagged.commit, asked.flagged.branch) == (head, "main")
+    assert (asked.sender.agent, asked.call) == (None, None)
 
 
 def answer_on_sleep(kit: Kit, response: Response) -> None:

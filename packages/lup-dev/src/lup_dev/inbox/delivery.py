@@ -463,11 +463,17 @@ class Dispatched(Model):
     """The approvals commented on whose push no known session made: their comments stay drafted."""
 
 
-def settled(item: Item, review: Item, at: datetime) -> Answered | Done:
-    """Return where an item a review covers stands once it's sent: a question answered by it, a message done."""
-    if isinstance(item.reason, Question):
-        return Answered(at=at, answer=review.number)
-    return Done(at=at)
+def settled(
+    item: Item, review: Item | None, at: datetime, *, commented: bool
+) -> Answered | Done | Decided:
+    """Return where an item a review covers stands once it's sent: a question answered by `review`, the review its asker gets; a flagged write marked read with nothing to add approved, "looks good"; anything else done, a flagged write `commented` on among it."""
+    match item.reason:
+        case Question() if review is not None:
+            return Answered(at=at, answer=review.number)
+        case Flagged() if not commented:
+            return Decided(at=at, approved=True)
+        case _:
+            return Done(at=at)
 
 
 def ruled(verdict: Verdict) -> str:
@@ -976,7 +982,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 ),
                 None,
             )
-            settling = Done(at=at) if answer is None else settled(item, answer, at)
+            settling = settled(item, answer, at, commented=item.number in commented)
             self.inbox.kept(item.model_copy(update={"state": settling}))
         return sent
 
@@ -1403,15 +1409,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return reply
 
     def done(self, number: int) -> Item:
-        """Take the message item `number` off the operator's list.
+        """Take the message item `number` off the operator's list: a flagged write approved, read with nothing to add.
 
         A question is answered instead, and an item that isn't the operator's,
         or isn't waiting, is refused.
         """
         item = self.inbox.item(number)
         match item:
+            case Item(reason=Flagged(), recipient=Operator(), state=Waiting()):
+                approved = Decided(at=self.clock.now(), approved=True)
+                return self.inbox.kept(item.model_copy(update={"state": approved}))
             case Item(
-                reason=Message() | Friction() | HowItWent() | Stop() | Flagged(),
+                reason=Message() | Friction() | HowItWent() | Stop(),
                 recipient=Operator(),
                 state=Waiting(),
             ):
