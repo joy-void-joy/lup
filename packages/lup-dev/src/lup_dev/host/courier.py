@@ -82,6 +82,10 @@ class Heard(Model):
     said: str | None = None
     """At a turn's end, the agent's last message before it, as the runtime hands
     it to the hook; none for any other hook, or where it has none."""
+    stopped: bool = False
+    """At a subagent's end, whether it was stopped before it ended its turn,
+    rather than ending it: told to its parent, and nothing it's told then holds
+    it, since nothing would read it."""
     prompt: str | None = None
     """At a turn's start, the prompt it starts on, the operator's or one lup's
     tool server pushed; none for any other hook."""
@@ -175,11 +179,19 @@ class Post(ABC):
 
     @abstractmethod
     async def telling(
-        self, launch: Register, conversation: Conversation, heard: Heard, room: int
+        self,
+        launch: Register,
+        conversation: Conversation,
+        parent: Conversation | None,
+        heard: Heard,
+        room: int,
     ) -> Posted:
         """Note the hook `heard`, and return what `conversation` of `launch` is told in its answer, in `room` bytes at most.
 
-        What's returned is counted told, unless it's put back (`returned`).
+        `parent` is the conversation that spawned it, for a subagent a
+        conversation spawned; none for a session's own, and for the runtime's
+        own agents (`Spawned.internal`). What's returned is counted told,
+        unless it's put back (`returned`).
         """
 
     @abstractmethod
@@ -207,6 +219,15 @@ class Spawned(Model):
     """Whether it reads its session's guidance, as the session's own
     conversation does: its runtime gives the guidance to every thread it
     spawns, or it was spawned with its parent's own prompt."""
+    internal: bool = False
+    """Whether it's one of the runtime's own agents, run for its own features
+    (suggesting the operator's next prompt, answering a side question), which
+    no conversation spawned: no parent hears of its end. Each adapter says how
+    its runtime tells them apart."""
+    handed: bool = False
+    """Whether its runtime hands its last message to the conversation that
+    spawned it itself, so lup's word of its end leaves the message out rather
+    than tell it twice."""
 
 
 class Conversation(Model):
@@ -226,6 +247,12 @@ class Conversation(Model):
     session's own, and where it isn't known."""
     kind: str | None = None
     """What kind of subagent it is (`Explore`)."""
+    internal: bool = False
+    """Whether it's one of the runtime's own agents, which no conversation
+    spawned (`Spawned.internal`)."""
+    handed: bool = False
+    """Whether its runtime hands its last message to its parent itself
+    (`Spawned.handed`)."""
     linked: bool = False
     """Whether what its runtime recorded of its spawn was read."""
     introduced: bool = False
@@ -234,6 +261,12 @@ class Conversation(Model):
     holding: bool = False
     """Whether the operator holds each flagged write of it: their switch, "hold
     each flagged write", which the judge asks (`ShowHolding`)."""
+
+    def own(self, launch: str) -> str:
+        """Say its own part of its path: its launch's name, `launch`, for the session's own; a subagent's name; an unnamed one by its kind and its runtime's id."""
+        if self.agent is None:
+            return launch
+        return self.name or f"{self.kind or 'subagent'}·{self.agent}"
 
 
 class Conversations(MutableModel):
@@ -276,7 +309,7 @@ class Conversations(MutableModel):
     def linked(
         self, conversation: Conversation, spawned: Spawned | None
     ) -> Conversation:
-        """Link a subagent to its spawn as its runtime recorded it, and return it: its name, its parent, its kind, and whether the guidance tells it lup's tools.
+        """Link a subagent to its spawn as its runtime recorded it, and return it: its name, its parent, its kind, whether it's the runtime's own, whether its runtime hands its last message to its parent, and whether the guidance tells it lup's tools.
 
         Its parent is the subagent the runtime names, else the session's own
         conversation.
@@ -290,11 +323,19 @@ class Conversations(MutableModel):
                     "name": None if spawned is None else spawned.name,
                     "parent": parent.id,
                     "kind": None if spawned is None else spawned.kind,
+                    "internal": spawned is not None and spawned.internal,
+                    "handed": spawned is not None and spawned.handed,
                     "linked": True,
                     "introduced": conversation.introduced or guided,
                 }
             )
         )
+
+    def spawner(self, conversation: Conversation) -> Conversation | None:
+        """Return the conversation that spawned `conversation`, a subagent a conversation spawned, which hears of its end; none for a session's own, the runtime's own agents, and one whose parent no hook named."""
+        if conversation.parent is None or conversation.internal:
+            return None
+        return self.calling(conversation.parent)
 
     def path(self, conversation: Conversation, launch: str) -> str:
         """Say a conversation as people call it: its launch's name, then each subagent's name down to it, an unnamed one by its kind and its runtime's id."""
@@ -304,16 +345,7 @@ class Conversations(MutableModel):
             None if conversation.parent is None else self.calling(conversation.parent)
         )
         above = launch if parent is None else self.path(parent, launch)
-        return f"{above}/{self.own(conversation, launch)}"
-
-    def own(self, conversation: Conversation, launch: str) -> str:
-        """Say a conversation's own part of its path: its launch's name for the session's own, a subagent's name, an unnamed one by its kind and its runtime's id."""
-        if conversation.agent is None:
-            return launch
-        return (
-            conversation.name
-            or f"{conversation.kind or 'subagent'}·{conversation.agent}"
-        )
+        return f"{above}/{conversation.own(launch)}"
 
     def holder(self, name: str, asking: str) -> Conversation | None:
         """Return the subagent other than `asking` named `name` in this launch, or none."""

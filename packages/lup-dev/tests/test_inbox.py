@@ -100,6 +100,7 @@ from lup_dev.inbox.store import (
     Decided,
     Done,
     Draft,
+    Ended,
     Flagged,
     Found,
     Friction,
@@ -585,8 +586,9 @@ def test_a_subagents_end_holds_once_on_what_waits_for_it(
         )["hookSpecificOutput"]["updatedInput"]
         call(machine.host.launch("one").mcp, "ask", arguments)
         inbox("answer", "1", "--comment", "Yes.")
-        held = send(hook, claude("SubagentStop", agent_id="a1", stop_hook_active=False))
-        let = send(hook, claude("SubagentStop", agent_id="a1", stop_hook_active=True))
+        ending = {"agent_id": "a1", "last_assistant_message": "Asked."}
+        held = send(hook, claude("SubagentStop", stop_hook_active=False, **ending))
+        let = send(hook, claude("SubagentStop", stop_hook_active=True, **ending))
     assert json.loads(held)["hookSpecificOutput"]["hookEventName"] == "SubagentStop"
     assert context(held) == (
         '<answer item="2" from="operator" question="1">\n'
@@ -1385,15 +1387,19 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         listed = inbox()
         shown = inbox("show", "1")
         replied = inbox("answer", "1", "--comment", "The rebuild is fixed.")
-        reply = delivery.inbox.item(7)
+        reply = delivery.inbox.item(8)
         done = inbox("done", "2")
+        copy = delivery.inbox.item(6)
+    # Codex's subagent b1 has a parent, its session's own conversation, which
+    # gets a copy of how it went (@6); Claude Code's a1, with no type and no
+    # record, is Claude Code's own, and has none.
     assert [text for text, _ in answers] == [
         "Your friction is with the operator, @1. Carry on.",
         "How it went is with the operator, @2.",
         "Your stop is with the operator, @3. End your turn.",
         "Your friction is with the operator, @4. Carry on.",
-        "How it went is with the operator, @5.",
-        "Your stop is with the operator, @6. End your turn.",
+        "How it went is with the operator, @5 and your parent.",
+        "Your stop is with the operator, @7. End your turn.",
     ]
     assert not any(error for _, error in answers)
     # The parts a friction once had are refused: it's one text.
@@ -1413,8 +1419,13 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         (3, claude_session, Operator(), "s1"),
         (4, codex_session, Operator(), "c1"),
         (5, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c2"),
-        (6, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c3"),
+        (7, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c3"),
     ]
+    assert (copy.reason, copy.recipient, copy.quiet) == (
+        HowItWent.model_validate(went),
+        codex_session,
+        True,
+    )
     friction = Friction.model_validate(jammed)
     assert [each.reason for each in waiting] == [
         friction,
@@ -1437,7 +1448,7 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         "`uv run lup-dev check` printed: engine stale\n"
         "I was running the gate; saying the rebuild's time first would help.\n"
     )
-    assert replied.startswith("Replied to @1: your reply, @7, is for subagent a1")
+    assert replied.startswith("Replied to @1: your reply, @8, is for subagent a1")
     assert reply.reason == Message(kind="note", text="The rebuild is fixed.", of=1)
     assert reply.recipient == claude_session.model_copy(update={"agent": "a1"})
     assert done.startswith("@2")
@@ -1917,6 +1928,17 @@ class Subagents:
             transcript_path=str(self.transcript),
         )
 
+    def ended(self, agent: str, kind: str, said: str | None) -> str:
+        """Subagent `agent`'s turn ending, saying `said`; with no message, as Claude Code ends one it stopped."""
+        return claude(
+            "SubagentStop",
+            agent_id=agent,
+            agent_type=kind,
+            transcript_path=str(self.transcript),
+            stop_hook_active=False,
+            **({} if said is None else {"last_assistant_message": said}),
+        )
+
     def lup(
         self,
         hooks: tuple[Path, Path],
@@ -2213,6 +2235,296 @@ def test_a_claude_fork_and_a_codex_subagent_read_the_guidance_and_are_told_nothi
     assert introduction() not in forked
     assert codex_told.startswith("lup: this subagent is `other/subagent·b1` for now")
     assert introduction() not in codex_told
+
+
+class Rollouts:
+    """A Codex session's subagents' rollouts, each headed by its `session_meta`, as Codex keeps them: session `t1`'s own thread is their root."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.folder = tmp_path / "sessions"
+        self.folder.mkdir(parents=True)
+
+    def rollout(self, thread: str) -> Path:
+        return self.folder / f"rollout-{thread}.jsonl"
+
+    def recorded(self, thread: str, parent: str, path: str | None = None) -> None:
+        """Record thread `thread`, spawned by thread `parent`: with the path the second `spawn_agent` gives, where it's given; with none, as the first spawns."""
+        meta: dict[str, JsonValue] = {
+            "id": thread,
+            "session_id": "t1",
+            "parent_thread_id": parent,
+            "agent_role": "explorer",
+        }
+        if path is not None:
+            meta["agent_path"] = path
+        line = json.dumps({"type": "session_meta", "payload": meta})
+        self.rollout(thread).write_text(f"{line}\n")
+
+    def call(self, thread: str, call: str) -> str:
+        """A call of subagent `thread`'s starting, naming its own rollout."""
+        return codex(
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "ls"},
+            tool_use_id=call,
+            agent_id=thread,
+            agent_type="explorer",
+            transcript_path=str(self.rollout(thread)),
+        )
+
+    def ended(self, thread: str, parent: str, said: str) -> str:
+        """Subagent `thread`'s turn ending, saying `said`: naming its parent's rollout, and its own beside it."""
+        return codex(
+            "SubagentStop",
+            agent_id=thread,
+            agent_type="explorer",
+            transcript_path=str(self.rollout(parent)),
+            agent_transcript_path=str(self.rollout(thread)),
+            last_assistant_message=said,
+            stop_hook_active=False,
+        )
+
+    def lup(
+        self,
+        hooks: tuple[Path, Path],
+        tool: str,
+        arguments: dict[str, JsonValue],
+        thread: str,
+    ) -> tuple[str, bool]:
+        """Call lup's `tool` as subagent `thread` does: its start stamped by the hook on `hooks[0]`, then the call through the tool server on `hooks[1]`."""
+        hook, mcp = hooks
+        started = codex(
+            "PreToolUse",
+            tool_name=f"mcp__lup__{tool}",
+            tool_input=arguments,
+            tool_use_id=f"{thread}-{tool}",
+            agent_id=thread,
+            agent_type="explorer",
+            transcript_path=str(self.rollout(thread)),
+        )
+        stamped = json.loads(send(hook, started))["hookSpecificOutput"]["updatedInput"]
+        return call(mcp, tool, stamped)
+
+
+def handed(number: int, agent: str, name: str) -> str:
+    """How item `number` is told: Claude Code's subagent `agent`, called `name`, ended its turn, its last message handed to its parent by Claude Code itself."""
+    return (
+        f'<ended item="{number}" from="subagent {agent} of claude session s1" '
+        f'name="{name}">It ended its turn. Its last message reaches you from your '
+        "runtime.</ended>"
+    )
+
+
+def test_wait_inbox_returns_when_its_own_subagent_ends_and_never_for_anothers_on_claude_code(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    others = Subagents(tmp_path / "other")
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, tmp_path / "x", "two", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        hook2 = machine.host.launch("two").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+        send(hook, records.spawn("t2", agent="a1"))
+        records.recorded("a2", "general-purpose", "t2", name="tokens", parent="a1")
+        send(hook, records.call("a2", "general-purpose", "c2"))
+        send(hook2, others.spawn("t3"))
+        others.recorded("b1", "Explore", "t3", name="lexer")
+        send(hook2, others.call("b1", "Explore", "c3"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting = pool.submit(call, mcp, "wait_inbox", {})
+            assert delivery.holding.wait(timeout=60)
+            # Another launch's subagent, and the subagent's own: neither is the
+            # main conversation's, and the call holds through both.
+            send(hook2, others.ended("b1", "Explore", "Lexed."))
+            send(hook, records.ended("a2", "general-purpose", "Found three."))
+            told = send(hook, records.call("a1", "Explore", "c4"))
+            send(hook, records.ended("a1", "Explore", "Parsed."))
+            returned = waiting.result(timeout=60)
+        after = send(hook, bash("m1"))
+        elsewhere = delivery.inbox.item(1)
+    assert context(told) == handed(2, "a2", "tokens")
+    assert returned == (handed(3, "a1", "parser"), False)
+    assert after == ""
+    assert elsewhere.recipient == Conversation(
+        repository=tmp_path / "x" / ".git", runtime="claude", session="s1"
+    )
+    assert elsewhere.state == Waiting()
+
+
+def test_a_subagents_end_waits_for_its_parents_call_never_holding_its_end_nor_waking_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        for agent, kind, call_id in [("a1", "Explore", "t1"), ("a3", "Plan", "t3")]:
+            send(hook, records.spawn(call_id))
+            records.recorded(agent, kind, call_id)
+        send(hook, records.call("a1", "Explore", "c1"))
+        send(hook, bash("m1"))
+        send(hook, records.ended("a1", "Explore", "Parsed."))
+        ended = send(hook, claude("Stop", stop_hook_active=False))
+        # The session idle: a subagent stopped, first heard at its end, and one
+        # of Claude Code's own, a suggestion for the operator's next prompt.
+        send(hook, records.ended("a3", "Plan", None))
+        own = claude(
+            "SubagentStop",
+            agent_id="x1",
+            agent_type="",
+            transcript_path=str(records.transcript),
+            last_assistant_message="Run the tests?",
+        )
+        send(hook, own)
+        returned = call(mcp, "wait_inbox", {})
+        after = send(hook, bash("m2"))
+        items = list(delivery.inbox.items.values())
+    assert ended == ""
+    assert not [line for line in said if "woke" in line or "woken" in line]
+    assert returned == (
+        handed(1, "a1", "Explore·a1")
+        + "\n\n"
+        + '<ended item="2" from="subagent a3 of claude session s1" name="Plan·a3">'
+        "It was stopped before it ended its turn.</ended>",
+        False,
+    )
+    assert after == ""
+    assert [(each.number, each.quiet) for each in items] == [(1, True), (2, True)]
+
+
+def test_a_stopped_subagent_holds_nothing_and_what_waits_for_it_goes_to_its_session(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        records.lup((hook, mcp), "ask", {"question": "May I?"}, "a1", "Explore")
+        inbox("answer", "1", "--comment", "Yes.")
+        stopped = send(hook, records.ended("a1", "Explore", None))
+        told = send(hook, bash("m1"))
+    assert stopped == ""
+    assert context(told) == (
+        '<answer item="2" from="operator" for="subagent a1 of claude session s1, '
+        'whose conversation had ended" question="1">\n'
+        "<asked>May I?</asked>\nYes.\n</answer>\n\n"
+        '<ended item="3" from="subagent a1 of claude session s1" name="parser">'
+        "It was stopped before it ended its turn.</ended>"
+    )
+
+
+def test_wait_inbox_returns_when_its_own_subagent_ends_with_its_last_message_on_codex(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    rollouts = Rollouts(tmp_path)
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "codex")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, codex("SessionStart", source="startup"))
+        rollouts.recorded("th1", "t1")
+        rollouts.recorded("th2", "th1")
+        rollouts.recorded("th3", "t1", "/root/lexer")
+        send(hook, rollouts.call("th1", "c1"))
+        send(hook, rollouts.call("th2", "c2"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting = pool.submit(call, mcp, "wait_inbox", {})
+            assert delivery.holding.wait(timeout=60)
+            send(hook, rollouts.ended("th2", "th1", "Found three call sites."))
+            told = send(hook, rollouts.call("th1", "c3"))
+            send(hook, rollouts.ended("th1", "t1", "Parsed: three call sites."))
+            returned = waiting.result(timeout=60)
+        # One the second `spawn_agent` spawned, first heard at its end: Codex
+        # hands its last message to its parent itself.
+        send(hook, rollouts.ended("th3", "t1", "Lexed."))
+        at_once = call(mcp, "wait_inbox", {})
+        after = send(hook, codex_bash("d1"))
+    assert context(told) == (
+        '<ended item="1" from="subagent th2 of codex session t1" name="explorer·th2">\n'
+        "It ended its turn. Its last message:\n"
+        "<said>Found three call sites.</said>\n"
+        "</ended>"
+    )
+    assert returned == (
+        (
+            '<ended item="2" from="subagent th1 of codex session t1" '
+            'name="explorer·th1">\n'
+            "It ended its turn. Its last message:\n"
+            "<said>Parsed: three call sites.</said>\n"
+            "</ended>"
+        ),
+        False,
+    )
+    assert at_once == (
+        (
+            '<ended item="3" from="subagent th3 of codex session t1" name="lexer">'
+            "It ended its turn. Its last message reaches you from your runtime."
+            "</ended>"
+        ),
+        False,
+    )
+    assert after == ""
+
+
+def test_a_subagents_friction_and_how_it_went_reach_its_parent_whole_on_each_runtime(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    rollouts = Rollouts(tmp_path)
+    jammed: dict[str, JsonValue] = {
+        "text": (
+            "`uv run lup-dev check` printed: engine stale\n"
+            "The brief said the engine was built."
+        )
+    }
+    went: dict[str, JsonValue] = {"text": "The brief was clear, and it felt good."}
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, tmp_path / "v", "two", "codex")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        hook2, mcp2 = machine.host.launch("two").hook, machine.host.launch("two").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, codex("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        rollouts.recorded("th1", "t1", "/root/lexer")
+        jam = records.lup((hook, mcp), "friction", jammed, "a1", "Explore")
+        how = rollouts.lup((hook2, mcp2), "how_it_went", went, "th1")
+        ended = send(hook, claude("Stop", stop_hook_active=False))
+        told = context(send(hook, bash("m1")))
+        told2 = context(send(hook2, codex_bash("d1")))
+        operators = [each.number for each in delivery.inbox.waiting(Operator())]
+        copies = [delivery.inbox.item(number) for number in [2, 4]]
+    friction = Friction.model_validate(jammed)
+    how_it_went = HowItWent.model_validate(went)
+    assert jam == (
+        "Your friction is with the operator, @1 and your parent. Carry on.",
+        False,
+    )
+    assert how == ("How it went is with the operator, @3 and your parent.", False)
+    assert ended == ""
+    assert told.startswith(
+        '<item item="2" from="subagent a1 of claude session s1" kind="friction">'
+    )
+    assert friction.text in told
+    assert told2.startswith(
+        '<item item="4" from="subagent th1 of codex session t1" kind="how it went">'
+    )
+    assert how_it_went.text in told2
+    assert operators == [1, 3]
+    assert [(each.reason, each.quiet) for each in copies] == [
+        (friction, True),
+        (how_it_went, True),
+    ]
 
 
 def test_lup_dev_inbox_send_names_a_launch_by_its_id_or_its_worktree(
@@ -2804,7 +3116,7 @@ def test_what_doesnt_fit_waits_for_the_next_hook_and_what_a_gone_hook_told_is_pu
     heard = Heard(event="call-started", session="s1", judged=False, fits=10_000)
 
     async def told(room: int) -> Posted:
-        return await delivery.telling(launch, caller, heard, room)
+        return await delivery.telling(launch, caller, None, heard, room)
 
     asyncio.run(told(10_000))
     for text in ["a" * 4_000, "b" * 4_000, "c" * 4_000]:
@@ -2838,6 +3150,7 @@ def test_an_items_kind_ranks_it_where_it_comes_and_whether_it_notifies() -> None
         Friction(text="The gate hung."),
         HowItWent(text="Nothing notable."),
         Stopped(why="Nothing more is worth doing."),
+        Ended(name="parser", said="Done."),
     ]
     assert [ranked(each) for each in waiting] == [
         Rank(name="waiting on you", order=0, notifies=True)

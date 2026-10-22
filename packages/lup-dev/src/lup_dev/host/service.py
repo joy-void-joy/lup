@@ -955,7 +955,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
         The conversation the hook names gets lup's id here the first time, and
         is told what the post says waits for it, in what room the judge's answer
-        leaves. A session's own turn's end puts its last message before the
+        leaves; the post hears of the conversation that spawned it too, where a
+        conversation did (`Conversations.spawner`), which hears of its end. A session's own turn's end puts its last message before the
         operator (`Post.concluded`) before anything is told, so the message is
         theirs to read whether the end is held or let through. A session's own
         start, and its own prompt where the hook takes a title, name its launch
@@ -1005,10 +1006,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         )
         if self.post is not None and ended is not None and ended.strip():
             await self.post.concluded(request, conversation, ended)
+        parent = conversations.spawner(conversation)
         posted = (
             Posted()
             if self.post is None
-            else await self.post.telling(request, conversation, heard, room)
+            else await self.post.telling(request, conversation, parent, heard, room)
         )
         title = None if named is None else named.title
         telling = Telling(
@@ -1242,7 +1244,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             parent = None if each.parent is None else conversations.calling(each.parent)
             return Talker(
                 path=conversations.path(each, launch),
-                own=conversations.own(each, launch),
+                own=each.own(launch),
                 session=each.session,
                 agent=each.agent,
                 kind=each.kind,

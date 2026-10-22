@@ -14,7 +14,9 @@ agent's tool took it; a change held, or a write that landed flagged, as the
 judge put it), whose kind ranks it (`ranked`); a sender and a recipient; when
 it was made; and its state: waiting, told (when, and how), answered, done, or
 for an approval decided. An item for a conversation that has ended goes to its
-session's main conversation, saying whose it was.
+session's main conversation, saying whose it was. A subagent's end, and a copy
+of what it says of its work, go to the conversation that spawned it, which its
+whereabouts keep: quiet items, told at a call and never holding a turn's end.
 
 An approval is trust on launch's: the launch's own question, put to the
 operator's inbox and answered at the launching terminal or any other, whichever
@@ -225,6 +227,52 @@ class Stop(speaking.Stop):
         return self.why
 
 
+class Ended(Model):
+    """A subagent's end, for the conversation that spawned it: its name, whether it ended its turn or was stopped, and its last message where its runtime doesn't hand that to its parent itself."""
+
+    reason: Literal["ended"] = "ended"
+    name: str
+    """How lup calls it: its own name, or its kind and its runtime's id."""
+    stopped: bool = False
+    """Whether it was stopped before it ended its turn, rather than ending it."""
+    handed: bool = False
+    """Whether its runtime hands its last message to its parent itself, so lup
+    leaves it out rather than tell it twice."""
+    said: str | None = None
+    """Its last message, whole, where its runtime doesn't hand it on; none where
+    it does, or the subagent left none."""
+
+    @property
+    def passed(self) -> str | None:
+        """Return its last message as lup hands it on; none where it was stopped, its runtime hands it on, or it left none."""
+        if self.stopped or self.handed or self.said is None or not self.said.strip():
+            return None
+        return self.said
+
+    @property
+    def heading(self) -> str:
+        """Say how it ended, in lup's words, and where its last message is."""
+        if self.stopped:
+            return "It was stopped before it ended its turn."
+        if self.handed:
+            return "It ended its turn. Its last message reaches you from your runtime."
+        if self.passed is None:
+            return "It ended its turn, with no last message."
+        return "It ended its turn. Its last message:"
+
+    @property
+    def text(self) -> str:
+        """Say it as lup tells the parent: how it ended, then its last message, where lup hands that on.
+
+        >>> print(Ended(name="parser", said="Done: three call sites.").text)
+        It ended its turn. Its last message:
+        Done: three call sites.
+        >>> print(Ended(name="parser", handed=True, said="Done.").text)
+        It ended its turn. Its last message reaches you from your runtime.
+        """
+        return self.heading if self.passed is None else f"{self.heading}\n{self.passed}"
+
+
 class Question(Model):
     """A question for the operator: its numbered decisions, each with the agent's lean; or none, answered in words."""
 
@@ -377,6 +425,7 @@ type Reason = Annotated[
     | Friction
     | HowItWent
     | Stop
+    | Ended
     | Question
     | Answer
     | Approval
@@ -616,13 +665,14 @@ def ranked(reason: Reason) -> Rank:
     | Rank | Kinds | Order | Notice |
     |---|---|---|---|
     | waiting on you | a question, a held change, an approval, a problem (`blocked`), a disagreement, a question sent as a message | first | yes |
-    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice | next | no |
+    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice, a subagent's end | next | no |
     | flag | a write that landed flagged | last | no |
 
     A message ranks by its kind, whichever tool sent it: a note is a remark to
     read, where a doubt that needs the operator soon is a question, asked.
     The operator's own items, an answer and a review, go to agents, so neither
-    the review nor a notice reads theirs.
+    the review nor a notice reads theirs; nor a subagent's end, which goes to
+    its parent.
 
     >>> ranked(Stop(why="Done."))
     Rank(name='news', order=1, notifies=False)
@@ -630,7 +680,7 @@ def ranked(reason: Reason) -> Rank:
     'news'
     """
     match reason:
-        case Message(kind="note") | Friction() | HowItWent() | Stop():
+        case Message(kind="note") | Friction() | HowItWent() | Stop() | Ended():
             return Rank(name="news", order=1, notifies=False)
         case Flagged():
             return Rank(name="flag", order=2, notifies=False)
@@ -654,6 +704,11 @@ class Item(Model):
     call: str | None = None
     """The runtime's id for the tool call that made it, its moment in its
     sender's record; none where no agent's call did (`ShowContext`)."""
+    quiet: bool = False
+    """Whether it waits for a call of its recipient's, never holding a turn's end
+    to be told nor waking an idle session: a subagent's news for its parent,
+    which its runtime wakes for the subagent's end already, so that each end
+    costs no turn of its own."""
     made: datetime
     state: State = Waiting()
 
@@ -703,6 +758,10 @@ class Whereabouts(Model):
     ended: datetime | None = None
     """When its conversation ended, at its `conversation-ended` hook; none while
     it goes on."""
+    parent: Conversation | None = None
+    """The conversation that spawned it, for a subagent a conversation spawned,
+    which hears of its end and of what it says of its work; none for a session's
+    own, and for the runtime's own agents."""
 
 
 def read[M: Model](path: Path, model: type[M]) -> M:
@@ -838,8 +897,9 @@ class Inbox(MutableModel):
         at: datetime,
         *,
         call: str | None = None,
+        quiet: bool = False,
     ) -> Item:
-        """Make an item, numbered after every other, and keep it; `call` is the runtime's id for the agent's call that made it, where one did.
+        """Make an item, numbered after every other, and keep it; `call` is the runtime's id for the agent's call that made it, where one did, and `quiet` says it waits for a call (`Item.quiet`).
 
         One for a conversation that has ended goes to its session's main
         conversation, saying whose it was.
@@ -853,6 +913,7 @@ class Inbox(MutableModel):
             addressed=addressed,
             worktree=worktree,
             call=call,
+            quiet=quiet,
             made=at,
         )
         return self.kept(item)

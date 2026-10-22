@@ -874,20 +874,33 @@ class Stop(Payload):
 
 
 class SubagentStop(Payload):
-    """`SubagentStop`: a subagent's conversation ends its turn.
+    """`SubagentStop`: a subagent's conversation ends its turn, or was stopped.
 
     The hooks reference: it takes "the same decision control format as Stop
     hooks, including `hookSpecificOutput.additionalContext` with `hookEventName`
     set to `"SubagentStop"`, for non-error feedback that keeps the subagent
     running".
+
+    Read in the 2.1.308 binary (`docs/field-notes.md`, *A subagent's end*): the
+    input carries `last_assistant_message`, as `Stop`'s does, when the
+    subagent's turn ends; and a subagent whose run broke off, stopped by the
+    operator or its parent or by an exception, runs `SubagentStop` once more as
+    it's cleaned up ("SubagentStop on interrupted query"), within 5 seconds and
+    with no message, so one without a message is taken as stopped: a turn
+    ending with no text is rare (2 of 2,507 `Stop`s, *The end after a held
+    end*), and taken so its end is held for nothing. One whose turn ends
+    on an error from the model's API runs `StopFailure` alone, which lup
+    doesn't hook: its parent isn't told.
     """
 
     hook_event_name: Literal["SubagentStop"]
     stop_hook_active: bool = False
     """Whether the subagent goes on because a `SubagentStop` hook blocked it already."""
+    last_assistant_message: str | None = None
+    """Its last message of the turn; absent where its run broke off."""
 
     def heard(self, fits: int) -> Heard:
-        """Read a subagent's turn's end: the judge reads it."""
+        """Read a subagent's turn's end, or its stop where it carries no message: the judge reads it."""
         return Heard(
             event="conversation-ended",
             session=self.session_id,
@@ -895,6 +908,8 @@ class SubagentStop(Payload):
             judged=True,
             after_block=self.stop_hook_active,
             fits=fits,
+            said=self.last_assistant_message,
+            stopped=self.last_assistant_message is None,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -955,11 +970,20 @@ reads the session's guidance, which the system prompt carries."""
 def spawned(raw: str) -> Spawned | None:
     """Return how the subagent a Claude Code hook fires for was spawned, from its record beside the session's transcript; none for the session's own conversation.
 
-    A subagent whose record isn't there is said by its type alone. Only a fork
-    reads the session's guidance: every other subagent's system prompt is "the
-    agent's own prompt plus environment details that Claude Code appends, not
-    the Claude Code system prompt" (the `sub-agents` docs, *What loads at
-    startup*), which lup's guidance is appended to.
+    A subagent whose record isn't there is said by its type alone; one with
+    neither is Claude Code's own (`Spawned.internal`): its prompt suggestions
+    and `/btw` are heard only at `SubagentStop`, with no type and no record,
+    174 of them in one of lup's launches (`docs/field-notes.md`, *A subagent's
+    end*). Only a fork reads the session's guidance: every other subagent's
+    system prompt is "the agent's own prompt plus environment details that
+    Claude Code appends, not the Claude Code system prompt" (the `sub-agents`
+    docs, *What loads at startup*), which lup's guidance is appended to.
+
+    Claude Code hands every subagent's last message to its parent itself
+    (`Spawned.handed`): the result of a foreground `Agent` call, or a
+    background one's task notification, its `<result>` whole, beside the
+    parent's next call's result or starting its turn (`docs/field-notes.md`,
+    *A subagent's end*).
     """
     payload = Subagented.model_validate_json(raw)
     if not payload.agent_id:
@@ -972,11 +996,17 @@ def spawned(raw: str) -> Spawned | None:
     )
     record = None if folder is None else folder / f"agent-{payload.agent_id}.meta.json"
     if record is None or not record.is_file():
-        return Spawned(kind=kind, guided=kind == FORK)
+        return Spawned(
+            kind=kind, guided=kind == FORK, internal=kind is None, handed=True
+        )
     kept = SubagentRecord.model_validate_json(record.read_text())
     kind = kept.agent_type or kind
     return Spawned(
-        name=kept.name, parent=kept.parent_agent_id, kind=kind, guided=kind == FORK
+        name=kept.name,
+        parent=kept.parent_agent_id,
+        kind=kind,
+        guided=kind == FORK,
+        handed=True,
     )
 
 

@@ -58,6 +58,16 @@ item's tag (`words`), as its agent reads it.
 conversation, saying whose it was: one made for it then (`Inbox.made`), and
 those still waiting when it ends.
 
+**A subagent's end, and what it says of its work,** reach the conversation that
+spawned it (`Whereabouts.parent`): which subagent ended and how, with its last
+message where its runtime doesn't hand that on (`ended`); a copy of each
+`friction` and `how_it_went`. Each is quiet (`Item.quiet`): told at the
+parent's next call, its turn's or session's start, or by `wait_inbox`, but never
+holding a turn's end nor waking an idle session, since its runtime wakes an idle
+parent for its subagent's end already, and each end would otherwise cost the
+parent a turn of its own. Told beside another item that holds an end or wakes
+the session, it goes with it.
+
 The operator hears of each item that reaches them waiting on them through the
 desktop's notices; news and flags never raise one (`ranked`).
 
@@ -104,6 +114,7 @@ from lup_dev.inbox.store import (
     Decided,
     Done,
     Draft,
+    Ended,
     Flagged,
     Friction,
     HeldChange,
@@ -172,6 +183,10 @@ def what(item: Item) -> str:
             return "how the work went"
         case Stop():
             return "a stop by choice"
+        case Ended(stopped=True):
+            return "a subagent stopped"
+        case Ended():
+            return "the end of a subagent's turn"
         case Question():
             return "a question"
         case Answer():
@@ -196,6 +211,7 @@ def opening(item: Item) -> str:
             | Friction(text=text)
             | HowItWent(text=text)
             | Stop(text=text)
+            | Ended(text=text)
             | Question(text=text)
             | Approval(text=text)
             | HeldChange(text=text)
@@ -223,6 +239,7 @@ def body(item: Item) -> str:
             | Friction(text=text)
             | HowItWent(text=text)
             | Stop(text=text)
+            | Ended(text=text)
             | Approval(text=text)
             | HeldChange(text=text)
             | Flagged(text=text)
@@ -295,6 +312,8 @@ def kind(item: Item) -> str:
             return "how it went"
         case Stop():
             return "stop"
+        case Ended():
+            return "ended"
         case Question():
             return "question"
         case Answer():
@@ -575,37 +594,46 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
     @override
     async def telling(
-        self, launch: Register, conversation: Caller, heard: Heard, room: int
+        self,
+        launch: Register,
+        conversation: Caller,
+        parent: Caller | None,
+        heard: Heard,
+        room: int,
     ) -> Posted:
-        """Note where the conversation is heard, and tell it what waits.
+        """Note where the conversation is heard, and the conversation that spawned it, `parent`; and tell it what waits.
 
-        At its turn's end, what waits holds the end once (`holding`), and a call
-        it holds learns its turn ended; an end let through leaves its main
-        conversation idle, and a subagent's ended, its waiting items passed to
-        its session's main conversation. A turn's start whose prompt carries
-        the token of what was pushed to it takes the push.
+        At its turn's end, what waits holds the end once (`holding`), but for
+        quiet items (`Item.quiet`), and a call it holds learns its turn ended;
+        an end let through leaves its main conversation idle, and a subagent's
+        ended (`ended`). A subagent stopped is held for nothing, since nothing
+        would read it. A turn's start whose prompt carries the token of what
+        was pushed to it takes the push.
         """
-        party = Conversation(
-            repository=launch.repository,
-            runtime=launch.runtime,
-            session=conversation.session,
-            agent=conversation.agent,
+        party = self.party(launch, conversation)
+        self.heard_in(
+            party, launch, None if parent is None else self.party(launch, parent)
         )
-        self.heard_in(party, launch)
         presence = self.presence(party)
         presence.woken = False
         match heard.event:
             case "turn-ended" | "conversation-ended":
                 for each in presence.held:
                     each.ended = True
-                fresh = [item for item in self.tellable(party) if not announced(item)]
-                if holding(fresh, [], after_block=heard.after_block):
+                fresh = [
+                    item
+                    for item in self.tellable(party)
+                    if not announced(item) and not item.quiet
+                ]
+                if not heard.stopped and holding(
+                    fresh, [], after_block=heard.after_block
+                ):
                     posted = self.told(party, room, heard.fits, "turn's end")
                     if posted.items:
                         return posted
                 presence.turning = False
                 if heard.event == "conversation-ended" and party.agent is not None:
-                    self.ended(party)
+                    await self.ended(party, launch, conversation, heard)
                 return Posted()
             case "session-started":
                 presence.turning = False
@@ -632,15 +660,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         An end held to tell what waits makes its note too, as its message
         stands: the turn goes on to another end, with words of its own.
         """
-        party = Conversation(
-            repository=launch.repository,
-            runtime=launch.runtime,
-            session=conversation.session,
-            agent=conversation.agent,
-        )
         await self.posted(
             Message(kind="note", text=said, ending=True),
-            party,
+            self.party(launch, conversation),
             Operator(),
             launch.worktree,
         )
@@ -651,10 +673,24 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             item = self.inbox.item(number)
             self.inbox.kept(item.model_copy(update={"state": Waiting()}))
 
-    def heard_in(self, party: Conversation, launch: Register) -> None:
-        """Note that `party` is heard in `launch`: where it runs, and that it goes on."""
+    @staticmethod
+    def party(launch: Register, conversation: Caller) -> Conversation:
+        """Return the inbox's party for `conversation`, one of `launch`'s."""
+        return Conversation(
+            repository=launch.repository,
+            runtime=launch.runtime,
+            session=conversation.session,
+            agent=conversation.agent,
+        )
+
+    def heard_in(
+        self, party: Conversation, launch: Register, parent: Conversation | None
+    ) -> None:
+        """Note that `party` is heard in `launch`: where it runs, that it goes on, and the conversation that spawned it, `parent`."""
         place = self.inbox.whereabouts.get(party.key())
         if place is not None and place.launch == launch.launch and place.ended is None:
+            if place.parent != parent:
+                self.inbox.placed(place.model_copy(update={"parent": parent}))
             return
         self.inbox.placed(
             Whereabouts(
@@ -662,11 +698,26 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 launch=launch.launch,
                 worktree=launch.worktree,
                 since=self.clock.now(),
+                parent=parent,
             )
         )
 
-    def ended(self, party: Conversation) -> None:
-        """Note that a subagent's conversation ended, and pass what waits for it to its session's main conversation."""
+    def parent(self, party: Conversation) -> Conversation | None:
+        """Return the conversation that spawned `party`, where it's a subagent a conversation spawned; none else."""
+        place = self.inbox.whereabouts.get(party.key())
+        return None if place is None else place.parent
+
+    async def ended(
+        self, party: Conversation, launch: Register, conversation: Caller, heard: Heard
+    ) -> None:
+        """Note that a subagent's conversation ended, pass what waits for it to its session's main conversation, and tell the conversation that spawned it.
+
+        Its parent is told quietly (`Item.quiet`) which subagent it was, whether
+        it ended its turn or was stopped, and its last message where its
+        runtime doesn't hand that on (`Ended`): at the parent's next call, or by
+        `wait_inbox`, which returns on it, since the runtime wakes an idle
+        parent for its subagent's end already.
+        """
         place = self.inbox.whereabouts.get(party.key())
         if place is not None:
             self.inbox.placed(place.model_copy(update={"ended": self.clock.now()}))
@@ -676,6 +727,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 item.model_copy(update={"recipient": main, "addressed": party})
             )
         self.arrive(main)
+        if place is None or place.parent is None:
+            return
+        news = Ended(
+            name=conversation.own(launch.name or launch.launch),
+            stopped=heard.stopped,
+            handed=conversation.handed,
+            said=heard.said,
+        )
+        await self.posted(news, party, place.parent, launch.worktree, quiet=True)
 
     def said(self, item: Item) -> str:
         """Say `item`, whole, to the conversation it's told to: its tag, written."""
@@ -736,6 +796,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     name="review",
                     attributes={**head, **covering},
                     parts=self.reviewing(review, item.addressed or item.recipient),
+                )
+            case Ended(name=name, heading=heading, passed=passed):
+                said = [] if passed is None else [Tag(name="said", parts=[passed])]
+                return Tag(
+                    name="ended",
+                    attributes={**head, "name": name},
+                    parts=[heading, *said],
                 )
             case (
                 Friction()
@@ -1068,10 +1135,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         worktree: Path | None,
         *,
         call: str | None = None,
+        quiet: bool = False,
     ) -> Item:
-        """Make an item and deliver it (`delivered`); `call` is the runtime's id for the agent's call that made it, where one did."""
+        """Make an item and deliver it (`delivered`); `call` is the runtime's id for the agent's call that made it, where one did, and `quiet` says it waits for a call (`Item.quiet`)."""
         item = self.inbox.made(
-            reason, sender, recipient, worktree, self.clock.now(), call=call
+            reason,
+            sender,
+            recipient,
+            worktree,
+            self.clock.now(),
+            call=call,
+            quiet=quiet,
         )
         await self.delivered(item)
         return item
@@ -1098,21 +1172,23 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     async def wake(self, party: Conversation) -> None:
         """Start a turn of an idle `party`'s session on what waits for it: pushed through lup's tool server, where its runtime takes a push, else its doorbell rung through its messaging socket.
 
-        Only a session's main conversation is woken, and only while it's idle.
-        One in its turn (`Presence.turning`) is told at its next call, or its
-        turn's end; a call it holds is given it; a wake since its last hook
-        started a turn whose first call tells it; and a runtime with no way
-        waits for its next hook. An idle session starts a turn with it; one the
-        service took for idle, unknown since the service started again or since
-        the operator interrupted it, takes it at its next boundary, as measured
-        on the runtime that has a way (`docs/field-notes.md`, *Waking a
-        session*, *Channels*).
+        Only a session's main conversation is woken, only while it's idle, and
+        never for quiet items alone (`Item.quiet`), which a wake for another
+        carries with it. One in its turn (`Presence.turning`) is told at its
+        next call, or its turn's end; a call it holds is given it; a wake since
+        its last hook started a turn whose first call tells it; and a runtime
+        with no way waits for its next hook. An idle session starts a turn with
+        it; one the service took for idle, unknown since the service started
+        again or since the operator interrupted it, takes it at its next
+        boundary, as measured on the runtime that has a way
+        (`docs/field-notes.md`, *Waking a session*, *Channels*).
         """
         presence = self.presence(party)
         place = self.inbox.whereabouts.get(party.key())
         waiting = self.inbox.waiting(party)
-        quiet = presence.turning or presence.woken or presence.held
-        if party.agent is not None or quiet or place is None or not waiting:
+        busy = presence.turning or presence.woken or presence.held
+        loud = [item for item in waiting if not item.quiet]
+        if party.agent is not None or busy or place is None or not loud:
             return
         if self.pushed(party, place, waiting):
             return

@@ -7,13 +7,16 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   from them, so an agent's habit carries between an ask from code and a
   launched session; their functions and descriptions are the inbox's, since
   in a launched session whoever asked is the operator, and each lands in their
-  inbox, a subagent's too, never its parent's;
+  inbox, a subagent's too; a subagent's `friction` and `how_it_went` reach its
+  parent as well, whole and quiet (`Item.quiet`), so it can file what got in
+  the way, or learn its brief misled;
 - `ask` puts a question to the operator, its decisions numbered, each with the
   agent's lean; with `wait` it holds until they answer;
 - `send` is the inbox's general verb, a message of a kind to a party's inbox:
   the operator's, in this piece;
-- `wait_inbox` holds until something reaches the agent's inbox. It isn't called
-  `wait`, a name a runtime has for a tool of its own;
+- `wait_inbox` holds until something reaches the agent's inbox, one of its own
+  subagents' ends among it. It isn't called `wait`, a name a runtime has for a
+  tool of its own;
 - `inbox` reads the inbox of the agent's repository, changing nothing: each
   item in a line, and the agent's own read whole;
 - `withdraw` takes back a message or question the agent sent that the
@@ -169,6 +172,21 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
         return item.number
 
+    async def passed_up(self, reason: Friction | HowItWent) -> bool:
+        """Put a copy of `reason` in the inbox of the conversation that spawned this one, quietly (`Item.quiet`), and say whether there's one."""
+        parent = self.delivery.parent(self.party)
+        if parent is None:
+            return False
+        await self.delivery.posted(
+            reason,
+            self.party,
+            parent,
+            self.launch.worktree,
+            call=self.call,
+            quiet=True,
+        )
+        return True
+
     async def blocked(self, said: Problem) -> Said:
         """Say the work can't go on, and what's wrong.
 
@@ -215,12 +233,16 @@ class Speaker(Model, arbitrary_types_allowed=True):
         Call it the moment something gets in the way of the work, whatever it
         is, in your own words. Where there's a command and the message it
         gave, the exact ones help whoever fixes it. It lands in the operator's
-        inbox as you wrote it, never your parent's, and your work goes on:
-        nothing waits for an answer. A doubt about the work itself is a `note`.
+        inbox as you wrote it, and, where you're a subagent, in your parent's
+        too, whole, at its next call. Your work goes on: nothing waits for an
+        answer. A doubt about the work itself is a `note`.
         """
-        number = await self.said(Friction.model_validate(said.model_dump()))
+        friction = Friction.model_validate(said.model_dump())
+        number = await self.said(friction)
+        parent = " and your parent" if await self.passed_up(friction) else ""
         return Said(
-            text=f"Your friction is with the operator, {cited(number)}. Carry on."
+            text=f"Your friction is with the operator, {cited(number)}{parent}. "
+            "Carry on."
         )
 
     async def how_it_went(self, said: results.HowItWent) -> Said:
@@ -229,10 +251,13 @@ class Speaker(Model, arbitrary_types_allowed=True):
         Call it once, near the end of a piece of work: how it went and how it
         felt, whatever's present for you, in your own words. "Nothing notable"
         is a fine answer. It lands in the operator's inbox as you wrote it,
-        never your parent's, and your work goes on.
+        and, where you're a subagent, in your parent's too, whole, at its next
+        call. Your work goes on.
         """
-        number = await self.said(HowItWent.model_validate(said.model_dump()))
-        return Said(text=f"How it went is with the operator, {cited(number)}.")
+        went = HowItWent.model_validate(said.model_dump())
+        number = await self.said(went)
+        parent = " and your parent" if await self.passed_up(went) else ""
+        return Said(text=f"How it went is with the operator, {cited(number)}{parent}.")
 
     async def ask(self, asked: Asking) -> Said:
         """Ask the operator, with numbered decisions.
@@ -289,10 +314,18 @@ class Speaker(Model, arbitrary_types_allowed=True):
     async def wait_inbox(self, nothing: Nothing) -> Said:
         """Wait until something reaches your inbox.
 
-        Holds this call until an item reaches your inbox, an answer or a
-        message, and returns everything waiting there, each whole: what a hook
-        announced as too long to tell is read here. Something already waiting
-        is returned at once.
+        Holds this call until an item reaches your inbox, and returns
+        everything waiting there, each whole: what a hook announced as too
+        long to tell is read here. An item is the operator's answer or
+        message; one of your own subagents ending its turn, or stopped, which
+        names it; or a subagent's `friction` or `how_it_went`. Something
+        already waiting, a subagent that ended since your last call among it,
+        is returned at once; each is told once, here or beside another call.
+
+        It doesn't return for what no item says: a background command's end,
+        another session's or another conversation's subagents, the operator
+        marking something read. Nor for a subagent stopped or failing where
+        its runtime doesn't report that, as some don't.
         """
         del nothing
         inbox = self.delivery.inbox

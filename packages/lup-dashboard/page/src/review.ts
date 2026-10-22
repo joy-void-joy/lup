@@ -178,7 +178,8 @@ function isComment(each: Written): each is Comment {
 
 /**
  * Return an item's own text as the review shows it: a message's, a friction's or how the work went's words as written,
- * a question's with its decisions, an approval's question and summary.
+ * a question's with its decisions, an approval's question and summary; a subagent's end's last message, where lup
+ * passed it on.
  */
 export function body(item: Item): string {
     const reason = item.reason;
@@ -189,6 +190,8 @@ export function body(item: Item): string {
             return reason.text;
         case "stop":
             return reason.why;
+        case "ended":
+            return reason.said ?? "";
         case "question": {
             const decisions = reason.decisions.map(
                 (each, at) => `${at + 1}. ${each.text}\n   lean: ${each.lean}`,

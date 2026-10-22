@@ -669,12 +669,20 @@ class SubagentStop(Payload):
     """`SubagentStop`: a subagent's turn ends.
 
     Its output takes `decision: "block"` and `systemMessage` as `Stop`'s does
-    (`subagent-stop.command.output`).
+    (`subagent-stop.command.output`), and its input carries
+    `last_assistant_message` and the subagent's own rollout as
+    `agent_transcript_path` (`subagent-stop.command.input`, at `rust-v0.163.0`).
+    It runs only where a turn completes (`run_turn_stop_hooks`, called from
+    `run_turn` in `core/src/session/turn.rs`): a subagent stopped, or whose
+    turn fails, runs none, and the `Interrupt` hook is a root turn's alone, so
+    its parent isn't told (`docs/field-notes.md`, *A subagent's end*).
     """
 
     hook_event_name: Literal["SubagentStop"]
     stop_hook_active: bool = False
     """Whether the subagent's turn goes on because a `SubagentStop` hook blocked it already."""
+    last_assistant_message: str | None = None
+    """Its last message of the turn, where it left one."""
 
     def heard(self, fits: int) -> Heard:
         """Read a subagent's turn's end: the judge reads it."""
@@ -685,6 +693,7 @@ class SubagentStop(Payload):
             judged=True,
             after_block=self.stop_hook_active,
             fits=fits,
+            said=self.last_assistant_message,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -776,6 +785,9 @@ class Subagented(Model, extra="ignore"):
     agent_id: str | None = None
     agent_type: str | None = None
     transcript_path: Path | None = None
+    agent_transcript_path: Path | None = None
+    """At `SubagentStop`, the subagent's own rollout, where `transcript_path` is
+    its parent's."""
 
 
 def spawned(raw: str) -> Spawned | None:
@@ -785,9 +797,20 @@ def spawned(raw: str) -> Spawned | None:
     `session_meta` gives its path, `/root/<parent>/<name>`, and its parent's
     thread; a parent that's the root is the session's own conversation. One
     spawned by the first version of `spawn_agent`, which takes no name, has no
-    path, and so no name. Its end names the root's rollout instead (measured
-    by the first lup on 0.158.0, `docs/field-notes.md`, *Subagents' records*),
-    so a rollout whose meta is another thread's says nothing of it.
+    path, and so no name. Its end names its parent's rollout there (measured
+    by the first lup on 0.158.0, `docs/field-notes.md`, *Subagents' records*)
+    and its own as `agent_transcript_path`, read first, so a subagent first
+    heard at its end is linked too; a rollout whose meta is another thread's
+    says nothing of it.
+
+    Codex hands a subagent with a path its last message itself
+    (`Spawned.handed`): as the subagent's turn completes, it queues a
+    `FINAL_ANSWER` message holding it in its parent's mailbox
+    (`notify_parent_of_terminal_turn`, `core/src/agent/control/completion.rs`).
+    One without a path, the first `spawn_agent`'s, the one Codex turns on by
+    default (`multi_agent` on, `multi_agent_v2` off, `features/src/lib.rs`), is
+    handed nothing: its parent reads it only through `wait_agent`, so lup
+    hands its last message on (`docs/field-notes.md`, *A subagent's end*).
 
     Every subagent reads the session's guidance, Codex's managed developer
     instructions: a spawned thread's configuration is its parent's, the
@@ -801,7 +824,7 @@ def spawned(raw: str) -> Spawned | None:
     if payload.agent_id is None:
         return None
     kind = payload.agent_type or None
-    rollout = payload.transcript_path
+    rollout = payload.agent_transcript_path or payload.transcript_path
     if rollout is None or not rollout.is_file():
         return Spawned(kind=kind, guided=True)
     with rollout.open() as lines:
@@ -817,6 +840,7 @@ def spawned(raw: str) -> Spawned | None:
         parent=parent,
         kind=meta.agent_role or kind,
         guided=True,
+        handed=meta.agent_path is not None,
     )
 
 
