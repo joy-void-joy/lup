@@ -357,7 +357,7 @@ class Fixed(Clock):
 
 
 def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) -> None:
-    served = client(Demo(clock=Fixed()), page)
+    served = client(Demo(clock=Fixed(), size=0), page)
     listed = served.post(
         "/api/ask", json=ListLaunches().model_dump(), headers=bearing()
     )

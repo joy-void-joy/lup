@@ -116,11 +116,29 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """The arrival under way, once the page asked for the inbox."""
     arrived: datetime | None = None
     """When the late question arrived; none until it has."""
+    size: int = 36
+    """How many flagged writes of a busy day the review holds beside the demo's own items (`worked`), each of a module of hundreds of lines, from `workers` workers of the lup-impl session, each with a note and a friction, the first with a long conversation: none for the demo's own items alone, as its tests ask it."""
+    first_worked: int = 1000
+    """The number of the first item a worker made (`worked`): after the demo's own, so they're laid out after them."""
+    workers: int = 6
+    """How many workers the busy day's writes come from, subagents of the lup-impl session, each in a worktree of its own."""
+    functions: int = 36
+    """How many functions a worker's module holds, a dozen lines each: a file of hundreds of lines."""
+    hooks: float = 0
+    """How many stand-in hook calls a minute the workers make, each changing what one of them does and answering every watch again, as the host service answers each watch at each hook (`docs/host.md`, *Watching*); none by default."""
+    hooked: int = 0
+    """How many stand-in hook calls have come."""
+    hooking: asyncio.TimerHandle | None = None
+    """The next stand-in hook call, once the page first asked for the launches."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
         match request:
             case ListLaunches():
+                if self.hooks > 0 and self.hooking is None:
+                    self.hooking = asyncio.get_running_loop().call_later(
+                        60 / self.hooks, self.hook
+                    )
                 return self.listed()
             case SetHolding(on=on) as switched:
                 others = [
@@ -152,6 +170,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 self.talks = {**self.talks, conversation.key(): talk}
                 return Talked(talk=talk)
             case ShowFiles(number=number):
+                if number >= self.first_worked:
+                    return self.worked_files(number)
                 if number == 54 and self.typing and self.reading is None:
                     self.reading = asyncio.get_running_loop().call_later(
                         self.types_read.total_seconds(), self.typed
@@ -266,6 +286,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     depth=2,
                 ),
                 *ended,
+                *self.working(),
             ],
             "b2e1": [
                 talker(
@@ -649,11 +670,14 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 call="call-62",
                 made=self.ago(0.8),
             ),
+            *self.worked(),
             *self.sent,
         ]
 
     def context(self, number: int) -> Context | Refused:
-        """Return a stand-in moment for each item an agent's call made: the operator's last words, what the agent said and called after them, the call, and what came after; the approval, which no call made, has none."""
+        """Return a stand-in moment for each item an agent's call made: the operator's last words, what the agent said and called after them, the call, and what came after; the approval, which no call made, has none; a worker's item has its own (`worked_context`)."""
+        if number >= self.first_worked:
+            return self.worked_context(number)
 
         def operator(text: str, minutes: float) -> Said:
             return Said(by="operator", text=text, at=self.ago(minutes))
@@ -766,7 +790,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Context(number=number, entries=entries, anchor=anchor)
 
     def conversation(self, session: str, agent: str | None) -> list[Entry]:
-        """Return a stand-in conversation: for the parser subagent, the call that sent @47, then its moment around @51 with what led to it; for any other, a short exchange."""
+        """Return a stand-in conversation: for the parser subagent, the call that sent @47, then its moment around @51 with what led to it; for the first worker, a day's work (`long_conversation`); for any other, a short exchange."""
+        if (session, agent) == ("s1", worker_agent(1)) and self.size > 0:
+            return self.long_conversation()
         if (session, agent) == ("s1", "a02"):
             return [
                 Said(
@@ -825,6 +851,252 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         """Return the stand-in steps around item `number`, none where it has none."""
         found = self.context(number)
         return found.entries if isinstance(found, Context) else []
+
+    def hook(self) -> None:
+        """Let a stand-in hook call come: what one worker does changes (`working`), each watch answers again, and the next comes after the interval `hooks` gives."""
+        self.hooked += 1
+        self.changed.set()
+        self.changed = asyncio.Event()
+        self.hooking = asyncio.get_running_loop().call_later(
+            60 / self.hooks, self.hook
+        )
+
+    def working(self) -> list[Talker]:
+        """Return the workers' conversations (`workers`), subagents of the lup-impl session, each calling a tool or between calls as the stand-in hook calls have it (`hook`); none without a busy day's writes (`size`)."""
+        if self.size == 0:
+            return []
+        tools = ["Read", "Edit", "Bash"]
+        return [
+            talker(
+                f"worker-{n}",
+                "s1",
+                Activity(
+                    state="calling",
+                    since=self.ago(0.3),
+                    tool=tools[(self.hooked + n) % len(tools)],
+                )
+                if (self.hooked + n) % 2 == 0
+                else Activity(state="idle", since=self.ago(0.1)),
+                agent=worker_agent(n),
+                kind="general-purpose",
+                parent="lup-impl",
+                depth=1,
+            )
+            for n in range(1, self.workers + 1)
+        ]
+
+    def worker(self, n: int) -> Conversation:
+        """Return worker `n`'s conversation: a subagent of the lup-impl session."""
+        first, _ = self.runtimes
+        return Conversation(
+            repository=Path("/home/op/lup.git"),
+            runtime=first,
+            session="s1",
+            agent=worker_agent(n),
+        )
+
+    def worked(self) -> list[Item]:
+        """Return the busy day's items (`size`): each worker's note, written in Markdown, and its friction, then the flagged writes, each worker's in turn, each of a module of hundreds of lines (`worked_files`); numbered from `first_worked`, made over the last hours, oldest first, each by a call, so each has a moment (`worked_context`)."""
+        if self.size == 0:
+            return []
+
+        def item(
+            number: int, n: int, reason: Message | Friction | Flagged, minutes: float
+        ) -> Item:
+            return Item(
+                number=number,
+                reason=reason,
+                sender=self.worker(n),
+                recipient=Operator(),
+                worktree=worker_worktree(n),
+                call=f"call-{number}",
+                made=self.ago(minutes),
+            )
+
+        def said(n: int) -> list[Item]:
+            number = self.first_worked + 2 * (n - 1)
+            note = Message(
+                kind="note", text=f"Worker {n}'s reading of the records.\n\n{MARKDOWN_NOTE}"
+            )
+            friction = Friction(
+                text=(
+                    f"`uv run lup-dev check` rebuilt the engine before worker {n}'s "
+                    "tests ran, printing nothing until then; a line saying the rebuild "
+                    "would have kept me from killing it."
+                )
+            )
+            return [item(number, n, note, 400 - n), item(number + 1, n, friction, 390 - n)]
+
+        def landed(i: int) -> Item:
+            number = self.first_worked + 2 * self.workers + i
+            n = i % self.workers + 1
+            path = worked_path(n, i)
+            summary = (
+                f"{path} adds the function `step_{self.functions - 1}`"
+                if i % 2 == 0
+                else f"{path} is a new production file"
+            )
+            flagged = Flagged(
+                text=f"{path} landed, flagged for the operator's review.",
+                summary=summary,
+                worktree=worker_worktree(n),
+                path=path,
+                writes=1 + i % 3,
+            )
+            return item(number, n, flagged, 360 - 360 * i / self.size)
+
+        return [
+            *(each for n in range(1, self.workers + 1) for each in said(n)),
+            *(landed(i) for i in range(self.size)),
+        ]
+
+    def worked_files(self, number: int) -> Files | Refused:
+        """Return the file a worker's flagged write (`worked`) landed, whole: a module of `functions` functions, one added where an earlier write made it, flagged for the public API it adds, with a finding told; else new, flagged as a new file. Refused for a note or a friction, which change no file."""
+        i = number - self.first_worked - 2 * self.workers
+        if i < 0 or i >= self.size:
+            return Refused(error=f"{cited(number)} changes no file")
+        n = i % self.workers + 1
+        after = text(module(n, i, self.functions))
+        last = self.functions - 1
+        added = f"def step_{last}(path: Path, count: int = {last}) -> list[str]:"
+        stripped = line(after, '            if line.strip() == "":')
+        grown = Reading(
+            role="production",
+            asks=[
+                Ask(
+                    name="public-api",
+                    taken="flagged",
+                    line=line(after, added),
+                    api=ApiChanged(kind="function-added", name=f"step_{last}"),
+                )
+            ],
+            findings=[
+                Found(
+                    rule="string-strip",
+                    message=(
+                        "`.strip` decides whether a line is blank by hand. Reading "
+                        "structured text by hand matches the inputs it was tried on, "
+                        "and fails quietly on the rest."
+                    ),
+                    start=stripped,
+                    end=stripped,
+                    taken="told",
+                )
+            ],
+        )
+        created = Reading(
+            role="production", asks=[Ask(name="new-file", taken="flagged")]
+        )
+        return Files(
+            number=number,
+            files=[
+                ChangedFile(
+                    path=worked_path(n, i),
+                    before=text(module(n, i, last)) if i % 2 == 0 else None,
+                    after=after,
+                    reading=grown if i % 2 == 0 else created,
+                )
+            ],
+        )
+
+    def worked_context(self, number: int) -> Context | Refused:
+        """Return the stand-in moment of a worker's item (`worked`): its brief, the reading before the item, the call that made it, and what came after."""
+        item = next((each for each in self.worked() if each.number == number), None)
+        if item is None:
+            return Refused(error=f"{cited(number)} was made by no agent's call")
+
+        def before(minutes: float) -> datetime:
+            return item.made - timedelta(minutes=minutes)
+
+        entries: list[Entry] = [
+            Said(
+                by="operator",
+                text=(
+                    "Build the piece your brief names, on a branch of your own; ask "
+                    "before you build on a shape."
+                ),
+                at=before(50),
+            ),
+            Said(by="agent", text="Reading the files the brief names first.", at=before(49)),
+            Called(tool="Read", at=before(48)),
+            Called(tool="Grep", at=before(47)),
+            Said(
+                by="agent",
+                text="Writing the module, a function a step, with a docstring each.",
+                at=before(2),
+            ),
+            Called(tool="Write", id=f"call-{number}", at=item.made),
+            Said(by="agent", text="On to its tests.", at=before(-0.1)),
+        ]
+        return Context(number=number, entries=entries, anchor=5)
+
+    def long_conversation(self, steps: int = 300) -> list[Entry]:
+        """Return the first worker's conversation, `steps` long: its brief, then a call and what it found, in turn, as a day's work reads."""
+        tools = ["Read", "Edit", "Bash"]
+        return [
+            Said(
+                by="operator",
+                text=(
+                    "Build the piece your brief names, on a branch of your own; ask "
+                    "before you build on a shape."
+                ),
+                at=self.ago(400),
+            ),
+            *(
+                Called(tool=tools[step % len(tools)], at=self.ago(400 - step))
+                if step % 2 == 0
+                else Said(
+                    by="agent",
+                    text=(
+                        f"Step {step // 2 + 1}: read the module, changed one function, "
+                        "ran its tests."
+                    ),
+                    at=self.ago(400 - step),
+                )
+                for step in range(steps)
+            ),
+        ]
+
+
+def worker_agent(n: int) -> str:
+    """Return the runtime's id of worker `n`'s subagent."""
+    return f"w{n:02}"
+
+
+def worker_worktree(n: int) -> Path:
+    """Return worker `n`'s worktree: one of its own, beside the demo's."""
+    return Path("/home/op/lup.git/tree") / f"worker-{n}"
+
+
+def worked_path(n: int, i: int) -> Path:
+    """Return the module worker `n`'s write `i` landed, from its worktree's root."""
+    return Path("packages/lup/src/lup") / f"worker{n}" / f"module_{i}.py"
+
+
+def module(n: int, i: int, functions: int) -> str:
+    """Return a stand-in Python module, worker `n`'s write `i`, of `functions` functions: hundreds of lines, each function's body folding and its lines highlighted as the review shows them."""
+    head = (
+        f'"""Worker {n}\'s module {i}: stand-in code, a busy day\'s flagged write."""\n'
+        "\n"
+        "from pathlib import Path\n"
+    )
+    return "".join([head, *(function(at) for at in range(functions))])
+
+
+def function(at: int) -> str:
+    """Return one stand-in function, `step_<at>`, with a docstring and a body of a few lines, so bodies fold and runs of lines sit inside them."""
+    return (
+        "\n\n"
+        f"def step_{at}(path: Path, count: int = {at}) -> list[str]:\n"
+        '    """Return the lines of `path` read `count` times, each numbered."""\n'
+        "    found: list[str] = []\n"
+        "    for turn in range(count):\n"
+        "        for number, line in enumerate(path.read_text().splitlines()):\n"
+        '            if line.strip() == "":\n'
+        "                continue\n"
+        '            found.append(f"{turn}:{number}:{line}")\n'
+        "    return found\n"
+    )
 
 
 CLI_HEAD = '''"""lup-dev's command line: launches, the host service, the inbox and trust."""
