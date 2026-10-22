@@ -97,6 +97,7 @@ from lup_dev.inbox.store import (
     Done,
     Flagged,
     HeldChange,
+    Inbox,
     InboxError,
     Item,
     Reading,
@@ -407,6 +408,69 @@ def shown_from(onto: str, since: int | None, old: str | None) -> str:
     return f"Shown whole: `{onto}` isn't on the remote yet."
 
 
+def approved(item: Item) -> bool:
+    """Say whether the operator approved `item`."""
+    return isinstance(item.state, Decided) and item.state.approved
+
+
+class Baseline(Model, arbitrary_types_allowed=True):
+    """What the operator last saw of a repository's files, read from the inbox: the version each hold at landing starts from, and each file of an agent's drawer since they approved it (`lup_dev.policy.since`)."""
+
+    inbox: Inbox
+    repository: Path
+    """The repository's git directory."""
+
+    def flags(self, branches: list[str], path: Path | None = None) -> list[Flag]:
+        """Return the flagged writes on `branches` the operator hasn't approved, those on the file at `path` alone where one's given."""
+        return [
+            Flag(number=item.number, flagged=item.reason)
+            for item in self.inbox.about(self.repository)
+            if isinstance(item.reason, Flagged)
+            and item.reason.branch in branches
+            and (path is None or item.reason.path == path)
+            and not approved(item)
+        ]
+
+    def seen(self, path: Path, landed: list[str]) -> Item | None:
+        """Return the latest item of the file at `path` on the branches `landed` that the operator saw: a flagged write or a hold at landing they approved, read or commented on, the last they settled; none where they saw none."""
+        seen = [
+            Seen(item=item, at=at)
+            for item in self.inbox.about(self.repository)
+            if flagged_on(path, landed, item) and (at := settled_at(item)) is not None
+        ]
+        latest = max(seen, key=lambda each: each.at, default=None)
+        return None if latest is None else latest.item
+
+    def kept(self, item: Item, path: Path) -> bytes | None:
+        """Return the version of `path` kept beside `item`, what it changed it to; none where none is kept as text."""
+        try:
+            files = self.inbox.files(item.number)
+        except InboxError:
+            return None
+        found = next((each for each in files if each.path == path), None)
+        if found is None or not isinstance(found.after, Text):
+            return None
+        return found.after.text.encode()
+
+    def reading(self, flag: Flag, after: bytes | None) -> Reading | None:
+        """Return the judge's reading of the file as `flag`, the latest on it, kept it: its lines and findings kept only where the file as it stands, `after`, is as that flag left it."""
+        try:
+            files = self.inbox.files(flag.number)
+        except InboxError:
+            return None
+        found = next((each for each in files if each.path == flag.flagged.path), None)
+        if found is None or found.reading is None:
+            return None
+        if isinstance(found.after, Text) and found.after.text.encode() == after:
+            return found.reading
+        return Reading(
+            role=found.reading.role,
+            asks=[
+                each.model_copy(update={"line": None}) for each in found.reading.asks
+            ],
+        )
+
+
 class Lander(Model, arbitrary_types_allowed=True):
     """One conversation of a launch landing a branch: the tool's function, bound to it."""
 
@@ -429,6 +493,11 @@ class Lander(Model, arbitrary_types_allowed=True):
     def party(self) -> Conversation:
         """Return the inbox's party for the conversation landing."""
         return Delivery.party(self.launch, self.caller)
+
+    @property
+    def baseline(self) -> Baseline:
+        """Return what the operator last saw of the repository's files."""
+        return Baseline(inbox=self.delivery.inbox, repository=self.launch.repository)
 
     @lup_tool(idempotent=True)
     async def land(self, landing: Landing) -> str:
@@ -577,12 +646,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         names = [short(ref) for ref in branches]
         changed = await asyncio.to_thread(changed_files, git, old, tip)
         flags = [
-            Flag(number=item.number, flagged=item.reason)
-            for item in self.delivery.inbox.about(self.launch.repository)
-            if isinstance(item.reason, Flagged)
-            and item.reason.branch in names
-            and item.reason.path in changed
-            and not (isinstance(item.state, Decided) and item.state.approved)
+            each for each in self.baseline.flags(names) if each.flagged.path in changed
         ]
         paths = list(dict.fromkeys(each.flagged.path for each in flags))
         return [
@@ -617,8 +681,11 @@ class Lander(Model, arbitrary_types_allowed=True):
                 "flags": [each.number for each in flags],
             }
         )
-        seen = self.seen(path, landed)
-        kept = None if seen is None else await asyncio.to_thread(self.after, seen, path)
+        baseline = self.baseline
+        seen = baseline.seen(path, landed)
+        kept = (
+            None if seen is None else await asyncio.to_thread(baseline.kept, seen, path)
+        )
         since = None if seen is None or kept is None else seen.number
         before = (
             kept
@@ -627,7 +694,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         )
         after = await asyncio.to_thread(blob, git, landing.tip, path)
         latest = max(flags, key=lambda each: each.number)
-        reading = await asyncio.to_thread(self.reading, latest, after)
+        reading = await asyncio.to_thread(baseline.reading, latest, after)
         asks = dict.fromkeys(
             line for each in flags for line in each.flagged.summary.splitlines()
         )
@@ -648,45 +715,6 @@ class Lander(Model, arbitrary_types_allowed=True):
             change, self.party, diff, [file], call=self.call
         )
         return Held(number=item.number, path=path)
-
-    def seen(self, path: Path, landed: list[str]) -> Item | None:
-        """Return the latest item of the file at `path` on the branches `landed` that the operator saw: a flagged write or a hold at landing they approved, read or commented on, the last they settled; none where they saw none."""
-        seen = [
-            Seen(item=item, at=at)
-            for item in self.delivery.inbox.about(self.launch.repository)
-            if flagged_on(path, landed, item) and (at := settled_at(item)) is not None
-        ]
-        latest = max(seen, key=lambda each: each.at, default=None)
-        return None if latest is None else latest.item
-
-    def after(self, item: Item, path: Path) -> bytes | None:
-        """Return the version of `path` kept beside `item`, what it changed it to; none where none is kept as text."""
-        try:
-            files = self.delivery.inbox.files(item.number)
-        except InboxError:
-            return None
-        found = next((each for each in files if each.path == path), None)
-        if found is None or not isinstance(found.after, Text):
-            return None
-        return found.after.text.encode()
-
-    def reading(self, flag: Flag, after: bytes | None) -> Reading | None:
-        """Return the judge's reading of the file as `flag`, the latest on it, kept it: its lines and findings kept only where the tip holds the file as that flag left it."""
-        try:
-            files = self.delivery.inbox.files(flag.number)
-        except InboxError:
-            return None
-        found = next((each for each in files if each.path == flag.flagged.path), None)
-        if found is None or found.reading is None:
-            return None
-        if isinstance(found.after, Text) and found.after.text.encode() == after:
-            return found.reading
-        return Reading(
-            role=found.reading.role,
-            asks=[
-                each.model_copy(update={"line": None}) for each in found.reading.asks
-            ],
-        )
 
     async def waited(self, holds: list[Held]) -> Waited:
         """Hold the call until no hold of `holds` waits for the operator, and return what reached the conversation meanwhile, told, and how each was answered; at once, telling nothing, where there's none."""

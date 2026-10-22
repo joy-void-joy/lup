@@ -404,7 +404,7 @@ def inboxed(
         courier=couriers,
         spawns=spawns or cli.SpawnRecords(adapters=known),
         post=delivery,
-        routes=cli.control_routes(delivery, recorded or {}, None),
+        routes=cli.control_routes(delivery, recorded or {}, None, judging or machine),
         tools=[
             each.model_copy(update={"run": rooms})
             if isinstance(each, LandingTools) and rooms is not None

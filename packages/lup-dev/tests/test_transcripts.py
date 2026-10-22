@@ -503,3 +503,221 @@ def test_a_calls_moment_runs_from_the_operators_last_words_to_their_next() -> No
     assert from_start is not None
     assert from_start.anchor == 1
     assert moment(session, "missing") is None
+
+
+def test_claude_codes_record_reads_its_context_in_use_and_its_task_list(
+    tmp_path: Path,
+) -> None:
+    """The context is the last reply's input, its cached parts included, in the window the operator's model chooses; the task list is replayed from the calls that wrote it, each task numbered by its result."""
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"model": "opus[1m]"}))
+    folder = tmp_path / "projects" / "-w"
+    folder.mkdir(parents=True)
+
+    def replied(*blocks: dict[str, object], usage: dict[str, int]) -> str:
+        return line(
+            type="assistant",
+            message={
+                "role": "assistant",
+                "model": "claude-opus-4-1",
+                "content": list(blocks),
+                "usage": usage,
+            },
+        )
+
+    def resulted(call: str, task: dict[str, str] | None = None) -> str:
+        return line(
+            type="user",
+            message={
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": call, "content": "ok"}
+                ],
+            },
+            **({} if task is None else {"toolUseResult": {"task": task}}),
+        )
+
+    def call(id_: str, name: str, **input_: object) -> dict[str, object]:
+        return {"type": "tool_use", "id": id_, "name": name, "input": input_}
+
+    (folder / "s1.jsonl").write_text(
+        "\n".join(
+            [
+                human("Build it."),
+                replied(
+                    call(
+                        "c1",
+                        "TaskCreate",
+                        subject="Write the sampler",
+                        activeForm="Writing the sampler",
+                    ),
+                    usage={
+                        "input_tokens": 2,
+                        "cache_creation_input_tokens": 14149,
+                        "cache_read_input_tokens": 8077,
+                    },
+                ),
+                resulted("c1", {"id": "1", "subject": "Write the sampler"}),
+                replied(
+                    call("c2", "TaskCreate", subject="Write the models"),
+                    usage={
+                        "input_tokens": 1,
+                        "cache_creation_input_tokens": 500,
+                        "cache_read_input_tokens": 22226,
+                    },
+                ),
+                resulted("c2", {"id": "2", "subject": "Write the models"}),
+                replied(
+                    call("c3", "TaskUpdate", taskId="1", status="in_progress"),
+                    usage={
+                        "input_tokens": 3,
+                        "cache_creation_input_tokens": 100,
+                        "cache_read_input_tokens": 22726,
+                    },
+                ),
+                resulted("c3"),
+                # A call whose input doesn't read as its tool's is passed over.
+                replied(
+                    call("c4", "TaskUpdate", status="completed"),
+                    usage={"input_tokens": 1},
+                ),
+                resulted("c4"),
+            ]
+        )
+        + "\n"
+    )
+    reader = ClaudeTranscripts(settings=settings)
+    read = reader.read(folder / "s1.jsonl")
+    assert read.usage is not None
+    assert (read.usage.used, read.usage.window, read.usage.model) == (
+        1,
+        1_000_000,
+        "claude-opus-4-1",
+    )
+    assert [
+        (each.id, each.subject, each.status, each.active) for each in read.tasks
+    ] == [
+        ("1", "Write the sampler", "in_progress", "Writing the sampler"),
+        ("2", "Write the models", "pending", None),
+    ]
+    # `TodoWrite` replaces the list; a `TaskUpdate` to `deleted` takes a task off; no settings read no window.
+    with (folder / "s1.jsonl").open("a") as grown:
+        grown.write(
+            replied(
+                call(
+                    "c5",
+                    "TodoWrite",
+                    todos=[
+                        {
+                            "content": "Smoke-test",
+                            "status": "completed",
+                            "activeForm": "Smoke-testing",
+                        },
+                        {"content": "Measure", "status": "pending"},
+                    ],
+                ),
+                usage={"input_tokens": 40},
+            )
+            + "\n"
+            + replied(
+                call("c6", "TaskUpdate", taskId="1", status="deleted"),
+                usage={"input_tokens": 41},
+            )
+            + "\n"
+        )
+    read = ClaudeTranscripts().read(folder / "s1.jsonl")
+    assert [(each.id, each.subject, each.status) for each in read.tasks] == [
+        ("2", "Measure", "pending")
+    ]
+    assert read.usage is not None
+    assert (read.usage.used, read.usage.window) == (41, None)
+    assert ClaudeTranscripts(settings=tmp_path / "none.json").model() is None
+
+
+def test_codexs_rollout_reads_its_context_in_use_and_its_plan(tmp_path: Path) -> None:
+    """The context is the last request's count but its reasoning, in the window the event names; the plan is the last `update_plan` call's, each step numbered in order."""
+    day = tmp_path / "codex" / "sessions" / "2026" / "10" / "17"
+    day.mkdir(parents=True)
+    plan = {
+        "plan": [
+            {"step": "Read the records", "status": "completed"},
+            {"step": "Write the reader", "status": "in_progress"},
+        ]
+    }
+    (day / "rollout-2026-10-17T12-00-00-th-1.jsonl").write_text(
+        "\n".join(
+            [
+                meta("th-1", "paginated"),
+                rolled("turn_context", {"model": "gpt-5.1-codex", "cwd": "/w"}),
+                rolled(
+                    "response_item",
+                    {
+                        "type": "function_call",
+                        "name": "update_plan",
+                        "call_id": "c1",
+                        "arguments": json.dumps(
+                            {
+                                "plan": [
+                                    {
+                                        "step": "Read the records",
+                                        "status": "in_progress",
+                                    }
+                                ]
+                            }
+                        ),
+                    },
+                ),
+                rolled(
+                    "event_msg",
+                    {
+                        "type": "token_count",
+                        "info": {
+                            "total_token_usage": {
+                                "input_tokens": 9000,
+                                "cached_input_tokens": 8000,
+                                "output_tokens": 600,
+                                "reasoning_output_tokens": 400,
+                                "total_tokens": 9600,
+                            },
+                            "last_token_usage": {
+                                "input_tokens": 9000,
+                                "cached_input_tokens": 8000,
+                                "output_tokens": 600,
+                                "reasoning_output_tokens": 400,
+                                "total_tokens": 9600,
+                            },
+                            "model_context_window": 272000,
+                        },
+                        "rate_limits": None,
+                    },
+                ),
+                rolled(
+                    "response_item",
+                    {
+                        "type": "function_call",
+                        "name": "update_plan",
+                        "call_id": "c2",
+                        "arguments": json.dumps(plan),
+                    },
+                ),
+                rolled(
+                    "event_msg",
+                    {"type": "token_count", "info": None, "rate_limits": None},
+                ),
+            ]
+        )
+        + "\n"
+    )
+    read = CodexTranscripts().read(day / "rollout-2026-10-17T12-00-00-th-1.jsonl")
+    assert read.usage is not None
+    assert (read.usage.used, read.usage.window, read.usage.model) == (
+        9200,
+        272000,
+        "gpt-5.1-codex",
+    )
+    assert [
+        (each.id, each.subject, each.status, each.active) for each in read.tasks
+    ] == [
+        ("1", "Read the records", "completed", None),
+        ("2", "Write the reader", "in_progress", None),
+    ]

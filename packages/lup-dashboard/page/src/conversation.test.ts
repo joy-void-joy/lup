@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-    MESSAGE,
     UNEXCHANGED,
     UNSAID,
     aboutAt,
@@ -9,11 +8,10 @@ import {
     folds,
     history,
     laid,
-    message,
     opened,
     quoted,
     reading,
-    sending,
+    shifted,
     type Beside,
     type Entry,
     type Exchange,
@@ -80,7 +78,6 @@ describe("a conversation laid out", () => {
             "you: Build the reader.",
             "Twenty kinds of line.",
         ]);
-        expect(out.message).toBeNull();
     });
 
     it("folds nothing where the operator's last words are its first step", () => {
@@ -121,10 +118,9 @@ describe("comments on the agent's words", () => {
         expect(quoted(out, from, out.text.indexOf("Twenty"))).toBeUndefined();
     });
 
-    it("shows each comment under the line its passage ends on, and the message last under its line", () => {
+    it("shows each comment under the line its passage ends on", () => {
         const talk: Talk = {
             comments: [
-                { step: null, quote: null, text: "Carry on after." },
                 { step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" },
                 { step: 6, quote: { text: "Four carry what was said.", start: 23, end: 48 }, text: "Which four?" },
             ],
@@ -144,71 +140,44 @@ describe("comments on the agent's words", () => {
                 "Four carry what was said.",
                 "Which four?",
                 "· called Grep",
-                MESSAGE,
-                "Carry on after.",
             ].join("\n"),
         );
-        expect(blockAt(commented, commented.text.indexOf("codex"))?.comment).toBe(1);
-        expect(blockAt(commented, commented.text.indexOf("Carry on"))?.comment).toBe(0);
-        expect(opened(commented, commented.text.indexOf(MESSAGE))).toEqual({ step: null, quote: null, text: "" });
+        expect(blockAt(commented, commented.text.indexOf("codex"))?.comment).toBe(0);
+        expect(blockAt(commented, commented.text.indexOf("Which four?"))?.comment).toBe(1);
         // Ctrl+Enter ending it lands on the last character of what it quotes, where reading carries on.
-        expect(aboutAt(commented, talk.comments[1]!)).toBe(commented.text.indexOf("JSONL") + "JSONL".length - 1);
-        expect(reading(commented, commented.text.indexOf("Carry on"))).toBe("message");
+        expect(aboutAt(commented, talk.comments[0]!)).toBe(commented.text.indexOf("JSONL") + "JSONL".length - 1);
+        expect(reading(commented, commented.text.indexOf("Which four?"))).toBe("elsewhere");
     });
 
-    it("says them as one message: each under what it quotes, in the conversation's order, the message on the whole last", () => {
-        const talk: Talk = {
-            comments: [
-                { step: null, quote: null, text: "Carry on after.  " },
-                { step: 6, quote: { text: "Twenty kinds of line.\n\nFour", start: 0, end: 27 }, text: "Which four?" },
-                { step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" },
-                { step: 1, quote: { text: "file", start: 24, end: 28 }, text: "   " },
-            ],
-        };
-        expect(message(talk)).toBe(
-            "> JSONL\n\nEven for codex?\n\n> Twenty kinds of line.\n>\n> Four\n\nWhich four?\n\nCarry on after.",
-        );
-        expect(message(UNSAID)).toBe("");
-    });
-
-    it("sends them for lup to tell: each passage it replied to with the reply, in the conversation's order, the message on the whole apart", () => {
-        const talk: Talk = {
-            comments: [
-                { step: null, quote: null, text: "Carry on after.  " },
-                { step: 6, quote: { text: "Twenty kinds of line.\n\nFour", start: 0, end: 27 }, text: "Which four?" },
-                { step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" },
-                { step: 1, quote: { text: "file", start: 24, end: 28 }, text: "   " },
-            ],
-        };
-        expect(sending(talk)).toEqual({
-            passages: [
-                { quote: "JSONL", text: "Even for codex?" },
-                { quote: "Twenty kinds of line.\n\nFour", text: "Which four?" },
-            ],
-            text: "Carry on after.",
-        });
-        expect(sending(UNSAID)).toEqual({ passages: [], text: "" });
+    it("numbers the steps from where a trace starts, and moves whole where a drawer lays it", () => {
+        const spoke = 5;
+        const trace = laid(STEPS.slice(spoke + 1), ALONE, UNSAID, "nothing", spoke + 1);
+        expect(trace.text).toBe("Twenty kinds of line.\n\nFour carry what was said.\n· called Grep");
+        expect(trace.words.map((each) => each.step)).toEqual([6]);
+        expect(opened(trace, trace.text.indexOf("Four"))?.step).toBe(6);
+        const by = 100;
+        const moved = shifted(trace, by);
+        expect(moved.words[0]!.lines.map((each) => [each.from - by, each.start - by])).toEqual(trace.words[0]!.lines.map((each) => [each.from, each.start]));
+        expect(moved.asides.map((each) => each.from)).toEqual(trace.asides.map((each) => each.from + by));
+        expect(moved.turns).toEqual(trace.turns.map((each) => each + by));
+        expect(moved.last).toEqual({ from: trace.last!.from + by, to: trace.last!.to + by });
     });
 });
 
 describe("the conversation growing", () => {
     const folded = history(STEPS, []);
     const talk: Talk = {
-        comments: [
-            { step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" },
-            { step: null, quote: null, text: "Carry on." },
-        ],
+        comments: [{ step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" }],
     };
 
-    it("adds what arrives at the end, before the operator's message, everything before it where it was", () => {
+    it("adds what arrives at the end, everything before it where it was", () => {
         const before = laid(STEPS, ALONE, talk, folded);
         const after = laid([...STEPS, ...MORE], ALONE, talk, folded);
         const made = changes(before.text, after.text);
-        // What arrives lands on the last line and after it, before the message, which stays last.
+        // What arrives lands on the last line and after it.
         expect(made.length).toBe(1);
         expect(made[0]!.from).toBeGreaterThanOrEqual(before.last!.from);
         expect(after.text.slice(0, before.last!.from)).toBe(before.text.slice(0, before.last!.from));
-        expect(after.text.endsWith(`${MESSAGE}\nCarry on.`)).toBe(true);
         expect(after.text.slice(after.last!.from, after.last!.to)).toBe("Found the four.");
         // The run of calls the conversation ended on goes on in its line.
         expect(after.text).toContain("· called Grep ×2\nFound the four.");
@@ -218,9 +187,6 @@ describe("the conversation growing", () => {
         const reader = before.text.indexOf("you: Build");
         expect(moved(reader, made, before.text)).toBe(reader);
         expect(reading(before, reader)).toBe("elsewhere");
-        // One writing their message stays in it, moved down with it.
-        const writer = before.text.indexOf("Carry on.") + 3;
-        expect(after.text.slice(moved(writer, made, before.text))).toBe("ry on.");
         expect(reading(before, before.last!.from)).toBe("last");
     });
 
@@ -541,10 +507,10 @@ describe("the changes between two texts", () => {
     });
 
     it("keep a reader between two of them where they were, as when a message sent clears comments above and adds below", () => {
-        const talk: Talk = { comments: [{ step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" }, { step: null, quote: null, text: "Carry on." }] };
+        const talk: Talk = { comments: [{ step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" }] };
         const folded = history(STEPS, []);
         const before = laid(STEPS, ALONE, talk, folded);
-        const sent: Sent[] = [{ number: 101, text: message(talk), after: STEPS.length, at: at(12) }];
+        const sent: Sent[] = [{ number: 101, text: "> JSONL\n\nEven for codex?", after: STEPS.length, at: at(12) }];
         const after = laid([...STEPS, ...MORE], { ...ALONE, sent }, UNSAID, folded);
         const made = changes(before.text, after.text);
         expect(made.length).toBe(2);
@@ -579,8 +545,8 @@ describe("the changes between two texts", () => {
 describe("a review it was sent", () => {
     it("says what it answers, or that it's the operator's message from the review where it answers nothing", () => {
         const told = { state: { state: "told" as const, at: at(9), how: "call" as const }, sender: OPERATOR, recipient: SESSION };
-        const written = item(60, { reason: "review", covers: [], comments: [], letters: [{ to: SESSION, text: "Rename it." }] }, 9, told);
-        const reviewed = item(61, { reason: "review", covers: [52], comments: [{ item: 52, quote: null, text: "Fine." }], letters: [] }, 9, told);
+        const written = item(60, { reason: "review", covers: [], comments: [], letters: [{ to: SESSION, text: "Rename it." }], remarks: [] }, 9, told);
+        const reviewed = item(61, { reason: "review", covers: [52], comments: [{ item: 52, quote: null, text: "Fine." }], letters: [], remarks: [] }, 9, told);
         const beside: Beside = {
             ...ALONE,
             exchanged: {

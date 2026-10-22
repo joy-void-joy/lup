@@ -41,14 +41,19 @@ export function levelOf(fold: Folded): number | undefined {
     return FOLD_KINDS.find((each) => each.kind === fold.kind)?.level;
 }
 
+/** Return whether `fold` is the one holding the rest of its item or drawer: the item's own, or a drawer's (`FoldKindKeys.own`). */
+export function isOwn(fold: Folded): boolean {
+    return FOLD_KINDS.find((each) => each.kind === fold.kind)?.own === true;
+}
+
 /**
- * Return the folds of one item, `folds`, that `zr` opens (`opening`) or `zm` closes, `closed` saying which are folded:
- * `zr` those folded at the first level any is folded at, the item's own first; `zm` those open at the last level any is
- * open at, never the item's own, which `za` on its header folds. With `all`, as `zR` and `zM`, every one of them: each
- * folded one, or each open one but the item's own.
+ * Return the folds of one item or drawer, `folds`, that `zr` opens (`opening`) or `zm` closes, `closed` saying which
+ * are folded: `zr` those folded at the first level any is folded at, the item's own or the drawer's first; `zm` those
+ * open at the last level any is open at, never the own one, which `za` on its header folds. With `all`, as `zR` and
+ * `zM`, every one of them: each folded one, or each open one but the own one.
  */
 export function levelled<F extends Folded>(folds: readonly F[], closed: (fold: F) => boolean, opening: boolean, all: boolean): F[] {
-    const reached = opening ? folds.filter(closed) : folds.filter((each) => !closed(each) && each.kind !== "item");
+    const reached = opening ? folds.filter(closed) : folds.filter((each) => !closed(each) && !isOwn(each));
     if (all) {
         return reached;
     }
@@ -58,15 +63,15 @@ export function levelled<F extends Folded>(folds: readonly F[], closed: (fold: F
 }
 
 /**
- * Return the folds of one item, `folds`, that Space `z` and a letter opens, `closed` saying which are folded: each of
- * `kind` folded, and the item's own where it's folded, so what opens is seen; or, `closing`, as Shift and the letter,
- * each of `kind` open.
+ * Return the folds of one item or drawer, `folds`, that Space `z` and a letter opens, `closed` saying which are folded:
+ * each of `kind` folded, and the own one where it's folded, so what opens is seen; or, `closing`, as Shift and the
+ * letter, each of `kind` open.
  */
 export function ofKind<F extends Folded>(folds: readonly F[], closed: (fold: F) => boolean, kind: FoldKind, closing: boolean): F[] {
     if (closing) {
         return folds.filter((each) => each.kind === kind && !closed(each));
     }
-    return folds.filter((each) => (each.kind === kind || each.kind === "item") && closed(each));
+    return folds.filter((each) => (each.kind === kind || isOwn(each)) && closed(each));
 }
 
 /** Return whether `fold` is hidden in another one folded, its summary line among the lines that one hides. */

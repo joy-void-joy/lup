@@ -1,5 +1,6 @@
 // The agents the host serves, as the page shows them: each launch with its
-// session's conversation, and each subagent under the conversation that spawned it.
+// session's conversation, and each subagent under the conversation that spawned
+// it; what each is doing, and the context ring its banner carries.
 import type { ReplyOf } from "./api";
 
 type Listed = ReplyOf<"listed">;
@@ -103,37 +104,6 @@ export function running(served: Launch[]): Running[] {
     );
 }
 
-/** The keys of a chord typed so far in the agents' tree: none, Space, or Space then `w`. */
-export type Leading = "" | "space" | "space-w";
-
-/** What a key does in the agents' tree: the chord it leaves begun, what it does, and whether the tree takes it from React Aria's own keys. */
-export interface TreeKey {
-    leading: Leading;
-    act: "right" | "hold" | null;
-    taken: boolean;
-}
-
-/**
- * What `key` does in the agents' tree, after the keys `leading` of a chord. `h` turns the operator's switch for the
- * conversation it's on; Space leads a chord, as in the views beside it: `l`, or `w` then `l`, gives the keyboard to the
- * view, and any other key ends the chord, taken. Every other key is React Aria's: arrows move, Enter selects.
- */
-export function treeKey(leading: Leading, key: string): TreeKey {
-    if (leading === "space" && key === "w") {
-        return { leading: "space-w", act: null, taken: true };
-    }
-    if (leading !== "") {
-        return { leading: "", act: key === "l" ? "right" : null, taken: true };
-    }
-    if (key === " ") {
-        return { leading: "space", act: null, taken: true };
-    }
-    if (key === "h") {
-        return { leading: "", act: "hold", taken: true };
-    }
-    return { leading: "", act: null, taken: false };
-}
-
 /** Say what a conversation is doing, and for how long. */
 export function doing(activity: Activity | null | undefined, now: Date): string {
     if (activity == null) {
@@ -165,4 +135,29 @@ export function since(at: Date, now: Date): string {
         return `${hours}h`;
     }
     return `${Math.floor(hours / 24)}d`;
+}
+
+/** The ring's faces, from empty to full, by how much of the window is in use. */
+const RINGS = ["○", "◔", "◑", "◕", "●"];
+
+/** Say a count of tokens in a few characters: `112k`, `1M`, `840`. */
+export function tokens(count: number): string {
+    if (count >= 1_000_000) {
+        const millions = count / 1_000_000;
+        return `${millions >= 10 ? Math.round(millions) : Math.round(millions * 10) / 10}M`;
+    }
+    return count >= 1000 ? `${Math.round(count / 1000)}k` : `${count}`;
+}
+
+/**
+ * Say a conversation's context ring: the tokens in use against its window, the ring filled by the quarter (`◔ 112k/1M`),
+ * full once nothing is left; the count alone where the window isn't known.
+ */
+export function ring(used: number, window: number | null | undefined): string {
+    if (window == null || window <= 0) {
+        return tokens(used);
+    }
+    const filled = Math.min(Math.max(used / window, 0), 1);
+    const face = RINGS[Math.min(Math.floor(filled * 4 + 0.5), RINGS.length - 1)] ?? "○";
+    return `${face} ${tokens(used)}/${tokens(window)}`;
 }

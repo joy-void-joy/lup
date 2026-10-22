@@ -37,6 +37,10 @@
     --fold-body: var(--purple);
     --fold-lines: var(--muted);
     --fold-context: var(--cyan);
+    --fold-tasks: var(--link);
+    --fold-trace: var(--ok);
+    --fold-since: var(--warn);
+    --fold-conversation: var(--cyan);
     /* How many columns the review's margin has, one for each depth folds nest to,
        and how wide each is: a letter's width, and a little. */
     --columns: 6;
@@ -126,29 +130,9 @@ kbd {
 
 .layout {
     display: grid;
-    grid-template-columns: minmax(24ch, 34ch) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     height: 100vh;
-}
-
-/* On a narrow screen, as a phone's, one column: the view the operator works in
-   over the whole width, the agents' tree under it, a few rows high. */
-@media (max-width: 640px) {
-    .layout {
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: auto minmax(0, 1fr) auto;
-    }
-
-    .layout > main {
-        grid-row: 2;
-    }
-
-    .layout > nav {
-        grid-row: 3;
-        max-height: 30vh;
-        border-right: 0;
-        border-top: 1px solid var(--border);
-    }
 }
 
 /* The tabline. */
@@ -166,8 +150,7 @@ kbd {
     font-weight: 700;
 }
 
-.bar .spacer,
-.wb .spacer {
+.bar .spacer {
     flex: 1;
 }
 
@@ -180,6 +163,10 @@ kbd {
     background: none;
     padding: 0;
     cursor: pointer;
+    color: var(--muted);
+}
+
+.bar .count {
     color: var(--muted);
 }
 
@@ -210,152 +197,10 @@ kbd {
     outline-offset: -2px;
 }
 
-.wb {
-    display: flex;
-    gap: 0 1ch;
-    padding: 0 1ch;
-    border-bottom: 1px solid var(--border);
-    font-weight: 700;
-}
-
-.wb .count,
-.wb .hint {
-    font-weight: 400;
-    color: var(--muted);
-}
-
-.buf {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
-}
-
-.buf:focus {
-    outline: none;
-}
-
 .empty {
     color: var(--muted);
     padding: 0 1ch;
     margin: 0;
-}
-
-/* The agents tree: one row a line. */
-.agent-row {
-    display: flex;
-    align-items: baseline;
-    gap: 1ch;
-    padding: 0 1ch 0 calc(1ch + (var(--tree-item-level, 1) - 1) * 2ch);
-    cursor: default;
-    border-left: 2px solid transparent;
-}
-
-[data-hovered] .agent-row {
-    background: var(--float-bg);
-}
-
-[data-selected] .agent-row {
-    border-left-color: var(--focus);
-    font-weight: 700;
-}
-
-.agent-row .chevron {
-    width: 1ch;
-    border: 0;
-    background: none;
-    padding: 0;
-    color: var(--muted);
-    cursor: pointer;
-}
-
-.agent-row .label {
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
-.agent-row .label.repository {
-    color: var(--orange);
-    font-weight: 700;
-}
-
-.agent-row .label.session {
-    color: var(--fg);
-}
-
-.agent-row .label.subagent {
-    color: var(--cyan);
-}
-
-.agent-row .label.ended {
-    color: var(--muted);
-}
-
-/* The tree's keys are read around it, without a box of their own. */
-.tree-keys {
-    display: contents;
-}
-
-/* The operator's switch on for a conversation: each flagged write of it held. */
-.agent-row .holding {
-    color: var(--warn);
-    border: 1px solid currentcolor;
-    padding: 0 0.5ch;
-    font-size: 0.85em;
-    flex-shrink: 0;
-}
-
-.agent-row .state {
-    margin-left: auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 400;
-}
-
-.state[data-state="calling"] {
-    color: var(--ok);
-}
-
-.state[data-state="asking"] {
-    color: var(--warn);
-}
-
-.state[data-state="idle"] {
-    color: var(--info);
-}
-
-.state[data-state="ended"],
-.state[data-state="repository"],
-.state[data-state="unheard"] {
-    color: var(--muted);
-}
-
-/* The details. */
-.details {
-    padding: 0 1ch;
-}
-
-.details h1 {
-    font-size: inherit;
-    font-weight: 700;
-    margin: 0;
-}
-
-.details dl {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 0 2ch;
-    margin: 1lh 0 0;
-}
-
-.details dt {
-    color: var(--muted);
-}
-
-.details dd {
-    margin: 0;
-    overflow-wrap: anywhere;
 }
 
 /* The palette. */
@@ -411,28 +256,6 @@ kbd {
 .palette [cmdk-empty] {
     color: var(--muted);
     padding: 0 1ch;
-}
-
-/* The agent selected, under the tree. */
-.agent-details {
-    border-top: 1px solid var(--border);
-    max-height: 40%;
-    overflow: auto;
-}
-
-/* The way back to the review, from a conversation's title bar. */
-.wb .crumb {
-    border: 0;
-    background: none;
-    padding: 0;
-    color: var(--link);
-    cursor: pointer;
-    font-weight: 700;
-}
-
-/* A pane kept while another is shown in its place: the review, while a conversation is open. */
-[hidden] {
-    display: none !important;
 }
 
 .status .error {
@@ -587,25 +410,6 @@ kbd {
     color: var(--purple);
 }
 
-.writing {
-    border-top: 1px solid var(--border);
-    padding: 0 1ch;
-}
-
-.writing-on {
-    color: var(--info);
-}
-
-.writing textarea {
-    width: 100%;
-    min-height: 5lh;
-    background: var(--float-bg);
-    color: var(--fg);
-    border: 1px solid var(--border);
-    padding: 0 1ch;
-    resize: vertical;
-}
-
 /* The line of keys: where the cursor is, the keys that apply there, cut at the line's end where they don't fit, and
    `?` at the end, always shown. One row. */
 .keys {
@@ -689,20 +493,37 @@ kbd {
     margin: 0;
 }
 
-/* What's under an item that isn't its own text: its context and an approval's
-   whole diff, each folded under its summary line, the lines it holds set in
-   under it. In a conversation, a summary line reads ▸ while folded and ▾ while
-   open; in the review, its mark in the margin says so. */
+/* What's under an item that isn't its own text: its context, each run of
+   unchanged lines, and what folds in a drawer, each under its summary line,
+   whose mark in the margin says whether it's folded. */
 .buffer .cm-line.aside-summary {
     color: var(--muted);
 }
 
-.conversation-buffer .cm-line.aside-summary::before {
-    content: "▾ ";
+/* A drawer's summary line, in its kind's colour, set off from the item above it; a task's line in its drawer. */
+.buffer .cm-line.drawer-summary {
+    font-weight: 700;
+    padding-top: 0.2em;
 }
 
-.conversation-buffer .cm-line.aside-summary:has(.cm-foldPlaceholder)::before {
-    content: "▸ ";
+.buffer .cm-line.drawer-tasks {
+    color: var(--fold-tasks);
+}
+
+.buffer .cm-line.drawer-trace {
+    color: var(--fold-trace);
+}
+
+.buffer .cm-line.drawer-since {
+    color: var(--fold-since);
+}
+
+.buffer .cm-line.drawer-conversation {
+    color: var(--fold-conversation);
+}
+
+.aside-task {
+    color: var(--fg);
 }
 
 .buffer .cm-editor .cm-foldPlaceholder {
@@ -731,10 +552,10 @@ kbd {
     font-weight: 700;
 }
 
-/* A conversation's lines: an item of lup's inbox it sent the operator, in the
-   orange of the call that made it, and one it was sent, in the blue of the
-   operator's words; each item's text under its line, set off by a bar; and the
-   line their message is under. */
+/* A conversation's lines in its drawer: an item of lup's inbox it sent the
+   operator, in the orange of the call that made it, and one it was sent, in
+   the blue of the operator's words; each item's text under its line, set off
+   by a bar. */
 .aside-item-from {
     color: var(--orange);
 }
@@ -745,11 +566,6 @@ kbd {
 
 .aside-item-text {
     border-left: 2px solid var(--muted);
-}
-
-.aside-message {
-    color: var(--orange);
-    font-weight: 700;
 }
 
 /* A changed file under an approval or a held change: its header, then its
@@ -858,6 +674,22 @@ kbd {
     color: var(--fold-context);
 }
 
+.fold-tasks {
+    color: var(--fold-tasks);
+}
+
+.fold-trace {
+    color: var(--fold-trace);
+}
+
+.fold-since {
+    color: var(--fold-since);
+}
+
+.fold-conversation {
+    color: var(--fold-conversation);
+}
+
 /* The review's margin: a row a line, as tall as the line beside it, and a
    column for each depth folds nest to, outermost leftmost, a fold deeper than
    the last sharing it. In a fold's column, beside its summary line, the letter
@@ -948,6 +780,38 @@ kbd {
 
 .buffer .cm-editor .cm-foldPlaceholder.fold-context {
     color: var(--fold-context);
+}
+
+.buffer .cm-editor .cm-foldPlaceholder.fold-tasks {
+    color: var(--fold-tasks);
+}
+
+.buffer .cm-editor .cm-foldPlaceholder.fold-trace {
+    color: var(--fold-trace);
+}
+
+.buffer .cm-editor .cm-foldPlaceholder.fold-since {
+    color: var(--fold-since);
+}
+
+.buffer .cm-editor .cm-foldPlaceholder.fold-conversation {
+    color: var(--fold-conversation);
+}
+
+.fold-tasks {
+    color: var(--fold-tasks);
+}
+
+.fold-trace {
+    color: var(--fold-trace);
+}
+
+.fold-since {
+    color: var(--fold-since);
+}
+
+.fold-conversation {
+    color: var(--fold-conversation);
 }
 
 /* The header over the review: whom what's being written goes to and the group,
@@ -1047,6 +911,22 @@ kbd {
     color: var(--fold-context);
 }
 
+.where-tasks .where-mark {
+    color: var(--fold-tasks);
+}
+
+.where-trace .where-mark {
+    color: var(--fold-trace);
+}
+
+.where-since .where-mark {
+    color: var(--fold-since);
+}
+
+.where-conversation .where-mark {
+    color: var(--fold-conversation);
+}
+
 .where-group {
     color: var(--cyan);
     font-weight: 700;
@@ -1071,6 +951,19 @@ kbd {
 @media (max-width: 640px) {
     :root {
         --columns: 5;
+    }
+
+    /* The top line keeps to one row: the count of agents gives way, and the demo's badge is cut. */
+    .bar .count {
+        display: none;
+    }
+
+    .bar .demo,
+    .bar .said {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
     }
 
     .where {

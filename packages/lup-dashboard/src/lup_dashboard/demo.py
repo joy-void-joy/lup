@@ -26,7 +26,7 @@ from lup_dev.host.protocol import (
     SetHolding,
     Talker,
 )
-from lup_dev.host.records import Called, Entry, Said
+from lup_dev.host.records import Called, Entry, Said, Task, Usage
 from lup_dev.inbox.delivery import body
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
@@ -83,11 +83,19 @@ from lup_dev.inbox.store import (
     cited,
 )
 from lup_dev.inbox.store import Asked as Ask
+from lup_dev.policy.since import Approved, ApproveSince, ShowSince, Since, SinceFile
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from lup_dashboard.api import Asked, Replied
+
+
+class Standing(MutableModel):
+    """What a stand-in conversation's record says of it: what its context holds, and its task list."""
+
+    usage: Usage | None = None
+    tasks: list[Task] = []
 
 
 class Demo(MutableModel, Host, arbitrary_types_allowed=True):
@@ -121,6 +129,14 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """The arrival under way, once the page asked for the inbox."""
     arrived: datetime | None = None
     """When the late question arrived; none until it has."""
+    approved: list[int] = []
+    """The flagged writes marked good from the drawer, by number, kept in memory."""
+    grows: timedelta = timedelta(seconds=20)
+    """How long after the page first asks what the parser subagent's branch changed since the operator approved it two more writes come to it, so a session can watch the drawer say so and bring them in."""
+    growth: asyncio.TimerHandle | None = None
+    """The growth under way, once the page asked."""
+    grew: bool = False
+    """Whether the two writes came."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -170,9 +186,33 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 if (session, agent) == ("s1", "a02"):
                     self.grown += 1
                 steps = self.conversation(session, agent)
-                return Conversed(entries=steps[since:], since=since, total=len(steps))
+                standing = self.standing(session, agent)
+                return Conversed(
+                    entries=steps[since:],
+                    since=since,
+                    total=len(steps),
+                    usage=standing.usage,
+                    tasks=standing.tasks,
+                )
             case ListItems(conversation=conversation):
                 return self.exchanged(conversation)
+            case ShowSince(conversation=conversation, seen=seen):
+                if self.growth is None:
+                    self.growth = asyncio.get_running_loop().call_later(
+                        self.grows.total_seconds(), self.grow
+                    )
+                return self.since(conversation, seen)
+            case ApproveSince(conversation=conversation, path=path):
+                flags = [
+                    each.flags
+                    for each in self.since(conversation, None).files
+                    if path is None or each.file.path == path
+                ]
+                approved = [number for each in flags for number in each]
+                self.approved = [*self.approved, *approved]
+                self.changed.set()
+                self.changed = asyncio.Event()
+                return Approved(flags=approved)
             case _:
                 return Refused(error=f"the demo doesn't answer `{request.kind}`")
 
@@ -199,6 +239,91 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         self.arrived = self.clock.now()
         self.changed.set()
         self.changed = asyncio.Event()
+
+    def grow(self) -> None:
+        """Let two more writes come to the parser subagent's branch: its drawer says so at the page's next asking, and brings them in on its key."""
+        self.grew = True
+
+    def standing(self, session: str, agent: str | None) -> Standing:
+        """Return what a stand-in conversation's record says of it: the parser subagent's three tasks and a ninth of the long window; its session's half of it and no task; the second runtime's session's own window and plan; none for the rest."""
+        match (session, agent):
+            case ("s1", "a02"):
+                return Standing(
+                    usage=Usage(used=112_000, window=1_000_000, model="opus-4-1"),
+                    tasks=[
+                        Task(id="1", subject="Read the records", status="completed"),
+                        Task(
+                            id="2",
+                            subject="Write the reader",
+                            status="in_progress",
+                            active="Writing the reader",
+                        ),
+                        Task(
+                            id="3", subject="Test each kind of line", status="pending"
+                        ),
+                    ],
+                )
+            case ("s1", None):
+                return Standing(
+                    usage=Usage(used=512_000, window=1_000_000, model="opus-4-1")
+                )
+            case ("s3", _):
+                return Standing(
+                    usage=Usage(used=61_000, window=272_000, model="gpt-5.1"),
+                    tasks=[
+                        Task(
+                            id="1",
+                            subject="Render the second scene",
+                            status="in_progress",
+                        ),
+                        Task(id="2", subject="Cut the reel", status="pending"),
+                    ],
+                )
+            case _:
+                return Standing()
+
+    def since(self, conversation: Conversation, seen: str | None) -> Since:
+        """Return what a stand-in conversation's branch changed since the operator approved it: the parser subagent's new reader module and, once `grew`, a change to the clock beside it, from its session's worktree; each file approved from the drawer left out; nothing for the rest."""
+        dev = conversation.repository / "tree" / "dev"
+        parser = conversation.session == "s1" and conversation.agent == "a02"
+        if not parser:
+            return Since(
+                worktree=dev,
+                branch=None,
+                version="demo 0",
+                writes=0,
+                same=seen == "demo 0",
+            )
+
+        def filed(number: int) -> SinceFile | None:
+            found = files(number)
+            if number in self.approved or not isinstance(found, Files):
+                return None
+            [file] = found.files
+            return SinceFile(file=file, version=f"blob-{number}", flags=[number])
+
+        shown = [
+            each
+            for number in [59, *([60] if self.grew else [])]
+            if (each := filed(number)) is not None
+        ]
+        writes = 5 if self.grew else 3
+        version = f"demo-{'grown' if self.grew else 'first'} {len(self.approved)}"
+        if seen == version:
+            return Since(
+                worktree=dev,
+                branch="feat-reader",
+                version=version,
+                writes=writes,
+                same=True,
+            )
+        return Since(
+            worktree=dev,
+            branch="feat-reader",
+            version=version,
+            writes=writes,
+            files=shown,
+        )
 
     def ago(self, minutes: float) -> datetime:
         """Return the moment `minutes` before the clock's."""

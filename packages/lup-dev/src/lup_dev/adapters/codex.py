@@ -226,7 +226,10 @@ from lup_dev.host.records import (
     Reader,
     Record,
     Records,
+    Status,
+    Task,
     Transcript,
+    Usage,
     within,
 )
 from lup_dev.host.records import Said as Spoken
@@ -1129,6 +1132,38 @@ class Renamed(Model, extra="ignore"):
     thread_name: str
 
 
+class TokenUsage(Model, extra="ignore"):
+    """What one request counted (`protocol/src/protocol.rs`, `TokenUsage`): its input, the cached part of it among it, its output, and the reasoning among that."""
+
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_output_tokens: int = 0
+    total_tokens: int = 0
+
+    def used(self) -> int:
+        """Return the tokens the context holds after the request: the whole count but the reasoning, which the model keeps out of its context (`tokens_in_context_window`).
+
+        >>> TokenUsage(input_tokens=1000, output_tokens=300, reasoning_output_tokens=200, total_tokens=1300).used()
+        1100
+        """
+        return self.total_tokens - self.reasoning_output_tokens
+
+
+class TokenInfo(Model, extra="ignore"):
+    """What a `token_count` event says of the thread (`TokenUsageInfo`): the last request's count, and the model's context window."""
+
+    last_token_usage: TokenUsage | None = None
+    model_context_window: int | None = None
+
+
+class TokenCounted(Model, extra="ignore"):
+    """`token_count`: the thread's token usage, after each request; `info` is none on a turn that made no request."""
+
+    type: Literal["token_count"]
+    info: TokenInfo | None = None
+
+
 class OtherEvent(Model, extra="ignore"):
     """Any other event."""
 
@@ -1141,19 +1176,60 @@ class EventRecord(Model, extra="ignore"):
     type: Literal["event_msg"]
     timestamp: datetime | None = None
     payload: Annotated[
-        Typed | Answered | Completed | Renamed | OtherEvent,
+        Typed | Answered | Completed | Renamed | TokenCounted | OtherEvent,
         Field(union_mode="left_to_right"),
     ]
 
 
+class TurnSettings(Model, extra="ignore"):
+    """What a `turn_context` line says of the turn: the model it runs."""
+
+    model: str | None = None
+
+
+class TurnRecord(Model, extra="ignore"):
+    """A `turn_context` line."""
+
+    type: Literal["turn_context"]
+    payload: TurnSettings
+
+
+class PlanStep(Model, extra="ignore"):
+    """One step of the plan `update_plan` writes, and where it stands."""
+
+    step: str
+    status: Status
+
+
+class PlanWritten(Model, extra="ignore"):
+    """`update_plan`'s arguments: the whole plan, which replaces the one before."""
+
+    plan: list[PlanStep]
+
+
 class ToolCalled(Model, extra="ignore"):
-    """A `function_call` or `custom_tool_call`: a tool, by its namespace and name (`protocol/src/models.rs`, `ResponseItem`)."""
+    """A `function_call` or `custom_tool_call`: a tool, by its namespace and name (`protocol/src/models.rs`, `ResponseItem`), and its arguments, read for the call that writes the plan."""
 
     type: Literal["function_call", "custom_tool_call"]
     name: str
     namespace: str | None = None
     call_id: str | None = None
     """The call's id, which its hooks carry as `tool_use_id`."""
+    arguments: str | None = None
+    """Its arguments, as the model wrote them: JSON in a string."""
+
+    def planned(self) -> list[Task] | None:
+        """Return the plan this call writes, where it's `update_plan` and its arguments read as one, each step numbered in order; none for any other call."""
+        if self.name != "update_plan" or self.arguments is None:
+            return None
+        try:
+            plan = PlanWritten.model_validate_json(self.arguments).plan
+        except ValidationError:
+            return None
+        return [
+            Task(id=str(at), subject=each.step, status=each.status)
+            for at, each in enumerate(plan, start=1)
+        ]
 
     def tool(self) -> str:
         """Return the tool's name as Codex shows it: its namespace before its name, but for the default one (`protocol/src/tool_name.rs`)."""
@@ -1186,7 +1262,8 @@ class ResponseRecord(Model, extra="ignore"):
 
 
 type Rolled = Annotated[
-    MetaRecord | EventRecord | ResponseRecord, Field(discriminator="type")
+    MetaRecord | EventRecord | ResponseRecord | TurnRecord,
+    Field(discriminator="type"),
 ]
 """A line of a rollout lup reads; the others it passes over."""
 
@@ -1224,7 +1301,50 @@ class CodexTranscripts(Model, Reader):
             title=names[-1] if names else None,
             directory=None if first is None else first.cwd,
             entries=[entry for each in lines for entry in stepped(each)],
+            usage=usage(lines),
+            tasks=planned(lines),
         )
+
+
+def usage(lines: list[Rolled]) -> Usage | None:
+    """Return what the thread's context held after its last request, from the last `token_count` event that counted one, and the model the last turn ran; none where no event counted.
+
+    Read from Codex's source at `rust-v0.163.0` and not measured on a live
+    rollout (`docs/field-notes.md`, *A thread's rollout*).
+    """
+    counted = [
+        each.payload.info
+        for each in lines
+        if isinstance(each, EventRecord)
+        and isinstance(each.payload, TokenCounted)
+        and each.payload.info is not None
+        and each.payload.info.last_token_usage is not None
+    ]
+    models = [
+        each.payload.model
+        for each in lines
+        if isinstance(each, TurnRecord) and each.payload.model is not None
+    ]
+    if not counted:
+        return None
+    last = counted[-1]
+    return Usage(
+        used=0 if last.last_token_usage is None else last.last_token_usage.used(),
+        window=last.model_context_window,
+        model=models[-1] if models else None,
+    )
+
+
+def planned(lines: list[Rolled]) -> list[Task]:
+    """Return the thread's plan as it stands at the rollout's end: the last `update_plan` call's, each replacing the one before; empty where it wrote none."""
+    plans = [
+        plan
+        for each in lines
+        if isinstance(each, ResponseRecord)
+        and isinstance(each.payload, ToolCalled)
+        and (plan := each.payload.planned()) is not None
+    ]
+    return plans[-1] if plans else []
 
 
 def rolled(record: Path) -> Iterator[Rolled]:

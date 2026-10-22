@@ -90,6 +90,14 @@ class Store(Model):
 
     layout: StoreLayout
     worktree: Path
+    common: Path | None = None
+    """The repository's common git directory, where git on the repository is
+    pinned to it (`Git.pinned`), as the host reads a room's; none finds it
+    from the worktree, as the judge does."""
+    index: Path | None = None
+    """An index of the reader's own to snapshot through, in place of the
+    store's (`StoreLayout.reading`), so a reader beside the judge never waits
+    on its index's lock nor moves what it staged; none for the store's own."""
 
     def snapshots(self) -> Git:
         """Return git on the store, with the worktree as its work tree."""
@@ -101,10 +109,13 @@ class Store(Model):
                 str(self.worktree),
             ],
             cwd=self.worktree,
+            index=self.index,
         )
 
     def repository(self) -> Git:
-        """Return git on the worktree's own repository."""
+        """Return git on the worktree's own repository: pinned to `common` where it's given, else found from the worktree."""
+        if self.common is not None:
+            return Git.pinned(self.common)
         return Git(cwd=self.worktree)
 
     def ensure(self) -> None:

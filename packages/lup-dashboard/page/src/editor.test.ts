@@ -25,7 +25,7 @@ import {
     type Pressed,
     type Typing,
 } from "./editor";
-import { CONVERSATION_KEYS, REVIEW_KEYS } from "./keys";
+import { REVIEW_KEYS } from "./keys";
 import { markdown, source, sourced } from "./markdown";
 
 describe("vim's cursor and the marks the Markdown hides", () => {
@@ -291,7 +291,7 @@ describe("the chords Space leads", () => {
 
     it("maps each chord the list of keys names, once, and leads each chord it names further", () => {
         expect(new Set(SPACED.map(([keys]) => keys)).size).toBe(SPACED.length);
-        const listed = [...REVIEW_KEYS.flatMap((part) => part.keys), ...CONVERSATION_KEYS.flatMap((part) => part.keys)]
+        const listed = REVIEW_KEYS.flatMap((part) => part.keys)
             .flatMap((key) => key.keys.split(" "))
             .filter((keys) => keys.startsWith("␣"))
             .map((keys) => keys.replace("␣", "<Space>"));

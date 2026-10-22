@@ -6,10 +6,10 @@ import {
     launches,
     repositories,
     repositoryName,
+    ring,
     running,
     since,
-    treeKey,
-    type Leading,
+    tokens,
     type Register,
     type Talker,
 } from "./agents";
@@ -143,36 +143,15 @@ describe("repositories", () => {
     });
 });
 
-describe("treeKey", () => {
-    function typed(keys: string[]): { acts: (string | null)[]; taken: boolean[] } {
-        let leading: Leading = "";
-        const acts: (string | null)[] = [];
-        const taken: boolean[] = [];
-        for (const key of keys) {
-            const next = treeKey(leading, key);
-            leading = next.leading;
-            acts.push(next.act);
-            taken.push(next.taken);
-        }
-        return { acts, taken };
-    }
-
-    it("turns the switch with h, and leaves arrows, Enter and other letters to the tree", () => {
-        expect(typed(["h", "ArrowDown", "Enter", "j"])).toEqual({
-            acts: ["hold", null, null, null],
-            taken: [true, false, false, false],
-        });
-    });
-
-    it("gives the keyboard to the view with Space l and Space w l", () => {
-        expect(typed([" ", "l", " ", "w", "l"]).acts).toEqual([null, "right", null, null, "right"]);
-    });
-
-    it("ends a chord on any other key, taking it, so a key after Space never turns the switch", () => {
-        expect(typed([" ", "h", "h"])).toEqual({ acts: [null, null, "hold"], taken: [true, true, true] });
-        expect(typed([" ", "w", "h", "ArrowDown"])).toEqual({
-            acts: [null, null, null, null],
-            taken: [true, true, true, false],
-        });
+describe("ring", () => {
+    it("says the tokens in use against the window, the ring filled to the nearest quarter, the count alone with no window", () => {
+        expect(ring(112_000, 1_000_000)).toBe("○ 112k/1M");
+        expect(ring(300_000, 1_000_000)).toBe("◔ 300k/1M");
+        expect(ring(100_000, 200_000)).toBe("◑ 100k/200k");
+        expect(ring(150_000, 200_000)).toBe("◕ 150k/200k");
+        expect(ring(190_000, 200_000)).toBe("● 190k/200k");
+        expect(ring(840, null)).toBe("840");
+        expect(tokens(1_500_000)).toBe("1.5M");
+        expect(tokens(12_000_000)).toBe("12M");
     });
 });
