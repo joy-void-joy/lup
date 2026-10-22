@@ -36,6 +36,16 @@ import {
     type Item,
 } from "./review";
 
+/** How long the answers to items' contexts and files are gathered before the review is laid out with them, in milliseconds. */
+const GATHERED = 100;
+
+/** The answers gathered so far, and the moment they're due to be laid out, where one is set. */
+interface Gathered {
+    contexts: Map<number, Answered<Context>>;
+    files: Map<number, Answered<ChangedFile[]>>;
+    due: ReturnType<typeof setTimeout> | null;
+}
+
 const SAID = {
     connecting: "connecting",
     live: "live",
@@ -61,6 +71,26 @@ export function App() {
     const asked = useRef({ contexts: new Set<number>(), files: new Set<string>() });
     // Each item's latest asking for its files, whose answer alone is shown.
     const latest = useRef(new Map<number, string>());
+    // What the host answered of items, gathered for a moment (`GATHERED`) and laid out together: at load, every
+    // item's files and context answer within the same second, and the review laid out once for them all costs
+    // what laid out once for each would.
+    const gathered = useRef<Gathered>({ contexts: new Map(), files: new Map(), due: null });
+    const gather = useCallback((add: (held: Gathered) => void) => {
+        const held = gathered.current;
+        add(held);
+        held.due ??= setTimeout(() => {
+            held.due = null;
+            const came = { contexts: held.contexts, files: held.files };
+            held.contexts = new Map();
+            held.files = new Map();
+            if (came.contexts.size > 0) {
+                setContexts((before) => new Map([...before, ...came.contexts]));
+            }
+            if (came.files.size > 0) {
+                setFiles((before) => new Map([...before, ...came.files]));
+            }
+        }, GATHERED);
+    }, []);
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
     const [inserting, setInserting] = useState(false);
@@ -259,7 +289,7 @@ export function App() {
                 asked.current.contexts.add(number);
                 void answered({ kind: "inbox-show-context", number }, (answer) =>
                     answer.kind === "inbox-context" ? answer : null,
-                ).then((context) => setContexts((before) => new Map(before).set(number, context)));
+                ).then((context) => gather((held) => held.contexts.set(number, context)));
             }
             const reason = item.reason;
             const stage = reason.reason === "approval" ? reason.typing : reason.reason === "flagged" ? reason.writes : 0;
@@ -272,7 +302,7 @@ export function App() {
                 ).then((shown) => {
                     // An answer to an earlier asking, arriving after a later one's, is dropped.
                     if (latest.current.get(number) === reading) {
-                        setFiles((before) => new Map(before).set(number, shown));
+                        gather((held) => held.files.set(number, shown));
                     }
                 });
             }
