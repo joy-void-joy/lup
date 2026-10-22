@@ -811,14 +811,16 @@ def test_an_ask_sent_again_across_a_restart_finds_its_question_and_asks_no_secon
     assert answered == (
         (
             '<answer item="2" from="operator" question="1">\n'
-            "<asked>Which parser?</asked>\nLark.\n</answer>"
+            '<asked>Which parser?</asked>\n<comment id="2.1">Lark.</comment>\n'
+            "</answer>"
         ),
         False,
     )
     assert held == (
         (
             '<answer item="4" from="operator" question="3">\n'
-            "<asked>Which cache?</asked>\nNone.\n</answer>"
+            '<asked>Which cache?</asked>\n<comment id="4.1">None.</comment>\n'
+            "</answer>"
         ),
         False,
     )
