@@ -39,13 +39,14 @@ class Core(Module):
     paths: Paths = Paths.of(
         protected=CorePaths().protected,
         operator_documents=CorePaths().operator_documents,
+        tests=CorePaths().tests,
         scratch=CorePaths().scratch,
         docs=CorePaths().docs,
         data=CorePaths().data,
     )
     """Every protected path but the Python tools' files, which are `Python`'s; the
-    operator's documents, scratch, docs and data. Nothing is excluded unless the
-    project says."""
+    operator's documents, TypeScript's tests, scratch, docs and data. Nothing is
+    excluded unless the project says."""
     packages: Packages = standard_machine()
     """The standard machine, every room's whatever the host: the shell and the
     usual tools, an agent's everyday work, what the runtimes call on, and editors

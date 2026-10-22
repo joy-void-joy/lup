@@ -53,6 +53,10 @@ class CorePaths(Model):
     """
     operator_documents: list[str] = ["DESIGN.md", "AGENTS.md"]
     """The operator's documents: changing one is a design decision, so it asks."""
+    tests: list[str] = ["**/*.test.ts", "**/*.test.tsx"]
+    """TypeScript's tests, wherever they are, as vitest, Jest and Bun find them by
+    default: a test, so writing one asks nothing. pytest's tests are `Python`'s,
+    by its test roots."""
     scratch: list[str] = ["**/tmp/**", ".lup/**"]
     """Scratch work, and the saved versions under `.lup/`: allowed at any size."""
     docs: list[str] = ["**/*.md", "docs/**"]

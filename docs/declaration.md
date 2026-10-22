@@ -99,7 +99,7 @@ Every collection a module holds is a selection (`Selection`, `declaration/gramma
 | Kind | Entries | Held by |
 |---|---|---|
 | `Rules` | rule ids | `CodeRules` |
-| `Paths` | a `Layer` of patterns per role (`protected`, `operator_documents`, `excluded`, `scratch`, `docs`, `data`, `source_trees`, `python`, `conftest`), the verbs taking roles as keywords | `Core`, `Python` |
+| `Paths` | a `Layer` of patterns per role (`protected`, `operator_documents`, `excluded`, `tests`, `scratch`, `docs`, `data`, `source_trees`, `python`, `conftest`), the verbs taking roles as keywords | `Core`, `Python` |
 | `Gate` | `Step`s, by name | `Python`, `Private` |
 | `Exemptions` | an `Exemption` per rule, listing every path it lifts the rule from | `CodeRules` |
 | `TestRoots` | `Pytest` roots | `Python` |
@@ -134,7 +134,7 @@ A tool's name and a request's kind are shared across modules, so the same one fr
 
 | Module | What it holds |
 |---|---|
-| `Core` | every protected path but the Python tools', the operator's documents, scratch, docs and data; the standard machine; lup's session defaults; the credentials' limits; guidance `core` |
+| `Core` | every protected path but the Python tools', the operator's documents, TypeScript's tests (`*.test.ts`, `*.test.tsx`), scratch, docs and data; the standard machine; lup's session defaults; the credentials' limits; guidance `core` |
 | `Python` | the Python tools' files (protected), source trees, Python files and `conftest.py`; the runner, `Uv()`; the test roots, `tests/`; the gate's `rules`, `format`, `pytest` and `lint-imports`; guidance `python` |
 | `CodeRules` | every rule but those `catalog/rules.py` leaves out, each with its reason (`runtime-mention` alone today); no exemptions; guidance `code-rules`. Requires Node `>=22.18` for the engine |
 | `GitHub` | the GitHub tools; the answer to a room's gate asking an issue's state; how many matches `find_issues` asks for |
