@@ -712,6 +712,54 @@ describe("typed folds", () => {
     });
 });
 
+describe("what a change shows open, as it's laid out", () => {
+    /** Thirty lines, `l1` to `l30`, each replaced where `changed` says. */
+    const thirty = (changed: Record<number, string> = {}) =>
+        Array.from({ length: 30 }, (_, at) => changed[at + 1] ?? `l${at + 1}`).join("\n") + "\n";
+    /** A file whose tenth line changes and whose twentieth changes a signature, which asks on that line alone. */
+    const signed: ChangedFile = {
+        path: "a.py",
+        before: { kind: "text", text: thirty() },
+        after: { kind: "text", text: thirty({ 10: "ten" }) },
+        reading: {
+            role: "production",
+            asks: [{ name: "public-api", taken: "flagged", line: 20, side: "after", api: { kind: "signature-changed", name: "f" } }],
+            findings: [],
+        },
+    };
+    const HELD: Item = {
+        number: 57,
+        reason: { reason: "held", text: "Let it land?", summary: "", worktree: "/w", key: "k" },
+        sender: from("s1"),
+        recipient: { party: "operator" },
+        made: AT,
+        state: { state: "waiting" },
+        rank: WAITING,
+    };
+    /** The runs of lines folded under `item`, changing `signed`, as it's laid out, and whether its change on line 10 is among what they hide. */
+    const folded = (item: Item) => {
+        const around: Around = { contexts: new Map(), files: new Map([[item.number, { shown: [signed] }]]) };
+        const out = laid([item], [], banner, header, EMPTY, around);
+        const runs = out.regions[0]!.folds.filter((each) => each.kind === "lines" && each.closed);
+        const ten = out.text.indexOf("\nten\n") + 1;
+        return { runs: runs.map((each) => each.label), hidden: runs.some((each) => ten > each.from && ten <= each.to) };
+    };
+    /** Unchanged lines alone folded, three kept around the change on line 10 and around the line that asks. */
+    const everyChange = { runs: ["6 unchanged lines, 1–6", "3 unchanged lines, 14–16", "7 unchanged lines, 24–30"], hidden: false };
+
+    it("opens every change of a flagged write, folding only unchanged lines, 3 kept around each change and each line that matters", () => {
+        expect(folded(FLAGGED)).toEqual(everyChange);
+    });
+
+    it("opens every change of a held change, folding only unchanged lines, as a flagged write does", () => {
+        expect(folded(HELD)).toEqual(everyChange);
+    });
+
+    it("keeps an approval's file showing the lines that ask alone, with their context, its other changes folded", () => {
+        expect(folded(APPROVAL)).toEqual({ runs: ["17 lines, 2 changed, 1–16", "7 unchanged lines, 24–30"], hidden: true });
+    });
+});
+
 describe("comments on a changed file's lines", () => {
     const HELD: Item = {
         number: 55,

@@ -48,6 +48,7 @@ import {
     quoted,
     regionAt,
     shownAt,
+    showing,
     stepped,
     stranded,
     toggled,
@@ -212,7 +213,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
         const stops = new Set(region.stops);
         for (const coded of region.code) {
             if (coded.row === null) {
-                const automatic = shownOnce(coded.file).automatic ? " code-automatic" : "";
+                const automatic = shownOnce(coded.file, showing(region.item)).automatic ? " code-automatic" : "";
                 const whole = stops.has(coded.from) ? " code-matters" : "";
                 marks.push({
                     from: coded.from,
