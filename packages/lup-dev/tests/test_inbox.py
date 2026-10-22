@@ -1383,15 +1383,19 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         listed = inbox()
         shown = inbox("show", "1")
         replied = inbox("answer", "1", "--comment", "The rebuild is fixed.")
-        reply = delivery.inbox.item(7)
+        reply = delivery.inbox.item(8)
         done = inbox("done", "2")
+        copy = delivery.inbox.item(6)
+    # Codex's subagent b1 has a parent, its session's own conversation, which
+    # gets a copy of how it went (@6); Claude Code's a1, with no type and no
+    # record, is Claude Code's own, and has none.
     assert [text for text, _ in answers] == [
         "Your friction is with the operator, @1. Carry on.",
         "How it went is with the operator, @2.",
         "Your stop is with the operator, @3. End your turn.",
         "Your friction is with the operator, @4. Carry on.",
-        "How it went is with the operator, @5.",
-        "Your stop is with the operator, @6. End your turn.",
+        "How it went is with the operator, @5 and your parent.",
+        "Your stop is with the operator, @7. End your turn.",
     ]
     assert not any(error for _, error in answers)
     assert missing[1]
@@ -1410,8 +1414,13 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         (3, claude_session, Operator(), "s1"),
         (4, codex_session, Operator(), "c1"),
         (5, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c2"),
-        (6, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c3"),
+        (7, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c3"),
     ]
+    assert (copy.reason, copy.recipient, copy.quiet) == (
+        HowItWent.model_validate(went),
+        codex_session,
+        True,
+    )
     friction = Friction.model_validate(jammed)
     assert [each.reason for each in waiting] == [
         friction,
@@ -1435,7 +1444,7 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         "Trying: run the gate\n"
         "Would change: say the rebuild's time first\n"
     )
-    assert replied.startswith("Replied to @1: your reply, @7, is for subagent a1")
+    assert replied.startswith("Replied to @1: your reply, @8, is for subagent a1")
     assert reply.reason == Message(kind="note", text="The rebuild is fixed.", of=1)
     assert reply.recipient == claude_session.model_copy(update={"agent": "a1"})
     assert done.startswith("@2")
@@ -2271,6 +2280,27 @@ class Rollouts:
             stop_hook_active=False,
         )
 
+    def lup(
+        self,
+        hooks: tuple[Path, Path],
+        tool: str,
+        arguments: dict[str, JsonValue],
+        thread: str,
+    ) -> tuple[str, bool]:
+        """Call lup's `tool` as subagent `thread` does: its start stamped by the hook on `hooks[0]`, then the call through the tool server on `hooks[1]`."""
+        hook, mcp = hooks
+        started = codex(
+            "PreToolUse",
+            tool_name=f"mcp__lup__{tool}",
+            tool_input=arguments,
+            tool_use_id=f"{thread}-{tool}",
+            agent_id=thread,
+            agent_type="explorer",
+            transcript_path=str(self.rollout(thread)),
+        )
+        stamped = json.loads(send(hook, started))["hookSpecificOutput"]["updatedInput"]
+        return call(mcp, tool, stamped)
+
 
 def handed(number: int, agent: str, name: str) -> str:
     """How item `number` is told: Claude Code's subagent `agent`, called `name`, ended its turn, its last message handed to its parent by Claude Code itself."""
@@ -2439,6 +2469,57 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_with_its_last_message_on_
         False,
     )
     assert after == ""
+
+
+def test_a_subagents_friction_and_how_it_went_reach_its_parent_whole_on_each_runtime(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    rollouts = Rollouts(tmp_path)
+    jammed: dict[str, JsonValue] = {
+        "got_in_the_way": "`uv run lup-dev check` printed: engine stale",
+        "trying": "run the gate",
+        "would_change": "say the rebuild's time first",
+    }
+    went: dict[str, JsonValue] = {"smooth": "The brief.", "felt": "Good."}
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, tmp_path / "v", "two", "codex")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        hook2, mcp2 = machine.host.launch("two").hook, machine.host.launch("two").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, codex("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        rollouts.recorded("th1", "t1", "/root/lexer")
+        jam = records.lup((hook, mcp), "friction", jammed, "a1", "Explore")
+        how = rollouts.lup((hook2, mcp2), "how_it_went", went, "th1")
+        ended = send(hook, claude("Stop", stop_hook_active=False))
+        told = context(send(hook, bash("m1")))
+        told2 = context(send(hook2, codex_bash("d1")))
+        operators = [each.number for each in delivery.inbox.waiting(Operator())]
+        copies = [delivery.inbox.item(number) for number in [2, 4]]
+    friction = Friction.model_validate(jammed)
+    how_it_went = HowItWent.model_validate(went)
+    assert jam == (
+        "Your friction is with the operator, @1 and your parent. Carry on.",
+        False,
+    )
+    assert how == ("How it went is with the operator, @3 and your parent.", False)
+    assert ended == ""
+    assert told.startswith(
+        '<item item="2" from="subagent a1 of claude session s1" kind="friction">'
+    )
+    assert friction.text in told
+    assert told2.startswith(
+        '<item item="4" from="subagent th1 of codex session t1" kind="how it went">'
+    )
+    assert how_it_went.text in told2
+    assert operators == [1, 3]
+    assert [(each.reason, each.quiet) for each in copies] == [
+        (friction, True),
+        (how_it_went, True),
+    ]
 
 
 def test_lup_dev_inbox_send_names_a_launch_by_its_id_or_its_worktree(
