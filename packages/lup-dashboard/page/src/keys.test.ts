@@ -28,6 +28,14 @@ describe("the line of keys", () => {
         }
     });
 
+    it("lists the clipboard's keys in each view, in the list alone", () => {
+        for (const parts of [REVIEW_KEYS, CONVERSATION_KEYS]) {
+            const part = parts.find((each) => each.title === "The clipboard");
+            expect(part?.keys.map((key) => key.keys)).toEqual(['"+y "*y', '"+p "*p', "v… ^c"]);
+            expect(part?.keys.every((key) => key.at.length === 0)).toBe(true);
+        }
+    });
+
     it("lists every key once a part, each saying what it does", () => {
         for (const parts of [REVIEW_KEYS, CONVERSATION_KEYS]) {
             for (const part of parts) {
