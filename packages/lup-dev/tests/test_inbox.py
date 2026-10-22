@@ -4764,6 +4764,8 @@ def test_judged_answers_a_large_log_in_pages_an_agent_reads_whole(
     recent = judged(since="PT2H")
     between = judged(since="2026-10-01T11:00", until="2026-10-01T11:30:00+00:00")
     answered = judged(answered=True)
+    widened = judged(limit=200, holds_limit=30, answered=True)
+    whole = judged(limit=len(ours))
     summary, listing, still, counted = first.split("\n\n")
     assert summary.splitlines()[0] == (
         f"Your session's {len(ours)} verdicts in this repository, by outcome and "
@@ -4776,7 +4778,8 @@ def test_judged_answers_a_large_log_in_pages_an_agent_reads_whole(
     assert listing.splitlines()[0] == "The latest 48, oldest first:"
     assert listing.splitlines()[-1] == (
         f"Not listed: {len(ours) - 48} earlier verdicts, which `until` "
-        f'"{(start + timedelta(minutes=2905)).isoformat()}" reads.'
+        f'"{(start + timedelta(minutes=2905)).isoformat()}" reads; a `limit` of '
+        f"{len(ours)} lists them all."
     )
     assert [line.split("  ")[1] for line in read] == [
         str(worktree / each.path) for each in ours
@@ -4801,8 +4804,18 @@ def test_judged_answers_a_large_log_in_pages_an_agent_reads_whole(
     assert heads == [f"k{n}" for n in range(5, 25)]
     assert held[-1] == (
         "Not listed: 5 earlier holds answered, which `until` "
-        '"2026-09-29T18:30:00+00:00" reads.'
+        '"2026-09-29T18:30:00+00:00" reads; a `holds_limit` of 25 lists them all.'
     )
+    # A larger limit lists more of them, and one as large as all lists every one.
+    wider = widened.split("\n\n")[1].splitlines()
+    assert wider[0] == "The latest 200, oldest first:"
+    assert wider[-1].startswith(f"Not listed: {len(ours) - 200} earlier verdicts")
+    every_hold = widened.split("\n\n")[-1].splitlines()
+    assert [
+        line.split()[0] for line in every_hold[1:] if not line.startswith("  ")
+    ] == [f"k{n}" for n in range(25)]
+    assert whole.split("\n\n")[1].splitlines()[0] == "Each, oldest first:"
+    assert "Not listed: " not in whole.split("\n\n")[1]
 
 
 def test_the_operators_list_says_when_they_last_settled_an_item(
