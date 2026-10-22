@@ -3,13 +3,16 @@
 git runs for real on the test's repositories, with the operator's own git
 configuration kept out. No test runs podman, reaches the network or a real host
 service, or reads the clock; the hook command runs under `sh` with a stand-in
-`socat`.
+`socat`, against a stand-in service where it must reach one.
 """
 
 import io
 import json
 import shlex
+import subprocess
+import sys
 from datetime import timedelta
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -23,6 +26,7 @@ from lup.rooms.engine import Exited, Podman, Process
 from lup.sessions.bridge import Bridge
 from lup.sessions.terminal import (
     Cli,
+    Event,
     SessionSettings,
     TerminalError,
     TerminalSettings,
@@ -629,7 +633,9 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
     assert own[-1] == "own"
     assert settings.directory == directory
     assert settings.cli == Cli(program=Path("/opt/cli"))
-    assert settings.hooks == claude.hooks(piped(), timedelta(hours=25))
+    assert settings.hooks == claude.hooks(
+        partial(piped, timeout=timedelta(hours=25)), timedelta(hours=25)
+    )
     assert settings.servers == [
         ToolServer(
             name="lup",
@@ -1093,33 +1099,24 @@ def test_the_command_names_the_runtimes_it_knows(
 
 
 def test_the_hook_pipes_the_payload_to_the_launchs_socket() -> None:
-    program, flag, script = piped(timedelta(hours=25))
+    program, flag, script = piped("call-started", timedelta(hours=25))
 
     assert [program, flag] == ["sh", "-c"]
-    assert shlex.split(script) == [
-        "socat",
+    piping, *_ = script.splitlines()
+    assert shlex.split(piping)[:7] == [
+        "answer=$(socat",
         "-t",
         "90000",
         "-",
         "UNIX-CONNECT:/run/lup/hook.sock,retry=120,interval=0.5",
-        "||",
-        "{",
+        "&&",
         "echo",
-        (
-            "lup: this hook couldn't reach lup's host service on /run/lup/hook.sock, "
-            "so it wasn't judged. On the host, `lup-dev host` serves this session "
-            "again."
-        ),
-        ">&2;",
-        "exit",
-        "1;",
-        "}",
     ]
 
 
 def test_the_hook_waits_for_the_service_as_long_as_lups_bridge_does() -> None:
-    _, _, script = piped()
-    _, options = shlex.split(script)[4].split(",", 1)
+    _, _, script = piped("call-started")
+    _, options = shlex.split(script.splitlines()[0])[4].split(",", 1)
     bridge = Bridge(Path("/run/lup/mcp.sock"), io.StringIO())
 
     assert options == "retry=120,interval=0.5"
@@ -1137,8 +1134,8 @@ def socat(tmp_path: Path, script: str) -> Path:
     return bin_dir
 
 
-def hook(path: Path, payload: str) -> Ran:
-    program, *arguments = piped()
+def hook(path: Path, payload: str, event: Event = "call-started") -> Ran:
+    program, *arguments = piped(event)
     return run(
         program,
         *arguments,
@@ -1149,11 +1146,11 @@ def hook(path: Path, payload: str) -> Ran:
 
 
 def test_the_hook_prints_the_answer_unchanged(tmp_path: Path) -> None:
-    path = socat(tmp_path, 'cat > "$0.payload"\nprintf \'{"answer": 1}\\n\'')
+    path = socat(tmp_path, 'cat > "$0.payload"\nprintf \'{"answer": 1}\\n\\n\'')
     ran = hook(path, '{"hook_event_name": "SessionStart"}')
 
     assert ran.status == 0
-    assert ran.output.decode() == '{"answer": 1}\n'
+    assert ran.output.decode() == '{"answer": 1}\n\n'
     assert ran.error.decode() == ""
     assert (tmp_path / "arguments").read_text() == (
         "-t 90000 - UNIX-CONNECT:/run/lup/hook.sock,retry=120,interval=0.5\n"
@@ -1161,6 +1158,12 @@ def test_the_hook_prints_the_answer_unchanged(tmp_path: Path) -> None:
     assert json.loads((path / "socat.payload").read_text()) == {
         "hook_event_name": "SessionStart"
     }
+
+
+UNREACHED = (
+    "lup: this hook couldn't reach lup's host service on /run/lup/hook.sock, so it "
+    "wasn't judged. On the host, `lup-dev host` serves this session again."
+)
 
 
 @pytest.mark.parametrize("status", [1, 2, 127])
@@ -1172,13 +1175,147 @@ def test_a_hook_that_cant_reach_the_service_ends_with_status_1_and_says_why(
 
     assert ran.status == 1
     assert ran.output.decode() == ""
-    assert ran.error.decode().splitlines() == [
-        "socat: connect failed",
+    assert ran.error.decode().splitlines() == ["socat: connect failed", UNREACHED]
+
+
+GONE = (
+    "lup: the host service went away before it answered this hook, as it does when "
+    "it restarts,"
+)
+HELD = (
+    "A write lup held for the operator's review stays held, and their answer "
+    "reaches you at a later call."
+)
+
+
+@pytest.mark.parametrize(
+    ("event", "status", "said"),
+    [
+        ("call-started", 2, f"{GONE} so this call didn't run: make it again. {HELD}"),
         (
-            "lup: this hook couldn't reach lup's host service on /run/lup/hook.sock, "
-            "so it wasn't judged. On the host, `lup-dev host` serves this session "
-            "again."
+            "call-finished",
+            2,
+            f"{GONE} so what was written is judged at your next call. {HELD}",
         ),
+        (
+            "turn-ended",
+            2,
+            f"{GONE} so what was written is judged at your next call. {HELD}",
+        ),
+        (
+            "conversation-ended",
+            2,
+            f"{GONE} so what was written is judged at your next call. {HELD}",
+        ),
+        ("session-started", 1, f"{GONE} so its answer was lost."),
+        ("turn-started", 1, f"{GONE} so its answer was lost."),
+    ],
+)
+def test_a_hook_whose_connection_ends_unanswered_fails_saying_why(
+    tmp_path: Path, event: Event, status: int, said: str
+) -> None:
+    """`socat` ends with status 0 and nothing printed where the service closes the
+    connection, exits or is killed while the hook waits (`docs/field-notes.md`,
+    *The room's hook when the service goes away*), and the service answers every
+    hook with something: this is a lost connection, never no decision. Status 2
+    keeps a write from landing unreviewed and tells the agent; at a session's or
+    a turn's start, 1, which drops no prompt."""
+    path = socat(tmp_path, "cat > /dev/null")
+    ran = hook(path, "{}", event)
+
+    assert ran.status == status
+    assert ran.output.decode() == ""
+    assert ran.error.decode().splitlines() == [said]
+
+
+SERVICE = """
+import os, signal, socket, sys
+path, mode = sys.argv[1:]
+listening = socket.socket(socket.AF_UNIX)
+listening.bind(path)
+listening.listen()
+print("listening", flush=True)
+connection, _ = listening.accept()
+while connection.recv(65536):
+    pass
+print("read", flush=True)
+match mode:
+    case "close":
+        connection.close()
+        signal.pause()
+    case "exit":
+        os._exit(0)
+    case "killed":
+        signal.pause()
+"""
+"""A stand-in host service, a process of its own: it reads a hook's payload to
+its end, then closes the connection, exits with it open, or waits to be killed."""
+
+
+STAND_IN = """
+import socket, sys
+connection = socket.socket(socket.AF_UNIX)
+try:
+    connection.connect({socket!r})
+except OSError as failed:
+    sys.exit(f"socat: connect failed: {{failed}}")
+connection.sendall(sys.stdin.buffer.read())
+connection.shutdown(socket.SHUT_WR)
+try:
+    while chunk := connection.recv(65536):
+        sys.stdout.buffer.write(chunk)
+except ConnectionResetError as reset:
+    sys.exit(f"socat: read: {{reset}}")
+"""
+"""`socat` as the room's hook runs it, on a socket of the test's: the payload sent
+and the write side shut, the answer printed until the connection ends, which is
+status 0 however it ends but a reset, as the real one was found to do."""
+
+
+@pytest.mark.parametrize("mode", ["close", "exit", "killed"])
+def test_a_hook_the_service_leaves_unanswered_mid_wait_fails_closed(
+    tmp_path_factory: pytest.TempPathFactory, mode: str
+) -> None:
+    # A socket's path is limited in length, so its directory is short.
+    base = tmp_path_factory.mktemp("hook")
+    hook_socket = base / "hook.sock"
+    bin_dir = base / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "socat"
+    fake.write_text(f"#!{sys.executable}\n{STAND_IN.format(socket=str(hook_socket))}")
+    fake.chmod(0o755)
+    service = subprocess.Popen(
+        [sys.executable, "-c", SERVICE, str(hook_socket), mode],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert service.stdout is not None
+        assert service.stdout.readline() == "listening\n"
+        program, *arguments = piped("call-started")
+        room = subprocess.Popen(
+            [program, *arguments],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={"PATH": f"{bin_dir}:/usr/bin:/bin"},
+        )
+        assert room.stdin is not None
+        room.stdin.write(b'{"hook_event_name": "PreToolUse"}')
+        room.stdin.close()
+        assert service.stdout.readline() == "read\n"
+        if mode == "killed":
+            service.kill()
+        assert room.stdout is not None
+        assert room.stderr is not None
+        output, error = room.stdout.read(), room.stderr.read()
+        status = room.wait()
+    finally:
+        service.kill()
+        service.wait()
+    assert (status, output) == (2, b"")
+    assert error.decode().splitlines() == [
+        f"{GONE} so this call didn't run: make it again. {HELD}"
     ]
 
 

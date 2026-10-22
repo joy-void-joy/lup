@@ -175,6 +175,10 @@ class StoreLayout(Model):
         """Say where one hold is kept."""
         return self.holds / f"{hold}.json"
 
+    def waiter(self, hold: str) -> Path:
+        """Say where the call waiting on hold `hold` holds its lock while it waits, which the OS frees where its process ends."""
+        return self.holds / f"{hold}.lock"
+
 
 class CheckoutLayout(Model):
     """The places inside a worktree that lup reads or writes."""
@@ -442,6 +446,10 @@ class HostLayout(Model):
     def launch(self, launch: str) -> LaunchSockets:
         """Say where launch `launch`'s sockets are."""
         return LaunchSockets(directory=self.launches / launch)
+
+    def ended(self, payload: str) -> Path:
+        """Say where the service marks a hook its runtime ended before its answer, by its payload's digest, for a hold its call waits on to give up (`hung_up`, `host/service.py`)."""
+        return self.sockets / "ended" / hashlib.sha256(payload.encode()).hexdigest()
 
     def record(self, launch: str) -> Path:
         """Say where launch `launch` is recorded, so a restarted service serves it."""

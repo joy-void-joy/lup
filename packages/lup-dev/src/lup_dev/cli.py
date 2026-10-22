@@ -297,10 +297,13 @@ class Adapters(Model, Answerer):
     def answer(self, runtime: str, payload: str, services: Services) -> str:
         """Answer one of `runtime`'s hooks, judging with `services`.
 
-        What the hook prints is its adapter's output on a line, or nothing.
+        What the hook prints is its adapter's output on a line, or nothing. A
+        hold its call waits on gives up where the host service marks the hook
+        ended, its runtime having ended it before its answer (`HostLayout.ended`).
         """
         adapter = self.named(runtime)
-        bench = Bench(runtime=adapter.runtime, services=services)
+        ended = services.layout.host.ended(payload)
+        bench = Bench(runtime=adapter.runtime, services=services, ended=ended)
         output = adapter.hook(payload, bench)
         return f"{output}\n" if output else ""
 

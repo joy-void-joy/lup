@@ -9,7 +9,7 @@ import pytest
 from pydantic import TypeAdapter
 
 from lup.adapters.claude.terminal import spelled
-from lup.sessions.terminal import Hook
+from lup.sessions.terminal import Event, Hook
 from lup_dev.adapters import claude, codex
 from lup_dev.codescan.contract import (
     Checker,
@@ -1098,13 +1098,19 @@ def test_codex_a_subagents_call_holds_back_the_main_conversations_checkpoint(
 # In a launched room
 
 
-HOOK = ["sh", "-c", "socat …"]
+def hook_at(event: Event) -> list[str]:
+    """The room's hook at `event`, as `piped` gives one for each."""
+    return ["sh", "-c", f"socat … {event}"]
+
+
 HOLD = timedelta(hours=25)
 
 
 def in_room(raw: str, bench: Bench) -> str:
     """Answer a Claude Code hook as a launched room does: the judge answers a hook the room runs (`claude.hooks`) and the judge reads (`claude.heard`); the host service answers every other as no decision."""
-    hooked = [name for each in claude.hooks(HOOK, HOLD) for name in spelled(each.event)]
+    hooked = [
+        name for each in claude.hooks(hook_at, HOLD) for name in spelled(each.event)
+    ]
     if json.loads(raw)["hook_event_name"] not in hooked:
         return ""
     return claude.hook(raw, bench) if claude.heard(raw).judged else ""
@@ -1414,13 +1420,17 @@ def test_claude_a_worker_busy_in_its_worktree_holds_back_checkpoints_there_alone
 def test_claude_hooks_every_call_and_each_turns_start_and_end_in_a_room() -> None:
     """Every hook waits as long as a hold may: a call's start for a file tool's
     write, its finish for the checkpoint's, a turn's end for its last checkpoint's."""
-    assert claude.hooks(HOOK, HOLD) == [
-        Hook(event="session-started", command=HOOK, timeout=HOLD),
-        Hook(event="turn-started", command=HOOK, timeout=HOLD),
-        Hook(event="call-started", command=HOOK, timeout=HOLD),
-        Hook(event="call-finished", command=HOOK, timeout=HOLD),
-        Hook(event="turn-ended", command=HOOK, timeout=HOLD),
-        Hook(event="conversation-ended", command=HOOK, timeout=HOLD),
+    assert claude.hooks(hook_at, HOLD) == [
+        Hook(event="session-started", command=hook_at("session-started"), timeout=HOLD),
+        Hook(event="turn-started", command=hook_at("turn-started"), timeout=HOLD),
+        Hook(event="call-started", command=hook_at("call-started"), timeout=HOLD),
+        Hook(event="call-finished", command=hook_at("call-finished"), timeout=HOLD),
+        Hook(event="turn-ended", command=hook_at("turn-ended"), timeout=HOLD),
+        Hook(
+            event="conversation-ended",
+            command=hook_at("conversation-ended"),
+            timeout=HOLD,
+        ),
     ]
 
 
@@ -1454,13 +1464,17 @@ def test_claudes_judge_reads_no_call_to_a_tool_that_only_reads_nor_to_lups(
 
 
 def test_codex_hooks_each_turns_start_and_the_judges_events_in_a_room() -> None:
-    assert codex.hooks(HOOK, HOLD) == [
-        Hook(event="session-started", command=HOOK, timeout=HOLD),
-        Hook(event="turn-started", command=HOOK, timeout=HOLD),
-        Hook(event="call-started", command=HOOK, timeout=HOLD),
-        Hook(event="call-finished", command=HOOK, timeout=HOLD),
-        Hook(event="turn-ended", command=HOOK, timeout=HOLD),
-        Hook(event="conversation-ended", command=HOOK, timeout=HOLD),
+    assert codex.hooks(hook_at, HOLD) == [
+        Hook(event="session-started", command=hook_at("session-started"), timeout=HOLD),
+        Hook(event="turn-started", command=hook_at("turn-started"), timeout=HOLD),
+        Hook(event="call-started", command=hook_at("call-started"), timeout=HOLD),
+        Hook(event="call-finished", command=hook_at("call-finished"), timeout=HOLD),
+        Hook(event="turn-ended", command=hook_at("turn-ended"), timeout=HOLD),
+        Hook(
+            event="conversation-ended",
+            command=hook_at("conversation-ended"),
+            timeout=HOLD,
+        ),
     ]
 
 

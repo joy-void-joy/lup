@@ -45,7 +45,20 @@ would land unseen; at a call's finish the agent is told beside its result, as
 when judging fails; any other hook warns the operator in `systemMessage`, and
 the call goes on. Where the room's hook can't reach the service, it ends with
 status 1 and says why on standard error: a non-blocking error, which Claude Code
-shows, and the call goes on.
+shows, and the call goes on. Where it reached the service and the connection
+was lost before an answer, as when the service restarts while a hold waits, it
+ends with status 2 at a call's start, its finish and a turn's end, and 1 at a
+session's start and a turn's start, saying why (`lost`, `launch/session.py`).
+The hooks reference's table of status 2 (read 2026-10-22): `PreToolUse` "Blocks
+the tool call"; `PostToolUse` and `PostToolUseFailure` "Shows stderr to Claude";
+`Stop` "Prevents Claude from stopping, continues the conversation", and
+`SubagentStop` "Prevents the subagent from stopping", each on the standard
+error, unless it "says a file is missing", which lup's line never does; and
+`UserPromptSubmit` "Blocks the prompt, so it never reaches Claude", which a
+turn's start mustn't do to the operator's prompt. So the service answers every
+hook with something, `{}` where it decides nothing: Claude Code reads output
+starting with `{` as JSON and checks it against its schema, every field of
+which is optional (2.1.308, `cte`), "Success. The fields apply", none here.
 
 The service adds to each answer through `told`: a call to lup's tools
 (`mcp__lup__<tool>`, `TOOL_PREFIX`) is rewritten to carry `caller`, lup's id for
@@ -154,7 +167,8 @@ What its judging relies on, from Claude Code's hooks reference
   with any status but 0 or 2 it's "a non-blocking error": "You see a `<hook
   name> hook error` notice in the transcript with `Failed with non-blocking
   status code:` and the first line of your hook's stderr", and "The action goes
-  ahead"; status 2 alone blocks the call, so the room's hook never ends with it;
+  ahead"; status 2 alone blocks the call, so the room's hook ends with it only
+  where its connection to the host service was lost before an answer;
 - `systemMessage` is a "Warning message shown to the user";
 - `PreToolUse`'s `permissionDecisionReason` is "For `"deny"`, shown to Claude.
   For `"allow"` and `"defer"`, written to the debug log only", and its
@@ -256,7 +270,7 @@ from lup_dev.policy.report import judge_failed, sections
 from lup_dev.policy.runtime import Runtime
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from datetime import timedelta
 
     import httpx
@@ -1131,8 +1145,8 @@ def pushed(text: str, token: str) -> Notice:
     return Notice(method=f"notifications/{CHANNEL}", params=message.model_dump())
 
 
-def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
-    """Return the hooks a launched Claude Code session runs `command` at: the events the host service hears.
+def hooks(command: Callable[[Event], list[str]], timeout: timedelta) -> list[Hook]:
+    """Return the hooks a launched Claude Code session runs at the events the host service hears, each running the command `command` gives for its event.
 
     `SessionStart`; `UserPromptSubmit`, each turn's start, a channel's message
     among them, which clears the calls the session's records show over (one
@@ -1152,7 +1166,9 @@ def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
         "turn-ended",
         "conversation-ended",
     ]
-    return [Hook(event=event, command=command, timeout=timeout) for event in events]
+    return [
+        Hook(event=event, command=command(event), timeout=timeout) for event in events
+    ]
 
 
 def agent() -> Declaration:

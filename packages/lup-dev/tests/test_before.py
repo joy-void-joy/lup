@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from lup_dev.inbox.store import (
     ApiChanged,
     Asked,
@@ -18,15 +20,16 @@ from lup_dev.policy.checkpoint import (
     CallStarted,
     Session,
     SessionStarted,
+    Worktree,
 )
-from lup_dev.policy.holds import Holds, Response
+from lup_dev.policy.holds import Holds, Response, answer
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.policy.worktrees import Place, place
 from lup_dev.private.withheld import Held, Withheld, kept
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
-    from conftest import Kit, Shell
+    from conftest import Dying, Kit, Shell
 
 CORE = Path("src/pkg/core.py")
 
@@ -427,6 +430,156 @@ def test_a_held_write_left_unanswered_is_denied_and_its_hold_stays_open(
     kept = Holds(layout=kit.layout.store(repo)).get(hold.key)
     assert kept is not None
     assert kept.abandoned
+
+
+def rewrite(repo: Path, call: str = "w1") -> Overwrite:
+    """A whole write of the core module, which asks, so it's held."""
+    text = (repo / CORE).read_text() + "\n"
+    return Overwrite(call=call, tool="Write", path=repo / CORE, text=text)
+
+
+def ran(kit: Kit, repo: Path, call: str) -> str:
+    """A shell call of the session's that writes nothing: what its finish tells."""
+    CallStarted(session="s1", cwd=repo, call=call, tool="Bash").apply(kit.bench)
+    return CallFinished(session="s1", cwd=repo, call=call).apply(kit.bench).context
+
+
+def test_a_held_write_holds_its_file_as_a_checkpoints_change_does_while_it_waits(
+    kit: Kit, repo: Path
+) -> None:
+    """So a write landing under it anyway is left to its answer, and no file tool
+    writes the file meanwhile, which a retried write would hold a second time."""
+    kit.announced.answering = None
+    store = Worktree.at(repo, kit.layout).store
+    seen: list[tuple[list[Path], Decision]] = []
+
+    def meanwhile() -> None:
+        [hold] = kit.announced.holds
+        holding = [each.path for each in store.state().holding]
+        again = before(kit.bench, rewrite(repo, "w2"), "s1", repo)
+        seen.append((holding, again))
+        Holds(layout=kit.layout.store(repo)).answer(
+            hold.key, Response(approved=True), kit.clock
+        )
+
+    kit.clock.on_sleep.append(meanwhile)
+    assert before(kit.bench, rewrite(repo), "s1", repo).outcome == "allow"
+    [hold] = kit.announced.holds
+    assert seen == [
+        (
+            [CORE],
+            Decision(
+                outcome="deny",
+                reason=(
+                    f"lup holds {repo}/src/pkg/core.py for the operator's review "
+                    f"(hold {hold.key}), so it isn't written until they answer, "
+                    "which reaches the conversation that made the change at its "
+                    "next call."
+                ),
+            ),
+        )
+    ]
+    assert store.state().holding == []
+
+
+GONE = (
+    "lup's host service went away while your call waited for the operator's answer "
+    "to the change to"
+)
+
+
+def test_a_held_write_whose_call_died_is_made_once_the_operator_approves(
+    kit: Kit, repo: Path, dying: Dying
+) -> None:
+    """The hook's connection lost with the service, its call didn't run; the
+    operator's approval still makes the write, at the next checkpoint in its
+    worktree, where the file is as it was."""
+    kit.announced.answering = None
+    start = SessionStarted(session="s1", cwd=repo)
+    start.apply(kit.bench)
+    original = (repo / CORE).read_text()
+    dying.at_next_wait(kit.clock)
+    with pytest.raises(dying.died):
+        before(kit.bench, rewrite(repo), "s1", repo)
+    assert (repo / CORE).read_text() == original
+    [hold] = kit.announced.holds
+    answer(kit.layout, hold.key, Response(approved=True, comment="fine"), [], kit.clock)
+    assert ran(kit, repo, "c1") == (
+        f"{GONE} {repo}/src/pkg/core.py, which they have since approved: fine. "
+        "It's in place."
+    )
+    assert (repo / CORE).read_text() == original + "\n"
+    store = Worktree.at(repo, kit.layout).store
+    assert store.content(store.accepted(), CORE) == (original + "\n").encode()
+    assert len(kit.announced.holds) == 1
+
+
+def test_a_held_write_whose_call_died_and_was_declined_never_lands(
+    kit: Kit, repo: Path, dying: Dying
+) -> None:
+    kit.announced.answering = None
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    original = (repo / CORE).read_text()
+    dying.at_next_wait(kit.clock)
+    with pytest.raises(dying.died):
+        before(kit.bench, rewrite(repo), "s1", repo)
+    [hold] = kit.announced.holds
+    answer(kit.layout, hold.key, Response(approved=False), [], kit.clock)
+    assert ran(kit, repo, "c1") == (
+        f"{GONE} {repo}/src/pkg/core.py, which they have since declined. It was put "
+        "back, or never landed, and your version saved."
+    )
+    assert (repo / CORE).read_text() == original
+    saved = repo / ".lup/saved/1/src/pkg/core.py"
+    assert saved.read_text() == original + "\n"
+
+
+def test_a_write_landing_under_its_open_hold_is_left_to_the_holds_answer(
+    kit: Kit, repo: Path, dying: Dying
+) -> None:
+    """As a hook that heard no answer let it land before lup told a lost
+    connection from one: the checkpoint doesn't judge it afresh, nor hold it a
+    second time, and the operator's decline puts it back."""
+    kit.announced.answering = None
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    original = (repo / CORE).read_text()
+    dying.at_next_wait(kit.clock)
+    with pytest.raises(dying.died):
+        before(kit.bench, rewrite(repo), "s1", repo)
+    (repo / CORE).write_text(original + "\n")
+    assert ran(kit, repo, "c1") == ""
+    assert len(kit.announced.holds) == 1
+    store = Worktree.at(repo, kit.layout).store
+    assert store.content(store.accepted(), CORE) == original.encode()
+    [hold] = kit.announced.holds
+    answer(kit.layout, hold.key, Response(approved=False), [], kit.clock)
+    ran(kit, repo, "c2")
+    assert (repo / CORE).read_text() == original
+
+
+def test_a_held_write_whose_call_is_interrupted_is_denied_and_told_at_the_next_call(
+    kit: Kit, repo: Path, tmp_path: Path
+) -> None:
+    kit.announced.answering = None
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    original = (repo / CORE).read_text()
+    mark = tmp_path / "ended"
+    bench = kit.bench.model_copy(update={"ended": mark})
+    kit.clock.on_sleep.append(mark.touch)
+    assert before(bench, rewrite(repo), "s1", repo).outcome == "deny"
+    assert (repo / CORE).read_text() == original
+    [hold] = kit.announced.holds
+    kept = Holds(layout=kit.layout.store(repo)).get(hold.key)
+    assert kept is not None
+    assert (kept.abandoned, kept.interrupted) == (True, True)
+    saved = repo / ".lup/saved/1/src/pkg/core.py"
+    assert ran(kit, repo, "c1") == (
+        "lup refused 1 file. It is unchanged; your version is saved.\n\n"
+        f"{repo}/src/pkg/core.py (saved at {saved})\n"
+        "  Its call was interrupted while it waited for the operator; the hold "
+        "stays open in their inbox, and their answer reaches you at a later call."
+    )
+    assert ran(kit, repo, "c2") == ""
 
 
 def test_writes_outside_the_repository_arent_judged(

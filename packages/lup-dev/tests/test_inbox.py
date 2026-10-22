@@ -57,7 +57,7 @@ from lup_dev.host.protocol import (
 )
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded, Said
-from lup_dev.host.service import Asked, HostService, Judged, Naming
+from lup_dev.host.service import UNDECIDED, Asked, HostService, Judged, Naming
 from lup_dev.host.service import judged as run_on_host
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import LaunchJudge, LaunchModules, WorkerJudge, Workers
@@ -233,13 +233,14 @@ def client(layout: HostLayout, clock: FakeClock) -> HostClient:
 
 
 def send(path: Path, payload: str) -> str:
-    """Send `payload` on the socket at `path`, as the room's hook does, and read back."""
+    """Send `payload` on the socket at `path`, as the room's hook does, and read back what it tells: nothing where the service decides and tells nothing (`UNDECIDED`, which `test_host.py` checks), as these tests read what a hook tells."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.connect(str(path))
         connection.sendall(payload.encode())
         connection.shutdown(socket.SHUT_WR)
         with connection.makefile("rb") as stream:
-            return stream.read().decode()
+            answer = stream.read().decode()
+    return "" if answer == UNDECIDED else answer
 
 
 @asynccontextmanager
@@ -5138,14 +5139,26 @@ def test_judged_says_where_an_open_hold_stands_and_what_waits_with_it(
         files=[],
         diff="",
     )
+    interrupted = {"abandoned": True, "interrupted": True}
     assert [
-        stands(hold),
-        stands(hold.model_copy(update={"abandoned": True})),
-        stands(hold.model_copy(update={"commit": "c0ffee"})),
+        stands(hold, waited=True),
+        stands(hold, waited=False),
+        stands(hold.model_copy(update={"abandoned": True}), waited=False),
+        stands(hold.model_copy(update=interrupted), waited=False),
+        stands(hold.model_copy(update={"commit": "c0ffee"}), waited=False),
     ] == [
         "waiting for the operator, its call waiting on their answer",
         (
+            "waiting for the operator, no call waiting on it any more: lup's host "
+            "service went away mid-wait, and their answer reaches its session at a "
+            "later call"
+        ),
+        (
             "waiting for the operator: nobody answered in time, so the change was "
+            "put back and its version saved"
+        ),
+        (
+            "waiting for the operator: its call was interrupted, so the change was "
             "put back and its version saved"
         ),
         "waiting for the operator, no call waiting on it",

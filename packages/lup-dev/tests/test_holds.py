@@ -72,12 +72,43 @@ def test_a_hold_waits_until_the_operator_answers(kit: Kit, tmp_path: Path) -> No
     assert kit.clock.slept == 2
 
 
-def test_a_hold_nobody_answers_gives_up_after_its_patience(
+def test_a_hold_is_waited_on_while_its_call_holds_its_lock(
+    kit: Kit, tmp_path: Path
+) -> None:
+    """The lock is the OS's, freed where the call's process ends, so a hold whose
+    call is gone is told from one a call waits on, by any thread or process."""
+    store = holds(kit, tmp_path)
+    hold = held(kit, tmp_path)
+    assert not store.waited_on(hold.key)
+    with store.waiting(hold.key):
+        assert store.waited_on(hold.key)
+    assert not store.waited_on(hold.key)
+
+
+def test_a_wait_whose_call_was_interrupted_gives_up_at_once(
     kit: Kit, tmp_path: Path
 ) -> None:
     store = holds(kit, tmp_path)
     hold = held(kit, tmp_path)
-    assert store.wait(hold.key, kit.clock, patience=timedelta(seconds=10)) is None
+    ended: list[bool] = []
+
+    def interrupted() -> bool:
+        return bool(ended)
+
+    kit.clock.on_sleep.append(lambda: ended.append(True))
+    assert store.wait(hold.key, kit.clock, ended=interrupted) is None
+    assert kit.clock.slept == 2
+    # An answer given as the call was interrupted is the session's next call's.
+    store.answer(hold.key, Response(approved=True), kit.clock)
+    assert store.wait(hold.key, kit.clock, ended=interrupted) is None
+
+
+def test_a_hold_nobody_answers_gives_up_after_its_patience(
+    kit: Kit, tmp_path: Path
+) -> None:
+    store = holds(kit, tmp_path).model_copy(update={"patience": timedelta(seconds=10)})
+    hold = held(kit, tmp_path)
+    assert store.wait(hold.key, kit.clock) is None
     assert kit.clock.slept == 10
 
 
@@ -125,6 +156,18 @@ def test_a_late_answer_is_told_once(kit: Kit, tmp_path: Path) -> None:
     assert [each.key for each in store.late()] == [hold.key]
     store.mark(hold.key, delivered=True)
     assert store.late() == []
+
+
+def test_a_hold_settled_with_no_call_waiting_is_told_once_its_answered(
+    kit: Kit, tmp_path: Path
+) -> None:
+    store = holds(kit, tmp_path)
+    hold = held(kit, tmp_path)
+    store.answer(hold.key, Response(approved=True), kit.clock)
+    assert store.late() == []
+    store.mark(hold.key, orphaned=True)
+    [late] = store.late()
+    assert (late.key, late.waited()) == (hold.key, False)
 
 
 def test_a_moves_hold_is_told_once_its_answered(kit: Kit, tmp_path: Path) -> None:

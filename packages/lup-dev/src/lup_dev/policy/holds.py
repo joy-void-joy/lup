@@ -9,6 +9,15 @@ back, or never lets it land, and saves it, with the comment beside it; an
 approval with a comment passes the comment on. Unanswered within the patience,
 the change is put back and saved, and the hold stays open.
 
+The call waiting holds a lock for as long as it waits (`Holds.waiting`), which
+the OS frees where its process ends, so a hold whose call is gone is told from
+one still waited on (`Holds.waited_on`). The host service stopping, or the
+launch's process ending, takes the call's wait with it: such a hold is settled
+at a later checkpoint in its worktree, as its call would have settled it, and
+its session told (`docs/judging-writes.md`, *Asking the operator*). A call its
+runtime ends while it waits, the operator interrupting it, gives up on the
+hold as on one unanswered in time, telling its conversation at its next call.
+
 What a move of `HEAD` asks is already committed, and isn't put back, so on every
 runtime it's kept as a hold no agent waits on, with the commit it came from
 (*A move's asks, after the fact*). Its answer is logged when it's given, and told
@@ -23,9 +32,12 @@ agent; the real separation comes with containers.
 import difflib
 import secrets
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
+
+from filelock import FileLock, Timeout
 
 from lup.types import Model
 from lup_dev.clock import Clock
@@ -41,7 +53,7 @@ from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Generator, Iterator
 
     from lup_dev.policy.runtime import Runtime
 
@@ -102,15 +114,25 @@ class Hold(Model):
     one an agent waits on."""
     verdicts: list[Verdict] = []
     """The verdicts logged on its files, which its answer is logged against."""
+    proposed: bool = False
+    """Whether it holds a file tool's write before it lands, which isn't on disk
+    until it's let through; a checkpoint's change is there already."""
     answer: Answer | None = None
     abandoned: bool = False
-    """Whether the wait ran out: the change was put back, and the hold stays open."""
+    """Whether the wait ran out, or its call was interrupted: the change was put
+    back, or never landed, and the hold stays open."""
+    interrupted: bool = False
+    """Whether its call was interrupted while it waited, its runtime ending the
+    hook."""
+    orphaned: bool = False
+    """Whether the call waiting on it was gone when its answer came, as when the
+    host service restarted mid-wait: a later checkpoint acted on the answer."""
     delivered: bool = False
     """Whether an answer given while no agent waited reached the session."""
 
     def waited(self) -> bool:
-        """Say whether an agent waits inside its hook for the answer."""
-        return self.commit is None and not self.abandoned
+        """Say whether an agent waits inside its hook for the answer, or did until its process ended."""
+        return self.commit is None and not self.abandoned and not self.orphaned
 
 
 class Announcing(ABC):
@@ -196,6 +218,11 @@ class Holds(Model):
     """The holds kept in one worktree's store."""
 
     layout: StoreLayout
+    patience: timedelta = timedelta(hours=24)
+    """How long a call waits for the operator's answer to a hold before the
+    change is put back, and a hold no call waits on any more is kept: the first
+    lup held calls for 4 hours without trouble; a day leaves room for an
+    operator away overnight."""
 
     def unused(self) -> str:
         """Return a short key no hold here has, which the operator can type."""
@@ -226,20 +253,36 @@ class Holds(Model):
         ]
         return sorted(found, key=lambda hold: hold.created)
 
+    @contextmanager
+    def waiting(self, key: str) -> Generator[None]:
+        """Hold the lock of the call waiting on hold `key` while the context is open."""
+        self.layout.holds.mkdir(parents=True, exist_ok=True)
+        with FileLock(self.layout.waiter(key)):
+            yield
+
+    def waited_on(self, key: str) -> bool:
+        """Say whether a call waits on hold `key`: whether its lock is held."""
+        self.layout.holds.mkdir(parents=True, exist_ok=True)
+        probe = FileLock(self.layout.waiter(key), timeout=0)
+        try:
+            probe.acquire()
+        except Timeout:
+            return True
+        probe.release()
+        return False
+
     def wait(
         self,
         key: str,
         clock: Clock,
-        patience: timedelta = timedelta(hours=24),
         poll: timedelta = timedelta(seconds=2),
+        ended: Callable[[], bool] | None = None,
     ) -> Answer | None:
-        """Wait for the operator to answer hold `key`; none if `patience` runs out.
-
-        The first lup held calls for 4 hours without trouble; a day leaves room
-        for an operator away overnight.
-        """
-        deadline = clock.now() + patience
+        """Wait for the operator to answer hold `key`; none if the patience runs out, or once `ended` says the call waiting was interrupted, whether or not they answered meanwhile: nothing would hear it."""
+        deadline = clock.now() + self.patience
         while True:
+            if ended is not None and ended():
+                return None
             hold = self.get(key)
             if hold is None:
                 message = f"hold {key} vanished while waiting for its answer"
@@ -251,9 +294,15 @@ class Holds(Model):
             clock.sleep(poll.total_seconds())
 
     def mark(
-        self, key: str, *, abandoned: bool = False, delivered: bool = False
+        self,
+        key: str,
+        *,
+        abandoned: bool = False,
+        delivered: bool = False,
+        interrupted: bool = False,
+        orphaned: bool = False,
     ) -> None:
-        """Note that hold `key` was given up on, or that its late answer was told."""
+        """Note that hold `key` was given up on, its call interrupted, or settled with no call waiting, or that its late answer was told."""
         hold = self.get(key)
         if hold is None:
             return
@@ -261,6 +310,8 @@ class Holds(Model):
             update={
                 "abandoned": hold.abandoned or abandoned,
                 "delivered": hold.delivered or delivered,
+                "interrupted": hold.interrupted or interrupted,
+                "orphaned": hold.orphaned or orphaned,
             }
         )
         write_model(self.layout.hold(key), marked)
@@ -268,7 +319,8 @@ class Holds(Model):
     def late(self) -> list[Hold]:
         """Return the holds answered while no agent waited, not yet told.
 
-        Those whose wait ran out, and a move's, which nobody waits on.
+        Those whose wait ran out or whose call was interrupted, those settled
+        with no call waiting, and a move's, which nobody waits on.
         """
         return [
             hold
@@ -296,6 +348,19 @@ class Holds(Model):
         )
         write_model(self.layout.hold(key), answered)
         return answered
+
+
+def outcome(
+    holds: Holds, key: str, answer: Answer | None
+) -> Literal["approved", "declined", "unanswered"]:
+    """Say how hold `key` was answered, as its log records it: as its call heard it, or where its call gave up, interrupted, as the operator answered it meanwhile, if they did."""
+    given = answer
+    if given is None:
+        kept = holds.get(key)
+        given = None if kept is None else kept.answer
+    if given is None:
+        return "unanswered"
+    return "approved" if given.approved else "declined"
 
 
 def stores(layout: Layout) -> list[Holds]:

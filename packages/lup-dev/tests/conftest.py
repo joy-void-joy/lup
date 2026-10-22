@@ -401,6 +401,30 @@ class FakeClock(Clock):
             action()
 
 
+class ProcessEndedError(Exception):
+    """The end of a hold's waiting call's process, the host service's or the launch's: the call stops where it stands, and the OS frees its lock."""
+
+
+class Dying:
+    """Ends the call waiting on the next hold, at its first look at its answer, raising `died`."""
+
+    died = ProcessEndedError
+
+    def at_next_wait(self, clock: FakeClock) -> None:
+        """End the next call that waits on `clock`."""
+
+        def die() -> None:
+            raise ProcessEndedError
+
+        clock.on_sleep.append(die)
+
+
+@pytest.fixture
+def dying() -> Dying:
+    """Ends a hold's waiting call as its process ending would."""
+    return Dying()
+
+
 @pytest.fixture
 def clock() -> FakeClock:
     """A clock the test drives: it moves only when slept on."""

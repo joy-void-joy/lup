@@ -17,10 +17,11 @@ on. It holds three sockets:
   session is judged by the code approved for its repository without paying a
   start of Python and an import of `lup-dev` at each hook (`host/workers.py`).
   One it doesn't read is answered by the service itself, without asking the
-  judge, as no decision. Every answer goes out through the `Courier` again, a
-  call to lup's tools rewritten to carry lup's id for the conversation calling,
-  and what the `Post` says waits for the conversation added: counted told once
-  the answer is written, and put back where the hook was gone first. Hooks for
+  judge, as no decision, which is never nothing (`UNDECIDED`). Every answer
+  goes out through the `Courier` again, a call to lup's tools rewritten to
+  carry lup's id for the conversation calling, and what the `Post` says waits
+  for the conversation added: counted told once the answer is written, and put
+  back where the hook was gone first. Hooks for
   parallel calls arrive at once and a hold waits for hours, so each is awaited
   on the event loop, which goes on serving meanwhile, and answered in a thread
   of its own in the launch's process. Where the judge can't answer (its process
@@ -37,10 +38,14 @@ on. It holds three sockets:
 Each launch is recorded beside its directory, so a service started after one
 stopped serves the same launches, in the directories their rooms mounted. The
 service stops without waiting for the answers in flight: the launches'
-processes are ended, and their hooks hear nothing.
+processes are ended, and their hooks hear nothing, which the room's hook tells
+from an answer: it fails rather than letting the call go on unjudged (`lost`,
+`launch/session.py`), and a hold left with no call waiting on it is settled at a
+later checkpoint (`docs/judging-writes.md`, *Asking the operator*).
 """
 
 import asyncio
+import select
 import shutil
 import traceback
 from abc import ABC, abstractmethod
@@ -554,6 +559,49 @@ async def closed(server: asyncio.Server) -> None:
     await server.wait_closed()
 
 
+UNDECIDED = "{}\n"
+"""What the service answers a hook where nothing is decided or told: an empty
+JSON object, which both runtimes read as an answer deciding nothing (each
+adapter says how), as they would read nothing printed. Every hook is answered
+with something, so the room's hook tells an answer from a connection lost
+before one, which `socat` ends as it ends an empty answer (`piped`,
+`launch/session.py`)."""
+
+
+@asynccontextmanager
+async def hung_up(writer: asyncio.StreamWriter) -> AsyncGenerator[asyncio.Future[None]]:
+    """Watch the connection `writer` writes to while the context is open: the future given is done once its peer has closed it whole.
+
+    A room's hook has sent all it will before it waits for its answer, so the
+    connection reads as ended from then on, and asyncio watches it no more. Its
+    runtime ending the hook, as when the operator interrupts the call, is the
+    peer closing it whole, which Linux reports as `EPOLLHUP`, never for a half
+    closed: an epoll of the connection's own, asking for nothing else, wakes the
+    loop on that alone. The service's own close of the connection takes it out
+    of that epoll unheard.
+    """
+    loop = asyncio.get_running_loop()
+    gone: asyncio.Future[None] = loop.create_future()
+    connection = writer.get_extra_info("socket")
+    if connection is None:
+        yield gone
+        return
+    watch = select.epoll()
+
+    def heard() -> None:
+        loop.remove_reader(watch.fileno())
+        if not gone.done():
+            gone.set_result(None)
+
+    try:
+        watch.register(connection.fileno(), 0)
+        loop.add_reader(watch.fileno(), heard)
+        yield gone
+    finally:
+        loop.remove_reader(watch.fileno())
+        watch.close()
+
+
 type Answering = Callable[
     [asyncio.StreamReader, asyncio.StreamWriter], Coroutine[None, None, None]
 ]
@@ -914,24 +962,31 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     ) -> None:
         """Answer one hook heard on a launch's socket, and close the connection.
 
-        The payload is read to the end and answered. Where answering fails even
-        so, the failure is said, with its traceback, and the connection closes
-        unanswered: the room's hook prints nothing and ends with status 0, which
-        the runtime takes as no decision. Where the hook is gone before its
-        answer is written, what it would have told is put back as waiting;
-        otherwise a title the answer gives the session's runtime is kept as the
-        one lup left it with (`Names.titled`).
+        The payload is read to the end and answered, always with something:
+        `UNDECIDED` where nothing is decided or told, so the room's hook tells an
+        answer from a lost connection. Where answering fails even so, the
+        failure is said, with its traceback, and the hook is answered in the
+        runtime's terms as one its judge couldn't answer. Where the hook is gone
+        before its answer is written, what it would have told is put back as
+        waiting; otherwise a title the answer gives the session's runtime is
+        kept as the one lup left it with (`Names.titled`).
         """
         payload = (await reader.read()).decode()
         try:
-            spoken = await self.answered(request, conversations, payload)
+            spoken = await self.answered(request, conversations, payload, writer)
         except Exception as failure:
             told = "".join(traceback.format_exception(failure))
             self.say(f"{request.launch}: answering a hook failed:\n{told}")
-            spoken = Spoken(answer="")
+            failed = (
+                f"the host service failed answering it, {failure!r}; its output "
+                f"says more, {self.layout.log} when it runs in the background"
+            )
+            unanswered = self.answerer.unanswered(request.runtime, payload, failed)
+            spoken = Spoken(answer=unanswered)
         self.changes.changed()
+        answer = spoken.answer if spoken.answer.strip() else UNDECIDED
         try:
-            writer.write(spoken.answer.encode())
+            writer.write(answer.encode())
             await writer.drain()
             writer.close()
             await writer.wait_closed()
@@ -949,7 +1004,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             self.post.returned(posted)
 
     async def answered(
-        self, request: Register, conversations: Conversations, payload: str
+        self,
+        request: Register,
+        conversations: Conversations,
+        payload: str,
+        writer: asyncio.StreamWriter,
     ) -> Spoken:
         """Return what one hook prints: the judge's answer where it reads the hook, none where it doesn't, with what the courier adds.
 
@@ -972,7 +1031,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 f"{request.launch}: a hook lup couldn't read goes to its judge as it "
                 f"is: {unread}"
             )
-            return Spoken(answer=await self.judgement(request, payload))
+            return Spoken(answer=await self.judgement(request, payload, writer))
         conversation = conversations.named(heard.session, heard.agent)
         conversations.activities = {
             **conversations.activities,
@@ -988,7 +1047,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 tool=heard.tool,
             )
             self.background(self.happened(request, happening))
-        answer = await self.judgement(request, payload) if heard.judged else ""
+        answer = await self.judgement(request, payload, writer) if heard.judged else ""
         own = heard.agent is None
         starting = heard.event == "session-started" and own
         prompted = heard.event == "turn-started" and own and heard.takes_title
@@ -1028,15 +1087,33 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         titled = None if title is None else Titled(session=heard.session, title=title)
         return Spoken(answer=told, posted=posted, titled=titled)
 
-    async def judgement(self, request: Register, payload: str) -> str:
+    async def judgement(
+        self, request: Register, payload: str, writer: asyncio.StreamWriter
+    ) -> str:
         """Return the judge's answer to one hook, or where it can't answer, the runtime's word that it couldn't, saying why.
 
         What the judge said beside is the service's to tell, in full; the hook's
         answer points there. It waits for as long as judging does, a hold's wait
-        for the operator included.
+        for the operator included. Where the hook's runtime ends it meanwhile
+        (`hung_up`), as when the operator interrupts its call, the hook is
+        marked ended (`HostLayout.ended`), so a hold its call waits on gives up
+        as an interrupted call's (`docs/judging-writes.md`, *Asking the
+        operator*), and the judge's answer, which nothing hears, is awaited
+        still; the mark goes once it's given.
         """
+        judging = asyncio.ensure_future(self.judge.judged(request, payload))
+        ended = self.layout.ended(payload)
         try:
-            return await self.judge.judged(request, payload)
+            async with hung_up(writer) as gone:
+                await asyncio.wait([judging, gone], return_when=asyncio.FIRST_COMPLETED)
+                if not judging.done():
+                    ended.parent.mkdir(parents=True, exist_ok=True)
+                    ended.touch()
+                    self.say(
+                        f"{request.launch}: its runtime ended a hook its judge was "
+                        "answering, so a hold its call waits on gives up"
+                    )
+            return await judging
         except HostError as failed:
             self.say(f"{request.launch}: its judge couldn't answer a hook: {failed}")
             failure = (
@@ -1044,6 +1121,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 "when it runs in the background"
             )
             return self.answerer.unanswered(request.runtime, payload, failure)
+        finally:
+            if not judging.done():
+                judging.cancel()
+            ended.unlink(missing_ok=True)
 
     async def tools_served(
         self,
