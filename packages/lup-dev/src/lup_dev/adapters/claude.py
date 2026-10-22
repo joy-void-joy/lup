@@ -28,7 +28,7 @@ host service hears each conversation's start, each turn's start and the prompt
 it starts on, its calls' starts and finishes, and its turn's ends
 (`docs/inbox.md`, *How an agent is told*). The judge reads every one of them
 (`heard`) but the calls `judging` leaves out: those to lup's own tools, and to a
-tool on the list of those that only read (`READING`). So every
+tool on the list of those that only read (`Reading`). So every
 write is judged: a file tool's before it lands, and anything else, a command's,
 a script's, a notebook's, at the checkpoint after its call, which holds what
 asks there until the operator answers, put back on a decline
@@ -65,7 +65,7 @@ back as `sessionTitle` where the two differ, so a rename through lup reaches
 Claude Code at the next prompt. From the hooks reference (read 2026-10-22):
 `SessionStart`'s `sessionTitle` "Sets the session title, with the same effect as
 `/rename`. Applies when `source` is `"startup"`, `"resume"`, or `"fork"`"
-(`TITLED_STARTS`), and `UserPromptSubmit`'s "Sets the session title"; both hooks
+(`TitledStart`), and `UserPromptSubmit`'s "Sets the session title"; both hooks
 receive `session_title`, "The session's custom title, present when one is set,
 for example with `--name`, `/rename`, a hook's `sessionTitle` output". A
 `UserPromptSubmit` hook defaults to a 30-second timeout, past which its output
@@ -204,7 +204,7 @@ Its release channel (`ClaudeChannel`) is the one its native installer reads
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Literal, override
+from typing import TYPE_CHECKING, Annotated, Literal, get_args, override
 
 from pydantic import Field, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
@@ -262,11 +262,11 @@ if TYPE_CHECKING:
     from lup.sessions.declaration import Declaration
     from lup.sessions.terminal import Event
 
-WRITING = ["Edit", "Write"]
+type Writing = Literal["Edit", "Write"]
 """The file tools whose writes are judged before they land: `PreToolUse.proposal`
 reads each."""
 
-READING = [
+type Reading = Literal[
     "Read",  # reads a file, an image, a PDF or a notebook into the model's context
     "Glob",  # lists the paths matching a pattern
     "Grep",  # searches files' contents with ripgrep
@@ -294,7 +294,7 @@ read 2026-10-21), with what each does beside it. On Linux, `Glob` and `Grep`
 are absent by default, and Claude searches with `find` and `grep` through
 `Bash`, which is judged."""
 
-TITLED_STARTS = ["startup", "resume", "fork"]
+type TitledStart = Literal["startup", "resume", "fork"]
 """The starts (`SessionStart`'s `source`) whose `sessionTitle` Claude Code applies
 (its `hooks` docs, *SessionStart decision control*): a compaction or a `/clear`
 takes none, so lup gives the title at the next prompt instead."""
@@ -314,7 +314,7 @@ def judging(tool: str) -> bool:
     >>> judging("mcp__lup__ask")
     False
     """
-    return not tool.startswith(TOOL_PREFIX) and tool not in READING
+    return not tool.startswith(TOOL_PREFIX) and tool not in get_args(Reading.__value__)
 
 
 class Variables(Settings):
@@ -488,7 +488,7 @@ class SessionStart(Payload):
     hook's `sessionTitle`); not the title Claude Code generates."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the session's start and its title in Claude Code, a start `sessionTitle` applies at (`TITLED_STARTS`) taking a new one: the judge reads it."""
+        """Read the session's start and its title in Claude Code, a start `sessionTitle` applies at (`TitledStart`) taking a new one: the judge reads it."""
         return Heard(
             event="session-started",
             session=self.session_id,
@@ -496,7 +496,8 @@ class SessionStart(Payload):
             judged=True,
             fits=fits,
             title=self.session_title,
-            takes_title=self.source in TITLED_STARTS and not self.agent_id,
+            takes_title=self.source in get_args(TitledStart.__value__)
+            and not self.agent_id,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -745,7 +746,7 @@ class PreToolUse(Payload):
 
         Let through, a write would land unjudged and unseen.
         """
-        if self.tool_name not in WRITING:
+        if self.tool_name not in get_args(Writing.__value__):
             return OperatorWarning(system_message=said)
         refused = PreToolUseAnswer(
             permission_decision="deny",

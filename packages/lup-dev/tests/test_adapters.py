@@ -3,7 +3,7 @@
 import json
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 import pytest
 from pydantic import TypeAdapter
@@ -1392,7 +1392,7 @@ def test_claudes_judge_proposes_the_file_tools_writes_and_reads_every_call(
     }
     write: dict[str, object] = {"file_path": "a.py", "content": "b"}
     inputs = {"Edit": edit, "Write": write}
-    for tool in claude.WRITING:
+    for tool in get_args(claude.Writing.__value__):
         raw = pre_tool_use(repo, tool, inputs[tool])
         assert claude.PreToolUse.model_validate_json(raw).proposal() is not None
         assert claude.heard(raw).judged
@@ -1406,7 +1406,7 @@ def test_claudes_judge_proposes_the_file_tools_writes_and_reads_every_call(
 def test_claudes_judge_reads_no_call_to_a_tool_that_only_reads_nor_to_lups(
     repo: Path,
 ) -> None:
-    for tool in [*claude.READING, "mcp__lup__ask"]:
+    for tool in [*get_args(claude.Reading.__value__), "mcp__lup__ask"]:
         assert not claude.heard(pre_tool_use(repo, tool, {})).judged
         assert not claude.heard(finished(repo, tool, {})).judged
 

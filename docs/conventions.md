@@ -50,15 +50,18 @@ Every concern has one owner, so two tools never report the same thing in two way
 | Constant | Its home |
 |---|---|
 | A number or a duration: a retry count, a timeout, a size limit | an overridable default: a parameter's or a field's |
+| A list a caller might change: the statuses retried, the editors tried | a field's default, on the model that uses it |
+| A closed set of options | a `Literal` type, its members read with `typing.get_args` |
+| A fixed table from one vocabulary to another | a function that `match`es, its key a `Literal` |
 | An environment variable's name | the package's `settings.py`, whose pydantic-settings model's fields are the variables |
 | A path or a file name | the package's `layout.py`, which says where everything is stored |
-| A runtime's wire spelling: a tool name, a hook event, a protocol field | its runtime's adapter |
+| A runtime's wire spelling: a tool name, a hook event, a protocol field | its runtime's adapter: a field of the adapter's model, or a `Literal` for a closed set |
 
-The rule reads a constant's type: a number or a duration is a finding anywhere, and a path outside the package's `layout.py`. A constant held in a `str`, such as a variable's name or a wire spelling, isn't read, so those two homes are review's. The direction for wire spellings is a `Spellings` ABC each adapter implements, one member per word of lup's own vocabulary, so adding a word forces every adapter to answer it, where a dict would miss an entry until something broke (#52); today each adapter holds its own.
+The rule reads a constant's type, and how a collection is written: a number or a duration is a finding anywhere; a path outside the package's `layout.py`; and a list, tuple, set or dict holding plain string or number literals alone, written out or handed whole to its constructor, anywhere but `__all__` and `layout.py`, whose file names a collection may hold as strings. A lone `str` constant, such as a variable's name or a single wire spelling, isn't read, so its home is review's. The direction for wire spellings is a `Spellings` ABC each adapter implements, one member per word of lup's own vocabulary, so adding a word forces every adapter to answer it, where a dict would miss an entry until something broke (#52). Until then each adapter holds its own: a closed set as a `Literal`, its real home, and a spelling waiting for `Spellings` as a field of the adapter's model, marked `# lup: defer(issue=52, why=…)` so the gate lists it once #52 closes.
 
-**Why.** A number is a judgement a caller may want to change, which a module constant would freeze; names and paths spread across files leave nobody able to find where things are stored or which variables are read. One home per kind answers both.
+**Why.** A number or a list is a judgement a caller may want to change, which a module constant would freeze; names and paths spread across files leave nobody able to find where things are stored or which variables are read; and a set of options kept as a list, or a table kept as a dict, is data pyright can't check a use against, where a `Literal` is a type it checks, and a `match` over one fails the type check once a member goes unanswered. One home per kind answers all three.
 
-**Enforced by:** `constant-home` (typed: the constant's type decides its home). ruff's `PLR2004` (magic values pushed into module constants) is off: it steers the opposite way.
+**Enforced by:** `constant-home` (typed: the constant's type, or the literals a collection holds, decides its home). ruff's `PLR2004` (magic values pushed into module constants) is off: it steers the opposite way.
 
 ## Collections and loops
 

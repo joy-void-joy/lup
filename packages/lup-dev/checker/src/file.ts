@@ -153,7 +153,12 @@ export interface Constant {
     name: string;
     // What the constant holds, as its type says, where the rule reads that kind.
     kind: 'number' | 'duration' | 'path' | null;
+    // The collection it's written as, where it holds plain literals alone
+    // (`["Edit", "Write"]`, `frozenset({1, 2})`); none for anything else.
+    collection: Collection | null;
 }
+
+export type Collection = 'list' | 'tuple' | 'set' | 'dict';
 
 export interface ExceptionText {
     // Where an exception's message decides something: `"x" in str(exc)`.
@@ -476,14 +481,58 @@ export class File {
     }
 
     // The module's constants: what it assigns at its top level, each with the kind
-    // its type says it holds.
+    // its type says it holds, and the collection of plain literals it's written as.
     moduleConstants(): Constant[] {
         return this.moduleAssignments().flatMap((assigned) => {
             if (!assigned.value) {
                 return [];
             }
-            return [{ node: assigned.node, name: assigned.name, kind: this.constantKind(assigned.node) }];
+            return [
+                {
+                    node: assigned.node,
+                    name: assigned.name,
+                    kind: this.constantKind(assigned.node),
+                    collection: this.literalCollection(assigned.value),
+                },
+            ];
         });
+    }
+
+    // The collection an expression builds, where it holds plain literals alone,
+    // written out or handed whole to its constructor: `["Edit", "Write"]`,
+    // `frozenset({1, 2})`, `dict(retries=3)`. None for anything else, an empty
+    // one among them.
+    private literalCollection(node: ExpressionNode): Collection | null {
+        const all = (items: ExpressionNode[]) => items.length > 0 && items.every(isPlainLiteral);
+        switch (node.nodeType) {
+            case ParseNodeType.List:
+                return all(node.d.items) ? 'list' : null;
+            case ParseNodeType.Tuple:
+                return all(node.d.items) ? 'tuple' : null;
+            case ParseNodeType.Set:
+                return all(node.d.items) ? 'set' : null;
+            case ParseNodeType.Dictionary: {
+                const entries = node.d.items.flatMap((item) =>
+                    item.nodeType === ParseNodeType.DictionaryKeyEntry ? [item.d.keyExpr, item.d.valueExpr] : []
+                );
+                return entries.length === 2 * node.d.items.length && all(entries) ? 'dict' : null;
+            }
+            case ParseNodeType.Call: {
+                const built = this.namesOf(node.d.leftExpr).flatMap((name) => collectionBuilders.get(name) ?? [])[0];
+                const [only, ...more] = node.d.args;
+                if (!built || !only) {
+                    return null;
+                }
+                const whole = more.length === 0 && !only.d.name && only.d.argCategory === ArgCategory.Simple;
+                if (whole && this.literalCollection(only.d.valueExpr)) {
+                    return built;
+                }
+                const keywords = node.d.args.every((arg) => arg.d.name && isPlainLiteral(arg.d.valueExpr));
+                return built === 'dict' && keywords ? built : null;
+            }
+            default:
+                return null;
+        }
     }
 
     private constantKind(node: NameNode): Constant['kind'] {
@@ -900,6 +949,31 @@ export class File {
 }
 
 const emptyBuilders = ['builtins.list', 'builtins.dict', 'builtins.set'];
+
+// The constructors of the collections a constant can be written as, and the
+// collection each builds.
+const collectionBuilders = new Map<string, Collection>([
+    ['builtins.list', 'list'],
+    ['builtins.tuple', 'tuple'],
+    ['builtins.set', 'set'],
+    ['builtins.frozenset', 'set'],
+    ['builtins.dict', 'dict'],
+]);
+
+// Whether an expression is a plain literal: a string with nothing interpolated,
+// or a number, signed or not.
+function isPlainLiteral(node: ExpressionNode): boolean {
+    switch (node.nodeType) {
+        case ParseNodeType.StringList:
+            return node.d.strings.every((part) => part.nodeType === ParseNodeType.String);
+        case ParseNodeType.Number:
+            return true;
+        case ParseNodeType.UnaryOperation:
+            return node.d.expr.nodeType === ParseNodeType.Number;
+        default:
+            return false;
+    }
+}
 
 // Methods that keep text text, and methods that test it for a part.
 const keepsText = ['lower', 'upper', 'casefold', 'strip', 'lstrip', 'rstrip'];
