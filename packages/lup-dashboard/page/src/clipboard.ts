@@ -1,12 +1,21 @@
 // The system clipboard as vim's registers `+` and `*`, one register, as a browser
 // has one clipboard: a yank into it, as `"+yy` or `v`, a motion and `"*y`, writes
-// the clipboard; a put from it, `"+p`, reads it, once the browser lets the page.
+// the clipboard, and says the lines were copied to the clipboard, naming no
+// register; a put from it, `"+p`, reads it, once the browser lets the page.
 // Where the browser doesn't, as for a page served over plain HTTP, which has no
 // clipboard to reach, or once it refused, the register keeps what was yanked into
 // it on the page and puts that, and the operator is told why in the page's top
 // line. Ctrl+C on a selection copies it wherever the page is served
 // (`docs/dashboard.md`, *The keys*).
-import { Vim, type ActionArgs, type CodeMirrorV, type InsertModeChanges, type vimState } from "@replit/codemirror-vim";
+import {
+    Vim,
+    type ActionArgs,
+    type CodeMirrorV,
+    type InsertModeChanges,
+    type OperatorFn,
+    type Pos,
+    type vimState,
+} from "@replit/codemirror-vim";
 
 /** The system clipboard, as the browser gives it to the page. */
 export interface SystemClipboard {
@@ -38,6 +47,9 @@ export class ClipboardRegister {
     searchQueries: string[] = [];
     linewise = false;
     blockwise = false;
+
+    /** Whether what it last took reached the system clipboard, once the browser has said. */
+    private reached: Promise<boolean> = Promise.resolve(false);
 
     constructor(private readonly reach: Reach) {}
 
@@ -83,12 +95,26 @@ export class ClipboardRegister {
     private copied(): void {
         const clipboard = this.reach.clipboard();
         if (clipboard === null) {
-            this.reach.tell(`Yanked into "+ on this page alone: ${UNSERVED}. Ctrl+C on a selection copies it.`);
+            this.reach.tell(`Yanked on this page alone, not to the clipboard: ${UNSERVED}. Ctrl+C on a selection copies it.`);
+            this.reached = Promise.resolve(false);
             return;
         }
-        clipboard.writeText(this.toString()).catch((error: unknown) => {
-            this.reach.tell(`Not copied: the browser refused to write the clipboard (${refusal(error)}). Ctrl+C on a selection copies it.`);
-        });
+        this.reached = clipboard.writeText(this.toString()).then(
+            () => true,
+            (error: unknown) => {
+                this.reach.tell(`Not copied: the browser refused to write the clipboard (${refusal(error)}). Ctrl+C on a selection copies it.`);
+                return false;
+            },
+        );
+    }
+
+    /**
+     * Return what a yank of `lines` lines into it says, once the browser has written the clipboard: that they were
+     * copied to the clipboard, naming no register, as `+` and `*` are one; nothing where they weren't, the page's top
+     * line saying why.
+     */
+    async yanked(lines: number): Promise<string | null> {
+        return (await this.reached) ? `${lines} ${lines === 1 ? "line" : "lines"} copied to the clipboard` : null;
     }
 
     /**
@@ -131,6 +157,50 @@ interface Pasting {
     continuePaste: (cm: CodeMirrorV, args: ActionArgs, vim: vimState, text: string, register: unknown) => void;
 }
 
+/** How long what a yank did is shown, in milliseconds, as vim's own yank shows it. */
+const SHOWN = 1500;
+
+/** Show `text` under the editor a while, as vim's own yank says what it did. */
+function shownBelow(cm: CodeMirrorV, text: string): void {
+    const shown = document.createElement("div");
+    shown.className = "cm-vim-message";
+    shown.textContent = text;
+    cm.openNotification(shown, { bottom: true, duration: SHOWN });
+}
+
+/** Return the first of `positions` in the text. */
+function earliest(positions: Pos[]): Pos | undefined {
+    return positions.toSorted((a, b) => a.line - b.line || a.ch - b.ch)[0];
+}
+
+/**
+ * Return vim's yank, which does what its own does but for what it says (`say`): a yank into the clipboard, `register`,
+ * says the lines were copied to the clipboard once the browser has written them (`yanked`), rather than vim's
+ * `1 lines yanked into "*`, as `"+` names `*`; any other says what vim's own says.
+ */
+export function yanking(register: ClipboardRegister, say: (cm: CodeMirrorV, text: string) => void): OperatorFn {
+    return (cm, args, ranges, oldAnchor) => {
+        const vim = cm.state.vim;
+        const controller = Vim.getRegisterController();
+        const range = ranges[0];
+        // Where the cursor goes, as vim's own: the selection's start in visual mode, else where it was.
+        const back = vim.visualMode && range !== undefined ? earliest([vim.sel.anchor, vim.sel.head, range.head, range.anchor]) : oldAnchor;
+        controller.pushText(args.registerName, "yank", cm.getSelection(), args.linewise, vim.visualBlock);
+        const lines = Math.abs(cm.getCursor("end").line - cm.getCursor("start").line) || 1;
+        const name = args.registerName;
+        if (name != null && controller.getRegister(name) === register) {
+            void register.yanked(lines).then((said) => {
+                if (said !== null) {
+                    say(cm, said);
+                }
+            });
+        } else {
+            say(cm, `${lines} lines yanked${name == null || name === "" ? "" : ` into "${name}`}`);
+        }
+        return back;
+    };
+}
+
 let defined: ClipboardRegister | null = null;
 
 /**
@@ -138,7 +208,7 @@ let defined: ClipboardRegister | null = null;
  * with `defineRegister`; `+`, which vim's register controller holds already, is replaced in it. Vim's own `+` writes
  * and reads the clipboard itself, saying nothing where it can't and throwing where the page has none, so `"+` names
  * `*` (`registerNamed`, in vim's own `setRegister`), and a put from it reads the clipboard here, going on with vim's
- * own put once it's read.
+ * own put once it's read. A yank into it says it was copied to the clipboard (`yanking`).
  */
 export function defineClipboard(reach: Reach): ClipboardRegister {
     if (defined !== null) {
@@ -164,5 +234,6 @@ export function defineClipboard(reach: Reach): ClipboardRegister {
         }
         void register.pasted().then((text) => this.continuePaste(cm, args, vim, text, register));
     });
+    Vim.defineOperator("yank", yanking(register, shownBelow));
     return register;
 }

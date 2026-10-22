@@ -8,16 +8,18 @@
 // items by their kind's rank, which the host gives. Each fold has a kind: the
 // item whole, a file, a function's or a class's body, a run of unchanged lines,
 // the context. What's folded by default: the context, each run of a file's
-// unchanged lines away from its changes and the lines that matter, an automatic
-// file whole under its header, and an item marked read or left for later; a body
-// is open. Each fold is named by what it hides, so an item laid out again keeps
-// the folds the operator left; and where the cursor is, said in the header over
-// the review, is the group, the item and the folds it's in. Pure: the editor
-// (`Review.tsx`) draws it, folds it and lets the comments and messages be
-// edited, and the host keeps the draft (`docs/dashboard.md`, *The review*). What
-// it shares with a conversation's text is in `comments.ts`.
+// unchanged lines away from its changes and the lines that matter, so a held
+// change and a flagged write show every change, and, in an approval's file whose
+// asks are each on a line, every run of lines away from those, changed ones too;
+// an automatic file whole under its header, and an item marked read or left for
+// later; a body is open. Each fold is named by what it hides, so an item laid
+// out again keeps the folds the operator left; and where the cursor is, said in
+// the header over the review, is the group, the item and the folds it's in.
+// Pure: the editor (`Review.tsx`) draws it, folds it and lets the comments and
+// messages be edited, and the host keeps the draft (`docs/dashboard.md`, *The
+// review*). What it shares with a conversation's text is in `comments.ts`.
 import { since } from "./agents";
-import { shownOnce, type Body, type ChangedFile, type Matter, type Row } from "./code";
+import { shownOnce, type Body, type ChangedFile, type Matter, type Row, type Showing } from "./code";
 import {
     calls,
     lastOf,
@@ -320,10 +322,19 @@ export function changing(item: Item): boolean {
 }
 
 /**
+ * Return what an item's files whose asks are each on a line keep open (`Showing`): an approval's, which may change tens
+ * of thousands of lines, the lines that ask alone; a held change's and a flagged write's, every change, as the
+ * operator reads them whole.
+ */
+export function showing(item: Item): Showing {
+    return item.reason.reason === "approval" ? "asks" : "changes";
+}
+
+/**
  * Return the lines of each file an item changes (`changing`), as the host answered them: each file's header, then its
- * rows, its runs of unchanged ones folding, each body able to fold under the row declaring it, and the whole of each
- * file able to fold under its header, an automatic one folded; none for any other item, or before the host has
- * answered.
+ * rows, its runs of unchanged ones folding, or for an approval every run away from the lines that ask (`showing`),
+ * each body able to fold under the row declaring it, and the whole of each file able to fold under its header, an
+ * automatic one folded; none for any other item, or before the host has answered.
  */
 function filed(item: Item, around: Around): Filed[] {
     const files = around.files.get(item.number);
@@ -331,7 +342,7 @@ function filed(item: Item, around: Around): Filed[] {
         return [];
     }
     return files.shown.flatMap((file) => {
-        const laidOut = shownOnce(file);
+        const laidOut = shownOnce(file, showing(item));
         const header: Filed = {
             file,
             row: null,
@@ -850,7 +861,7 @@ export function asideAt(region: Region, position: number): Aside | undefined {
     return region.asides.find((each) => position >= each.from && position <= each.to);
 }
 
-/** Return the folds of the item `position` is in, which `zr`, `zm`, `zR`, `zM` and Space `f` reach: none on a group's banner or the messages under it. */
+/** Return the folds of the item `position` is in, which `zr`, `zm`, `zR`, `zM` and Space `z` reach: none on a group's banner or the messages under it. */
 export function foldsOf(laidOut: Laid, position: number): Fold[] {
     return regionAt(laidOut, position)?.folds ?? [];
 }

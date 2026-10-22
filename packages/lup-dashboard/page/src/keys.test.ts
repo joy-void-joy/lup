@@ -8,16 +8,16 @@ describe("the line of keys", () => {
     it("shows the keys that apply where the cursor is, in the list's order", () => {
         expect(shown("insert")).toEqual(["^⏎", "Esc", "Esc u"]);
         expect(shown("change")).toEqual(["␣a", "␣x", "␣d", "o", "c…", "␣c", "]c [c", "]n [n", "za"]);
-        expect(shown("item")).toEqual(["␣d", "␣z", "o", "c…", "C", "␣c", "]] [[", "]n [n", "za"]);
+        expect(shown("item")).toEqual(["␣d", "␣p", "o", "c…", "C", "␣c", "]] [[", "]n [n", "za"]);
         expect(shown("banner")).toEqual(["o ␣c", "]] [[", "]n [n", "␣h"]);
         expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]n [n"]);
-        expect(shown("aside")).toEqual(["]] [[", "za", "zr zm", "zR zM", "␣f", "zj zk"]);
+        expect(shown("aside")).toEqual(["]] [[", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
         expect(barOf(CONVERSATION_KEYS, "normal").map((key) => key.keys)).toEqual(["o", "c…", "␣c", "]] [[", "]n [n", "␣r", "za"]);
     });
 
     it("offers a flagged write's file reading it, never approving or declining it", () => {
-        expect(shown("flagged")).toEqual(["␣d", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣f"]);
-        expect(shown("file")).toEqual(["␣a", "␣x", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣f"]);
+        expect(shown("flagged")).toEqual(["␣d", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
+        expect(shown("file")).toEqual(["␣a", "␣x", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
     });
 
     it("shows no key of insert mode outside it, and none of the others in it", () => {
@@ -52,24 +52,26 @@ describe("what may follow a chord", () => {
         chords(REVIEW_KEYS, pressed, place).map((each) => `${each.keys.join(" ")} ${each.short}`);
 
     it("lists the keys after Space, from the same table as the line of keys and the list, once each", () => {
-        expect(following("␣", "item")).toEqual(["a approve", "x decline", "d read", "z later", "c on the item", "h agents", "f by kind"]);
+        expect(following("␣", "item")).toEqual(["a approve", "x decline", "d read", "p park", "c on the item", "h agents", "z by kind"]);
         // Of two keys alike, the one that applies where the cursor is: on a banner, Space c writes to its agent.
         expect(following("␣", "banner")).toContain("c message");
         expect(chords(CONVERSATION_KEYS, "␣", "normal").map((each) => each.keys.join(" "))).toEqual(["c", "r", "h"]);
     });
 
-    it("lists the keys after Space f, each kind of fold's letter opening it and Shift and the letter closing it", () => {
-        expect(following("␣f", "file")).toEqual(["f F files", "b B bodies", "u U unchanged lines", "c C context"]);
+    it("lists the keys after Space z, as vim's fold keys begin with z, each kind of fold's letter opening it and Shift and the letter closing it", () => {
+        expect(following("␣z", "file")).toEqual(["f F files", "b B bodies", "u U unchanged lines", "c C context"]);
+        expect(following("␣f", "file")).toEqual([]);
         expect(following("␣x", "file")).toEqual([]);
         expect(following("", "file")).toEqual([]);
     });
 
-    it("names each kind of fold by a letter of its own, Space f's beside every one but the item's own", () => {
+    it("names each kind of fold by a letter of its own, Space z's beside every one but the item's own", () => {
         const letters = FOLD_KINDS.map((each) => each.letter);
         expect(new Set(letters).size).toBe(letters.length);
-        const spaced = following("␣f", "file").map((each) => each.split(" ")[0]);
+        const spaced = following("␣z", "file").map((each) => each.split(" ")[0]);
         expect(spaced).toEqual(FOLD_KINDS.filter((each) => each.chord).map((each) => each.letter));
-        // No chord of Space was there before Space f: f follows Space once.
-        expect(following("␣", "file").filter((each) => each.startsWith("f "))).toEqual(["f by kind"]);
+        // Space z leads the folds alone, the item left for later on Space p: z and p each follow Space once.
+        expect(following("␣", "file").filter((each) => each.startsWith("z "))).toEqual(["z by kind"]);
+        expect(following("␣", "item").filter((each) => each.startsWith("p ") || each.startsWith("z "))).toEqual(["p park", "z by kind"]);
     });
 });

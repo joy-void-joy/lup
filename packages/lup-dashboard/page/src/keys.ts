@@ -36,7 +36,7 @@ export type ReviewPlace = "insert" | "written" | "banner" | "approvals" | "item"
 export type FoldKind = "item" | "file" | "body" | "lines" | "context";
 
 /**
- * One kind of fold: the letter naming it, what its folds are called together, whether Space `f` and its letter open
+ * One kind of fold: the letter naming it, what its folds are called together, whether Space `z` and its letter open
  * them, and the level `zr` and `zm` open and close them at, the item's own first.
  */
 export interface FoldKindKeys {
@@ -49,8 +49,8 @@ export interface FoldKindKeys {
 
 /**
  * Each kind of fold, outermost first, by the letter naming it: the mark beside its summary line, and, but for an
- * item's own, which its header's `za` folds, the key after Space `f` that opens every fold of that kind in the item, as
- * Shift and the letter closes them.
+ * item's own, which its header's `za` folds, the key after Space `z`, as vim's fold keys begin with `z`, that opens
+ * every fold of that kind in the item, as Shift and the letter closes them.
  */
 export const FOLD_KINDS: FoldKindKeys[] = [
     { kind: "item", letter: "i", called: "the item", chord: false, level: 0 },
@@ -134,7 +134,7 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 at: ["change", "file"],
             },
             { keys: "␣d", does: "mark the item read, folding it, or unmark it", short: "read", at: ["item", "change", "flagged"] },
-            { keys: "␣z", does: "leave the item for later, folding it, or bring it back", short: "later", at: ["item"] },
+            { keys: "␣p", does: "park the item, leaving it for later, folded; on one parked, bring it back", short: "park", at: ["item"] },
             { keys: "^⏎", does: "send the reply: every comment, message and item marked read", short: "send", at: [] },
         ],
     },
@@ -195,13 +195,13 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
             },
             { keys: "zR zM", does: "open or close every fold in the item the cursor is in", short: "all of it", at: ["aside"] },
             {
-                keys: "␣f",
+                keys: "␣z",
                 does: "and a letter: open every fold of its kind in the item the cursor is in; Shift and the letter closes them",
                 short: "by kind",
                 at: ["file", "flagged", "aside"],
             },
             ...FOLD_KINDS.filter((each) => each.chord).map((each) => ({
-                keys: `␣f${each.letter} ␣f${each.letter.toUpperCase()}`,
+                keys: `␣z${each.letter} ␣z${each.letter.toUpperCase()}`,
                 does: `open or close the item's ${each.called}`,
                 short: each.called,
                 at: [],
@@ -273,10 +273,10 @@ export interface Following {
 }
 
 /**
- * Return the keys that may follow `pressed`, the keys of a chord pressed so far as the list writes them (`␣`, `␣f`),
+ * Return the keys that may follow `pressed`, the keys of a chord pressed so far as the list writes them (`␣`, `␣z`),
  * with the cursor at `place`, in the list's order: each key of `parts` that `pressed` begins and one more key ends,
  * once by that key; of two that share it, as `␣c` on an item and on a banner, the one the line of keys shows at `place`,
- * else the first. A key leading further, as `␣f`, shows by its own line of the list. None before a chord is begun.
+ * else the first. A key leading further, as `␣z`, shows by its own line of the list. None before a chord is begun.
  */
 export function chords<P extends string>(parts: Part<P>[], pressed: string, place: P): Following[] {
     if (pressed === "") {

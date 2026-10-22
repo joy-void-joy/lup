@@ -1,7 +1,7 @@
 // What the fold keys reach among a view's folds, whatever the view: the folds
 // the cursor is in, outermost first, which the review's margin bars and header
 // show; within one item, the folds `zr` and `zm` open or close a level at a
-// time, and those Space `f` and a letter open or close by kind; and where `zj`,
+// time, and those Space `z` and a letter open or close by kind; and where `zj`,
 // `zk`, `[z` and `]z` go. Folds nest, each whole inside another or beside it
 // (`review.ts`, `code.ts`). Pure: the editor folds what these return
 // (`editor.ts`; `docs/dashboard.md`, *The keys*).
@@ -14,6 +14,26 @@ type Folded = Pick<Folding, "summary" | "from" | "to" | "kind">;
 /** Return the folds `at` is in, from a summary line to a last line, outermost first. */
 export function around<F extends Pick<Folding, "summary" | "to">>(folds: readonly F[], at: number): F[] {
     return folds.filter((each) => at >= each.summary.from && at <= each.to).sort((a, b) => a.summary.from - b.summary.from);
+}
+
+/**
+ * Return how deep each of `folds` is: how many of the others hold it, from a summary line to a last line, the outermost
+ * none. Folds nest, each whole inside another or beside it, so a fold the cursor is in is as deep as its place among
+ * those `around` it, and the review's margin draws each in the column of its depth (`margin.ts`).
+ */
+export function depths<F extends Pick<Folding, "summary" | "to">>(folds: readonly F[]): Map<F, number> {
+    const ordered = [...folds].sort((a, b) => a.summary.from - b.summary.from || b.to - a.to);
+    // The folds holding the one reached so far, outermost first.
+    const holding: F[] = [];
+    const found = new Map<F, number>();
+    for (const fold of ordered) {
+        while (holding.length > 0 && (holding.at(-1)?.to ?? 0) < fold.summary.from) {
+            holding.pop();
+        }
+        found.set(fold, holding.length);
+        holding.push(fold);
+    }
+    return found;
 }
 
 /** Return the level `zr` and `zm` open and close `fold` at, by its kind (`FOLD_KINDS`); a fold of no kind is at none. */
@@ -38,7 +58,7 @@ export function levelled<F extends Folded>(folds: readonly F[], closed: (fold: F
 }
 
 /**
- * Return the folds of one item, `folds`, that Space `f` and a letter opens, `closed` saying which are folded: each of
+ * Return the folds of one item, `folds`, that Space `z` and a letter opens, `closed` saying which are folded: each of
  * `kind` folded, and the item's own where it's folded, so what opens is seen; or, `closing`, as Shift and the letter,
  * each of `kind` open.
  */

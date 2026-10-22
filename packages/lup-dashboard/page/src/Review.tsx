@@ -3,21 +3,21 @@
 // one, empty or not; their comments written into it, each under the line it's
 // on: Space `c` opens one on the item whole; `o` or Space `c` on a banner, a
 // message to its agent, under the banner. Ctrl+Enter elsewhere than in a comment
-// or a message sends. Space `d` marks an item read, Space `z`
-// leaves it for later, Space `a` or `x` answers an approval or a held change;
+// or a message sends. Space `d` marks an item read, Space `p` parks it,
+// leaving it for later, Space `a` or `x` answers an approval or a held change;
 // `]]` and `[[` go to the next and previous item, landing on its first line that
 // matters, `]c` and `[c` to the next and previous such line. Under an approval or
 // a held change, each file it changes, whole, its lines numbered, marked and
 // highlighted as they come into view, each line that matters by the judge's
 // reading barred and saying what it triggered; the item's header counts its files
 // by why each is open; under each item, its context. Each fold has a kind,
-// marked in the margin beside its summary line, with a bar for each fold the
-// cursor is in (`margin.ts`); the context, each run of unchanged lines and each
-// automatic file fold, folded until opened, and `zr`, `zm`, `zR`, `zM` and Space
-// `f` act on the item the cursor is in. The header over the review says where
-// the cursor is: the group, the item, the file and the folds it's in, and,
-// while a comment is being written, whom it goes to (`docs/dashboard.md`, *The
-// review*).
+// its letter in the margin beside its summary line, in the column of its depth,
+// a bar under it for each fold the cursor is in (`margin.ts`); the context, each
+// run of unchanged lines and each automatic file fold, folded until opened, and
+// `zr`, `zm`, `zR`, `zM` and Space `z` act on the item the cursor is in. The
+// header over the review says where the cursor is: the group, the item, the
+// file and the folds it's in, and, while a comment is being written, whom it
+// goes to (`docs/dashboard.md`, *The review*).
 import { RangeSetBuilder, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -48,6 +48,7 @@ import {
     quoted,
     regionAt,
     shownAt,
+    showing,
     stepped,
     stranded,
     toggled,
@@ -212,7 +213,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
         const stops = new Set(region.stops);
         for (const coded of region.code) {
             if (coded.row === null) {
-                const automatic = shownOnce(coded.file).automatic ? " code-automatic" : "";
+                const automatic = shownOnce(coded.file, showing(region.item)).automatic ? " code-automatic" : "";
                 const whole = stops.has(coded.from) ? " code-matters" : "";
                 marks.push({
                     from: coded.from,

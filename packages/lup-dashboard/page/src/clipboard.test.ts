@@ -1,7 +1,7 @@
-import { Vim } from "@replit/codemirror-vim";
+import { Vim, type CodeMirrorV, type Pos } from "@replit/codemirror-vim";
 import { describe, expect, it } from "vitest";
 
-import { ClipboardRegister, defineClipboard, registerNamed, type Reach, type SystemClipboard } from "./clipboard";
+import { ClipboardRegister, defineClipboard, registerNamed, yanking, type Reach, type SystemClipboard } from "./clipboard";
 
 /** A system clipboard holding `held`, each text written to it kept, refusing to be written or read where told to. */
 function system(held = "", refuses: { write?: string; read?: string } = {}): SystemClipboard & { written: string[] } {
@@ -40,7 +40,7 @@ describe("the system clipboard as `+` and `*`", () => {
         register.setText("Let");
         expect(register.toString()).toBe("Let");
         expect(reach.told).toEqual([
-            'Yanked into "+ on this page alone: the browser lets only a page on https or localhost reach the clipboard. Ctrl+C on a selection copies it.',
+            "Yanked on this page alone, not to the clipboard: the browser lets only a page on https or localhost reach the clipboard. Ctrl+C on a selection copies it.",
         ]);
     });
 
@@ -93,5 +93,42 @@ describe("the system clipboard as `+` and `*`", () => {
         expect(controller.unnamedRegister.toString()).toBe("Let the change land?\n");
         // Defined once: vim's registers can't be defined twice.
         expect(defineClipboard(reaching(null))).toBe(register);
+    });
+
+    it("says a yank into it was copied to the clipboard, naming no register, once the browser has written it, and nothing where it wasn't", async () => {
+        const register = new ClipboardRegister(reaching(system()));
+        register.setText("Let the change land?\n", true);
+        expect(await register.yanked(1)).toBe("1 line copied to the clipboard");
+        register.pushText("And the next?\n", true);
+        expect(await register.yanked(2)).toBe("2 lines copied to the clipboard");
+        const unserved = new ClipboardRegister(reaching(null));
+        unserved.setText("Let");
+        const refused = new ClipboardRegister(reaching(system("", { write: "Document is not focused." })));
+        refused.setText("Let");
+        expect([await unserved.yanked(1), await refused.yanked(1)]).toEqual([null, null]);
+    });
+
+    it("yanks as vim does, saying a yank into `+` or `*` was copied to the clipboard, and any other as vim says it", async () => {
+        const register = defineClipboard(reaching(system()));
+        const said: string[] = [];
+        const yank = yanking(register, (_, text) => said.push(text));
+        const at = (line: number, ch = 0): Pos => ({ line, ch });
+        /** An editor holding `text` selected from line `from` to line `to`, in visual mode where it says. */
+        const editor = (text: string, from: number, to: number, visualMode = false) =>
+            ({
+                state: { vim: { visualMode, visualBlock: false, sel: { anchor: at(to, 3), head: at(from, 1) } } },
+                getSelection: () => text,
+                getCursor: (which: string) => (which === "start" ? at(from) : at(to)),
+            }) as unknown as CodeMirrorV;
+        const controller = Vim.getRegisterController();
+        expect(yank(editor("Let the change land?", 4, 4), { registerName: registerNamed("+") ?? null, linewise: true }, [{ anchor: at(4), head: at(4) }], at(4, 2))).toEqual(at(4, 2));
+        expect(controller.getRegister("+").toString()).toBe("Let the change land?\n");
+        // Two lines selected whole, in visual mode: the cursor goes to the selection's start.
+        expect(yank(editor("Let\nthe\n", 2, 4, true), { registerName: "*" }, [{ anchor: at(2, 5), head: at(4) }], at(9))).toEqual(at(2, 1));
+        yank(editor("Let", 2, 2), { registerName: "a" }, [{ anchor: at(2), head: at(2) }], at(2));
+        yank(editor("Let", 2, 2), {}, [{ anchor: at(2), head: at(2) }], at(2));
+        await settled();
+        expect(said).toEqual(['1 lines yanked into "a', "1 lines yanked", "1 line copied to the clipboard", "2 lines copied to the clipboard"]);
+        expect(controller.unnamedRegister.toString()).toBe("Let");
     });
 });

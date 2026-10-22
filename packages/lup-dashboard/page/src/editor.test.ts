@@ -14,6 +14,7 @@ import {
     nextWritten,
     ownOf,
     rewritten,
+    SPACED,
     stepped,
     UNPRESSED,
     visit,
@@ -23,6 +24,7 @@ import {
     type Pressed,
     type Typing,
 } from "./editor";
+import { CONVERSATION_KEYS, REVIEW_KEYS } from "./keys";
 
 describe("the draft's history", () => {
     const draft = (history: History<string>) => history.states[history.at]?.draft;
@@ -214,9 +216,48 @@ describe("a chord begun", () => {
 
     it("says what vim holds of a chord begun with Space, as the list writes it, and nothing of any other", () => {
         expect(held(["<Space>"])).toBe("␣");
-        expect(held(["<Space>", "f"])).toBe("␣f");
+        expect(held(["<Space>", "z"])).toBe("␣z");
         expect(held([])).toBe("");
         expect(held(["z"])).toBe("");
         expect(held(["<Space>"], { insertMode: true })).toBe("");
+    });
+});
+
+describe("the chords Space leads", () => {
+    const mapped = new Map(SPACED);
+
+    it("opens the folds of a kind with Space z and its letter, closing them with Shift and the letter, as vim's fold keys begin with z", () => {
+        expect(["<Space>zf", "<Space>zb", "<Space>zu", "<Space>zc"].map((keys) => mapped.get(keys))).toEqual([
+            "lupFoldOpen-file",
+            "lupFoldOpen-body",
+            "lupFoldOpen-lines",
+            "lupFoldOpen-context",
+        ]);
+        expect(["<Space>zF", "<Space>zB", "<Space>zU", "<Space>zC"].map((keys) => mapped.get(keys))).toEqual([
+            "lupFoldClose-file",
+            "lupFoldClose-body",
+            "lupFoldClose-lines",
+            "lupFoldClose-context",
+        ]);
+        // Space z alone leads, doing nothing of its own, and Space f is no chord.
+        expect([...mapped.keys()].filter((keys) => keys === "<Space>z" || keys.startsWith("<Space>f"))).toEqual([]);
+    });
+
+    it("parks an item with Space p, leaving it for later, which no other chord begins", () => {
+        expect(mapped.get("<Space>p")).toBe("lupLater");
+        expect([...mapped.keys()].filter((keys) => keys.startsWith("<Space>p"))).toEqual(["<Space>p"]);
+        expect([...mapped.values()].filter((action) => action === "lupLater")).toHaveLength(1);
+    });
+
+    it("maps each chord the list of keys names, once, and leads each chord it names further", () => {
+        expect(new Set(SPACED.map(([keys]) => keys)).size).toBe(SPACED.length);
+        const listed = [...REVIEW_KEYS.flatMap((part) => part.keys), ...CONVERSATION_KEYS.flatMap((part) => part.keys)]
+            .flatMap((key) => key.keys.split(" "))
+            .filter((keys) => keys.startsWith("␣"))
+            .map((keys) => keys.replace("␣", "<Space>"));
+        for (const keys of listed) {
+            const leads = [...mapped.keys()].some((each) => each.startsWith(keys) && each !== keys);
+            expect([keys, mapped.has(keys) || leads]).toEqual([keys, true]);
+        }
     });
 });

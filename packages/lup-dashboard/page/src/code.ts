@@ -1,16 +1,17 @@
 // The code under an approval, a held change or a write that landed flagged: each
 // file it changes shown whole, what it was and what it becomes, its lines marked
 // added, removed (in place, where they were) or the same, each run of unchanged
-// lines away from the
-// changes folded under a summary, a few lines of context kept around each; and
-// its text highlighted by CodeMirror's own language packages, chosen by its
-// name. The judge's reading of the file says why it's open, in its header's last
-// words, and which of its lines matter, each saying what it triggered; a file
-// that asks nothing, held or flagged, is automatic, its header alone in view,
-// and in one whose asks are each on a line, those lines alone are open, with
-// their context, every other change folded. Each function's and class's body,
-// read from the file's syntax, can fold under the line declaring it; a run of
-// lines never crosses a body's edge, so every fold sits whole inside another.
+// lines away from the changes folded under a summary, a few lines of context
+// kept around each; and its text highlighted by CodeMirror's own language
+// packages, chosen by its name. The judge's reading of the file says why it's
+// open, in its header's last words, and which of its lines matter, each saying
+// what it triggered; a file that asks nothing, held or flagged, is automatic,
+// its header alone in view. A held change's and a flagged write's files show
+// every change; an approval's, which may change tens of thousands of lines, show
+// only the lines that ask in a file whose asks are each on a line, with their
+// context, every other change folded (`Showing`). Each function's and class's
+// body, read from the file's syntax, can fold under the line declaring it; a run
+// of lines never crosses a body's edge, so every fold sits whole inside another.
 // Pure: the review lays these rows into its text (`review.ts`), and its editor
 // paints the lines in view with them (`Review.tsx`).
 import { javascriptLanguage, jsxLanguage, tsxLanguage, typescriptLanguage } from "@codemirror/lang-javascript";
@@ -40,6 +41,14 @@ const FEWEST = 2;
 
 /** The most changes to the public API a header names: the rest are on their lines. */
 const NAMED = 4;
+
+/**
+ * What a file whose asks are each on a line keeps open, by the item it's under: every change, unchanged lines alone
+ * folding, as in any other file, for a held change and a flagged write, which the operator reads whole; or the lines
+ * that ask alone, with their context, every other change folding too, for an approval, which may change tens of
+ * thousands of lines.
+ */
+export type Showing = "changes" | "asks";
 
 /** What a line of a file shows: one the change adds, one it removes, or one it leaves. */
 export type Change = "added" | "removed" | "same";
@@ -182,9 +191,11 @@ function told(file: ChangedFile, rows: Row[]): string {
 /**
  * Lay a changed file out as the review shows it: what it becomes, whole, each line it removes in place where it was,
  * before the lines that replace it; then each run of unchanged lines folded where it's `context` lines or more away
- * from every change, and hides two lines or more. A binary file shows its header alone.
+ * from every change and every line that matters, and hides two lines or more; where `showing` is `asks` and the file's
+ * asks are each on a line, every run of lines away from those, changed ones among them. A binary file shows its
+ * header alone.
  */
-export function shown(file: ChangedFile, context: number = CONTEXT): Shown {
+export function shown(file: ChangedFile, showing: Showing = "changes", context: number = CONTEXT): Shown {
     const before = lines(textOf(file.before) ?? "");
     const after = lines(textOf(file.after) ?? "");
     const rows: Row[] = [];
@@ -228,8 +239,8 @@ export function shown(file: ChangedFile, context: number = CONTEXT): Shown {
     const automatic = reasons[0]?.said === "automatic";
     const header = [`${file.path} · ${told(file, rows)}`, ...reasons.map((each) => each.said)].join(" · ");
     const kept = new Set(placed.matters.map((each) => each.row));
-    // A file whose asks are each on a line shows those lines alone, with their context, its other changes folded.
-    const onLines = !automatic && !placed.whole && placed.matters.length > 0;
+    // An approval's file whose asks are each on a line shows those lines alone, with their context, its other changes folded.
+    const onLines = showing === "asks" && !automatic && !placed.whole && placed.matters.length > 0;
     const found = bodiesOf(file, rows);
     return {
         header,
@@ -381,7 +392,7 @@ export function tally(files: ChangedFile[]): string {
     }
     const counts = new Map<string, { reason: Reason; count: number }>();
     for (const file of files) {
-        const reason = shownOnce(file).reasons[0] ?? plainly("unread");
+        const reason = (file.reading == null ? undefined : reasoned(file.reading)[0]) ?? plainly("unread");
         const kept = counts.get(reason.one);
         counts.set(reason.one, { reason, count: (kept?.count ?? 0) + 1 });
     }
@@ -391,17 +402,18 @@ export function tally(files: ChangedFile[]): string {
         .join(" · ");
 }
 
-/** Each file as shown, once laid out: the review is laid out again at each key typed in a comment, and a file's lines don't change. */
-const laidOut = new WeakMap<ChangedFile, Shown>();
+/** Each file as shown, by what it shows, once laid out: the review is laid out again at each key typed in a comment, and a file's lines don't change. */
+const laidOut = new WeakMap<ChangedFile, Map<Showing, Shown>>();
 
-/** Return `file` as shown (`shown`), laid out once and kept. */
-export function shownOnce(file: ChangedFile): Shown {
-    const kept = laidOut.get(file);
-    if (kept !== undefined) {
-        return kept;
+/** Return `file` as shown (`shown`), showing what `showing` says, laid out once and kept. */
+export function shownOnce(file: ChangedFile, showing: Showing): Shown {
+    const kept = laidOut.get(file) ?? new Map<Showing, Shown>();
+    const found = kept.get(showing);
+    if (found !== undefined) {
+        return found;
     }
-    const made = shown(file);
-    laidOut.set(file, made);
+    const made = shown(file, showing);
+    laidOut.set(file, kept.set(showing, made));
     return made;
 }
 

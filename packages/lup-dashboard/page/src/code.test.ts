@@ -238,16 +238,22 @@ describe("the judge's reading", () => {
         ]);
     });
 
-    it("shows only the lines that ask in a file whose asks are each on a line, its other changes folded", () => {
+    it("shows every change of a file whose asks are each on a line, but where it shows the lines that ask alone, as an approval does", () => {
         const reading: Reading = {
             ...PRODUCTION,
             asks: [{ name: "public-api", taken: "flagged", line: 20, side: "after", api: { kind: "signature-changed", name: "f" } }],
         };
-        const laid = shown({ path: "a.py", before: text(numbered(30)), after: text(numbered(30, { 10: "ten" })), reading });
-        expect(laid.runs.map((each) => each.summary)).toEqual(["17 lines, 2 changed, 1–16", "7 unchanged lines, 24–30"]);
+        const file: ChangedFile = { path: "a.py", before: text(numbered(30)), after: text(numbered(30, { 10: "ten" })), reading };
+        const summaries = (showing?: "changes" | "asks", read: Reading = reading) =>
+            shown({ ...file, reading: read }, showing).runs.map((each) => each.summary);
+        // Unchanged lines alone fold, three kept around the change on line 10 and around the line that asks.
+        const everyChange = ["6 unchanged lines, 1–6", "3 unchanged lines, 14–16", "7 unchanged lines, 24–30"];
+        expect(summaries()).toEqual(everyChange);
+        expect(summaries("changes")).toEqual(everyChange);
+        // The line that asks alone, with its context, the change on line 10 folding with the lines around it.
+        expect(summaries("asks")).toEqual(["17 lines, 2 changed, 1–16", "7 unchanged lines, 24–30"]);
         const whole: Reading = { ...reading, asks: [...reading.asks!, { name: "whole-file", taken: "held", side: "after" }] };
-        const written = shown({ path: "a.py", before: text(numbered(30)), after: text(numbered(30, { 10: "ten" })), reading: whole });
-        expect(written.runs.map((each) => each.summary)).toEqual(["6 unchanged lines, 1–6", "3 unchanged lines, 14–16", "7 unchanged lines, 24–30"]);
+        expect(summaries("asks", whole)).toEqual(everyChange);
     });
 
     it("places a name taken out of a package's root on the line it was, and what's on no line shown on the header", () => {
