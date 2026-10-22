@@ -188,6 +188,7 @@ from lup_dev.layout import (
     LaunchLayout,
     Layout,
 )
+from lup_dev.listing import given, latest, unlisted
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import InboxAnnouncing, Response, answer
@@ -986,24 +987,71 @@ def dashboard_open(
 
 
 @inbox.callback(invoke_without_command=True)
-def inbox_list(context: typer.Context) -> None:
+def inbox_list(
+    context: typer.Context,
+    *,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                "Only what was made from this time on: an ISO 8601 time, such as "
+                "2026-10-19T09:30 (without a zone, the host's), or an ISO 8601 "
+                "duration back from now, such as PT2H or P3D."
+            )
+        ),
+    ] = None,
+    until: Annotated[
+        str | None,
+        typer.Option(
+            help="Only what was made before this time, in the same forms as --since."
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(
+            min=1, help="How many to list at most, the latest; left out, every one."
+        ),
+    ] = None,
+) -> None:
     """List what waits for you from your agents, oldest first.
 
-    Each item has a number, which `show`, `answer` and `done` take. Listing and
-    `show` only read, so an agent's session runs them too: on the host, over
-    the whole inbox; in a room, over its repository's items alone. Answering is
-    the operator's, in their own terminal.
+    Each item has a number, which `show`, `answer` and `done` take. `--since`
+    and `--until` narrow them by when each was made, as `judged` and the agents'
+    `inbox` do, and `--limit` lists the latest alone, saying how many it left
+    out and how to read them. Listing and `show` only read, so an agent's
+    session runs them too: on the host, over the whole inbox; in a room, over
+    its repository's items alone. Answering is the operator's, in their own
+    terminal.
     """
     if context.invoked_subcommand is not None:
         return
+    try:
+        asked = ListInbox(since=given(since), until=given(until))
+    except ValueError as unread:
+        message = (
+            "--since and --until each take an ISO 8601 time, such as "
+            "2026-10-19T09:30, or an ISO 8601 duration, such as PT2H"
+        )
+        raise typer.BadParameter(message) from unread
     client = reading()
-    items = client.ask(ListInbox(), Items).items
+    items = sorted(client.ask(asked, Items).items, key=lambda item: item.made)
     if not items:
-        typer.echo("Nothing waits for you.")
+        narrowed = "" if asked == ListInbox() else " made in that time"
+        typer.echo(f"Nothing{narrowed} waits for you.")
         return
+    shown = items if limit is None else latest(items, lambda item: item.made, limit)
     listed = client.ask(ListLaunches(), Listed)
-    for item in items:
+    for item in shown:
         typer.echo(line(item, listed))
+    for left in unlisted(
+        len(items) - len(shown),
+        "earlier item",
+        shown[0].made,
+        len(items),
+        until="--until",
+        limit="--limit",
+    ):
+        typer.echo(left)
 
 
 @inbox.command("show")

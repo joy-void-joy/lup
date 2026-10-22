@@ -12,7 +12,7 @@ Everything between a session and the operator goes through the inbox, which the 
 | `blocked`, `stop` | Says the work can't go on; ends it by the agent's own choice. Either answer tells the agent to end its turn |
 | `send` | A message of a kind (`note`, `problem`, `disagreement`, `question`) to the operator's inbox, the general verb beside the speaking tools |
 | `wait_inbox` | Holds until something reaches the agent, and returns all of it |
-| `inbox` | Reads the repository's inbox, changing nothing: what's still waiting, for the operator or an agent, every item with `every`, or one of the agent's own whole |
+| `inbox` | Reads the repository's inbox, changing nothing: what's still waiting, for the operator or an agent, every item with `every`, narrowed by `since` and `until` and the latest up to `limit`; or one of the agent's own whole |
 | `withdraw` | Takes back a message or question the agent sent that no longer needs the operator, with its reason |
 | `judged` | Reads what the judge made of the repository's writes, and its holds, changing nothing (`docs/judging-writes.md`, *The verdict log*) |
 | `rename` | Names the session's launch, or a subagent, after its task (`docs/launch.md`, *Names*) |
@@ -21,7 +21,7 @@ Everything between a session and the operator goes through the inbox, which the 
 - **Who serves which:** the inbox's tools are the core's (`InboxTools`, `inbox/tools.py`), and so is `judged` (`JudgeTools`, `policy/tools.py`), which the inbox, below the judge in `lup_dev`'s layers, can't import; `rename` is the host service's own; the GitHub tools are the `GitHub` module's, served from the launch's process of its repository's approved copy (`docs/host.md`, *Each launch's judge and modules*).
 - **The speaking tools are the library's** (`lup.tools.speaking`): `blocked`, `stop`, `note`, `friction` and `how_it_went` have the same names and inputs on an ask from code, so an agent's habit carries between the two. In a launched session whoever asked is the operator.
 - **`wait_inbox` isn't called `wait`,** since on a Codex model in code mode Codex has a `wait` tool of its own, and two tools of one name invite the wrong call.
-- **`judged` is sized to be read whole:** the latest 50 verdicts and 20 holds of each state, never splitting a moment, with how many it left out and the `until` that reads them. lup's own log, listed whole after ten days, was 785,000 characters, past what a tool's result holds.
+- **What `judged` and `inbox` list is sized to be read whole, and the call sets the size:** by default the latest 50 verdicts and 20 holds of each state (`limit`, `holds_limit`), and the latest 50 items (`limit`), never splitting a moment; `since` and `until`, a time or a duration back from now, narrow each alike (`lup_dev/listing.py`, which `lup-dev inbox` shares). Where an answer leaves earlier ones out, its last line says how many, the `until` that reads them, and the limit that lists them all. lup's own log, listed whole after ten days, was 785,000 characters, and its inbox's 271 items, 72,499, past what a tool's result holds.
 - **Results are one text block:** Codex shows the model only a result's `structuredContent` where it has one, and Claude Code reads `content`, so a result with both would read differently on each. A large result is the runtime's to keep for now (#164).
 
 **Found through tool search, listed in the guidance.** Each runtime defers an MCP server's tools behind its tool search, Codex where the model supports it (`docs/field-notes.md`, *MCP in a launched session*), so a tool's description can be as long as it needs without costing every request its context: the first lup's 14 coordination tools, always loaded, carried about 10 KB of descriptions (its `coordination/tools.py` and `peer_tools.py`). But agents told nothing of deferred tools concluded they didn't exist, so every session's guidance lists each tool by its name and summary (`listed`, `launch/guidance.py`), and a subagent that doesn't read the guidance is told them once, at its first hook that isn't its turn's end (`introduction`, `host/service.py`), with a line that some subagent types have none of them (#108). A tool's summary is its docstring's first line, 50 characters at most, which `@lup_tool` checks (`ToolSpec.summary`), so the docstring is the one source.
@@ -29,7 +29,8 @@ Everything between a session and the operator goes through the inbox, which the 
 ## The operator's face
 
 ```
-lup-dev inbox                         what's waiting for you, oldest first
+lup-dev inbox                         what's waiting for you, oldest first; --since, --until
+                                      and --limit narrow it as the `inbox` tool's fields do
 lup-dev inbox show <number>           one item whole; --context its moment, --diff an approval's diff
 lup-dev inbox answer <number>         a question: each decision in turn, then a comment;
                                       a conversation's message: your reply; an approval: yes or no

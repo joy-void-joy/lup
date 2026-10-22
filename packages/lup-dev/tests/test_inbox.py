@@ -4339,6 +4339,79 @@ def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
     assert [line.split()[0] for line in listed.splitlines()] == ["@2", "@3"]
 
 
+def test_inbox_and_lup_dev_inbox_list_the_latest_within_a_time_saying_what_they_left_out(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        mcp = machine.host.launch("one").mcp
+        for hour in range(5):
+            call(mcp, "note", {"remark": f"Note {hour + 1}."})
+            clock.sleep(3600)
+
+        def reading(**arguments: JsonValue) -> str:
+            text, error = call(mcp, "inbox", arguments)
+            assert not error, text
+            return text
+
+        latest = reading(limit=2)
+        earlier = reading(limit=2, until="2026-10-01T15:00:00+00:00")
+        recent = reading(since="PT2H30M")
+        between = reading(since="2026-10-01T13:00", until="2026-10-01T15:00")
+        quiet = reading(since="PT10M")
+        every = reading()
+        nothing, refused = call(mcp, "inbox", {"limit": 0})
+        operators = inbox("--limit", "2")
+        operators_between = inbox("--since", "PT4H30M", "--until", "PT2H30M")
+        operators_quiet = inbox("--since", "PT10M")
+        unread = runner.invoke(cli.app, ["inbox", "--since", "yesterday"])
+
+    def note(number: int) -> str:
+        return (
+            f"@{number}  2026-10-01 {11 + number}:00  a note from you to the "
+            f"operator, waiting: Note {number}."
+        )
+
+    assert latest.splitlines() == [
+        note(4),
+        note(5),
+        (
+            'Not listed: 3 earlier items, which `until` "2026-10-01T15:00:00+00:00" '
+            "reads; a `limit` of 5 lists them all."
+        ),
+    ]
+    assert earlier.splitlines() == [
+        note(2),
+        note(3),
+        (
+            'Not listed: 1 earlier item, which `until` "2026-10-01T13:00:00+00:00" '
+            "reads; a `limit` of 3 lists them all."
+        ),
+    ]
+    assert recent.splitlines() == [note(4), note(5)]
+    assert between.splitlines() == [note(2), note(3)]
+    assert quiet == (
+        "Nothing about this repository waits in the inbox since 2026-10-01 16:50."
+    )
+    assert every.splitlines() == [note(number) for number in range(1, 6)]
+    assert refused
+    assert "limit" in nothing
+    listed = operators.splitlines()
+    assert [line.split()[0] for line in listed[:-1]] == ["@4", "@5"]
+    assert listed[-1] == (
+        'Not listed: 3 earlier items, which `--until` "2026-10-01T15:00:00+00:00" '
+        "reads; a `--limit` of 5 lists them all."
+    )
+    assert [line.split()[0] for line in operators_between.splitlines()] == [
+        "@2",
+        "@3",
+    ]
+    assert operators_quiet == "Nothing made in that time waits for you.\n"
+    assert unread.exit_code != 0
+    assert "--since and --until each take an ISO 8601 time" in unread.output
+
+
 def test_an_agent_withdraws_its_own_waiting_item_and_nothing_else(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
