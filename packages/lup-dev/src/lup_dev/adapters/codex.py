@@ -289,6 +289,11 @@ class Codex(Runtime):
     def inside(self) -> bool:
         return bool(Variables().codex_thread_id)
 
+    @override
+    def settings(self) -> PurePosixPath:
+        """Return `.codex`: a project's own layer of Codex's configuration."""
+        return PurePosixPath(".codex")
+
 
 class Output(Model, alias_generator=to_camel, populate_by_name=True):
     """What a hook prints for Codex, its fields in camel case."""

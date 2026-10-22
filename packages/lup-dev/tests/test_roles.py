@@ -17,7 +17,9 @@ from lup_dev import (
     Pytest,
     Python,
     TestRoots,
+    cli,
 )
+from lup_dev.catalog.paths import CorePaths
 from lup_dev.codescan.contract import FileReport, Finding, Position, Span
 from lup_dev.codescan.directives import Ignore
 from lup_dev.declaration.resolve import Declaration
@@ -166,6 +168,20 @@ def test_a_project_adds_protected_paths(repo: Path) -> None:
 def test_a_project_drops_a_protected_path(repo: Path) -> None:
     project = core(Paths().drop(protected=["**/.gitignore"], why="a test"))
     assert roles(repo, project).role(Path(".gitignore")) == "production"
+
+
+def test_every_runtime_s_settings_are_protected_by_default_and_a_project_can_drop_them(
+    repo: Path,
+) -> None:
+    # An adapter added without its directory among the defaults fails here.
+    known = [runtime.settings() for runtime in cli.runtimes()]
+    assert known
+    for directory in known:
+        assert f"{directory}/**" in CorePaths().protected
+        assert roles(repo).role(Path(directory, "settings.json")) == "protected"
+    first = known[0]
+    project = core(Paths().drop(protected=[f"{first}/**"], why="a test"))
+    assert roles(repo, project).role(Path(first, "settings.json")) != "protected"
 
 
 def test_the_declaration_itself_is_protected(repo: Path) -> None:

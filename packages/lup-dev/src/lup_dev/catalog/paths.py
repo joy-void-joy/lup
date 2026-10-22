@@ -25,9 +25,9 @@ class CorePaths(Model):
         ".pre-commit-config.yaml",
         ".vscode/**",
         ".devcontainer/**",
-        # lup: ignore("runtime-mention", why="data naming a runtime's own files")
+        # lup: ignore("runtime-mention", why="a default a project's declaration can drop, so data rather than the adapter's own; a test keeps it in step with each adapter's `Runtime.settings`")
         ".claude/**",
-        # lup: ignore("runtime-mention", why="data naming a runtime's own files")
+        # lup: ignore("runtime-mention", why="a default a project's declaration can drop, so data rather than the adapter's own; a test keeps it in step with each adapter's `Runtime.settings`")
         ".codex/**",
         "**/sync.json",
         "**/sync.json.local",

@@ -357,6 +357,11 @@ class Claude(Runtime):
     def inside(self) -> bool:
         return bool(Variables().claude_code_child_session)
 
+    @override
+    def settings(self) -> PurePosixPath:
+        """Return `.claude`: the project's settings, hooks, commands and subagents (code.claude.com/docs/en/settings)."""
+        return PurePosixPath(".claude")
+
 
 class Output(Model, alias_generator=to_camel, populate_by_name=True):
     """What a hook prints for Claude Code, its fields in camel case."""
