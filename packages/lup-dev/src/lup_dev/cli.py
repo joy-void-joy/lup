@@ -1147,10 +1147,13 @@ def inbox_list(
     and `--until` narrow them by when each was made, as `judged` and the agents'
     `inbox` do, and `--limit` lists the latest alone, saying how many it left
     out and how to read them. With `--conversation`, `--kind`, `--whole` or
-    `--every`, it reads as the agents' `inbox` tool does, every party's items,
-    those still waiting unless `--every`: one conversation's exchange with
-    `--conversation`, and each item whole, your words on a conversation's
-    under it, with `--whole`. Listing and `show` only read, so an agent's
+    `--every`, it reads your own exchange, the items you sent or were sent,
+    as the agents' `inbox` tool reads theirs, each line in the tool's form
+    rather than the one above (`@12  2026-10-23 14:00  a note from `w` to
+    you, waiting: …`): what waits for you unless `--every`, your exchange with
+    one conversation with `--conversation`, and each item whole, your words
+    on a conversation's item under it, with `--whole`. Listing and `show`
+    only read, so an agent's
     session runs them too: on the host, over the whole inbox; in a room, over
     its repository's items alone. Answering is the operator's, in their own
     terminal.
