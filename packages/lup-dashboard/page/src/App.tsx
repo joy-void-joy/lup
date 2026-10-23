@@ -18,7 +18,7 @@
 // drawers*).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { doing, everyone, launches, ring, running, type Activity, type Running } from "./agents";
+import { doing, everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useWatched } from "./hooks";
@@ -27,6 +27,7 @@ import { Keys } from "./Keys";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
 import { marked, sameShown, type Marking } from "./since";
+import { searchOf, trialsOf, type Trials } from "./trials";
 import {
     UNREAD,
     answer,
@@ -88,6 +89,16 @@ export function App() {
     const minute = useNow(60_000);
     const soon = useNow(5000);
     const [palette, setPalette] = useState(false);
+    // The layout trials, as the address says them, changed from the palette and written back into the address.
+    const [trials, setTrials] = useState<Trials>(() => trialsOf(window.location.search));
+    const choose = useCallback((next: Trials) => {
+        setTrials(next);
+        const url = new URL(window.location.href);
+        url.search = searchOf(next, url.search);
+        window.history.replaceState(window.history.state, "", url);
+    }, []);
+    // The outline on a narrow screen, where it's an overlay its key opens.
+    const [outlining, setOutlining] = useState(false);
     const [draft, setDraft] = useState<Draft>(EMPTY);
     const [contexts, setContexts] = useState<Map<number, Answered<Context>>>(new Map());
     const [files, setFiles] = useState<Map<number, Answered<ChangedFile[]>>>(new Map());
@@ -173,6 +184,32 @@ export function App() {
                 return { launch, talker, conversation, key: whose(conversation) };
             }),
         [served],
+    );
+    // Each conversation's parent, by `whose` each is, as the host's tree has it: what nests a subagent's group under its parent's.
+    const parents = useSame(
+        useMemo(() => {
+            const found = new Map<string, string>();
+            for (const { launch, session } of served) {
+                const keyOf = (agent: Agent) =>
+                    whose({ party: "conversation", repository: launch.repository, runtime: launch.runtime, session: agent.talker.session, agent: agent.talker.agent ?? null });
+                const walk = (agent: Agent) => {
+                    for (const child of agent.children) {
+                        found.set(keyOf(child), keyOf(agent));
+                        walk(child);
+                    }
+                };
+                if (session !== null) {
+                    walk(session);
+                }
+            }
+            return found;
+        }, [served]),
+        (map) => JSON.stringify([...map]),
+    );
+    // What each conversation running is doing, by `whose` it is, for the outline's marks.
+    const states = useSame(
+        useMemo(() => new Map(live.map((each) => [each.key, each.talker.activity?.state ?? null])), [live]),
+        (map) => JSON.stringify([...map]),
     );
     const agentsRunning = useSame(
         useMemo(() => live.map((each) => each.conversation), [live]),
@@ -736,6 +773,11 @@ export function App() {
                 <span className="count">
                     {agents.length} {agents.length === 1 ? "agent" : "agents"} · {waiting.length} waiting on you
                 </span>
+                {trials.outline ? (
+                    <button type="button" className="outline-button" onClick={() => setOutlining((before) => !before)}>
+                        Outline <kbd>gO</kbd>
+                    </button>
+                ) : null}
                 <button type="button" onClick={() => setPalette(true)}>
                     Go to <kbd>Ctrl</kbd> <kbd>K</kbd>
                 </button>
@@ -770,6 +812,11 @@ export function App() {
                         list={openList}
                         reviewed={inbox.reply?.kind === "inbox-items" ? (inbox.reply.reviewed ?? null) : null}
                         now={minute}
+                        trials={trials}
+                        parents={parents}
+                        states={states}
+                        outlining={outlining}
+                        setOutlining={setOutlining}
                     />
                     <div className="status">
                         {!replying ? (
@@ -798,7 +845,7 @@ export function App() {
                     />
                 </div>
             </main>
-            <Palette open={palette} setOpen={setPalette} agents={agents} select={goTo} now={now} />
+            <Palette open={palette} setOpen={setPalette} agents={agents} select={goTo} now={now} trials={trials} choose={choose} />
         </div>
     );
 }

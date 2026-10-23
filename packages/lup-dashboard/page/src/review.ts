@@ -290,6 +290,33 @@ export interface Group {
     banner: Span;
     blocks: Block[];
     drawers: Drawer[];
+    /** How many groups it's laid out under, its subagent's under its parent's, where they're nested (`Arranging.parents`); 0 else. */
+    depth: number;
+    /** The row of its drawers under its banner, where they're a row (`Arranging.row`); none else, or where it has none. */
+    row: DrawerRow | null;
+}
+
+/** One drawer's label in the row under a banner: which, whose (`ownerOf`), whether it's pulled out below the row, and whether it holds what waits on the operator. */
+export interface RowLabel extends Span {
+    kind: DrawerKind;
+    of: string;
+    pulled: boolean;
+    waiting: boolean;
+}
+
+/** The row of an agent's drawers under its banner: a line, each drawer a label on it. */
+export interface DrawerRow extends Span {
+    labels: RowLabel[];
+}
+
+/**
+ * How the review's groups are arranged beyond the order items came in, as the layout trials switch it (`trials.ts`):
+ * each subagent's group under its parent's, by `whose` each conversation is and its parent's; and the drawers as a row
+ * under the banner, those pulled out laid below it, open, by `ownerOf` each is, the rest only a label.
+ */
+export interface Arranging {
+    parents?: ReadonlyMap<string, string> | null;
+    row?: { pulled: ReadonlySet<string> } | null;
 }
 
 /**
@@ -611,7 +638,7 @@ function filed(item: Item, around: Around): Filed[] {
 }
 
 /** A group as it's laid out: what names it among the others, the agent it's of, what its banner names it by, and its items. */
-interface Grouping {
+export interface Grouping {
     key: string;
     conversation: Conversation | null;
     head: Head;
@@ -879,6 +906,68 @@ function placedOn(comments: Placed[], starts: number[]): Map<number | null, Plac
 }
 
 /**
+ * Return `groups` with each subagent's under its parent's, after it and the subagents laid under it before, each with
+ * how deep it's set in: under its nearest forebear with a group among them, by `parents`, each conversation's parent by
+ * `whose` each is; those with none where they were. As they are, none set in, where `parents` is none.
+ */
+export function nested(groups: Grouping[], parents: ReadonlyMap<string, string> | null): { group: Grouping; depth: number }[] {
+    if (parents === null) {
+        return groups.map((group) => ({ group, depth: 0 }));
+    }
+    const keys = new Set(groups.map((each) => each.key));
+    const forebear = (key: string): string | undefined => {
+        let at = parents.get(key);
+        while (at !== undefined && !keys.has(at)) {
+            at = parents.get(at);
+        }
+        return at;
+    };
+    const under = new Map<string, Grouping[]>();
+    const roots: Grouping[] = [];
+    for (const group of groups) {
+        const parent = group.conversation === null ? undefined : forebear(group.key);
+        if (parent === undefined) {
+            roots.push(group);
+        } else {
+            under.set(parent, [...(under.get(parent) ?? []), group]);
+        }
+    }
+    const out: { group: Grouping; depth: number }[] = [];
+    const walk = (group: Grouping, depth: number) => {
+        out.push({ group, depth });
+        for (const child of under.get(group.key) ?? []) {
+            walk(child, depth + 1);
+        }
+    };
+    roots.forEach((each) => walk(each, 0));
+    return out;
+}
+
+/** Return a drawer's label in the row under its banner, from what the host answered of its agent, and whether it holds what waits on the operator; none where it has nothing in it. */
+export function rowLabel(kind: DrawerKind, data: AgentDrawers): { text: string; waiting: boolean } | null {
+    switch (kind) {
+        case "tasks": {
+            if (data.tasks.length === 0) {
+                return null;
+            }
+            const done = data.tasks.filter((each) => each.status === "completed").length;
+            return { text: `tasks ${done}/${data.tasks.length}`, waiting: false };
+        }
+        case "since": {
+            const files = data.since?.files ?? [];
+            if (files.length === 0) {
+                return null;
+            }
+            const [, ...counts] = sinceSummary(data.since).split(" · ");
+            const waiting = counts.some((each) => each.endsWith("to review") || each.endsWith("flagged"));
+            return { text: ["since you approved", ...counts].join(" · "), waiting };
+        }
+        case "conversation":
+            return data.entries.length === 0 ? null : { text: `conversation · ${counted(data.entries.length, "step")}`, waiting: false };
+    }
+}
+
+/**
  * Lay `items` out as one text, in groups, one per agent, each under its banner, in the order they arrived: those with
  * items now first, each where its first item came (`grouped`); then a group for each agent of `agents` (those running,
  * in the tree's order) with none, and for each the draft writes to with none; then the parked items' groups, each
@@ -914,6 +1003,7 @@ export function laid(
     places: readonly string[] = [],
     drawers: Drawers = new Map(),
     name: (party: Conversation) => string = (party) => party.agent ?? party.session,
+    arranging: Arranging = {},
 ): Laid {
     const parked = draft.parked ?? [];
     const done = draft.done ?? [];
@@ -928,11 +1018,11 @@ export function laid(
     const groups: Group[] = [];
     const regions: Region[] = [];
     const laidDrawers: Drawer[] = [];
-    for (const group of kept([...now, ...empty], false)) {
-        layGroup(group, false);
+    for (const { group, depth } of nested(kept([...now, ...empty], false), arranging.parents ?? null)) {
+        layGroup(group, false, depth);
     }
     for (const group of kept(later, true)) {
-        layGroup(group, true);
+        layGroup(group, true, 0);
     }
     // A conversation laid in a drawer reads its lines from the whole text, once it's whole.
     for (const drawer of laidDrawers) {
@@ -951,9 +1041,13 @@ export function laid(
         return [...section].sort((a, b) => rank(a) - rank(b));
     }
 
-    function layGroup(group: Grouping, isParked: boolean): void {
+    function layGroup(group: Grouping, isParked: boolean, depth: number): void {
         const said = banner(group.head, isParked);
         const opening = w.line(said);
+        const conversation = group.conversation;
+        const data = conversation !== null && !isParked ? drawers.get(group.key) : undefined;
+        // Where the drawers are a row, it's right under the banner, each drawer's label on it.
+        const row = arranging.row != null && conversation !== null && data !== undefined ? layRow(conversation, data, arranging.row.pulled) : null;
         const blocks: Block[] = [];
         if (!isParked) {
             letters.forEach((letter, at) => {
@@ -970,21 +1064,31 @@ export function laid(
             banner: opening,
             blocks,
             drawers: [],
+            depth,
+            row,
         };
         groups.push(made);
-        for (const item of group.items) {
-            layItem(item, isParked);
-        }
-        const conversation = group.conversation;
-        if (conversation !== null && !isParked && drawers.has(group.key)) {
-            const data = drawers.get(group.key) ?? UNREAD;
-            for (const kind of DRAWERS) {
-                const drawer = layDrawer(kind, conversation, data);
+        const lay = (kinds: DrawerKind[], pulled: boolean) => {
+            if (conversation === null || data === undefined) {
+                return;
+            }
+            for (const kind of kinds) {
+                const drawer = layDrawer(kind, conversation, data, pulled);
                 if (drawer !== null) {
                     made.drawers.push(drawer);
                     laidDrawers.push(drawer);
                 }
             }
+        };
+        // The drawers pulled out of the row, below it, before the items.
+        if (row !== null) {
+            lay(row.labels.filter((each) => each.pulled).map((each) => each.kind), true);
+        }
+        for (const item of group.items) {
+            layItem(item, isParked);
+        }
+        if (arranging.row == null) {
+            lay(DRAWERS, false);
         }
         if (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0) {
             w.line("");
@@ -1123,8 +1227,35 @@ export function laid(
         return thread.said.filter((each) => each.on === null).flatMap(saying);
     }
 
-    /** Lay one of `conversation`'s drawers of `kind` from `data`, and return it; none where it has nothing under its summary line, as a task list none keeps, a branch with nothing since the operator approved it, or one not read yet. */
-    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers): Drawer | null {
+    /**
+     * Lay the row of `conversation`'s drawers under its banner, a label each for those with something in them, from
+     * `data`, those `pulled` out marked so; none where none has anything.
+     */
+    function layRow(conversation: Conversation, data: AgentDrawers, pulled: ReadonlySet<string>): DrawerRow | null {
+        const shown = DRAWERS.flatMap((kind) => {
+            const label = rowLabel(kind, data);
+            return label === null ? [] : [{ kind, ...label, of: ownerOf({ drawer: kind, conversation }) }];
+        });
+        if (shown.length === 0) {
+            return null;
+        }
+        let text = "";
+        const labels: RowLabel[] = [];
+        const from = w.at;
+        for (const each of shown) {
+            const out = pulled.has(each.of);
+            const said = `${out ? "▾" : "▸"} ${each.text}`;
+            if (text !== "") {
+                text += "   ";
+            }
+            labels.push({ kind: each.kind, of: each.of, pulled: out, waiting: each.waiting, from: from + text.length, to: from + text.length + said.length });
+            text += said;
+        }
+        return { ...w.line(text), labels };
+    }
+
+    /** Lay one of `conversation`'s drawers of `kind` from `data`, and return it; none where it has nothing under its summary line, as a task list none keeps, a branch with nothing since the operator approved it, or one not read yet. One `pulled` out of the row under the banner is open. */
+    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers, pulled = false): Drawer | null {
         const of = ownerOf({ drawer: kind, conversation });
         const into = gathering();
         const key = whose(conversation);
@@ -1204,7 +1335,7 @@ export function laid(
             return null;
         }
         // "Since you approved" is open, as it's the code waiting on the operator; the others fold until opened.
-        into.folds.push({ of, kind, name: "", label, closed: kind !== "since", summary, from: summary.to, to: last });
+        into.folds.push({ of, kind, name: "", label, closed: !pulled && kind !== "since", summary, from: summary.to, to: last });
         w.line("");
         return { kind, conversation, talk, files, reviewed, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
     }

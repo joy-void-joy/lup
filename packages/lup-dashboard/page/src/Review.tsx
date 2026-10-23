@@ -34,13 +34,19 @@
 // and the passage it answers marked among the operator's words, a click there
 // going to it (`exchange.ts`; `docs/dashboard.md`, *The review*, *The
 // drawers*).
-import { RangeSetBuilder, type Range } from "@codemirror/state";
+import { foldedRanges } from "@codemirror/language";
+import { RangeSetBuilder, StateEffect, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type Taken } from "./code";
 import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
 import { closedAs, folding, isFolded, reached, reaching, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import { Following } from "./follow";
+import { mapOutlineKey, Outline, setOutlineFocus, useNarrow } from "./Outline";
+import { Stack } from "./Stack";
+import { linesOver, stickies, type Sticky } from "./stack";
+import { rowed, stacked, type Trials } from "./trials";
 import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type DrawerKind, type ReviewPlace } from "./keys";
 import { markerEnd, outdated, unfound } from "./exchange";
@@ -70,8 +76,10 @@ import {
     laid,
     news,
     opened,
+    ownerOf,
     placeAt,
     quoted,
+    recipient,
     regionAt,
     sameId,
     scopeAt,
@@ -97,6 +105,7 @@ import {
     type Item,
     type Laid,
     type Region,
+    type RowLabel,
     type Scope,
     type SinceFile,
     type Viewed,
@@ -153,6 +162,15 @@ interface Props {
     reviewed: string | null;
     /** The time, to the minute, which each item's wait is told from. */
     now: Date;
+    /** The layout trials as they stand (`trials.ts`). */
+    trials: Trials;
+    /** Each conversation's parent, by `whose` each is: what nests a subagent's group, and the outline's tree. */
+    parents: ReadonlyMap<string, string>;
+    /** What each conversation running is doing, by `whose` it is, for the outline's marks. */
+    states: ReadonlyMap<string, string | null>;
+    /** Whether the outline is open as an overlay, on a narrow screen. */
+    outlining: boolean;
+    setOutlining: (open: boolean) => void;
 }
 
 /** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it's set in under a summary or a file's header, as a file's reviewed line isn't. */
@@ -352,13 +370,37 @@ function citing(cited: Cited[]): { from: number; to: number; value: Decoration }
     });
 }
 
-/** Draw the review: groups' banners and the messages under them, items' headers, done and parked items, the lines under each item and in each drawer, the changed files' headers, each comment's lines, and the passage each comment is on. */
-function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): DecorationSet {
+/** Return the classes a group's banner is drawn with: set in by how deep it's nested, where it is. */
+function bannerClasses(depth: number): string {
+    return depth > 0 ? `review-banner is-nested nest-${Math.min(depth, 4)}` : "review-banner";
+}
+
+/**
+ * Draw the review: groups' banners and the messages under them, items' headers, done and parked items, the lines under
+ * each item and in each drawer, the changed files' headers, each comment's lines, and the passage each comment is on.
+ * A banner nested under its parent's is set in; the row of a group's drawers has each label marked, pulling its drawer
+ * out on a click; and where `to` says it, each comment, message and remark says whom it reaches on its first line.
+ */
+function decorations(laidOut: Laid, draft: Draft, reviewed: string | null, to: ((written: Written) => string) | null = null): DecorationSet {
     const marks: { from: number; to: number; value: Decoration }[] = [];
     const comments = written(draft);
+    const reaching = (block: Block) => {
+        const comment = comments[block.comment];
+        if (to !== null && comment !== undefined) {
+            marks.push({ from: block.from, to: block.from, value: Decoration.line({ class: "remark-to", attributes: { "data-to": to(comment) } }) });
+        }
+    };
     for (const group of laidOut.groups) {
-        marks.push({ from: group.banner.from, to: group.banner.from, value: Decoration.line({ class: "review-banner" }) });
+        marks.push({ from: group.banner.from, to: group.banner.from, value: Decoration.line({ class: bannerClasses(group.depth) }) });
         marks.push(...group.blocks.flatMap((block) => remarks(laidOut, block)));
+        group.blocks.forEach(reaching);
+        if (group.row !== null) {
+            marks.push({ from: group.row.from, to: group.row.from, value: Decoration.line({ class: "drawer-row" }) });
+            for (const label of group.row.labels) {
+                const classes = `row-label row-${label.kind}${label.pulled ? " is-pulled" : ""}${label.waiting ? " is-waiting" : ""}`;
+                marks.push({ from: label.from, to: label.to, value: Decoration.mark({ class: classes, attributes: { "data-pull": label.of, title: label.pulled ? "put it back in the row" : "pull it out below the row" } }) });
+            }
+        }
     }
     for (const scope of scopesOf(laidOut)) {
         if (isDrawer(scope)) {
@@ -401,6 +443,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
         }
         for (const block of scope.blocks) {
             marks.push(...remarks(laidOut, block));
+            reaching(block);
             const comment = comments[block.comment];
             if (comment === undefined || isLetter(comment)) {
                 continue;
@@ -572,12 +615,25 @@ export function Review({
     list,
     reviewed,
     now,
+    trials,
+    parents,
+    states,
+    outlining,
+    setOutlining,
 }: Props) {
     // Where the cursor is, and whether a comment is being written: what the header says.
     const [head, setHead] = useState(0);
     const [commenting, setCommenting] = useState(false);
     // Where the groups were laid out this sitting, which ends once nothing's left to read: each keeps its place.
     const places = useRef<string[]>([]);
+    // The drawers pulled out of the row under their banner, where the drawers are a row, by what names each (`ownerOf`).
+    const [pulled, setPulled] = useState<ReadonlySet<string>>(new Set());
+    const narrow = useNarrow();
+    const stacking = stacked(trials);
+    const arranging = useMemo(
+        () => ({ parents: trials.nest ? parents : null, row: rowed(trials) ? { pulled } : null }),
+        [trials, parents, pulled],
+    );
     const laidOut = useMemo(
         () =>
             laid(
@@ -605,8 +661,14 @@ export function Review({
                 places.current,
                 drawers,
                 called,
+                arranging,
             ),
-        [items, agents, banner, called, draft, around, drawers, reviewed, now],
+        [items, agents, banner, called, draft, around, drawers, reviewed, now, arranging],
+    );
+    // The scopes the header stack pins the headers of, where it's on.
+    const roots = useMemo(
+        () => (stacking ? stickies(laidOut, laidOut.groups.map((each) => each.depth), trials.drawers === "stack") : []),
+        [stacking, laidOut, trials.drawers],
     );
     const laidFor = useMemo(
         () => ({
@@ -659,6 +721,45 @@ export function Review({
     });
     const { view, landing, kept } = editor;
     const before = useRef<Laid | null>(null);
+
+    // What follows the view, the header stack and the outline, told as it moves.
+    const follower = useMemo(() => new Following(), []);
+    // How many lines of the stack are over a line once it's the first under it: what a scroll to the cursor keeps
+    // clear, so the cursor's line never goes under the stack. Read as it scrolls, of what's laid out then.
+    const over = useRef<(position: number) => number>(() => 0);
+    over.current = (position) => (stacking ? linesOver(roots, position, narrow) * (view.current?.defaultLineHeight ?? 18) : 0);
+    // The pulled-out drawers and the folds, as they're laid out now, which the editor's listener reads.
+    const pulledNow = useRef(pulled);
+    pulledNow.current = pulled;
+    const foldsNow = useRef(laidFor.folds);
+    foldsNow.current = laidFor.folds;
+    useEffect(() => {
+        const current = view.current;
+        if (current === null) {
+            return;
+        }
+        follower.attach(current);
+        mapOutlineKey(say);
+        current.dispatch({
+            effects: StateEffect.appendConfig.of([
+                EditorView.scrollMargins.of((seen) => ({ top: over.current(seen.state.selection.main.head) })),
+                // A drawer pulled out of the row goes back into it once the operator closes it, by its keys or a click.
+                EditorView.updateListener.of((update) => {
+                    if (pulledNow.current.size === 0 || foldedRanges(update.startState) === foldedRanges(update.state) || update.transactions.some((each) => each.annotation(rebuilt) === true)) {
+                        return;
+                    }
+                    const closed = foldsNow.current.filter(
+                        (fold) => fold.name === "" && pulledNow.current.has(fold.of) && fold.of.startsWith(`${fold.kind} `) && isFolded(update.state, fold),
+                    );
+                    if (closed.length > 0) {
+                        queueMicrotask(() => putBackNow.current(closed.map((each) => each.of)));
+                    }
+                }),
+            ]),
+        });
+        // Made once, with the editor.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     // What's laid out now, which a click on a citation, or on the passage of the operator's words it answers, reads.
     const laidNow = useRef(laidOut);
     laidNow.current = laidOut;
@@ -671,6 +772,11 @@ export function Review({
             return undefined;
         }
         const clicked = (event: MouseEvent) => {
+            const label = event.target instanceof Element ? event.target.closest("[data-pull]") : null;
+            if (label !== null) {
+                pullNow.current(label.getAttribute("data-pull") ?? "");
+                return;
+            }
             const target = event.target instanceof Element ? event.target.closest("[data-answered], .citation") : null;
             if (target === null) {
                 return;
@@ -701,6 +807,18 @@ export function Review({
     const reviewing = useRef<{ of: string; path: string; files: SinceFile[] } | null>(null);
     const freshOf: Freshness = (scope, file) =>
         isDrawer(scope) && scope.kind === "since" ? freshRows(looked.current.get(lookedAt(scope.of, file.path)) ?? null, file) : null;
+
+    /** Say whom what's written reaches, on its first line, where the header no longer says it: the stack's. */
+    const reachesOf = stacking
+        ? (each: Written): string => {
+              if (isLetter(each) || isRemark(each)) {
+                  return `to ${called(each.to)}`;
+              }
+              const item = laidOut.regions.find((region) => region.item.number === each.item)?.item;
+              const party = item === undefined ? null : recipient(item);
+              return party === null ? "to no agent: no session's push asked it" : `to ${called(party)}`;
+          }
+        : null;
 
     /** Take each "since you approved" drawer read for the first time as looked at, and forget what was looked at of each file standing as the operator last saw it, which shows each of its changes once it comes back. */
     function read(laid: Laid) {
@@ -743,7 +861,7 @@ export function Review({
         }
         looked.current.set(lookedAt(was.of, was.path), standing);
         // Drawn once the cursor's move is done, which this is told of while CodeMirror is still telling it.
-        queueMicrotask(() => editor.draw(decorations(laidOut, draft, reviewed)));
+        queueMicrotask(() => editor.draw(decorations(laidOut, draft, reviewed, reachesOf)));
     }
     // What was written as it was last laid out.
     const wrote = useRef<Written[]>([]);
@@ -802,7 +920,8 @@ export function Review({
             // CodeMirror keeps the last scroll asked of it alone.
             if (onScreen !== null) {
                 const line = current.state.doc.lineAt(current.state.selection.main.head).from;
-                current.dispatch({ effects: EditorView.scrollIntoView(line, { y: "start", yMargin: onScreen }) });
+                // Where the stack is on, a scroll keeps clear what it pins over the line, which it takes off here.
+                current.dispatch({ effects: EditorView.scrollIntoView(line, { y: "start", yMargin: onScreen - over.current(current.state.selection.main.head) }) });
             } else if (!landed && scrolled !== undefined) {
                 current.dispatch({ effects: scrolled });
             }
@@ -815,11 +934,18 @@ export function Review({
         wrote.current = written(draft);
         places.current = items.length === 0 ? [] : laidOut.groups.map((each) => each.place);
         landing.current = null;
-        editor.draw(decorations(laidOut, draft, reviewed));
+        editor.draw(decorations(laidOut, draft, reviewed, reachesOf));
+        // A drawer just pulled out of the row: the cursor goes onto its summary line, in view.
+        const out = pulledTo.current === null ? undefined : laidOut.drawers.find((each) => each.of === pulledTo.current);
+        if (out !== undefined) {
+            pulledTo.current = null;
+            current.dispatch({ selection: { anchor: out.header.from }, scrollIntoView: true });
+        }
+        follower.tell();
         if (arriving !== null && "comment" in arriving) {
             editor.enter();
         }
-    }, [laidOut, draft, reviewed]);
+    }, [laidOut, draft, reviewed, stacking]);
 
     // Asked to go to an agent's group, as from the palette: onto its banner.
     const jumped = useRef<number>(0);
@@ -915,6 +1041,56 @@ export function Review({
         const drawer = drawerAt(laidOut, editor.head());
         return drawer?.kind === "since" ? drawer : undefined;
     }
+
+    /** Pull a drawer out of its row under the banner, open, reading what it shows; or put it back. */
+    function pull(of: string) {
+        const label = laidOut.groups.flatMap((group) => (group.row?.labels ?? []).map((each) => ({ group, label: each }))).find((each) => each.label.of === of);
+        if (label === undefined) {
+            return;
+        }
+        const { group, label: drawer } = label;
+        // Pulled out, it's open, however it was last closed.
+        kept.current.delete(foldKey({ of, kind: drawer.kind, name: "" }));
+        if (!drawer.pulled && group.conversation !== null) {
+            told(group.conversation, drawer.kind);
+        }
+        if (drawer.pulled) {
+            putBack([of]);
+            return;
+        }
+        pulledTo.current = of;
+        setPulled((before) => new Set([...before, of]));
+    }
+    const pullNow = useRef(pull);
+    pullNow.current = pull;
+
+    /** Put drawers pulled out back in their row, the cursor going onto the row where it was in one. */
+    function putBack(ofs: string[]) {
+        const group = laidOut.groups.find((each) => each.row?.labels.some((label) => ofs.includes(label.of)) === true);
+        const inside = drawerAt(laidOut, editor.head());
+        if (group?.row != null && (inside === undefined || ofs.includes(inside.of))) {
+            landing.current = { at: group.row.from };
+        }
+        setPulled((before) => new Set([...before].filter((each) => !ofs.includes(each))));
+    }
+    const putBackNow = useRef(putBack);
+    putBackNow.current = putBack;
+    // The drawer just pulled out, which the cursor goes onto once it's laid out.
+    const pulledTo = useRef<string | null>(null);
+
+    /** Go to `position` in the review, as the stack and the outline do, opening the folds over it, its line under the stack. */
+    const jumpTo = useCallback(
+        (position: number) => {
+            const current = view.current;
+            if (current === null) {
+                return;
+            }
+            const effects = reaching(current.state, position);
+            current.dispatch({ selection: { anchor: position }, effects: [...effects, EditorView.scrollIntoView(position, { y: "start" })], annotations: reached.of(effects.length) });
+            current.focus();
+        },
+        [view],
+    );
 
     editor.bind({
         whole: (position) => {
@@ -1050,6 +1226,12 @@ export function Review({
         kind: (position, kind, closing, closed) => {
             // On a banner, Space z and a drawer's letter opens that drawer of the agent's.
             const group = groupAt(laidOut, position);
+            // Where the drawers are a row, Space z f and a drawer's letter pulls it out below the row, Space z F puts it back.
+            const label = group?.row?.labels.find((each) => each.kind === kind);
+            if (label !== undefined && label.pulled === closing) {
+                pull(label.of);
+                return [];
+            }
             if (group !== undefined) {
                 const drawer = group.drawers.find((each) => each.kind === kind);
                 return drawer === undefined ? [] : laidFor.folds.filter((each) => each.of === drawer.of && each.kind === kind && closed(each) !== closing);
@@ -1064,15 +1246,79 @@ export function Review({
         return laidFor.folds.filter((each) => keys.has(each.key));
     }
 
+    // What the outline reads beside the review as it's laid out.
+    const reading = useMemo(() => ({ draft, reviewed, parents, states, called }), [draft, reviewed, parents, states, called]);
+    const focusing = useCallback((focus: (() => void) | null) => setOutlineFocus(focus), []);
+
     const naming = {
         group: (group: Group) => banner(group.head),
         item: (region: Region) => itemNamed(laidOut.text.slice(region.header.from, region.header.to)),
         party: called,
     };
+    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, written(draft), naming)} tally={tallied(items, draft, reviewed)} />;
+    // Each header pinned is drawn as the buffer draws its line.
+    const classesOf = (sticky: Sticky): string => {
+        switch (sticky.kind) {
+            case "group": {
+                return bannerClasses(laidOut.groups.find((each) => each.banner.from === sticky.header.from)?.depth ?? 0);
+            }
+            case "item": {
+                const region = laidOut.regions.find((each) => each.header.from === sticky.header.from);
+                if (region === undefined) {
+                    return "review-header";
+                }
+                const number = region.item.number;
+                return [
+                    "review-header",
+                    fresh(region.item, reviewed) ? "is-new" : "",
+                    news(region.item) ? "is-news" : "",
+                    (draft.done ?? []).includes(number) ? "is-done" : "",
+                    (draft.parked ?? []).includes(number) ? "is-parked" : "",
+                ].join(" ");
+            }
+            case "drawer": {
+                const drawer = laidOut.drawers.find((each) => each.header.from === sticky.header.from);
+                return `drawer-summary drawer-${drawer?.kind ?? "since"}`;
+            }
+            case "file":
+                return "code-file";
+        }
+    };
+    const labelsOf = (sticky: Sticky): RowLabel[] => laidOut.groups.find((each) => each.banner.from === sticky.header.from)?.row?.labels ?? [];
     return (
         <>
-            <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, written(draft), naming)} tally={tallied(items, draft, reviewed)} />
-            <div className="buffer review-buffer" ref={editor.parent} />
+            {stacking ? null : where}
+            <div className={`review-body${trials.outline ? " with-outline" : ""}`}>
+                {trials.outline ? (
+                    <Outline
+                        following={follower}
+                        laidOut={laidOut}
+                        reading={reading}
+                        narrow={narrow}
+                        open={outlining}
+                        setOpen={setOutlining}
+                        jump={jumpTo}
+                        back={() => view.current?.focus()}
+                        focusing={focusing}
+                    />
+                ) : null}
+                <div className="buffer-wrap">
+                    <div className="buffer review-buffer" ref={editor.parent} />
+                    {stacking ? (
+                        <Stack
+                            following={follower}
+                            roots={roots}
+                            text={laidOut.text}
+                            classesOf={classesOf}
+                            labelsOf={labelsOf}
+                            narrow={narrow}
+                            jump={jumpTo}
+                            pull={(label) => pull(label.of)}
+                        />
+                    ) : null}
+                </div>
+            </div>
+            {trials.header === "stack-status" ? <div className="status-line">{where}</div> : null}
         </>
     );
 }

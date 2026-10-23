@@ -1220,3 +1220,314 @@ kbd {
     white-space: pre;
     color: var(--muted);
 }
+
+/* The layout trials (`trials.ts`): where things sit, switched from the palette. */
+.review-body {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.buffer-wrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+}
+
+/* The header stack: the headers of the scopes the top of the view is inside,
+   over the buffer's top, each drawn as the buffer draws its line, one row each,
+   a rule under the last; pushed up as its scope ends. */
+.buffer.stack {
+    position: absolute;
+    top: 0;
+    left: 0;
+    flex: none;
+    z-index: 5;
+    overflow: hidden;
+    background: var(--bg);
+    box-shadow: 0 1px 0 var(--border), 0 4px 6px -2px rgb(0 0 0 / 0.9);
+    pointer-events: none;
+}
+
+.buffer.stack .cm-editor {
+    position: relative;
+    height: 100%;
+}
+
+.buffer.stack .cm-content {
+    position: relative;
+    height: 100%;
+}
+
+/* Set in as the buffer's content is, past its padding, which a line placed absolutely would start before. */
+.buffer.stack .cm-line.stack-line {
+    position: absolute;
+    left: 1ch;
+    right: 1ch;
+    height: var(--lh);
+    padding: 0 2px 0 6px;
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-top: 0;
+    background: var(--bg);
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.buffer.stack .cm-line.stack-line:hover {
+    background: var(--float-bg);
+}
+
+.buffer.stack .cm-line.stack-line.review-banner.is-nested::before {
+    content: "↳ ";
+    color: var(--muted);
+}
+
+/* A banner nested under its parent's, set in by how deep it is. */
+.buffer .cm-line.review-banner.is-nested::before {
+    content: "↳ ";
+    color: var(--muted);
+}
+
+.buffer .cm-line.review-banner.nest-1 {
+    padding-left: calc(6px + 2ch);
+}
+
+.buffer .cm-line.review-banner.nest-2 {
+    padding-left: calc(6px + 4ch);
+}
+
+.buffer .cm-line.review-banner.nest-3 {
+    padding-left: calc(6px + 6ch);
+}
+
+.buffer .cm-line.review-banner.nest-4 {
+    padding-left: calc(6px + 8ch);
+}
+
+/* Whom a comment, a message or a remark reaches, said on its first line where the header doesn't say it. */
+.buffer .cm-line.remark-to::after {
+    content: "  " attr(data-to);
+    color: var(--muted);
+    font-style: italic;
+}
+
+/* The row of an agent's drawers under its banner: each a label in its kind's
+   colour, pulled out below the row where it's bold, and in the colour of what
+   waits where it holds files to review. */
+.buffer .cm-line.drawer-row {
+    color: var(--muted);
+}
+
+.row-label {
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+}
+
+.row-tasks {
+    color: var(--fold-tasks);
+}
+
+.row-since {
+    color: var(--fold-since);
+}
+
+.row-conversation {
+    color: var(--fold-conversation);
+}
+
+.row-label.is-pulled {
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.row-label.is-waiting {
+    font-weight: 700;
+}
+
+/* The status line at the bottom, where vim keeps its own: the cursor's place and what waits. */
+.status-line .where {
+    border-bottom: 0;
+    border-top: 1px solid var(--border);
+}
+
+/* The outline: a narrow pane beside the review, each entry a row, set in by how
+   deep it is; what's in view bracketed by a bar down its rows, the cursor's
+   entry highlighted. */
+.outline {
+    flex: 0 0 36ch;
+    max-width: 40%;
+    overflow: hidden auto;
+    border-right: 1px solid var(--border);
+    padding-bottom: 1em;
+    scrollbar-width: thin;
+}
+
+.outline:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+}
+
+.outline-row {
+    display: flex;
+    gap: 0 1ch;
+    white-space: nowrap;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    padding-right: 1ch;
+}
+
+.outline-row:hover {
+    background: var(--float-bg);
+}
+
+.outline-row.is-in-view {
+    border-left-color: var(--border);
+    background: #04101a;
+}
+
+.outline-row.is-cursor {
+    background: var(--selection);
+}
+
+.outline-row.is-selected {
+    outline: 1px solid var(--focus);
+    outline-offset: -1px;
+}
+
+.outline-glyph {
+    flex: 0 0 auto;
+    width: 1ch;
+    text-align: center;
+}
+
+.outline-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.outline-tag {
+    flex: 0 0 auto;
+}
+
+.outline-repository {
+    color: var(--muted);
+    font-weight: 700;
+    margin-top: 0.4em;
+}
+
+.outline-agent,
+.outline-approvals {
+    color: var(--cyan);
+    font-weight: 700;
+}
+
+.outline-drawer .outline-text {
+    color: var(--muted);
+}
+
+.outline-file .outline-text {
+    color: var(--info);
+}
+
+.mark-waiting,
+.mark-calling {
+    color: var(--orange);
+}
+
+.mark-news {
+    color: var(--info);
+}
+
+.mark-read,
+.mark-parked,
+.mark-reviewed,
+.mark-folded,
+.mark-ended,
+.mark-repository {
+    color: var(--muted);
+}
+
+.mark-approved {
+    color: var(--ok);
+}
+
+.mark-flagged,
+.mark-new,
+.mark-commented {
+    color: var(--warn);
+}
+
+.mark-idle {
+    color: var(--cyan);
+}
+
+.mark-drawer-tasks {
+    color: var(--fold-tasks);
+    font-weight: 700;
+}
+
+.mark-drawer-since {
+    color: var(--fold-since);
+    font-weight: 700;
+}
+
+.mark-drawer-conversation {
+    color: var(--fold-conversation);
+    font-weight: 700;
+}
+
+.outline-glyph.is-label {
+    font-weight: 400;
+}
+
+.outline-hint {
+    color: var(--muted);
+    padding: 0.5em 1ch 0;
+}
+
+.outline-hint kbd {
+    border: 0;
+    padding: 0;
+    color: var(--fg);
+}
+
+/* The outline's button in the top line, for the narrow screen it's an overlay on. */
+.bar .outline-button {
+    display: none;
+}
+
+@media (max-width: 640px) {
+    .bar .outline-button {
+        display: inline;
+    }
+
+    .outline.is-overlay {
+        position: absolute;
+        z-index: 20;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: min(42ch, 90vw);
+        max-width: none;
+        background: var(--bg);
+        box-shadow: 4px 0 12px rgb(0 0 0 / 0.9);
+    }
+
+    /* On a touch screen the stack lets a swipe through to the buffer under it; its labels still take a tap. */
+    .buffer.stack .cm-line.stack-line {
+        pointer-events: none;
+    }
+
+    .buffer.stack .row-label {
+        pointer-events: auto;
+    }
+}
