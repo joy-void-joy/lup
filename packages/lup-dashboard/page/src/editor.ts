@@ -70,6 +70,10 @@ interface Actions {
     answer: (forward: boolean) => void;
     matter: (forward: boolean) => void;
     written: (forward: boolean) => void;
+    /** `]q` and `[q`: the next or previous citation of the operator's words. */
+    cite: (forward: boolean) => void;
+    /** `gd`: follow a citation to the passage it cites, or a passage cited back to its citation. */
+    follow: () => void;
     approve: (approved: boolean) => void;
     /** Space `A`: mark every file of a "since you approved" drawer reviewed. */
     approveAll: () => void;
@@ -379,6 +383,9 @@ function mapKeys(): void {
     action("lupPreviousMatter", (actions) => actions.matter(false));
     action("lupNextWritten", (actions) => actions.written(true));
     action("lupPreviousWritten", (actions) => actions.written(false));
+    action("lupNextCitation", (actions) => actions.cite(true));
+    action("lupPreviousCitation", (actions) => actions.cite(false));
+    action("lupFollow", (actions) => actions.follow());
     action("lupApprove", (actions) => actions.approve(true));
     action("lupDecline", (actions) => actions.approve(false));
     action("lupApproveAll", (actions) => actions.approveAll());
@@ -455,6 +462,9 @@ function mapKeys(): void {
     map("[c", "lupPreviousMatter", "normal");
     map("]n", "lupNextWritten", "normal");
     map("[n", "lupPreviousWritten", "normal");
+    map("]q", "lupNextCitation", "normal");
+    map("[q", "lupPreviousCitation", "normal");
+    map("gd", "lupFollow", "normal");
 }
 
 /** Return the editor's vim, once it's started. */
@@ -1065,6 +1075,10 @@ export interface Own<C> {
     toggle?: (list: "done" | "parked") => void;
     /** Go to the next or previous line that matters, as the review's are by the judge's reading, opening what folds it on the way. */
     matter?: (forward: boolean) => void;
+    /** Go to the next or previous citation of the operator's words, as the review's `]q` and `[q` do; none where the view has none. */
+    cite?: (forward: boolean) => void;
+    /** Follow a citation to what it cites, or back, as the review's `gd` does; none where the view has none. */
+    follow?: () => void;
     approve?: (approved: boolean) => void;
     /** Mark every file of the "since you approved" drawer the cursor is in reviewed, as Space `A` does; none where the view has none. */
     approveAll?: () => void;
@@ -1359,6 +1373,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             move: own.move,
             answer: (forward) => own.answer?.(forward),
             matter: (forward) => own.matter?.(forward),
+            cite: (forward) => own.cite?.(forward),
+            follow: () => own.follow?.(),
             written: (forward) => {
                 const editor = view.current;
                 const target = editor === null ? undefined : nextWritten(shown.blocks, head(), forward, visited.current);

@@ -233,6 +233,18 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 at: ["written", "banner", "approvals", "item", "change", "file", "words", "since", "reviewed"],
             },
             {
+                keys: "]q [q",
+                does: "next and previous citation of your words in an agent's answer, the passage it cites opening under its line, the folds hiding it opening, said under the review",
+                short: "citations",
+                at: [],
+            },
+            {
+                keys: "gd",
+                does: "on a citation, go to the passage of your words it cites, above the answer; on that passage, back to the citation",
+                short: "follow",
+                at: [],
+            },
+            {
                 keys: "/ n N",
                 does: "search, then the next and previous match, the folds hiding it opening, said under the review; / then N searches back, ? being this list",
                 short: "search",

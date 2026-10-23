@@ -26,8 +26,13 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   and the agent's own item read whole;
 - `withdraw` takes back a message or question the agent sent that the
   operator needn't see, with its reason: the agent's workflow is its own;
-- `reply` answers the operator's comments by their ids, several in one call,
-  each kept on their item as a thread (`docs/inbox.md`, *Replying by id*).
+- `edit` changes what the agent sent the operator: a passage of its text, or
+  its text whole (`docs/inbox.md`, *Editing what was sent*).
+
+What an agent writes the operator may cite their words inline (`docs/inbox.md`,
+*Citing the operator's words*): each call's answer says which citations named
+no one passage, and the places they might mean, so the agent fixes them with
+`edit` (`said`).
 
 A tool's docstring's first line is its summary, 50 characters at most, which the
 guidance lists (`launch/guidance.py`); the rest is its description, which the
@@ -46,11 +51,11 @@ from lup.types import Model
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import Register
 from lup_dev.host.rooms import RoomTools
+from lup_dev.inbox.citations import unresolved
 from lup_dev.inbox.delivery import (
     Delivery,
     body,
     clocked,
-    replied_to,
     standing,
     what,
     who,
@@ -73,8 +78,8 @@ from lup_dev.inbox.store import (
     Stop,
     cited,
 )
-from lup_dev.inbox.tags import Tag
-from lup_dev.inbox.threads import Replying, anchors, parts_of
+from lup_dev.inbox.tags import Tag, inside
+from lup_dev.inbox.threads import parts_of, spoken
 
 if TYPE_CHECKING:
     from lup.sessions import results
@@ -158,31 +163,27 @@ class Reading(Narrowing):
         description=(
             "One part to read alone, by its id (`414.3`): of an item a "
             "conversation sent, one of its Markdown blocks; of the operator's, "
-            "their words there, or a reply made to them. With it, `number` is "
-            "left out."
+            "their words there: a comment, a message, a remark. With it, "
+            "`number` is left out."
         ),
     )
 
 
-class Answering(Model):
-    """One reply: what it answers, by its id, and its words."""
+class Editing(Model):
+    """An edit of an item you sent the operator."""
 
-    to: str = Field(
-        description=(
-            "The id of what it answers, as the tag carried it (`546.2`): a comment "
-            "or reply of the operator's in a review, a message or an answer sent "
-            "to you."
-        )
+    number: int = Field(
+        description="The item's number, as its tool's answer cited it: 270 for `@270`."
     )
-    text: str = Field(description="Your reply to it, in full.")
-
-
-class Replies(Model):
-    """Your replies, each to a part of the operator's by its id."""
-
-    replies: list[Answering] = Field(
-        min_length=1,
-        description="Each reply, in the order you'd have them read.",
+    old: str | None = Field(
+        default=None,
+        description=(
+            "A passage of its text to replace, exactly as it stands there, found "
+            "there once. Left out, `new` is its text whole."
+        ),
+    )
+    new: str = Field(
+        description="What replaces `old`; with no `old`, the item's text whole."
     )
 
 
@@ -208,12 +209,17 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
     async def said(
         self, reason: Message | Friction | HowItWent | Stop | Question
-    ) -> int:
-        """Put `reason` in the operator's inbox, from this conversation, and return its number."""
-        item = await self.delivery.posted(
+    ) -> Item:
+        """Put `reason` in the operator's inbox, from this conversation, and return it as kept, its citations of their words read (`Delivery.cited`)."""
+        return await self.delivery.posted(
             reason, self.party, Operator(), self.launch.worktree, call=self.call
         )
-        return item.number
+
+    @staticmethod
+    def answered(text: str, item: Item) -> Said:
+        """Answer a call with `text`, then which citations of the operator's words in `item`, the item it made, name no one passage, where any doesn't (`unresolved`)."""
+        told = unresolved(item.citations, item.number)
+        return Said(text=text if not told else f"{text}\n\n{inside(told)}")
 
     async def passed_up(self, reason: Friction | HowItWent) -> bool:
         """Put a copy of `reason` in the inbox of the conversation that spawned this one, quietly (`Item.quiet`), and say whether there's one."""
@@ -239,9 +245,10 @@ class Speaker(Model, arbitrary_types_allowed=True):
         inbox as a problem, and they're notified. Then end your turn. To end
         your work by your own choice instead, it's `stop`.
         """
-        number = await self.said(Message(kind="problem", text=said.problem))
-        return Said(
-            text=f"Your problem is with the operator, {cited(number)}. End your turn."
+        item = await self.said(Message(kind="problem", text=said.problem))
+        return self.answered(
+            f"Your problem is with the operator, {cited(item.number)}. End your turn.",
+            item,
         )
 
     async def stop(self, said: speaking.Stop) -> Said:
@@ -252,9 +259,10 @@ class Speaker(Model, arbitrary_types_allowed=True):
         the operator's inbox, never your parent's. Then end your turn. Where the
         work can't go on, it's `blocked`.
         """
-        number = await self.said(Stop.model_validate(said.model_dump()))
-        return Said(
-            text=f"Your stop is with the operator, {cited(number)}. End your turn."
+        item = await self.said(Stop.model_validate(said.model_dump()))
+        return self.answered(
+            f"Your stop is with the operator, {cited(item.number)}. End your turn.",
+            item,
         )
 
     async def note(self, said: Remark) -> Said:
@@ -267,8 +275,10 @@ class Speaker(Model, arbitrary_types_allowed=True):
         that needs their eyes soon, is an `ask`, which waits on them and
         notifies them.
         """
-        number = await self.said(Message(kind="note", text=said.remark))
-        return Said(text=f"Your note is with the operator, {cited(number)}. Carry on.")
+        item = await self.said(Message(kind="note", text=said.remark))
+        return self.answered(
+            f"Your note is with the operator, {cited(item.number)}. Carry on.", item
+        )
 
     async def friction(self, said: results.Friction) -> Said:
         """Say what got in your way, and carry on.
@@ -281,11 +291,12 @@ class Speaker(Model, arbitrary_types_allowed=True):
         answer. A doubt about the work itself is a `note`.
         """
         friction = Friction.model_validate(said.model_dump())
-        number = await self.said(friction)
+        item = await self.said(friction)
         parent = " and your parent" if await self.passed_up(friction) else ""
-        return Said(
-            text=f"Your friction is with the operator, {cited(number)}{parent}. "
-            "Carry on."
+        return self.answered(
+            f"Your friction is with the operator, {cited(item.number)}{parent}. "
+            "Carry on.",
+            item,
         )
 
     async def how_it_went(self, said: results.HowItWent) -> Said:
@@ -298,9 +309,11 @@ class Speaker(Model, arbitrary_types_allowed=True):
         call. Your work goes on.
         """
         went = HowItWent.model_validate(said.model_dump())
-        number = await self.said(went)
+        item = await self.said(went)
         parent = " and your parent" if await self.passed_up(went) else ""
-        return Said(text=f"How it went is with the operator, {cited(number)}{parent}.")
+        return self.answered(
+            f"How it went is with the operator, {cited(item.number)}{parent}.", item
+        )
 
     def asked(self) -> int | None:
         """Return the number of the question this call made already, where the call is one sent again across a restart of the service: a question from this conversation anchored to the call's id (`Item.call`); none where there's none, or the call carries no id."""
@@ -337,27 +350,31 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 for choice in asked.decisions
             ],
         )
-        number = self.asked()
-        if number is None:
-            number = await self.said(question)
+        found = self.asked()
+        item = (
+            await self.said(question)
+            if found is None
+            else self.delivery.inbox.item(found)
+        )
+        number = item.number
         if not asked.wait:
-            return Said(
-                text=(
-                    f"Your question is with the operator, {cited(number)}. Their "
-                    "answer reaches you at a later call; `wait_inbox` waits for it."
-                )
+            return self.answered(
+                f"Your question is with the operator, {cited(number)}. Their answer "
+                "reaches you at a later call; `wait_inbox` waits for it.",
+                item,
             )
 
         def answered() -> bool:
             return isinstance(self.delivery.inbox.item(number).state, Answered)
 
         told = await self.delivery.held(self.party, answered)
-        return Said(
-            text=told
+        return self.answered(
+            told
             or (
                 f"The operator answered {cited(number)}; their answer was told to you "
                 "beside another call."
-            )
+            ),
+            item,
         )
 
     @lup_tool
@@ -385,8 +402,10 @@ class Speaker(Model, arbitrary_types_allowed=True):
         message = Message(kind=sending.kind, text=sending.text)
         match recipient:
             case Operator():
-                number = await self.said(message)
-                return Said(text=f"Your message is with the operator, {cited(number)}.")
+                item = await self.said(message)
+                return self.answered(
+                    f"Your message is with the operator, {cited(item.number)}.", item
+                )
             case Conversation():
                 item = await self.delivery.posted(
                     message,
@@ -396,7 +415,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
                     call=self.call,
                 )
                 copy = await self.said(message.model_copy(update={"to": recipient}))
-                return Said(text=self.arriving(recipient, item.number, copy))
+                return self.answered(
+                    self.arriving(recipient, item.number, copy.number), copy
+                )
 
     def addressed(self, to: str) -> Party:
         """Return the party `to` names for this conversation: the operator, its parent, or one of its own subagents, by its name, its path or its runtime's id.
@@ -551,9 +572,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
         id: what it sent, to the operator above all, and what it was sent,
         with its subagents' where `subagents` asks. With `whole`, each item is
         read whole, the operator's words on one of the conversation's under
-        it with the conversation's replies to them, so the exchange reads as
-        one thread: how a session reads what an earlier one said and was
-        told. Given an item's `number`, any of this repository's, it's read
+        it, and its turn's end saying which of theirs it answers, so the
+        exchange reads as one thread: how a session reads what an earlier one
+        said and was told. Given an item's `number`, any of this repository's, it's read
         whole. It marks nothing read and answers nothing: what reaches you
         still comes through `wait_inbox` and beside your calls.
         """
@@ -624,7 +645,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
 
     def part(self, wanted: PartId, items: list[Item]) -> str:
-        """Say part `wanted` of its item, any of `items`: a block of an item a conversation sent, as a `<part>` tag; the operator's words there in one of theirs, as the item's tag carried them; a reply of the conversation's it was sent to, as `<reply>`. One that isn't there is said."""
+        """Say part `wanted` of its item, any of `items`: a block of an item a conversation sent, as a `<part>` tag; the operator's words there in one of theirs (`spoken`), as the item's tag carried them, saying the item of the agent's it's on, or whom it was written to; a reply copies before kept on it, as `<reply>`. One that isn't there is said."""
         item = next((each for each in items if each.number == wanted.item), None)
         if item is None:
             return self.whole(wanted.item, items)
@@ -637,9 +658,15 @@ class Speaker(Model, arbitrary_types_allowed=True):
             return Tag(
                 name="part", attributes={"id": wanted.said()}, parts=[found.text]
             ).written()
-        anchor = next((each for each in anchors(item) if each.id == wanted), None)
+        anchor = next((each for each in spoken(item) if each.id == wanted), None)
         if anchor is not None:
-            where = {} if anchor.item is None else {"on": str(anchor.item)}
+            where = (
+                {"on": str(anchor.item)}
+                if anchor.item is not None
+                else {"to": who(anchor.to)}
+                if anchor.to is not None
+                else {}
+            )
             return Tag(
                 name="part",
                 attributes={"id": wanted.said(), **where},
@@ -657,35 +684,28 @@ class Speaker(Model, arbitrary_types_allowed=True):
         return f"{cited(wanted.item)} has no part {wanted.cited()}."
 
     @lup_tool
-    async def reply(self, replying: Replies) -> Said:
-        """Reply to the operator's comments, each by its id.
+    async def edit(self, editing: Editing) -> Said:
+        """Edit what you sent the operator.
 
-        Each `<reply id="546.2">` or `<comment id>` in a review, a message or
-        an answer sent to you can be answered by its id, and one call carries
-        every reply of a round. Each is kept on the operator's item under what
-        it answers, never as an item of its own, and the dashboard shows it
-        there, under their comment, so the exchange reads as a thread: the
-        item of yours their comment was on comes back before them with the
-        thread, and their next comment on your reply reaches you as an `<on>`
-        naming the reply's id. An id naming no part, a comment on another
-        agent's item, or a reply of your own is refused, naming what you may
-        answer, and nothing of the call is kept. What answers no point of
-        theirs is your turn's last words, which reach them as a note; `note`
-        is for what they didn't say.
+        A message, a note, your turn's last words, a question's text, a
+        friction, how it went or a stop: one you sent the operator, by its
+        number. Give `old`, a passage of its text exactly as it stands, found
+        there once, and `new`, what replaces it, as a file's edit does; or
+        `new` alone, its text whole. They see it marked edited, with what
+        changed, and it comes back before them where they'd read it. Its
+        citations of their words are read again, and the answer says any that
+        still don't name one passage. A question they answered, or what you
+        withdrew, isn't edited: `send` what changed.
         """
         try:
-            replies = [
-                Replying(to=PartId.parsed(each.to), text=each.text)
-                for each in replying.replies
-            ]
-            kept = await self.delivery.replied_by(self.party, replies)
-        except (ValueError, InboxError) as refused:
-            return Said(text=f"Not replied: {refused}")
-        said = [
-            replied_to([reply], self.delivery.anchored(self.party, each))
-            for reply, each in zip(kept, replies, strict=True)
-        ]
-        return Said(text=f"Your replies are with the operator: {'; '.join(said)}.")
+            item = await self.delivery.edited(
+                editing.number, self.party, editing.old, editing.new
+            )
+        except InboxError as refused:
+            return Said(text=f"Not edited: {refused}")
+        return self.answered(
+            f"{cited(item.number)} is edited, and before the operator.", item
+        )
 
     def tools(self) -> list[AgentTool]:
         """Return the inbox's tools, each calling this conversation's function: the speaking tools, as the library serves them, then the inbox's own, as declared (`bound`)."""
@@ -696,7 +716,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             speaking.friction.name: self.friction,
             speaking.how_it_went.name: self.how_it_went,
         }
-        spoken = [
+        speaking_tools = [
             tool.model_copy(
                 update={
                     "description": inspect.getdoc(functions[tool.name]),
@@ -711,7 +731,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 speaking.how_it_went,
             ]
         ]
-        return [*spoken, *bound(self)]
+        return [*speaking_tools, *bound(self)]
 
 
 def specs() -> list[ToolSpec]:

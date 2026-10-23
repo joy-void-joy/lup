@@ -43,6 +43,10 @@ export interface Source extends Span {
     kind: "text" | "comment";
     /** The stretches it's read from, in the text's order, each ending after its line break, the comments among them left out: one, the whole, for a comment. */
     lines: Span[];
+    /** Stretches of it hidden as a construct's marks are, beyond Markdown's own: each resolved citation's words, whose passage unfolds under its line (`review.ts`). */
+    hidden?: Span[];
+    /** Stretches of it shown as written, none of Markdown's marks in them hidden: each citation that found no passage, which the operator always sees whole. */
+    written?: Span[];
 }
 
 /**
@@ -103,6 +107,8 @@ export const sources = StateField.define<readonly Source[]>({
             ...each,
             ...carried(each, transaction.changes, each.kind === "comment"),
             lines: each.lines.map((line) => carried(line, transaction.changes, each.kind === "comment")),
+            ...(each.hidden === undefined ? {} : { hidden: each.hidden.map((span) => carried(span, transaction.changes, false)) }),
+            ...(each.written === undefined ? {} : { written: each.written.map((span) => carried(span, transaction.changes, false)) }),
         }));
     },
 });
@@ -562,7 +568,9 @@ function decorated(root: SyntaxNode, doc: Text, from: number, to: number, reveal
 
 /**
  * Return the decorations of the Markdown shown in `ranges` of `state`'s text, by its sources' trees as far as they're
- * read: each construct's marks hidden (`hiddenBy`), but on a line `revealed` says is, the cursor's in a comment; each
+ * read: each construct's marks hidden (`hiddenBy`), but on a line `revealed` says is, the cursor's in a comment, or in
+ * a stretch a source shows as written (`Source.written`), and each stretch a source hides beyond them
+ * (`Source.hidden`); each
  * line of a block of code barred; each link's text saying its address on hover; and each table's cells padded so its
  * columns line up (`table`), those on a revealed line as they show there.
  */
@@ -574,9 +582,17 @@ export function decorate(state: EditorState, ranges: readonly Span[], revealed: 
         if (root === null) {
             continue;
         }
+        const written = each.written ?? [];
+        // A mark inside a stretch shown as written stays.
+        const shown = (range: Range<Decoration>) => range.value !== HIDDEN || !written.some((span) => range.from < span.to && range.to > span.from);
         for (const range of ranges) {
             if (each.to >= range.from && each.from <= range.to) {
-                made.push(...decorated(root, state.doc, Math.max(range.from, each.from), Math.min(range.to, each.to), revealed));
+                made.push(...decorated(root, state.doc, Math.max(range.from, each.from), Math.min(range.to, each.to), revealed).filter(shown));
+                for (const span of each.hidden ?? []) {
+                    if (span.to > span.from && span.to >= range.from && span.from <= range.to) {
+                        made.push(HIDDEN.range(span.from, span.to));
+                    }
+                }
             }
         }
     }

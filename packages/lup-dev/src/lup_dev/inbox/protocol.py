@@ -65,6 +65,7 @@ from lup_dev.inbox.store import (
     Review,
     Ruling,
     Talk,
+    Unresolved,
     Waiting,
     cited,
 )
@@ -317,10 +318,16 @@ class Items(Reply):
     """When the operator's last reply was sent, from the review; none before
     their first: what came after it is new to them."""
     answers: list[Item] = []
-    """The operator's own items answering those listed, a review, a reply or
-    an answer, with the replies the agents made on them (`Item.replies`): the
-    page lays each comment and the thread under it out under the line it's on
-    (`docs/dashboard.md`, *The review*)."""
+    """The operator's own items about those listed: those a turn's end listed
+    answers or cites, which the page lays out above it, and a review, a reply
+    or an answer to one listed, with the replies copies before kept on them
+    (`Item.replies`), which it lays out under it (`docs/dashboard.md`, *The
+    review*)."""
+    commented: list[Item] = []
+    """The conversations' items the operator's in `answers` are on, as they
+    stand: whose each is, so the page shows an agent the operator's words on its
+    own items alone, and what each says as it stands, a comment on a passage an
+    edit changed marked outdated."""
 
 
 class Readout(Reply):
@@ -471,17 +478,23 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
     async def answer(self, request: ListInbox) -> Reply:
         inbox = self.delivery.inbox
         waiting = self.waiting(request)
+        answers = self.answering(waiting)
         return Items(
-            items=waiting, reviewed=inbox.reviewed(), answers=self.answering(waiting)
+            items=waiting,
+            reviewed=inbox.reviewed(),
+            answers=answers,
+            commented=self.commented(answers),
         )
 
     @override
     async def scoped(self, request: ListInbox, repository: Path) -> Reply:
         waiting = [each for each in self.waiting(request) if each.of(repository)]
+        answers = self.answering(waiting)
         return Items(
             items=waiting,
             reviewed=self.delivery.inbox.reviewed(repository),
-            answers=self.answering(waiting),
+            answers=answers,
+            commented=self.commented(answers),
         )
 
     def waiting(self, request: ListInbox) -> list[Item]:
@@ -490,12 +503,34 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
         waiting = self.delivery.inbox.waiting(Operator())
         return [each for each in waiting if window.covers(each.made)]
 
+    def commented(self, answers: list[Item]) -> list[Item]:
+        """Return the items the operator's `answers` are on, oldest first, as they stand: each a review's comments are on, the question an answer answers, the message a reply is to."""
+        found = self.delivery.inbox.items
+
+        def on(answer: Item) -> list[int]:
+            match answer.reason:
+                case Review(comments=comments):
+                    return [each.item for each in comments]
+                case Answer(question=question):
+                    return [question]
+                case Message(of=int() as of):
+                    return [of]
+                case _:
+                    return []
+
+        numbers = [number for answer in answers for number in on(answer)]
+        return [
+            found[number]
+            for number in sorted(dict.fromkeys(numbers))
+            if number in found
+        ]
+
     def answering(self, items: list[Item]) -> list[Item]:
-        """Return the operator's items that answer any of `items`, oldest first, each the one sent to the item's sender: a review covering it with a comment on it, a reply to it, or an answer to it; what the threads under them are read from.
+        """Return the operator's items that any of `items` answers or that answer it, oldest first: those a turn's end follows (`Message.answers`) or cites (`Item.citations`), shown above it; and, each the one sent to the item's sender, a review covering it with a comment on it, a reply to it, or an answer to it, whose comments and the replies copies before kept on them are shown under it.
 
         A review goes to each conversation it reaches as an item of its own,
         each carrying every comment, so only the copy sent to the item's
-        sender answers it: the thread under the item is read once.
+        sender answers it: what's under the item is read once.
         """
         found = self.delivery.inbox.items
 
@@ -512,11 +547,23 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
                 case _:
                     return False
 
+        def followed(item: Item) -> list[int]:
+            after = item.reason.answers if isinstance(item.reason, Message) else []
+            named = [
+                each.found.part.item
+                for each in item.citations
+                if each.found is not None
+            ]
+            return [*after, *named]
+
+        before = [number for item in items for number in followed(item)]
         return [
             found[number]
             for number in sorted(found)
             if found[number].sender == Operator()
-            and any(answers(found[number], item) for item in items)
+            and (
+                number in before or any(answers(found[number], item) for item in items)
+            )
         ]
 
 
@@ -796,17 +843,21 @@ class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
         return self.exchanged(party, [each for each in items if each.of(repository)])
 
     def exchanged(self, party: Conversation, items: list[Item]) -> Exchanged:
-        """Return `items` as `party` sent them, as it wrote them, and as it was sent them, as it's told them."""
+        """Return `items` as `party` sent them, as it wrote them, and as it was sent them, as it's told them: lup's word on its citations that named no passage among those it was sent, though it's its own item, being lup's to it (`Unresolved`)."""
+
+        def told(item: Item) -> bool:
+            return item.sender != party or isinstance(item.reason, Unresolved)
+
         return Exchanged(
             sent=[
                 Exchange(item=each, text=written(each))
                 for each in items
-                if each.sender == party
+                if not told(each)
             ],
             received=[
                 Exchange(item=each, text=self.delivery.words(each))
                 for each in items
-                if each.sender != party
+                if told(each)
             ],
         )
 

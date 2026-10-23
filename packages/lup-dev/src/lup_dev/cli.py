@@ -108,6 +108,7 @@ from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import WorkerJudge, Workers
 from lup_dev.inbox.bearings import RepositoryBearings
+from lup_dev.inbox.citations import plainly
 from lup_dev.inbox.delivery import (
     Delivery,
     ItemKind,
@@ -156,6 +157,7 @@ from lup_dev.inbox.store import (
     Review,
     Ruling,
     Stop,
+    Unresolved,
     Verdict,
     cited,
     item_number,
@@ -808,6 +810,8 @@ def shown(item: Item) -> str:
             | Ended(text=text)
         ):
             body = [text]
+        case Unresolved(of=of, citations=citations):
+            body = [plainly(citations, of)]
         case Question(text=text, decisions=decisions):
             numbered = [
                 f"{number}. {decision.text}\n   Its lean: {decision.lean}"

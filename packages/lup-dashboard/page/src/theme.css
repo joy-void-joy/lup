@@ -376,11 +376,61 @@ kbd {
     color: var(--muted);
 }
 
-/* A reply of the agent's in the thread under an item, after the operator's comment it answers: in the orange of the
-   agent's own items, set off by a bar, so the exchange reads as a thread. */
-.thread-reply {
-    color: var(--orange);
-    border-left: 2px solid var(--orange);
+/* An exchange: who wrote what follows; what the operator's words are on; the passage a citation cites, folded under
+   its line, in the blue of the operator's words, set off by a bar; what an edit took away and put in. A citation's id,
+   which says its passage on hover and opens it on a click; the passage it answers among the operator's words, which
+   goes to it on a click; one that found no passage, shown as written, marked as not found. A line an edit changed is
+   barred, and a comment on a passage it changed says it's outdated. */
+.buffer .cm-line.aside-by {
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.aside-quoted {
+    color: var(--muted);
+    font-style: italic;
+}
+
+.aside-cited {
+    color: var(--info);
+    border-left: 2px solid var(--info);
+}
+
+.aside-was {
+    color: var(--err);
+}
+
+.aside-now {
+    color: var(--ok);
+}
+
+.citation {
+    color: var(--cyan);
+    text-decoration: underline dotted var(--cyan);
+    text-underline-offset: 3px;
+    cursor: pointer;
+}
+
+.citation-unresolved {
+    color: var(--err);
+    text-decoration: underline wavy var(--err);
+    text-underline-offset: 3px;
+}
+
+.answered {
+    text-decoration: underline 2px var(--cyan);
+    text-underline-offset: 3px;
+    cursor: pointer;
+}
+
+.buffer .cm-line.edited-line {
+    box-shadow: inset 3px 0 0 var(--purple);
+}
+
+.buffer .cm-line.outdated[data-said]::after {
+    content: "  ◂ " attr(data-said);
+    color: var(--err);
+    font-style: italic;
 }
 
 .bar .demo {

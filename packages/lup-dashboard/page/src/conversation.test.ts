@@ -358,6 +358,8 @@ function item(number: number, reason: Item["reason"], minute: number, fields: Pa
         sender: SESSION,
         recipient: OPERATOR,
         replies: [],
+        citations: [],
+        edits: [],
         quiet: false,
         made: at(minute),
         state: { state: "waiting" },
@@ -385,13 +387,13 @@ const ASKED = item(51, { reason: "question", text: "Which parser?", decisions: [
     call: "q1",
     state: { state: "answered", at: at(4), answer: 53 },
 });
-const NOTED = item(52, { reason: "message", passages: [], ending: false, kind: "note", text: "I assumed UTF-8." }, 7, { state: { state: "done", at: at(9) } });
+const NOTED = item(52, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "I assumed UTF-8." }, 7, { state: { state: "done", at: at(9) } });
 const ANSWERED = item(53, { reason: "answer", question: 51, rulings: [{ decision: 1, verdict: "leaning", comment: "" }], comment: "" }, 4, {
     sender: OPERATOR,
     recipient: SESSION,
     state: { state: "told", at: at(5), how: "call" },
 });
-const REPLIED = item(54, { reason: "message", passages: [], ending: false, kind: "note", text: "Good.", of: 52 }, 9, { sender: OPERATOR, recipient: SESSION });
+const REPLIED = item(54, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Good.", of: 52 }, 9, { sender: OPERATOR, recipient: SESSION });
 
 const EXCHANGED: Beside = {
     ...ALONE,
@@ -455,7 +457,7 @@ describe("the items of lup's inbox in a conversation", () => {
     });
 
     it("leaves out a turn's last words lup made a note, which are the agent's words already shown", () => {
-        const ended = item(55, { reason: "message", passages: [], ending: true, kind: "note", text: "Reading the second runtime's." }, 8);
+        const ended = item(55, { reason: "message", passages: [], answers: [], ending: true, kind: "note", text: "Reading the second runtime's." }, 8);
         const beside: Beside = {
             ...EXCHANGED,
             exchanged: { ...EXCHANGED.exchanged, sent: [...EXCHANGED.exchanged.sent, exchange(ended, "Reading the second runtime's.")] },
@@ -471,12 +473,12 @@ describe("the items of lup's inbox in a conversation", () => {
         });
         const flagged = { reason: "flagged", text: "a.py landed, flagged.", summary: "a.py is a new production file", worktree: "/w", path: "a.py", writes: 1 } as const;
         const sent = [
-            item(56, { reason: "message", passages: [], ending: false, kind: "problem", text: "Stuck." }, 12),
-            item(57, { reason: "message", passages: [], ending: false, kind: "note", text: "Done." }, 12, { state: { state: "done", at: at(13) } }),
+            item(56, { reason: "message", passages: [], answers: [], ending: false, kind: "problem", text: "Stuck." }, 12),
+            item(57, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Done." }, 12, { state: { state: "done", at: at(13) } }),
             item(58, { reason: "question", text: "Which?", decisions: [] }, 12, { state: { state: "withdrawn", at: at(13), why: "Found it." } }),
             // A flag and news wait on no one, as the review ranks them: unread, never waiting on you.
             item(59, flagged, 12),
-            item(60, { reason: "message", passages: [], ending: false, kind: "note", text: "Assumed UTF-8." }, 12),
+            item(60, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Assumed UTF-8." }, 12),
         ];
         const out = laid(
             STEPS,
@@ -505,8 +507,8 @@ describe("the items of lup's inbox in a conversation", () => {
     });
 
     it("says one passed on from an ended subagent: in its session's, whose it was; in the subagent's, where it went", () => {
-        const noted = item(44, { reason: "message", passages: [], ending: false, kind: "note", text: "No cache." }, 2, { sender: SURVEY, state: { state: "done", at: at(3) } });
-        const reply = item(46, { reason: "message", passages: [], ending: false, kind: "note", text: "Right.", of: 44 }, 3, {
+        const noted = item(44, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "No cache." }, 2, { sender: SURVEY, state: { state: "done", at: at(3) } });
+        const reply = item(46, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Right.", of: 44 }, 3, {
             sender: OPERATOR,
             recipient: SESSION,
             addressed: SURVEY,
@@ -535,8 +537,8 @@ describe("the items of lup's inbox in a conversation", () => {
             { kind: "called", tool: "Read" },
             { kind: "said", by: "agent", text: "Read it." },
         ];
-        const early = item(60, { reason: "message", passages: [], ending: false, kind: "note", text: "Early." }, 4);
-        const late = item(61, { reason: "message", passages: [], ending: false, kind: "note", text: "Late." }, 6);
+        const early = item(60, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Early." }, 4);
+        const late = item(61, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Late." }, 6);
         const beside: Beside = { ...ALONE, exchanged: { sent: [exchange(late, "Late."), exchange(early, "Early.")], received: [] } };
         const lines = (entries: Entry[]) =>
             laid(entries, beside, UNSAID)
@@ -563,13 +565,13 @@ describe("the items of lup's inbox in a conversation", () => {
     });
 
     it("folds an item before the operator's last words in the exchange it came in, and one before their first words with what came before them, counting it", () => {
-        const before = item(50, { reason: "message", passages: [], ending: false, kind: "note", text: "Early." }, 4);
+        const before = item(50, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Early." }, 4);
         const out = laid(STEPS, { ...ALONE, exchanged: { sent: [exchange(before, "Early.")], received: [] } }, UNSAID);
         const exchange_ = out.folds.find((each) => each.key === "you 0")!;
         const inner = out.items[0]!.fold!;
         expect(inner.from > exchange_.from && inner.to <= exchange_.to).toBe(true);
         expect(out.folds.map((each) => each.key)).toEqual(["calls 2", "item 50", "you 0"]);
-        const first = item(49, { reason: "message", passages: [], ending: false, kind: "note", text: "Earliest." }, 0);
+        const first = item(49, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Earliest." }, 0);
         const early = laid(STEPS.slice(1), { ...ALONE, exchanged: { sent: [exchange(first, "Earliest.")], received: [] } }, UNSAID);
         expect(early.text.split("\n")[0]).toBe("earlier · 4 steps, 1 item, from 9m before your first words");
     });
@@ -609,7 +611,7 @@ describe("the changes between two texts", () => {
     it("keep a reader between two of them where they were, as when a message sent clears comments above and adds below", () => {
         const talk: Talk = { comments: [{ step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" }] };
         const before = laid(STEPS, ALONE, talk);
-        const told = item(101, { reason: "message", passages: [], ending: false, kind: "note", text: "Even for codex?" }, 12, {
+        const told = item(101, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Even for codex?" }, 12, {
             sender: OPERATOR,
             recipient: SESSION,
             state: { state: "told", at: at(12), how: "call" },
@@ -660,5 +662,18 @@ describe("a review it was sent", () => {
         const out = laid(CALLED, beside, UNSAID);
         expect(out.text).toContain("← @60 your message, from the review\n  The operator's message to you:\n  Rename it.");
         expect(out.text).toContain("← @61 your review of @52\n  Fine.");
+    });
+});
+
+describe("lup's word on its citations", () => {
+    it("says it's lup's, and how many citations in which item named no passage, though the conversation is its sender", () => {
+        const missed = { said: "@50[the tone]", start: 0, end: 13, item: 50, part: null, words: "the tone", found: null, candidates: [] };
+        const told = { state: { state: "told" as const, at: at(9), how: "turn's end" as const }, recipient: SESSION };
+        const one = item(63, { reason: "unresolved", of: 56, citations: [missed] }, 9, told);
+        const two = item(64, { reason: "unresolved", of: 57, citations: [missed, missed] }, 9, told);
+        const beside: Beside = { ...ALONE, exchanged: { sent: [], received: [exchange(one, "A citation in @56 doesn't name one passage."), exchange(two, "")] } };
+        const out = laid(CALLED, beside, UNSAID);
+        expect(out.text).toContain("← @63 from lup: a citation of your words in @56 named no one passage\n  A citation in @56 doesn't name one passage.");
+        expect(out.text).toContain("← @64 from lup: 2 citations of your words in @57 named no one passage");
     });
 });

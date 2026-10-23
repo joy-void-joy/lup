@@ -28,6 +28,7 @@ from lup_dev.host.protocol import (
     Talker,
 )
 from lup_dev.host.records import Call, Called, Entry, Said, Task, Usage
+from lup_dev.inbox.citations import resolved
 from lup_dev.inbox.delivery import body, written
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
@@ -66,12 +67,14 @@ from lup_dev.inbox.store import (
     Decision,
     Done,
     Draft,
+    Edit,
     Flagged,
     Found,
     Friction,
     HeldChange,
     HowItWent,
     Item,
+    Letter,
     Message,
     Operator,
     Question,
@@ -82,10 +85,12 @@ from lup_dev.inbox.store import (
     Talk,
     Text,
     Told,
+    Unresolved,
     Waiting,
     cited,
 )
 from lup_dev.inbox.store import Asked as Ask
+from lup_dev.inbox.threads import spoken
 from lup_dev.policy.reviewed import Mark, Marks
 from lup_dev.policy.since import (
     ReviewSince,
@@ -662,7 +667,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def items(self) -> Items:
-        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn, a friction and how the work went, and two writes that landed flagged, the subagent's new module gathering three; the operator last settled an item 3 minutes ago, so those since are new."""
+        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn answering the operator's review, citing it, one citation edited and one naming no passage, the note that review was on, edited since, a friction and how the work went, and two writes that landed flagged, the subagent's new module gathering three; the operator last settled an item 3 minutes ago, so those since are new."""
         every = self.every()
         waiting = [
             each
@@ -670,15 +675,39 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             if each.recipient == Operator() and isinstance(each.state, Waiting)
         ]
         numbers = [each.number for each in waiting]
+        followed = [
+            number
+            for each in waiting
+            if isinstance(each.reason, Message)
+            for number in each.reason.answers
+        ]
+        answers = [
+            each
+            for each in every
+            if each.sender == Operator()
+            and (
+                each.number in followed
+                or (
+                    isinstance(each.reason, Review)
+                    and any(comment.item in numbers for comment in each.reason.comments)
+                )
+            )
+        ]
         return Items(
             items=waiting,
             reviewed=self.ago(3),
-            answers=[
+            answers=answers,
+            commented=[
                 each
                 for each in every
-                if each.sender == Operator()
-                and isinstance(each.reason, Review)
-                and any(comment.item in numbers for comment in each.reason.comments)
+                if any(
+                    isinstance(answer.reason, Review)
+                    and any(
+                        comment.item == each.number
+                        for comment in answer.reason.comments
+                    )
+                    for answer in answers
+                )
             ],
         )
 
@@ -724,21 +753,24 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             for each in self.every()
             if conversation in (each.sender, each.recipient, each.addressed)
         ]
+
+        # lup's word on a conversation's citations is its own item, and told to it, as the host lists it.
+        def told(item: Item) -> bool:
+            return item.sender != conversation or isinstance(item.reason, Unresolved)
+
         return Exchanged(
             sent=[
                 Exchange(item=each, text=written(each))
                 for each in items
-                if each.sender == conversation
+                if not told(each)
             ],
             received=[
-                Exchange(item=each, text=body(each))
-                for each in items
-                if each.sender != conversation
+                Exchange(item=each, text=body(each)) for each in items if told(each)
             ],
         )
 
     def every(self) -> list[Item]:
-        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to its session; the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page."""
+        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to its session; the voice session's note the operator reviewed, edited since, and their review, which its turn's last words answer (`answer`); the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         parser = Conversation(repository=lup, runtime=first, session="s1", agent="a02")
@@ -853,7 +885,19 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 made=self.ago(23),
                 state=Told(at=self.ago(23), how="call"),
             ),
-            # The operator's review of the voice session's note, which its reply by id brought back before them.
+            # The voice session's note the operator reviewed, which it edited since, back before them; and their
+            # review, which its turn's end answers.
+            Item(
+                number=45,
+                reason=Message(kind="note", text=VOICE_EDITED),
+                sender=voice,
+                recipient=Operator(),
+                worktree=lup / "tree" / "guidance-voice",
+                made=self.ago(9),
+                edits=[Edit(at=self.ago(1), before=VOICE_NOTE)],
+            ),
+            self.reviewed_voice(voice),
+            # The operator's review of the voice session's note, which a reply copies before kept is on.
             Item(
                 number=49,
                 reason=Review(
@@ -932,20 +976,22 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 call="call-55",
                 made=self.ago(0.5),
             ),
+            self.answer(voice),
             Item(
-                number=56,
-                reason=Message(
-                    kind="note",
-                    text=(
-                        "The guidance's voice section is rewritten and the gate "
-                        "passes; it's on its branch for you to look at."
-                    ),
-                    ending=True,
+                number=63,
+                reason=Unresolved(
+                    of=56,
+                    citations=[
+                        each
+                        for each in self.answer(voice).citations
+                        if each.found is None
+                    ],
                 ),
                 sender=voice,
-                recipient=Operator(),
+                recipient=voice,
                 worktree=lup / "tree" / "guidance-voice",
                 made=self.ago(1.5),
+                state=Told(at=self.ago(1.5), how="turn's end"),
             ),
             Item(
                 number=57,
@@ -1048,6 +1094,57 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             *self.worked(),
             *self.sent,
         ]
+
+    def reviewed_voice(self, voice: Conversation) -> Item:
+        """Return the operator's review of the voice session's note: a comment on a passage of it, one on it whole, and a message to the session, told to it at a call."""
+        return Item(
+            number=50,
+            reason=Review(
+                covers=[45],
+                comments=[
+                    Comment(
+                        item=45,
+                        quote=Quote(
+                            text=VOICE_PASSAGE,
+                            start=len(VOICE_OPENING) + 1,
+                            end=len(VOICE_OPENING) + 1 + len(VOICE_PASSAGE),
+                        ),
+                        text=(
+                            "Good. But does it read well where a line speaks of both "
+                            "of us at once?"
+                        ),
+                    ),
+                    Comment(item=45, text="And cut the history: say what is."),
+                ],
+                letters=[
+                    Letter(
+                        to=voice,
+                        text=(
+                            "Once that's done, put it on its branch for me to read. "
+                            "Keep the examples short."
+                        ),
+                    )
+                ],
+            ),
+            sender=Operator(),
+            recipient=voice,
+            made=self.ago(8),
+            state=Told(at=self.ago(7.5), how="call"),
+        )
+
+    def answer(self, voice: Conversation) -> Item:
+        """Return the voice session's turn's last words, answering the operator's review of its note (`reviewed_voice`), its citations of their words read as the host reads them (`resolved`): one edited to name the part it meant, and one that names no passage, shown as written."""
+        said = spoken(self.reviewed_voice(voice))
+        return Item(
+            number=56,
+            reason=Message(kind="note", text=VOICE_ANSWER, ending=True, answers=[50]),
+            sender=voice,
+            recipient=Operator(),
+            worktree=Path("/home/op/lup.git/tree/guidance-voice"),
+            made=self.ago(1.5),
+            citations=resolved(VOICE_ANSWER, said),
+            edits=[Edit(at=self.ago(1.2), before=VOICE_SENT)],
+        )
 
     def context(self, number: int) -> Context | Refused:
         """Return a stand-in moment for each item an agent's call made: the operator's last words, what the agent said and called after them, the call, and what came after; the approval, which no call made, has none; a worker's item has its own (`worked_context`)."""
@@ -2238,6 +2335,45 @@ CLOCK_AFTER = '''    def sleep(self, seconds: float) -> None:
         """Say why the last wait waited, which a test's clock reads."""
 '''
 
+
+VOICE_OPENING = (
+    "The guidance's voice section says what an agent does, in the second person."
+)
+"""How the voice session's note the operator reviewed opens, before the passage they commented on."""
+
+VOICE_PASSAGE = "I kept 'you' for the agent throughout"
+"""The passage of the voice session's note the operator commented on."""
+
+VOICE_NOTE = f"{VOICE_OPENING} {VOICE_PASSAGE}, and named the operator by their role."
+"""The voice session's note as the operator reviewed it."""
+
+VOICE_EDITED = (
+    f"{VOICE_OPENING} It says 'you' to the agent alone, and names the operator by "
+    "their role."
+)
+"""The voice session's note as it edited it since, the passage the operator commented on changed."""
+
+VOICE_ANSWER = (
+    "It reads well where a line speaks of one of us. Where it speaks of both, "
+    "@50.1[does it read well … at once?], I name you by your role and leave "
+    '"you" to the agent, so nothing reads two ways.\n\n'
+    "The history is out, @50.2[say what is]. The examples are a line each, "
+    "@50.3[Keep the examples short], and the section is on its branch, "
+    "`guidance-voice`, the gate passing.\n\n"
+    "One thing I couldn't place: @50.1[the tone of the examples]."
+)
+"""The voice session's turn's last words, answering the operator's review of its note."""
+
+VOICE_SENT = (
+    "It reads well where a line speaks of one of us. Where it speaks of both, "
+    "@50.1[does it read well … at once?], I name you by your role and leave "
+    '"you" to the agent, so nothing reads two ways.\n\n'
+    "The history is out, @50.1[say what is]. The examples are a line each, "
+    "@50.3[Keep the examples short], and the section is on its branch, "
+    "`guidance-voice`, the gate passing.\n\n"
+    "One thing I couldn't place: @50.1[the tone of the examples]."
+)
+"""What those words said as the session sent them, before it edited a citation to name the part it meant."""
 
 MARKDOWN_NOTE = """\
 Read the first runtime's records whole: what each kind of line holds, and what \
