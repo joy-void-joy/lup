@@ -98,7 +98,7 @@ from lup_dev.inbox.protocol import (
     ShowTalk,
     Talked,
 )
-from lup_dev.inbox.reading import Narrowing, Reader
+from lup_dev.inbox.reading import Narrowing, Reader, by_agent
 from lup_dev.inbox.store import (
     Answer,
     Answered,
@@ -7978,6 +7978,107 @@ def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_n
     )
 
 
+def test_each_conversations_flagged_writes_are_one_entry_wherever_the_inbox_is_listed(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    inbox = Inbox.opened(
+        Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path).inbox
+    )
+    main = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    parser = main.model_copy(update={"agent": "a1"})
+    inbox.placed(
+        Whereabouts(
+            conversation=parser, launch="one", worktree=tmp_path, since=clock.now()
+        )
+    )
+
+    def flag(path: str, branch: str | None) -> Flagged:
+        return Flagged(
+            text=f"{path} landed, flagged for the operator's review.",
+            summary=f"{path} is a new production file",
+            worktree=tmp_path,
+            path=Path(path),
+            branch=branch,
+        )
+
+    start = clock.now()
+    for minutes, (reason, sender) in enumerate(
+        [
+            (flag("src/parser.py", "feat"), parser),
+            (Message(kind="note", text="Header first."), main),
+            (flag("src/lexer.py", "feat"), parser),
+            (flag("src/clock.py", None), main),
+            (flag("src/tokens.py", "feat"), parser),
+        ]
+    ):
+        inbox.made(
+            reason, sender, Operator(), tmp_path, start + timedelta(minutes=minutes)
+        )
+    approved = inbox.item(5).model_copy(
+        update={"state": Decided(at=clock.now(), approved=True)}
+    )
+    inbox.kept(approved)
+    reader = Reader(
+        delivery=Delivery.model_construct(inbox=inbox, clock=clock),
+        reader=Operator(),
+        names={"s1": "w"},
+        mine=True,
+    )
+    items = inbox.about(tmp_path / ".git")
+    listed = reader.read(items, Narrowing())
+    assert listed.found == 4
+    assert listed.text.splitlines() == [
+        (
+            "@2  2026-10-01 12:01  a note from `w` (claude session s1) to you, "
+            "waiting: Header first."
+        ),
+        (
+            "@1 @3  2026-10-01 12:02  2 flagged writes from `w/a1` (subagent a1 of "
+            "claude session s1) to you, waiting: 2 files on `feat`"
+        ),
+        (
+            "@4  2026-10-01 12:03  1 flagged write from `w` (claude session s1) to "
+            "you, waiting: 1 file on no branch"
+        ),
+        "Not listed: 1 item not waiting for you, which `every` lists.",
+    ]
+    # An entry counts as one against the limit, and what it leaves out is counted in items.
+    latest = reader.read(items, Narrowing(limit=1, every=True))
+    assert latest.text.splitlines() == [
+        (
+            "@1 @3 @5  2026-10-01 12:04  3 flagged writes from `w/a1` (subagent a1 "
+            "of claude session s1) to you, 2 waiting, 1 approved: 3 files on `feat`"
+        ),
+        (
+            "Not listed: 2 earlier items, which `until` "
+            f'"{(start + timedelta(minutes=4)).astimezone().isoformat()}" reads; a '
+            "`limit` of 3 lists them all."
+        ),
+    ]
+    # Read whole, each is under the entry's heading, naming its file.
+    whole = reader.read(items, Narrowing(whole=True, kinds=["flagged write"]))
+    assert whole.text.split("\n\n")[0].splitlines()[:3] == [
+        (
+            "@1 @3  2026-10-01 12:02  2 flagged writes from `w/a1` (subagent a1 of "
+            "claude session s1) to you, waiting:"
+        ),
+        '<item item="1" kind="flagged write" from="w/a1">',
+        "src/parser.py landed, flagged for the operator's review.",
+    ]
+    # `lup-dev inbox` lists them so too.
+    entries = by_agent([each for each in items if isinstance(each.state, Waiting)])
+    assert [cli.line(each) for each in entries][1:] == [
+        (
+            "@1 @3  2026-10-01 12:02  2 flagged writes from subagent a1 of claude "
+            f"session s1 in {tmp_path}: 2 files on `feat`"
+        ),
+        (
+            f"   @4  2026-10-01 12:03  1 flagged write from claude session s1 in "
+            f"{tmp_path}: 1 file on no branch"
+        ),
+    ]
+
+
 def dated(root: Path, message: str, at: str) -> str:
     """Commit everything in `root`'s worktree as made at `at`, and return the commit's short id: what landed since a moment is read by its date."""
     when = {**os.environ, "GIT_AUTHOR_DATE": at, "GIT_COMMITTER_DATE": at}
@@ -8194,7 +8295,11 @@ def test_the_bearings_list_what_waits_on_the_operator_the_last_sessions_first(
             "- News, by kind: 1 `how it went`, 1 `note` (`inbox` with those `kinds` "
             "lists them)."
         ),
-        "- 3 flagged writes, holding landings: `parser`'s, @2, @3; `lexer`'s, @5.",
+        (
+            "- Flagged writes, holding their branches' landings: claude session s1, "
+            "1 file on `parser` (@2); subagent a1 of claude session s1, 2 files on "
+            "`parser` and `lexer` (@3, @5)."
+        ),
         "- @7 a question from claude session s9: Which lexer?",
     ]
     nowhere = Register(

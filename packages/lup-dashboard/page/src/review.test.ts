@@ -1225,7 +1225,7 @@ describe("the drawers at the end of each agent's group", () => {
         const texts = out.drawers.map((each) => lines(each.header.from, each.folds.at(-1)!.to));
         expect(texts[0]).toEqual(["tasks · 3 entries, 1 done, 1 in progress", "✓ Write the sampler", "▶ Writing the models", "· Measure"]);
         expect(texts[1]).toEqual(["trace · 2 steps since your last message", "Twenty kinds of line.", "· called Grep"]);
-        expect(texts[2]?.slice(0, 2)).toEqual(["since you approved on feat · 1 to review", "reader.py · created · 8 lines · new file"]);
+        expect(texts[2]?.slice(0, 2)).toEqual(["since you approved on feat · 1 to review · 1 flagged", "reader.py · created · 8 lines · new file"]);
         expect(texts[3]?.slice(0, 3)).toEqual(["conversation · 7 steps", "earlier · 4 steps, from 5m before your last words", "you: Build the reader."]);
         // Each drawer is its own fold, folded; the new module's bodies fold until opened, its file open.
         const own = out.drawers.map((each) => each.folds.at(-1)!);
@@ -1240,7 +1240,7 @@ describe("the drawers at the end of each agent's group", () => {
             ["body", "Reader", true],
             ["body", "turns", true],
             ["file", "reader.py", false],
-            ["since", "since you approved on feat · 1 to review", true],
+            ["since", "since you approved on feat · 1 to review · 1 flagged", true],
         ]);
         expect(foldKey(since.folds[1]!)).toBe(`since ${whose(S1)} body reader.py ["Reader","turns"]`);
         // The items came before the drawers, the group after them where it is.
@@ -1317,10 +1317,12 @@ describe("the drawers at the end of each agent's group", () => {
         expect(traceSummary(ENTRIES.slice(0, 5), true)).toBe("trace · nothing since your last message");
         expect(traceSummary([], false)).toBe("trace · not read yet");
         expect(sinceSummary(null)).toBe("since you approved · not read yet");
-        expect(sinceSummary(SINCE)).toBe("since you approved on feat · 1 to review");
+        expect(sinceSummary(SINCE)).toBe("since you approved on feat · 1 to review · 1 flagged");
         expect(sinceSummary({ ...SINCE, files: [] })).toBe("since you approved on feat · nothing");
         const kept = { path: "a.py", version: "a1", flags: [], reviewed: "2026-10-17T12:00:00Z" };
-        expect(sinceSummary({ ...SINCE, files: [kept, ...SINCE.files] })).toBe("since you approved on feat · 1 to review · 1 reviewed");
+        expect(sinceSummary({ ...SINCE, files: [kept, ...SINCE.files] })).toBe("since you approved on feat · 1 to review · 1 flagged · 1 reviewed");
+        const unflagged = SINCE.files.map((each) => ({ ...each, flags: [] }));
+        expect(sinceSummary({ ...SINCE, files: [kept, ...unflagged] })).toBe("since you approved on feat · 1 to review · 1 reviewed");
         expect(sinceSummary({ ...SINCE, branch: null, files: [kept] })).toBe("since you approved · 1 reviewed");
     });
 
@@ -1332,7 +1334,7 @@ describe("the drawers at the end of each agent's group", () => {
         const [, , since] = laidOut.drawers;
         const text = laidOut.text.slice(since!.header.from, since!.folds.at(-1)!.to).split("\n");
         expect(text.slice(0, 3)).toEqual([
-            "since you approved on feat · 1 to review · 2 reviewed",
+            "since you approved on feat · 1 to review · 2 flagged · 2 reviewed",
             "a.py · reviewed at a1b2c3d",
             "reader.py · created · 8 lines · new file",
         ]);
@@ -1356,7 +1358,7 @@ describe("the drawers at the end of each agent's group", () => {
             ["body", "Reader"],
             ["body", "turns"],
             ["file", "reader.py"],
-            ["since", "since you approved on feat · 1 to review · 2 reviewed"],
+            ["since", "since you approved on feat · 1 to review · 2 flagged · 2 reviewed"],
         ]);
     });
 });

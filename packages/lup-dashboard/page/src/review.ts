@@ -722,7 +722,7 @@ export function traceSummary(entries: Entry[], read: boolean): string {
     return steps === 0 ? `trace · nothing${since}` : `trace · ${counted(steps, "step")}${since}`;
 }
 
-/** Say a "since you approved" drawer's summary line: on which branch, how many files changed since the operator last saw them, to review, and how many stand as they saw them, reviewed. */
+/** Say a "since you approved" drawer's summary line: on which branch, how many files changed since the operator last saw them, to review, how many have flagged writes waiting on them, which the branch's landing waits on, and how many stand as they saw them, reviewed: the agent's flags in one line, as the inbox lists them. */
 export function sinceSummary(shown: Since | null): string {
     if (shown === null) {
         return "since you approved · not read yet";
@@ -731,7 +731,12 @@ export function sinceSummary(shown: Since | null): string {
     const files = shown.files ?? [];
     const changed = files.filter((each) => each.file != null).length;
     const kept = files.length - changed;
-    const said = [...(changed === 0 ? [] : [`${changed} to review`]), ...(kept === 0 ? [] : [`${kept} reviewed`])];
+    const flagged = files.filter((each) => (each.flags ?? []).length > 0).length;
+    const said = [
+        ...(changed === 0 ? [] : [`${changed} to review`]),
+        ...(flagged === 0 ? [] : [`${flagged} flagged`]),
+        ...(kept === 0 ? [] : [`${kept} reviewed`]),
+    ];
     return `since you approved${branch} · ${said.length === 0 ? "nothing" : said.join(" · ")}`;
 }
 

@@ -136,6 +136,7 @@ from lup_dev.inbox.protocol import (
     Whole,
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
+from lup_dev.inbox.reading import Flags, by_agent, counted
 from lup_dev.inbox.store import (
     Answer,
     Approval,
@@ -713,8 +714,18 @@ def reading() -> HostClient | FromRoom:
     return client
 
 
-def line(item: Item, listed: Listed | None = None) -> str:
-    """Say an item in a line: its number, when it was made, what it is, from whom (as it's called, where `listed` knows it) and, for a copy of a message between conversations, to whom, and its first line; for an approval, how to read it whole and answer it."""
+def line(entry: Item | Flags, listed: Listed | None = None) -> str:
+    """Say an item in a line: its number, when it was made, what it is, from whom (as it's called, where `listed` knows it) and, for a copy of a message between conversations, to whom, and its first line; for an approval, how to read it whole and answer it. A conversation's flagged writes are one line: each number, the latest's time, how many, and how many files on which branches (`Flags`)."""
+    known = listed or Listed(launches=[])
+    if isinstance(entry, Flags):
+        last = entry.items[-1]
+        where = "" if last.worktree is None else f" in {last.worktree}"
+        return (
+            f"{entry.cited():>5}  {clocked(entry.made)}  "
+            f"{many(len(entry.items), 'flagged write')} from "
+            f"{sender_named(entry.sender, known)}{where}: {entry.said()}"
+        )
+    item = entry
     where = "" if item.worktree is None else f" in {item.worktree}"
     reading = (
         f" (`answer {item.number}` shows its summary, offers its whole diff, and "
@@ -722,7 +733,6 @@ def line(item: Item, listed: Listed | None = None) -> str:
         if isinstance(item.reason, Approval)
         else ""
     )
-    known = listed or Listed(launches=[])
     match item.reason:
         case Message(to=InboxConversation() as to):
             between = f" to {sender_named(to, known)}"
@@ -1168,7 +1178,8 @@ def inbox_list(
 ) -> None:
     """List what waits for you from your agents, oldest first; or read the inbox as the agents' `inbox` tool does.
 
-    Each item has a number, which `show`, `answer` and `done` take. `--since`
+    Each item has a number, which `show`, `answer` and `done` take; each
+    agent's flagged writes are one line, with every number. `--since`
     and `--until` narrow them by when each was made, as `judged` and the agents'
     `inbox` do, and `--limit` lists the latest alone, saying how many it left
     out and how to read them. With `--conversation`, `--kind`, `--whole` or
@@ -1222,15 +1233,17 @@ def inbox_list(
         narrowed = "" if asked == ListInbox() else " made in that time"
         typer.echo(f"Nothing{narrowed} waits for you.")
         return
-    shown = items if limit is None else latest(items, lambda item: item.made, limit)
+    # Each conversation's flagged writes are one entry, counted as one against the limit.
+    entries = by_agent(items)
+    shown = entries if limit is None else latest(entries, lambda each: each.made, limit)
     listed = client.ask(ListLaunches(), Listed)
-    for item in shown:
-        typer.echo(line(item, listed))
+    for each in shown:
+        typer.echo(line(each, listed))
     for left in unlisted(
-        len(items) - len(shown),
+        len(items) - counted(shown),
         "earlier item",
         shown[0].made,
-        len(items),
+        len(entries),
         until="--until",
         limit="--limit",
     ):
