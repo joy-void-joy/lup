@@ -233,6 +233,12 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 at: ["change", "file", "since", "reviewed"],
             },
             {
+                keys: "^d ^u ^f ^b",
+                does: "half a page or a page down or up, as vim's, stopping on the next file's header it reaches, as a motion repeated by a key held down does, j among them; held there until a key is pressed afresh, which goes on",
+                short: "page",
+                at: [],
+            },
+            {
                 keys: "]n [n",
                 does: "next and previous comment, message or remark written, where you last were in it, the folds hiding it opening, said under the review",
                 short: "comments",

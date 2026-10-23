@@ -1214,7 +1214,7 @@ export function arrival(region: Region): number {
 
 /**
  * Return the start of each file's header line, of every change and "since you approved" drawer, in the text's order:
- * where `]f` and `[f` go. A file folded whole
+ * where `]f` and `[f` go, and where a key held down or a page scroll stops (`stopAt`, `editor.ts`). A file folded whole
  * is one, its header the fold's summary line; one standing as the operator last saw it, a line with nothing under it to
  * read, isn't.
  */

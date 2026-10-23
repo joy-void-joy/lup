@@ -1552,7 +1552,7 @@ describe("the drawers at the end of each agent's group", () => {
         ]);
     });
 
-    it("says where each file's header is, where ]f and [f go: a test folded whole among them, never a reviewed file's line", () => {
+    it("says where each file's header is, where ]f and [f go and a key held down stops: a test folded whole among them, never a reviewed file's line", () => {
         const kept = { path: "a.py", version: "a1b2c3d4e5f6", flags: [], reviewed: "2026-10-17T12:00:00Z" };
         const test = {
             path: "test_reader.py",

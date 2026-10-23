@@ -623,7 +623,7 @@ export function Review({
         }),
         [laidOut],
     );
-    // The start of each file's header line: where `]f` and `[f` go.
+    // The start of each file's header line: where `]f` and `[f` go, and where a key held down or a page scroll stops.
     const heads = useMemo(() => fileHeads(laidOut), [laidOut]);
     const editor = useEditor<Draft, Written>({
         shown: laidFor,
@@ -988,6 +988,7 @@ export function Review({
             // the cursor into view, which CodeMirror would take in place of an earlier scroll.
             queueMicrotask(() => current.dispatch({ effects: EditorView.scrollIntoView(target, { y: "start" }) }));
         },
+        stops: () => heads,
         cite: (forward) => {
             const current = view.current;
             if (current === null) {
