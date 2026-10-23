@@ -24,7 +24,16 @@ drawer shows of it starts there from then on. It approves the flagged writes
 on each file only where the file still stands at that version, so a write that
 came after the page read it, which the operator never saw, waits: the file
 comes back with it, and its landing waits on its flags
-(`docs/judging-writes.md`, *Landing a branch*).
+(`docs/judging-writes.md`, *Landing a branch*). Where the drawer stood at the
+version the page shows as they were marked (`ReviewSince.seen`), the answer
+carries its version after and each file marked as the drawer shows it then, so
+the page takes them in without reading the drawer again.
+
+Each reading lists the snapshot's tree and the base once, and reads every
+version it compares in one `git cat-file` of the store and one of the
+repository, never one known by its id to stand as its diff starts: the drawer
+is read at each of an agent's hooks, and a few git runs a file add up to
+hundreds of milliseconds on a branch of tens of files.
 
 The host runs git on the repository pinned to its git directory
 (`docs/credentials.md`, *Running git on the host*), never from the worktree.
@@ -39,7 +48,7 @@ from typing import Annotated, Literal, override
 from pydantic import Field, StringConstraints
 
 from lup.types import Model, MutableModel
-from lup_dev.git import Git
+from lup_dev.git import Git, GitError, Tracked
 from lup_dev.host.protocol import Reply, Request
 from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.inbox import store as inbox
@@ -49,10 +58,10 @@ from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import LastDeclaration
 from lup_dev.policy.landing import (
     Baseline,
+    Saw,
     approved,
     changed_files,
     short,
-    started,
     worktrees,
 )
 from lup_dev.policy.reviewed import Mark, Reviews
@@ -92,6 +101,10 @@ class ReviewSince(Request, reads=False):
     kind: Literal["policy-review-since"] = "policy-review-since"
     conversation: Conversation
     files: list[ViewedFile] = Field(min_length=1)
+    seen: str | None = None
+    """The drawer's version the page shows (`Since.version`): where the drawer
+    stood at it as the files were marked, the answer says the drawer as it
+    stands after (`SinceReviewed.version`)."""
 
 
 class SinceFile(Model):
@@ -148,6 +161,14 @@ class SinceReviewed(Reply):
     """The files that stand at another version than the one shown, a write
     having come after the page read it: marked reviewed at the version shown,
     their flags left waiting."""
+    version: str | None = None
+    """The drawer's version once the files are marked, where it stood at the
+    version the page shows (`ReviewSince.seen`) as they were: the drawer the
+    page shows, with the files marked as `files` says, is the drawer as it
+    stands. None else, and the page reads the drawer again."""
+    files: list[SinceFile] = []
+    """Each file marked, as the drawer shows it once marked, where `version` is
+    given."""
 
 
 class Snapshotting(MutableModel, arbitrary_types_allowed=True):
@@ -167,35 +188,93 @@ class Located(Model):
     branch: str | None
 
 
+def blobs(listed: list[Tracked]) -> dict[Path, str]:
+    """Return git's id for each file's content of `listed`, by its path: its blobs, a directory and a submodule's commit left out."""
+    return {Path(each.path): each.object for each in listed if each.kind == "blob"}
+
+
 class Snapshot(Model, arbitrary_types_allowed=True):
-    """The worktree as it stands, read once for each file: its snapshot's tree in the store, where the branch left the integration branch in the repository, and what the operator saw."""
+    """The worktree as it stands and where the branch left the integration branch, each listed once, and what the operator saw: every file of the drawer read from them together."""
 
     baseline: Baseline
     store: Store
     git: Git
-    tree: str
+    standing: dict[Path, str]
+    """git's id for each file's content in the worktree's snapshot, by its path
+    (`blobs`)."""
     base: str | None
     """The commit the branch left the integration branch at (`Reader.base`),
     which a file the operator saw none of is shown from."""
+    based: dict[Path, str]
+    """git's id for each file's content at `base`, by its path."""
     branches: list[str]
     roles: Roles | None
     """The role of each path, by the repository's declaration the judge last
     loaded; none where it has loaded none, and an unflagged file has no role."""
 
-    def filed(self, path: Path) -> SinceFile | None:
-        """Return the file at `path` as the drawer shows it: as it stands in the tree, from the version the operator last saw on the branches, else from `base`; with no `file` where it stands as they saw it, and none where they saw none and it stands as at `base`."""
-        after = self.store.content(self.tree, path)
-        saw = self.baseline.saw(path, self.branches)
-        before = started(saw, self.git, self.base, path)
+    def files(self, paths: list[Path]) -> list[SinceFile]:
+        """Return each file of `paths` as the drawer shows it, in order: as it stands in the snapshot, from the version the operator last saw on the branches, else from `base`; with no `file` where it stands as they saw it, and left out where they saw none and it stands as at `base`.
+
+        Every version compared is read in one `git cat-file` of the store and
+        one of the repository; one known by its id to stand as its diff starts
+        (`same`), never.
+        """
+        saws = {path: self.baseline.saw(path, self.branches) for path in paths}
+        known = {path: self.same(path, saws[path]) for path in paths}
+        compared = [path for path in paths if known[path] is not True]
+        after = self.read(self.store.snapshots(), self.standing, compared)
+        unseen = [path for path in compared if saws[path] is None]
+        based = self.read(self.git, self.based, unseen)
+
+        def shown(path: Path) -> SinceFile | None:
+            saw = saws[path]
+            before = based.get(path) if saw is None else saw.content
+            same = known[path]
+            return self.filed(
+                path,
+                saw,
+                same=before == after.get(path) if same is None else same,
+                before=before,
+                after=after.get(path),
+            )
+
+        return [found for path in paths if (found := shown(path)) is not None]
+
+    def same(self, path: Path, saw: Saw | None) -> bool | None:
+        """Say whether the file at `path` stands as its diff starts, by git's ids where both are known: against the version at `base` where the operator saw none (`saw`), or the version they marked reviewed; none where its bytes are to be compared, as with a version kept beside an item."""
+        if saw is None:
+            return self.standing.get(path) == self.based.get(path)
+        if saw.reviewed is not None:
+            return saw.reviewed.version == self.standing.get(path)
+        return None
+
+    @staticmethod
+    def read(git: Git, ids: dict[Path, str], paths: list[Path]) -> dict[Path, bytes]:
+        """Return the content of each of `paths` that has an id in `ids`, read by one `git cat-file` of `git`."""
+        wanted = [path for path in paths if path in ids]
+        return dict(
+            zip(wanted, git.contents([ids[path] for path in wanted]), strict=True)
+        )
+
+    def filed(
+        self,
+        path: Path,
+        saw: Saw | None,
+        *,
+        same: bool,
+        before: bytes | None,
+        after: bytes | None,
+    ) -> SinceFile | None:
+        """Return the file at `path` as the drawer shows it, from `before`, what the operator last saw (`saw`) or the version at `base`, to `after`, as it stands, unless it stands as its diff starts (`same`), where it's a line; none where they saw none and it stands as at `base`."""
         flags = self.baseline.flags(self.branches, path)
         shown = SinceFile(
             path=path,
-            version=self.store.blob(self.tree, path),
+            version=self.standing.get(path),
             flags=[each.number for each in flags],
             since=None if saw is None else saw.item,
             reviewed=None if saw is None or saw.reviewed is None else saw.reviewed.at,
         )
-        if before == after:
+        if same:
             return None if saw is None else shown
         latest = max(flags, key=lambda each: each.number, default=None)
         # A file nothing flagged has no reading of the judge's but its role, which
@@ -271,13 +350,15 @@ class Reader(Model, arbitrary_types_allowed=True):
             layout=layout, worktree=root, common=party.repository, index=layout.reading
         )
 
-    def baseline(self, party: Conversation) -> Baseline:
-        """Return what the operator last saw of the files of `party`'s repository."""
+    def baseline(self, party: Conversation, *, once: bool = False) -> Baseline:
+        """Return what the operator last saw of the files of `party`'s repository: with the inbox's items about it read `once`, for a whole drawer."""
         repository = party.repository
+        inbox = self.delivery.inbox
         return Baseline(
-            inbox=self.delivery.inbox,
+            inbox=inbox,
             repository=repository,
             reviews=Reviews(layout=self.layout.reviewed(repository)),
+            items=inbox.about(repository) if once else None,
         )
 
     def flagged(self, party: Conversation, branch: str | None) -> list[Item]:
@@ -310,12 +391,13 @@ class Reader(Model, arbitrary_types_allowed=True):
         if request.seen == version:
             return Since(worktree=root, branch=branch, version=version, same=True)
         tip = None if branch is None else git.commit(f"refs/heads/{branch}")
-        base = self.base(git, self.old(git), tip)
-        committed = [] if tip is None else changed_files(git, base, tip)
+        listed = store.snapshots().tracked(tree)
+        snapshot = self.snapshot(party, located, store, listed=listed, tip=tip)
+        committed = [] if tip is None else changed_files(git, snapshot.base, tip)
         at_tip = (
             {} if tip is None else {each.path: each.object for each in git.tracked(tip)}
         )
-        standing = {each.path: each.object for each in store.snapshots().tracked(tree)}
+        standing = {each.path: each.object for each in listed}
         uncommitted = [
             path
             for path in dict.fromkeys([*at_tip, *standing])
@@ -324,17 +406,31 @@ class Reader(Model, arbitrary_types_allowed=True):
         paths = sorted(
             dict.fromkeys([*committed, *(Path(each) for each in uncommitted)])
         )
-        snapshot = Snapshot(
-            baseline=self.baseline(party),
+        files = snapshot.files(paths)
+        return Since(worktree=root, branch=branch, version=version, files=files)
+
+    def snapshot(
+        self,
+        party: Conversation,
+        located: Located,
+        store: Store,
+        *,
+        listed: list[Tracked],
+        tip: str | None,
+    ) -> Snapshot:
+        """Return the worktree's snapshot as `listed` lists its tree, with where the branch at `tip` left the integration branch, listed too, and what the operator saw of `party`'s repository."""
+        git = Git.pinned(party.repository)
+        base = self.base(git, self.old(git), tip)
+        return Snapshot(
+            baseline=self.baseline(party, once=True),
             store=store,
             git=git,
-            tree=tree,
+            standing=blobs(listed),
             base=base,
-            branches=[] if branch is None else [branch],
-            roles=self.roles(party, root),
+            based={} if base is None else blobs(git.tracked(base)),
+            branches=[] if located.branch is None else [located.branch],
+            roles=self.roles(party, located.root),
         )
-        files = [found for path in paths if (found := snapshot.filed(path)) is not None]
-        return Since(worktree=root, branch=branch, version=version, files=files)
 
     def roles(self, party: Conversation, root: Path) -> Roles | None:
         """Return the role of each path in the worktree at `root`, by the last of `party`'s repository's declarations the judge loaded (`LastDeclaration`): read from lup's state, never loaded here, which would run the declaration at each reading; none where the judge has loaded none."""
@@ -342,7 +438,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         return None if last is None else Roles(root=root, declaration=last.declaration)
 
     def reviewed(self, request: ReviewSince) -> SinceReviewed:
-        """Mark each file of `request` reviewed at the version shown, approving the flagged writes on those still standing at it, and say which; refused on a detached `HEAD`, where nothing is marked by branch, and where a version shown isn't in the worktree's store."""
+        """Mark each file of `request` reviewed at the version shown, approving the flagged writes on those still standing at it, and say which, with the drawer's version after and the files as it shows them where it stood at the version the page shows (`ReviewSince.seen`); refused on a detached `HEAD`, where nothing is marked by branch, and where a version shown isn't in the worktree's store."""
         party = request.conversation
         located = self.located(party)
         branch = located.branch
@@ -353,25 +449,22 @@ class Reader(Model, arbitrary_types_allowed=True):
             )
             raise InboxError(message)
         store = self.store(party, located.root)
-        contents = {
-            each.version: store.object(each.version)
-            for each in request.files
-            if each.version is not None
-        }
-        lost = [version for version, content in contents.items() if content is None]
-        if lost:
-            message = (
-                f"the worktree's store keeps no {', '.join(lost)}, a version the "
-                "page shows: read the drawer again"
-            )
-            raise InboxError(message)
+        contents = self.kept(
+            store, [each.version for each in request.files if each.version is not None]
+        )
         with self.snapshotting.of(located.root):
             tree = store.snapshot()
+        # The drawer the page shows is the one as it stands, but for the files marked, where it stood at the version shown.
+        shown = request.seen is not None and request.seen == self.version(
+            party, branch, tree
+        )
+        listed = store.snapshots().tracked(tree)
+        standing = blobs(listed)
         baseline = self.baseline(party)
         moved = [
             each.path
             for each in request.files
-            if store.blob(tree, each.path) != each.version
+            if standing.get(each.path) != each.version
         ]
         flags = [
             flag
@@ -389,17 +482,36 @@ class Reader(Model, arbitrary_types_allowed=True):
                 Mark(path=each.path, version=each.version, at=at)
                 for each in request.files
             ],
-            {
-                version: content
-                for version, content in contents.items()
-                if content is not None
-            },
+            contents,
         )
-        return SinceReviewed(
+        reviewed = SinceReviewed(
             reviewed=[each.path for each in request.files],
             approved=[each.number for each in flags],
             moved=moved,
         )
+        if not shown:
+            return reviewed
+        tip = Git.pinned(party.repository).commit(f"refs/heads/{branch}")
+        snapshot = self.snapshot(party, located, store, listed=listed, tip=tip)
+        return reviewed.model_copy(
+            update={
+                "version": self.version(party, branch, tree),
+                "files": snapshot.files([each.path for each in request.files]),
+            }
+        )
+
+    def kept(self, store: Store, versions: list[str]) -> dict[str, bytes]:
+        """Return the content of each of `versions` the worktree's store keeps, by git's id for it, read by one `git cat-file`; refused, naming them, where it keeps any not, as a version the page shows."""
+        wanted = list(dict.fromkeys(versions))
+        try:
+            return dict(zip(wanted, store.snapshots().contents(wanted), strict=True))
+        except GitError:
+            lost = [each for each in wanted if store.object(each) is None]
+            message = (
+                f"the worktree's store keeps no {', '.join(lost)}, a version the "
+                "page shows: read the drawer again"
+            )
+            raise InboxError(message) from None
 
 
 class SinceShowing(Model, Reading[ShowSince], arbitrary_types_allowed=True):

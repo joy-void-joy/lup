@@ -356,6 +356,81 @@ def test_marking_a_file_reviewed_approves_its_flags_only_where_it_stands_as_show
     assert str(unknown_party.value) == "lup's inbox has never heard of the conversation"
 
 
+def test_a_file_the_operator_saw_in_an_item_is_shown_from_the_version_kept_beside_it(
+    bare: Path, shell: Shell, clock: FakeClock, tmp_path: Path
+) -> None:
+    delivery = alone(tmp_path, clock)
+    branch = Branch(bare, shell, delivery, clock)
+    reader = branch.reader(tmp_path)
+    branch.wrote("src/pkg/a.py", "a = 1\n")
+    flag = branch.flagged("src/pkg/a.py", None, "a = 1\n")
+    delivery.flag_approved(flag)
+
+    # Standing as the item kept it, it's a line saying where they saw it.
+    [a] = reader.read(ShowSince(conversation=branch.party)).files
+    assert (a.file, a.since, a.flags) == (None, flag, [])
+
+    # Written since, it's shown from that version.
+    branch.wrote("src/pkg/a.py", "a = 2\n", committed=False)
+    [a] = reader.read(ShowSince(conversation=branch.party)).files
+    assert a.file == ChangedFile(
+        path=a.path, before=Text(text="a = 1\n"), after=Text(text="a = 2\n")
+    )
+    assert a.since == flag
+
+
+def test_marking_files_reviewed_answers_with_the_drawer_as_it_stands_where_it_stood_as_the_page_shows_it(
+    bare: Path, shell: Shell, clock: FakeClock, tmp_path: Path
+) -> None:
+    delivery = alone(tmp_path, clock)
+    branch = Branch(bare, shell, delivery, clock)
+    reader = branch.reader(tmp_path)
+    branch.wrote("src/pkg/a.py", "a = 1\n")
+    branch.wrote("src/pkg/b.py", "b = 1\n")
+    flag = branch.flagged("src/pkg/a.py", None, "a = 1\n")
+    shown = reader.read(ShowSince(conversation=branch.party))
+    [a, b] = shown.files
+
+    # Nothing changed since the page read the drawer: the answer is the drawer as it stands, the file marked a line.
+    marked = reader.reviewed(
+        ReviewSince(
+            conversation=branch.party,
+            files=[ViewedFile(path=a.path, version=a.version)],
+            seen=shown.version,
+        )
+    )
+    now = reader.read(ShowSince(conversation=branch.party))
+    assert (marked.approved, marked.version, marked.files) == (
+        [flag],
+        now.version,
+        [now.files[0]],
+    )
+    assert marked.files == [
+        SinceFile(path=a.path, version=a.version, reviewed=clock.now())
+    ]
+    assert now.files[1] == b
+
+    # A write came after the page read it: the page's drawer isn't the one as it stands, and it's read again.
+    clock.sleep(60)
+    branch.wrote("src/pkg/a.py", "a = 2\n", committed=False)
+    again = reader.reviewed(
+        ReviewSince(
+            conversation=branch.party,
+            files=[ViewedFile(path=b.path, version=b.version)],
+            seen=now.version,
+        )
+    )
+    assert (again.reviewed, again.version, again.files) == ([b.path], None, [])
+    # Without the version shown, as an older page asks, it's read again too.
+    unsaid = reader.reviewed(
+        ReviewSince(
+            conversation=branch.party,
+            files=[ViewedFile(path=b.path, version=b.version)],
+        )
+    )
+    assert (unsaid.version, unsaid.files) == (None, [])
+
+
 def test_what_the_operator_last_saw_of_a_file_is_the_later_of_its_mark_and_an_item_they_settled(
     tmp_path: Path, clock: FakeClock
 ) -> None:

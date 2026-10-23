@@ -292,8 +292,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                         self.grows.total_seconds(), self.grow
                     )
                 return self.since(conversation, seen)
-            case ReviewSince(conversation=conversation, files=viewed):
-                return self.reviewed(conversation, viewed)
+            case ReviewSince(conversation=conversation, files=viewed, seen=seen):
+                return self.reviewed(conversation, viewed, seen)
             case _:
                 return Refused(error=f"the demo doesn't answer `{request.kind}`")
 
@@ -511,9 +511,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Since(worktree=worktree, branch=branch, version=version, files=shown)
 
     def reviewed(
-        self, conversation: Conversation, viewed: list[ViewedFile]
+        self, conversation: Conversation, viewed: list[ViewedFile], seen: str | None
     ) -> SinceReviewed | Refused:
-        """Mark each file of `viewed` reviewed at the version shown, in memory, approving the flag on each still standing at it, as the host does (`lup_dev.policy.since`); each watch answers again."""
+        """Mark each file of `viewed` reviewed at the version shown, in memory, approving the flag on each still standing at it, as the host does (`lup_dev.policy.since`), with the drawer after where it stood at `seen`, the version the page shows; each watch answers again."""
         standing = self.since(conversation, None)
         if standing.branch is None:
             return Refused(error="the demo's conversation has no branch to mark on")
@@ -544,8 +544,18 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         }
         self.changed.set()
         self.changed = asyncio.Event()
-        return SinceReviewed(
+        reviewed = SinceReviewed(
             reviewed=[each.path for each in viewed], approved=approved, moved=moved
+        )
+        if seen != standing.version:
+            return reviewed
+        after = self.since(conversation, None)
+        paths = [each.path for each in viewed]
+        return reviewed.model_copy(
+            update={
+                "version": after.version,
+                "files": [each for each in after.files if each.path in paths],
+            }
         )
 
     def ago(self, minutes: float) -> datetime:

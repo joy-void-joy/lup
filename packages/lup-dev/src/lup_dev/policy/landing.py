@@ -508,12 +508,21 @@ class Baseline(Model, arbitrary_types_allowed=True):
     """The repository's git directory."""
     reviews: Reviews
     """The files of its branches the operator marked reviewed."""
+    items: list[Item] | None = None
+    """The inbox's items about the repository, as read once for a whole
+    drawer, which asks of each of a branch's files; none reads them as they
+    stand at each asking."""
+
+    @property
+    def about(self) -> list[Item]:
+        """The inbox's items about the repository, oldest first: `items` where they were read once, else as they stand."""
+        return self.inbox.about(self.repository) if self.items is None else self.items
 
     def flags(self, branches: list[str], path: Path | None = None) -> list[Flag]:
         """Return the flagged writes on `branches` the operator hasn't approved, those on the file at `path` alone where one's given."""
         return [
             Flag(number=item.number, flagged=item.reason)
-            for item in self.inbox.about(self.repository)
+            for item in self.about
             if isinstance(item.reason, Flagged)
             and item.reason.branch in branches
             and (path is None or item.reason.path == path)
@@ -524,7 +533,7 @@ class Baseline(Model, arbitrary_types_allowed=True):
         """Return the latest item of the file at `path` on the branches `landed` that the operator saw: a flagged write or a hold at landing they approved, read or commented on, the last they settled; none where they saw none."""
         seen = [
             Seen(item=item, at=at)
-            for item in self.inbox.about(self.repository)
+            for item in self.about
             if flagged_on(path, landed, item) and (at := settled_at(item)) is not None
         ]
         latest = max(seen, key=lambda each: each.at, default=None)
