@@ -926,9 +926,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.ended_saying(self.party(launch, conversation), text, launch.worktree)
 
     async def ended_saying(
-        self, party: Conversation, text: str, worktree: Path | None
+        self,
+        party: Conversation,
+        text: str,
+        worktree: Path | None,
+        *,
+        telling: bool = True,
     ) -> Item:
-        """Put `party`'s last words of a turn, `text`, before the operator as its turn's end, with the operator's items it answers (`answering`) and its citations of their words read (`cited`); where some name no passage, tell `party` so, which holds its turn's end once (`docs/inbox.md`, *Citing the operator's words*)."""
+        """Put `party`'s last words of a turn, `text`, before the operator as its turn's end, with the operator's items it answers (`answering`) and its citations of their words read (`cited`); where some name no passage and `telling` says it can still be told, tell `party` so, which holds its turn's end once (`docs/inbox.md`, *Citing the operator's words*)."""
         answers = self.answering(party)
         note = await self.posted(
             Message(kind="note", text=text, ending=True, answers=answers),
@@ -937,7 +942,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             worktree,
         )
         missed = failing(note.citations)
-        if missed:
+        if missed and telling:
             await self.posted(
                 Unresolved(of=note.number, citations=missed), party, party, worktree
             )
@@ -946,13 +951,20 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     async def subagent_answered(
         self, party: Conversation, launch: Register, heard: Heard
     ) -> None:
-        """Put a subagent's last words before the operator as its turn's end, where the operator's words were told to it since it last did (`answering`): what answers them, which its parent alone would read otherwise. None for a subagent stopped or failing, or one leaving no words."""
+        """Put a subagent's last words before the operator as its turn's end, where the operator's words were told to it since it last did (`answering`): what answers them, which its parent alone would read otherwise. None for a subagent stopped or failing, or one leaving no words.
+
+        Its citations naming no passage are told to it only where its end can
+        still be held for them: one let through after a hold ends, and what
+        waits for it would go to its session, which can't edit its words.
+        """
         said = heard.said
         if party.agent is None or heard.stopped or heard.failed is not None:
             return
         if said is None or not said.strip() or not self.answering(party):
             return
-        await self.ended_saying(party, said, launch.worktree)
+        await self.ended_saying(
+            party, said, launch.worktree, telling=not heard.after_block
+        )
 
     def answering(self, party: Conversation) -> list[int]:
         """Return the operator's items told to `party` since its last turn's end that lup put before the operator, and not among those that end answers: what its next turn's end answers, oldest first."""

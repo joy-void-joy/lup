@@ -4388,13 +4388,26 @@ def test_a_subagents_last_words_after_the_operators_reach_them_as_its_turns_end_
         send(hook, calling("c0"))
         host.ask(SendItem(launch="one", text="Which three kinds?", agent="a1"), Shown)
         send(hook, calling("c1"))
-        send(
+        held = json.loads(
+            send(
+                hook,
+                payload(
+                    "SubagentStop",
+                    agent_id="a1",
+                    stop_hook_active=False,
+                    last_assistant_message=(
+                        "Strings, numbers and lists: @1[which three]. @1[Why] not more?"
+                    ),
+                ),
+            )
+        )
+        again = send(
             hook,
             payload(
                 "SubagentStop",
                 agent_id="a1",
-                stop_hook_active=False,
-                last_assistant_message="Strings, numbers and lists: @1[which three].",
+                stop_hook_active=True,
+                last_assistant_message="Edited.",
             ),
         )
         send(
@@ -4410,24 +4423,36 @@ def test_a_subagents_last_words_after_the_operators_reach_them_as_its_turns_end_
             (each.sender, each.reason, [c.found is not None for c in each.citations])
             for each in delivery.inbox.waiting(Operator())
         ]
+        word = delivery.inbox.item(3)
     subagent = Conversation(
         repository=tmp_path / ".git",
         runtime=runtime,
         session={"claude": "s1", "codex": "t1"}[runtime],
         agent="a1",
     )
+    holding = {
+        "claude": held.get("hookSpecificOutput", {}).get("additionalContext"),
+        "codex": held.get("reason") if held.get("decision") == "block" else None,
+    }[runtime]
     assert notes == [
         (
             subagent,
             Message(
                 kind="note",
-                text="Strings, numbers and lists: @1[which three].",
+                text="Strings, numbers and lists: @1[which three]. @1[Why] not more?",
                 ending=True,
                 answers=[1],
             ),
-            [True],
+            [True, False],
         )
     ]
+    assert holding is not None
+    assert holding.startswith('<unresolved item="3" from="lup" of="2">')
+    assert again == ""
+    assert (word.recipient, word.state) == (
+        subagent,
+        Told(at=clock.now(), how="turn's end"),
+    )
 
 
 def test_edit_changes_what_an_agent_sent_the_operator_alone_and_puts_it_back_before_them(
