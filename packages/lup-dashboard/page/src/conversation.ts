@@ -1,12 +1,14 @@
 // One conversation laid out as one text to read and move through: the
-// operator's words and the agent's, each run of calls in a line, the items of
-// lup's inbox it sent and was sent, what the operator sent it from the review
-// among them, each in a line with its text folded under it, and their remarks
-// on the agent's words, each under the line it's on. What came before their
-// last words folds. It grows at its end as the conversation does, what's before
-// staying where it was. Pure: the review lays it into an agent's trace and
-// conversation drawers (`review.ts`), the trace from the operator's last words
-// on, and keeps the reader where they are as it grows (`docs/dashboard.md`,
+// operator's words and the agent's, each call a line saying what it did, the
+// items of lup's inbox it sent and was sent, each in a line with its text
+// folded under it, and the operator's remarks on the agent's words, each under
+// the line it's on. Its latest part is open: everything since the operator's
+// last words. Each earlier exchange folds under the line of their words that
+// opened it, so each step back is one more fold to open; a run of calls folds
+// under one line saying how many of which, and each call's input and output
+// under its line, read whole as it opens. It grows at its end as the
+// conversation does, what's before staying where it was. Pure: the review lays
+// it into an agent's conversation drawer (`review.ts`; `docs/dashboard.md`,
 // *The drawers*).
 import { since } from "./agents";
 import {
@@ -26,10 +28,13 @@ import {
     type Span,
 } from "./comments";
 import type { components } from "./generated/api";
+import type { FoldKind } from "./keys";
 
 export type Entry = components["schemas"]["Entry"];
 export type Item = components["schemas"]["Item"];
 export type Exchange = components["schemas"]["Exchange"];
+export type Call = components["schemas"]["Call"];
+type Called = components["schemas"]["Called"];
 type Party = components["schemas"]["Conversation"];
 
 /** A comment of the operator's on a line or a passage of what the agent said at step `step`: what the review's remark on the conversation holds of it (`Remark`, `review.ts`). */
@@ -46,14 +51,6 @@ export interface Talk {
 
 export const UNSAID: Talk = { comments: [] };
 
-/** A message the operator sent the conversation from here, through lup: the item it made, what it said, and how many steps the conversation had then. */
-export interface Sent {
-    number: number;
-    text: string;
-    after: number;
-    at: string;
-}
-
 /** The items of lup's inbox the conversation sent, and those it was sent, each with its text whole. */
 export interface Exchanged {
     sent: Exchange[];
@@ -68,11 +65,24 @@ export interface Whose {
     name: (party: Party) => string;
 }
 
+/** A call read whole, as the host answered: what it was given and what it returned, or why it wasn't read. */
+export type Detail = { shown: Call } | { refused: string };
+
+/** What a conversation shows beside its steps: the items of lup's inbox it exchanged, said as to whose conversation it is, and each call read whole so far, by its id. */
+export interface Beside {
+    exchanged: Exchanged;
+    whose: Whose;
+    calls: ReadonlyMap<string, Detail>;
+}
+
+/** How many calls in a row start folded under one line saying how many of which; fewer show a line each. */
+export const RUN = 3;
+
 /**
- * What a line no comment is on shows: the summary of what folds, the operator's words, a run of calls, an item the
- * conversation sent or one it was sent, or a line of an item's text.
+ * What a line no comment is on shows: a fold's summary, the operator's words, a run of calls, a call, a line of a
+ * call's input and output, an item the conversation sent or one it was sent, or a line of an item's text.
  */
-export type Kind = "summary" | "you" | "agent" | "calls" | "item-from" | "item-to" | "item-text";
+export type Kind = "summary" | "you" | "agent" | "calls" | "call" | "call-text" | "item-from" | "item-to" | "item-text";
 
 /** A line no comment is on. */
 export interface Aside extends Span {
@@ -84,6 +94,12 @@ export interface Placed {
     number: number;
     line: Span;
     fold: Folding | null;
+}
+
+/** A call where it's shown, by the runtime's id for it: its line, and the fold its input and output are under. */
+export interface Shown {
+    id: string;
+    fold: Folding;
 }
 
 /** What the agent said at one step, which comments may be on: its lines, each shown after `start`, and the comments under them. */
@@ -99,20 +115,18 @@ export interface Laid {
     text: string;
     words: Words[];
     asides: Aside[];
-    /** Every comment, on the agent's words and the message's. */
+    /** Every comment on the agent's words. */
     blocks: Block[];
-    /** What came before the operator's last words, folded under its summary. */
-    fold: Folding | null;
+    /** What folds, each of its kind: each exchange before the operator's last words, a run of calls, a call's input and output, an item's text. */
+    folds: Folding[];
     /** Each item of lup's inbox, in the text's order. */
     items: Placed[];
-    /** Where each thing said starts: the operator's words, the agent's, an item. */
-    turns: number[];
-    /** The conversation's last line. */
-    last: Span | null;
+    /** Each call with an id, in the text's order. */
+    calls: Shown[];
 }
 
-/** Where an item goes among the steps: just after the call that made it, where the record holds it; after the steps the conversation had when it was sent from here; else by when it was told, or made. */
-type Where = { call: string; at: string } | { after: number; at: string } | { at: string };
+/** Where an item goes among the steps: just after the call that made it, where the record holds it; else by when it was told, or made. */
+type Where = { call: string; at: string } | { at: string };
 
 /** An item of lup's inbox as the conversation shows it: whether the conversation sent it, its line, its text's lines, and where it goes. */
 interface Inboxed {
@@ -126,7 +140,7 @@ interface Inboxed {
 /** One step of the conversation, or an item of lup's inbox between its steps. */
 type Turn = { step: number; entry: Entry } | { inboxed: Inboxed };
 
-/** How an item's text is set in under its line. */
+/** How an item's text is set in under its line, and a call's input and output under its. */
 export const ITEM_INDENT = "  ";
 
 /** Return an item's text as the lines it's shown in under its line: its paragraphs kept, each line set in. */
@@ -225,13 +239,10 @@ function dotted(first: string, ...parts: (string | null)[]): string {
 /**
  * Return the items the conversation exchanged as it shows them, each in a line and its text folded under it: one it
  * sent, `→`, what it is, whom to and where it stands (answered and by what, read, waiting on you, unread, withdrawn, decided);
- * one it was sent, `←`, what it is, for whom where it was passed on, and whether it's told yet. A message sent from
- * here is one of them, said to be from here and placed after the steps the conversation had then; one its item isn't
- * listed for yet is shown from what was sent. A turn's last words, which lup made a note, aren't: they're the agent's
- * words already shown.
+ * one it was sent, `←`, what it is, for whom where it was passed on, and whether it's told yet. A turn's last words,
+ * which lup made a note, aren't: they're the agent's words already shown.
  */
-function inboxed(exchanged: Exchanged, sent: Sent[], whose: Whose): Inboxed[] {
-    const here = new Map(sent.map((each) => [each.number, each]));
+function inboxed(exchanged: Exchanged, whose: Whose): Inboxed[] {
     const spoken = exchanged.sent.filter(({ item }) => !(item.reason.reason === "message" && item.reason.ending === true));
     const its = spoken.map(({ item, text }): Inboxed => {
         const to = item.recipient.party === "operator" ? "you" : whose.name(item.recipient);
@@ -246,15 +257,10 @@ function inboxed(exchanged: Exchanged, sent: Sent[], whose: Whose): Inboxed[] {
         };
     });
     const theirs = exchanged.received.map(({ item, text }): Inboxed => {
-        const from = here.get(item.number);
         const passed = item.addressed;
         const ours = passed != null && (passed.agent ?? null) === whose.agent;
         const recipient = item.recipient;
-        const head = [
-            `← ${cited(item.number)} ${came(item, whose)}`,
-            from === undefined ? "" : ", from here",
-            passed == null || ours ? "" : `, for ${whose.name(passed)}, which had ended`,
-        ].join("");
+        const head = [`← ${cited(item.number)} ${came(item, whose)}`, passed == null || ours ? "" : `, for ${whose.name(passed)}, which had ended`].join("");
         const onward =
             ours && recipient.party === "conversation" ? `passed on to ${whose.name(recipient)}, this one having ended` : null;
         const state = item.state;
@@ -263,33 +269,17 @@ function inboxed(exchanged: Exchanged, sent: Sent[], whose: Whose): Inboxed[] {
             from: false,
             line: dotted(head, state.state === "waiting" ? "not told yet" : null, onward),
             text: setIn(text),
-            where:
-                from !== undefined
-                    ? { after: from.after, at: from.at }
-                    : { at: state.state === "told" ? state.at : item.made },
+            where: { at: state.state === "told" ? state.at : item.made },
         };
     });
-    const listed = new Set(exchanged.received.map(({ item }) => item.number));
-    const unlisted = sent
-        .filter((each) => !listed.has(each.number))
-        .map(
-            (each): Inboxed => ({
-                number: each.number,
-                from: false,
-                line: `← ${cited(each.number)} your message, from here`,
-                text: setIn(each.text),
-                where: { after: each.after, at: each.at },
-            }),
-        );
-    return [...its, ...theirs, ...unlisted];
+    return [...its, ...theirs];
 }
 
 /**
  * Return the steps and the items in order: an item the conversation sent just after the call that made it, where the
- * record holds it; a message sent from here after the steps the conversation had then; any other by when it was told,
- * or made, after the last step at or before then. A step its record gives no time takes the time of the last before
- * it, and one before any time counts as before every item, so in a record with no times they're all at its end. Items
- * between the same two steps go in the order they came.
+ * record holds it; any other by when it was told, or made, after the last step at or before then. A step its record
+ * gives no time takes the time of the last before it, and one before any time counts as before every item, so in a
+ * record with no times they're all at its end. Items between the same two steps go in the order they came.
  */
 function merged(entries: Entry[], items: Inboxed[]): Turn[] {
     const calls = new Map<string, number>();
@@ -311,8 +301,6 @@ function merged(entries: Entry[], items: Inboxed[]): Turn[] {
         const call = "call" in where ? calls.get(where.call) : undefined;
         if (call !== undefined) {
             after[call]?.push(item);
-        } else if ("after" in where) {
-            before[Math.min(Math.max(where.after, 0), entries.length)]?.push(item);
         } else {
             const when = new Date(where.at).getTime();
             before[times.findLastIndex((time) => time === null || time <= when) + 1]?.push(item);
@@ -322,35 +310,14 @@ function merged(entries: Entry[], items: Inboxed[]): Turn[] {
         new Date(a.where.at).getTime() - new Date(b.where.at).getTime() || a.number - b.number;
     const turns = (each: Inboxed[]): Turn[] => [...each].sort(order).map((inboxed) => ({ inboxed }));
     return [
-        ...entries.flatMap((entry, step): Turn[] => [
-            ...turns(before[step] ?? []),
-            { step, entry },
-            ...turns(after[step] ?? []),
-        ]),
+        ...entries.flatMap((entry, step): Turn[] => [...turns(before[step] ?? []), { step, entry }, ...turns(after[step] ?? [])]),
         ...turns(before[entries.length] ?? []),
     ];
 }
 
-/** What folds once the conversation opens: what came before the operator's words at a step, or before a message they sent from here; or nothing. */
-export type Earlier = { step: number } | { item: number } | "nothing";
-
-/** Return what folds once the conversation opens: what came before the operator's last words, a message they sent from here among them. */
-export function history(entries: Entry[], sent: Sent[]): Earlier {
-    const spoke = entries.findLastIndex((each) => each.kind === "said" && each.by === "operator");
-    const later = sent.filter((each) => each.after > spoke);
-    const last = later.reduce<Sent | null>((found, each) => (found === null || each.after >= found.after ? each : found), null);
-    if (last !== null) {
-        return { item: last.number };
-    }
-    return spoke < 0 ? "nothing" : { step: spoke };
-}
-
-/** Return whether `turn` is where what folds ends. */
-function ending(turn: Turn, earlier: Earlier): boolean {
-    if (earlier === "nothing") {
-        return false;
-    }
-    return "step" in earlier ? "entry" in turn && turn.step === earlier.step : "inboxed" in turn && turn.inboxed.number === earlier.item;
+/** Return whether `turn` is the operator's own words, which open an exchange. */
+function theirs(turn: Turn): boolean {
+    return "entry" in turn && turn.entry.kind === "said" && turn.entry.by === "operator";
 }
 
 /** Return when a turn was, where its record says. */
@@ -363,31 +330,78 @@ function counted(count: number, one: string): string {
     return `${count} ${one}${count === 1 ? "" : "s"}`;
 }
 
-/** What a conversation shows beside its steps: the items of lup's inbox it exchanged, the messages sent to it from here among them, said as to whose conversation it is. */
-export interface Beside {
-    sent: Sent[];
-    exchanged: Exchanged;
-    whose: Whose;
+/** Say a call in its line: its tool, and what it did where its record says (`Called.gist`). */
+export function called(call: Called): string {
+    return call.gist == null ? call.tool : `${call.tool}: ${call.gist}`;
+}
+
+/** Return `text`'s lines as they are, each set in by `indent`, but for an empty one; none for no text. */
+function lined(text: string, indent: string): string[] {
+    if (text === "") {
+        return [];
+    }
+    const lines = text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
+    return lines.map((line) => (line.trim() === "" ? "" : `${indent}${line.trimEnd()}`));
+}
+
+/** How long a value given a call may be, as JSON, to show on its argument's line; a longer one is laid out under it. */
+const INLINE = 100;
+
+/** Return what a call was given as the lines it's shown in, set in by `indent`: each argument after its name, a value of several lines under it; text as it is. */
+export function given(input: unknown, indent: string): string[] {
+    if (typeof input === "string") {
+        return lined(input, indent);
+    }
+    if (input === null || typeof input !== "object" || Array.isArray(input)) {
+        return lined(JSON.stringify(input, null, 2), indent);
+    }
+    return Object.entries(input as Record<string, unknown>).flatMap(([name, value]) => {
+        if (typeof value === "string") {
+            return value.includes("\n") ? [`${indent}${name}:`, ...lined(value, `${indent}${ITEM_INDENT}`)] : [`${indent}${name}: ${value}`];
+        }
+        const compact = JSON.stringify(value);
+        return compact.length <= INLINE ? [`${indent}${name}: ${compact}`] : [`${indent}${name}:`, ...lined(JSON.stringify(value, null, 2), `${indent}${ITEM_INDENT}`)];
+    });
 }
 
 /**
- * Lay a conversation out as one text: each step in order, `entries` being the steps from step `first` on, the
- * operator's words after `you:`, the agent's as they are, each run of calls in one line; each item of lup's inbox it
- * exchanged in a line among them, its text folded under it (`merged`); under each line of the agent's words, the
- * comments on it. What came before `earlier` folds under a summary line. Laid out again with more steps, or an item
- * arriving, everything before the last line stays as it was: what arrives is added after it.
+ * Return a call's input and output as the lines they're shown in under its line, set in by `indent`: what it was given
+ * after `input:`, what it returned after `output:`, or `failed:` where the runtime says it failed, `none yet` while it
+ * runs; a line saying it's being read before the host has answered, or why it wasn't read.
  */
-export function laid(entries: Entry[], beside: Beside, talk: Talk, earlier: Earlier, first: number = 0): Laid {
-    const turns = merged(entries, inboxed(beside.exchanged, beside.sent, beside.whose)).map((turn) =>
-        "entry" in turn ? { ...turn, step: turn.step + first } : turn,
-    );
+export function detailed(detail: Detail | undefined, indent: string): string[] {
+    if (detail === undefined) {
+        return [`${indent}reading its input and output…`];
+    }
+    if ("refused" in detail) {
+        return [`${indent}not read: ${detail.refused}`];
+    }
+    const call = detail.shown;
+    const inner = `${indent}${ITEM_INDENT}`;
+    const returned =
+        call.output == null ? [`${indent}output: none yet`] : [`${indent}${call.failed ? "failed" : "output"}:`, ...lined(call.output, inner)];
+    return [`${indent}input:`, ...given(call.input, inner), ...returned];
+}
+
+/**
+ * Lay a conversation out as one text: each step in order, the operator's words after `you:`, the agent's as they are,
+ * each call a line saying what it did, each run of `RUN` calls or more under one line saying how many of which; each
+ * item of lup's inbox it exchanged in a line among them, its text folded under it (`merged`); under each line of the
+ * agent's words, the comments on it. Everything since the operator's last words is open; each exchange before them
+ * folds under the first line of their words that opened it, and what came before their first words under a line of
+ * its own. Each call's input and output fold under its line, as `beside.calls` holds them. Laid out again with more
+ * steps, or an item arriving, everything before the last line stays as it was: what arrives is added after it.
+ */
+export function laid(entries: Entry[], beside: Beside, talk: Talk): Laid {
+    const turns = merged(entries, inboxed(beside.exchanged, beside.whose));
     const rows: string[] = [];
     let length = 0;
     const words: Words[] = [];
     const asides: Aside[] = [];
     const blocks: Block[] = [];
-    const starts: number[] = [];
-    let last: Span | null = null;
+    const folds: Folding[] = [];
+    const items: Placed[] = [];
+    const shown: Shown[] = [];
     const write = (text: string): Span => {
         const from = length + (rows.length === 0 ? 0 : 1);
         rows.push(text);
@@ -399,108 +413,130 @@ export function laid(entries: Entry[], beside: Beside, talk: Talk, earlier: Earl
         asides.push({ kind, ...span });
         return span;
     };
+    // A fold under `summary`, of what's written after it up to here, where anything is.
+    const fold = (key: string, kind: FoldKind, summary: Span, label: string): Folding | null => {
+        if (length <= summary.to) {
+            return null;
+        }
+        const made: Folding = { key, kind, label, summary, from: summary.to, to: length, closed: true };
+        folds.push(made);
+        return made;
+    };
     const comments = talk.comments.map((comment, at) => ({ comment, at }));
-    const writeBlocks = (shown: { comment: Remark; at: number }[]) => {
-        for (const { comment, at } of shown) {
+    const writeBlocks = (mine: { comment: Remark; at: number }[]) => {
+        for (const { comment, at } of mine) {
             const span = write(comment.text);
             blocks.push({ comment: at, ...span });
         }
     };
 
-    // What folds: the turns before the one `earlier` names, where any come before it.
-    const folded = turns.findIndex((turn) => ending(turn, earlier));
-    let summary: Span | null = null;
-    if (folded > 0) {
-        const steps = turns.slice(0, folded).filter((each) => "entry" in each).length;
-        const items = folded - steps;
-        const first = turns[0] === undefined ? null : at(turns[0]);
-        const until = turns[folded] === undefined ? null : at(turns[folded]);
-        const before = first === null || until === null ? "" : `, from ${since(new Date(first), new Date(until))} before your last words`;
-        const count = [counted(steps, "step"), ...(items === 0 ? [] : [counted(items, "item")])].join(", ");
-        summary = aside("summary", `earlier · ${count}${before}`);
-    }
-    let foldTo: number | null = null;
-    const items: Placed[] = [];
-    let run: string[] = [];
-    const ran = () => {
-        if (run.length > 0) {
-            last = aside("calls", calls(run));
-            run = [];
+    // A call's line, and its input and output folded under it where its record gives it an id.
+    const writeCall = (entry: Called, indent: string) => {
+        const said = `${indent}· ${called(entry)}`;
+        const line = aside("call", said);
+        if (entry.id == null) {
+            return;
+        }
+        for (const row of detailed(beside.calls.get(entry.id), `${indent}${ITEM_INDENT}${ITEM_INDENT}`)) {
+            aside("call-text", row);
+        }
+        const made = fold(`call ${entry.id}`, "call", line, said.trim());
+        if (made !== null) {
+            shown.push({ id: entry.id, fold: made });
         }
     };
-    turns.forEach((turn, index) => {
-        if (index === folded && summary !== null) {
-            ran();
-            foldTo = length;
+    let run: { step: number; entry: Called }[] = [];
+    const ran = () => {
+        const [first] = run;
+        if (first === undefined) {
+            return;
         }
+        if (run.length < RUN) {
+            run.forEach(({ entry }) => writeCall(entry, ""));
+        } else {
+            const said = calls(run.map(({ entry }) => entry.tool));
+            const summary = aside("calls", said);
+            run.forEach(({ entry }) => writeCall(entry, ITEM_INDENT));
+            fold(`calls ${first.step}`, "calls", summary, said);
+        }
+        run = [];
+    };
+
+    // Each exchange before the operator's last words folds under the first line of their words; what came before
+    // their first words, under a line of its own.
+    const opening = turns.flatMap((turn, index) => (theirs(turn) ? [index] : []));
+    const lastWords = opening.at(-1);
+    let earlier: { key: string; summary: Span; label: string } | null = null;
+    const closeEarlier = () => {
+        ran();
+        if (earlier !== null) {
+            fold(earlier.key, "earlier", earlier.summary, earlier.label);
+            earlier = null;
+        }
+    };
+    const firstWords = opening[0];
+    if (firstWords !== undefined && firstWords > 0) {
+        const before = turns.slice(0, firstWords);
+        const steps = before.filter((each) => "entry" in each).length;
+        const itemsBefore = before.length - steps;
+        const start = before[0] === undefined ? null : at(before[0]);
+        const until = turns[firstWords] === undefined ? null : at(turns[firstWords]);
+        const ago = start === null || until === null ? "" : `, from ${since(new Date(start), new Date(until))} before your first words`;
+        const count = [counted(steps, "step"), ...(itemsBefore === 0 ? [] : [counted(itemsBefore, "item")])].join(", ");
+        const label = `earlier · ${count}${ago}`;
+        earlier = { key: "before", summary: aside("summary", label), label };
+    }
+
+    turns.forEach((turn, index) => {
         if ("inboxed" in turn) {
             ran();
             const { inboxed: item } = turn;
             const line = aside(item.from ? "item-from" : "item-to", item.line);
-            starts.push(line.from);
-            last = line;
-            const end = item.text.map((row) => aside("item-text", row)).at(-1);
-            const fold = end === undefined ? null : { key: `item ${item.number}`, summary: line, from: line.to, to: end.to, closed: true };
-            items.push({ number: item.number, line, fold });
+            for (const row of item.text) {
+                aside("item-text", row);
+            }
+            items.push({ number: item.number, line, fold: fold(`item ${item.number}`, "context", line, item.line) });
             return;
         }
         const { entry, step } = turn;
         if (entry.kind === "called") {
-            run.push(entry.tool);
+            run.push({ step, entry });
             return;
         }
-        ran();
-        // The operator's words after `you:`; the agent's, which are most of it, unlabelled.
-        const who = entry.by === "operator" ? "you" : null;
-        const rowsSaid = spoken(who, entry.text, true);
-        if (who === "you") {
+        if (entry.by === "operator") {
+            closeEarlier();
+            const rowsSaid = spoken("you", entry.text, true);
             rowsSaid.forEach((row, at) => {
                 const span = aside("you", row.text);
-                if (at === 0) {
-                    starts.push(span.from);
+                if (at === 0 && index !== lastWords) {
+                    earlier = { key: `you ${step}`, summary: span, label: row.text };
                 }
-                last = span;
             });
             return;
         }
+        ran();
+        // The agent's words, which are most of it, unlabelled.
         const lines = kept(entry.text, true);
         const own = lines.join("\n");
         const lineStarts = startsOf(lines);
         const mine = comments.filter(({ comment }) => comment.step === step);
-        const shown: Words = { step, own, lines: [], blocks: [] };
+        const said: Words = { step, own, lines: [], blocks: [] };
         const before = blocks.length;
-        rowsSaid.forEach((row, at) => {
+        spoken(null, entry.text, true).forEach((row, at) => {
             const span = write(row.text);
-            if (at === 0) {
-                starts.push(span.from);
-            }
-            last = span;
             if (row.blank) {
                 asides.push({ kind: "agent", ...span });
                 return;
             }
-            shown.lines.push({ from: span.from + row.words, to: span.to, own: row.own, start: span.from });
+            said.lines.push({ from: span.from + row.words, to: span.to, own: row.own, start: span.from });
             writeBlocks(mine.filter(({ comment }) => (under(lineStarts, comment.quote) ?? 0) === at));
         });
-        shown.blocks = blocks.slice(before);
-        words.push(shown);
+        said.blocks = blocks.slice(before);
+        words.push(said);
     });
-    ran();
-    if (summary !== null && foldTo === null) {
-        foldTo = length;
-    }
-    const fold =
-        summary === null || foldTo === null || foldTo <= summary.to
-            ? null
-            : { key: "earlier", summary, from: summary.to, to: foldTo, closed: true };
+    closeEarlier();
 
-    return { text: rows.join("\n"), words, asides, blocks, fold, items, turns: starts, last };
-}
-
-/** Return what folds in a laid-out conversation: what came before the operator's last words first, then each item's text. */
-export function folds(laidOut: Laid): Folding[] {
-    const each = laidOut.items.flatMap((item) => (item.fold === null ? [] : [item.fold]));
-    return laidOut.fold === null ? each : [laidOut.fold, ...each];
+    return { text: rows.join("\n"), words, asides, blocks, folds, items, calls: shown };
 }
 
 /** Return the agent's words, and their line, shown at `position`, where it's on one. */
@@ -553,24 +589,16 @@ export function aboutAt(laidOut: Laid, comment: Remark): number | undefined {
 /** Return `laidOut` moved by `by` in the text: each span of it where it is once the conversation is laid out after `by` characters, as a drawer lays it; its text is still its own, which the drawer replaces by the whole once that's laid out. */
 export function shifted(laidOut: Laid, by: number): Laid {
     const span = <S extends Span>(each: S): S => ({ ...each, from: each.from + by, to: each.to + by });
-    const folding = (fold: Folding | null): Folding | null => (fold === null ? null : { ...span(fold), summary: span(fold.summary) });
+    const folding = (fold: Folding): Folding => ({ ...span(fold), summary: span(fold.summary) });
+    const moved = new Map(laidOut.folds.map((fold) => [fold, folding(fold)]));
+    const kept = (fold: Folding): Folding => moved.get(fold) ?? folding(fold);
     return {
         text: laidOut.text,
         words: laidOut.words.map((each) => ({ ...each, lines: each.lines.map((line) => ({ ...span(line), start: line.start + by })), blocks: each.blocks.map(span) })),
         asides: laidOut.asides.map(span),
         blocks: laidOut.blocks.map(span),
-        fold: folding(laidOut.fold),
-        items: laidOut.items.map((each) => ({ ...each, line: span(each.line), fold: folding(each.fold) })),
-        turns: laidOut.turns.map((each) => each + by),
-        last: laidOut.last === null ? null : span(laidOut.last),
+        folds: laidOut.folds.map(kept),
+        items: laidOut.items.map((each) => ({ ...each, line: span(each.line), fold: each.fold === null ? null : kept(each.fold) })),
+        calls: laidOut.calls.map((each) => ({ ...each, fold: kept(each.fold) })),
     };
-}
-
-/** Where the reader is, as the conversation grows: on its last line, or anywhere else, where nothing they see moves. */
-export type Reading = "last" | "elsewhere";
-
-/** Return where the reader is with the cursor at `head`. */
-export function reading(laidOut: Laid, head: number): Reading {
-    const last = laidOut.last;
-    return last === null || (head >= last.from && head <= last.to) ? "last" : "elsewhere";
 }

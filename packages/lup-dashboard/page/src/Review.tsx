@@ -13,10 +13,11 @@
 // view, each line that matters by the judge's reading barred and saying what it
 // triggered; the item's header counts its files by why each is open; under each
 // item, its context. At the end of each agent's group, its drawers
-// (`review.ts`): its tasks, its trace, what its branch changed since the
-// operator last saw it, live, where Space `a` marks a file reviewed at the
-// version shown and Space `A` every file shown, each line changed since they
-// last looked at its file marked (`since.ts`), and its conversation;
+// (`review.ts`): its tasks, what its branch changed since the operator last saw
+// it, live, where Space `a` marks a file reviewed at the version shown and Space
+// `A` every file shown, each line changed since they last looked at its file
+// marked (`since.ts`), and its conversation, each call's input and output read
+// as its fold opens;
 // `h` on a banner turns the operator's switch to hold the agent's flagged
 // writes. Each fold has a kind, its letter in the margin beside its summary
 // line, in the column of its depth, a bar under it for each fold the cursor is
@@ -128,6 +129,8 @@ interface Props {
     hold: (conversation: Conversation) => void;
     /** Told each drawer the operator opens, so the page reads what it shows. */
     opened: (conversation: Conversation, kind: DrawerKind) => void;
+    /** Told the calls whose input and output the operator opens in an agent's conversation, so the page reads them whole. */
+    details: (conversation: Conversation, ids: string[]) => void;
     /** Where the page asks the review to go, as the palette does: an agent's group. */
     jump: Jump | null;
     /** Say something on the page's line of messages, as why a key did nothing. */
@@ -232,7 +235,7 @@ function painted(laidOut: Laid, from: number, to: number, fresh: Freshness): Ran
 
 /**
  * Return what of the review is written in Markdown (`markdown.ts`): each item's own text, its lines whole and the
- * comments under them left out; the agent's words in a context, in a trace and in a conversation, each run of them one,
+ * comments under them left out; the agent's words in a context and in a conversation, each run of them one,
  * the remarks under them left out; and each comment, message and remark.
  */
 function sourcesOf(laidOut: Laid): Source[] {
@@ -539,6 +542,7 @@ export function Review({
     reviewSince,
     hold,
     opened: told,
+    details,
     jump,
     say,
     inserting,
@@ -622,6 +626,13 @@ export function Review({
             const drawer = laidOut.drawers.find((each) => each.folds.some((own) => foldKey(own) === fold.key && own.kind === each.kind));
             if (drawer !== undefined) {
                 told(drawer.conversation, drawer.kind);
+            }
+            // A call's input and output, read as its fold opens.
+            for (const each of laidOut.drawers) {
+                const call = each.talk?.calls.find((shown) => foldKey({ of: each.of, kind: "call", name: shown.fold.key }) === fold.key);
+                if (call !== undefined) {
+                    details(each.conversation, [call.id]);
+                }
             }
         },
     });
