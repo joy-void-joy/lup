@@ -107,6 +107,68 @@ def test_awaited_kills_its_program_where_the_wait_is_cancelled(tmp_path: Path) -
         os.kill(pid, 0)
 
 
+def filling(started: Path, printed: Path) -> list[str]:
+    """Return a program that says its pid on `started`, prints a mebibyte at once into a pipe made large enough to hold it, says so on `printed`, then waits to be killed.
+
+    Each is a named pipe, so nothing polls. While the test holds the event loop
+    until `printed`, nothing reads the output: once the loop goes on, asyncio
+    reads past what it buffers for a stream nobody reads and stops reading the
+    pipe, which then closes only where the rest is read.
+    """
+    return python(
+        "import fcntl, os, signal, sys\n"
+        f"open({str(started)!r}, 'w').write(str(os.getpid()))\n"
+        "fcntl.fcntl(1, fcntl.F_SETPIPE_SZ, 1 << 20)\n"
+        "sys.stdout.buffer.write(bytes(1 << 20))\n"
+        "sys.stdout.flush()\n"
+        f"open({str(printed)!r}, 'w').close()\n"
+        "signal.pause()\n"
+    )
+
+
+def test_awaited_reads_a_program_killed_past_its_limit_to_its_end(
+    tmp_path: Path,
+) -> None:
+    # Waiting on a program returns only once its pipes closed, so the output
+    # past the limit is read to its end, or the wait never ended.
+    started, printed = tmp_path / "started", tmp_path / "printed"
+    os.mkfifo(started)
+    os.mkfifo(printed)
+
+    async def overflowed() -> int:
+        waiting = asyncio.create_task(awaited(*filling(started, printed), limit=10))
+        pid = int(await asyncio.to_thread(started.read_text))
+        printed.read_text()  # The loop held: the mebibyte is printed, unread.
+        with pytest.raises(ProgramOverflowError):
+            await waiting
+        return pid
+
+    pid = asyncio.run(overflowed())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+def test_awaited_reads_a_program_killed_where_the_wait_is_cancelled_to_its_end(
+    tmp_path: Path,
+) -> None:
+    started, printed = tmp_path / "started", tmp_path / "printed"
+    os.mkfifo(started)
+    os.mkfifo(printed)
+
+    async def cancelled() -> int:
+        waiting = asyncio.create_task(awaited(*filling(started, printed)))
+        pid = int(await asyncio.to_thread(started.read_text))
+        printed.read_text()  # The loop held: the mebibyte is printed, unread.
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        return pid
+
+    pid = asyncio.run(cancelled())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
 def test_started_talks_over_its_input_and_output_and_ends_when_its_input_closes() -> (
     None
 ):

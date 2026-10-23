@@ -204,10 +204,23 @@ async def awaited(
         finally:
             process.stdin.close()
 
+    async def emptied(reader: asyncio.StreamReader | None) -> None:
+        """Read `reader` to its end, keeping nothing.
+
+        A killed program's pipes are read to their end before it's waited on:
+        asyncio stops reading a pipe whose buffer nobody reads, and waiting on
+        a program returns only once each of its pipes has closed, so a program
+        killed while it printed would be waited on forever.
+        """
+        if reader is None:
+            return
+        while await reader.read(64 * 1024):
+            pass
+
     async def drained(
         reader: asyncio.StreamReader | None, most: int | None
     ) -> bytes | None:
-        """Read `reader` to its end; none where it gives more than `most` bytes, the program killed at once."""
+        """Read `reader` to its end; none where it gives more than `most` bytes, the program killed at once and the rest read to its end, kept nowhere."""
         if reader is None:
             return b""
         kept = bytearray()
@@ -215,6 +228,7 @@ async def awaited(
             kept += chunk
             if most is not None and len(kept) > most:
                 process.kill()
+                await emptied(reader)
                 return None
         return bytes(kept)
 
@@ -226,6 +240,7 @@ async def awaited(
     finally:
         if process.returncode is None:
             process.kill()
+            await asyncio.gather(emptied(process.stdout), emptied(process.stderr))
             await process.wait()
     if output is None:
         message = f"`{program}` printed more than {limit} bytes"
