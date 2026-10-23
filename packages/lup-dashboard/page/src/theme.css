@@ -1361,7 +1361,7 @@ kbd {
    deep it is; what's in view bracketed by a bar down its rows, the cursor's
    entry highlighted. */
 .outline {
-    flex: 0 0 36ch;
+    flex: 0 0 32ch;
     max-width: 40%;
     overflow: hidden auto;
     border-right: 1px solid var(--border);
@@ -1530,4 +1530,12 @@ kbd {
     .buffer.stack .row-label {
         pointer-events: auto;
     }
+}
+
+/* The stack's margin: each pinned header's fold letter, in its column, as the buffer's margin has it. */
+.buffer.stack .stack-margin {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
 }

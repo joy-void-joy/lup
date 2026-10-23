@@ -43,8 +43,9 @@ import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type
 import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
 import { closedAs, folding, isFolded, reached, reaching, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import { Following } from "./follow";
+import { timed } from "./timing";
 import { mapOutlineKey, Outline, setOutlineFocus, useNarrow } from "./Outline";
-import { Stack } from "./Stack";
+import { Stack, type Mark as StackMark } from "./Stack";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { rowed, stacked, type Trials } from "./trials";
 import { levelled, ofKind } from "./folds";
@@ -636,7 +637,7 @@ export function Review({
     );
     const laidOut = useMemo(
         () =>
-            laid(
+            timed("lup-laid", () => laid(
                 items,
                 agents,
                 (head, later) => `━━ ${banner(head)}${later ? " · later" : ""} ━━`,
@@ -662,12 +663,12 @@ export function Review({
                 drawers,
                 called,
                 arranging,
-            ),
+            )),
         [items, agents, banner, called, draft, around, drawers, reviewed, now, arranging],
     );
     // The scopes the header stack pins the headers of, where it's on.
     const roots = useMemo(
-        () => (stacking ? stickies(laidOut, laidOut.groups.map((each) => each.depth), trials.drawers === "stack") : []),
+        () => (stacking ? timed("lup-stickies", () => stickies(laidOut, laidOut.groups.map((each) => each.depth), trials.drawers === "stack")) : []),
         [stacking, laidOut, trials.drawers],
     );
     const laidFor = useMemo(
@@ -1284,6 +1285,14 @@ export function Review({
                 return "code-file";
         }
     };
+    const markOf = (sticky: Sticky): StackMark | null => {
+        if (sticky.kind === "group") {
+            return null;
+        }
+        const kind = sticky.kind === "drawer" ? (laidOut.drawers.find((each) => each.header.from === sticky.header.from)?.kind ?? "since") : sticky.kind;
+        const letter = FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? "";
+        return { kind, letter, depth: sticky.kind === "file" ? 1 : 0 };
+    };
     const labelsOf = (sticky: Sticky): RowLabel[] => laidOut.groups.find((each) => each.banner.from === sticky.header.from)?.row?.labels ?? [];
     return (
         <>
@@ -1311,6 +1320,7 @@ export function Review({
                             text={laidOut.text}
                             classesOf={classesOf}
                             labelsOf={labelsOf}
+                            markOf={markOf}
                             narrow={narrow}
                             jump={jumpTo}
                             pull={(label) => pull(label.of)}

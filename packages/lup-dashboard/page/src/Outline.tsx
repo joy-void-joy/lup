@@ -11,6 +11,7 @@ import { Vim } from "@replit/codemirror-vim";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import type { Following } from "./follow";
+import { measured } from "./timing";
 import { cursorRow, filedScopes, outlineOf, scopesSeen, type OutlineMark, type OutlineRow, type Reading } from "./outline";
 import type { Laid } from "./review";
 
@@ -87,7 +88,7 @@ const GLYPHS: Partial<Record<OutlineMark, string>> = {
     news: "•",
     read: "✓",
     approved: "✓",
-    parked: "⏸",
+    parked: "‖",
     "to-review": "○",
     flagged: "⚑",
     reviewed: "✓",
@@ -118,7 +119,12 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
     const filed = useMemo(() => filedScopes(laidOut), [laidOut]);
     const openKey = viewed.open.join("\n");
     const rows = useMemo(
-        () => outlineOf(laidOut, { ...reading, open: new Set(viewed.open) }),
+        () => {
+            const began = performance.now();
+            const made = outlineOf(laidOut, { ...reading, open: new Set(viewed.open) });
+            measured("lup-outline-rows", began);
+            return made;
+        },
         // The scopes whose files are listed, by what names them, not by the list made anew each frame.
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [laidOut, reading, openKey],
@@ -134,16 +140,19 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
             view.requestMeasure({
                 key: "lup-outline",
                 read: (read: EditorView): Viewed => {
+                    const began = performance.now();
                     const scroller = read.scrollDOM.getBoundingClientRect();
                     const top = scroller.top - read.documentTop;
                     const from = read.lineBlockAtHeight(Math.max(top, 0)).from;
                     const to = read.lineBlockAtHeight(Math.max(top + read.scrollDOM.clientHeight - 1, 0)).to;
                     const { rows } = now.current;
-                    return {
+                    const viewed = {
                         open: scopesSeen(now.current.filed, from, to),
                         seen: rows.flatMap((row) => (row.kind !== "repository" && row.from <= to && row.to >= from ? [row.key] : [])),
                         cursor: cursorRow(rows, read.state.selection.main.head)?.key ?? null,
                     };
+                    measured("lup-outline", began);
+                    return viewed;
                 },
                 write: (measured: Viewed) => setViewed((before) => (sameViewed(before, measured) ? before : measured)),
             });
@@ -247,7 +256,7 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                     <div key={row.key} data-key={row.key} className={classes} style={{ paddingLeft: `calc(${row.depth * 2}ch + 1ch)` }} title={row.title} onClick={() => go(row)}>
                         <span className={`outline-glyph mark-${mark}`}>{glyph}</span>
                         <span className="outline-text">{row.text}</span>
-                        {row.marks.includes("commented") ? <span className="outline-tag mark-commented">✎</span> : null}
+                        {row.marks.includes("commented") ? <span className="outline-tag mark-commented" title="commented">»</span> : null}
                         {row.marks.includes("new") ? <span className="outline-tag mark-new">new</span> : null}
                     </div>
                 );
