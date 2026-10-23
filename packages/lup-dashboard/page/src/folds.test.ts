@@ -124,6 +124,38 @@ describe("opening and closing one item's folds", () => {
         expect(aroundOf(READ, at("item").summary.from, "file")).toBeUndefined();
     });
 
+    it("in a conversation, opens with each `zr` one exchange further back, the latest first, then its runs of calls, never a call's input and output", () => {
+        // A conversation drawer, 0–30: what came before the operator's first words, 1–4; two earlier exchanges, 5–12 and
+        // 13–20, a run of calls in each, one holding a call's input and output; the last exchange, open, 21–30, a run in it.
+        const talk = [
+            fold("drawer", "conversation", 0, 30, true),
+            fold("before", "earlier", 1, 4, true),
+            fold("first", "earlier", 5, 12, true),
+            fold("run 1", "calls", 7, 10, true),
+            fold("call 1", "call", 8, 9, true),
+            fold("second", "earlier", 13, 20, true),
+            fold("run 2", "calls", 15, 18, true),
+            fold("run 3", "calls", 23, 26, true),
+        ];
+        const state = new Set(talk);
+        const step = (opening: boolean) => {
+            const changed = levelled(talk, (each) => state.has(each), opening, false);
+            for (const each of changed) {
+                if (opening) {
+                    state.delete(each);
+                } else {
+                    state.add(each);
+                }
+            }
+            return changed.map((each) => each.key);
+        };
+        expect([true, true, true, true, true, true].map(step)).toEqual([["drawer"], ["second"], ["first"], ["before"], ["run 1", "run 2", "run 3"], []]);
+        // `zm` closes the runs, then each exchange, the earliest first.
+        expect([false, false, false].map(step)).toEqual([["run 1", "run 2", "run 3"], ["before"], ["first"]]);
+        expect(levelled(talk, closed, true, true).map((each) => each.key)).not.toContain("call 1");
+        expect(ofKind(talk, (each) => each.key !== "drawer", "call", false).map((each) => each.key)).toEqual(["call 1"]);
+    });
+
     it("opens with Space z f and a letter each fold of a kind, and the item's own so they're seen; closes with Space z F and the letter", () => {
         expect(ofKind(READ, closed, "lines", false).map((each) => each.key)).toEqual(["item", "lines"]);
         expect(ofKind(READ, closed, "body", false).map((each) => each.key)).toEqual(["item"]);

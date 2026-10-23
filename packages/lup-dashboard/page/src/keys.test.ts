@@ -13,7 +13,7 @@ describe("the line of keys", () => {
         expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]a [a", "]n [n"]);
         expect(shown("aside")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "zf", "␣z", "zj zk"]);
         expect(shown("drawer")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
-        expect(shown("trace")).toEqual(["o", "c…", "]n [n", "za"]);
+        expect(shown("words")).toEqual(["o", "c…", "C", "]n [n", "za"]);
     });
 
     it("lists the jump to what's to answer beside the jump to any item, and shows it where either applies", () => {
@@ -34,7 +34,7 @@ describe("the line of keys", () => {
     });
 
     it("shows no key of insert mode outside it, and none of the others in it", () => {
-        const places: ReviewPlace[] = ["written", "banner", "approvals", "item", "change", "file", "drawer", "trace", "since", "reviewed", "aside", "nothing"];
+        const places: ReviewPlace[] = ["written", "banner", "approvals", "item", "change", "file", "drawer", "words", "since", "reviewed", "aside", "nothing"];
         const writing = shown("insert");
         for (const place of places) {
             expect(shown(place).filter((key) => writing.includes(key) && key !== "^⏎")).toEqual([]);
@@ -68,7 +68,18 @@ describe("what may follow a chord", () => {
 
     it("lists the keys after Space z, f opening by kind and F closing, then each kind of fold's letter, as vim's fold keys begin with z", () => {
         expect(following("␣z", "file")).toEqual(["f open by kind", "F close by kind"]);
-        const kinds = ["t the tasks", "r the trace", "s since you approved", "v the conversation", "f files", "b bodies", "u unchanged lines", "c context"];
+        const kinds = [
+            "t the tasks",
+            "s since you approved",
+            "v the conversation",
+            "f files",
+            "e earlier exchanges",
+            "b bodies",
+            "u unchanged lines",
+            "k runs of calls",
+            "c context",
+            "d calls' input and output",
+        ];
         expect(following("␣zf", "file")).toEqual(kinds);
         expect(following("␣zF", "file")).toEqual(kinds);
         expect(following("␣f", "file")).toEqual([]);
@@ -80,13 +91,15 @@ describe("what may follow a chord", () => {
         expect(following("zf", "file")).toEqual([
             "i the item",
             "t the tasks",
-            "r the trace",
             "s since you approved",
             "v the conversation",
             "f the file",
+            "e the earlier exchange",
             "b the body",
             "u the unchanged lines",
+            "k the run of calls",
             "c the context",
+            "d the call's input and output",
         ]);
     });
 

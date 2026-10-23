@@ -160,8 +160,8 @@ interface Pasting {
 /** How long what a yank did is shown, in milliseconds, as vim's own yank shows it. */
 const SHOWN = 1500;
 
-/** Show `text` under the editor a while, as vim's own yank says what it did. */
-function shownBelow(cm: CodeMirrorV, text: string): void {
+/** Show `text` under the editor a while, as vim's own yank says what it did: what a yank copied, or the folds a jump opened (`editor.ts`). */
+export function shownBelow(cm: CodeMirrorV, text: string): void {
     const shown = document.createElement("div");
     shown.className = "cm-vim-message";
     shown.textContent = text;

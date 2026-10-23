@@ -5,7 +5,7 @@ import { NodeProp } from "@lezer/common";
 import { describe, expect, it } from "vitest";
 
 import type { Span } from "./comments";
-import { continued, decorate, hiddenOn, markdown, revealing, source, sourced, sources, treeOf, without, type Source } from "./markdown";
+import { continued, decorate, hiddenOn, markdown, openedLine, revealing, source, sourced, sources, treeOf, without, type Source } from "./markdown";
 
 /** The lines of `text` from the one holding `first` to the one holding `last`, each with its line break, as a source is read from them. */
 function lined(text: string, first: string, last: string = first): Span[] {
@@ -193,6 +193,56 @@ describe("Enter in a comment", () => {
         const plain = "an item's line\nsome words\n";
         expect(entered(plain, "some words", plain.indexOf("words") + 2)).toBeNull();
         expect(entered(plain, "some words", 3)).toBeNull();
+    });
+});
+
+describe("o and O in a comment", () => {
+    /** What `o` (`below`) or `O` makes of the comment `comment` under an item's line, on its line holding `on`: the comment after, `|` where the cursor is. */
+    function opening(comment: string, on: string, below: boolean): string {
+        const text = `an item's line\n${comment}\n`;
+        const from = text.indexOf(comment);
+        const found = [source("text", lined(text, "an item's line")), source("comment", [{ from, to: from + comment.length }])].flatMap((each) =>
+            each === null ? [] : [each],
+        );
+        const state = laid(text, found);
+        const made = state.update(openedLine(state, text.indexOf(on, from), below)).state;
+        const head = made.selection.main.head;
+        const after = `${made.sliceDoc(0, head)}|${made.sliceDoc(head)}`;
+        return after.slice(from, after.length - 1);
+    }
+
+    it("starts the next item below a list's item, as Enter at its end does, and the one before it above, at its indentation, with its bullet", () => {
+        expect(opening("- a\n- b", "- a", true)).toBe("- a\n- |\n- b");
+        expect(opening("- a\n- b", "- b", false)).toBe("- a\n- |\n- b");
+        expect(opening("- a\n  - b\n- c", "  - b", true)).toBe("- a\n  - b\n  - |\n- c");
+        expect(opening("- a\n  - b\n- c", "  - b", false)).toBe("- a\n  - |\n  - b\n- c");
+    });
+
+    it("numbers the item it starts, and each after it one more, as long as they were numbered one after another", () => {
+        expect(opening("1. a\n2. b\n3. c", "1. a", true)).toBe("1. a\n2. |\n3. b\n4. c");
+        expect(opening("1. a\n2. b\n3. c", "2. b", false)).toBe("1. a\n2. |\n3. b\n4. c");
+        expect(opening("1. a\n2. b\n3. c", "1. a", false)).toBe("1. |\n2. a\n3. b\n4. c");
+        expect(opening("1) a\n2) b\n7) c", "2) b", false)).toBe("1) a\n2) |\n3) b\n7) c");
+    });
+
+    it("starts the next item below one just begun, where Enter would end the list, never changing the line it's on", () => {
+        expect(opening("- a\n- ", "- \n", true)).toBe("- a\n- \n- |");
+        expect(opening("1. a\n2. \n3. c", "2. ", true)).toBe("1. a\n2. \n3. |\n4. c");
+    });
+
+    it("leaves a task's box unticked, and takes a quote's mark and an item's further line's indentation", () => {
+        expect(opening("- [x] done", "- [x]", true)).toBe("- [x] done\n- [ ] |");
+        expect(opening("- [x] done", "- [x]", false)).toBe("- [ ] |\n- [x] done");
+        expect(opening("> quoted\n> - a", "> quoted", false)).toBe("> |\n> quoted\n> - a");
+        expect(opening("> quoted\n> - a", "> - a", true)).toBe("> quoted\n> - a\n> - |");
+        expect(opening("- a\n  more", "  more", false)).toBe("- a\n  |\n  more");
+        expect(opening("- a\n  more", "  more", true)).toBe("- a\n  more\n  |");
+    });
+
+    it("opens a plain line beside a line in no list, and in a block of code", () => {
+        expect(opening("some words\nmore", "some words", true)).toBe("some words\n|\nmore");
+        expect(opening("some words\nmore", "more", false)).toBe("some words\n|\nmore");
+        expect(opening("```\n- code\n```", "- code", false)).toBe("```\n|\n- code\n```");
     });
 });
 
