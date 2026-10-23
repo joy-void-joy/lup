@@ -549,6 +549,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
         ),
         github=GitHubRepository(owner="someone", name="work"),
         name="dev",
+        runner=[],
     )
     run = machine.engine.run()
     assert f"--name={container}" in run

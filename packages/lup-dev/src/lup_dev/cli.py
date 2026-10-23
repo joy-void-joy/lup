@@ -64,7 +64,16 @@ from lup_dev.declaration.requirements import check as checked
 from lup_dev.declaration.resolve import Declaration, Selected, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM, GitHubError, named
-from lup_dev.gate import Check, Passed, Passes, Shell, at_commit, failed, report
+from lup_dev.gate import (
+    Amended,
+    Check,
+    Passed,
+    Passes,
+    Shell,
+    at_commit,
+    failed,
+    report,
+)
 from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, nul_separated
 from lup_dev.host.client import Detached, HostClient, RoomClient
@@ -196,6 +205,7 @@ from lup_dev.layout import (
     Layout,
 )
 from lup_dev.listing import given, latest, many, unlisted
+from lup_dev.merging import Merging, merged
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import InboxAnnouncing, Response, answer
@@ -1851,6 +1861,7 @@ def launched(
             github=github,
             name=name or branch_name(worktree),
             exact=name is not None,
+            runner=declared.resolved.runner.command([]),
         )
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -2414,16 +2425,17 @@ def check(
     own engine, rebuilt when stale. Its modules' requirements are checked first,
     all at once: a required tool missing stops the gate before any step. Each
     step's outcome is reported, then each failure's output in full; the exit code
-    is non-zero when any step failed. With `--fix`, which the session landing work
-    runs on the merged result, ruff's safe fixes and the formatter rewrite the
-    worktree first.
+    is non-zero when any step failed. With `--fix`, ruff's safe fixes and the
+    formatter rewrite the worktree first.
 
     A pass is recorded for the worktree's files, in the repository's git
     directory, and a later run on the same files finds it and runs nothing but
     the builds stale in its worktree, unless `--again`. With `--at`, the gate
     runs on a commit, in a worktree made at it and removed after, unless it
     passed on the commit's files already: a push to the integration branch
-    from a room runs it so.
+    from a room runs it so. With `--fix` too, where the fixes change files,
+    they're committed in a commit with the same parents and message, which it
+    names and no branch does: `land` runs it so on the merge it makes.
     """
     root = toplevel(Path.cwd())
     passes = Passes.of(root, SystemClock())
@@ -2435,27 +2447,68 @@ def check(
         if failed(gated.outcomes):
             raise typer.Exit(code=1)
         return
-    if fix:
-        message = (
-            "`--fix` rewrites the worktree's files, and `--at` checks a commit's "
-            "files as committed"
-        )
-        raise typer.BadParameter(message, param_hint="'--fix'")
     runner = resolve(load(root, local=person_layer(root)).project).runner
 
     def stop(made: Path) -> None:
         scrapped(made, runner)
 
     outcome = at_commit(
-        root, at, Shell(), passes, runner, say=typer.echo, stop=stop, again=again
+        root,
+        at,
+        Shell(),
+        passes,
+        runner,
+        say=typer.echo,
+        stop=stop,
+        again=again,
+        fix=fix,
     )
     match outcome:
         case Passed():
+            typer.echo(outcome.said())
+        case Amended(ran=ran):
+            typer.echo(ran.output, nl=False)
             typer.echo(outcome.said())
         case GateRan(code=code, output=output):
             typer.echo(output, nl=False)
             if code != 0:
                 raise typer.Exit(code=code)
+
+
+@app.command("merge", hidden=True)
+def merge(
+    base: Annotated[
+        str,
+        typer.Argument(help="The commit it goes onto: the integration branch's tip."),
+    ],
+    tip: Annotated[str, typer.Argument(help="The commit merged: the branch's tip.")],
+) -> None:
+    """Merge `tip` onto `base` apart from every checkout, run the gate on the merge with its fixes, and print what came of it as JSON: what `land` runs in a launch's room.
+
+    The merge commit's message is read from standard input
+    (`lup_dev.merging`). What the gate says as it goes is on standard error.
+    """
+    root = toplevel(Path.cwd())
+    runner = resolve(load(root, local=person_layer(root)).project).runner
+
+    def stop(made: Path) -> None:
+        scrapped(made, runner)
+
+    def say(line: str) -> None:
+        typer.echo(line, err=True)
+
+    merging = merged(
+        root,
+        base,
+        tip,
+        sys.stdin.read(),
+        processes=Shell(),
+        passes=Passes.of(root, SystemClock()),
+        runner=runner,
+        say=say,
+        stop=stop,
+    )
+    typer.echo(TypeAdapter[Merging](Merging).dump_json(merging).decode())
 
 
 def scrapped(worktree: Path, runner: Runner) -> None:
