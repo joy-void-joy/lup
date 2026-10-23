@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue
+from pydantic import Field, JsonValue, ValidationInfo, field_validator
 
 from lup.types import JsonObject, Model
 
@@ -94,10 +94,24 @@ class Usage(Model):
     """The tokens in the context at the last reply: its input, the cached part
     of it included, and on a runtime that counts it the output it added."""
     window: int | None = None
-    """The model's context window, in tokens; none where neither the record
-    nor the runtime's settings say it."""
+    """The model's context window, in tokens; none where it isn't known, or
+    where fewer tokens fit in it than are in use (`holding`)."""
     model: str | None = None
     """The model, as the record names it."""
+
+    @field_validator("window")
+    @classmethod
+    def holding(cls, window: int | None, info: ValidationInfo) -> int | None:
+        """Return the window, or none where it's smaller than the tokens in use: a context never holds more than its window, so that window was read wrong (#282), and shown it would read as a context past full.
+
+        >>> Usage(used=269_000, window=200_000).window, Usage(used=112_000, window=1_000_000).window
+        (None, 1000000)
+        """
+        match info.data:
+            case {"used": int() as used} if window is not None and used > window:
+                return None
+            case _:
+                return window
 
 
 type Status = Literal["pending", "in_progress", "completed"]

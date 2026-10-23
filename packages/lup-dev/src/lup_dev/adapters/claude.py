@@ -234,6 +234,7 @@ import lup
 from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.adapters.claude.terminal import own_settings
+from lup.adapters.claude.windows import catalogued, reach
 from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, MutableModel, Settings
@@ -1690,8 +1691,8 @@ class AssistantMessage(Model, extra="ignore"):
 
     content: list[Block] = []
     model: str | None = None
-    """The model, as the API names it: without the `[1m]` the operator's
-    settings may add, so the window isn't read from it (`window`)."""
+    """The model that made it, as the API names it, never with `[1m]` after it;
+    `<synthetic>` on a reply of Claude Code's own."""
     usage: Counted | None = None
 
 
@@ -1702,6 +1703,9 @@ class AssistantLine(Model, extra="ignore", alias_generator=to_camel):
     message: AssistantMessage
     timestamp: datetime | None = None
     is_sidechain: bool = False
+    requested_model: str | None = None
+    """The model the conversation asked for, `[1m]` after it where it chose
+    the long variant; none in a record before Claude Code 2.1.295."""
 
 
 class Queued(Model, extra="ignore", alias_generator=to_camel):
@@ -1756,18 +1760,22 @@ type Line = Annotated[
 
 
 class ClaudeTranscripts(Model, Reader):
-    """Claude Code's records, read: a session's file per session under `projects/<folder>/`, its subagents' in a folder beside it; each conversation's context from its last reply, in the window the operator's `settings` choose."""
+    """Claude Code's records, read: a session's file per session under `projects/<folder>/`, its subagents' in a folder beside it; each conversation's context from its last reply, in the window of the model that made it."""
 
     settings: Path | None = None
-    """The operator's own settings file, whose model says the window; none
-    reads no window, as for a copy of the records."""
+    """The operator's own settings file, whose `env` may turn the long window
+    off for every session it starts; none reads nothing of it, as for a copy
+    of the records."""
     window: int = 200_000
-    """The context window of Claude's models, in tokens, but for the long one."""
+    """The standard context window, in tokens."""
     long: str = "[1m]"
-    """What the operator's settings add after a model's name to choose its long
-    context (`model-config`, *Setting your model*)."""
+    """What follows a model's name, in any case, where the long variant was
+    chosen (`model-config`, *1M context window*)."""
     long_window: int = 1_000_000
     """The long context's window, in tokens."""
+    synthetic: str = "<synthetic>"
+    """The model a reply of Claude Code's own names, an error's or an
+    interruption's: no model made it, and its usage counts nothing."""
 
     @override
     def sessions(self, copies: Path) -> list[Path]:
@@ -1835,38 +1843,66 @@ class ClaudeTranscripts(Model, Reader):
         ]
 
     def usage(self, own: list[AssistantLine]) -> Usage | None:
-        """Return what the context held at the last of `own`, the conversation's replies, that counted its input; none where none did."""
-        counted = [each for each in own if each.message.usage is not None]
+        """Return what the context held at the last of `own`, the conversation's replies, that a model made and that counted its input; none where none did."""
+        counted = [
+            each
+            for each in own
+            if each.message.usage is not None and each.message.model != self.synthetic
+        ]
         if not counted:
             return None
-        last = counted[-1].message
+        last = counted[-1]
         return Usage(
-            used=last.usage.used() if last.usage is not None else 0,
-            window=self.windowed(self.model()),
-            model=last.model,
+            used=last.message.usage.used() if last.message.usage is not None else 0,
+            window=self.windowed(last, shortened=self.shortened()),
+            model=last.message.model,
         )
 
-    def windowed(self, model: str | None) -> int | None:
-        """Return the context window of the model the operator's settings name: the long one where the name ends `[1m]`, else the usual; none where they name none, Claude Code running its default.
+    def windowed(self, reply: AssistantLine, *, shortened: bool | None) -> int | None:
+        """Return the context window `reply` was made in, by the model that made it (`lup.adapters.claude.windows`); none where that isn't known.
 
-        The record names each reply's model without the suffix, so the window is
-        read from the settings, which the launch applies (`--setting-sources
-        user`): a model changed there mid-session reads as it stands.
+        A model with the long window natively reads it, and one that reaches it
+        only through its `[1m]` variant reads it where the conversation asked
+        for that variant, which its record says from Claude Code 2.1.295 on
+        (`requested_model`). Every model reads the standard window where
+        `shortened`, the long one turned off; none where that can't be read.
 
-        >>> reading = ClaudeTranscripts()
-        >>> reading.windowed("opus[1m]"), reading.windowed("sonnet"), reading.windowed(None)
-        (1000000, 200000, None)
+        >>> reading, reply = ClaudeTranscripts(), AssistantLine.model_validate(
+        ...     {"type": "assistant", "message": {"model": "claude-opus-4-6"}, "requestedModel": "claude-opus-4-6[1m]"}
+        ... )
+        >>> reading.windowed(reply, shortened=False), reading.windowed(reply, shortened=True)
+        (1000000, 200000)
         """
-        if model is None:
+        model = reply.message.model
+        if model is None or not catalogued(model) or shortened is None:
             return None
-        return self.long_window if model.endswith(self.long) else self.window
+        if shortened:
+            return self.window
+        match reach(model), reply.requested_model:
+            case "long", _:
+                return self.long_window
+            case "chosen", str() as requested:
+                chose = self.long in requested.lower()
+                return self.long_window if chose else self.window
+            case "chosen", None:
+                return None
+            case "standard", _:
+                return self.window
 
-    def model(self) -> str | None:
-        """Return the model the operator's settings choose; none where they choose none, or there are no settings to read."""
+    def shortened(self) -> bool | None:
+        """Return whether the operator's settings turn the long window off for the sessions they start, as the file stands at this reading; none where it doesn't read.
+
+        A session applies its settings' `env` as it starts, so a change made
+        after reads here before the session has it. `/model` never writes it, as it
+        writes the model the record names instead (#282), so it changes only
+        where the operator edits it. A launched room's environment carries the
+        variable only from that file: lup's own settings and its environment
+        never set it, and the operator's shell doesn't reach the room.
+        """
         if self.settings is None:
-            return None
+            return False
         try:
-            return own_settings(self.settings).model
+            return own_settings(self.settings).shortened()
         except TerminalError:
             return None
 
