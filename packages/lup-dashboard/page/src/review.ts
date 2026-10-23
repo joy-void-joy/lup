@@ -980,8 +980,10 @@ export function laid(
             const data = drawers.get(group.key) ?? UNREAD;
             for (const kind of DRAWERS) {
                 const drawer = layDrawer(kind, conversation, data);
-                made.drawers.push(drawer);
-                laidDrawers.push(drawer);
+                if (drawer !== null) {
+                    made.drawers.push(drawer);
+                    laidDrawers.push(drawer);
+                }
             }
         }
         if (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0) {
@@ -1121,8 +1123,8 @@ export function laid(
         return thread.said.filter((each) => each.on === null).flatMap(saying);
     }
 
-    /** Lay one of `conversation`'s drawers of `kind` from `data`, and return it. */
-    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers): Drawer {
+    /** Lay one of `conversation`'s drawers of `kind` from `data`, and return it; none where it has nothing under its summary line, as a task list none keeps, a branch with nothing since the operator approved it, or one not read yet. */
+    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers): Drawer | null {
         const of = ownerOf({ drawer: kind, conversation });
         const into = gathering();
         const key = whose(conversation);
@@ -1196,11 +1198,13 @@ export function laid(
         // Labelled by the words written, not sliced from the text being built, which copies it whole each time.
         const label = said;
         const last = w.at - 1;
-        // A drawer with nothing under its summary line hides nothing, so it has no fold. "Since you approved" is open,
-        // as it's the code waiting on the operator; the others fold until opened.
-        if (last > summary.to) {
-            into.folds.push({ of, kind, name: "", label, closed: kind !== "since", summary, from: summary.to, to: last });
+        // A drawer with nothing under its summary line isn't shown: it would say only that it's empty.
+        if (last <= summary.to) {
+            w.text = w.text.slice(0, summary.from);
+            return null;
         }
+        // "Since you approved" is open, as it's the code waiting on the operator; the others fold until opened.
+        into.folds.push({ of, kind, name: "", label, closed: kind !== "since", summary, from: summary.to, to: last });
         w.line("");
         return { kind, conversation, talk, files, reviewed, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
     }
