@@ -1812,8 +1812,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 Item(reason=Message(to=Conversation() as to))
                 | Item(recipient=Conversation() as to)
             ) if item.sender == party:
+                called = self.called(to)
+                whom = who(to) if called is None else f"`{called}`"
                 message = (
-                    f"{cited(number)} is your message to {who(to)}, which the operator "
+                    f"{cited(number)} is your message to {whom}, which the operator "
                     "reads a copy of: neither is withdrawn. Where it was wrong, `send` "
                     "a correction"
                 )

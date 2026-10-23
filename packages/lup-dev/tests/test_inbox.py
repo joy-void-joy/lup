@@ -2725,6 +2725,248 @@ def test_a_subagents_friction_and_how_it_went_reach_its_parent_whole_on_each_run
     ]
 
 
+def to_parent(text: str, kind: str = "note") -> dict[str, JsonValue]:
+    """A `send` to the conversation that spawned the caller."""
+    return {"to": "parent", "kind": kind, "text": text}
+
+
+def arriving(whose: str, number: int, idle: str = "") -> str:
+    """What `send` answers for a message to another conversation, item `number`, with the operator's copy the next."""
+    return (
+        f"Your message is in the inbox of {whose}, {cited(number)}, and the operator "
+        f"has a copy, {cited(number + 1)}. It's told at its next call, its turn's end "
+        f"or its `wait_inbox`, whichever comes first{idle}."
+    )
+
+
+WOKEN = "; idle between turns, its session is woken for it"
+"""What `send`'s answer adds for a main conversation whose runtime wakes it."""
+
+
+def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_reads_a_copy(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    found = "The brief said the engine was built. It isn't: I'm building it first."
+    worktree = tmp_path / "w"
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, worktree, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+        send(hook, bash("m1"))
+        sent = records.lup(
+            (hook, mcp), "send", to_parent(found, "problem"), "a1", "Explore"
+        )
+        told = context(send(hook, bash("m2")))
+        listed = inbox()
+        shown = inbox("show", "2")
+        unwithdrawn = [
+            records.lup(
+                (hook, mcp), "withdraw", {"number": number, "why": "x"}, "a1", "Explore"
+            )
+            for number in [1, 2]
+        ]
+        inbox("answer", "2", "--comment", "Good catch.")
+        replied = context(send(hook, records.call("a1", "Explore", "c2")))
+        items = [delivery.inbox.item(number) for number in [1, 2]]
+    assert sent == (arriving("your parent `w`", 1, WOKEN), False)
+    assert told == (
+        '<message item="1" from="subagent a1 of claude session s1" name="parser" '
+        f'kind="problem">{found}</message>'
+    )
+    assert listed.splitlines() == [
+        (
+            f"   @2  {clocked(clock.now())}  a problem from `w/parser` (subagent a1 of "
+            f"claude session s1) to `w` (claude session s1) in {worktree}: {found}"
+        )
+    ]
+    assert shown == (
+        f"@2, a problem from subagent a1 of claude session s1 in {worktree} to claude "
+        f"session s1, your copy, made {clocked(clock.now())}, waiting:\n{found}\n"
+    )
+    # The copy is news, whatever its kind: it waits on the parent, not the operator.
+    assert notices.raised == []
+    assert [each.reason for each in items] == [
+        Message(kind="problem", text=found),
+        Message(
+            kind="problem",
+            text=found,
+            to=Conversation(
+                repository=worktree / ".git", runtime="claude", session="s1"
+            ),
+        ),
+    ]
+    assert items[1].rank.name == "news"
+    assert [each.recipient for each in items] == [
+        Conversation(repository=worktree / ".git", runtime="claude", session="s1"),
+        Operator(),
+    ]
+    assert unwithdrawn == [
+        (
+            (
+                f"Not withdrawn: @{number} is your message to `w`, which the operator "
+                "reads a copy of: neither is withdrawn. Where it was wrong, `send` a "
+                "correction"
+            ),
+            False,
+        )
+        for number in [1, 2]
+    ]
+    # The operator's reply to the copy reaches the subagent that sent it.
+    assert replied == (
+        '<message item="3" from="operator" kind="note">\n<on item="2" kind="problem">'
+        f"\n<opening>{found}</opening>\n"
+        '<comment id="3.1">Good catch.</comment>\n</on>\n</message>'
+    )
+
+
+def test_send_reaches_ones_own_subagents_by_name_path_or_id_and_refuses_whom_nothing_reads(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+
+    def sent(to: str, text: str) -> tuple[str, bool]:
+        return call(mcp, "send", {"to": to, "kind": "note", "text": text})
+
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+        send(hook, records.spawn("t2", agent="a1"))
+        records.recorded("a2", "general-purpose", "t2", name="tokens", parent="a1")
+        send(hook, records.call("a2", "general-purpose", "c2"))
+        by_name = sent("parser", "By name.")
+        by_path = sent("w/parser", "By path.")
+        by_id = sent("a1", "By id.")
+        grandchild = sent("tokens", "Not mine.")
+        orphan = sent("parent", "Nobody.")
+        told = context(send(hook, records.call("a1", "Explore", "c3")))
+        down = records.lup(
+            (hook, mcp),
+            "send",
+            {"to": "tokens", "kind": "note", "text": "Look at the lexer."},
+            "a1",
+            "Explore",
+        )
+        held = send(hook, records.ended("a2", "general-purpose", "Looking."))
+        send(hook, records.ended("a2", "general-purpose", "Done."))
+        gone = records.lup(
+            (hook, mcp),
+            "send",
+            {"to": "tokens", "kind": "note", "text": "And the parser."},
+            "a1",
+            "Explore",
+        )
+        send(hook, records.call("a2", "general-purpose", "c4"))
+        resumed = records.lup(
+            (hook, mcp),
+            "send",
+            {"to": "w/parser/tokens", "kind": "note", "text": "And the parser."},
+            "a1",
+            "Explore",
+        )
+        records.lup((hook, mcp), "rename", {"name": "lexing"}, "a1", "Explore")
+        send(hook, records.call("a1", "Explore", "c5"))
+        renamed = sent("lexing", "Renamed.")
+    yours = (
+        "`to` takes `operator`, or one of your own subagents by its name, its path "
+        "or its runtime's id: `parser`."
+    )
+    assert by_name == (arriving("your subagent `parser`", 1), False)
+    assert by_path == (arriving("your subagent `parser`", 3), False)
+    assert by_id == (arriving("your subagent `parser`", 5), False)
+    assert grandchild == (f"Not sent: no subagent of yours is `tokens`. {yours}", False)
+    assert orphan == (
+        f"Not sent: no conversation spawned you, so you have no parent. {yours}",
+        False,
+    )
+    assert told == "\n\n".join(
+        f'<message item="{number}" from="claude session s1" name="w" kind="note">'
+        f"{text}</message>"
+        for number, text in [(1, "By name."), (3, "By path."), (5, "By id.")]
+    )
+    assert down == (arriving("your subagent `tokens`", 7), False)
+    # The subagent's end is held once to tell what its parent sent it.
+    assert "Look at the lexer." in held
+    assert gone == (
+        (
+            f"Not sent: your subagent `tokens` ended at {clocked(clock.now())}, so "
+            "nothing reads its inbox: once its runtime resumes it, lup hears it again "
+            "and it can be sent to"
+        ),
+        False,
+    )
+    # Resumed, it's heard again, and reached; the Ended its parent got is @9.
+    assert resumed == (arriving("your subagent `tokens`", 10), False)
+    # A subagent that renamed itself is reached by its new name once it's heard.
+    assert renamed == (arriving("your subagent `lexing`", 12), False)
+
+
+def test_a_subagents_message_wakes_its_idle_claude_session(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+        assert send(hook, claude("Stop", stop_hook_active=False)) == ""
+        sent = records.lup((hook, mcp), "send", to_parent("Found it."), "a1", "Explore")
+        state = delivery.inbox.item(1).state
+    assert sent == (arriving("your parent `w`", 1, WOKEN), False)
+    # Pushed to the session, it waits until a turn's start carries the push's token.
+    assert "one: pushed @1 to claude session s1" in said
+    assert state == Waiting()
+
+
+def test_on_codex_a_subagents_message_holds_its_parents_turns_end_and_waits_for_its_next_turn_when_idle(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    rollouts = Rollouts(tmp_path)
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "v", "two", "codex")
+        hook, mcp = machine.host.launch("two").hook, machine.host.launch("two").mcp
+        messages = Socket(machine.host.launch("two").messages)
+        send(hook, codex("SessionStart", source="startup"))
+        rollouts.recorded("th1", "t1", "/root/lexer")
+        send(hook, rollouts.call("th1", "d1"))
+        send(hook, codex_bash("m1"))
+        first = rollouts.lup(
+            (hook, mcp), "send", to_parent("Not this way.", "disagreement"), "th1"
+        )
+        held = json.loads(send(hook, codex("Stop", stop_hook_active=False)))
+        let = send(hook, codex("Stop", stop_hook_active=True))
+        second = rollouts.lup((hook, mcp), "send", to_parent("Found it."), "th1")
+        started = context(send(hook, codex("UserPromptSubmit", prompt="Go on.")))
+        frames = messages.close()
+    idle = (
+        "; idle between turns, it waits for the session's next turn, since its "
+        "runtime can't be woken"
+    )
+    assert first == (arriving("your parent `v`", 1, idle), False)
+    assert held["decision"] == "block"
+    assert held["reason"] == (
+        '<message item="1" from="subagent th1 of codex session t1" name="lexer" '
+        'kind="disagreement">Not this way.</message>'
+    )
+    assert let == ""
+    assert second == (arriving("your parent `v`", 3, idle), False)
+    assert frames == []
+    assert started == (
+        '<message item="3" from="subagent th1 of codex session t1" name="lexer" '
+        'kind="note">Found it.</message>'
+    )
+
+
 def test_lup_dev_inbox_send_names_a_launch_by_its_id_or_its_worktree(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
