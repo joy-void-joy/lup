@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { citedOn, editedOf, markerEnd, passageOf, unfound, type Citation } from "./exchange";
+import { citedOn, editedOf, markerEnd, outdated, passageOf, unfound, type Citation } from "./exchange";
 import type { components } from "./generated/api";
 
 type Item = components["schemas"]["Item"];
@@ -69,5 +69,15 @@ describe("an edit", () => {
         ]);
         expect(shown?.changed).toEqual([1]);
         expect(editedOf(note("Never edited."), (at) => at)).toBeNull();
+    });
+
+    it("leaves a comment on a question's decision as it is where only the question's text changed", () => {
+        const asked: Item = {
+            ...note(""),
+            reason: { reason: "question", text: "Which, now?", decisions: [{ text: "Use lark", lean: "yes" }] },
+            edits: [{ at: AT, before: "Which?" }],
+        };
+        expect(outdated(asked, { text: "1. Use lark", start: 12, end: 23 })).toBe(false);
+        expect(outdated(asked, { text: "Which?", start: 0, end: 6 })).toBe(true);
     });
 });

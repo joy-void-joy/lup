@@ -177,6 +177,15 @@ export function ownText(item: Item): string | null {
     }
 }
 
+/** Return an agent's item's words as the review shows them, which a comment's quote counts in: a question's with each decision numbered, its lean under it (`body`, `review.ts`); its own text for any other an edit changes. */
+function shownText(item: Item): string | null {
+    const reason = item.reason;
+    if (reason.reason === "question") {
+        return [reason.text, ...reason.decisions.map((each, at) => `${at + 1}. ${each.text}\n   lean: ${each.lean}`)].join("\n");
+    }
+    return ownText(item);
+}
+
 /**
  * Return whether a comment on `item`'s text, quoting `quote`, is outdated: the item was edited since, and its text no
  * longer holds the passage where the comment quoted it.
@@ -185,7 +194,7 @@ export function outdated(item: Item | undefined, quote: Quote | null | undefined
     if (item === undefined || quote == null || (item.edits ?? []).length === 0) {
         return false;
     }
-    const text = ownText(item);
+    const text = shownText(item);
     return text !== null && text.slice(quote.start, quote.end) !== quote.text;
 }
 
