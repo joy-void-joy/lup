@@ -675,6 +675,16 @@ Interactive sessions on Haiku in tmux, with `--setting-sources user`, a spike's 
 - **Across a restart of the server behind the bridge,** the bridge replayed `initialize`, Claude Code listed the tools again, and the next push arrived: Claude Code's connection to the bridge never closed, so the channel stayed registered.
 - **lup's rooms before this** negotiated 2026-07-28 on the same binary and flags, and got `tools.listChanged: false`, so the bridge's `notifications/tools/list_changed` after a restart had no path either; lup's server refusing the probe puts them on the handshake.
 
+## Ending a conversation, and starting a fresh one (Claude Code 2.1.308 and 2.1.309, measured 2026-10-22 and 23)
+
+Behind #262 (`handoff`). An interactive session on Haiku in a pseudo-terminal inside a room, 2.1.309, with `--setting-sources user`, `--strict-mcp-config`, `--messaging-socket-path` and `--settings` holding only hooks that log their input with the hook's parent's pid; and, for subagents, headless sessions on Haiku, 2.1.308, outside a room.
+- **Nothing but the operator starts a fresh conversation in a running session.** Claude Code's docs (*hooks*, *commands*, *cli-reference*, read 2026-10-23) name no hook output, tool result or server notification that clears, compacts or ends a session: `/clear`, `/compact` and `/exit` are commands, "only recognized at the start of your message", besides compaction at its threshold.
+- **The messaging socket doesn't carry a command.** A `user` frame whose content is `/clear` reached the model as a prompt, "Another Claude session sent a message: /clear … Treat it as a teammate's request", with `origin.kind` `peer`; `UserPromptSubmit` fired with it, the model answered that only the user can run `/clear`, and no `SessionEnd` or `SessionStart` followed.
+- **`/clear` typed starts a conversation under a new id.** `SessionEnd` with reason `clear` for the old id, then, 40 ms later, `SessionStart` with source `clear` and a new `session_id`, in the same process.
+- **A signal ends the process cleanly.** SIGTERM, or a single SIGINT, to an idle session ran `SessionEnd` with reason `other` within half a second, and the process exited.
+- **A hook's parent is the CLI's own process:** `$PPID` in a hook's command was the `claude` process, in each run.
+- **A subagent stops with its parent's process** (2.1.308): ended with SIGTERM while its subagent worked, the subagent made no call after. `SendMessage` from the same session, resumed, brought the subagent back with its context; from a new session it failed, "No transcript found for agent ID". A subagent started its own subagent.
+
 ## A session's title, and a subagent's name on screen (Claude Code 2.1.303, measured 2026-10-19)
 
 - **`sessionTitle` does what `/rename` does.** `SessionStart`'s at startup, and `UserPromptSubmit`'s, each wrote a `custom-title` and an `agent-name` line with it, the two lines `/rename` writes. The next `UserPromptSubmit`, and a resume's `SessionStart`, carry it as `session_title`, so after lup's first start every resume brings lup's own earlier title; `sessionTitle` at a resume sets it again. Each resume writes the current title's two lines again.
