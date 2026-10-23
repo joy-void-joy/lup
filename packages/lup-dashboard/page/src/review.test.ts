@@ -1372,6 +1372,17 @@ describe("the drawers at the end of each agent's group", () => {
         const unflagged = SINCE.files.map((each) => ({ ...each, flags: [] }));
         expect(sinceSummary({ ...SINCE, files: [kept, ...unflagged] })).toBe("since you approved on feat · 1 to review · 1 reviewed");
         expect(sinceSummary({ ...SINCE, branch: null, files: [kept] })).toBe("since you approved · 1 reviewed");
+        const unread = (path: string, role: string) => ({
+            path,
+            file: { path, before: null, after: { kind: "text" as const, text: "x = 1\n" }, reading: { role, asks: [], findings: [] } },
+            version: `${path}1`,
+            flags: [],
+        });
+        const tests = [unread("test_reader.py", "test"), unread("reader.test.ts", "test"), unread("fixture.json", "data")];
+        expect(sinceSummary({ ...SINCE, files: [...SINCE.files, ...tests, kept] })).toBe(
+            "since you approved on feat · 1 to review · 1 flagged · 2 tests · 1 data file · 1 reviewed",
+        );
+        expect(sinceSummary({ ...SINCE, files: tests.slice(0, 1) })).toBe("since you approved on feat · 1 test");
     });
 
     it("lays each file standing as the operator last saw it in a line among the others, in their order, which Space a and A take", () => {

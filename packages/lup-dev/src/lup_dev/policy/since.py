@@ -41,9 +41,11 @@ from lup.types import Model, MutableModel
 from lup_dev.git import Git
 from lup_dev.host.protocol import Reply, Request
 from lup_dev.host.service import Handler, Reading, Route
+from lup_dev.inbox import store as inbox
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.store import ChangedFile, Conversation, Flagged, InboxError, Item
 from lup_dev.layout import Layout
+from lup_dev.policy.checkpoint import LastDeclaration
 from lup_dev.policy.landing import (
     Baseline,
     approved,
@@ -53,8 +55,10 @@ from lup_dev.policy.landing import (
     worktrees,
 )
 from lup_dev.policy.reviewed import Mark, Reviews
+from lup_dev.policy.roles import Roles
 from lup_dev.policy.store import Store
 from lup_dev.policy.worktrees import SessionIndex
+from lup_dev.stored import read_model
 
 type Version = Annotated[
     str, StringConstraints(pattern=r"^[0-9a-f]{40}([0-9a-f]{24})?$")
@@ -171,6 +175,9 @@ class Snapshot(Model, arbitrary_types_allowed=True):
     tree: str
     old: str | None
     branches: list[str]
+    roles: Roles | None
+    """The role of each path, by the repository's declaration the judge last
+    loaded; none where it has loaded none, and an unflagged file has no role."""
 
     def filed(self, path: Path) -> SinceFile | None:
         """Return the file at `path` as the drawer shows it: as it stands in the tree, from the version the operator last saw on the branches, else from the integration branch's tip; with no `file` where it stands as they saw it, and none where they saw none and it stands as at that tip."""
@@ -188,7 +195,15 @@ class Snapshot(Model, arbitrary_types_allowed=True):
         if before == after:
             return None if saw is None else shown
         latest = max(flags, key=lambda each: each.number, default=None)
-        reading = None if latest is None else self.baseline.reading(latest, after)
+        # A file nothing flagged has no reading of the judge's but its role, which
+        # the drawer folds a test or a data file whole by.
+        reading = (
+            self.baseline.reading(latest, after)
+            if latest is not None
+            else None
+            if self.roles is None
+            else inbox.Reading(role=self.roles.role(path))
+        )
         return shown.model_copy(
             update={"file": ChangedFile.of(path, before, after, reading)}
         )
@@ -301,9 +316,15 @@ class Reader(Model, arbitrary_types_allowed=True):
             tree=tree,
             old=old,
             branches=[] if branch is None else [branch],
+            roles=self.roles(party, root),
         )
         files = [found for path in paths if (found := snapshot.filed(path)) is not None]
         return Since(worktree=root, branch=branch, version=version, files=files)
+
+    def roles(self, party: Conversation, root: Path) -> Roles | None:
+        """Return the role of each path in the worktree at `root`, by the last of `party`'s repository's declarations the judge loaded (`LastDeclaration`): read from lup's state, never loaded here, which would run the declaration at each reading; none where the judge has loaded none."""
+        last = read_model(self.layout.declaration(party.repository), LastDeclaration)
+        return None if last is None else Roles(root=root, declaration=last.declaration)
 
     def reviewed(self, request: ReviewSince) -> SinceReviewed:
         """Mark each file of `request` reviewed at the version shown, approving the flagged writes on those still standing at it, and say which; refused on a detached `HEAD`, where nothing is marked by branch, and where a version shown isn't in the worktree's store."""

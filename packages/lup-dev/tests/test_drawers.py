@@ -9,6 +9,8 @@ import pytest
 from pydantic import ValidationError
 
 from lup_dev import cli
+from lup_dev.declaration.project import Project
+from lup_dev.declaration.resolve import Declaration
 from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.delivery import Delivery, changed_since
 from lup_dev.inbox.notices import Notices
@@ -31,6 +33,7 @@ from lup_dev.inbox.store import (
     Whereabouts,
 )
 from lup_dev.layout import InboxLayout, Layout
+from lup_dev.policy.checkpoint import LastDeclaration
 from lup_dev.policy.landing import Baseline, Saw
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.since import (
@@ -41,6 +44,7 @@ from lup_dev.policy.since import (
     SinceReviewed,
     ViewedFile,
 )
+from lup_dev.stored import write_model
 
 if TYPE_CHECKING:
     from conftest import FakeClock, Shell
@@ -230,6 +234,35 @@ def test_since_you_approved_shows_each_file_from_the_version_last_seen_and_a_fil
         (readme.path, None, clock.now()),
         (rooms.path, None, clock.now()),
     ]
+
+
+def test_a_file_nothing_flagged_carries_its_role_by_the_declaration_the_judge_last_loaded(
+    bare: Path, shell: Shell, clock: FakeClock, tmp_path: Path
+) -> None:
+    delivery = alone(tmp_path, clock)
+    branch = Branch(bare, shell, delivery, clock)
+    branch.wrote("src/rooms.test.ts", "test('rooms', () => {});\n")
+    branch.wrote("fixture.json", "{}\n")
+    branch.wrote("src/rooms.ts", "export const rooms = 1;\n")
+
+    # Before the judge has loaded any declaration of the repository, nothing says a file's role.
+    unknown = branch.reader(tmp_path).read(ShowSince(conversation=branch.party))
+    assert [each.file.reading for each in unknown.files if each.file] == [None] * 3
+
+    layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run")
+    last = LastDeclaration(declaration=Declaration.of(Project()), commit="c1")
+    write_model(layout.declaration(bare), last)
+    shown = branch.reader(tmp_path).read(ShowSince(conversation=branch.party))
+    roles = {
+        str(each.path): each.file.reading.role
+        for each in shown.files
+        if each.file is not None and each.file.reading is not None
+    }
+    assert roles == {
+        "fixture.json": "data",
+        "src/rooms.test.ts": "test",
+        "src/rooms.ts": "production",
+    }
 
 
 def reviewed_at(clock: FakeClock) -> datetime:

@@ -31,7 +31,7 @@
 // (`docs/dashboard.md`, *The review*). What it shares with a conversation's
 // text is in `comments.ts`.
 import { since } from "./agents";
-import { shownOnce, type Body, type ChangedFile, type Matter, type Row } from "./code";
+import { FOLDED, foldedOf, shownOnce, type Body, type ChangedFile, type Folded, type Matter, type Row } from "./code";
 import {
     calls,
     lastOf,
@@ -727,19 +727,33 @@ export function lastSpoken(entries: Entry[]): number {
     return entries.findLastIndex((each) => each.kind === "said" && each.by === "operator");
 }
 
-/** Say a "since you approved" drawer's summary line: on which branch, how many files changed since the operator last saw them, to review, how many have flagged writes waiting on them, which the branch's landing waits on, and how many stand as they saw them, reviewed: the agent's flags in one line, as the inbox lists them. */
+/**
+ * Say a "since you approved" drawer's summary line: on which branch, how many files changed since the operator last saw
+ * them are to review, how many have flagged writes waiting on them, which the branch's landing waits on, how many are
+ * tests or data files, folded whole and left out of what's to review (`foldedOf`), and how many stand as they saw them,
+ * reviewed: the agent's flags in one line, as the inbox lists them.
+ */
 export function sinceSummary(shown: Since | null): string {
     if (shown === null) {
         return "since you approved · not read yet";
     }
     const branch = shown.branch == null ? "" : ` on ${shown.branch}`;
     const files = shown.files ?? [];
-    const changed = files.filter((each) => each.file != null).length;
-    const kept = files.length - changed;
+    const changed = files.flatMap((each) => (each.file == null ? [] : [each.file]));
+    const folded = new Map<Folded, number>();
+    for (const each of changed) {
+        const why = foldedOf(each, false);
+        if (why !== null) {
+            folded.set(why, (folded.get(why) ?? 0) + 1);
+        }
+    }
+    const open = changed.length - [...folded.values()].reduce((sum, each) => sum + each, 0);
+    const kept = files.length - changed.length;
     const flagged = files.filter((each) => (each.flags ?? []).length > 0).length;
     const said = [
-        ...(changed === 0 ? [] : [`${changed} to review`]),
+        ...(open === 0 ? [] : [`${open} to review`]),
         ...(flagged === 0 ? [] : [`${flagged} flagged`]),
+        ...[...folded].map(([why, count]) => `${count} ${count === 1 ? FOLDED[why].one : FOLDED[why].many}`),
         ...(kept === 0 ? [] : [`${kept} reviewed`]),
     ];
     return `since you approved${branch} · ${said.length === 0 ? "nothing" : said.join(" · ")}`;
