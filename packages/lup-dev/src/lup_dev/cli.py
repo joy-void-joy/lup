@@ -24,7 +24,7 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, override
+from typing import TYPE_CHECKING, Annotated, get_args, override
 
 import typer
 from filelock import FileLock
@@ -64,7 +64,16 @@ from lup_dev.declaration.requirements import check as checked
 from lup_dev.declaration.resolve import Declaration, Selected, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM, GitHubError, named
-from lup_dev.gate import Check, Passed, Passes, Shell, at_commit, failed, report
+from lup_dev.gate import (
+    Amended,
+    Check,
+    Passed,
+    Passes,
+    Shell,
+    at_commit,
+    failed,
+    report,
+)
 from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, nul_separated
 from lup_dev.host.client import Detached, HostClient, RoomClient
@@ -98,8 +107,10 @@ from lup_dev.host.records import Called, Recorded
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import WorkerJudge, Workers
+from lup_dev.inbox.bearings import RepositoryBearings
 from lup_dev.inbox.delivery import (
     Delivery,
+    ItemKind,
     clocked,
     opening,
     standing,
@@ -114,6 +125,8 @@ from lup_dev.inbox.protocol import (
     FinishItem,
     Items,
     ListInbox,
+    ReadInbox,
+    Readout,
     SendItem,
     Settled,
     ShowContext,
@@ -192,7 +205,8 @@ from lup_dev.layout import (
     LaunchLayout,
     Layout,
 )
-from lup_dev.listing import given, latest, unlisted
+from lup_dev.listing import given, latest, many, unlisted
+from lup_dev.merging import Merging, merged
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import InboxAnnouncing, Response, answer
@@ -517,6 +531,9 @@ def host_serve(context: typer.Context) -> None:
         judge=WorkerJudge(modules=workers),
         spawns=SpawnRecords(adapters=known),
         post=delivery,
+        bearings=RepositoryBearings(
+            delivery=delivery, integration=settings.lup_integration_branch
+        ),
         routes=control_routes(delivery, recorded(), dashboard, layout),
         tools=room_tools(delivery, layout, remotes),
         room_routes=[*remote_routes(remotes), *clipboard_routes(Desktop.of(settings))],
@@ -901,9 +918,44 @@ def transcripts_show(
         ),
     ] = False,
 ) -> None:
-    """Show what you said in a session, each time after what the agent last said before it; or, with `--all`, the whole conversation."""
+    """Show what you said in a session, each time after what the agent last said before it; or, with `--all`, the whole conversation.
+
+    What you typed in its terminal is its record's alone. What reached a
+    session through lup, your reviews and answers among it, and what it said
+    to you, is its exchange in lup's inbox, which this leaves out: where the
+    inbox holds some, the last line says how many items, and the `lup-dev
+    inbox --conversation` that reads them.
+    """
     chosen = views.chosen(kept_sessions(Path.cwd()), session)
     typer.echo(views.whole(chosen) if everything else views.answered(chosen), nl=False)
+    for line in exchanged_through_lup(chosen.session):
+        typer.echo(f"\n{line}")
+
+
+def exchanged_through_lup(session: str) -> list[str]:
+    """Say how many items lup's inbox holds of `session`'s exchange, and the command that reads them; nothing where it holds none, or no host service answers, since this starts none. A service that can't answer is said."""
+    room = RoomClient()
+    asker: HostClient | FromRoom
+    if room.socket.exists():
+        asker = FromRoom(room=room)
+    else:
+        asker = host_client()
+        if not asker.answers():
+            return []
+    try:
+        read = asker.ask(ReadInbox(conversation=session, every=True, limit=1), Readout)
+    except HostError as unanswered:
+        return [f"lup's inbox wasn't asked for this session's exchange: {unanswered}"]
+    if not read.found:
+        return []
+    items = many(read.found, "item")
+    command = f"lup-dev inbox --conversation {session} --every --whole"
+    return [
+        (
+            f"Its exchange with you through lup, which this leaves out, is {items} "
+            f"in lup's inbox: `{command}` reads it."
+        )
+    ]
 
 
 @transcripts.command("search")
@@ -1063,16 +1115,70 @@ def inbox_list(
     limit: Annotated[
         int | None,
         typer.Option(
-            min=1, help="How many to list at most, the latest; left out, every one."
+            min=1,
+            help=(
+                "How many to list at most, the latest; left out, every one, or with "
+                "the options below 50 a line each, or 10 whole."
+            ),
         ),
     ] = None,
+    conversation: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                "Only one conversation's exchange, what it sent and was sent: a "
+                "session by its name, a subagent by its path (flow-review/explore) "
+                "or its own name, or either by its id or the id's start."
+            )
+        ),
+    ] = None,
+    subagents: Annotated[
+        bool,
+        typer.Option(
+            "--subagents", help="With --conversation, its subagents' items too."
+        ),
+    ] = False,
+    kinds: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--kind",
+            help=(
+                "Only items of this kind, as a tag's `kind` names it: turn's end, "
+                "note, question, review…; repeat it for several."
+            ),
+        ),
+    ] = None,
+    whole: Annotated[
+        bool,
+        typer.Option(
+            "--whole",
+            help=(
+                "Each item whole, your words on a conversation's item under it with "
+                "its replies to them."
+            ),
+        ),
+    ] = False,
+    every: Annotated[
+        bool,
+        typer.Option(
+            "--every",
+            help="Every item, answered, done or told too, not those waiting alone.",
+        ),
+    ] = False,
 ) -> None:
-    """List what waits for you from your agents, oldest first.
+    """List what waits for you from your agents, oldest first; or read the inbox as the agents' `inbox` tool does.
 
     Each item has a number, which `show`, `answer` and `done` take. `--since`
     and `--until` narrow them by when each was made, as `judged` and the agents'
     `inbox` do, and `--limit` lists the latest alone, saying how many it left
-    out and how to read them. Listing and `show` only read, so an agent's
+    out and how to read them. With `--conversation`, `--kind`, `--whole` or
+    `--every`, it reads your own exchange, the items you sent or were sent,
+    as the agents' `inbox` tool reads theirs, each line in the tool's form
+    rather than the one above (`@12  2026-10-23 14:00  a note from `w` to
+    you, waiting: …`): what waits for you unless `--every`, your exchange with
+    one conversation with `--conversation`, and each item whole, your words
+    on a conversation's item under it, with `--whole`. Listing and `show`
+    only read, so an agent's
     session runs them too: on the host, over the whole inbox; in a room, over
     its repository's items alone. Answering is the operator's, in their own
     terminal.
@@ -1088,6 +1194,29 @@ def inbox_list(
         )
         raise typer.BadParameter(message) from unread
     client = reading()
+    if conversation is not None or kinds or whole or every:
+        try:
+            kinded = (
+                TypeAdapter[list[ItemKind]](list[ItemKind]).validate_python(kinds)
+                if kinds
+                else None
+            )
+        except ValidationError as unread:
+            known = ", ".join(get_args(ItemKind.__value__))
+            message = f"--kind takes one of {known}"
+            raise typer.BadParameter(message) from unread
+        narrowed = ReadInbox(
+            since=asked.since,
+            until=asked.until,
+            limit=limit,
+            conversation=conversation,
+            subagents=subagents,
+            kinds=kinded,
+            whole=whole,
+            every=every,
+        )
+        typer.echo(client.ask(narrowed, Readout).text)
+        return
     items = sorted(client.ask(asked, Items).items, key=lambda item: item.made)
     if not items:
         narrowed = "" if asked == ListInbox() else " made in that time"
@@ -1747,6 +1876,7 @@ def launched(
             github=github,
             name=name or branch_name(worktree),
             exact=name is not None,
+            runner=declared.resolved.runner.command([]),
         )
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -2310,16 +2440,17 @@ def check(
     own engine, rebuilt when stale. Its modules' requirements are checked first,
     all at once: a required tool missing stops the gate before any step. Each
     step's outcome is reported, then each failure's output in full; the exit code
-    is non-zero when any step failed. With `--fix`, which the session landing work
-    runs on the merged result, ruff's safe fixes and the formatter rewrite the
-    worktree first.
+    is non-zero when any step failed. With `--fix`, ruff's safe fixes and the
+    formatter rewrite the worktree first.
 
     A pass is recorded for the worktree's files, in the repository's git
     directory, and a later run on the same files finds it and runs nothing but
     the builds stale in its worktree, unless `--again`. With `--at`, the gate
     runs on a commit, in a worktree made at it and removed after, unless it
     passed on the commit's files already: a push to the integration branch
-    from a room runs it so.
+    from a room runs it so. With `--fix` too, where the fixes change files,
+    they're committed in a commit with the same parents and message, which it
+    names and no branch does: `land` runs it so on the merge it makes.
     """
     root = toplevel(Path.cwd())
     passes = Passes.of(root, SystemClock())
@@ -2331,27 +2462,68 @@ def check(
         if failed(gated.outcomes):
             raise typer.Exit(code=1)
         return
-    if fix:
-        message = (
-            "`--fix` rewrites the worktree's files, and `--at` checks a commit's "
-            "files as committed"
-        )
-        raise typer.BadParameter(message, param_hint="'--fix'")
     runner = resolve(load(root, local=person_layer(root)).project).runner
 
     def stop(made: Path) -> None:
         scrapped(made, runner)
 
     outcome = at_commit(
-        root, at, Shell(), passes, runner, say=typer.echo, stop=stop, again=again
+        root,
+        at,
+        Shell(),
+        passes,
+        runner,
+        say=typer.echo,
+        stop=stop,
+        again=again,
+        fix=fix,
     )
     match outcome:
         case Passed():
+            typer.echo(outcome.said())
+        case Amended(ran=ran):
+            typer.echo(ran.output, nl=False)
             typer.echo(outcome.said())
         case GateRan(code=code, output=output):
             typer.echo(output, nl=False)
             if code != 0:
                 raise typer.Exit(code=code)
+
+
+@app.command("merge", hidden=True)
+def merge(
+    base: Annotated[
+        str,
+        typer.Argument(help="The commit it goes onto: the integration branch's tip."),
+    ],
+    tip: Annotated[str, typer.Argument(help="The commit merged: the branch's tip.")],
+) -> None:
+    """Merge `tip` onto `base` apart from every checkout, run the gate on the merge with its fixes, and print what came of it as JSON: what `land` runs in a launch's room.
+
+    The merge commit's message is read from standard input
+    (`lup_dev.merging`). What the gate says as it goes is on standard error.
+    """
+    root = toplevel(Path.cwd())
+    runner = resolve(load(root, local=person_layer(root)).project).runner
+
+    def stop(made: Path) -> None:
+        scrapped(made, runner)
+
+    def say(line: str) -> None:
+        typer.echo(line, err=True)
+
+    merging = merged(
+        root,
+        base,
+        tip,
+        sys.stdin.read(),
+        processes=Shell(),
+        passes=Passes.of(root, SystemClock()),
+        runner=runner,
+        say=say,
+        stop=stop,
+    )
+    typer.echo(TypeAdapter[Merging](Merging).dump_json(merging).decode())
 
 
 def scrapped(worktree: Path, runner: Runner) -> None:

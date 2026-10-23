@@ -533,6 +533,25 @@ def introduction(tools: list[ToolSpec]) -> str:
     return "\n".join([opening, "", *summaries(tools), "", direct])
 
 
+class Running(Model):
+    """A main conversation the service serves: its launch as it stands, the launch's name, and its session, the latest heard in it."""
+
+    launch: Register
+    name: str
+    session: str
+    """The runtime's id for the session."""
+
+
+class Bearings(ABC):
+    """What a new main session is told, once, as it starts, of where its repository stands (`inbox/bearings.py`)."""
+
+    @abstractmethod
+    async def told(
+        self, launch: Register, session: str, running: list[Running]
+    ) -> str | None:
+        """Return what session `session`'s own conversation, starting anew in `launch`, is told; `running` being the main conversations the service serves, its own among them. None tells nothing."""
+
+
 class Spoken(Model):
     """What a hook prints, what it tells the conversation from its inbox, and the title it gives the session's runtime."""
 
@@ -671,6 +690,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     spawns: Spawns | None = None
     """How each runtime recorded its subagents' spawns; none reads nothing, so
     subagents go without names until they rename themselves."""
+    bearings: Bearings | None = None
+    """What a new main session is told of where its repository stands as it
+    starts; none tells nothing."""
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's,
     returning those it rewrote; none leaves them as the launch wrote them."""
@@ -1025,7 +1047,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         before anything is told, so the note is theirs to read whether the end
         is held or let through. A session's own
         start, and its own prompt where the hook takes a title, name its launch
-        (`named_at`). A payload the courier can't read goes to the judge as it
+        (`named_at`); a session's own conversation starting anew is told its
+        bearings beside its name (`Bearings`), once. A payload the courier can't read goes to the judge as it
         is, which answers it or says it couldn't; where the courier can't add to
         the judge's answer, the answer goes out as the judge gave it, and what
         it would have told is put back. Either is said.
@@ -1060,7 +1083,18 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         named = (
             await self.named_at(request.launch, heard) if starting or prompted else None
         )
-        naming = [*([] if named is None else named.told), *said]
+        bearings = (
+            await self.bearings.told(
+                self.current(request), heard.session, self.running()
+            )
+            if starting and heard.fresh and self.bearings is not None
+            else None
+        )
+        naming = [
+            *([] if named is None else named.told),
+            *([] if bearings is None else [bearings]),
+            *said,
+        ]
         room = (
             heard.fits
             - len(answer.encode())
@@ -1370,6 +1404,18 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 return Activity(state="ended", since=at)
             case _:
                 return Activity(state="idle", since=at)
+
+    def running(self) -> list[Running]:
+        """Return the main conversation of each launch served, as its latest hook named it; none for a launch no hook has named one of."""
+        return [
+            Running(
+                launch=served.launch,
+                name=self.named(served.launch),
+                session=served.conversations.session,
+            )
+            for served in self.served.values()
+            if served.conversations.session is not None
+        ]
 
     def current(self, request: Register) -> Register:
         """Return launch `request` as it stands: as served, its name and its container with each rename since it registered; as given where it isn't served."""
@@ -1698,6 +1744,9 @@ class HostService(Model, arbitrary_types_allowed=True):
     spawns: Spawns | None = None
     """How each runtime recorded its subagents' spawns, read once at a
     subagent's first hook (`cli.py`'s adapters); none reads nothing."""
+    bearings: Bearings | None = None
+    """What a new main session is told of where its repository stands as it
+    starts (`inbox/bearings.py`, which `cli.py` gives); none tells nothing."""
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's when
     the service serves it again, returning those it rewrote: git's remote
@@ -1787,6 +1836,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             say=self.say,
             names=Names(path=self.layout.names),
             spawns=self.spawns,
+            bearings=self.bearings,
             refresh=self.refresh,
             podman=self.podman,
             changes=self.changes,

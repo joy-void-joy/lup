@@ -10,6 +10,7 @@ otherwise hang.
 import asyncio
 import gc
 import json
+import os
 import socket
 import sys
 import threading
@@ -31,18 +32,21 @@ from mcp.types import (
     ToolAnnotations,
     jsonrpc_message_adapter,
 )
-from pydantic import Field
+from pydantic import Field, TypeAdapter
 from typer.testing import CliRunner
 
 from lup.github.tools import GitHubTools
-from lup.programs import Ran
+from lup.programs import Ran, run
 from lup.rooms import Podman
 from lup.tools.speaking import SPEAKING
+from lup.transcripts.module import Transcripts
 from lup_dev import Modules, Project, cli
 from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
 from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.resolve import resolve
-from lup_dev.gate import Passed, Standing
+from lup_dev.declaration.runner import Uv
+from lup_dev.gate import Passed, Passes, Processes, Standing
+from lup_dev.gate import Ran as GateRan
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
@@ -62,6 +66,7 @@ from lup_dev.host.records import Called, Recorded, Said
 from lup_dev.host.service import UNDECIDED, HostService, Naming, Program, executed
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import LaunchJudge, LaunchModules, WorkerJudge, Workers
+from lup_dev.inbox.bearings import Repository, RepositoryBearings, Unlanded
 from lup_dev.inbox.delivery import Delivery, clocked, opening
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.parts import PartId, blocks
@@ -93,6 +98,7 @@ from lup_dev.inbox.protocol import (
     ShowTalk,
     Talked,
 )
+from lup_dev.inbox.reading import Narrowing, Reader
 from lup_dev.inbox.store import (
     Answer,
     Answered,
@@ -132,6 +138,7 @@ from lup_dev.inbox.store import (
     Text,
     Told,
     Waiting,
+    Whereabouts,
     cited,
     item_number,
     ranked,
@@ -143,6 +150,7 @@ from lup_dev.inbox.tools import specs
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import GitDirectoryLayout, InboxLayout, Layout
+from lup_dev.merging import Merging, merged
 from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import Bench, CallFinished, CallStarted
 from lup_dev.policy.flags import InboxFlagging
@@ -159,6 +167,7 @@ from lup_dev.policy.landing import LandingTools
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.remote.protocol import Remotes
+from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
 
 if TYPE_CHECKING:
@@ -375,8 +384,9 @@ def inboxed(
     modules: LaunchModules | None = None,
     remotes: Callable[[Delivery], Remotes] | None = None,
     rooms: Callable[[Program], Awaitable[Ran]] | None = None,
+    bearings: bool = False,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, and running in a launch's room through `rooms`, where given."""
+    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, and running in a launch's room through `rooms`, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     wakers = cli.Wakers(adapters=known)
@@ -404,6 +414,11 @@ def inboxed(
         courier=couriers,
         spawns=spawns or cli.SpawnRecords(adapters=known),
         post=delivery,
+        bearings=(
+            RepositoryBearings(delivery=delivery, integration="dev")
+            if bearings
+            else None
+        ),
         routes=cli.control_routes(delivery, recorded or {}, None, judging or machine),
         tools=[
             each.model_copy(update={"run": rooms})
@@ -2763,6 +2778,7 @@ def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_reads_a_c
         told = context(send(hook, bash("m2")))
         listed = inbox()
         shown = inbox("show", "2")
+        theirs = records.lup((hook, mcp), "inbox", {"every": True}, "a1", "Explore")
         unwithdrawn = [
             records.lup(
                 (hook, mcp), "withdraw", {"number": number, "why": "x"}, "a1", "Explore"
@@ -2786,6 +2802,22 @@ def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_reads_a_c
     assert shown == (
         f"@2, a problem from subagent a1 of claude session s1 in {worktree} to claude "
         f"session s1, your copy, made {clocked(clock.now())}, waiting:\n{found}\n"
+    )
+    # The subagent's own `inbox` lists its message, and the copy as whom it went to.
+    assert theirs == (
+        "\n".join(
+            [
+                (
+                    f"@1  {clocked(clock.now())}  a problem from you to claude session "
+                    f"s1, told at {clocked(clock.now())} (call): {found}"
+                ),
+                (
+                    f"@2  {clocked(clock.now())}  a problem from you to claude session "
+                    f"s1, the operator's copy, waiting: {found}"
+                ),
+            ]
+        ),
+        False,
     )
     # The copy is news, whatever its kind: it waits on the parent, not the operator.
     assert notices.raised == []
@@ -5421,7 +5453,7 @@ def test_an_items_moment_is_read_from_its_senders_record_around_its_call(
     assert "· called Bash\n\n→ called mcp__lup__note: this item\n\n" in shown.output
 
 
-def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
+def test_inbox_lists_this_repositorys_items_and_reads_any_of_them_whole(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     other = tmp_path / "other"
@@ -5465,13 +5497,14 @@ def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
     assert waiting.splitlines() == [
         f"@2  {at}  a note from {sub} to the operator, waiting: I assumed UTF-8.",
         f"@4  {at}  an answer from the operator to you, waiting: A model per kind.",
+        "Not listed: 1 item no longer waiting, which `every` lists.",
     ]
     assert every.splitlines() == [
         (
             f"@1  {at}  a question from you to the operator, answered at {at}, "
             "@4: Which parser?"
         ),
-        *waiting.splitlines(),
+        *waiting.splitlines()[:-1],
     ]
     assert asked == (
         f"@1, a question you sent to the operator at {at}, answered at {at}, "
@@ -5484,8 +5517,8 @@ def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
         "</answer>\n\nIt's waiting."
     )
     assert theirs == (
-        f"@2 is a note from {sub} to the operator, which isn't yours: only your "
-        "own items are read whole. Its first line: I assumed UTF-8."
+        f"@2, a note from {sub} to the operator at {at}, waiting:\n"
+        '<part id="2.1">I assumed UTF-8.</part>'
     )
     assert elsewhere == missing.replace("9", "3")
     assert missing == (
@@ -6288,6 +6321,12 @@ def test_a_sent_draft_approves_what_it_marks_read_and_held_changes_commented_on(
 
 # Landing a branch: `land`, waiting on what was flagged on it.
 
+NOTHING_GOING = (
+    "Nothing else is running or waiting to land: no subagent of yours lup hasn't "
+    "heard end, and no local branch off `dev`."
+)
+"""What a landing ends on where nothing else waits."""
+
 
 class Landings:
     """lup's layout of a repository for landing: its git directory bare, its worktrees under `tree/`, `dev` checked out in one and `feat` in another; its remote `origin` a bare forge on disk holding `main` and `dev`; and a launch of `runtime` served, started in `dev`'s worktree, whose room is the test's own machine, each command it runs there recorded."""
@@ -6316,6 +6355,10 @@ class Landings:
         """Each command run in the launch's room, as the host asked it."""
         self.containers: list[str] | None = None
         """The containers podman has, as the host's `podman container exists` is answered; none has every one."""
+        self.gate = MergeGate()
+        """The gate the room's `lup-dev merge` runs on a merge."""
+        self.unmerging: str | None = None
+        """What the room's `lup-dev merge` says failing, where it fails, as one without the command does."""
 
     def branched(self, name: str) -> Path:
         """Add a worktree on a new branch `name` from `dev`, and return its root."""
@@ -6336,9 +6379,45 @@ class Landings:
                 return await executed(
                     Program(command=command, payload="", directory=Path(workdir))
                 )
+            case [
+                "podman",
+                "exec",
+                "--interactive",
+                "--workdir",
+                workdir,
+                _,
+                "uv",
+                "run",
+                "lup-dev",
+                "merge",
+                base,
+                tip,
+            ]:
+                return await asyncio.to_thread(
+                    self.merging, Path(workdir), base, tip, program.payload
+                )
             case _:
                 message = f"the room was asked {program.command}"
                 raise AssertionError(message)
+
+    def merging(self, root: Path, base: str, tip: str, message: str) -> Ran:
+        """Run `lup-dev merge` as the room does, in this process, from the worktree at `root`, its gate the test's (`gate`); or fail as told (`unmerging`)."""
+        if self.unmerging is not None:
+            failing = self.unmerging.encode()
+            return Ran(command=["lup-dev", "merge"], status=2, error=failing)
+        merging = merged(
+            root,
+            base,
+            tip,
+            message,
+            processes=self.gate,
+            passes=Passes.of(root, self.clock),
+            runner=Uv(),
+            say=self.gate.said.append,
+            stop=self.gate.stopped.append,
+        )
+        printed = TypeAdapter[Merging](Merging).dump_json(merging)
+        return Ran(command=["lup-dev", "merge"], status=0, output=printed)
 
     def wrote(self, root: Path, path: str, content: str) -> None:
         """Write `path` in the worktree at `root`, and commit it."""
@@ -6371,7 +6450,12 @@ class Landings:
         return found or None
 
     def launched(
-        self, runtime: str, name: str = "one", worktree: Path | None = None
+        self,
+        runtime: str,
+        name: str = "one",
+        worktree: Path | None = None,
+        *,
+        runner: bool = True,
     ) -> Register:
         """Register a launch of `runtime` in the repository with the running service, started in `worktree`, `dev`'s by default, landing on `dev`."""
         judge = self.repository.parent / "judges" / "bin" / "lup-dev"
@@ -6391,6 +6475,7 @@ class Landings:
             ),
             github=None,
             name=name,
+            runner=["uv", "run"] if runner else None,
         )
         client(self.machine.host, self.clock).register(registered)
         return registered
@@ -6415,6 +6500,26 @@ class Landings:
             file=ChangedFile.of(Path(path), None, content.encode(), reading),
         )
         return client(self.machine.host, self.clock).ask(asking, Shown).item.number
+
+
+class MergeGate(Processes):
+    """The gate a merge runs in the room, going as the test says: its exit code, and the files its fixes rewrite, from the worktree's root."""
+
+    def __init__(self) -> None:
+        self.code = 0
+        self.fixes: dict[str, str] = {}
+        self.ran: list[list[str]] = []
+        self.said: list[str] = []
+        self.stopped: list[Path] = []
+
+    @override
+    def run(self, command: list[str], cwd: Path) -> GateRan:
+        self.ran.append(command)
+        for path, content in self.fixes.items():
+            (cwd / path).write_text(content)
+        return GateRan(
+            code=self.code, output=f"the gate's report, ending {self.code}\n"
+        )
 
 
 @pytest.fixture
@@ -6478,7 +6583,7 @@ def test_land_puts_the_branch_on_dev_and_cleans_up_what_it_landed_but_what_s_in_
         f"- the local branch `busy`, checked out in {busy}\n"
         f"- the worktree {kept}: `git worktree remove`: fatal: '{kept}' contains "
         "modified or untracked files, use --force to delete it\n"
-        f"- the local branch `kept`, checked out in {kept}"
+        f"- the local branch `kept`, checked out in {kept}\n{NOTHING_GOING}"
     )
     assert landings.on_forge("refs/heads/dev") == tip
     assert landings.on_forge("refs/heads/feat") is None
@@ -6599,7 +6704,7 @@ def test_land_says_once_where_no_container_is_there_and_names_each_worktree_left
         f"- the worktree {feat}\n"
         f"- the local branch `feat`, checked out in {feat}\n"
         f"- the worktree {kept}\n"
-        f"- the local branch `kept`, checked out in {kept}"
+        f"- the local branch `kept`, checked out in {kept}\n{NOTHING_GOING}"
     )
     assert landings.ran == [["podman", "container", "exists", "lup-one"]]
     assert feat.is_dir()
@@ -6651,7 +6756,8 @@ def test_land_leaves_alone_a_branch_with_nothing_of_its_own_and_a_flag_on_it_hol
         "- deleted the local branch `feat`\n"
         f"- removed the worktree {later}\n"
         "- deleted the local branch `later`\n"
-        "Left alone, `dev` having merged none of them: `fresh`, `mid`."
+        "Left alone, `dev` having merged none of them: `fresh`, `mid`.\n"
+        f"{NOTHING_GOING}"
     )
     assert holds == []
     assert states == [Waiting(), Waiting()]
@@ -6925,6 +7031,375 @@ def test_a_land_sent_again_across_a_restart_holds_on_its_holds_again_and_lands_o
     assert landings.on_forge("refs/heads/dev") == tip
 
 
+MESSAGE = "feat(rooms): rooms, `merged` by $(land)\n\nWhat changed, and why.  \n\n\n"
+"""A merge commit's message holding what a shell would read, and the blank lines `git commit -m` cleans away."""
+
+CLEANED = "feat(rooms): rooms, `merged` by $(land)\n\nWhat changed, and why."
+"""`MESSAGE` as the merge commit carries it."""
+
+
+def merging(landings: Landings, mcp: Path, message: str = MESSAGE) -> str:
+    """Land `feat` through the launch's `mcp`, merged with `message`: the answer, which mustn't be an error."""
+    answer, error = call(mcp, "land", {"branch": "feat", "message": message})
+    assert not error, answer
+    return answer
+
+
+def moved_on(landings: Landings) -> str:
+    """Commit on `dev` and push it, as a landing meanwhile would: return the remote's tip."""
+    landings.wrote(landings.dev, "src/pkg/hall.py", '"""Hall."""\n')
+    landings.shell.git(landings.repository, "push", "-q", "origin", "dev")
+    old = landings.on_forge("refs/heads/dev")
+    assert old is not None
+    return old
+
+
+def test_land_merges_a_branch_onto_dev_in_the_room_gates_the_merge_and_moves_dev_there(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    branch = shell.git(dev, "rev-parse", "feat")
+    old = moved_on(landings)
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    merge = landings.on_forge("refs/heads/dev")
+    assert answer == (
+        f"Merged `feat` onto `dev` as {merge}, and moved `dev` here to it: the gate "
+        "passed on it.\n"
+        f"Landed {merge} on `dev` at `origin`, which was at {old}.\n"
+        "Cleaned up after it:\n"
+        f"- removed the worktree {feat}\n"
+        "- deleted the local branch `feat`\n"
+        f"{NOTHING_GOING}"
+    )
+    assert merge is not None
+    assert shell.git(dev, "rev-parse", f"{merge}^@").splitlines() == [old, branch]
+    assert shell.git(dev, "log", "-1", "--format=%B", merge) == CLEANED
+    assert shell.git(dev, "rev-parse", "HEAD") == merge
+    assert (dev / "src/pkg/rooms.py").read_text() == '"""Rooms."""\n'
+    assert landings.gate.ran == [Uv().judging(["lup-dev", "check", "--fix"])]
+    assert landings.ran == [
+        ["podman", "container", "exists", "lup-one"],
+        [
+            *["podman", "exec", "--interactive", "--workdir", str(dev), "lup-one"],
+            *["uv", "run", "lup-dev", "merge", old, branch],
+        ],
+        [
+            *["podman", "exec", "--workdir", str(dev), "lup-one"],
+            *["git", "merge", "--ff-only", "--quiet", merge],
+        ],
+        ["podman", "container", "exists", "lup-one"],
+        [
+            *["podman", "exec", "--workdir", str(dev), "lup-one"],
+            *["git", "worktree", "remove", str(feat)],
+        ],
+    ]
+
+
+def test_land_amends_the_gate_s_fixes_into_the_merge_its_parents_and_message_kept(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    branch = shell.git(dev, "rev-parse", "feat")
+    old = moved_on(landings)
+    landings.gate.fixes = {"src/pkg/rooms.py": '"""Rooms, formatted."""\n'}
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    merge = shell.git(dev, "rev-parse", "HEAD")
+    assert answer.startswith(
+        f"Merged `feat` onto `dev` as {merge}, and moved `dev` here to it: the gate "
+        "passed on it, its fixes amended into it.\n"
+    )
+    assert shell.git(dev, "show", f"{merge}:src/pkg/rooms.py") == (
+        '"""Rooms, formatted."""'
+    )
+    assert shell.git(dev, "rev-parse", f"{merge}^@").splitlines() == [old, branch]
+    assert shell.git(dev, "log", "-1", "--format=%B", merge) == CLEANED
+    assert landings.on_forge("refs/heads/dev") == merge
+
+
+def test_land_of_a_branch_that_held_dev_finds_its_pass_and_the_gate_runs_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    moved_on(landings)
+    shell.git(feat, "merge", "-q", "--no-edit", "dev")
+    branch = shell.git(feat, "rev-parse", "HEAD")
+    landings.passing(branch)
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    merge = shell.git(dev, "rev-parse", "HEAD")
+    assert answer.startswith(
+        f"Merged `feat` onto `dev` as {merge}, and moved `dev` here to it: the gate "
+        "passed on its files already, so it ran nothing.\n"
+    )
+    assert landings.gate.ran == []
+    assert shell.git(dev, "rev-parse", f"{merge}^{{tree}}") == shell.git(
+        dev, "rev-parse", f"{branch}^{{tree}}"
+    )
+    assert landings.on_forge("refs/heads/dev") == merge
+
+
+def test_land_of_a_branch_that_conflicts_names_the_files_and_who_resolves_them_changing_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "README.md", "# Feat's\n")
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.wrote(dev, "README.md", "# Dev's\n")
+    landings.wrote(dev, "src/pkg/rooms.py", '"""Chambers."""\n')
+    before = shell.git(dev, "rev-parse", "HEAD")
+    old = landings.on_forge("refs/heads/dev")
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        landings.launched("claude", name="two", worktree=feat)
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    assert answer == (
+        "Not landed: merging `feat` onto `dev` conflicts, in:\n"
+        "- README.md\n"
+        "- src/pkg/rooms.py\n"
+        f"Nothing has changed. Merge `dev` into `feat` in its worktree, {feat} "
+        "(launch `two` started there), resolve, run the gate there, and call `land` "
+        "again."
+    )
+    assert shell.git(dev, "rev-parse", "HEAD") == before
+    assert landings.on_forge("refs/heads/dev") == old
+    assert feat.is_dir()
+    assert landings.gate.ran == []
+
+
+def test_land_where_the_gate_fails_on_the_merge_answers_its_report_changing_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    old = moved_on(landings)
+    landings.gate.code = 1
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    assert answer.startswith(
+        "Not landed: the gate failed on the merge of `feat` onto `dev`, "
+    )
+    assert answer.endswith(
+        ", which no branch names, and nothing has changed. Merge `dev` into `feat` "
+        "in its worktree, fix it there, run the gate, and call `land` again. The "
+        "gate's report:\nthe gate's report, ending 1"
+    )
+    assert shell.git(dev, "rev-parse", "HEAD") == old
+    assert landings.on_forge("refs/heads/dev") == old
+    assert feat.is_dir()
+
+
+def test_land_leaves_dev_where_uncommitted_work_is_in_the_way_and_lands_once_it_s_gone(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev = landings.feat, landings.dev
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    old = moved_on(landings)
+    (dev / "src/pkg/rooms.py").write_text("work not committed\n")
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, started("claude"))
+        refused = merging(landings, mcp)
+        (dev / "src/pkg/rooms.py").unlink()
+        answer = merging(landings, mcp)
+    assert refused.startswith(
+        f"Not landed: `dev`'s checkout, {dev}, wasn't fast-forwarded to the merge, "
+    )
+    assert "(`git merge --ff-only`: error: " in refused
+    assert refused.endswith(
+        "Nothing else has changed: commit or set aside what's in the way there, and "
+        "call `land` again, which finds the gate's pass and runs nothing."
+    )
+    merge = landings.on_forge("refs/heads/dev")
+    assert merge != old
+    assert answer.startswith(
+        f"Merged `feat` onto `dev` as {merge}, and moved `dev` here to it: the gate "
+        "passed on its files already, so it ran nothing.\n"
+    )
+    assert len(landings.gate.ran) == 1
+
+
+def test_land_refuses_a_merge_without_its_message_a_message_without_a_branch_and_a_launch_keeping_no_runner(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude", runner=False)
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, started("claude"))
+        unsaid, _ = call(mcp, "land", {"branch": "feat", "message": " \n"})
+        unmerged, _ = call(mcp, "land", {"message": "feat: rooms"})
+        unrun, _ = call(mcp, "land", {"branch": "feat", "message": "feat: rooms"})
+    assert unsaid == (
+        "Not landed: landing `feat` merges it with a merge commit, which needs its "
+        "`message`: what changed and why, how it was tested"
+    )
+    assert unmerged == (
+        "Not landed: without a branch to merge, `dev` lands as it is, making no "
+        "merge commit for a `message`: leave it out, or name the branch"
+    )
+    assert unrun == (
+        "Not landed: this launch began before lup kept the project's runner with "
+        "it, which the merge runs in your room through: relaunch it, or merge "
+        "`feat` into `dev` yourself and call `land` without a branch."
+    )
+    assert landings.ran == []
+
+
+def test_land_where_the_room_can_t_merge_says_what_it_said_changing_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    old = landings.on_forge("refs/heads/dev")
+    landings.unmerging = "Error: No such command 'merge'.\n"
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    assert answer == (
+        "Not landed: the merge couldn't be made in your room, and nothing has "
+        "changed. `lup-dev merge` said:\nError: No such command 'merge'."
+    )
+    assert landings.shell.git(landings.dev, "rev-parse", "HEAD") == old
+    assert landings.on_forge("refs/heads/dev") == old
+
+
+def test_land_of_a_branch_dev_holds_already_lands_dev_as_it_is(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, mcp)
+        again = merging(landings, mcp)
+    assert answer.startswith(
+        "`feat` is in `dev`'s history already, so nothing was merged: `dev` lands "
+        f"as it is.\nLanded {tip} on `dev` at `origin`, which was at {old}.\n"
+    )
+    assert again == ("Not landed: this repository has no local branch `feat`")
+    assert landings.gate.ran == []
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_land_ends_on_the_subagents_lup_hasn_t_heard_end_and_the_branches_off_dev(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    idea = landings.branched("idea")
+    landings.wrote(idea, "src/pkg/idea.py", '"""Idea."""\n')
+    landings.shell.git(landings.repository, "branch", "draft", "idea")
+    with inboxed(machine, clock, notices, said, spawns=Unguided(), rooms=landings.room):
+        landings.launched("claude")
+        hook = machine.host.launch("one").hook
+        send(hook, started("claude"))
+        send(hook, bash("b1", agent_id="a1", agent_type="general-purpose"))
+        send(hook, bash("b2", agent_id="a2", agent_type="general-purpose"))
+        send(hook, claude("SubagentStop", agent_id="a2", agent_type="general-purpose"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    assert answer.endswith(
+        "Still running or waiting to land:\n"
+        "- `one/sub-a1`, a subagent of yours lup hasn't heard end\n"
+        "- `draft`, checked out nowhere\n"
+        f"- `idea`, checked out in {idea}, where no conversation lup knows of works"
+    )
+
+
+def test_a_hold_declined_after_a_merge_leaves_it_on_dev_here_and_says_so(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    rooms, path = '"""Rooms."""\n', "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, rooms)
+    old = landings.on_forge("refs/heads/dev")
+    session = lander(landings, "claude")
+    with (
+        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, started("claude"))
+        landings.flag(path, rooms, session)
+        landing = pool.submit(merging, landings, mcp)
+        assert delivery.holding.wait(timeout=60)
+        [hold] = [
+            each
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.reason, HeldChange)
+        ]
+        inbox("answer", str(hold.number), "--decline", "--comment", "Not yet.")
+        answer = landing.result(timeout=60)
+    merge = landings.shell.git(landings.dev, "rev-parse", "HEAD")
+    assert f"- @{hold.number} (`{path}`): declined\n" in answer
+    assert (
+        f"`dev` here holds the merge, {merge}, which `origin`'s doesn't yet: the "
+        "next `land` lands it.\n"
+    ) in answer
+    assert landings.on_forge("refs/heads/dev") == old
+    assert merge != old
+
+
 def test_lup_s_tools_say_which_may_be_sent_again_across_a_restart(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
@@ -7084,3 +7559,609 @@ def test_the_github_module_s_tools_answer_through_the_server_with_and_without_ar
     assert numbered == (refused.format("read_issue", "read-issues"), True)
     assert searched == (refused.format("find_issues", "read-issues"), True)
     assert filed == (refused.format("file_issue", "file-issue"), True)
+
+
+def exchanged(
+    machine: Layout, clock: FakeClock, tmp_path: Path, records: Subagents
+) -> Path:
+    """Make an exchange in a launch named `w`, and return its tool socket: session `s0`'s note at 12:00; then at 13:00 session `s1`'s note, its question, and its subagent `explore-auth`'s note; at 14:00 the operator's answer, their review commenting on a passage of the note with a message, `s1`'s reply to the comment by its id, its turn's end and the operator's reply to it, and the subagent's end."""
+    launched(machine, clock, tmp_path / "w", "one", "claude")
+    hook = machine.host.launch("one").hook
+    mcp = machine.host.launch("one").mcp
+    send(hook, claude("SessionStart", source="startup", session_id="s0"))
+    call(mcp, "note", {"remark": "An earlier session's note."})
+    clock.sleep(3600)
+    send(hook, claude("SessionStart", source="startup"))
+    call(mcp, "note", {"remark": "I assumed UTF-8.\n\nThe parser reads twenty kinds."})
+    asking: dict[str, JsonValue] = {
+        "decision": "One model per kind?",
+        "lean": "Yes, each validates.",
+    }
+    call(mcp, "ask", {"question": "Which parser?", "decisions": [asking]})
+    send(hook, records.spawn("t1", name="explore-auth"))
+    records.recorded("a1", "Explore", "t1", name="explore-auth")
+    send(hook, records.call("a1", "Explore", "c1"))
+    records.lup((hook, mcp), "note", {"remark": "Found the token."}, "a1", "Explore")
+    clock.sleep(3600)
+    inbox("answer", "3", "--leaning", "1", "--comment", "Go.")
+    passage = "The parser reads twenty kinds."
+    comment = Comment(
+        item=2,
+        quote=Quote(text=passage, start=18, end=18 + len(passage)),
+        text="Why twenty?",
+    )
+    own = Conversation(
+        repository=tmp_path / "w" / ".git", runtime="claude", session="s1"
+    )
+    drafting(
+        machine,
+        clock,
+        Draft(comments=[comment], letters=[Letter(to=own, text="Carry on.")]),
+    )
+    sending(machine, clock)
+    reply: dict[str, JsonValue] = {"to": "6.1", "text": "The grammar has twenty."}
+    call(mcp, "reply", {"replies": [reply]})
+    ending = claude(
+        "Stop", stop_hook_active=False, last_assistant_message="Done for now."
+    )
+    send(hook, ending)
+    inbox("answer", "7", "--comment", "Thanks, rest.")
+    send(hook, records.ended("a1", "Explore", "The token is in auth.py."))
+    return mcp
+
+
+def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_each(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        mcp = exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+
+        def reading(**arguments: JsonValue) -> str:
+            text, error = call(mcp, "inbox", arguments)
+            assert not error, text
+            return text
+
+        every = reading(conversation="w", every=True)
+        waiting = reading(conversation="w")
+        below = reading(conversation="s1", every=True, subagents=True)
+        kinds = reading(conversation="s1", every=True, kinds=["question", "answer"])
+        earlier = reading(conversation="s0", every=True)
+        path = reading(conversation="w/explore-auth", every=True)
+        nobody = reading(conversation="nobody")
+    several = (
+        "`w` names 2 conversations; this reads the one last heard, claude session "
+        "s1, at 2026-10-01 14:00. The others, which `conversation` reads by id: "
+        "claude session s0, last heard 2026-10-01 12:00."
+    )
+    at, then = "2026-10-01 13:00", "2026-10-01 14:00"
+    told = f"told at {then} (turn's end)"
+    lines = {
+        2: f"@2  {at}  a note from you to the operator, waiting: I assumed UTF-8.",
+        3: (
+            f"@3  {at}  a question from you to the operator, answered at {then}, "
+            "@5: Which parser?"
+        ),
+        4: (
+            f"@4  {at}  a note from `w/explore-auth` to the operator, waiting: "
+            "Found the token."
+        ),
+        5: f"@5  {then}  an answer from the operator to you, {told}: Go.",
+        6: f"@6  {then}  a review from the operator to you, {told}: Carry on.",
+        7: (
+            f"@7  {then}  the end of a turn from you to the operator, done at "
+            f"{then}: Done for now."
+        ),
+        8: f"@8  {then}  a note from the operator to you, waiting: Thanks, rest.",
+        9: (
+            f"@9  {then}  the end of a subagent's turn from `w/explore-auth` to "
+            "you, waiting: It ended its turn. Its last message reaches you from "
+            "your runtime."
+        ),
+    }
+    assert every.splitlines() == [
+        several,
+        "The exchange of `w` (claude session s1): every item, oldest first.",
+        *(lines[number] for number in [2, 3, 5, 6, 7, 8, 9]),
+    ]
+    assert waiting.splitlines() == [
+        several,
+        "The exchange of `w` (claude session s1): what still waits, oldest first.",
+        lines[2],
+        lines[8],
+        lines[9],
+        "Not listed: 4 items no longer waiting, which `every` lists.",
+    ]
+    assert below.splitlines() == [
+        (
+            "The exchange of `w` (claude session s1) and its 1 subagent: every "
+            "item, oldest first."
+        ),
+        *(lines[number] for number in range(2, 10)),
+    ]
+    assert kinds.splitlines()[1:] == [lines[3], lines[5]]
+    assert earlier.splitlines() == [
+        "The exchange of `w` (claude session s0): every item, oldest first.",
+        (
+            "@1  2026-10-01 12:00  a note from `w` to the operator, waiting: An "
+            "earlier session's note."
+        ),
+    ]
+    assert path.splitlines() == [
+        (
+            "The exchange of `w/explore-auth` (subagent a1 of claude session s1): "
+            "every item, oldest first."
+        ),
+        lines[4],
+        lines[9],
+    ]
+    assert nobody == (
+        "No conversation about this repository is `nobody`: `conversation` takes "
+        "a session's name, a subagent's path or its own name, or the runtime's id "
+        "for either, or the id's start, as `inbox` lines name them."
+    )
+
+
+def test_inbox_reads_an_exchange_whole_the_operators_words_under_what_they_answer(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        mcp = exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+
+        def reading(**arguments: JsonValue) -> str:
+            text, error = call(mcp, "inbox", arguments)
+            assert not error, text
+            return text
+
+        whole = reading(conversation="s1", every=True, whole=True)
+        latest = reading(conversation="s1", every=True, whole=True, limit=1)
+    at, then = "2026-10-01 13:00", "2026-10-01 14:00"
+    told = f"told at {then} (turn's end)"
+    assert whole == "\n".join(
+        [
+            "The exchange of `w` (claude session s1): every item, oldest first.",
+            f"@2  {at}  a note from you to the operator, waiting:",
+            '<item item="2" kind="note" from="w">',
+            "I assumed UTF-8.",
+            "",
+            "The parser reads twenty kinds.",
+            f'<review item="6" from="operator" made="{then}">',
+            '<quote part="2.2">The parser reads twenty kinds.</quote>',
+            '<reply id="6.1">Why twenty?</reply>',
+            '<reply id="6.2" to="6.1" from="w">The grammar has twenty.</reply>',
+            "</review>",
+            "</item>",
+            "",
+            f"@3  {at}  a question from you to the operator, answered at {then}, @5:",
+            '<item item="3" kind="question" from="w">',
+            "Which parser?",
+            "1. One model per kind?",
+            "   lean: Yes, each validates.",
+            f'<answer item="5" from="operator" made="{then}">',
+            (
+                '<decision number="1" lean="Yes, each validates." verdict="leaning: '
+                'they go with the lean" id="5.1">One model per kind?</decision>'
+            ),
+            '<comment id="5.2">Go.</comment>',
+            "</answer>",
+            "</item>",
+            "",
+            f"@5  {then}  an answer from the operator to you, {told}:",
+            (
+                '<answer item="5" from="operator" question="3">What it says on @3 '
+                "is told under it.</answer>"
+            ),
+            "",
+            f"@6  {then}  a review from the operator to you, {told}:",
+            '<review item="6" from="operator" covers="2">',
+            "<message>Carry on.</message>",
+            "What it says on @2 is told under it.",
+            "</review>",
+            "",
+            f"@7  {then}  the end of a turn from you to the operator, done at {then}:",
+            '<item item="7" kind="turn\'s end" from="w">',
+            "Done for now.",
+            f'<message item="8" from="operator" made="{then}">',
+            '<comment id="8.1">Thanks, rest.</comment>',
+            "</message>",
+            "</item>",
+            "",
+            f"@8  {then}  a note from the operator to you, waiting:",
+            (
+                '<message item="8" from="operator" kind="note">What it says on @7 '
+                "is told under it.</message>"
+            ),
+            "",
+            (
+                f"@9  {then}  the end of a subagent's turn from `w/explore-auth` to "
+                "you, waiting:"
+            ),
+            (
+                '<item item="9" kind="ended" from="w/explore-auth">It ended its '
+                "turn. Its last message reaches you from your runtime.</item>"
+            ),
+        ]
+    )
+    assert latest.split("\n\n")[-1] == (
+        'Not listed: 2 earlier items, which `until` "2026-10-01T14:00:00+00:00" '
+        "reads; a `limit` of 7 lists them all."
+    )
+    assert '<review item="6" from="operator" covers="2">' in latest
+    assert '<on item="2" kind="note">' in latest
+
+
+def test_lup_dev_inbox_narrows_the_operators_own_exchange_as_the_tool_reads(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+        plain = inbox()
+        waiting = inbox("--conversation", "w")
+        every = inbox("--every")
+        questions = inbox("--kind", "question", "--every")
+        whole = inbox("--conversation", "s1", "--whole", "--every", "--limit", "2")
+        unknown = runner.invoke(cli.app, ["inbox", "--kind", "nonsense"])
+    assert [line.split()[0] for line in plain.splitlines()] == ["@1", "@2", "@4"]
+    assert waiting.splitlines() == [
+        (
+            "`w` names 2 conversations; this reads the one last heard, claude "
+            "session s1, at 2026-10-01 14:00. The others, which `--conversation` "
+            "reads by id: claude session s0, last heard 2026-10-01 12:00."
+        ),
+        "The exchange of `w` (claude session s1): what still waits, oldest first.",
+        "@2  2026-10-01 13:00  a note from `w` to you, waiting: I assumed UTF-8.",
+        "Not listed: 5 items not waiting for you, which `--every` lists.",
+    ]
+    s0, s1 = "`w` (claude session s0)", "`w` (claude session s1)"
+    sub = "`w/explore-auth` (subagent a1 of claude session s1)"
+    assert [line.partition("  2026-10-01 ")[2] for line in every.splitlines()] == [
+        f"12:00  a note from {s0} to you, waiting: An earlier session's note.",
+        f"13:00  a note from {s1} to you, waiting: I assumed UTF-8.",
+        (
+            f"13:00  a question from {s1} to you, answered at 2026-10-01 14:00, "
+            "@5: Which parser?"
+        ),
+        f"13:00  a note from {sub} to you, waiting: Found the token.",
+        (
+            f"14:00  an answer from you to {s1}, told at 2026-10-01 14:00 (turn's "
+            "end): Go."
+        ),
+        (
+            f"14:00  a review from you to {s1}, told at 2026-10-01 14:00 (turn's "
+            "end): Carry on."
+        ),
+        (
+            f"14:00  the end of a turn from {s1} to you, done at 2026-10-01 14:00: "
+            "Done for now."
+        ),
+        f"14:00  a note from you to {s1}, waiting: Thanks, rest.",
+    ]
+    assert [line.split()[0] for line in questions.splitlines() if line] == ["@3"]
+    assert '<item item="7" kind="turn\'s end" from="w">' in whole
+    assert "a `--limit` of 6 lists them all." in whole
+    assert unknown.exit_code == 2
+    assert "--kind takes one of turn's end, note, problem" in unknown.output
+
+
+def test_lup_dev_transcripts_show_says_how_much_of_the_exchange_lups_inbox_holds(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    shell: Shell,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    shell.git(repository, "init", "--quiet")
+    monkeypatch.chdir(repository)
+    kept = Layout.of(LupDevSettings()).module_data(
+        Transcripts.name, (repository / ".git").resolve()
+    )
+    folder = kept / "claude" / "projects" / "-repo"
+    folder.mkdir(parents=True)
+    typed = {
+        "timestamp": "2026-10-01T12:00:00Z",
+        "type": "user",
+        "origin": {"kind": "human"},
+        "cwd": "/w",
+        "message": {"role": "user", "content": "Read the parser."},
+    }
+    for session in ["s1", "s7"]:
+        (folder / f"{session}.jsonl").write_text(json.dumps(typed) + "\n")
+    with inboxed(machine, clock, notices, said):
+        exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+        shown = runner.invoke(cli.app, ["transcripts", "show", "s1"])
+        unheard = runner.invoke(cli.app, ["transcripts", "show", "s7"])
+    unserved = runner.invoke(cli.app, ["transcripts", "show", "s1"])
+    assert shown.exit_code == 0, shown.output
+    assert shown.output.endswith(
+        "    Read the parser.\n\nIts exchange with you through lup, which this "
+        "leaves out, is 6 items in lup's inbox: `lup-dev inbox --conversation s1 "
+        "--every --whole` reads it.\n"
+    )
+    assert unheard.output.endswith("    Read the parser.\n")
+    assert unserved.output == shown.output.partition("\n\nIts exchange")[0] + "\n"
+
+
+def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_name(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    inbox = Inbox.opened(
+        Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path).inbox
+    )
+    main = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    parser = main.model_copy(update={"agent": "a1"})
+    lexer = main.model_copy(update={"agent": "a2"})
+    at = clock.now()
+    for each, parent in [(parser, main), (lexer, parser)]:
+        inbox.placed(
+            Whereabouts(
+                conversation=each,
+                launch="one",
+                worktree=tmp_path,
+                since=at,
+                parent=parent,
+            )
+        )
+    inbox.made(Message(kind="note", text="Lexing."), lexer, Operator(), tmp_path, at)
+    inbox.made(Ended(name="parser", said="Parsed."), parser, main, tmp_path, at)
+    reader = Reader(
+        delivery=Delivery.model_construct(inbox=inbox, clock=clock),
+        reader=Operator(),
+        names={"s1": "w"},
+    )
+    items = inbox.about(tmp_path / ".git")
+    lexing = reader.read(items, Narrowing(conversation="w/parser/a2", every=True))
+    parsing = reader.read(
+        items, Narrowing(conversation="parser", every=True, subagents=True)
+    )
+    assert lexing.text.splitlines() == [
+        (
+            "The exchange of `w/parser/a2` (subagent a2 of claude session s1): every "
+            "item, oldest first."
+        ),
+        "@1  2026-10-01 12:00  a note from `w/parser/a2` to you, waiting: Lexing.",
+    ]
+    assert parsing.found == 2
+    assert parsing.text.splitlines()[0] == (
+        "The exchange of `w/parser` (subagent a1 of claude session s1) and its 1 "
+        "subagent: every item, oldest first."
+    )
+
+
+def dated(root: Path, message: str, at: str) -> str:
+    """Commit everything in `root`'s worktree as made at `at`, and return the commit's short id: what landed since a moment is read by its date."""
+    when = {**os.environ, "GIT_AUTHOR_DATE": at, "GIT_COMMITTER_DATE": at}
+    run("git", "add", "-A", cwd=root)
+    run("git", "commit", "-q", "-m", message, cwd=root, env=when)
+    return run("git", "rev-parse", "--short", "HEAD", cwd=root).text().strip()
+
+
+def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_starts(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    shell: Shell,
+) -> None:
+    repository = tmp_path / "w"
+    repository.mkdir()
+    shell.git(repository, "init", "-q", "-b", "dev")
+    (repository / ".git" / "info" / "exclude").write_text("judges/\n")
+    (repository / "README.md").write_text("lup\n")
+    dated(repository, "Start.", "2026-10-01T11:00:00+00:00")
+    origin = tmp_path / "origin.git"
+    shell.git(tmp_path, "init", "-q", "--bare", str(origin))
+    shell.git(repository, "remote", "add", "origin", str(origin))
+    shell.git(repository, "push", "-q", "origin", "dev")
+    feature = tmp_path / "parser"
+    shell.git(repository, "worktree", "add", "-q", "-b", "parser", str(feature))
+    (feature / "parser.py").write_text("header = 1\n")
+    parsed = dated(feature, "Parse the header.", "2026-10-01T11:30:00+00:00")
+    (feature / "draft.md").write_text("A draft.\n")
+    with inboxed(machine, clock, notices, said, bearings=True):
+        launched(machine, clock, repository, "one", "claude")
+        hook = machine.host.launch("one").hook
+        mcp = machine.host.launch("one").mcp
+
+        def started(source: str, session: str) -> str:
+            clock.sleep(60)
+            return send(hook, claude("SessionStart", source=source, session_id=session))
+
+        first = context(started("startup", "s0"))
+        call(mcp, "ask", {"question": "Which parser?"})
+        call(mcp, "note", {"remark": "The header comes first."})
+        (repository / "lexer.py").write_text("tokens = []\n")
+        lexed = dated(repository, "Land the lexer.", "2026-10-01T12:30:00+00:00")
+        shell.git(repository, "push", "-q", "origin", "dev")
+        clock.sleep(3600)
+        resumed = context(started("resume", "s0"))
+        second = context(started("startup", "s1"))
+        compacted = context(started("compact", "s1"))
+        cleared = context(started("clear", "s2"))
+        for name, session in [("two", "t2"), ("three", "t3")]:
+            (tmp_path / name).mkdir()
+            launched(
+                machine,
+                clock,
+                tmp_path / name,
+                name,
+                "claude",
+                repository=repository / ".git",
+            )
+            clock.sleep(60)
+            send(
+                machine.host.launch(name).hook,
+                claude("SessionStart", source="resume", session_id=session),
+            )
+        beside = context(started("startup", "s4"))
+    opening = (
+        "lup: where this repository stands as you start, told once. Each line "
+        "says where to read more."
+    )
+    unlanded = (
+        "Not landed on `origin/dev` (`git log <branch> --not --remotes` reads a "
+        "branch's commits; `git -C <worktree> status` its changes):\n"
+        f'- `parser`, in {feature}: 1 commit, the last {parsed} "Parse the '
+        'header.", 2026-10-01 11:30; 1 file changed, not committed.'
+    )
+    assert first.split("\n\n") == [
+        opening,
+        unlanded,
+        "Nothing waits for the operator.",
+        "No main session of this repository was heard before you.",
+    ]
+    assert resumed == ""
+    assert compacted == ""
+    s0 = "`w` (claude session s0)"
+    assert second == "\n\n".join(
+        [
+            opening,
+            unlanded,
+            "\n".join(
+                [
+                    (
+                        f"Waiting for the operator: 2 items, all from {s0} and its "
+                        "subagents (`inbox` lists them; with `number`, one whole):"
+                    ),
+                    "- @1 a question from `w`: Which parser?",
+                    (
+                        "- News, by kind: 1 `note` (`inbox` with those `kinds` lists "
+                        "them)."
+                    ),
+                ]
+            ),
+            "\n".join(
+                [
+                    (
+                        f"Landed on `origin/dev` since {s0}, the last main session "
+                        "(last heard at 2026-10-01 12:01), started at 2026-10-01 "
+                        "12:01 (`git show <commit>` reads one):"
+                    ),
+                    f"- {lexed} Land the lexer.",
+                    (
+                        f"What {s0} and the operator said to each other: `inbox` "
+                        'with `conversation` "s0", `every` and `whole`.'
+                    ),
+                ]
+            ),
+        ]
+    )
+    assert cleared.splitlines()[-3:] == [
+        (
+            "Landed on `origin/dev` since `w` (claude session s1), the last main "
+            "session (last heard at 2026-10-01 13:03), started at 2026-10-01 13:03 "
+            "(`git show <commit>` reads one):"
+        ),
+        "- Nothing.",
+        (
+            "What `w` (claude session s1) and the operator said to each other: "
+            '`inbox` with `conversation` "s1", `every` and `whole`.'
+        ),
+    ]
+    assert "Waiting for the operator: 2 items (`inbox` lists them" in cleared
+    assert (
+        "Main sessions of this repository running beside you:\n"
+        f"- `two` (claude session t2), in {tmp_path / 'two'}.\n"
+        f"- `three` (claude session t3), in {tmp_path / 'three'}."
+    ) in beside
+    assert "`three` (claude session t3), the last main session (still running)" in (
+        beside
+    )
+
+
+def test_the_bearings_list_what_waits_on_the_operator_the_last_sessions_first(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
+    inbox = Inbox.opened(layout.inbox)
+    last = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    worker = last.model_copy(update={"agent": "a1"})
+    other = last.model_copy(update={"session": "s9"})
+    at = clock.now()
+    inbox.placed(
+        Whereabouts(conversation=last, launch="one", worktree=tmp_path, since=at)
+    )
+
+    def flag(branch: str) -> Flagged:
+        return Flagged(
+            text="parser.py landed, flagged.",
+            summary="new-file",
+            worktree=tmp_path,
+            path=Path("parser.py"),
+            branch=branch,
+        )
+
+    for reason, sender in [
+        (Question(text="Which parser?"), last),
+        (flag("parser"), last),
+        (flag("parser"), worker),
+        (HowItWent(text="Calm."), worker),
+        (flag("lexer"), worker),
+        (Message(kind="note", text="Header first."), worker),
+        (Question(text="Which lexer?"), other),
+    ]:
+        inbox.made(reason, sender, Operator(), tmp_path, at)
+    bearings = RepositoryBearings(
+        delivery=Delivery.model_construct(inbox=inbox, clock=clock, layout=layout.host),
+        integration="dev",
+    )
+    starting = last.model_copy(update={"session": "s2"})
+    page = bearings.page(
+        starting,
+        last,
+        Repository(
+            unlanded=[
+                Unlanded(
+                    branch="lexer",
+                    worktree=None,
+                    commits=2,
+                    changed=0,
+                    last='abc1234 "Lex."',
+                    at=at,
+                )
+            ],
+            landed=[],
+            onto="dev",
+        ),
+        [],
+    )
+    unlanded, waiting = page.split("\n\n")[1:3]
+    assert unlanded == (
+        "Not landed on `dev` (`git log <branch> --not --remotes` reads a "
+        "branch's commits; `git -C <worktree> status` its changes):\n"
+        '- `lexer`, with no worktree: 2 commits, the last abc1234 "Lex.", '
+        "2026-10-01 12:00."
+    )
+    assert waiting.splitlines() == [
+        (
+            "Waiting for the operator: 7 items, 6 from claude session s1 and its "
+            "subagents, listed first (`inbox` lists them; with `number`, one whole):"
+        ),
+        "- @1 a question from claude session s1: Which parser?",
+        (
+            "- News, by kind: 1 `how it went`, 1 `note` (`inbox` with those `kinds` "
+            "lists them)."
+        ),
+        "- 3 flagged writes, holding landings: `parser`'s, @2, @3; `lexer`'s, @5.",
+        "- @7 a question from claude session s9: Which lexer?",
+    ]
+    nowhere = Register(
+        launch="one",
+        runtime="claude",
+        worktree=tmp_path,
+        repository=tmp_path / ".git",
+        judge=tmp_path / "lup-dev",
+        container="lup-one",
+        limits=Limits(actions=[], protected=[]),
+        github=None,
+    )
+    unread = asyncio.run(bearings.told(nowhere, "s2", [])) or ""
+    assert unread.split("\n\n")[1].startswith(
+        "lup couldn't read this repository's git: git "
+    )
+    assert "- Unread: git couldn't be read, as said above." in unread

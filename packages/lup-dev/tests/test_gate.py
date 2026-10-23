@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 from filelock import FileLock
+from pydantic import TypeAdapter
 from typer.testing import CliRunner
 
 from lup_dev import Requirement, cli
@@ -22,6 +23,7 @@ from lup_dev.declaration.requirements import (
 )
 from lup_dev.declaration.runner import Plain, Uv
 from lup_dev.gate import (
+    Amended,
     Check,
     Fixes,
     Gated,
@@ -38,6 +40,7 @@ from lup_dev.gate import (
     report,
     standing,
 )
+from lup_dev.merging import Merged, Merging
 
 if TYPE_CHECKING:
     from conftest import FakeClock, Kit
@@ -734,7 +737,8 @@ def gated_at(
     clock: FakeClock,
     *,
     again: bool = False,
-) -> tuple[Passed | Ran, list[str], list[Path]]:
+    fix: bool = False,
+) -> tuple[Passed | Ran | Amended, list[str], list[Path]]:
     """Run the gate at `revision` from `repo`: what it gave, what it said, and each worktree it stopped."""
     said: list[str] = []
     stopped: list[Path] = []
@@ -747,6 +751,7 @@ def gated_at(
         say=said.append,
         stop=stopped.append,
         again=again,
+        fix=fix,
     )
     return outcome, said, stopped
 
@@ -798,6 +803,69 @@ def test_at_a_commit_again_runs_the_gate_where_its_files_passed(
     gated_at(repo, "HEAD", processes, clock, again=True)
     [(command, _)] = processes.ran
     assert command == Uv().judging(["lup-dev", "check", "--again"])
+
+
+class Fixing(Processes):
+    """Answers the gate run on a commit as `lup-dev check --fix` would on the files it's given: rewriting the README, as told, then passing."""
+
+    def __init__(self, readme: str | None) -> None:
+        self.written = readme
+        self.ran: list[list[str]] = []
+
+    @override
+    def run(self, command: list[str], cwd: Path) -> Ran:
+        self.ran.append(command)
+        if self.written is not None:
+            (cwd / "README.md").write_text(self.written)
+        return Ran(code=0, output="the report, ending 0\n")
+
+
+def test_at_a_commit_with_fix_what_the_fixes_change_is_amended_into_a_commit_of_its_own(
+    repo: Path, shell: Git, clock: FakeClock
+) -> None:
+    (repo / "README.md").write_text("# Second\n")
+    shell.commit(repo, "second:\n\n  kept `as` written  \n")
+    first = shell.git(repo, "rev-parse", "HEAD")
+    processes = Fixing("# Second, formatted\n")
+
+    outcome, said, _ = gated_at(repo, "HEAD", processes, clock, fix=True)
+
+    assert processes.ran == [Uv().judging(["lup-dev", "check", "--fix"])]
+    assert isinstance(outcome, Amended)
+    assert (outcome.amends, outcome.ran) == (
+        first,
+        Ran(code=0, output="the report, ending 0\n"),
+    )
+    amended = outcome.commit
+    assert shell.git(repo, "rev-parse", "HEAD") == first
+    assert shell.git(repo, "show", f"{amended}:README.md") == "# Second, formatted"
+    assert shell.git(repo, "rev-parse", f"{amended}^@") == shell.git(
+        repo, "rev-parse", f"{first}^@"
+    )
+    message = ["cat-file", "commit"]
+    assert (
+        shell.git(repo, *message, amended).partition("\n\n")[2]
+        == shell.git(repo, *message, first).partition("\n\n")[2]
+    )
+    tree = shell.git(repo, "rev-parse", f"{amended}^{{tree}}")
+    assert Passes.of(repo, clock).found(Standing(tree=tree)) is not None
+    assert outcome.said() == (
+        f"The fixes changed files: they're in {amended}, a commit with {first}'s "
+        "parents and message, which no branch names."
+    )
+    assert len(said) == 1
+
+
+def test_at_a_commit_with_fix_that_changes_nothing_the_commit_itself_passes(
+    repo: Path, shell: Git, clock: FakeClock
+) -> None:
+    processes = Fixing(None)
+
+    outcome, _, _ = gated_at(repo, "HEAD", processes, clock, fix=True)
+
+    assert outcome == Ran(code=0, output="the report, ending 0\n")
+    tree = shell.git(repo, "rev-parse", "HEAD^{tree}")
+    assert Passes.of(repo, clock).found(Standing(tree=tree)) is not None
 
 
 def test_at_a_commit_whose_gate_fails_nothing_is_recorded(
@@ -1079,6 +1147,34 @@ def test_lup_dev_check_at_a_commit_runs_its_gate_in_a_worktree_made_at_it(
     assert len(scripted.ran) == 2
 
 
+def test_lup_dev_merge_merges_apart_gates_the_merge_and_prints_what_came_of_it(
+    scripted: Scripted, tmp_path: Path
+) -> None:
+    git = ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test"]
+    base = Shell().run(["git", "rev-parse", "HEAD"], tmp_path).output.strip()
+    for arguments in [
+        ["switch", "-q", "-c", "feat"],
+        ["commit", "-q", "--allow-empty", "-m", "feat"],
+    ]:
+        Shell().run([*git, *arguments], tmp_path)
+    tip = Shell().run(["git", "rev-parse", "HEAD"], tmp_path).output.strip()
+    result = CliRunner().invoke(
+        cli.app,
+        ["merge", base, tip],
+        input="merge: feat\n",
+        env={"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@example.com"}
+        | {"GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@example.com"},
+    )
+    assert result.exit_code == 0, result.output
+    merging = TypeAdapter[Merging](Merging).validate_json(result.stdout)
+    assert isinstance(merging, Merged)
+    assert merging.ran
+    parents = Shell().run(["git", "rev-parse", f"{merging.commit}^@"], tmp_path)
+    assert parents.output.split() == [base, tip]
+    assert "The gate runs on " in result.stderr
+    assert scripted.ran[0] == Uv().judging(["lup-dev", "check", "--fix"])
+
+
 def test_lup_dev_check_at_a_commit_exits_as_its_gate_did(
     scripted: Scripted,
 ) -> None:
@@ -1088,10 +1184,11 @@ def test_lup_dev_check_at_a_commit_exits_as_its_gate_did(
     assert result.output.endswith("The gate failed: tests.\n")
 
 
-def test_lup_dev_check_at_a_commit_doesnt_fix(scripted: Scripted) -> None:
-    result = CliRunner().invoke(
-        cli.app, ["check", "--at", "HEAD", "--fix"], env={"COLUMNS": "300"}
-    )
-    assert result.exit_code == 2
-    assert "`--at` checks a commit's files as committed" in result.output
-    assert scripted.ran == []
+def test_lup_dev_check_at_a_commit_with_fix_runs_its_gate_with_the_fixes(
+    scripted: Scripted,
+) -> None:
+    result = CliRunner().invoke(cli.app, ["check", "--at", "HEAD", "--fix"])
+    assert result.exit_code == 0, result.output
+    [ran, _] = scripted.ran
+    assert ran == Uv().judging(["lup-dev", "check", "--fix"])
+    assert result.output.endswith("env ok\n")

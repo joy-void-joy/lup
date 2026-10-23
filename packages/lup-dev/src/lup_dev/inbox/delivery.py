@@ -114,11 +114,12 @@ import secrets
 import textwrap
 from collections.abc import Callable, Generator
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Literal, override
 
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
 from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
+from lup_dev.host.names import Names
 from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.ends import holding
 from lup_dev.inbox.notices import Notices
@@ -283,6 +284,17 @@ def body(item: Item) -> str:
             return "\n".join(each.text for each in [*letters, *comments])
 
 
+def written(item: Item) -> str:
+    """Return the text of an item a conversation sent, whole: as it wrote it, a question with its decisions and leans; a change held from it, with what's held and why, or one that landed flagged, with what's flagged."""
+    match item.reason:
+        case (
+            HeldChange(text=text, summary=summary) | Flagged(text=text, summary=summary)
+        ):
+            return f"{text}\n{summary}"
+        case _:
+            return body(item)
+
+
 def clocked(at: datetime) -> str:
     """Say a moment as the host's clock reads it, to the minute: the operator's own time zone's, where the inbox keeps UTC."""
     return f"{at.astimezone():%Y-%m-%d %H:%M}"
@@ -322,7 +334,29 @@ def named(party: Party) -> str:
             return who(party)
 
 
-def kind(item: Item) -> str:
+type ItemKind = Literal[
+    "turn's end",
+    "note",
+    "problem",
+    "disagreement",
+    "question as a message",
+    "friction",
+    "how it went",
+    "stop",
+    "ended",
+    "question",
+    "answer",
+    "approval",
+    "held change",
+    "flagged write",
+    "review",
+]
+"""An item's kind as a tag's `kind` names it (`kind`), and as `inbox` narrows
+to: a message by its own kind, a turn's last words told apart from a note,
+else what the item is."""
+
+
+def kind(item: Item) -> ItemKind:
     """Name an item's kind as a tag's `kind` says it: a message's own kind, else what the item is.
 
     >>> from datetime import UTC, datetime
@@ -364,6 +398,18 @@ def on(item: Item, attributes: dict[str, str], parts: list[Tag | str]) -> Tag:
     """Tag what the operator said on one of an agent's items, holding `parts`: which item, its kind, and `attributes`."""
     head = {"item": str(item.number), "kind": kind(item)}
     return Tag(name="on", attributes={**head, **attributes}, parts=parts)
+
+
+def told_under(numbers: list[int]) -> str:
+    """Say that what an item of the operator's says on each of the items `numbers` is told under that item, where an exchange is read whole.
+
+    >>> told_under([414]), told_under([414, 416])
+    ('What it says on @414 is told under it.', 'What it says on @414 and @416 is told under each.')
+    """
+    *first, last = [cited(each) for each in numbers]
+    named = f"{', '.join(first)} and {last}" if first else last
+    under = "each" if first else "it"
+    return f"What it says on {named} is told under {under}."
 
 
 def doorbell(waiting: list[Item]) -> str:
@@ -773,7 +819,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             party,
             launch,
             None if parent is None else self.party(launch, parent),
-            conversation.own(launch.name or launch.launch),
+            conversation.name,
         )
         presence = self.presence(party)
         presence.woken = False
@@ -860,12 +906,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         party: Conversation,
         launch: Register,
         parent: Conversation | None,
-        name: str,
+        name: str | None = None,
     ) -> None:
-        """Note that `party` is heard in `launch`: where it runs, that it goes on, the conversation that spawned it, `parent`, and how lup calls it, `name`."""
+        """Note that `party` is heard in `launch`: where it runs, that it goes on, the conversation that spawned it, `parent`, and a subagent's own `name`, which `inbox` reads it by once its launch has ended."""
         place = self.inbox.whereabouts.get(party.key())
         if place is not None and place.launch == launch.launch and place.ended is None:
-            if (place.parent, place.name) != (parent, name):
+            if place.parent != parent or place.name != name:
                 self.inbox.placed(
                     place.model_copy(update={"parent": parent, "name": name})
                 )
@@ -897,16 +943,6 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             if each.parent == party and each.launch == place.launch
         ]
         return sorted(spawned, key=lambda each: each.since)
-
-    def path(self, party: Conversation) -> str | None:
-        """Say `party` as people call it, as its hooks last named it: its launch's name, then each subagent's name down to it (`dev/explore-auth`); none where lup has no name for it."""
-        place = self.inbox.whereabouts.get(party.key())
-        if place is None or place.name is None:
-            return None
-        if place.parent is None:
-            return place.name
-        above = self.path(place.parent)
-        return place.name if above is None else f"{above}/{place.name}"
 
     async def ended(
         self, party: Conversation, launch: Register, conversation: Caller, heard: Heard
@@ -949,16 +985,27 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return inside(self.tagged(item).parts)
 
     def called(self, party: Party) -> str | None:
-        """Return how lup calls `party` where it's a conversation, as its hooks last named it (`Whereabouts.name`); none for the operator, and for a conversation lup has no name for."""
+        """Return the name lup calls `party` by where it's a conversation: a session's own, its launch's as lup last kept it (`SessionNames`); a subagent's own, as its whereabouts last heard it; none for the operator, and where lup knows none."""
         match party:
+            case Conversation(agent=None):
+                return Names(path=self.layout.names).last(party.session)
             case Conversation():
                 place = self.inbox.whereabouts.get(party.key())
                 return None if place is None else place.name
             case Operator():
                 return None
 
-    def tagged(self, item: Item) -> Tag:
-        """Return `item` as the tag it's told in: named for what it is, saying its number, whom it's from and, for a conversation, how lup calls it, whom it was for where it was passed on from a conversation that had ended, and what it answers."""
+    def tagged(
+        self, item: Item, *, under: list[int] | None = None, context: bool = True
+    ) -> Tag:
+        """Return `item` as the tag it's told in: named for what it is, saying its number, whom it's from and, for a conversation, the name lup calls it by, whom it was for where it was passed on from a conversation that had ended, and what it answers.
+
+        Where it's read beside the items it's on, as `inbox` reads an exchange
+        whole, what it says on each of `under` is told under that item instead,
+        and a line says so; and a review's `context` is left out where it's
+        asked to be.
+        """
+        placed = [] if under is None else under
         passed = (
             {}
             if item.addressed is None
@@ -974,6 +1021,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         }
         parts = anchors(item)
         match item.reason:
+            case Message(kind=said, of=int() as of) if of in placed:
+                return Tag(
+                    name="message",
+                    attributes={**head, "kind": said},
+                    parts=[told_under([of])],
+                )
+            case Answer(question=question) if question in placed:
+                return Tag(
+                    name="answer",
+                    attributes={**head, "question": str(question)},
+                    parts=[told_under([question])],
+                )
             case Message(kind=said, text=text, of=int() as of):
                 original = self.inbox.item(of)
                 [anchor] = parts
@@ -1025,7 +1084,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     name="review",
                     attributes={**head, **covering},
                     parts=self.reviewing(
-                        review, item.addressed or item.recipient, parts
+                        review,
+                        item.addressed or item.recipient,
+                        parts,
+                        under=placed,
+                        context=context,
                     ),
                 )
             case Ended(name=name, heading=heading, passed=passed):
@@ -1051,9 +1114,21 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
 
     def reviewing(
-        self, review: Review, recipient: Party, parts: list[Anchor]
+        self,
+        review: Review,
+        recipient: Party,
+        parts: list[Anchor],
+        *,
+        under: list[int] | None = None,
+        context: bool = True,
     ) -> list[Tag | str]:
-        """Tag a review for the conversation it's for: the operator's message to it, their remarks in its drawers (`remarking`) and its own items they commented on first, each comment with the id of its part among `parts`, the review's (`remarked`); its items read with nothing to add in one line; then, in its context, the other agents' items they commented on, each named and never repeated, and their messages and remarks to other agents, each saying whom it was for."""
+        """Tag a review for the conversation it's for: the operator's message to it, their remarks in its drawers (`remarking`) and its own items they commented on first, each comment with the id of its part among `parts`, the review's (`remarked`); its items read with nothing to add in one line; then, in its context, the other agents' items they commented on, each named and never repeated, and their messages and remarks to other agents, each saying whom it was for.
+
+        Its comments on each of its own items among `under` are told under that
+        item instead, where an exchange is read whole, a line saying so; its
+        context is left out where `context` is false.
+        """
+        under_items = [] if under is None else under
         items = [self.inbox.item(each) for each in review.covers]
         commented = [each.item for each in review.comments]
         addressed = list(dict.fromkeys(each.to for each in review.letters))
@@ -1121,10 +1196,20 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             *(
                 yours(item)
                 for item in items
-                if item.sender == recipient and item.number in commented
+                if item.sender == recipient
+                and item.number in commented
+                and item.number not in under_items
             ),
             *([Tag(name="read", attributes={"items": " ".join(read)})] if read else []),
         ]
+        told = [
+            item.number
+            for item in items
+            if item.sender == recipient
+            and item.number in commented
+            and item.number in under_items
+        ]
+        moved = [told_under(told)] if told else []
         others: list[Tag | str] = [
             *(
                 theirs(item)
@@ -1138,8 +1223,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             "What the operator said in the same reply on other agents' items and to "
             "other agents: not yours to act on, unless it says so."
         )
-        context = [Tag(name="context", parts=[heading, *others])] if others else []
-        return [*own, *context]
+        around = (
+            [Tag(name="context", parts=[heading, *others])]
+            if others and context
+            else []
+        )
+        return [*own, *moved, *around]
 
     async def replied_by(
         self, party: Conversation, replies: list[Replying]

@@ -319,6 +319,11 @@ read 2026-10-21), with what each does beside it. On Linux, `Glob` and `Grep`
 are absent by default, and Claude searches with `find` and `grep` through
 `Bash`, which is judged."""
 
+type FreshStart = Literal["startup", "clear"]
+"""The starts (`SessionStart`'s `source`) whose conversation begins empty: a
+session started, or cleared with `/clear`, which gives it an id of its own; a
+resume, a compaction or a fork carries a conversation on (`Heard.fresh`)."""
+
 type TitledStart = Literal["startup", "resume", "fork"]
 """The starts (`SessionStart`'s `source`) whose `sessionTitle` Claude Code applies
 (its `hooks` docs, *SessionStart decision control*): a compaction or a `/clear`
@@ -528,7 +533,7 @@ class SessionStart(Payload):
     hook's `sessionTitle`); not the title Claude Code generates."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the session's start and its title in Claude Code, a start `sessionTitle` applies at (`TitledStart`) taking a new one: the judge reads it."""
+        """Read the session's start and its title in Claude Code, a start `sessionTitle` applies at (`TitledStart`) taking a new one, and whether its conversation begins empty (`FreshStart`): the judge reads it."""
         return Heard(
             event="session-started",
             session=self.session_id,
@@ -536,6 +541,7 @@ class SessionStart(Payload):
             judged=True,
             fits=fits,
             title=self.session_title,
+            fresh=self.source in get_args(FreshStart.__value__) and not self.agent_id,
             takes_title=self.source in get_args(TitledStart.__value__)
             and not self.agent_id,
         )

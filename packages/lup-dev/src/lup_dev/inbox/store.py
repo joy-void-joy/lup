@@ -894,10 +894,10 @@ class Whereabouts(Model):
     which hears of its end and of what it says of its work; none for a session's
     own, and for the runtime's own agents."""
     name: str | None = None
-    """How lup called it at its last hook: its launch's name for a session's
-    own conversation, a subagent's name, or an unnamed one's kind and its
-    runtime's id (`courier.Conversation.own`), which `send` takes it by; none
-    where it was last heard before lup kept names here."""
+    """A subagent's own name as its latest hook was heard, kept once its launch
+    has ended, so `inbox` reads it by its name then, and `send` reaches it by
+    it; none while it has none, and for a session's own conversation, named as
+    its launch (`SessionNames`, `host/names.py`)."""
 
 
 def read[M: Model](path: Path, model: type[M]) -> M:
