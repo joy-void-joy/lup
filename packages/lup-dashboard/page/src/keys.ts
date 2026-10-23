@@ -178,7 +178,7 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 short: "on a passage",
                 at: ["item", "change", "file", "words", "since"],
             },
-            { keys: "C", does: "comment from the cursor to the line's end", short: "to its end", at: ["item"] },
+            { keys: "C", does: "comment from the cursor to the line's end", short: "to its end", at: ["item", "words"] },
             { keys: "v… c", does: "comment on a selection: v or V and a motion, then c or s", short: "on a selection", at: [] },
             { keys: "␣c", does: "comment on the item whole", short: "on the item", at: ["item", "change"] },
             { keys: "o ␣c", does: "on a banner, write a message to its agent, which its drawers' remarks go with", short: "message", at: ["banner"] },

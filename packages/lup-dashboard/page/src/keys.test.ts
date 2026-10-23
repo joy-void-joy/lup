@@ -13,7 +13,7 @@ describe("the line of keys", () => {
         expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]a [a", "]n [n"]);
         expect(shown("aside")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
         expect(shown("drawer")).toEqual(["␣l", "]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
-        expect(shown("words")).toEqual(["o", "c…", "]n [n", "za"]);
+        expect(shown("words")).toEqual(["o", "c…", "C", "]n [n", "za"]);
     });
 
     it("lists the jump to what's to answer beside the jump to any item, and shows it where either applies", () => {
