@@ -721,3 +721,257 @@ def test_codexs_rollout_reads_its_context_in_use_and_its_plan(tmp_path: Path) ->
         ("1", "Read the records", "completed", None),
         ("2", "Write the reader", "in_progress", None),
     ]
+
+
+def test_codexs_rollout_as_0_163_writes_it_reads_its_words_calls_and_context(
+    tmp_path: Path,
+) -> None:
+    """Each line shaped as Codex 0.163.0 wrote this repository's kept rollouts, its values invented: the lines and keys lup doesn't read are passed over (`docs/field-notes.md`, *A thread's rollout*)."""
+    passthrough = {"turn_id": "t1", "create_time": 1792571593.5}
+    usage = {
+        "input_tokens": 26471,
+        "cached_input_tokens": 26112,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1165,
+        "reasoning_output_tokens": 1034,
+        "total_tokens": 27636,
+    }
+    lines: list[dict[str, object]] = [
+        {
+            "type": "session_meta",
+            "payload": {
+                "session_id": "th-1",
+                "id": "th-1",
+                "timestamp": AT,
+                "cwd": "/w",
+                "originator": "codex-tui",
+                "cli_version": "0.163.0",
+                "source": "cli",
+                "model_provider": "openai",
+                "base_instructions": {"text": "You are Codex."},
+                "history_mode": "paginated",
+                "context_window": {"window_id": "w1"},
+                "git": {"commit_hash": "abc", "branch": "dev"},
+            },
+        },
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "id": "m1",
+                "role": "developer",
+                "content": [{"type": "input_text", "text": "<permissions>"}],
+                "internal_chat_message_metadata_passthrough": passthrough,
+            },
+            "metadata": {"client_authored": False},
+        },
+        {"type": "world_state", "payload": {"full": True, "state": {"model": "m"}}},
+        {
+            "type": "turn_context",
+            "payload": {
+                "turn_id": "t1",
+                "cwd": "/w",
+                "approval_policy": "never",
+                "model": "gpt-6-astra",
+                "effort": "high",
+            },
+        },
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "id": "m2",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "go"}],
+                "internal_chat_message_metadata_passthrough": passthrough,
+            },
+            "metadata": {"client_authored": False},
+        },
+        {
+            "type": "event_msg",
+            "payload": {
+                "type": "item_completed",
+                "thread_id": "th-1",
+                "turn_id": "t1",
+                "item": {
+                    "type": "UserMessage",
+                    "id": "i1",
+                    "client_id": "k1",
+                    "content": [{"type": "text", "text": "go", "text_elements": []}],
+                },
+                "started_at_ms": 1792571593995,
+                "completed_at_ms": 1792571593995,
+            },
+        },
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call",
+                "id": "r1",
+                "status": "completed",
+                "call_id": "c1",
+                "name": "exec",
+                "input": "await tools.note({text: 'x'})",
+                "internal_chat_message_metadata_passthrough": passthrough,
+            },
+        },
+        # lup: defer(issue=268, why="a tool an `exec` cell calls is only this item, which lup doesn't read yet")
+        {
+            "type": "event_msg",
+            "payload": {
+                "type": "item_completed",
+                "thread_id": "th-1",
+                "turn_id": "t1",
+                "item": {
+                    "type": "McpToolCall",
+                    "id": "c2",
+                    "server": "lup",
+                    "tool": "note",
+                    "status": "completed",
+                    "duration": {"secs": 0, "nanos": 5},
+                },
+            },
+        },
+        {
+            "type": "token_usage_record",
+            "payload": {"thread_id": "th-1", "turn_id": "t1", "usage": usage},
+        },
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "custom_tool_call_output",
+                "id": "r2",
+                "call_id": "c1",
+                "output": [{"type": "input_text", "text": "ok"}],
+                "internal_chat_message_metadata_passthrough": passthrough,
+            },
+            "metadata": {"client_authored": False},
+        },
+        {
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "total_token_usage": usage,
+                    "last_token_usage": usage,
+                    "model_context_window": 258400,
+                },
+                "rate_limits": {"limit_id": "l1", "primary": {"used_percent": 0.0}},
+            },
+        },
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "status": "completed",
+                "id": "r3",
+                "name": "spawn_agent",
+                "namespace": "collaboration",
+                "arguments": "{}",
+                "call_id": "c3",
+                "internal_chat_message_metadata_passthrough": passthrough,
+            },
+            "metadata": {"client_authored": False, "user_input_order": 2},
+        },
+        {
+            "type": "inter_agent_communication_metadata",
+            "payload": {"trigger_turn": False},
+        },
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "agent_message",
+                "id": "r4",
+                "author": "/root/scout",
+                "recipient": "/root",
+                "content": [{"type": "input_text", "text": "found it"}],
+                "internal_chat_message_metadata_passthrough": passthrough,
+            },
+            "metadata": {"client_authored": False},
+        },
+        {
+            "type": "event_msg",
+            "payload": {
+                "type": "item_completed",
+                "thread_id": "th-1",
+                "turn_id": "t1",
+                "item": {
+                    "type": "AgentMessage",
+                    "id": "i2",
+                    "content": [{"type": "Text", "text": "Done."}],
+                    "phase": "final_answer",
+                },
+            },
+        },
+    ]
+    day = tmp_path / "codex" / "sessions" / "2026" / "10" / "21"
+    day.mkdir(parents=True)
+    rollout = day / "rollout-2026-10-21T10-33-01-th-1.jsonl"
+    rollout.write_text(
+        "\n".join(
+            json.dumps({"timestamp": AT, "ordinal": at, **each})
+            for at, each in enumerate(lines)
+        )
+        + "\n"
+    )
+    read = CodexTranscripts().read(rollout)
+    when = datetime(2026, 10, 17, 12, tzinfo=UTC)
+    assert (read.session, read.title, str(read.directory)) == ("th-1", None, "/w")
+    assert read.entries == [
+        Said(by="operator", text="go", at=when),
+        Called(tool="exec", id="c1", at=when),
+        Called(tool="collaborationspawn_agent", id="c3", at=when),
+        Said(by="agent", text="Done.", at=when),
+    ]
+    assert read.usage is not None
+    assert (read.usage.used, read.usage.window, read.usage.model) == (
+        26602,
+        258400,
+        "gpt-6-astra",
+    )
+    assert read.tasks == []
+
+
+def test_codexs_plan_call_as_0_145_writes_it_reads_its_last_steps(
+    tmp_path: Path,
+) -> None:
+    """An `update_plan` call shaped as Codex 0.145.0 wrote it, the latest version a kept rollout calls it in: an `explanation` beside the plan, which lup passes over."""
+    day = tmp_path / "codex" / "sessions" / "2026" / "07" / "26"
+    day.mkdir(parents=True)
+    rollout = day / "rollout-2026-07-26T06-18-50-th-1.jsonl"
+    plan = {
+        "explanation": "The reader is written; its tests are next.",
+        "plan": [
+            {"step": "Write the reader", "status": "completed"},
+            {"step": "Test it", "status": "in_progress"},
+            {"step": "Document it", "status": "pending"},
+        ],
+    }
+    rollout.write_text(
+        "\n".join(
+            [
+                meta("th-1", "paginated"),
+                rolled(
+                    "response_item",
+                    {
+                        "type": "function_call",
+                        "id": "r1",
+                        "name": "update_plan",
+                        "arguments": json.dumps(plan),
+                        "call_id": "c1",
+                        "internal_chat_message_metadata_passthrough": {
+                            "turn_id": "t1",
+                            "create_time": 1785045530.5,
+                        },
+                    },
+                ),
+            ]
+        )
+        + "\n"
+    )
+    read = CodexTranscripts().read(rollout)
+    assert [(each.id, each.subject, each.status) for each in read.tasks] == [
+        ("1", "Write the reader", "completed"),
+        ("2", "Test it", "in_progress"),
+        ("3", "Document it", "pending"),
+    ]

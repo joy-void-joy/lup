@@ -1271,12 +1271,14 @@ type Rolled = Annotated[
 class CodexTranscripts(Model, Reader):
     """Codex's records, read: a rollout per thread under `sessions/`, a subagent's among them, which isn't a session of its own.
 
-    Read from Codex's source at `rust-v0.163.0` (`docs/field-notes.md`, *A
-    thread's rollout*): the operator's words and the agent's are the events,
-    which the legacy history mode writes as `user_message` and `agent_message`,
-    and the paginated one, the default from 0.163, as `item_completed`; the
-    `response_item` messages repeat them, and carry injected context too, so
-    they're passed over. Tools called are `response_item`s.
+    Read from Codex's source at `rust-v0.163.0`, and measured on the rollouts
+    lup keeps, 0.128.0 to 0.163.0 (`docs/field-notes.md`, *A thread's
+    rollout*): the operator's words and the agent's are the events, which the
+    legacy history mode writes as `user_message` and `agent_message`, and the
+    paginated one, every kept thread's but a few subagents' of 0.144.3, as
+    `item_completed`; the `response_item` messages repeat them, and carry
+    injected context too, so they're passed over. Tools called are
+    `response_item`s.
     """
 
     @override
@@ -1309,8 +1311,8 @@ class CodexTranscripts(Model, Reader):
 def usage(lines: list[Rolled]) -> Usage | None:
     """Return what the thread's context held after its last request, from the last `token_count` event that counted one, and the model the last turn ran; none where no event counted.
 
-    Read from Codex's source at `rust-v0.163.0` and not measured on a live
-    rollout (`docs/field-notes.md`, *A thread's rollout*).
+    Read from Codex's source at `rust-v0.163.0`, and measured on 0.163.0's
+    rollouts (`docs/field-notes.md`, *A thread's rollout*).
     """
     counted = [
         each.payload.info
