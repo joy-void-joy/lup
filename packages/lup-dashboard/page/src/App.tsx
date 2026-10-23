@@ -1,14 +1,15 @@
 // The page: everything waiting for the operator as one review in groups, one
 // per agent, every agent running having one, its banner saying what the agent
 // is doing, what it's working on and its context, its drawers at the group's end
-// holding its tasks, its trace, what its branch changed since the operator
-// approved it and its whole conversation; the operator's reply written into it,
+// holding its tasks, what its branch changed since the operator approved it and
+// its whole conversation; the operator's reply written into it,
 // their messages to agents and their remarks in the drawers among it, and a line
 // saying what the reply covers and who it reaches: every agent it covers or
 // writes to, each getting all of it. The palette (Ctrl+K) goes to an agent's
 // group. Each agent's record is read at each of its hooks the host hears, which
-// the listing watched says (`Talker.activity`), and as its trace or conversation
-// drawer opens, for its banner and its drawers; what its branch changed since
+// the listing watched says (`Talker.activity`), and as its conversation drawer
+// opens, for its banner and its drawers, each call read whole as its fold opens,
+// again as the record grows where it hadn't returned; what its branch changed since
 // the operator approved it as a call of its that may have written ends, as its
 // drawer opens, and on Space `l`, with the version shown, so what they read
 // never moves until they bring the latest in; each a minute apart at most
@@ -37,6 +38,7 @@ import {
     whose,
     type AgentDrawers,
     type Answered,
+    type Call,
     type ChangedFile,
     type Context,
     type Conversation as InboxConversation,
@@ -348,6 +350,76 @@ export function App() {
     const have = useRef(new Map<string, number>());
     const reading = useRef(new Map<string, boolean>());
 
+    // Each agent's calls asked for whole, by its conversation, so each is asked once, but again where the host
+    // couldn't answer, and those that hadn't returned when read, asked again as the record grows; and those asked in
+    // one moment, as `␣zd` opens many, gathered into one asking.
+    const callsAsked = useRef(new Map<string, Set<string>>());
+    const callsRunning = useRef(new Map<string, Set<string>>());
+    const callsWanted = useRef(new Map<string, { agent: Live; ids: Set<string> }>());
+
+    /** Read the calls gathered for each agent whole, those not asked yet, one asking an agent. */
+    const askCalls = useCallback(() => {
+        const wanted = [...callsWanted.current.values()];
+        callsWanted.current = new Map();
+        for (const { agent, ids } of wanted) {
+            const asked = callsAsked.current.get(agent.key) ?? new Set<string>();
+            const fresh = [...ids].filter((each) => !asked.has(each));
+            if (fresh.length === 0) {
+                continue;
+            }
+            callsAsked.current.set(agent.key, new Set([...asked, ...fresh]));
+            const { conversation } = agent;
+            const request: Asked = { kind: "inbox-show-calls", runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null, calls: fresh };
+            void answered(request, (answer) => (answer.kind === "inbox-calls" ? answer.calls : null)).then((reply) => {
+                const read = new Map<string, Answered<Call>>(
+                    fresh.map((id) => {
+                        if ("refused" in reply) {
+                            return [id, reply];
+                        }
+                        const found = reply.shown.find((each) => each.id === id);
+                        return [id, found === undefined ? { refused: "its record doesn't hold it" } : { shown: found }];
+                    }),
+                );
+                const running = [...read].flatMap(([id, each]) => ("shown" in each && each.shown.output == null ? [id] : []));
+                callsRunning.current.set(agent.key, new Set([...(callsRunning.current.get(agent.key) ?? []), ...running]));
+                // One the host couldn't read is asked again as its fold opens again.
+                if ("refused" in reply) {
+                    fresh.forEach((each) => callsAsked.current.get(agent.key)?.delete(each));
+                }
+                drawn(agent.key, (before) => ({ ...before, calls: new Map([...before.calls, ...read]) }));
+            });
+        }
+    }, [drawn]);
+
+    /** Read `ids` of `agent`'s calls whole, with any others asked for in the same moment. */
+    const readCalls = useCallback(
+        (agent: Live, ids: string[]) => {
+            const held = callsWanted.current.get(agent.key) ?? { agent, ids: new Set<string>() };
+            ids.forEach((each) => held.ids.add(each));
+            const first = callsWanted.current.size === 0;
+            callsWanted.current.set(agent.key, held);
+            if (first) {
+                setTimeout(askCalls, 0);
+            }
+        },
+        [askCalls],
+    );
+
+    /** Read again `agent`'s calls that hadn't returned when they were read, its record having grown. */
+    const again = useCallback(
+        (agent: Live) => {
+            const running = [...(callsRunning.current.get(agent.key) ?? [])];
+            if (running.length === 0) {
+                return;
+            }
+            callsRunning.current.delete(agent.key);
+            const asked = callsAsked.current.get(agent.key);
+            running.forEach((each) => asked?.delete(each));
+            readCalls(agent, running);
+        },
+        [readCalls],
+    );
+
     /** Read `agent`'s record for the steps since those the page has, with its task list and its context, and the items it exchanged; once at a time, again where asked meanwhile. */
     const readRecord = useCallback(
         async (agent: Live): Promise<void> => {
@@ -370,6 +442,9 @@ export function App() {
                     if (steps.kind !== "inbox-conversation") {
                         drawn(key, (before) => ({ ...before, exchanged }));
                     } else {
+                        if (steps.entries.length > 0) {
+                            again(agent);
+                        }
                         const whole = steps.total < since;
                         if (whole) {
                             // The record is shorter than what the page read of it: read it again whole.
@@ -394,7 +469,7 @@ export function App() {
                 reading.current.delete(key);
             }
         },
-        [drawn],
+        [drawn, again],
     );
 
     // What each agent's branch changed since the operator approved it, as the page shows it, by its conversation.
@@ -459,7 +534,7 @@ export function App() {
         return () => clearInterval(asking);
     }, [live, readRecord, since]);
 
-    /** Read what an agent's drawer shows as it opens: its record for the trace or the conversation, its branch for "since you approved". */
+    /** Read what an agent's drawer shows as it opens: its record for the conversation, its branch for "since you approved". */
     const opened = useCallback(
         (conversation: InboxConversation, kind: DrawerKind) => {
             const agent = live.find((each) => each.key === whose(conversation));
@@ -473,6 +548,17 @@ export function App() {
             }
         },
         [live, readRecord, since],
+    );
+
+    /** Read an agent's calls whole as their folds open. */
+    const details = useCallback(
+        (conversation: InboxConversation, ids: string[]) => {
+            const agent = live.find((each) => each.key === whose(conversation));
+            if (agent !== undefined) {
+                readCalls(agent, ids);
+            }
+        },
+        [live, readCalls],
     );
 
     /** Bring the latest of what an agent's branch changed into its drawer. */
@@ -655,6 +741,7 @@ export function App() {
                         latest={bringIn}
                         hold={hold}
                         opened={opened}
+                        details={details}
                         jump={jump}
                         say={setSaid}
                         inserting={setInserting}
@@ -730,12 +817,13 @@ function bannerOf(agent: Live, data: AgentDrawers, now: Date): string {
     ].join(" · ");
 }
 
-/** Whether two of what's held of an agent's drawers say the same: as many steps of its record, its branch at the same version with as many files, and the same tasks, context and items exchanged. */
+/** Whether two of what's held of an agent's drawers say the same: as many steps of its record and the same calls read whole, its branch at the same version with as many files, and the same tasks, context and items exchanged. */
 function sameDrawers(a: AgentDrawers, b: AgentDrawers): boolean {
     const sameSince = (x: Since | null, y: Since | null) =>
         x === y || (x !== null && y !== null && x.version === y.version && (x.files ?? []).length === (y.files ?? []).length);
     return (
         a.entries.length === b.entries.length &&
+        a.calls === b.calls &&
         sameSince(a.since, b.since) &&
         sameSince(a.latest, b.latest) &&
         JSON.stringify([a.tasks, a.usage, a.exchanged]) === JSON.stringify([b.tasks, b.usage, b.exchanged])

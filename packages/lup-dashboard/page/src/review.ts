@@ -6,11 +6,11 @@
 // own are, the lines that matter in it, by the judge's reading, kept in order
 // for the keys to walk; under each item its context. At the end of each agent's
 // group, after its items, its drawers (`docs/dashboard.md`, *The drawers*): its
-// task list, its trace since the operator's last message, what its branch
-// changed since they approved it, each file laid out as an item's, and its whole
-// conversation (`conversation.ts`), each a fold of its own kind, folded until
-// opened; a comment in the trace, the conversation or on the changed files is a
-// remark to the agent, which records the version of the code it was written on.
+// task list, what its branch changed since they approved it, each file laid out
+// as an item's, and its whole conversation (`conversation.ts`), its latest part
+// open, each a fold of its own kind, folded until opened; a comment in the
+// conversation or on the changed files is a remark to the agent, the one on code
+// recording the version it was written on.
 // Its groups and items in the order they arrived, never sorted again, so what
 // the operator reads stays put as items come; their kind's rank, which the host
 // gives, says only which `]a` and `[a` stop at. Each fold has a kind: the item
@@ -47,11 +47,11 @@ import {
 import {
     UNEXCHANGED,
     aboutAt as aboutTalk,
-    history,
     laid as laidTalk,
     opened as openedTalk,
     quoted as quotedTalk,
     shifted,
+    type Call,
     type Entry,
     type Exchanged,
     type Laid as Talk,
@@ -76,7 +76,7 @@ export type Since = components["schemas"]["Since"];
 export type SinceFile = components["schemas"]["SinceFile"];
 export type Task = components["schemas"]["Task"];
 export type Usage = components["schemas"]["Usage"];
-export type { Entry, Exchanged };
+export type { Call, Entry, Exchanged };
 
 /** What the operator writes in the review, as its editor holds it: a comment on an item, a message to an agent, or a remark in one of its drawers. */
 export type Written = Comment | Letter | Remark;
@@ -190,13 +190,14 @@ export function threaded(answers: Item[], item: Item): boolean {
 export const REPLY_MARK = "↳ ";
 
 /**
- * What the page holds of one agent, for its banner and its drawers: its conversation's steps as read so far, its task
- * list and what its context holds, the items it exchanged where they were asked, what its branch changed since the
- * operator approved it as they read it (`since`), and what stands now where that differs (`latest`), which Space `l`
- * brings in. None of a drawer's before the host has answered.
+ * What the page holds of one agent, for its banner and its drawers: its conversation's steps as read so far, each call
+ * read whole once its fold was opened, by its id, its task list and what its context holds, the items it exchanged
+ * where they were asked, what its branch changed since the operator approved it as they read it (`since`), and what
+ * stands now where that differs (`latest`), which Space `l` brings in. None of a drawer's before the host has answered.
  */
 export interface AgentDrawers {
     entries: Entry[];
+    calls: ReadonlyMap<string, Answered<Call>>;
     tasks: Task[];
     usage: Usage | null;
     exchanged: Exchanged | null;
@@ -207,14 +208,27 @@ export interface AgentDrawers {
 /** Each agent's drawers' data, by `whose` its conversation is. */
 export type Drawers = Map<string, AgentDrawers>;
 
-export const UNREAD: AgentDrawers = { entries: [], tasks: [], usage: null, exchanged: null, since: null, latest: null };
+export const UNREAD: AgentDrawers = { entries: [], calls: new Map(), tasks: [], usage: null, exchanged: null, since: null, latest: null };
 
 /**
  * What a line under an item or in a drawer that isn't the operator's or the agent's own text shows: a fold's summary;
- * a step of a context or a conversation, the operator's words, the agent's, a run of calls, or the call that made the
- * item; an item of the inbox in a conversation, and a line of its text; a task; or why the host showed none.
+ * a step of a context or a conversation, the operator's words, the agent's, a run of calls, a call and a line of its
+ * input and output, or the call that made the item; an item of the inbox in a conversation, and a line of its text; a
+ * task; or why the host showed none.
  */
-export type Kind = "summary" | "you" | "agent" | "calls" | "anchor" | "refused" | "item-from" | "item-to" | "item-text" | "task";
+export type Kind =
+    | "summary"
+    | "you"
+    | "agent"
+    | "calls"
+    | "call"
+    | "call-text"
+    | "anchor"
+    | "refused"
+    | "item-from"
+    | "item-to"
+    | "item-text"
+    | "task";
 
 /** A line under an item that isn't its own text, so no comment is on it. */
 export interface Aside extends Span {
@@ -308,7 +322,7 @@ export interface Region extends Scope {
     threads: Threaded[];
 }
 
-/** One of an agent's drawers, where it's shown: which, whose, and, for its trace and its conversation, the conversation as laid out in it, which its remarks are placed by. */
+/** One of an agent's drawers, where it's shown: which, whose, and, for its conversation, the conversation as laid out in it, which its remarks are placed by. */
 export interface Drawer extends Scope {
     kind: DrawerKind;
     conversation: Conversation;
@@ -703,17 +717,6 @@ export function lastSpoken(entries: Entry[]): number {
     return entries.findLastIndex((each) => each.kind === "said" && each.by === "operator");
 }
 
-/** Say a trace's summary line: how many steps since the operator's last message, or that the record isn't read yet. */
-export function traceSummary(entries: Entry[], read: boolean): string {
-    if (!read) {
-        return "trace · not read yet";
-    }
-    const spoke = lastSpoken(entries);
-    const steps = entries.length - spoke - 1;
-    const since = spoke < 0 ? "" : " since your last message";
-    return steps === 0 ? `trace · nothing${since}` : `trace · ${counted(steps, "step")}${since}`;
-}
-
 /** Say a "since you approved" drawer's summary line: on which branch, how many files, and how many writes came since the operator read it, which Space `l` brings in. */
 export function sinceSummary(shown: Since | null, latest: Since | null): string {
     if (shown === null) {
@@ -726,9 +729,11 @@ export function sinceSummary(shown: Since | null, latest: Since | null): string 
     return `since you approved${branch} · ${files}${newer}`;
 }
 
-/** Say a conversation drawer's summary line: how many steps it has, or that the record isn't read yet. */
-export function conversationSummary(entries: Entry[], read: boolean): string {
-    return read ? `conversation · ${counted(entries.length, "step")}` : "conversation · not read yet";
+/** Say a conversation drawer's summary line: how many steps it has, and how many since the operator's last words, where they spoke. */
+export function conversationSummary(entries: Entry[]): string {
+    const spoke = lastSpoken(entries);
+    const since = spoke < 0 ? "" : `, ${entries.length - spoke - 1} since your last words`;
+    return `conversation · ${counted(entries.length, "step")}${since}`;
 }
 
 /** The text being laid out, line by line. */
@@ -1085,39 +1090,24 @@ export function laid(
                 }
                 break;
             }
-            case "trace":
             case "conversation": {
-                const spoke = lastSpoken(data.entries);
-                const tracing = kind === "trace";
-                said = tracing ? traceSummary(data.entries, true) : conversationSummary(data.entries, true);
+                said = conversationSummary(data.entries);
                 summary = w.line(said);
-                // A remark on a step since the operator's last words shows in the trace, which holds the same steps, never twice.
+                // Each remark on the agent's words, under the line it's on.
                 const steps = mine.flatMap(({ comment, at }) =>
-                    isRemark(comment) && comment.step != null && (tracing ? comment.step > spoke : comment.step <= spoke)
-                        ? [{ remark: { step: comment.step, quote: comment.quote, text: comment.text }, at }]
-                        : [],
+                    isRemark(comment) && comment.step != null ? [{ remark: { step: comment.step, quote: comment.quote, text: comment.text }, at }] : [],
                 );
-                const first = tracing ? spoke + 1 : 0;
-                const entries = tracing ? data.entries.slice(first) : data.entries;
-                const beside = {
-                    sent: [],
-                    exchanged: tracing || data.exchanged === null ? UNEXCHANGED : data.exchanged,
-                    whose: { agent: conversation.agent ?? null, name },
-                };
-                const earlier = tracing ? ("nothing" as const) : history(data.entries, []);
-                const laidOut = laidTalk(entries, beside, { comments: steps.map((each) => each.remark) }, earlier, first);
-                // Where the talk starts: its folds' labels are read from its own text, not the whole being built.
-                const offset = w.at;
-                talk = shifted(laidOut, offset);
+                const beside = { exchanged: data.exchanged ?? UNEXCHANGED, whose: { agent: conversation.agent ?? null, name }, calls: data.calls };
+                const laidOut = laidTalk(data.entries, beside, { comments: steps.map((each) => each.remark) });
+                talk = shifted(laidOut, w.at);
                 if (laidOut.text !== "") {
                     w.text += `${laidOut.text}\n`;
                 }
                 into.lines.push(...talk.words.flatMap((words) => words.lines.map(({ from, to, own }) => ({ from, to, own }))));
                 into.blocks.push(...talk.blocks.map((block) => ({ ...block, comment: steps[block.comment]?.at ?? block.comment })));
                 into.asides.push(...talk.asides);
-                const folds = [...(talk.fold === null ? [] : [talk.fold]), ...talk.items.flatMap((item) => (item.fold === null ? [] : [item.fold]))];
-                for (const fold of folds) {
-                    into.folds.push({ of, kind: "context", name: fold.key, label: laidOut.text.slice(fold.summary.from - offset, fold.summary.to - offset), closed: fold.closed, summary: fold.summary, from: fold.from, to: fold.to });
+                for (const fold of talk.folds) {
+                    into.folds.push({ of, kind: fold.kind ?? "context", name: fold.key, label: fold.label ?? "", closed: fold.closed, summary: fold.summary, from: fold.from, to: fold.to });
                 }
                 break;
             }
@@ -1331,7 +1321,7 @@ export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "inse
         if (drawer.kind === "since") {
             return codeAt(drawer, head) !== undefined ? "since" : "aside";
         }
-        return lineAt(drawer, head) !== undefined ? "trace" : "aside";
+        return lineAt(drawer, head) !== undefined ? "words" : "aside";
     }
     const region = regionAt(laidOut, head);
     if (region === undefined || asideAt(region, head) !== undefined) {
@@ -1560,7 +1550,7 @@ function quotedCode(drawer: Drawer, lines: Line[]): NonNullable<Remark["code"]> 
 /**
  * Return where a comment opened on the line at `position` goes: on that line of its item, or on the item whole from
  * its header or an empty line of its own; on a line of a changed file, or its header, empty or not; in a drawer, a
- * remark to its agent on the agent's words in its trace or conversation, or on a line of a file since they approved it,
+ * remark to its agent on the agent's words in its conversation, or on a line of a file since they approved it,
  * which records the file's version. On a group's banner, a message to its agent, laid out under its group among those
  * to answer now, from the banner of what's left for later too. None on a line no comment is on, or on the banner of
  * lup's approvals.

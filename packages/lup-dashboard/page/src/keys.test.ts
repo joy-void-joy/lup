@@ -13,7 +13,7 @@ describe("the line of keys", () => {
         expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]a [a", "]n [n"]);
         expect(shown("aside")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
         expect(shown("drawer")).toEqual(["␣l", "]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
-        expect(shown("trace")).toEqual(["o", "c…", "]n [n", "za"]);
+        expect(shown("words")).toEqual(["o", "c…", "]n [n", "za"]);
     });
 
     it("lists the jump to what's to answer beside the jump to any item, and shows it where either applies", () => {
@@ -32,7 +32,7 @@ describe("the line of keys", () => {
     });
 
     it("shows no key of insert mode outside it, and none of the others in it", () => {
-        const places: ReviewPlace[] = ["written", "banner", "approvals", "item", "change", "file", "drawer", "trace", "since", "aside", "nothing"];
+        const places: ReviewPlace[] = ["written", "banner", "approvals", "item", "change", "file", "drawer", "words", "since", "aside", "nothing"];
         const writing = shown("insert");
         for (const place of places) {
             expect(shown(place).filter((key) => writing.includes(key) && key !== "^⏎")).toEqual([]);
@@ -67,13 +67,15 @@ describe("what may follow a chord", () => {
     it("lists the keys after Space z, as vim's fold keys begin with z, each kind of fold's letter opening it and Shift and the letter closing it", () => {
         expect(following("␣z", "file")).toEqual([
             "t T the tasks",
-            "r R the trace",
             "s S since you approved",
             "v V the conversation",
             "f F files",
+            "e E earlier exchanges",
             "b B bodies",
             "u U unchanged lines",
+            "k K runs of calls",
             "c C context",
+            "d D calls' input and output",
         ]);
         expect(following("␣f", "file")).toEqual([]);
         expect(following("␣x", "file")).toEqual([]);
