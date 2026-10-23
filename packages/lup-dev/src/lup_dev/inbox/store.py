@@ -862,6 +862,11 @@ class Whereabouts(Model):
     """The conversation that spawned it, for a subagent a conversation spawned,
     which hears of its end and of what it says of its work; none for a session's
     own, and for the runtime's own agents."""
+    name: str | None = None
+    """A subagent's own name as its latest hook was heard, kept once its launch
+    has ended, so `inbox` reads it by its name then; none while it has none,
+    and for a session's own conversation, named as its launch (`SessionNames`,
+    `host/names.py`)."""
 
 
 def read[M: Model](path: Path, model: type[M]) -> M:

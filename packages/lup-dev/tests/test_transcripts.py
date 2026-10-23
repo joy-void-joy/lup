@@ -234,6 +234,7 @@ def test_lup_dev_transcripts_reads_the_repositorys_kept_copies(
     shell.git(repository, "init", "--quiet")
     monkeypatch.chdir(repository)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
     common = repository / ".git"
     data = Layout.of(LupDevSettings()).module_data(Transcripts.name, common.resolve())
     folder = data / "claude" / "projects" / "-repo"

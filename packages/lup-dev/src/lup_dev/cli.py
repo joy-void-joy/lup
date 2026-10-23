@@ -24,7 +24,7 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, override
+from typing import TYPE_CHECKING, Annotated, get_args, override
 
 import typer
 from filelock import FileLock
@@ -100,6 +100,7 @@ from lup_dev.host.watch import Changes
 from lup_dev.host.workers import WorkerJudge, Workers
 from lup_dev.inbox.delivery import (
     Delivery,
+    ItemKind,
     clocked,
     opening,
     standing,
@@ -114,6 +115,8 @@ from lup_dev.inbox.protocol import (
     FinishItem,
     Items,
     ListInbox,
+    ReadInbox,
+    Readout,
     SendItem,
     Settled,
     ShowContext,
@@ -192,7 +195,7 @@ from lup_dev.layout import (
     LaunchLayout,
     Layout,
 )
-from lup_dev.listing import given, latest, unlisted
+from lup_dev.listing import given, latest, many, unlisted
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import InboxAnnouncing, Response, answer
@@ -890,9 +893,44 @@ def transcripts_show(
         ),
     ] = False,
 ) -> None:
-    """Show what you said in a session, each time after what the agent last said before it; or, with `--all`, the whole conversation."""
+    """Show what you said in a session, each time after what the agent last said before it; or, with `--all`, the whole conversation.
+
+    What you typed in its terminal is its record's alone. What reached a
+    session through lup, your reviews and answers among it, and what it said
+    to you, is its exchange in lup's inbox, which this leaves out: where the
+    inbox holds some, the last line says how many items, and the `lup-dev
+    inbox --conversation` that reads them.
+    """
     chosen = views.chosen(kept_sessions(Path.cwd()), session)
     typer.echo(views.whole(chosen) if everything else views.answered(chosen), nl=False)
+    for line in exchanged_through_lup(chosen.session):
+        typer.echo(f"\n{line}")
+
+
+def exchanged_through_lup(session: str) -> list[str]:
+    """Say how many items lup's inbox holds of `session`'s exchange, and the command that reads them; nothing where it holds none, or no host service answers, since this starts none. A service that can't answer is said."""
+    room = RoomClient()
+    asker: HostClient | FromRoom
+    if room.socket.exists():
+        asker = FromRoom(room=room)
+    else:
+        asker = host_client()
+        if not asker.answers():
+            return []
+    try:
+        read = asker.ask(ReadInbox(conversation=session, every=True, limit=1), Readout)
+    except HostError as unanswered:
+        return [f"lup's inbox wasn't asked for this session's exchange: {unanswered}"]
+    if not read.found:
+        return []
+    items = many(read.found, "item")
+    command = f"lup-dev inbox --conversation {session} --every --whole"
+    return [
+        (
+            f"Its exchange with you through lup, which this leaves out, is {items} "
+            f"in lup's inbox: `{command}` reads it."
+        )
+    ]
 
 
 @transcripts.command("search")
@@ -1052,16 +1090,67 @@ def inbox_list(
     limit: Annotated[
         int | None,
         typer.Option(
-            min=1, help="How many to list at most, the latest; left out, every one."
+            min=1,
+            help=(
+                "How many to list at most, the latest; left out, every one, or with "
+                "the options below 50 a line each, or 10 whole."
+            ),
         ),
     ] = None,
+    conversation: Annotated[
+        str | None,
+        typer.Option(
+            help=(
+                "Only one conversation's exchange, what it sent and was sent: a "
+                "session by its name, a subagent by its path (flow-review/explore) "
+                "or its own name, or either by its id or the id's start."
+            )
+        ),
+    ] = None,
+    subagents: Annotated[
+        bool,
+        typer.Option(
+            "--subagents", help="With --conversation, its subagents' items too."
+        ),
+    ] = False,
+    kinds: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--kind",
+            help=(
+                "Only items of this kind, as a tag's `kind` names it: turn's end, "
+                "note, question, review…; repeat it for several."
+            ),
+        ),
+    ] = None,
+    whole: Annotated[
+        bool,
+        typer.Option(
+            "--whole",
+            help=(
+                "Each item whole, your words on a conversation's item under it with "
+                "its replies to them."
+            ),
+        ),
+    ] = False,
+    every: Annotated[
+        bool,
+        typer.Option(
+            "--every",
+            help="Every item, answered, done or told too, not those waiting alone.",
+        ),
+    ] = False,
 ) -> None:
-    """List what waits for you from your agents, oldest first.
+    """List what waits for you from your agents, oldest first; or read the inbox as the agents' `inbox` tool does.
 
     Each item has a number, which `show`, `answer` and `done` take. `--since`
     and `--until` narrow them by when each was made, as `judged` and the agents'
     `inbox` do, and `--limit` lists the latest alone, saying how many it left
-    out and how to read them. Listing and `show` only read, so an agent's
+    out and how to read them. With `--conversation`, `--kind`, `--whole` or
+    `--every`, it reads as the agents' `inbox` tool does, every party's items,
+    those still waiting unless `--every`: one conversation's exchange with
+    `--conversation`, and each item whole, your words on a conversation's
+    under it, with `--whole`. Listing and `show` only read, so an agent's
     session runs them too: on the host, over the whole inbox; in a room, over
     its repository's items alone. Answering is the operator's, in their own
     terminal.
@@ -1077,6 +1166,29 @@ def inbox_list(
         )
         raise typer.BadParameter(message) from unread
     client = reading()
+    if conversation is not None or kinds or whole or every:
+        try:
+            kinded = (
+                TypeAdapter[list[ItemKind]](list[ItemKind]).validate_python(kinds)
+                if kinds
+                else None
+            )
+        except ValidationError as unread:
+            known = ", ".join(get_args(ItemKind.__value__))
+            message = f"--kind takes one of {known}"
+            raise typer.BadParameter(message) from unread
+        narrowed = ReadInbox(
+            since=asked.since,
+            until=asked.until,
+            limit=limit,
+            conversation=conversation,
+            subagents=subagents,
+            kinds=kinded,
+            whole=whole,
+            every=every,
+        )
+        typer.echo(client.ask(narrowed, Readout).text)
+        return
     items = sorted(client.ask(asked, Items).items, key=lambda item: item.made)
     if not items:
         narrowed = "" if asked == ListInbox() else " made in that time"

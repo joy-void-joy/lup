@@ -18,8 +18,10 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   subagents' ends among it. It isn't called `wait`, a name a runtime has for a
   tool of its own;
 - `inbox` reads the inbox of the agent's repository, changing nothing: each
-  item in a line, the latest up to the call's `limit`, narrowed by `since` and
-  `until` as `judged` is (`lup_dev.listing`), and the agent's own read whole;
+  item in a line or whole, the latest up to the call's `limit`, narrowed by
+  `since` and `until` as `judged` is (`lup_dev.listing`), by kind, and to one
+  conversation's exchange, as `lup-dev inbox` reads it (`inbox/reading.py`);
+  and the agent's own item read whole;
 - `withdraw` takes back a message or question the agent sent that the
   operator needn't see, with its reason: the agent's workflow is its own;
 - `reply` answers the operator's comments by their ids, several in one call,
@@ -33,25 +35,26 @@ runtime's tool search finds. Each answers in words, as `content`.
 import inspect
 from typing import TYPE_CHECKING, Literal, override
 
-from pydantic import Field, JsonValue, PositiveInt
+from pydantic import Field, JsonValue
 
 from lup.tools import speaking
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec, bound, lup_tool
 from lup.types import Model
+from lup_dev.host.names import Names
 from lup_dev.host.protocol import Register
 from lup_dev.host.rooms import RoomTools
 from lup_dev.inbox.delivery import (
     Delivery,
     body,
     clocked,
-    opening,
     replied_to,
     standing,
     what,
     who,
 )
 from lup_dev.inbox.parts import PartId
+from lup_dev.inbox.reading import Narrowing, Reader
 from lup_dev.inbox.store import (
     Answered,
     Conversation,
@@ -63,15 +66,12 @@ from lup_dev.inbox.store import (
     Kind,
     Message,
     Operator,
-    Party,
     Question,
     Stop,
-    Waiting,
     cited,
 )
 from lup_dev.inbox.tags import Tag
 from lup_dev.inbox.threads import Replying, anchors, parts_of
-from lup_dev.listing import Span, latest, unlisted
 
 if TYPE_CHECKING:
     from lup.sessions import results
@@ -132,35 +132,25 @@ class Nothing(Model):
     """No input."""
 
 
-class Reading(Span):
+class Reading(Narrowing):
     """What of the inbox to read."""
 
     number: int | None = Field(
         default=None,
         description=(
-            "An item to read whole, by its number (270 for `@270`): one you sent, "
-            "or that was sent to you. Left out, the items are listed, a line each."
+            "An item to read whole, by its number (270 for `@270`): any of this "
+            "repository's, as it was told where the operator or another "
+            "conversation sent it to you, else as its sender wrote it. Left out, "
+            "the items are listed."
         ),
     )
     part: str | None = Field(
         default=None,
         description=(
-            "One part to read alone, by its id (`414.3`): of an item you sent, "
-            "one of its Markdown blocks; of one sent to you, the operator's words "
-            "there, or a reply of yours. With it, `number` is left out."
-        ),
-    )
-    every: bool = Field(
-        default=False,
-        description=(
-            "List every item, those answered, done or told too; left out, those "
-            "still waiting alone."
-        ),
-    )
-    limit: PositiveInt = Field(
-        default=50,
-        description=(
-            "How many items to list at most, the latest. Those left out are counted."
+            "One part to read alone, by its id (`414.3`): of an item a "
+            "conversation sent, one of its Markdown blocks; of the operator's, "
+            "their words there, or a reply made to them. With it, `number` is "
+            "left out."
         ),
     )
 
@@ -407,10 +397,18 @@ class Speaker(Model, arbitrary_types_allowed=True):
         number, when it was made, what it is, from whom to whom, where it
         stands, and its first line. Those still waiting, for the operator or
         for an agent, by default; every one with `every`. `since` and `until`
-        narrow them by when each was made, and `limit` says how many to list,
-        the latest: where it leaves earlier ones out, the answer says how many,
-        the `until` that reads them, and the `limit` that lists them all. Given
-        an item's `number`, one you sent or that was sent to you, it's read
+        narrow them by when each was made, `kinds` by what they are, and
+        `limit` says how many to list, the latest: where it leaves earlier
+        ones out, or `every` would list more, the answer says how many and
+        what reads them.
+
+        `conversation` reads one conversation's exchange, by its name or its
+        id: what it sent, to the operator above all, and what it was sent,
+        with its subagents' where `subagents` asks. With `whole`, each item is
+        read whole, the operator's words on one of the conversation's under
+        it with the conversation's replies to them, so the exchange reads as
+        one thread: how a session reads what an earlier one said and was
+        told. Given an item's `number`, any of this repository's, it's read
         whole. It marks nothing read and answers nothing: what reaches you
         still comes through `wait_inbox` and beside your calls.
         """
@@ -423,29 +421,13 @@ class Speaker(Model, arbitrary_types_allowed=True):
             return Said(text=self.part(wanted, items))
         if reading.number is not None:
             return Said(text=self.whole(reading.number, items))
-        window = reading.window(self.delivery.clock.now())
-        chosen = sorted(
-            (
-                item
-                for item in items
-                if (reading.every or isinstance(item.state, Waiting))
-                and window.covers(item.made)
-            ),
-            key=lambda item: item.made,
+        reader = Reader(
+            delivery=self.delivery,
+            reader=self.party,
+            names=Names(path=self.delivery.layout.names).all(),
+            where=" about this repository",
         )
-        if not chosen:
-            where = "is in" if reading.every else "waits in"
-            return Said(
-                text=f"Nothing about this repository {where} the inbox{window.said()}."
-            )
-        shown = latest(chosen, lambda item: item.made, reading.limit)
-        lines = [
-            *(self.line(item) for item in shown),
-            *unlisted(
-                len(chosen) - len(shown), "earlier item", shown[0].made, len(chosen)
-            ),
-        ]
-        return Said(text="\n".join(lines))
+        return Said(text=reader.read(items, reading).text)
 
     @lup_tool
     async def withdraw(self, withdrawing: Withdrawing) -> Said:
@@ -464,20 +446,8 @@ class Speaker(Model, arbitrary_types_allowed=True):
             text=f"{cited(withdrawing.number)} is withdrawn, off the operator's list."
         )
 
-    def named(self, party: Party) -> str:
-        """Name a party for this conversation: itself as you."""
-        return "you" if party == self.party else who(party)
-
-    def line(self, item: Item) -> str:
-        """Say an item in a line, as `inbox` lists it."""
-        return (
-            f"{cited(item.number)}  {clocked(item.made)}  {what(item)} from "
-            f"{self.named(item.sender)} to {self.named(item.recipient)}, "
-            f"{standing(item)}: {opening(item)}"
-        )
-
     def whole(self, number: int, items: list[Item]) -> str:
-        """Say item `number` of `items` whole, where it's this conversation's own: as it was told, where it was sent to it; as it was written, where it sent it. One not among them, or another conversation's, is said and not read."""
+        """Say item `number` of `items` whole: as it was told, where it was sent to this conversation, or where the operator sent it, to whom it was for; as it was written, its Markdown blocks each with its id, where a conversation sent it, this one or another. One not among them is said and not read."""
         item = next((each for each in items if each.number == number), None)
         if item is None:
             return (
@@ -486,33 +456,34 @@ class Speaker(Model, arbitrary_types_allowed=True):
             )
         if self.party in (item.recipient, item.addressed):
             return f"{self.delivery.said(item)}\n\nIt's {standing(item)}."
-        if item.sender == self.party:
-            parts = "\n".join(
-                Tag(
-                    name="part", attributes={"id": each.id.said()}, parts=[each.text]
-                ).written()
-                for each in parts_of(item, body(item))
-            )
-            return (
-                f"{cited(number)}, {what(item)} you sent to {who(item.recipient)} at "
-                f"{clocked(item.made)}, {standing(item)}:\n{parts}"
-            )
+        sent = (
+            f"you sent to {who(item.recipient)}"
+            if item.sender == self.party
+            else f"from {who(item.sender)} to {who(item.recipient)}"
+        )
+        match item.sender:
+            case Conversation():
+                said = "\n".join(
+                    Tag(
+                        name="part",
+                        attributes={"id": each.id.said()},
+                        parts=[each.text],
+                    ).written()
+                    for each in parts_of(item, body(item))
+                )
+            case Operator():
+                said = self.delivery.said(item)
         return (
-            f"{cited(number)} is {what(item)} from {who(item.sender)} to "
-            f"{who(item.recipient)}, which isn't yours: only your own items are read "
-            f"whole. Its first line: {opening(item)}"
+            f"{cited(number)}, {what(item)} {sent} at {clocked(item.made)}, "
+            f"{standing(item)}:\n{said}"
         )
 
     def part(self, wanted: PartId, items: list[Item]) -> str:
-        """Say part `wanted` of its item, where the item is this conversation's own (`whole`): a block of an item it sent, as a `<part>` tag; the operator's words there in one sent to it, as the item's tag carried them; a reply of its own, as `<reply>`. One that isn't there is said."""
+        """Say part `wanted` of its item, any of `items`: a block of an item a conversation sent, as a `<part>` tag; the operator's words there in one of theirs, as the item's tag carried them; a reply of the conversation's it was sent to, as `<reply>`. One that isn't there is said."""
         item = next((each for each in items if each.number == wanted.item), None)
-        if item is None or self.party not in (
-            item.recipient,
-            item.addressed,
-            item.sender,
-        ):
+        if item is None:
             return self.whole(wanted.item, items)
-        if item.sender == self.party:
+        if isinstance(item.sender, Conversation):
             found = next(
                 (each for each in parts_of(item, body(item)) if each.id == wanted), None
             )

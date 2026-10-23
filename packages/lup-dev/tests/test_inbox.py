@@ -38,6 +38,7 @@ from lup.github.tools import GitHubTools
 from lup.programs import Ran
 from lup.rooms import Podman
 from lup.tools.speaking import SPEAKING
+from lup.transcripts.module import Transcripts
 from lup_dev import Modules, Project, cli
 from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
 from lup_dev.codescan.engine import EngineError
@@ -93,6 +94,7 @@ from lup_dev.inbox.protocol import (
     ShowTalk,
     Talked,
 )
+from lup_dev.inbox.reading import Narrowing, Reader
 from lup_dev.inbox.store import (
     Answer,
     Answered,
@@ -132,6 +134,7 @@ from lup_dev.inbox.store import (
     Text,
     Told,
     Waiting,
+    Whereabouts,
     cited,
     item_number,
     ranked,
@@ -159,6 +162,7 @@ from lup_dev.policy.landing import LandingTools
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.remote.protocol import Remotes
+from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
 
 if TYPE_CHECKING:
@@ -5090,7 +5094,7 @@ def test_an_items_moment_is_read_from_its_senders_record_around_its_call(
     assert "· called Bash\n\n→ called mcp__lup__note: this item\n\n" in shown.output
 
 
-def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
+def test_inbox_lists_this_repositorys_items_and_reads_any_of_them_whole(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     other = tmp_path / "other"
@@ -5134,13 +5138,14 @@ def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
     assert waiting.splitlines() == [
         f"@2  {at}  a note from {sub} to the operator, waiting: I assumed UTF-8.",
         f"@4  {at}  an answer from the operator to you, waiting: A model per kind.",
+        "Not listed: 1 item no longer waiting, which `every` lists.",
     ]
     assert every.splitlines() == [
         (
             f"@1  {at}  a question from you to the operator, answered at {at}, "
             "@4: Which parser?"
         ),
-        *waiting.splitlines(),
+        *waiting.splitlines()[:-1],
     ]
     assert asked == (
         f"@1, a question you sent to the operator at {at}, answered at {at}, "
@@ -5153,8 +5158,8 @@ def test_inbox_lists_this_repositorys_items_and_reads_a_conversations_own_whole(
         "</answer>\n\nIt's waiting."
     )
     assert theirs == (
-        f"@2 is a note from {sub} to the operator, which isn't yours: only your "
-        "own items are read whole. Its first line: I assumed UTF-8."
+        f"@2, a note from {sub} to the operator at {at}, waiting:\n"
+        '<part id="2.1">I assumed UTF-8.</part>'
     )
     assert elsewhere == missing.replace("9", "3")
     assert missing == (
@@ -6753,3 +6758,373 @@ def test_the_github_module_s_tools_answer_through_the_server_with_and_without_ar
     assert numbered == (refused.format("read_issue", "read-issues"), True)
     assert searched == (refused.format("find_issues", "read-issues"), True)
     assert filed == (refused.format("file_issue", "file-issue"), True)
+
+
+def exchanged(
+    machine: Layout, clock: FakeClock, tmp_path: Path, records: Subagents
+) -> Path:
+    """Make an exchange in a launch named `w`, and return its tool socket: session `s0`'s note at 12:00; then at 13:00 session `s1`'s note, its question, and its subagent `explore-auth`'s note; at 14:00 the operator's answer, their review commenting on a passage of the note with a message, `s1`'s reply to the comment by its id, its turn's end and the operator's reply to it, and the subagent's end."""
+    launched(machine, clock, tmp_path / "w", "one", "claude")
+    hook = machine.host.launch("one").hook
+    mcp = machine.host.launch("one").mcp
+    send(hook, claude("SessionStart", source="startup", session_id="s0"))
+    call(mcp, "note", {"remark": "An earlier session's note."})
+    clock.sleep(3600)
+    send(hook, claude("SessionStart", source="startup"))
+    call(mcp, "note", {"remark": "I assumed UTF-8.\n\nThe parser reads twenty kinds."})
+    asking: dict[str, JsonValue] = {
+        "decision": "One model per kind?",
+        "lean": "Yes, each validates.",
+    }
+    call(mcp, "ask", {"question": "Which parser?", "decisions": [asking]})
+    send(hook, records.spawn("t1", name="explore-auth"))
+    records.recorded("a1", "Explore", "t1", name="explore-auth")
+    send(hook, records.call("a1", "Explore", "c1"))
+    records.lup((hook, mcp), "note", {"remark": "Found the token."}, "a1", "Explore")
+    clock.sleep(3600)
+    inbox("answer", "3", "--leaning", "1", "--comment", "Go.")
+    passage = "The parser reads twenty kinds."
+    comment = Comment(
+        item=2,
+        quote=Quote(text=passage, start=18, end=18 + len(passage)),
+        text="Why twenty?",
+    )
+    own = Conversation(
+        repository=tmp_path / "w" / ".git", runtime="claude", session="s1"
+    )
+    drafting(
+        machine,
+        clock,
+        Draft(comments=[comment], letters=[Letter(to=own, text="Carry on.")]),
+    )
+    sending(machine, clock)
+    reply: dict[str, JsonValue] = {"to": "6.1", "text": "The grammar has twenty."}
+    call(mcp, "reply", {"replies": [reply]})
+    ending = claude(
+        "Stop", stop_hook_active=False, last_assistant_message="Done for now."
+    )
+    send(hook, ending)
+    inbox("answer", "7", "--comment", "Thanks, rest.")
+    send(hook, records.ended("a1", "Explore", "The token is in auth.py."))
+    return mcp
+
+
+def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_each(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        mcp = exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+
+        def reading(**arguments: JsonValue) -> str:
+            text, error = call(mcp, "inbox", arguments)
+            assert not error, text
+            return text
+
+        every = reading(conversation="w", every=True)
+        waiting = reading(conversation="w")
+        below = reading(conversation="s1", every=True, subagents=True)
+        kinds = reading(conversation="s1", every=True, kinds=["question", "answer"])
+        earlier = reading(conversation="s0", every=True)
+        path = reading(conversation="w/explore-auth", every=True)
+        nobody = reading(conversation="nobody")
+    several = (
+        "`w` names 2 conversations; this reads the one last heard, claude session "
+        "s1, at 2026-10-01 14:00. The others, which `conversation` reads by id: "
+        "claude session s0, last heard 2026-10-01 12:00."
+    )
+    at, then = "2026-10-01 13:00", "2026-10-01 14:00"
+    told = f"told at {then} (turn's end)"
+    lines = {
+        2: f"@2  {at}  a note from you to the operator, waiting: I assumed UTF-8.",
+        3: (
+            f"@3  {at}  a question from you to the operator, answered at {then}, "
+            "@5: Which parser?"
+        ),
+        4: (
+            f"@4  {at}  a note from `w/explore-auth` to the operator, waiting: "
+            "Found the token."
+        ),
+        5: f"@5  {then}  an answer from the operator to you, {told}: Go.",
+        6: f"@6  {then}  a review from the operator to you, {told}: Carry on.",
+        7: (
+            f"@7  {then}  the end of a turn from you to the operator, done at "
+            f"{then}: Done for now."
+        ),
+        8: f"@8  {then}  a note from the operator to you, waiting: Thanks, rest.",
+        9: (
+            f"@9  {then}  the end of a subagent's turn from `w/explore-auth` to "
+            "you, waiting: It ended its turn. Its last message reaches you from "
+            "your runtime."
+        ),
+    }
+    assert every.splitlines() == [
+        several,
+        "The exchange of `w` (claude session s1): every item, oldest first.",
+        *(lines[number] for number in [2, 3, 5, 6, 7, 8, 9]),
+    ]
+    assert waiting.splitlines() == [
+        several,
+        "The exchange of `w` (claude session s1): what still waits, oldest first.",
+        lines[2],
+        lines[8],
+        lines[9],
+        "Not listed: 4 items no longer waiting, which `every` lists.",
+    ]
+    assert below.splitlines() == [
+        (
+            "The exchange of `w` (claude session s1) and its 1 subagent: every "
+            "item, oldest first."
+        ),
+        *(lines[number] for number in range(2, 10)),
+    ]
+    assert kinds.splitlines()[1:] == [lines[3], lines[5]]
+    assert earlier.splitlines() == [
+        "The exchange of `w` (claude session s0): every item, oldest first.",
+        (
+            "@1  2026-10-01 12:00  a note from `w` to the operator, waiting: An "
+            "earlier session's note."
+        ),
+    ]
+    assert path.splitlines() == [
+        (
+            "The exchange of `w/explore-auth` (subagent a1 of claude session s1): "
+            "every item, oldest first."
+        ),
+        lines[4],
+        lines[9],
+    ]
+    assert nobody == (
+        "No conversation about this repository is `nobody`: `conversation` takes "
+        "a session's name, a subagent's path or its own name, or the runtime's id "
+        "for either, or the id's start, as `inbox` lines name them."
+    )
+
+
+def test_inbox_reads_an_exchange_whole_the_operators_words_under_what_they_answer(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        mcp = exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+
+        def reading(**arguments: JsonValue) -> str:
+            text, error = call(mcp, "inbox", arguments)
+            assert not error, text
+            return text
+
+        whole = reading(conversation="s1", every=True, whole=True)
+        latest = reading(conversation="s1", every=True, whole=True, limit=1)
+    at, then = "2026-10-01 13:00", "2026-10-01 14:00"
+    told = f"told at {then} (turn's end)"
+    assert whole == "\n".join(
+        [
+            "The exchange of `w` (claude session s1): every item, oldest first.",
+            f"@2  {at}  a note from you to the operator, waiting:",
+            '<item item="2" kind="note" from="w">',
+            "I assumed UTF-8.",
+            "",
+            "The parser reads twenty kinds.",
+            f'<review item="6" from="operator" made="{then}">',
+            '<quote part="2.2">The parser reads twenty kinds.</quote>',
+            '<reply id="6.1">Why twenty?</reply>',
+            '<reply id="6.2" to="6.1" from="w">The grammar has twenty.</reply>',
+            "</review>",
+            "</item>",
+            "",
+            f"@3  {at}  a question from you to the operator, answered at {then}, @5:",
+            '<item item="3" kind="question" from="w">',
+            "Which parser?",
+            "1. One model per kind?",
+            "   lean: Yes, each validates.",
+            f'<answer item="5" from="operator" made="{then}">',
+            (
+                '<decision number="1" lean="Yes, each validates." verdict="leaning: '
+                'they go with the lean" id="5.1">One model per kind?</decision>'
+            ),
+            '<comment id="5.2">Go.</comment>',
+            "</answer>",
+            "</item>",
+            "",
+            f"@5  {then}  an answer from the operator to you, {told}:",
+            (
+                '<answer item="5" from="operator" question="3">What it says on @3 '
+                "is told under it.</answer>"
+            ),
+            "",
+            f"@6  {then}  a review from the operator to you, {told}:",
+            '<review item="6" from="operator" covers="2">',
+            "<message>Carry on.</message>",
+            "What it says on @2 is told under it.",
+            "</review>",
+            "",
+            f"@7  {then}  the end of a turn from you to the operator, done at {then}:",
+            '<item item="7" kind="turn\'s end" from="w">',
+            "Done for now.",
+            f'<message item="8" from="operator" made="{then}">',
+            '<comment id="8.1">Thanks, rest.</comment>',
+            "</message>",
+            "</item>",
+            "",
+            f"@8  {then}  a note from the operator to you, waiting:",
+            (
+                '<message item="8" from="operator" kind="note">What it says on @7 '
+                "is told under it.</message>"
+            ),
+            "",
+            (
+                f"@9  {then}  the end of a subagent's turn from `w/explore-auth` to "
+                "you, waiting:"
+            ),
+            (
+                '<item item="9" kind="ended" from="w/explore-auth">It ended its '
+                "turn. Its last message reaches you from your runtime.</item>"
+            ),
+        ]
+    )
+    assert latest.split("\n\n")[-1] == (
+        'Not listed: 2 earlier items, which `until` "2026-10-01T14:00:00+00:00" '
+        "reads; a `limit` of 7 lists them all."
+    )
+    assert '<review item="6" from="operator" covers="2">' in latest
+    assert '<on item="2" kind="note">' in latest
+
+
+def test_lup_dev_inbox_narrows_the_operators_own_exchange_as_the_tool_reads(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+        plain = inbox()
+        waiting = inbox("--conversation", "w")
+        every = inbox("--every")
+        questions = inbox("--kind", "question", "--every")
+        whole = inbox("--conversation", "s1", "--whole", "--every", "--limit", "2")
+        unknown = runner.invoke(cli.app, ["inbox", "--kind", "nonsense"])
+    assert [line.split()[0] for line in plain.splitlines()] == ["@1", "@2", "@4"]
+    assert waiting.splitlines() == [
+        (
+            "`w` names 2 conversations; this reads the one last heard, claude "
+            "session s1, at 2026-10-01 14:00. The others, which `--conversation` "
+            "reads by id: claude session s0, last heard 2026-10-01 12:00."
+        ),
+        "The exchange of `w` (claude session s1): what still waits, oldest first.",
+        "@2  2026-10-01 13:00  a note from `w` to you, waiting: I assumed UTF-8.",
+        "Not listed: 5 items not waiting for you, which `--every` lists.",
+    ]
+    s0, s1 = "`w` (claude session s0)", "`w` (claude session s1)"
+    sub = "`w/explore-auth` (subagent a1 of claude session s1)"
+    assert [line.partition("  2026-10-01 ")[2] for line in every.splitlines()] == [
+        f"12:00  a note from {s0} to you, waiting: An earlier session's note.",
+        f"13:00  a note from {s1} to you, waiting: I assumed UTF-8.",
+        (
+            f"13:00  a question from {s1} to you, answered at 2026-10-01 14:00, "
+            "@5: Which parser?"
+        ),
+        f"13:00  a note from {sub} to you, waiting: Found the token.",
+        (
+            f"14:00  an answer from you to {s1}, told at 2026-10-01 14:00 (turn's "
+            "end): Go."
+        ),
+        (
+            f"14:00  a review from you to {s1}, told at 2026-10-01 14:00 (turn's "
+            "end): Carry on."
+        ),
+        (
+            f"14:00  the end of a turn from {s1} to you, done at 2026-10-01 14:00: "
+            "Done for now."
+        ),
+        f"14:00  a note from you to {s1}, waiting: Thanks, rest.",
+    ]
+    assert [line.split()[0] for line in questions.splitlines() if line] == ["@3"]
+    assert '<item item="7" kind="turn\'s end" from="w">' in whole
+    assert "a `--limit` of 6 lists them all." in whole
+    assert unknown.exit_code == 2
+    assert "--kind takes one of turn's end, note, problem" in unknown.output
+
+
+def test_lup_dev_transcripts_show_says_how_much_of_the_exchange_lups_inbox_holds(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    shell: Shell,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    shell.git(repository, "init", "--quiet")
+    monkeypatch.chdir(repository)
+    kept = Layout.of(LupDevSettings()).module_data(
+        Transcripts.name, (repository / ".git").resolve()
+    )
+    folder = kept / "claude" / "projects" / "-repo"
+    folder.mkdir(parents=True)
+    typed = {
+        "timestamp": "2026-10-01T12:00:00Z",
+        "type": "user",
+        "origin": {"kind": "human"},
+        "cwd": "/w",
+        "message": {"role": "user", "content": "Read the parser."},
+    }
+    for session in ["s1", "s7"]:
+        (folder / f"{session}.jsonl").write_text(json.dumps(typed) + "\n")
+    with inboxed(machine, clock, notices, said):
+        exchanged(machine, clock, tmp_path, Subagents(tmp_path))
+        shown = runner.invoke(cli.app, ["transcripts", "show", "s1"])
+        unheard = runner.invoke(cli.app, ["transcripts", "show", "s7"])
+    unserved = runner.invoke(cli.app, ["transcripts", "show", "s1"])
+    assert shown.exit_code == 0, shown.output
+    assert shown.output.endswith(
+        "    Read the parser.\n\nIts exchange with you through lup, which this "
+        "leaves out, is 6 items in lup's inbox: `lup-dev inbox --conversation s1 "
+        "--every --whole` reads it.\n"
+    )
+    assert unheard.output.endswith("    Read the parser.\n")
+    assert unserved.output == shown.output.partition("\n\nIts exchange")[0] + "\n"
+
+
+def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_name(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    inbox = Inbox.opened(
+        Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path).inbox
+    )
+    main = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    parser = main.model_copy(update={"agent": "a1"})
+    lexer = main.model_copy(update={"agent": "a2"})
+    at = clock.now()
+    for each, parent in [(parser, main), (lexer, parser)]:
+        inbox.placed(
+            Whereabouts(
+                conversation=each,
+                launch="one",
+                worktree=tmp_path,
+                since=at,
+                parent=parent,
+            )
+        )
+    inbox.made(Message(kind="note", text="Lexing."), lexer, Operator(), tmp_path, at)
+    inbox.made(Ended(name="parser", said="Parsed."), parser, main, tmp_path, at)
+    reader = Reader(
+        delivery=Delivery.model_construct(inbox=inbox, clock=clock),
+        reader=Operator(),
+        names={"s1": "w"},
+    )
+    items = inbox.about(tmp_path / ".git")
+    lexing = reader.read(items, Narrowing(conversation="w/parser/a2", every=True))
+    parsing = reader.read(
+        items, Narrowing(conversation="parser", every=True, subagents=True)
+    )
+    assert lexing.text.splitlines() == [
+        (
+            "The exchange of `w/parser/a2` (subagent a2 of claude session s1): every "
+            "item, oldest first."
+        ),
+        "@1  2026-10-01 12:00  a note from `w/parser/a2` to you, waiting: Lexing.",
+    ]
+    assert parsing.found == 2
+    assert parsing.text.splitlines()[0] == (
+        "The exchange of `w/parser` (subagent a1 of claude session s1) and its 1 "
+        "subagent: every item, oldest first."
+    )
