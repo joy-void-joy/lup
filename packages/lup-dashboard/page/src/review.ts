@@ -8,7 +8,8 @@
 // group, after its items, its drawers (`docs/dashboard.md`, *The drawers*): its
 // task list, what its branch changed since they approved it, each file laid out
 // as an item's, and its whole conversation (`conversation.ts`), its latest part
-// open, each a fold of its own kind, folded until opened; a comment in the
+// open, each a fold of its own kind, folded until opened but "since you
+// approved", which is open, as it's the code waiting on them; a comment in the
 // conversation or on the changed files is a remark to the agent, the one on code
 // recording the version it was written on.
 // Its groups and items in the order they arrived, never sorted again, so what
@@ -19,7 +20,8 @@
 // unchanged lines away from its changes and the lines that matter, so every
 // change shows, never a changed line among unchanged ones; a test and a data
 // file whole under its header, and each file of a first approval (`Folded`);
-// an item marked read or left for later, and each drawer; a body is open, but
+// an item marked read or left for later, and each drawer but "since you
+// approved"; a body is open, but
 // a new module's in its drawer,
 // which shows its design. Each fold is named by what it hides, so an item or a
 // drawer laid out again keeps the folds the operator left; and where the cursor
@@ -249,7 +251,8 @@ export interface Coded extends Span {
 
 /**
  * What folds in an item or a drawer, by its kind (`FoldKind`): the item whole under its header, folded where it's
- * marked read or left for later; a drawer under its summary line, folded until opened; each file it changes under its
+ * marked read or left for later; a drawer under its summary line, folded until opened, but "since you approved", open;
+ * each file it changes under its
  * header, folded where it's a test, data, or a first approval's (`Folded`); a function's or a class's body under the
  * line declaring it, open but in a new module of a drawer; a run of a file's unchanged lines under a summary line,
  * folded; and its context, folded. Each sits whole inside another or beside it. It hides `from` to `to`, from the end
@@ -1158,9 +1161,10 @@ export function laid(
         // Labelled by the words written, not sliced from the text being built, which copies it whole each time.
         const label = said;
         const last = w.at - 1;
-        // A drawer with nothing under its summary line hides nothing, so it has no fold.
+        // A drawer with nothing under its summary line hides nothing, so it has no fold. "Since you approved" is open,
+        // as it's the code waiting on the operator; the others fold until opened.
         if (last > summary.to) {
-            into.folds.push({ of, kind, name: "", label, closed: true, summary, from: summary.to, to: last });
+            into.folds.push({ of, kind, name: "", label, closed: kind !== "since", summary, from: summary.to, to: last });
         }
         w.line("");
         return { kind, conversation, talk, files, reviewed, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
