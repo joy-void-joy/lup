@@ -180,24 +180,35 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
     {
         title: "Moving",
         keys: [
-            { keys: "]] [[", does: "next and previous item, on its first line that matters", short: "items", at: ["banner", "approvals", "item", "aside", "written", "drawer"] },
+            {
+                keys: "]] [[",
+                does: "next and previous item, on its first line that matters, or on the summary line of the closed fold hiding it, which, as every motion of vim's, it doesn't open",
+                short: "items",
+                at: ["banner", "approvals", "item", "aside", "written", "drawer"],
+            },
             {
                 keys: "]a [a",
-                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; news and what's marked read or left for later are passed over",
+                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; news and what's marked read or left for later are passed over; the folds hiding where it lands open, said under the review",
                 short: "to answer",
                 at: ["banner", "approvals", "item", "change", "aside", "written", "drawer"],
             },
             {
                 keys: "]c [c",
-                does: "next and previous line that matters, in what an approval, a held change or a \"since you approved\" drawer changes",
+                does: "next and previous line that matters, in what an approval, a held change or a \"since you approved\" drawer changes, the folds hiding it opening, said under the review",
                 short: "what matters",
                 at: ["change", "file", "since"],
             },
             {
                 keys: "]n [n",
-                does: "next and previous comment, message or remark written, where you last were in it",
+                does: "next and previous comment, message or remark written, where you last were in it, the folds hiding it opening, said under the review",
                 short: "comments",
                 at: ["written", "banner", "approvals", "item", "change", "file", "trace", "since"],
+            },
+            {
+                keys: "/ n N",
+                does: "search, then the next and previous match, the folds hiding it opening, said under the review; / then N searches back, ? being this list",
+                short: "search",
+                at: [],
             },
             { keys: "^k", does: "go to an agent's group", short: "go to", at: [] },
         ],
