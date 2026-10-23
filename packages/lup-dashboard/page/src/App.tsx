@@ -353,7 +353,7 @@ export function App() {
 
     // Each agent's calls asked for whole, by its conversation, so each is asked once, but again where the host
     // couldn't answer, and those that hadn't returned when read, asked again as the record grows; and those asked in
-    // one moment, as `␣zd` opens many, gathered into one asking.
+    // one moment, as `␣zfd` opens many, gathered into one asking.
     const callsAsked = useRef(new Map<string, Set<string>>());
     const callsRunning = useRef(new Map<string, Set<string>>());
     const callsWanted = useRef(new Map<string, { agent: Live; ids: Set<string> }>());

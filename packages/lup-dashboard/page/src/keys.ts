@@ -58,16 +58,18 @@ export type DrawerKind = "tasks" | "since" | "conversation";
 export type FoldKind = "item" | "file" | "body" | "lines" | "context" | "earlier" | "calls" | "call" | DrawerKind;
 
 /**
- * One kind of fold: the letter naming it, what its folds are called together, whether Space `z` and its letter open
- * them, the level `zr` and `zm` open and close them at, the item's own first, and whether it's the fold holding the
- * rest, as the item's own and a drawer's are, which `zm` never closes. `back` folds open one at a time, the latest
- * first, so each `zr` reaches one step further back, and close the earliest first; `deep` ones only by their own keys,
- * `za` or Space `z` and the letter, never by `zr` or `zR`, since what they hold is read as they open.
+ * One kind of fold: the letter naming it, what its folds are called together, and what the one the cursor is in is
+ * called, which `zf` and the letter closes; whether Space `z` `f` and its letter open them, the level `zr` and `zm` open
+ * and close them at, the item's own first, and whether it's the fold holding the rest, as the item's own and a
+ * drawer's are, which `zm` never closes. `back` folds open one at a time, the latest first, so each `zr` reaches one
+ * step further back, and close the earliest first; `deep` ones only by their own keys, `za` or Space `z` `f` and the
+ * letter, never by `zr` or `zR`, since what they hold is read as they open.
  */
 export interface FoldKindKeys {
     kind: FoldKind;
     letter: string;
     called: string;
+    one: string;
     chord: boolean;
     level: number;
     own: boolean;
@@ -76,22 +78,23 @@ export interface FoldKindKeys {
 }
 
 /**
- * Each kind of fold, outermost first, by the letter naming it: the mark beside its summary line, and, but for an
- * item's own, which its header's `za` folds, the key after Space `z`, as vim's fold keys begin with `z`, that opens
- * every fold of that kind in the item or the drawer, as Shift and the letter closes them.
+ * Each kind of fold, outermost first, by the letter naming it: the mark beside its summary line; the key after `zf`
+ * that closes the fold of that kind the cursor is in, as vim's fold keys begin with `z`; and, but for an item's own,
+ * which its header's `za` folds, the key after Space `z` `f` that opens every fold of that kind in the item or the
+ * drawer, as after Space `z` `F` it closes them.
  */
 export const FOLD_KINDS: FoldKindKeys[] = [
-    { kind: "item", letter: "i", called: "the item", chord: false, level: 0, own: true },
-    { kind: "tasks", letter: "t", called: "the tasks", chord: true, level: 0, own: true },
-    { kind: "since", letter: "s", called: "since you approved", chord: true, level: 0, own: true },
-    { kind: "conversation", letter: "v", called: "the conversation", chord: true, level: 0, own: true },
-    { kind: "file", letter: "f", called: "files", chord: true, level: 1, own: false },
-    { kind: "earlier", letter: "e", called: "earlier exchanges", chord: true, level: 1, own: false, back: true },
-    { kind: "body", letter: "b", called: "bodies", chord: true, level: 2, own: false },
-    { kind: "lines", letter: "u", called: "unchanged lines", chord: true, level: 2, own: false },
-    { kind: "calls", letter: "k", called: "runs of calls", chord: true, level: 2, own: false },
-    { kind: "context", letter: "c", called: "context", chord: true, level: 3, own: false },
-    { kind: "call", letter: "d", called: "calls' input and output", chord: true, level: 4, own: false, deep: true },
+    { kind: "item", letter: "i", called: "the item", one: "the item", chord: false, level: 0, own: true },
+    { kind: "tasks", letter: "t", called: "the tasks", one: "the tasks", chord: true, level: 0, own: true },
+    { kind: "since", letter: "s", called: "since you approved", one: "since you approved", chord: true, level: 0, own: true },
+    { kind: "conversation", letter: "v", called: "the conversation", one: "the conversation", chord: true, level: 0, own: true },
+    { kind: "file", letter: "f", called: "files", one: "the file", chord: true, level: 1, own: false },
+    { kind: "earlier", letter: "e", called: "earlier exchanges", one: "the earlier exchange", chord: true, level: 1, own: false, back: true },
+    { kind: "body", letter: "b", called: "bodies", one: "the body", chord: true, level: 2, own: false },
+    { kind: "lines", letter: "u", called: "unchanged lines", one: "the unchanged lines", chord: true, level: 2, own: false },
+    { kind: "calls", letter: "k", called: "runs of calls", one: "the run of calls", chord: true, level: 2, own: false },
+    { kind: "context", letter: "c", called: "context", one: "the context", chord: true, level: 3, own: false },
+    { kind: "call", letter: "d", called: "calls' input and output", one: "the call's input and output", chord: true, level: 4, own: false, deep: true },
 ];
 
 /** The drawers, in the order they come under a banner. */
@@ -254,15 +257,34 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 short: "a level",
                 at: ["file", "since", "reviewed", "drawer", "aside"],
             },
-            { keys: "zR zM", does: "open or close every fold in the item or the drawer the cursor is in, but for calls' input and output, which za and ␣zd open", short: "all of it", at: ["aside", "drawer"] },
+            { keys: "zR zM", does: "open or close every fold in the item or the drawer the cursor is in, but for calls' input and output, which za and ␣zfd open", short: "all of it", at: ["aside", "drawer"] },
+            {
+                keys: "zf",
+                does: "and a letter: close the fold of its kind the cursor is in, the file, the run of unchanged lines, the item, a drawer, or in a conversation an earlier exchange, a run of calls or a call's input and output, the cursor going to its summary line",
+                short: "close one",
+                at: ["file", "since", "reviewed", "aside"],
+            },
+            ...FOLD_KINDS.map((each) => ({ keys: `zf${each.letter}`, does: `close ${each.one} the cursor is in`, short: each.one, at: [] })),
             {
                 keys: "␣z",
-                does: "and a letter: open every fold of its kind in the item or the drawer the cursor is in, or, on a banner, open that drawer of the agent's; Shift and the letter closes them",
+                does: "f or F, then a letter: open or close every fold of its kind in the item or the drawer the cursor is in",
                 short: "by kind",
                 at: ["file", "since", "reviewed", "drawer", "aside", "banner"],
             },
+            {
+                keys: "␣zf",
+                does: "and a letter: open every fold of its kind in the item or the drawer the cursor is in, or, on a banner, that drawer of the agent's",
+                short: "open by kind",
+                at: [],
+            },
+            {
+                keys: "␣zF",
+                does: "and a letter: close every fold of its kind in the item or the drawer the cursor is in, or, on a banner, that drawer of the agent's",
+                short: "close by kind",
+                at: [],
+            },
             ...FOLD_KINDS.filter((each) => each.chord).map((each) => ({
-                keys: `␣z${each.letter} ␣z${each.letter.toUpperCase()}`,
+                keys: `␣zf${each.letter} ␣zF${each.letter}`,
                 does: `open or close ${each.called}`,
                 short: each.called,
                 at: [],
@@ -298,7 +320,7 @@ export interface Following {
 }
 
 /**
- * Return the keys that may follow `pressed`, the keys of a chord pressed so far as the list writes them (`␣`, `␣z`),
+ * Return the keys that may follow `pressed`, the keys of a chord pressed so far as the list writes them (`␣`, `␣z`, `zf`),
  * with the cursor at `place`, in the list's order: each key of `parts` that `pressed` begins and one more key ends,
  * once by that key; of two that share it, as `␣c` on an item and on a banner, the one the line of keys shows at `place`,
  * else the first. A key leading further, as `␣z`, shows by its own line of the list. None before a chord is begun.

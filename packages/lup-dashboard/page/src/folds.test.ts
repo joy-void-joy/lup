@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
-import { around, depths, foldEdge, levelled, nextFold, ofKind } from "./folds";
+import { around, aroundOf, depths, foldEdge, levelled, nextFold, ofKind } from "./folds";
 import type { FoldKind } from "./keys";
 
 // A text of lines two characters long, line `n` starting at `3n`.
@@ -115,6 +115,15 @@ describe("opening and closing one item's folds", () => {
         expect(levelled(READ, open, false, true).map((each) => each.key)).toEqual(["file", "body", "lines", "context"]);
     });
 
+    it("finds the innermost fold of a kind the cursor is in, from its summary line, for z f and the kind's letter", () => {
+        const at = (key: string) => READ.find((each) => each.key === key)!;
+        const lines = at("lines");
+        expect(aroundOf(READ, lines.summary.from, "lines")?.key).toBe("lines");
+        expect(aroundOf(READ, lines.to, "file")?.key).toBe("file");
+        expect(aroundOf(READ, lines.to, "item")?.key).toBe("item");
+        expect(aroundOf(READ, at("item").summary.from, "file")).toBeUndefined();
+    });
+
     it("in a conversation, opens with each `zr` one exchange further back, the latest first, then its runs of calls, never a call's input and output", () => {
         // A conversation drawer, 0–30: what came before the operator's first words, 1–4; two earlier exchanges, 5–12 and
         // 13–20, a run of calls in each, one holding a call's input and output; the last exchange, open, 21–30, a run in it.
@@ -147,7 +156,7 @@ describe("opening and closing one item's folds", () => {
         expect(ofKind(talk, (each) => each.key !== "drawer", "call", false).map((each) => each.key)).toEqual(["call 1"]);
     });
 
-    it("opens with Space z and a letter each fold of a kind, and the item's own so they're seen; closes with Shift and the letter", () => {
+    it("opens with Space z f and a letter each fold of a kind, and the item's own so they're seen; closes with Space z F and the letter", () => {
         expect(ofKind(READ, closed, "lines", false).map((each) => each.key)).toEqual(["item", "lines"]);
         expect(ofKind(READ, closed, "body", false).map((each) => each.key)).toEqual(["item"]);
         expect(ofKind(READ, closed, "body", true).map((each) => each.key)).toEqual(["body"]);
