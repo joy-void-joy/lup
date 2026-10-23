@@ -1550,7 +1550,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
 
     def answered(self, answer: Answer, parts: list[Anchor]) -> list[Tag | str]:
-        """Tag the operator's answer: what was asked, then each decision with its text, the lean it was asked with and their verdict, then their words, a comment on the whole or a plain question's answer; each ruling and the comment with the id of its part among `parts`, the answer's, which the agent's `reply` answers."""
+        """Tag the operator's answer: what was asked, then each decision with its text, the lean it was asked with and their verdict, then their words, a comment on the whole or a plain question's answer; each ruling and the comment with the id of its part among `parts`, the answer's, which a citation of the operator's words names."""
         match self.inbox.item(answer.question).reason:
             case Question(text=text, decisions=decisions):
                 pass
