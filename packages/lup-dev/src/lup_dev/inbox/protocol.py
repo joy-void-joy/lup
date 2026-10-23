@@ -167,6 +167,8 @@ class AskApproval(Request, reads=False):
     pushed_by: Conversation | None = None
     """The main conversation of the session whose push asked it; none for a
     launch's."""
+    first: bool = False
+    """Whether it's the zone's first approval (`Approval.first`)."""
 
     def approval(self) -> Approval:
         """Return the approval as the inbox keeps it, its diff and files beside it."""
@@ -177,6 +179,7 @@ class AskApproval(Request, reads=False):
             fingerprint=self.fingerprint,
             pushed_by=self.pushed_by,
             typing=self.typing,
+            first=self.first,
         )
 
 

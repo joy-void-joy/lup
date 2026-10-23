@@ -1843,6 +1843,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                     repository=repository,
                     fingerprint=standing.fingerprint,
                     worktree=self.root,
+                    first=change.approved is None,
                 )
             )
         inboxed = (
@@ -1893,6 +1894,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                     fingerprint=standing.fingerprint,
                     worktree=self.root,
                     pushed_by=pushed_by,
+                    first=change.approved is None,
                 )
             )
 

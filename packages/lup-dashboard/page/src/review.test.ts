@@ -118,6 +118,7 @@ const APPROVAL: Item = {
         repository: "/r/.git",
         fingerprint: "f",
         typing: false,
+        first: false,
     },
     sender: { party: "operator" },
     recipient: { party: "operator" },
