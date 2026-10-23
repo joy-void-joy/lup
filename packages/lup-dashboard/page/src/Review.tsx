@@ -14,8 +14,8 @@
 // triggered; the item's header counts its files by why each is open; under each
 // item, its context. At the end of each agent's group, its drawers
 // (`review.ts`): its tasks, its trace, what its branch changed since the
-// operator approved it, where Space `a` on a file approves its flags, Space `A`
-// marks all of it good and Space `l` brings the latest in, and its conversation;
+// operator last saw it, live, where Space `a` marks a file reviewed at the
+// version shown and Space `A` every file shown, and its conversation;
 // `h` on a banner turns the operator's switch to hold the agent's flagged
 // writes. Each fold has a kind, its letter in the margin beside its summary
 // line, in the column of its depth, a bar under it for each fold the cursor is
@@ -67,6 +67,7 @@ import {
     shownAt,
     shownInReply,
     showing,
+    sinceFileAt,
     stepped,
     stranded,
     tallied,
@@ -88,7 +89,9 @@ import {
     type Laid,
     type Region,
     type Scope,
+    type SinceFile,
     type Threaded,
+    type Viewed,
     type Where,
     type Written,
 } from "./review";
@@ -115,10 +118,8 @@ interface Props {
     drawers: Drawers;
     send: () => void;
     approve: (number: number, approved: boolean) => void;
-    /** Approve the flagged writes on an agent's branch: those on one file, or every one. */
-    approveSince: (conversation: Conversation, path: string | null) => void;
-    /** Bring the latest of what an agent's branch changed into its drawer. */
-    latest: (conversation: Conversation) => void;
+    /** Mark files of an agent's branch reviewed at the versions shown, approving their flags where they stand so. */
+    reviewSince: (conversation: Conversation, files: Viewed[]) => void;
     /** Turn the operator's switch for an agent: whether each flagged write of it and its subagents is held. */
     hold: (conversation: Conversation) => void;
     /** Told each drawer the operator opens, so the page reads what it shows. */
@@ -143,9 +144,9 @@ interface Props {
     now: Date;
 }
 
-/** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it folds under a summary. */
+/** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it's set in under a summary or a file's header, as a file's reviewed line isn't. */
 function asideClasses(aside: Aside, code: boolean): string {
-    const under = aside.kind === "summary" || aside.kind === "refused" ? null : "aside-under";
+    const under = aside.kind === "summary" || aside.kind === "refused" || aside.kind === "reviewed" ? null : "aside-under";
     return [`aside-${aside.kind}`, under, code ? "code-run" : null].filter((each) => each !== null).join(" ");
 }
 
@@ -462,6 +463,11 @@ function Heading({ parts, tally }: { parts: Where[]; tally: string }) {
     );
 }
 
+/** Return a file of a "since you approved" drawer as marking it reviewed names it: its path, and the version shown. */
+function viewed(file: SinceFile): Viewed {
+    return { path: file.path, version: file.version ?? null };
+}
+
 /** Return where the cursor goes in the comment or message being written at `head` once the text is laid out again: as far into the same one as it was, wherever an item arriving moved it; none where it isn't in one. */
 function writtenAt(before: Laid | null, after: Laid, head: number): number | undefined {
     const was = before === null ? undefined : blockAt(before, head);
@@ -508,8 +514,7 @@ export function Review({
     drawers,
     send,
     approve,
-    approveSince,
-    latest,
+    reviewSince,
     hold,
     opened: told,
     jump,
@@ -599,6 +604,9 @@ export function Review({
     });
     const { view, landing, kept } = editor;
     const before = useRef<Laid | null>(null);
+    // The file Space `a` marked reviewed, and what its drawer showed then, so the cursor goes onto its line once the
+    // drawer reads it as reviewed.
+    const reviewing = useRef<{ of: string; path: string; files: SinceFile[] } | null>(null);
     // What was written as it was last laid out.
     const wrote = useRef<Written[]>([]);
 
@@ -622,9 +630,11 @@ export function Review({
                 arriving === null && writing === undefined && before.current !== null
                     ? stranded(before.current, wrote.current, laidOut, written(draft), head)
                     : undefined;
+            const onReviewed = arriving === null && writing === undefined ? reviewedLine(laidOut) : undefined;
             const anchor =
                 writing ??
                 away ??
+                onReviewed ??
                 (arriving === null ? moved(head, made, doc) : followed(before.current, laidOut, head, made, doc, arriving));
             const landed = arriving !== null || away !== undefined;
             const closed = laidFor.folds.filter((each) => closedAs(each, kept.current));
@@ -726,6 +736,17 @@ export function Review({
         });
     }
 
+    /** Return where the line of the file Space `a` marked reviewed is, once its drawer is read anew and shows it so; none else, or before. */
+    function reviewedLine(laid: Laid): number | undefined {
+        const asked = reviewing.current;
+        const drawer = asked === null ? undefined : laid.drawers.find((each) => each.of === asked.of);
+        if (asked === null || drawer === undefined || drawer.files === asked.files) {
+            return undefined;
+        }
+        reviewing.current = null;
+        return drawer.reviewed.find((each) => each.file.path === asked.path)?.from;
+    }
+
     /** Return the "since you approved" drawer the cursor is in, where it's in one. */
     function sinceHere(): Drawer | undefined {
         const drawer = drawerAt(laidOut, editor.head());
@@ -784,13 +805,14 @@ export function Review({
         approve: (approved) => {
             const drawer = sinceHere();
             if (drawer !== undefined) {
-                const coded = codeAt(drawer, editor.head());
-                if (coded === undefined) {
-                    say("Space a approves a file's flagged writes: put the cursor on one of its lines.");
+                const file = sinceFileAt(drawer, editor.head());
+                if (file === undefined) {
+                    say("Space a marks a file reviewed: put the cursor on one of its lines.");
                 } else if (!approved) {
-                    say("A flagged write is approved or commented on, never declined.");
+                    say("A file is marked reviewed or commented on, never declined.");
                 } else {
-                    approveSince(drawer.conversation, coded.file.path);
+                    reviewing.current = { of: drawer.of, path: file.path, files: drawer.files };
+                    reviewSince(drawer.conversation, [viewed(file)]);
                 }
                 return;
             }
@@ -805,18 +827,14 @@ export function Review({
         approveAll: () => {
             const drawer = sinceHere();
             if (drawer === undefined) {
-                say('Space A marks a "since you approved" drawer good: put the cursor in one.');
+                say('Space A marks every file of a "since you approved" drawer reviewed: put the cursor in one.');
                 return;
             }
-            approveSince(drawer.conversation, null);
-        },
-        latest: () => {
-            const drawer = sinceHere();
-            if (drawer === undefined) {
-                say('Space l brings the latest into a "since you approved" drawer: put the cursor in one.');
+            if (drawer.files.length === 0) {
+                say("Nothing in this drawer to mark reviewed.");
                 return;
             }
-            latest(drawer.conversation);
+            reviewSince(drawer.conversation, drawer.files.map(viewed));
         },
         hold: () => {
             const group = groupAt(laidOut, editor.head());

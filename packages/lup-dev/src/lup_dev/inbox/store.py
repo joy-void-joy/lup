@@ -372,8 +372,13 @@ class AtLanding(Model):
     """The item whose version of the file its diff starts from: the latest the
     operator saw of it on those branches, a flagged write or a hold at landing
     they approved, read or commented on, so what changed in answer to a comment
-    is what they read; none where they saw none, and it starts from the file at
-    the gated branch's tip."""
+    is what they read; none where they saw none, or last saw it marking it
+    reviewed (`reviewed`), and it starts from the file at the gated branch's
+    tip where they saw none."""
+    reviewed: datetime | None = None
+    """When the operator marked the version its diff starts from reviewed in
+    its agent's drawer, where that's the latest they saw of it
+    (`lup_dev.policy.reviewed`); none else."""
 
 
 class HeldChange(Model):

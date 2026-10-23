@@ -12,7 +12,7 @@ describe("the line of keys", () => {
         expect(shown("banner")).toEqual(["h", "o ␣c", "]] [[", "]a [a", "]n [n", "␣z"]);
         expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]a [a", "]n [n"]);
         expect(shown("aside")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
-        expect(shown("drawer")).toEqual(["␣l", "]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
+        expect(shown("drawer")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
         expect(shown("trace")).toEqual(["o", "c…", "]n [n", "za"]);
     });
 
@@ -26,8 +26,8 @@ describe("the line of keys", () => {
         expect(shown("since")).not.toContain("]a [a");
     });
 
-    it("offers a file since the operator approved approving its flags, all of it good and the latest, never declining", () => {
-        expect(shown("since")).toEqual(["␣a", "␣A", "␣l", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
+    it("offers a file since the operator approved marking it reviewed and every file shown reviewed, never declining", () => {
+        expect(shown("since")).toEqual(["␣a", "␣A", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
         expect(shown("file")).toEqual(["␣a", "␣x", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
     });
 
@@ -59,7 +59,7 @@ describe("what may follow a chord", () => {
         chords(REVIEW_KEYS, pressed, place).map((each) => `${each.keys.join(" ")} ${each.short}`);
 
     it("lists the keys after Space, from the same table as the line of keys and the list, once each", () => {
-        expect(following("␣", "item")).toEqual(["a approve", "x decline", "d read", "p park", "A all good", "l latest", "c on the item", "z by kind"]);
+        expect(following("␣", "item")).toEqual(["a approve", "x decline", "d read", "p park", "A all reviewed", "c on the item", "z by kind"]);
         // Of two keys alike, the one that applies where the cursor is: on a banner, Space c writes to its agent.
         expect(following("␣", "banner")).toContain("c message");
     });

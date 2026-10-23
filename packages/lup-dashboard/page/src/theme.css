@@ -653,6 +653,13 @@ kbd {
     font-weight: 400;
 }
 
+/* In "since you approved": a file standing as the operator last saw it,
+   reviewed, a muted line of its own, ruled as a file's header is. */
+.buffer .cm-line.aside-reviewed {
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+}
+
 /* Each kind of fold in its colour: its mark, its bar, its placeholder, its part of the header. */
 .fold-item {
     color: var(--fold-item);

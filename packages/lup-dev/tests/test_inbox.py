@@ -164,6 +164,7 @@ from lup_dev.policy.holds import (
     stores,
 )
 from lup_dev.policy.landing import LandingTools
+from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.remote.protocol import Remotes
@@ -6982,6 +6983,52 @@ def test_a_comment_on_a_hold_lands_nothing_and_the_next_hold_shows_what_changed_
     assert again != latest
     assert landings.on_forge("refs/heads/dev") == old
     assert flag_state == Waiting()
+
+
+def test_a_hold_at_landing_starts_from_the_version_the_operator_marked_reviewed(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    first, second = '"""Rooms."""\n', '"""Chambers."""\n'
+    feat, path = landings.feat, "src/pkg/rooms.py"
+    landings.wrote(feat, path, first)
+    version = landings.shell.git(feat, "rev-parse", f"HEAD:{path}")
+    mark = Mark(path=Path(path), version=version, at=clock.now())
+    reviews = Reviews(layout=machine.reviewed(landings.repository))
+    reviews.marked("feat", [mark], {version: first.encode()})
+    landings.wrote(feat, path, second)
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with (
+        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        landings.flag(path, second, session)
+        landing = pool.submit(call, machine.host.launch("one").mcp, "land", {})
+        assert delivery.holding.wait(timeout=60)
+        [hold] = [
+            each
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.reason, HeldChange)
+        ]
+        diff = inbox("show", str(hold.number), "--diff")
+        inbox("answer", str(hold.number), "--approve", "--comment", "")
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert isinstance(hold.reason, HeldChange)
+    assert hold.reason.landing is not None
+    assert (hold.reason.landing.since, hold.reason.landing.reviewed) == (None, mark.at)
+    assert hold.reason.summary.endswith(
+        "Shown since the version you last marked reviewed in its agent's drawer, "
+        f"{version}."
+    )
+    assert '-"""Rooms."""\n+"""Chambers."""' in diff
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
 
 
 def test_a_land_sent_again_across_a_restart_holds_on_its_holds_again_and_lands_once_approved(
