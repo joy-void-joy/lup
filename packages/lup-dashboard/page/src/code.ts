@@ -2,14 +2,13 @@
 // file it changes shown whole, what it was and what it becomes, its lines marked
 // added, removed (in place, where they were) or the same, each run of unchanged
 // lines away from the changes folded under a summary, a few lines of context
-// kept around each; and its text highlighted by CodeMirror's own language
-// packages, chosen by its name. The judge's reading of the file says why it's
-// open, in its header's last words, and which of its lines matter, each saying
-// what it triggered; a file that asks nothing, held or flagged, is automatic,
-// its header alone in view. A held change's and a flagged write's files show
-// every change; an approval's, which may change tens of thousands of lines, show
-// only the lines that ask in a file whose asks are each on a line, with their
-// context, every other change folded (`Showing`). Each function's and class's
+// kept around each, so every change shows; and its text highlighted by
+// CodeMirror's own language packages, chosen by its name. The judge's reading of
+// the file says why it's open, in its header's last words, and which of its
+// lines matter, each saying what it triggered; a file that asks nothing, held or
+// flagged, is automatic. A test and a data file, by the reading's role, and each
+// file of a first approval, which trusts the repository as it is, fold whole
+// under their header, which says why (`Folded`). Each function's and class's
 // body, read from the file's syntax, can fold under the line declaring it; a run
 // of lines never crosses a body's edge, so every fold sits whole inside another.
 // Pure: the review lays these rows into its text (`review.ts`), and its editor
@@ -42,14 +41,6 @@ const FEWEST = 2;
 /** The most changes to the public API a header names: the rest are on their lines. */
 const NAMED = 4;
 
-/**
- * What a file whose asks are each on a line keeps open, by the item it's under: every change, unchanged lines alone
- * folding, as in any other file, for a held change and a flagged write, which the operator reads whole; or the lines
- * that ask alone, with their context, every other change folding too, for an approval, which may change tens of
- * thousands of lines.
- */
-export type Showing = "changes" | "asks";
-
 /** What a line of a file shows: one the change adds, one it removes, or one it leaves. */
 export type Change = "added" | "removed" | "same";
 
@@ -65,13 +56,11 @@ export interface Row {
     text: string;
 }
 
-/** A run of unchanged rows folded under a summary line, from row `from` up to row `to`. */
+/** A run of unchanged rows folded under a summary line, from row `from` up to row `to`: a changed row is never among them. */
 export interface Run {
     from: number;
     to: number;
     summary: string;
-    /** How many of its rows are changed: none for a run of unchanged lines. */
-    changed: number;
     /**
      * What names it across layouts, by what it hides, so it's found again as lines are added or taken away elsewhere in
      * the file: the body it's in, none at the file's top level; the bodies it holds whole, or where it holds none its
@@ -113,7 +102,8 @@ export interface Reason {
 /**
  * A changed file as the review shows it: its header line, its rows in order, the runs of them that fold and the bodies
  * of its functions and classes; why it's open, from the judge's reading of it, none where it wasn't read; whether it's
- * automatic; whether what it asks is about it whole, its header then a line that matters; and the rows that matter.
+ * automatic, asking nothing held or flagged; why it folds whole under its header, where it does (`Folded`); whether
+ * what it asks is about it whole, its header then a line that matters; and the rows that matter.
  */
 export interface Shown {
     header: string;
@@ -122,8 +112,32 @@ export interface Shown {
     bodies: Body[];
     reasons: Reason[];
     automatic: boolean;
+    folded: Folded | null;
     whole: boolean;
     matters: Matter[];
+}
+
+/**
+ * Why a file folds whole under its header, which says it where `automatic` would stand: a test, or a data file, by the
+ * role the judge's reading gives it, whose lines the operator has little use for; or any file of a first approval,
+ * which trusts the repository as it is rather than asking it read.
+ */
+export type Folded = "test" | "data" | "first approval";
+
+/** What a file folded whole says in its header, and in a tally of an item's files. */
+const FOLDED: Record<Folded, Reason> = {
+    test: { said: "test", one: "test", many: "tests" },
+    data: { said: "data", one: "data file", many: "data files" },
+    "first approval": { said: "first approval", one: "of a first approval", many: "of a first approval" },
+};
+
+/** Return why `file` folds whole under its header (`Folded`), where it's one of a first approval's (`first`) or by its role; none where it opens. */
+export function foldedOf(file: ChangedFile, first: boolean): Folded | null {
+    if (first) {
+        return "first approval";
+    }
+    const role = file.reading?.role;
+    return role === "test" || role === "data" ? role : null;
 }
 
 /** One line of a text, and where it starts in it. */
@@ -191,11 +205,11 @@ function told(file: ChangedFile, rows: Row[]): string {
 /**
  * Lay a changed file out as the review shows it: what it becomes, whole, each line it removes in place where it was,
  * before the lines that replace it; then each run of unchanged lines folded where it's `context` lines or more away
- * from every change and every line that matters, and hides two lines or more; where `showing` is `asks` and the file's
- * asks are each on a line, every run of lines away from those, changed ones among them. A binary file shows its
- * header alone.
+ * from every change and every line that matters, and hides two lines or more, so every change shows. Where it folds
+ * whole (`foldedOf`, `first` where it's a first approval's), its header says why where `automatic` would stand. A
+ * binary file shows its header alone.
  */
-export function shown(file: ChangedFile, showing: Showing = "changes", context: number = CONTEXT): Shown {
+export function shown(file: ChangedFile, first: boolean = false, context: number = CONTEXT): Shown {
     const before = lines(textOf(file.before) ?? "");
     const after = lines(textOf(file.after) ?? "");
     const rows: Row[] = [];
@@ -235,20 +249,23 @@ export function shown(file: ChangedFile, showing: Showing = "changes", context: 
     }
     const reading = file.reading ?? null;
     const placed = mattering(reading, rows);
-    const reasons = reading === null ? [] : reasoned(reading);
-    const automatic = reasons[0]?.said === "automatic";
+    const read = reading === null ? [] : reasoned(reading);
+    const automatic = read[0]?.said === "automatic";
+    const folded = foldedOf(file, first);
+    const why = folded === null ? null : FOLDED[folded];
+    // A file folded whole says why where `automatic` stands, or after what it asks.
+    const reasons = why === null ? read : automatic ? [why, ...read.slice(1)] : [...read, why];
     const header = [`${file.path} · ${told(file, rows)}`, ...reasons.map((each) => each.said)].join(" · ");
     const kept = new Set(placed.matters.map((each) => each.row));
-    // An approval's file whose asks are each on a line shows those lines alone, with their context, its other changes folded.
-    const onLines = showing === "asks" && !automatic && !placed.whole && placed.matters.length > 0;
     const found = bodiesOf(file, rows);
     return {
         header,
         rows,
-        runs: runs(rows, context, kept, onLines, found),
+        runs: runs(rows, context, kept, found),
         bodies: found,
         reasons,
         automatic,
+        folded,
         whole: placed.whole,
         matters: placed.matters,
     };
@@ -392,14 +409,18 @@ function reasoned(reading: Reading): Reason[] {
     return [...(asked.length > 0 ? asked : [plainly("automatic")]), ...informed];
 }
 
-/** Count an item's files by the first reason each is open, the most first: `3 automatic · 1 new file · 1 public API`; files the judge didn't read are `unread`; nothing where it read none. */
-export function tally(files: ChangedFile[]): string {
+/**
+ * Count an item's files by the first reason each is open, or folds whole, `first` where it's a first approval, the
+ * most first: `3 automatic · 2 tests · 1 new file · 1 public API`; files the judge didn't read are `unread`; nothing
+ * where it read none.
+ */
+export function tally(files: ChangedFile[], first: boolean = false): string {
     if (files.every((each) => each.reading == null)) {
         return "";
     }
     const counts = new Map<string, { reason: Reason; count: number }>();
     for (const file of files) {
-        const reason = (file.reading == null ? undefined : reasoned(file.reading)[0]) ?? plainly("unread");
+        const reason = (file.reading == null ? undefined : shownOnce(file, first).reasons[0]) ?? plainly("unread");
         const kept = counts.get(reason.one);
         counts.set(reason.one, { reason, count: (kept?.count ?? 0) + 1 });
     }
@@ -409,18 +430,18 @@ export function tally(files: ChangedFile[]): string {
         .join(" · ");
 }
 
-/** Each file as shown, by what it shows, once laid out: the review is laid out again at each key typed in a comment, and a file's lines don't change. */
-const laidOut = new WeakMap<ChangedFile, Map<Showing, Shown>>();
+/** Each file as shown, whether it's a first approval's, once laid out: the review is laid out again at each key typed in a comment, and a file's lines don't change. */
+const laidOut = new WeakMap<ChangedFile, Map<boolean, Shown>>();
 
-/** Return `file` as shown (`shown`), showing what `showing` says, laid out once and kept. */
-export function shownOnce(file: ChangedFile, showing: Showing): Shown {
-    const kept = laidOut.get(file) ?? new Map<Showing, Shown>();
-    const found = kept.get(showing);
+/** Return `file` as shown (`shown`), `first` where it's a first approval's, laid out once and kept. */
+export function shownOnce(file: ChangedFile, first: boolean): Shown {
+    const kept = laidOut.get(file) ?? new Map<boolean, Shown>();
+    const found = kept.get(first);
     if (found !== undefined) {
         return found;
     }
-    const made = shown(file, showing);
-    laidOut.set(file, kept.set(showing, made));
+    const made = shown(file, first);
+    laidOut.set(file, kept.set(first, made));
     return made;
 }
 
@@ -431,15 +452,14 @@ interface Stretch {
 }
 
 /**
- * Return the runs of rows to fold: each run's part `context` rows or more from every change and every row that
- * matters (`kept`), where it hides `FEWEST` rows or more. Unchanged rows alone fold, but `onLines`, where the rows
- * that matter are the only ones kept open, changed rows among the rest folding, each run saying how many it holds. A run
- * never crosses the edge of one of `bodies` (`cut`), so each sits whole inside the body or around it, and is named by
- * what it hides (`Run.name`).
+ * Return the runs of unchanged rows to fold: each run's part `context` rows or more from every change and every row
+ * that matters (`kept`), where it hides `FEWEST` rows or more; a changed row never folds among them. A run never
+ * crosses the edge of one of `bodies` (`cut`), so each sits whole inside the body or around it, and is named by what it
+ * hides (`Run.name`).
  */
-function runs(rows: Row[], context: number, kept: Set<number> = new Set(), onLines: boolean = false, bodies: Body[] = []): Run[] {
+function runs(rows: Row[], context: number, kept: Set<number> = new Set(), bodies: Body[] = []): Run[] {
     const stretches: Stretch[] = [];
-    const folding = (at: number) => (onLines || rows[at]?.change === "same") && !kept.has(at);
+    const folding = (at: number) => rows[at]?.change === "same" && !kept.has(at);
     let start = 0;
     while (start < rows.length) {
         if (!folding(start)) {
@@ -460,9 +480,7 @@ function runs(rows: Row[], context: number, kept: Set<number> = new Set(), onLin
     return pieces.map(({ from, to }) => {
         const first = rows[from]?.number ?? 0;
         const last = rows[to - 1]?.number ?? 0;
-        const changed = rows.slice(from, to).filter((row) => row.change !== "same").length;
-        const said =
-            changed === 0 ? counted(to - from, "unchanged line") : `${counted(to - from, "line")}, ${changed} changed`;
+        const said = counted(to - from, "unchanged line");
         // The innermost body it's in: the one starting last of those holding it whole.
         const within = bodies.filter((body) => body.from < from && to - 1 <= body.to).at(-1)?.name ?? "";
         // What it hides: the outermost bodies it holds whole, else its first line with words.
@@ -472,7 +490,7 @@ function runs(rows: Row[], context: number, kept: Set<number> = new Set(), onLin
         const hides = JSON.stringify([within, outermost.length > 0 ? outermost.map((body) => body.name) : words]);
         const times = named.get(hides) ?? 0;
         named.set(hides, times + 1);
-        return { from, to, summary: `${said}, ${first}–${last}`, changed, name: times === 0 ? hides : `${hides} ${times}` };
+        return { from, to, summary: `${said}, ${first}–${last}`, name: times === 0 ? hides : `${hides} ${times}` };
     });
 }
 
