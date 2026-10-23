@@ -24,7 +24,10 @@ drawer shows of it starts there from then on. It approves the flagged writes
 on each file only where the file still stands at that version, so a write that
 came after the page read it, which the operator never saw, waits: the file
 comes back with it, and its landing waits on its flags
-(`docs/judging-writes.md`, *Landing a branch*).
+(`docs/judging-writes.md`, *Landing a branch*). Where the drawer stood at the
+version the page shows as they were marked (`ReviewSince.seen`), the answer
+carries its version after and each file marked as the drawer shows it then, so
+the page takes them in without reading the drawer again.
 
 Each reading lists the snapshot's tree and the base once, and reads every
 version it compares in one `git cat-file` of the store and one of the
@@ -98,6 +101,10 @@ class ReviewSince(Request, reads=False):
     kind: Literal["policy-review-since"] = "policy-review-since"
     conversation: Conversation
     files: list[ViewedFile] = Field(min_length=1)
+    seen: str | None = None
+    """The drawer's version the page shows (`Since.version`): where the drawer
+    stood at it as the files were marked, the answer says the drawer as it
+    stands after (`SinceReviewed.version`)."""
 
 
 class SinceFile(Model):
@@ -154,6 +161,14 @@ class SinceReviewed(Reply):
     """The files that stand at another version than the one shown, a write
     having come after the page read it: marked reviewed at the version shown,
     their flags left waiting."""
+    version: str | None = None
+    """The drawer's version once the files are marked, where it stood at the
+    version the page shows (`ReviewSince.seen`) as they were: the drawer the
+    page shows, with the files marked as `files` says, is the drawer as it
+    stands. None else, and the page reads the drawer again."""
+    files: list[SinceFile] = []
+    """Each file marked, as the drawer shows it once marked, where `version` is
+    given."""
 
 
 class Snapshotting(MutableModel, arbitrary_types_allowed=True):
@@ -423,7 +438,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         return None if last is None else Roles(root=root, declaration=last.declaration)
 
     def reviewed(self, request: ReviewSince) -> SinceReviewed:
-        """Mark each file of `request` reviewed at the version shown, approving the flagged writes on those still standing at it, and say which; refused on a detached `HEAD`, where nothing is marked by branch, and where a version shown isn't in the worktree's store."""
+        """Mark each file of `request` reviewed at the version shown, approving the flagged writes on those still standing at it, and say which, with the drawer's version after and the files as it shows them where it stood at the version the page shows (`ReviewSince.seen`); refused on a detached `HEAD`, where nothing is marked by branch, and where a version shown isn't in the worktree's store."""
         party = request.conversation
         located = self.located(party)
         branch = located.branch
@@ -439,7 +454,12 @@ class Reader(Model, arbitrary_types_allowed=True):
         )
         with self.snapshotting.of(located.root):
             tree = store.snapshot()
-        standing = blobs(store.snapshots().tracked(tree))
+        # The drawer the page shows is the one as it stands, but for the files marked, where it stood at the version shown.
+        shown = request.seen is not None and request.seen == self.version(
+            party, branch, tree
+        )
+        listed = store.snapshots().tracked(tree)
+        standing = blobs(listed)
         baseline = self.baseline(party)
         moved = [
             each.path
@@ -464,10 +484,20 @@ class Reader(Model, arbitrary_types_allowed=True):
             ],
             contents,
         )
-        return SinceReviewed(
+        reviewed = SinceReviewed(
             reviewed=[each.path for each in request.files],
             approved=[each.number for each in flags],
             moved=moved,
+        )
+        if not shown:
+            return reviewed
+        tip = Git.pinned(party.repository).commit(f"refs/heads/{branch}")
+        snapshot = self.snapshot(party, located, store, listed=listed, tip=tip)
+        return reviewed.model_copy(
+            update={
+                "version": self.version(party, branch, tree),
+                "files": snapshot.files([each.path for each in request.files]),
+            }
         )
 
     def kept(self, store: Store, versions: list[str]) -> dict[str, bytes]:
