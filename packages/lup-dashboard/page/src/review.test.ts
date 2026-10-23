@@ -1416,11 +1416,18 @@ describe("the drawers at the end of each agent's group", () => {
         // The items came before the drawers, the group after them where it is.
         expect(at("── #51")).toBeLessThan(at("tasks ·"));
         expect(at("conversation · 7 steps")).toBeLessThan(at("━━ s2"));
-        // An agent the host hasn't answered of has no drawers; a drawer with nothing under its summary line has no fold.
+        // An agent the host hasn't answered of has no drawers; nor is a drawer with nothing under its summary line shown,
+        // which would say only that it's empty.
         expect(laid([QUESTION], [S1], banner, header, EMPTY, NOTHING).drawers).toEqual([]);
         const bare = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), UNREAD]]));
-        expect(bare.drawers.map((each) => [each.kind, each.folds.length])).toEqual([["tasks", 0], ["since", 0], ["conversation", 0]]);
-        expect(bare.text).toContain("tasks · none kept\n\nsince you approved · not read yet\n\nconversation · 0 steps\n\n");
+        expect(bare.drawers).toEqual([]);
+        expect(bare.text).not.toContain("tasks ·");
+        const empty = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, tasks: [], since: { ...SINCE, files: [] } }]]));
+        expect(empty.drawers.map((each) => each.kind)).toEqual(["conversation"]);
+        expect(empty.text).not.toContain("since you approved");
+        expect(empty.text.endsWith("· Grep\n\n")).toBe(true);
+        const without = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING);
+        expect(bare.text).toBe(without.text);
     });
 
     it("opens a remark on the agent's words in the conversation, and on a file's line since you approved, recording the version", () => {

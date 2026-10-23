@@ -704,6 +704,12 @@ export function Review({
 
     /** Take each "since you approved" drawer read for the first time as looked at, and forget what was looked at of each file standing as the operator last saw it, which shows each of its changes once it comes back. */
     function read(laid: Laid) {
+        // A drawer read with nothing in it isn't shown, but it's been read: a file coming to it later is new to the operator.
+        for (const [key, data] of drawers) {
+            if (data.since?.worktree != null && (data.since.files ?? []).length === 0) {
+                firstRead.current.add(`since ${key}`);
+            }
+        }
         for (const drawer of laid.drawers) {
             if (drawer.kind !== "since" || drawer.worktree === null) {
                 continue;
