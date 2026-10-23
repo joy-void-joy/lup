@@ -635,6 +635,43 @@ def test_claude_codes_record_reads_its_context_in_use_and_its_task_list(
     assert ClaudeTranscripts(settings=tmp_path / "none.json").model() is None
 
 
+def test_codexs_window_is_the_threads_own_and_none_where_the_count_overflows_it(
+    tmp_path: Path,
+) -> None:
+    """Codex writes each request's window into the thread's own rollout, so it's read there; one smaller than the tokens in use is wrong, and none is shown, as on Claude Code."""
+    rollout = tmp_path / "rollout-th-1.jsonl"
+
+    def counted(total: int, window: int) -> str:
+        used = {
+            "input_tokens": total,
+            "cached_input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_output_tokens": 0,
+            "total_tokens": total,
+        }
+        return rolled(
+            "event_msg",
+            {
+                "type": "token_count",
+                "info": {
+                    "total_token_usage": used,
+                    "last_token_usage": used,
+                    "model_context_window": window,
+                },
+            },
+        )
+
+    head = [meta("th-1", "paginated"), rolled("turn_context", {"model": "gpt-6"})]
+    rollout.write_text("\n".join([*head, counted(26_602, 258_400)]) + "\n")
+    read = CodexTranscripts().read(rollout)
+    assert read.usage is not None
+    assert (read.usage.used, read.usage.window) == (26_602, 258_400)
+    rollout.write_text("\n".join([*head, counted(300_000, 258_400)]) + "\n")
+    read = CodexTranscripts().read(rollout)
+    assert read.usage is not None
+    assert (read.usage.used, read.usage.window) == (300_000, None)
+
+
 def test_codexs_rollout_reads_its_context_in_use_and_its_plan(tmp_path: Path) -> None:
     """The context is the last request's count but its reasoning, in the window the event names; the plan is the last `update_plan` call's, each step numbered in order."""
     day = tmp_path / "codex" / "sessions" / "2026" / "10" / "17"
