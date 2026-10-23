@@ -356,6 +356,29 @@ def test_marking_a_file_reviewed_approves_its_flags_only_where_it_stands_as_show
     assert str(unknown_party.value) == "lup's inbox has never heard of the conversation"
 
 
+def test_a_file_the_operator_saw_in_an_item_is_shown_from_the_version_kept_beside_it(
+    bare: Path, shell: Shell, clock: FakeClock, tmp_path: Path
+) -> None:
+    delivery = alone(tmp_path, clock)
+    branch = Branch(bare, shell, delivery, clock)
+    reader = branch.reader(tmp_path)
+    branch.wrote("src/pkg/a.py", "a = 1\n")
+    flag = branch.flagged("src/pkg/a.py", None, "a = 1\n")
+    delivery.flag_approved(flag)
+
+    # Standing as the item kept it, it's a line saying where they saw it.
+    [a] = reader.read(ShowSince(conversation=branch.party)).files
+    assert (a.file, a.since, a.flags) == (None, flag, [])
+
+    # Written since, it's shown from that version.
+    branch.wrote("src/pkg/a.py", "a = 2\n", committed=False)
+    [a] = reader.read(ShowSince(conversation=branch.party)).files
+    assert a.file == ChangedFile(
+        path=a.path, before=Text(text="a = 1\n"), after=Text(text="a = 2\n")
+    )
+    assert a.since == flag
+
+
 def test_what_the_operator_last_saw_of_a_file_is_the_later_of_its_mark_and_an_item_they_settled(
     tmp_path: Path, clock: FakeClock
 ) -> None:
