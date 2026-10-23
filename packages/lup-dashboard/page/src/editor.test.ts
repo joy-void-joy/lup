@@ -12,8 +12,11 @@ import {
     deadTyped,
     keptFolds,
     nextWritten,
+    openedSaid,
     ownOf,
+    pastFolds,
     pastHidden,
+    reaching,
     rewritten,
     SPACED,
     stepped,
@@ -245,6 +248,70 @@ describe("folds kept as the operator left them", () => {
     it("folds each as the operator left it, else as it's laid out", () => {
         expect([closedAs(folded, new Map()), closedAs(open, new Map())]).toEqual([true, false]);
         expect([closedAs(folded, new Map([["folded", false]])), closedAs(open, new Map([["open", true]]))]).toEqual([false, true]);
+    });
+});
+
+describe("motions past a closed fold, which counts as its summary line", () => {
+    // `head` folds `h1` and `h2` away under it, from its end to `h2`'s; `h1` folds `h2` away, inside.
+    const text = "head\nh1\nh2\nafter";
+    const at = (needle: string, offset = 0) => text.indexOf(needle) + offset;
+    const outer = { from: at("\nh1"), to: at("\nafter") };
+    const inner = { from: at("\nh2"), to: at("\nafter") };
+    const folded = (doc: string, ...folds: { from: number; to: number }[]) =>
+        EditorState.create({ doc, extensions: [foldState] }).update({ effects: folds.map((each) => foldEffect.of(each)) }).state;
+    const state = folded(text, outer);
+    /** Where the cursor rests once a motion from `was` puts the selection at `head`, from `anchor` in visual mode: the text it's on, or the selection; none where it stays. */
+    const rests = (on: EditorState, head: number, was: number, anchor = head) => {
+        const moved = pastFolds(on, EditorSelection.single(anchor, head), was);
+        const doc = on.doc.toString();
+        return moved === null ? null : moved.main.empty ? doc.slice(moved.main.head) : doc.slice(moved.main.from, moved.main.to);
+    };
+
+    it("goes on past the fold onto the line after it, going on past the summary line, as `w` does", () => {
+        expect(rests(state, at("h1", 1), at("head"))).toBe("after");
+        expect(rests(state, at("h2"), at("ad"))).toBe("after");
+    });
+
+    it("comes back onto the summary line's last character, coming back into it, as `b` does, or where no line follows", () => {
+        expect(rests(state, at("h2", 1), at("after"))).toBe("d\nh1\nh2\nafter");
+        const last = "head\nh1\nh2";
+        expect(rests(folded(last, { from: 4, to: last.length }), at("h2"), 0)).toBe("d\nh1\nh2");
+        expect(rests(folded("\nh1\nafter", { from: 0, to: 3 }), 2, 6)).toBe("\nh1\nafter");
+    });
+
+    it("passes the outermost fold folded, and leaves the cursor where no closed fold hides it, its summary line's end and the fold's own end among them", () => {
+        expect(rests(folded(text, outer, inner), at("h2", 1), at("head"))).toBe("after");
+        expect(rests(folded(text, inner), at("h2", 1), at("head"))).toBe("after");
+        expect(rests(state, at("ad", 1), at("head"))).toBeNull();
+        expect(rests(state, outer.from, at("head"))).toBeNull();
+        expect(rests(state, outer.to, at("after"))).toBeNull();
+        expect(rests(state, at("after"), at("head"))).toBeNull();
+    });
+
+    it("keeps a visual selection's anchor, its head past the character the cursor is on where it runs forward, as vim draws it", () => {
+        expect(rests(state, at("h1", 1), at("head"), at("ead"))).toBe("ead\nh1\nh2\na");
+        // Selecting to the summary line's end, as `v$` does, stops on its last character, the line break being the fold's.
+        expect(rests(state, outer.from + 1, at("ad"), 0)).toBe("head");
+        expect(rests(state, at("h1"), at("after"), at("fter"))).toBe("d\nh1\nh2\na");
+    });
+});
+
+describe("a search or a jump to what a closed fold hides", () => {
+    const text = "head\nh1\nh2\nafter";
+    const outer = { from: 4, to: text.indexOf("\nafter") };
+    const inner = { from: text.indexOf("\nh2"), to: outer.to };
+    const state = EditorState.create({ doc: text, extensions: [foldState] }).update({ effects: [foldEffect.of(outer), foldEffect.of(inner)] }).state;
+
+    it("opens the folds around where it goes, those alone, one ending there among them", () => {
+        expect(reaching(state, text.indexOf("h2")).length).toBe(2);
+        expect(reaching(state, text.indexOf("h1")).length).toBe(1);
+        expect(reaching(state, outer.to).length).toBe(2);
+        expect(reaching(state, outer.from).length).toBe(0);
+        expect(reaching(state, text.indexOf("after")).length).toBe(0);
+    });
+
+    it("says how many folds it opened", () => {
+        expect([openedSaid(1), openedSaid(2)]).toEqual(["opened a fold to reach it", "opened 2 folds to reach it"]);
     });
 });
 

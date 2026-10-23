@@ -36,7 +36,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type Taken } from "./code";
 import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
-import { closedAs, folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import { closedAs, isFolded, reached, reaching, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type DrawerKind, type ReviewPlace } from "./keys";
 import { source, sourced, without, type Source } from "./markdown";
@@ -732,6 +732,12 @@ export function Review({
                 effects: sourced.of(laidFor.sources),
             });
             refold(current, laidFor.folds, kept.current);
+            // A comment opened where a closed fold hides it, as on the header of an item marked read, opens the folds
+            // over it, as a jump does, saying so, so the cursor goes into it.
+            const opens = arriving !== null && "comment" in arriving ? reaching(current.state, anchor) : [];
+            if (opens.length > 0) {
+                current.dispatch({ effects: opens, selection: { anchor }, scrollIntoView: true, annotations: reached.of(opens.length) });
+            }
             // Restored after the folds, whose heights it takes in: the cursor's line where it was on screen, or, where
             // it was out of view, the text at the view's top. Either keeps a comment being written where it is on
             // screen too, as only what arrives above moves it; a scroll to the cursor after it would replace it, since
@@ -792,24 +798,36 @@ export function Review({
         editor.record(toggled(editor.latest.current, list, region.item.number));
     }
 
-    /** Open each fold over `target`, as a motion into it would, so the line it's on is in view. */
+    /** Open each fold over `target`, as a jump to it does, so the line it's on is in view, saying so under the review. */
     function opening(current: EditorView, target: number) {
-        const effects = laidFor.folds
-            .filter((fold) => target > fold.from && target <= fold.to && isFolded(current.state, fold))
-            .map((fold) => folding(fold, false));
+        const effects = reaching(current.state, target);
         if (effects.length > 0) {
-            current.dispatch({ effects });
+            current.dispatch({ effects, annotations: reached.of(effects.length) });
         }
     }
 
-    /** Go to `region`'s item, where there's one: onto where it lands (`arrival`), its header kept in view above the line where both fit. */
-    function goTo(region: Region | undefined) {
+    /** Return where `target` is seen: there, or, where a closed fold hides it, on the outermost one's summary line, which a closed fold counts as. */
+    function seen(current: EditorView, target: number): number {
+        return uncovered(
+            laidFor.folds.filter((each) => isFolded(current.state, each)),
+            target,
+        );
+    }
+
+    /**
+     * Go to `region`'s item, where there's one: onto where it lands (`arrival`), its header kept in view above the line
+     * where both fit; `reaching` it, as `]a` does, opening the folds over it, else, as `]]` does, on the summary line of
+     * the closed fold hiding it, which a plain motion never opens.
+     */
+    function goTo(region: Region | undefined, reaches: boolean) {
         const current = view.current;
         if (current === null || region === undefined) {
             return;
         }
-        const at = arrival(region);
-        opening(current, at);
+        const at = reaches ? arrival(region) : seen(current, arrival(region));
+        if (reaches) {
+            opening(current, at);
+        }
         if (at === region.header.from) {
             current.dispatch({ selection: { anchor: at }, scrollIntoView: true });
             return;
@@ -854,14 +872,19 @@ export function Review({
         about: (comment, block) => aboutAt(laidOut, comment, block),
         toggle,
         move: (forward) => {
+            const current = view.current;
+            if (current === null) {
+                return;
+            }
             const head = editor.head();
-            const landings = laidOut.regions.map((region) => ({ region, at: arrival(region) }));
+            // Where each item is seen to land, a closed fold over it counting as its summary line, which `]]` never opens.
+            const landings = laidOut.regions.map((region) => ({ region, at: seen(current, arrival(region)) }));
             const target = forward
                 ? landings.find((each) => each.at > head)
                 : [...landings].reverse().find((each) => each.at < head);
-            goTo(target?.region);
+            goTo(target?.region, false);
         },
-        answer: (forward) => goTo(answerAfter(laidOut, draft, editor.head(), forward)),
+        answer: (forward) => goTo(answerAfter(laidOut, draft, editor.head(), forward), true),
         matter: (forward) => {
             const current = view.current;
             if (current === null) {

@@ -19,11 +19,14 @@
 // letter those of a kind, within what the view says (in the review, the item the
 // cursor is in; in a conversation, everything); `zj` and `zk` go to the next
 // fold's start and the previous one's end, `[z` and `]z` to the start and the end
-// of the open fold the cursor is in (`folds.ts`). `?` opens the list of every key, in place of vim's
-// search backward; once a chord is begun, as with Space, the view is told what's
-// pressed, to show what may follow. `"+` and `"*` are the system clipboard, and a
-// yank or a put the clipboard refused is said in the page's top line
-// (`clipboard.ts`). What's written, an agent's text and a comment, is
+// of the open fold the cursor is in (`folds.ts`). A closed fold counts as its
+// summary line: no motion opens it, the cursor passing over it (`outOfFolds`);
+// a search, and a jump to what it hides, as `]n`, opens the folds around where
+// it goes, saying so under the view (`reached`). `?` opens the list of every
+// key, in place of vim's search backward; once a chord is begun, as with Space,
+// the view is told what's pressed, to show what may follow. `"+` and `"*` are
+// the system clipboard, and a yank or a put the clipboard refused is said in
+// the page's top line (`clipboard.ts`). What's written, an agent's text and a comment, is
 // Markdown, shown as such, Enter in a comment continuing the list it's in, and
 // `o` and `O` on one of its items opening the next item or the one before it
 // (`markdown.ts`); each view says which stretches of its text those are, in the
@@ -46,7 +49,7 @@ import {
 import { Vim, getCM, vim, type CodeMirror, type CodeMirrorV } from "@replit/codemirror-vim";
 import { useEffect, useRef, type RefObject } from "react";
 
-import { defineClipboard } from "./clipboard";
+import { defineClipboard, shownBelow } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, foldEdge, levelled, nextFold } from "./folds";
 import { FOLD_KINDS, type FoldKind } from "./keys";
@@ -99,6 +102,8 @@ interface Keyed {
     changing: boolean;
     /** Whether vim is in insert mode, that is, whether a comment is being written. */
     inserting: boolean;
+    /** Whether it begins or makes a search, `/`, `n`, `N`, `*` or `#`, whose match opens the folds around it, where the cursor goes next. */
+    searching: boolean;
     /** Where a dead key pressed outside insert mode is. */
     dead: Dead;
 }
@@ -297,7 +302,7 @@ interface Bound {
 /** Each editor's own, read by the keys, the filters and vim's actions, which vim's keymap shares between editors. */
 const binding = Facet.define<Bound, Bound | null>({ combine: (values) => values[0] ?? null });
 
-const NONE: Keyed = { from: 0, visual: false, passage: null, changing: false, inserting: false, dead: UNPRESSED };
+const NONE: Keyed = { from: 0, visual: false, passage: null, changing: false, inserting: false, searching: false, dead: UNPRESSED };
 
 function boundOf(state: EditorState): Bound {
     return state.facet(binding) ?? { actions: null, keyed: NONE };
@@ -551,6 +556,10 @@ const keys = Prec.highest(
             if (idle(cm)) {
                 keyed.changing = (event.key === "c" || event.key === "C") && !modified && !keyed.visual;
             }
+            // A key typed in the search's prompt is the query's: the search stays begun until it's made.
+            if (event.target === view.contentDOM) {
+                keyed.searching = !modified && searches(cm, event.key);
+            }
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 if (cm.state.vim.insertMode) {
                     bound.actions?.finish(cm);
@@ -613,6 +622,15 @@ const typed = Prec.highest(
         return true;
     }),
 );
+
+/** The keys that search: vim's `/`, `n`, `N`, `*` and `#`, and `g*` and `g#`; `?` lists the keys instead. */
+const SEARCHES = new Set(["/", "n", "N", "*", "#"]);
+
+/** Return whether `key`, pressed outside insert mode, begins or makes a search, rather than finishing another command, as `fn` does. */
+function searches(cm: CodeMirrorV, key: string): boolean {
+    const held = cm.state.vim.inputState.keyBuffer;
+    return !cm.state.vim.insertMode && SEARCHES.has(key) && (held.length === 0 || (held.join("") === "g" && (key === "*" || key === "#")));
+}
 
 /** Marks a view's own replacing of its text, which isn't the operator's edit. */
 export const rebuilt = Annotation.define<boolean>();
@@ -777,6 +795,110 @@ const offHidden = EditorView.updateListener.of((update) => {
             view.dispatch({ selection: moved });
         }
     });
+});
+
+/**
+ * Marks a transaction that opened folds to reach where it puts the cursor, a search's match or a jump's line, by how
+ * many: the editor says so under the view.
+ */
+export const reached = Annotation.define<number>();
+
+/** Marks a selection a plain motion put in what a closed fold hides, moved past it (`pastFolds`). */
+const passed = Annotation.define<boolean>();
+
+/** Return the effects that open each fold folded in `state` around `target`, the lines it hides holding it or ending at it: what a search or a jump opens to reach it. */
+export function reaching(state: EditorState, target: number): StateEffect<Span>[] {
+    const effects: StateEffect<Span>[] = [];
+    foldedRanges(state).between(target, target, (from, to) => {
+        if (target > from && target <= to) {
+            effects.push(unfoldEffect.of({ from, to }));
+        }
+    });
+    return effects;
+}
+
+/** Say how many folds a search or a jump opened to reach where it went. */
+export function openedSaid(count: number): string {
+    return count === 1 ? "opened a fold to reach it" : `opened ${count} folds to reach it`;
+}
+
+/**
+ * Return where a plain motion's cursor rests where it was put in what a closed fold hides, coming from `was`, as if
+ * the fold were the summary line it shows as: past it the way it went, on the start of the line after it, where it
+ * went on past the summary line's end; back on the summary line's last character where it came back into it, or where
+ * no line follows the fold. Of folds one inside another, past the outermost folded. Where the selection is a visual
+ * one, the anchor stays, and where it runs forward the head is past the character the cursor is on, as vim draws it.
+ * None where the head isn't in what a closed fold hides, where CodeMirror would open it.
+ */
+export function pastFolds(state: EditorState, selection: EditorSelection, was: number): EditorSelection | null {
+    const { main } = selection;
+    const holding: Span[] = [];
+    foldedRanges(state).between(main.head, main.head, (from, to) => {
+        if (from < main.head && main.head < to) {
+            holding.push({ from, to });
+        }
+    });
+    const fold = holding.sort((a, b) => a.from - b.from || b.to - a.to)[0];
+    if (fold === undefined) {
+        return null;
+    }
+    // The character the cursor is on: before the head where a visual selection runs forward.
+    const at = main.anchor < main.head ? main.head - 1 : main.head;
+    const forward = main.head > was && at > fold.from && fold.to < state.doc.length;
+    const rest = forward ? fold.to + 1 : Math.max(fold.from - 1, state.doc.lineAt(fold.from).from);
+    if (main.empty) {
+        return EditorSelection.single(rest);
+    }
+    return EditorSelection.single(main.anchor, main.anchor <= rest ? Math.min(rest + 1, state.doc.length) : rest);
+}
+
+/**
+ * Keep the cursor out of what a closed fold hides, where CodeMirror would open the fold: a plain motion put there, as
+ * `w` past a folded file's header, `b` back into one or `G` into a folded drawer, rests past the fold instead
+ * (`pastFolds`), so a fold opens by the fold keys, a click, a search or a jump alone. A search, `/`, `n`, `N`, `*` or
+ * `#`, opens the folds around its match, said under the view (`reached`); a jump opens what it reaches itself. Not in
+ * insert mode, where the cursor stays in the comment being written, nor where a view lays its text out, or a click.
+ */
+const outOfFolds = EditorState.transactionFilter.of((transaction) => {
+    const moved = transaction.selection;
+    if (
+        moved === undefined ||
+        transaction.docChanged ||
+        transaction.annotation(rebuilt) === true ||
+        transaction.annotation(reached) !== undefined ||
+        transaction.isUserEvent("select.pointer")
+    ) {
+        return transaction;
+    }
+    const { keyed } = boundOf(transaction.startState);
+    if (keyed.inserting) {
+        return transaction;
+    }
+    const before = transaction.startState;
+    if (keyed.searching) {
+        const opening = reaching(before, moved.main.head);
+        return opening.length === 0 ? transaction : [transaction, { effects: opening, annotations: reached.of(opening.length) }];
+    }
+    const past = pastFolds(before, moved, before.selection.main.head);
+    return past === null ? transaction : [transaction, { selection: past, annotations: passed.of(true) }];
+});
+
+/**
+ * Say under the view how many folds a search or a jump opened to reach where it went (`reached`); and, where a plain
+ * motion's visual selection was moved past a fold (`pastFolds`), give it to vim as a selection it didn't make, once its
+ * key is done, so vim's own selection goes on from there.
+ */
+const foldsTold = EditorView.updateListener.of((update) => {
+    const opened = update.transactions.reduce((sum, each) => sum + (each.annotation(reached) ?? 0), 0);
+    const cm = vimOf(update.view);
+    if (opened > 0 && cm !== null) {
+        queueMicrotask(() => shownBelow(cm, openedSaid(opened)));
+    }
+    const moved = update.transactions.some((each) => each.annotation(passed) === true);
+    if (moved && !update.state.selection.main.empty) {
+        const { view } = update;
+        queueMicrotask(() => view.dispatch({ selection: view.state.selection }));
+    }
 });
 
 /** Return whether CodeMirror holds `fold` folded. */
@@ -1014,6 +1136,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     drawSelection(),
                     onlyComments,
                     withinComment,
+                    outOfFolds,
+                    foldsTold,
                     offHidden,
                     EditorView.lineWrapping,
                     placeheld(margined),
@@ -1221,14 +1345,9 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 if (editor === null || target === undefined) {
                     return;
                 }
-                // Each fold it's in opens, as a motion into it would.
-                const effects: StateEffect<Span>[] = [];
-                foldedRanges(editor.state).between(target, target, (from, to) => {
-                    if (target > from && target <= to) {
-                        effects.push(unfoldEffect.of({ from, to }));
-                    }
-                });
-                editor.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true });
+                // Each fold it's in opens, said under the view.
+                const effects = reaching(editor.state, target);
+                editor.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true, annotations: reached.of(effects.length) });
             },
             approve: (approved) => own.approve?.(approved),
             approveAll: () => own.approveAll?.(),
