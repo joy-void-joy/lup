@@ -28,14 +28,14 @@ describe("the lines changed since the operator last looked at a file", () => {
 
     it("are each line the file changes where they never looked at it", () => {
         const changed = file("a = 1\nb = 2\n", "a = 1\nb = 20\nc = 3\n");
-        const rows = shownOnce(changed, "changes").rows;
+        const rows = shownOnce(changed, false).rows;
         const fresh = freshRows(null, changed);
         expect(rows.filter((row) => fresh.rows.has(row)).map((row) => `${row.change} ${row.text}`)).toEqual(["removed b = 2", "added b = 20", "added c = 3"]);
     });
 
     it("are each row shown anew or otherwise, and the row after one gone, against the version they looked at", () => {
         const now = file(null, "a = 1\nb = 2\nd = 4\nc = 3\n");
-        const rows = shownOnce(now, "changes").rows;
+        const rows = shownOnce(now, false).rows;
         const grown = freshRows(first, now);
         expect(rows.filter((row) => grown.rows.has(row)).map((row) => row.text)).toEqual(["d = 4"]);
         expect(grown.gaps.size).toBe(0);
@@ -43,11 +43,11 @@ describe("the lines changed since the operator last looked at a file", () => {
         const based = file("a = 1\nb = 2\n", "a = 1\nb = 2\nc = 3\n");
         const cut = file("a = 1\nb = 2\n", "b = 2\nc = 3\n");
         const taken = freshRows(based, cut);
-        const shown = shownOnce(cut, "changes").rows;
+        const shown = shownOnce(cut, false).rows;
         expect(shown.filter((row) => taken.rows.has(row)).map((row) => `${row.change} ${row.text}`)).toEqual(["removed a = 1"]);
         // A line only added, then taken out again, leaves its mark on the row after where it was.
         const gone = freshRows(now, first);
-        const after = shownOnce(first, "changes").rows;
+        const after = shownOnce(first, false).rows;
         expect([gone.rows.size, after.filter((row) => gone.gaps.has(row)).map((row) => row.text)]).toEqual([0, ["c = 3"]]);
         // Worked out once for each pair, as it's painted at each scroll.
         expect(freshRows(first, now)).toBe(grown);

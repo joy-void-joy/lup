@@ -186,6 +186,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     """How many workers the busy day's writes come from, subagents of the lup-impl session, each in a worktree of its own."""
     functions: int = 36
     """How many functions a worker's module holds, a dozen lines each: a file of hundreds of lines."""
+    approval_lines: int = 0
+    """How many lines the approval's change holds beside its own files, as one of lup's own code may hold tens of
+    thousands (`approved`): none by default."""
     hooks: float = 0
     """How many stand-in hook calls a minute the workers make, each changing what one of them does and answering every watch again, as the host service answers each watch at each hook (`docs/host.md`, *Watching*); none by default."""
     hooked: int = 0
@@ -257,7 +260,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     self.reading = asyncio.get_running_loop().call_later(
                         self.types_read.total_seconds(), self.typed
                     )
-                return files(number, typed=not self.typing)
+                return files(number, typed=not self.typing, lines=self.approval_lines)
             case ShowContext(number=number):
                 return self.context(number)
             case SendItem() as sending:
@@ -1876,8 +1879,8 @@ def module(n: int, i: int, functions: int) -> str:
     return "".join([head, *(function(at) for at in range(functions))])
 
 
-def function(at: int) -> str:
-    """Return one stand-in function, `step_<at>`, with a docstring and a body of a few lines, so bodies fold and runs of lines sit inside them."""
+def function(at: int, returned: str = "found") -> str:
+    """Return one stand-in function, `step_<at>`, with a docstring and a body of a few lines ending in returning `returned`, so bodies fold and runs of lines sit inside them."""
     return (
         "\n\n"
         f"def step_{at}(path: Path, count: int = {at}) -> list[str]:\n"
@@ -1888,7 +1891,7 @@ def function(at: int) -> str:
         '            if line.strip() == "":\n'
         "                continue\n"
         '            found.append(f"{turn}:{number}:{line}")\n'
-        "    return found\n"
+        f"    return {returned}\n"
     )
 
 
@@ -2296,8 +2299,39 @@ def line(content: Text, written: str) -> int:
     return content.text.splitlines().index(written) + 1
 
 
-def files(number: int, *, typed: bool = True) -> Files | Refused:
-    """Return the stand-in files of the approval (54), the held change (55) and the flagged writes (59, 60): Python, TypeScript, TOML, Markdown and JSON, changed, created, and one binary; each with a stand-in of the judge's reading of it, two of the approval's automatic, the rest open for what they ask, a production change, or a finding told, which only the approval's reading with types, once `typed`, holds; a new module and a method added, flagged."""
+def approved(lines: int, functions: int = 36) -> list[ChangedFile]:
+    """Return the stand-in files that make the approval `lines` lines larger, as one of lup's own code may be by tens of thousands: half in production modules of `functions` functions, hundreds of lines each, every function of which changes, so the review shows each change with unchanged lines folded between; half in their tests, created, which it folds whole."""
+    each = len(changing(0, functions, changed=True).splitlines())
+    count = -(-lines // (2 * each))
+    return [
+        made
+        for i in range(count)
+        for made in (
+            ChangedFile(
+                path=Path("packages/lup/src/lup/approved") / f"module_{i}.py",
+                before=text(changing(i, functions, changed=False)),
+                after=text(changing(i, functions, changed=True)),
+                reading=Reading(role="production"),
+            ),
+            ChangedFile(
+                path=Path("packages/lup/tests/approved") / f"test_module_{i}.py",
+                before=None,
+                after=text(changing(i, functions, changed=True)),
+                reading=Reading(role="test"),
+            ),
+        )
+    ]
+
+
+def changing(i: int, functions: int, *, changed: bool) -> str:
+    """Return the stand-in module `i` of the approval's change (`approved`), of `functions` functions, each returning what it found, or, `changed`, sorted."""
+    head = f'"""Module {i} of an approval at size: stand-in code."""\n\nfrom pathlib import Path\n'
+    returned = "sorted(found)" if changed else "found"
+    return "".join([head, *(function(at, returned) for at in range(functions))])
+
+
+def files(number: int, *, typed: bool = True, lines: int = 0) -> Files | Refused:
+    """Return the stand-in files of the approval (54), the held change (55) and the flagged writes (59, 60): Python, TypeScript, TOML, Markdown and JSON, changed, created, and one binary; each with a stand-in of the judge's reading of it, two of the approval's automatic, the rest open for what they ask, a production change, or a finding told, which only the approval's reading with types, once `typed`, holds; a new module and a method added, flagged. The approval holds `lines` lines more (`approved`)."""
     created = Reading(role="production", asks=[Ask(name="new-file", taken="flagged")])
     match number:
         case 54:
@@ -2372,6 +2406,7 @@ def files(number: int, *, typed: bool = True) -> Files | Refused:
                         after=text(VIEWS),
                         reading=created,
                     ),
+                    *approved(lines),
                 ],
             )
         case 55:

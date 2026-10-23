@@ -587,6 +587,8 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
     assert asking.repository == common
     assert asking.fingerprint == trust.check().fingerprint
     assert asking.worktree == lup
+    assert asking.first
+    assert asking.approval().first
     assert "+++ b/lup_project.py" in Text.from_ansi(asking.diff).plain
     assert trust.approvals.answers == [True]
     [install] = recording(trust).installed
@@ -921,8 +923,9 @@ def test_a_first_approval_reads_the_zone_by_its_roles_alone_never_the_tips_decla
     )
     assert readings[Path("lup_project.py")] == Reading(role="protected")
     assert not ran.exists()
-    # Trusted as it is: there's nothing to read the types of.
+    # Trusted as it is: there's nothing to read the types of, and the review folds its files.
     assert not asking.typing
+    assert asking.first
     assert kit.parser.parsed_asked == []
 
 
@@ -941,6 +944,7 @@ def test_once_approved_the_declaration_approved_judges_the_zones_change(
     [asking] = trust.approvals.asking
     readings = {each.path: each.reading for each in asking.files}
     assert readings[Path(extra)] == Reading(role="production")
+    assert not asking.first
 
 
 class Broken(Checker):

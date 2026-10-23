@@ -53,7 +53,7 @@ export function freshRows(looked: ChangedFile | null, file: ChangedFile): Fresh 
     if (looked === file) {
         return NOTHING;
     }
-    const now = shownOnce(file, "changes").rows;
+    const now = shownOnce(file, false).rows;
     if (looked === null) {
         return { rows: new Set(now.filter((row) => row.change !== "same")), gaps: new Set() };
     }
@@ -62,7 +62,7 @@ export function freshRows(looked: ChangedFile | null, file: ChangedFile): Fresh 
     if (found !== undefined) {
         return found;
     }
-    const was = shownOnce(looked, "changes").rows;
+    const was = shownOnce(looked, false).rows;
     const said = (row: Row) => `${row.change} ${row.text}`;
     const changed = hunks(was.map(said), now.map(said));
     const rows = new Set(changed.flatMap((hunk) => now.slice(hunk.into, hunk.until)));
