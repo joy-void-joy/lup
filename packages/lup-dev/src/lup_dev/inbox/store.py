@@ -17,6 +17,8 @@ for an approval decided. An item for a conversation that has ended goes to its
 session's main conversation, saying whose it was. A subagent's end, and a copy
 of what it says of its work, go to the conversation that spawned it, which its
 whereabouts keep: quiet items, told at a call and never holding a turn's end.
+A message one conversation sends another, its parent or one of its own
+subagents, is that other's, and the operator reads a copy (`Message.to`).
 
 An approval is trust on launch's: the launch's own question, put to the
 operator's inbox and answered at the launching terminal or any other, whichever

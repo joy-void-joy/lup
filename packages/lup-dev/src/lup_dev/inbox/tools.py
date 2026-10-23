@@ -13,7 +13,9 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
 - `ask` puts a question to the operator, its decisions numbered, each with the
   agent's lean; with `wait` it holds until they answer;
 - `send` is the inbox's general verb, a message of a kind to a party's inbox:
-  the operator's, in this piece;
+  the operator's, the conversation's parent's, or one of its own subagents',
+  each by a name the conversation knows it by, the operator reading a copy of
+  a message between conversations; one whom nothing would read is refused;
 - `wait_inbox` holds until something reaches the agent's inbox, one of its own
   subagents' ends among it. It isn't called `wait`, a name a runtime has for a
   tool of its own;
@@ -419,7 +421,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 parent = self.delivery.parent(self.party)
                 if parent is None:
                     message = (
-                        f"no conversation spawned you, so you have no parent. "
+                        "no conversation spawned you, so you have no parent. "
                         f"{self.yours()}"
                     )
                     raise InboxError(message)
