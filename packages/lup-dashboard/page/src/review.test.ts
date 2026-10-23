@@ -1243,7 +1243,7 @@ describe("the drawers at the end of each agent's group", () => {
     const at = (text: string) => out.text.indexOf(text);
     const lines = (from: number, to: number) => out.text.slice(from, to).split("\n");
 
-    it("lays four drawers after the group's items, each folded under its summary line, a new module's bodies folded too", () => {
+    it("lays the drawers after the group's items, each its own fold, folded but \"since you approved\", a new module's bodies folded too", () => {
         const [group] = out.groups;
         expect(group?.drawers.map((each) => each.kind)).toEqual(["tasks", "since", "conversation"]);
         expect(out.groups[1]?.drawers).toEqual([]);
@@ -1260,11 +1260,12 @@ describe("the drawers at the end of each agent's group", () => {
             "Twenty kinds of line.",
             "· Grep",
         ]);
-        // Each drawer is its own fold, folded; the new module's bodies fold until opened, its file open.
+        // Each drawer is its own fold, folded but "since you approved", the code waiting on the operator; the new
+        // module's bodies fold until opened, its file open.
         const own = out.drawers.map((each) => each.folds.at(-1)!);
         expect(own.map((each) => [each.kind, each.closed, each.of])).toEqual([
             ["tasks", true, `tasks ${whose(S1)}`],
-            ["since", true, `since ${whose(S1)}`],
+            ["since", false, `since ${whose(S1)}`],
             ["conversation", true, `conversation ${whose(S1)}`],
         ]);
         // In the conversation, each exchange before the operator's last words folds under their words.
@@ -1279,7 +1280,7 @@ describe("the drawers at the end of each agent's group", () => {
             ["body", "Reader", true],
             ["body", "turns", true],
             ["file", "reader.py", false],
-            ["since", "since you approved on feat · 1 to review · 1 flagged", true],
+            ["since", "since you approved on feat · 1 to review · 1 flagged", false],
         ]);
         expect(foldKey(since.folds[1]!)).toBe(`since ${whose(S1)} body reader.py ["Reader","turns"]`);
         // The items came before the drawers, the group after them where it is.

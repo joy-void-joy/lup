@@ -22,7 +22,7 @@
 // writes. Each fold has a kind, its letter in the margin beside its summary
 // line, in the column of its depth, a bar under it for each fold the cursor is
 // in (`margin.ts`); the context, each run of unchanged lines, each test, data
-// and first approval's file and each drawer, folded until opened, and `zr`, `zm`, `zR`, `zM` and
+// and first approval's file and each drawer but "since you approved", folded until opened, and `zr`, `zm`, `zR`, `zM` and
 // Space `z` act on the item or the drawer the cursor is in. The header over the
 // review says where the cursor is: the group, the item or the drawer, the file
 // and the folds it's in, and, while a comment is being written, whom it goes
