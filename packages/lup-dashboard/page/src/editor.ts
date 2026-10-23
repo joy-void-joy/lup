@@ -24,7 +24,8 @@
 // pressed, to show what may follow. `"+` and `"*` are the system clipboard, and a
 // yank or a put the clipboard refused is said in the page's top line
 // (`clipboard.ts`). What's written, an agent's text and a comment, is
-// Markdown, shown as such, Enter in a comment continuing the list it's in
+// Markdown, shown as such, Enter in a comment continuing the list it's in, and
+// `o` and `O` on one of its items opening the next item or the one before it
 // (`markdown.ts`); each view says which stretches of its text those are, in the
 // transaction that lays the text out. Each view says what else its keys do, lays
 // its own text out and draws it, and may paint the lines in view as well, as the
@@ -49,12 +50,13 @@ import { defineClipboard } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, foldEdge, levelled, nextFold } from "./folds";
 import { FOLD_KINDS, type FoldKind } from "./keys";
-import { continued, hiddenOn, markdown } from "./markdown";
+import { continued, hiddenOn, markdown, openedLine } from "./markdown";
 import { margin, placeheld, type Margined } from "./margin";
 
 /** What the vim keys and the editor's own events do, as a view stands: replaced at each render. */
 interface Actions {
-    comment: (cm: CodeMirrorV, on: "line" | "whole") => void;
+    /** Open a comment on the line or the whole, or, in a comment, a line below it to write on (`line`) or above it (`above`). */
+    comment: (cm: CodeMirrorV, on: "line" | "above" | "whole") => void;
     entered: (cm: CodeMirrorV) => void;
     left: () => void;
     finish: (cm: CodeMirrorV) => void;
@@ -348,6 +350,7 @@ function mapKeys(): void {
             }
         });
     action("lupCommentLine", (actions, cm) => actions.comment(cm, "line"));
+    action("lupCommentAbove", (actions, cm) => actions.comment(cm, "above"));
     action("lupCommentWhole", (actions, cm) => actions.comment(cm, "whole"));
     action("lupDone", (actions) => actions.toggle("done"));
     action("lupLater", (actions) => actions.toggle("parked"));
@@ -401,6 +404,7 @@ function mapKeys(): void {
     const map = (keys: string, name: string, context: string) =>
         Vim.mapCommand(keys, "action", name, {}, { context });
     map("o", "lupCommentLine", "normal");
+    map("O", "lupCommentAbove", "normal");
     map("h", "lupHold", "normal");
     for (const [keys, name] of SPACED) {
         map(keys, name, "normal");
@@ -1143,10 +1147,12 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 if (editor === null) {
                     return;
                 }
-                if (on === "line" && blockAt(head()) !== undefined) {
-                    const end = editor.state.doc.lineAt(head()).to;
-                    editor.dispatch({ changes: { from: end, insert: "\n" }, selection: { anchor: end + 1 } });
-                    Vim.handleKey(cm, "i", "mapping");
+                // In a comment, a line below or above to write on, a list's next item or the one before it.
+                if (on !== "whole" && blockAt(head()) !== undefined) {
+                    editor.dispatch(openedLine(editor.state, head(), on === "line"));
+                    // The line opened and what's written on it are one step, as a comment opened is.
+                    writing.current = true;
+                    Vim.handleKey(cm, "A", "mapping");
                     return;
                 }
                 const comment = on === "whole" ? own.whole(head()) : own.opened(head());
