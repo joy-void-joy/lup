@@ -20,6 +20,14 @@ what's left out said with what reads it), and further:
 
 Waiting items alone are listed unless `every` is asked, and what that leaves out
 is counted too, with the parameter that reads it.
+
+**A conversation's flagged writes are one entry** (`Flags`, `by_agent`), placed
+at its latest, rather than a line a file: what it changed is the operator's to
+read in its agent's drawer (`docs/dashboard.md`, *The drawers*), and ten files
+of one branch listed a line each buried what waits on them. Each stays an item
+of its own underneath, which a landing waits on, read whole by its number; an
+entry counts as one against a `limit`, and says how many files, on which
+branches, and where they stand; read whole, each under it names its file.
 """
 
 from typing import TYPE_CHECKING, Literal
@@ -43,19 +51,24 @@ from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.store import (
     Answer,
     Conversation,
+    Decided,
+    Done,
     Ended,
+    Flagged,
     Item,
     Message,
     Operator,
     Party,
     Review,
     Waiting,
+    cited,
 )
 from lup_dev.inbox.tags import Tag
 from lup_dev.inbox.threads import Anchor, addressed_to, anchors
 from lup_dev.listing import Span, latest, many, unlisted
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
 
 
@@ -151,6 +164,96 @@ class Read(Model):
 
     text: str
     found: int = 0
+
+
+class Flags(Model):
+    """One conversation's flagged writes, listed as one entry rather than a line a file: each an item of its own underneath, one file's on one branch, which a landing waits on (`lup_dev.policy.landing`)."""
+
+    items: list[Item]
+    """Oldest first, all from one sender, each a flagged write."""
+
+    @property
+    def sender(self) -> Party:
+        """Who made them: the conversation whose writes they are."""
+        return self.items[0].sender
+
+    @property
+    def made(self) -> datetime:
+        """When the latest was made, where the entry is listed."""
+        return max(item.made for item in self.items)
+
+    def flagged(self) -> list[Flagged]:
+        """Return what each flagged, in order."""
+        return [item.reason for item in self.items if isinstance(item.reason, Flagged)]
+
+    def cited(self, between: str = " ") -> str:
+        """Cite each item, in order, `between` each: `@59 @61`."""
+        return between.join(cited(item.number) for item in self.items)
+
+    def standing(self) -> str:
+        """Say where they stand: `waiting`, or each state counted, `2 waiting, 1 approved`."""
+
+        def state(item: Item) -> str:
+            match item.state:
+                case Waiting():
+                    return "waiting"
+                case Decided(approved=True):
+                    return "approved"
+                case Decided():
+                    return "declined"
+                case Done():
+                    return "read"
+                case _:
+                    return "settled"
+
+        states = [state(item) for item in self.items]
+        counted = list(dict.fromkeys(states))
+        if len(counted) == 1:
+            return counted[0]
+        return ", ".join(f"{states.count(each)} {each}" for each in counted)
+
+    def said(self) -> str:
+        """Say what they flag: how many files, one on two branches counting twice, as each branch's landing waits on it; and on which branches. Each, read whole, names its file."""
+        files = list(dict.fromkeys((each.branch, each.path) for each in self.flagged()))
+        branches = list(dict.fromkeys(each.branch for each in self.flagged()))
+        on = and_said([f"`{each}`" for each in branches if each is not None])
+        where = (
+            f"on {on}"
+            if None not in branches
+            else f"on {on} and on no branch"
+            if on
+            else "on no branch"
+        )
+        return f"{many(len(files), 'file')} {where}"
+
+
+def and_said(words: Sequence[str]) -> str:
+    """Say `words` as a list in prose: `a`, `a and b`, `a, b and c`; nothing for none.
+
+    >>> and_said(["a"]), and_said(["a", "b", "c"])
+    ('a', 'a, b and c')
+    """
+    *first, last = words or [""]
+    return f"{', '.join(first)} and {last}" if first else last
+
+
+def by_agent(items: list[Item]) -> list[Item | Flags]:
+    """Return `items`, oldest first, with each conversation's flagged writes as one entry (`Flags`), placed at its latest, and the rest as they are."""
+    flagged = [item for item in items if isinstance(item.reason, Flagged)]
+    senders = list(dict.fromkeys(item.sender for item in flagged))
+    entries: list[Item | Flags] = [
+        *(item for item in items if not isinstance(item.reason, Flagged)),
+        *(
+            Flags(items=[item for item in flagged if item.sender == sender])
+            for sender in senders
+        ),
+    ]
+    return sorted(entries, key=lambda each: each.made)
+
+
+def counted(entries: list[Item | Flags]) -> int:
+    """Count the items `entries` hold, each entry of flagged writes as many as it gathers."""
+    return sum(len(each.items) if isinstance(each, Flags) else 1 for each in entries)
 
 
 class Reader(Model, arbitrary_types_allowed=True):
@@ -252,22 +355,27 @@ class Reader(Model, arbitrary_types_allowed=True):
             )
             nothing = f"Nothing{of}{where} {waits}{window.said()}."
             return Read(text="\n".join([*head, nothing, *settled]))
-        shown = latest(chosen, lambda item: item.made, wanted.most())
+        entries = by_agent(chosen)
+        shown = latest(entries, lambda each: each.made, wanted.most())
         naming: Naming = (
             "paths" if heading is not None else "paths and ids" if self.mine else "ids"
         )
         if wanted.whole:
-            placed = [item.number for item in shown]
+            placed = [
+                item.number
+                for each in shown
+                for item in (each.items if isinstance(each, Flags) else [each])
+            ]
             said = "\n\n".join(
-                self.whole(item, placed, items, naming=naming) for item in shown
+                self.whole(each, placed, items, naming=naming) for each in shown
             )
         else:
-            said = "\n".join(self.line(item, items, naming=naming) for item in shown)
+            said = "\n".join(self.line(each, items, naming=naming) for each in shown)
         left = unlisted(
-            len(chosen) - len(shown),
+            len(chosen) - counted(shown),
             "earlier item",
             shown[0].made,
-            len(chosen),
+            len(entries),
             until=self.spelling.until,
             limit=self.spelling.limit,
         )
@@ -281,12 +389,24 @@ class Reader(Model, arbitrary_types_allowed=True):
         waiting = isinstance(item.state, Waiting)
         return waiting and (not self.mine or item.recipient == self.reader)
 
-    def line(self, item: Item, items: list[Item], *, naming: Naming) -> str:
-        """Say an item in a line: its number, when it was made, what it is, from whom to whom, where it stands, and its first line."""
-        return f"{self.headed(item, items, naming=naming)}: {opening(item)}"
+    def line(self, entry: Item | Flags, items: list[Item], *, naming: Naming) -> str:
+        """Say an item in a line: its number, when it was made, what it is, from whom to whom, where it stands, and its first line; a conversation's flagged writes, the files they flag."""
+        if isinstance(entry, Flags):
+            return f"{self.headed(entry, items, naming=naming)}: {entry.said()}"
+        return f"{self.headed(entry, items, naming=naming)}: {opening(entry)}"
 
-    def headed(self, item: Item, items: list[Item], *, naming: Naming) -> str:
-        """Say an item's heading: its number, when it was made, what it is, from whom to whom, and where it stands; each conversation as `naming` says, and the operator's copy of a message between conversations to whom it was sent."""
+    def headed(self, entry: Item | Flags, items: list[Item], *, naming: Naming) -> str:
+        """Say an item's heading: its number, when it was made, what it is, from whom to whom, and where it stands; each conversation as `naming` says, and the operator's copy of a message between conversations to whom it was sent. A conversation's flagged writes are headed as one: each number, the latest's time, and how many."""
+        if isinstance(entry, Flags):
+            latest = entry.items[-1]
+            return (
+                f"{entry.cited()}  {clocked(entry.made)}  "
+                f"{many(len(entry.items), 'flagged write')} from "
+                f"{self.called(entry.sender, items, naming=naming)} to "
+                f"{self.called(latest.recipient, items, naming=naming)}, "
+                f"{entry.standing()}"
+            )
+        item = entry
         match item.reason:
             case Message(to=Conversation() as to):
                 recipient = (
@@ -301,10 +421,23 @@ class Reader(Model, arbitrary_types_allowed=True):
         )
 
     def whole(
+        self,
+        entry: Item | Flags,
+        placed: list[int],
+        items: list[Item],
+        *,
+        naming: Naming,
+    ) -> str:
+        """Say an item whole under its heading: a conversation's as it wrote it, the operator's words on it and its replies to them under it; any other's as it was told to whom it was for, what it says on the items `placed` told under them, and a review's context left out. A conversation's flagged writes under one heading, each whole."""
+        heading = self.headed(entry, items, naming=naming)
+        each = entry.items if isinstance(entry, Flags) else [entry]
+        tags = [self.tagged(item, placed, items, naming=naming) for item in each]
+        return f"{heading}:\n" + "\n".join(tags)
+
+    def tagged(
         self, item: Item, placed: list[int], items: list[Item], *, naming: Naming
     ) -> str:
-        """Say an item whole under its heading: a conversation's as it wrote it, the operator's words on it and its replies to them under it; any other's as it was told to whom it was for, what it says on the items `placed` told under them, and a review's context left out."""
-        heading = self.headed(item, items, naming=naming)
+        """Say an item whole, as `whole` does under its heading."""
         match item.sender:
             case Conversation() as sender:
                 tag = Tag(
@@ -321,7 +454,7 @@ class Reader(Model, arbitrary_types_allowed=True):
                 )
             case Operator():
                 tag = self.delivery.tagged(item, under=placed, context=False)
-        return f"{heading}:\n{tag.written()}"
+        return tag.written()
 
     def thread(
         self, item: Item, sender: Conversation, items: list[Item], *, naming: Naming

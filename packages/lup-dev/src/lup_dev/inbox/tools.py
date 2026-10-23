@@ -539,12 +539,13 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         Lists the items about this repository, oldest first, a line each: its
         number, when it was made, what it is, from whom to whom, where it
-        stands, and its first line. Those still waiting, for the operator or
-        for an agent, by default; every one with `every`. `since` and `until`
-        narrow them by when each was made, `kinds` by what they are, and
-        `limit` says how many to list, the latest: where it leaves earlier
-        ones out, or `every` would list more, the answer says how many and
-        what reads them.
+        stands, and its first line; each conversation's flagged writes in one
+        line, with how many files and on which branches. Those still waiting,
+        for the operator or for an agent, by default; every one with `every`.
+        `since` and `until` narrow them by when each was made, `kinds` by what
+        they are, and `limit` says how many to list, the latest: where it
+        leaves earlier ones out, or `every` would list more, the answer says
+        how many and what reads them.
 
         `conversation` reads one conversation's exchange, by its name or its
         id: what it sent, to the operator above all, and what it was sent,

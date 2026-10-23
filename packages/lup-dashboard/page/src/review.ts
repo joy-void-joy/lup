@@ -722,7 +722,7 @@ export function traceSummary(entries: Entry[], read: boolean): string {
     return steps === 0 ? `trace · nothing${since}` : `trace · ${counted(steps, "step")}${since}`;
 }
 
-/** Say a "since you approved" drawer's summary line: on which branch, how many files changed since the operator last saw them, to review, and how many stand as they saw them, reviewed. */
+/** Say a "since you approved" drawer's summary line: on which branch, how many files changed since the operator last saw them, to review, how many have flagged writes waiting on them, which the branch's landing waits on, and how many stand as they saw them, reviewed: the agent's flags in one line, as the inbox lists them. */
 export function sinceSummary(shown: Since | null): string {
     if (shown === null) {
         return "since you approved · not read yet";
@@ -731,7 +731,12 @@ export function sinceSummary(shown: Since | null): string {
     const files = shown.files ?? [];
     const changed = files.filter((each) => each.file != null).length;
     const kept = files.length - changed;
-    const said = [...(changed === 0 ? [] : [`${changed} to review`]), ...(kept === 0 ? [] : [`${kept} reviewed`])];
+    const flagged = files.filter((each) => (each.flags ?? []).length > 0).length;
+    const said = [
+        ...(changed === 0 ? [] : [`${changed} to review`]),
+        ...(flagged === 0 ? [] : [`${flagged} flagged`]),
+        ...(kept === 0 ? [] : [`${kept} reviewed`]),
+    ];
     return `since you approved${branch} · ${said.length === 0 ? "nothing" : said.join(" · ")}`;
 }
 
@@ -1353,7 +1358,7 @@ export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "inse
             return "drawer";
         }
         if (drawer.kind === "since") {
-            return codeAt(drawer, head) !== undefined || reviewedAt(drawer, head) !== undefined ? "since" : "aside";
+            return codeAt(drawer, head) !== undefined ? "since" : reviewedAt(drawer, head) !== undefined ? "reviewed" : "aside";
         }
         return lineAt(drawer, head) !== undefined ? "trace" : "aside";
     }
@@ -1421,14 +1426,15 @@ export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Wr
     if (scope === undefined) {
         return [...going, { kind: "group", text: naming.group(group) }];
     }
-    const file = scope.filed.find((each) => head >= each.from && head <= each.to);
+    // A file's path: from its lines, or from its line in "since you approved" once it stands as the operator last saw it.
+    const file = scope.filed.find((each) => head >= each.from && head <= each.to)?.file.path ?? (isDrawer(scope) ? reviewedAt(scope, head)?.file.path : undefined);
     const inner = around(scope.folds, head).filter((each) => each.kind !== "file" && each.of !== scope.of || (each.kind !== "item" && each.kind !== "file" && !(DRAWERS as string[]).includes(each.kind)));
     const named: Where = isRegion(scope) ? { kind: "item", text: naming.item(scope) } : { kind: (scope as Drawer).kind, text: (scope as Drawer).kind };
     return [
         ...going,
         { kind: "group", text: naming.group(group) },
         named,
-        ...(file === undefined ? [] : [{ kind: "file" as const, text: file.file.path }]),
+        ...(file === undefined ? [] : [{ kind: "file" as const, text: file }]),
         ...inner.map((each) => ({ kind: each.kind, text: each.label })),
     ];
 }

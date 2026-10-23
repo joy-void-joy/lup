@@ -28,11 +28,13 @@ describe("the line of keys", () => {
 
     it("offers a file since the operator approved marking it reviewed and every file shown reviewed, never declining", () => {
         expect(shown("since")).toEqual(["␣a", "␣A", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
+        // A reviewed file's line takes no comment.
+        expect(shown("reviewed")).toEqual(["␣a", "␣A", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
         expect(shown("file")).toEqual(["␣a", "␣x", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
     });
 
     it("shows no key of insert mode outside it, and none of the others in it", () => {
-        const places: ReviewPlace[] = ["written", "banner", "approvals", "item", "change", "file", "drawer", "trace", "since", "aside", "nothing"];
+        const places: ReviewPlace[] = ["written", "banner", "approvals", "item", "change", "file", "drawer", "trace", "since", "reviewed", "aside", "nothing"];
         const writing = shown("insert");
         for (const place of places) {
             expect(shown(place).filter((key) => writing.includes(key) && key !== "^⏎")).toEqual([]);
