@@ -853,10 +853,11 @@ describe("what a change shows open, as it's laid out", () => {
     const read = (path: string, role: string): ChangedFile => ({ ...signed, path, reading: { role, asks: [], findings: [] } });
     const FILES = [read("a.py", "production"), read("t.py", "test"), read("d.json", "data"), read("n.md", "docs")];
 
-    it("folds a test and a data file whole, in every kind of change, and opens one that asks nothing, production code among them", () => {
-        const expected = { "a.py": false, "t.py": true, "d.json": true, "n.md": false };
-        expect(whole(HELD, FILES)).toEqual(expected);
-        expect(whole(APPROVAL, FILES)).toEqual(expected);
+    it("folds whole, in every kind of change, a file that asks nothing, a test and a data file, and opens one that asks", () => {
+        const asking: ChangedFile = { ...read("f.py", "production"), reading: { role: "production", asks: [{ name: "new-file", taken: "flagged", side: "after" }], findings: [] } };
+        const expected = { "a.py": true, "t.py": true, "d.json": true, "n.md": true, "f.py": false };
+        expect(whole(HELD, [...FILES, asking])).toEqual(expected);
+        expect(whole(APPROVAL, [...FILES, asking])).toEqual(expected);
     });
 
     it("folds each file of a first approval whole under its header, which says so, and counts them so in the item's", () => {
