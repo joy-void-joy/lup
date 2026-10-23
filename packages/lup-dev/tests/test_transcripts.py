@@ -709,6 +709,37 @@ def test_claude_codes_window_is_the_standard_one_where_the_operators_env_turns_t
     assert read.usage.window == 1_000_000
 
 
+def test_claude_codes_context_passes_over_a_reply_of_its_own_and_a_window_it_overflows(
+    tmp_path: Path,
+) -> None:
+    """A `<synthetic>` reply, an error Claude Code wrote, counts nothing and names no model, so the context is the last real reply's; a window smaller than the tokens in use is wrong, and none is shown."""
+    record = tmp_path / "s1.jsonl"
+    synthetic = line(
+        type="assistant",
+        message={
+            "role": "assistant",
+            "model": "<synthetic>",
+            "content": [{"type": "text", "text": "API Error"}],
+            "usage": {"input_tokens": 0, "cache_read_input_tokens": 0},
+        },
+    )
+    record.write_text(
+        "\n".join([reply("claude-fable-5-1", 269_000, "claude-fable-5-1"), synthetic])
+        + "\n"
+    )
+    read = ClaudeTranscripts().read(record)
+    assert read.usage is not None
+    assert (read.usage.used, read.usage.window, read.usage.model) == (
+        269_000,
+        1_000_000,
+        "claude-fable-5-1",
+    )
+    record.write_text(reply("claude-opus-4-6", 269_000, "claude-opus-4-6") + "\n")
+    read = ClaudeTranscripts().read(record)
+    assert read.usage is not None
+    assert (read.usage.used, read.usage.window) == (269_000, None)
+
+
 def test_codexs_window_is_the_threads_own_and_none_where_the_count_overflows_it(
     tmp_path: Path,
 ) -> None:

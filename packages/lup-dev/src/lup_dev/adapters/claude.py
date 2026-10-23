@@ -1583,7 +1583,8 @@ class AssistantMessage(Model, extra="ignore"):
 
     content: list[Block] = []
     model: str | None = None
-    """The model that made it, as the API names it, never with `[1m]` after it."""
+    """The model that made it, as the API names it, never with `[1m]` after it;
+    `<synthetic>` on a reply of Claude Code's own."""
     usage: Counted | None = None
 
 
@@ -1664,6 +1665,9 @@ class ClaudeTranscripts(Model, Reader):
     chosen (`model-config`, *1M context window*)."""
     long_window: int = 1_000_000
     """The long context's window, in tokens."""
+    synthetic: str = "<synthetic>"
+    """The model a reply of Claude Code's own names, an error's or an
+    interruption's: no model made it, and its usage counts nothing."""
 
     @override
     def sessions(self, copies: Path) -> list[Path]:
@@ -1695,8 +1699,12 @@ class ClaudeTranscripts(Model, Reader):
         )
 
     def usage(self, own: list[AssistantLine]) -> Usage | None:
-        """Return what the context held at the last of `own`, the conversation's replies, that counted its input; none where none did."""
-        counted = [each for each in own if each.message.usage is not None]
+        """Return what the context held at the last of `own`, the conversation's replies, that a model made and that counted its input; none where none did."""
+        counted = [
+            each
+            for each in own
+            if each.message.usage is not None and each.message.model != self.synthetic
+        ]
         if not counted:
             return None
         last = counted[-1]
