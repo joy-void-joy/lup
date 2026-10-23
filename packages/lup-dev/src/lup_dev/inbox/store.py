@@ -131,8 +131,10 @@ class Message(Model):
     where they read it (`lup-dev inbox answer`), in the
     conversation's order: told before its words, each quoted with their reply."""
     ending: bool = False
-    """Whether it's a session's last words of a turn, made a note by lup rather
-    than sent by the agent: the conversation already shows them as its words."""
+    """Whether lup made it at a session's turn's end rather than the agent
+    sending it: its last words, or, where its turn ended on an error from the
+    model's API, that error in lup's words. The conversation already shows
+    either among its steps, the error as its runtime's text for it."""
 
 
 def labelled(opening: str, parts: dict[str, str]) -> str:
@@ -229,13 +231,18 @@ class Stop(speaking.Stop):
 
 
 class Ended(Model):
-    """A subagent's end, for the conversation that spawned it: its name, whether it ended its turn or was stopped, and its last message where its runtime doesn't hand that to its parent itself."""
+    """A subagent's end, for the conversation that spawned it: its name, whether it ended its turn, was stopped or failed, and its last message where its runtime doesn't hand that to its parent itself."""
 
     reason: Literal["ended"] = "ended"
     name: str
     """How lup calls it: its own name, or its kind and its runtime's id."""
     stopped: bool = False
     """Whether it was stopped before it ended its turn, rather than ending it."""
+    failed: str | None = None
+    """Where its turn ended on an error from the model's API, the error's kind
+    in its runtime's word (`rate_limit`), which says whether trying again makes
+    sense; none where it ended its turn or was stopped. The error's own words
+    are its runtime's to hand on (`handed`), so lup doesn't tell them twice."""
     handed: bool = False
     """Whether its runtime hands its last message to its parent itself, so lup
     leaves it out rather than tell it twice."""
@@ -245,14 +252,24 @@ class Ended(Model):
 
     @property
     def passed(self) -> str | None:
-        """Return its last message as lup hands it on; none where it was stopped, its runtime hands it on, or it left none."""
-        if self.stopped or self.handed or self.said is None or not self.said.strip():
+        """Return its last message as lup hands it on; none where it was stopped or failed, its runtime hands it on, or it left none."""
+        if self.stopped or self.failed is not None or self.handed:
+            return None
+        if self.said is None or not self.said.strip():
             return None
         return self.said
 
     @property
     def heading(self) -> str:
-        """Say how it ended, in lup's words, and where its last message is."""
+        """Say how it ended, in lup's words, and where its last message is.
+
+        >>> Ended(name="parser", failed="rate_limit", handed=True).heading
+        "It failed on an error from the model's API (rate_limit). Your runtime's notice of its end says more."
+        """
+        if self.failed is not None:
+            failed = f"It failed on an error from the model's API ({self.failed})."
+            told = " Your runtime's notice of its end says more." if self.handed else ""
+            return failed + told
         if self.stopped:
             return "It was stopped before it ended its turn."
         if self.handed:

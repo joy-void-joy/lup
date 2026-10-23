@@ -200,6 +200,24 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
     ]
 
 
+def test_claude_runs_a_turns_end_hook_at_stopfailure_too_once_whoever_failed(
+    tmp_path: Path, home: Path
+) -> None:
+    """`StopFailure` runs in place of `Stop` or `SubagentStop` where a turn ends on an error from the model's API, its matcher filtering by the error's kind alone: registered with both ends it would run twice."""
+    launch = tmp_path / "launch"
+    ends = [
+        Hook(event="turn-ended", command=HOOK),
+        Hook(event="conversation-ended", command=HOOK),
+    ]
+    terminal = Claude().terminal(settings(launch, CLAUDE_CLI, hooks=ends))
+    command = {"type": "command", "command": HOOK_LINE}
+    assert json.loads(terminal.files[launch / "settings.json"])["hooks"] == {
+        "Stop": [{"hooks": [command]}],
+        "StopFailure": [{"hooks": [command]}],
+        "SubagentStop": [{"hooks": [command]}],
+    }
+
+
 def test_claude_loads_no_server_and_moves_no_socket_where_lup_gives_none(
     tmp_path: Path, home: Path
 ) -> None:
