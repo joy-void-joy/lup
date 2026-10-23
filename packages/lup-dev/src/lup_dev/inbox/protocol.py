@@ -295,6 +295,11 @@ class Items(Reply):
     or an answer to one listed, with the replies copies before kept on them
     (`Item.replies`), which it lays out under it (`docs/dashboard.md`, *The
     review*)."""
+    commented: list[Item] = []
+    """The conversations' items the operator's in `answers` are on, as they
+    stand: whose each is, so the page shows an agent the operator's words on its
+    own items alone, and what each says as it stands, a comment on a passage an
+    edit changed marked outdated."""
 
 
 class Readout(Reply):
@@ -438,17 +443,23 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
     async def answer(self, request: ListInbox) -> Reply:
         inbox = self.delivery.inbox
         waiting = self.waiting(request)
+        answers = self.answering(waiting)
         return Items(
-            items=waiting, reviewed=inbox.reviewed(), answers=self.answering(waiting)
+            items=waiting,
+            reviewed=inbox.reviewed(),
+            answers=answers,
+            commented=self.commented(answers),
         )
 
     @override
     async def scoped(self, request: ListInbox, repository: Path) -> Reply:
         waiting = [each for each in self.waiting(request) if each.of(repository)]
+        answers = self.answering(waiting)
         return Items(
             items=waiting,
             reviewed=self.delivery.inbox.reviewed(repository),
-            answers=self.answering(waiting),
+            answers=answers,
+            commented=self.commented(answers),
         )
 
     def waiting(self, request: ListInbox) -> list[Item]:
@@ -456,6 +467,28 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
         window = request.window(self.delivery.clock.now())
         waiting = self.delivery.inbox.waiting(Operator())
         return [each for each in waiting if window.covers(each.made)]
+
+    def commented(self, answers: list[Item]) -> list[Item]:
+        """Return the items the operator's `answers` are on, oldest first, as they stand: each a review's comments are on, the question an answer answers, the message a reply is to."""
+        found = self.delivery.inbox.items
+
+        def on(answer: Item) -> list[int]:
+            match answer.reason:
+                case Review(comments=comments):
+                    return [each.item for each in comments]
+                case Answer(question=question):
+                    return [question]
+                case Message(of=int() as of):
+                    return [of]
+                case _:
+                    return []
+
+        numbers = [number for answer in answers for number in on(answer)]
+        return [
+            found[number]
+            for number in sorted(dict.fromkeys(numbers))
+            if number in found
+        ]
 
     def answering(self, items: list[Item]) -> list[Item]:
         """Return the operator's items that any of `items` answers or that answer it, oldest first: those a turn's end follows (`Message.answers`) or cites (`Item.citations`), shown above it; and, each the one sent to the item's sender, a review covering it with a comment on it, a reply to it, or an answer to it, whose comments and the replies copies before kept on them are shown under it.

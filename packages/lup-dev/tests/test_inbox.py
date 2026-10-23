@@ -4296,6 +4296,7 @@ def test_a_turns_end_answers_the_operators_words_told_citing_them_held_once_wher
         "@2[the]",
     ]
     assert [each.number for each in listed.answers] == [2]
+    assert [each.number for each in listed.commented] == [1]
     assert (fixed, error) == ("@3 is edited, and before the operator.", False)
     assert ended == ""
     assert turn.reason == Message(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { above, outdated, spokenOf } from "./exchange";
 import { levelled } from "./folds";
 import {
     EMPTY,
@@ -37,8 +38,6 @@ import {
     steps,
     stranded,
     tallied,
-    threadAt,
-    threaded,
     threadsOf,
     toAnswer,
     toggled,
@@ -170,7 +169,7 @@ const CONTEXT: Context = {
     ],
 };
 
-const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [] };
+const NOTHING: Around = { contexts: new Map(), files: new Map(), answers: [], commented: [] };
 
 const header = (item: Item, parked: boolean) => `── #${item.number}${parked ? " · later" : ""} ──`;
 const banner = (head: Head, parked: boolean) => {
@@ -447,7 +446,7 @@ describe("laid", () => {
 
     it("says where the cursor is, for the line of keys", () => {
         const draft: Draft = { ...EMPTY, comments: [{ item: 51, quote: null, text: "Fine." }] };
-        const files: Around = { contexts: new Map([[51, { shown: CONTEXT }]]), files: new Map([[54, { shown: [CHANGED] }]]), answers: [] };
+        const files: Around = { contexts: new Map([[51, { shown: CONTEXT }]]), files: new Map([[54, { shown: [CHANGED] }]]), answers: [], commented: [] };
         const out = laid([QUESTION, APPROVAL], [from("s3")], banner, header, draft, files);
         const at = (text: string) => out.text.indexOf(text);
         expect(placeAt(out, at("Fine."))).toBe("written");
@@ -480,6 +479,7 @@ describe("what folds under an item", () => {
         ]),
         files: new Map([[54, { shown: [CHANGED] }]]),
         answers: [],
+        commented: [],
     };
 
     it("says each step of a context in a line, its words' own lines kept, a run of calls in one, the call that made the item marked", () => {
@@ -576,6 +576,7 @@ describe("what folds under an item", () => {
                 ],
             ]),
             answers: [],
+            commented: [],
         };
         const out = laid([APPROVAL, NOTE], [], banner, header, EMPTY, read);
         const [note, approval] = out.regions;
@@ -640,7 +641,7 @@ describe("what folds under an item", () => {
         };
         const untimed: Context = { ...agents, entries: [{ kind: "called", tool: "blocked", id: "call-51" }], anchor: 0 };
         const summary = (context: Context) => {
-            const out = laid([QUESTION], [], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map(), answers: [] });
+            const out = laid([QUESTION], [], banner, header, EMPTY, { contexts: new Map([[51, { shown: context }]]), files: new Map(), answers: [], commented: [] });
             const [fold] = out.regions[0]!.folds.filter((each) => each.kind === "context");
             return out.text.slice(fold!.summary.from, fold!.summary.to);
         };
@@ -688,6 +689,7 @@ describe("typed folds", () => {
         contexts: new Map([[56, { shown: { ...CONTEXT, number: 56 } }]]),
         files: new Map([[56, { shown: [AUTOMATIC, held(after)] }]]),
         answers: [],
+        commented: [],
     });
     const out = laid([HELD, QUESTION], [], banner, header, EMPTY, around(clock(30, true)));
     const region = out.regions.find((each) => each.item.number === 56)!;
@@ -836,7 +838,7 @@ describe("what a change shows open, as it's laid out", () => {
     };
     /** The runs of lines folded under `item`, changing `signed`, as it's laid out, and whether its change on line 10 is among what they hide. */
     const folded = (item: Item) => {
-        const around: Around = { contexts: new Map(), files: new Map([[item.number, { shown: [signed] }]]), answers: [] };
+        const around: Around = { contexts: new Map(), files: new Map([[item.number, { shown: [signed] }]]), answers: [], commented: [] };
         const out = laid([item], [], banner, header, EMPTY, around);
         const runs = out.regions[0]!.folds.filter((each) => each.kind === "lines" && each.closed);
         const ten = out.text.indexOf("\nten\n") + 1;
@@ -870,7 +872,7 @@ describe("comments on a changed file's lines", () => {
         rank: WAITING,
     };
     const CREATED: ChangedFile = { path: "b.md", before: null, after: { kind: "text", text: "# B\n\nNew.\n" } };
-    const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]), answers: [] };
+    const around: Around = { contexts: new Map(), files: new Map([[55, { shown: [CHANGED, CREATED] }]]), answers: [], commented: [] };
     const out = laid([HELD], [], banner, header, EMPTY, around);
     const at = (line: string) => out.text.indexOf(`\n${line}\n`) + 1;
 
@@ -894,7 +896,7 @@ describe("comments on a changed file's lines", () => {
     });
 
     it("shows a flagged write's file under it as a held change's, where one is still laid out, its lines quoted the same", () => {
-        const flagged = laid([FLAGGED], [], banner, header, EMPTY, { contexts: new Map(), files: new Map([[70, { shown: [CHANGED] }]]), answers: [] });
+        const flagged = laid([FLAGGED], [], banner, header, EMPTY, { contexts: new Map(), files: new Map([[70, { shown: [CHANGED] }]]), answers: [], commented: [] });
         const line = (text: string) => flagged.text.indexOf(`\n${text}\n`) + 1;
         expect([changing(FLAGGED), changing(HELD), changing(NOTE)]).toEqual([true, true, false]);
         expect(flagged.text.startsWith("━━ s2 ━━\n── #70 ──\na.py landed, flagged for the operator's review.\n")).toBe(true);
@@ -1055,7 +1057,7 @@ describe("every agent's group, and the messages under its banner", () => {
     });
 });
 
-describe("the thread under an item", () => {
+describe("replies kept from before", () => {
     /** The operator's review that answered the note: a comment on its passage, and the agent's reply to it, kept on the review after its one part. */
     const REVIEW: Item = {
         number: 60,
@@ -1098,9 +1100,9 @@ describe("the thread under an item", () => {
         state: { state: "told", at: AT, how: "call" },
         rank: WAITING,
     };
-    const around: Around = { contexts: new Map(), files: new Map(), answers: [REVIEW, ANSWER] };
+    const around: Around = { contexts: new Map(), files: new Map(), answers: [REVIEW, ANSWER], commented: [] };
 
-    it("reads the thread from the operator's items answering the item: each comment by its part's id, and the replies to them", () => {
+    it("reads them from the operator's items answering the item: each comment by its part's id, and the replies to them", () => {
         expect(threadsOf([REVIEW, ANSWER], 52)).toEqual({
             said: [{ id: { item: 60, part: 1 }, text: "Every one?", quote: { text: "UTF-8", start: 10, end: 15 }, on: null, decision: null }],
             replies: [{ id: { item: 60, part: 2 }, to: { item: 60, part: 1 }, text: "Every one I read.\nA stray byte is replaced." }],
@@ -1110,52 +1112,141 @@ describe("the thread under an item", () => {
             [2, "Drop it.", 2],
             [3, "Go.", null],
         ]);
-        expect([threaded([REVIEW, ANSWER], NOTE), threaded([REVIEW], QUESTION), threaded([], NOTE)]).toEqual([true, false, false]);
     });
 
-    it("lays each comment under the line it's on, the agent's reply under it, a ruling under its decision, and a comment on the whole under the header", () => {
+    it("lays them after the item's own words, each after who wrote it, read and never commented", () => {
         const out = laid([QUESTION, NOTE], [], banner, header, EMPTY, around);
         expect(out.text).toBe(
-            "━━ s1 ━━\n── #51 ──\nyou: Go.\nWhich parser?\n1. Use lark\n   lean: yes\nyou: leaning\n2. Keep the cache\n   lean: no\nyou: Drop it.\n↳ Dropped.\n\n" +
-                "━━ s2 ━━\n── #52 ──\nI assumed UTF-8.\nyou: Every one?\n↳ Every one I read.\n  A stray byte is replaced.\n\n",
+            "━━ s1 ━━\n── #51 ──\nWhich parser?\n1. Use lark\n   lean: yes\n2. Keep the cache\n   lean: no\n" +
+                "you · @61.1\n  leaning\nyou · @61.2\n  Drop it.\na1 · @61.4, a reply kept from before\n  Dropped.\nyou · @61.3\n  Go.\n\n" +
+                "━━ s2 ━━\n── #52 ──\nI assumed UTF-8.\nyou · @60.1\n  on “UTF-8”\n  Every one?\ns2 · @60.2, a reply kept from before\n  Every one I read.\n  A stray byte is replaced.\n\n",
         );
-        const [question, note] = out.regions;
-        // The operator's own comments are read, never commented; the reply's lines take comments, each knowing its reply.
-        expect(question!.asides.map((each) => [each.kind, out.text.slice(each.from, each.to)])).toEqual([
-            ["you", "you: Go."],
-            ["you", "you: leaning"],
-            ["you", "you: Drop it."],
-        ]);
-        expect(note!.threads.map((each) => [out.text.slice(each.from, each.to), each.own, each.reply.id])).toEqual([
-            ["Every one I read.", 0, { item: 60, part: 2 }],
-            ["A stray byte is replaced.", 18, { item: 60, part: 2 }],
-        ]);
-        expect(opened(out, out.text.indexOf("you: Every"))).toBeUndefined();
-        expect(placeAt(out, out.text.indexOf("you: Every"))).toBe("aside");
-        expect(placeAt(out, out.text.indexOf("stray byte"))).toBe("item");
+        const [, note] = out.regions;
+        expect(note!.asides.map((each) => each.kind)).toEqual(["by", "quoted", "you", "by", "agent", "agent"]);
+        expect(opened(out, out.text.indexOf("A stray"))).toBeUndefined();
+        expect(placeAt(out, out.text.indexOf("A stray"))).toBe("aside");
     });
 
-    it("opens a comment on a reply's line, or on a passage of the reply, carrying the reply's id, and lays it under that line", () => {
-        const out = laid([NOTE], [], banner, header, EMPTY, around);
-        const stray = out.text.indexOf("A stray byte is replaced.");
-        expect(opened(out, stray)).toEqual({
-            item: 52,
-            quote: { text: "A stray byte is replaced.", start: 18, end: 43 },
-            on: { item: 60, part: 2 },
-            text: "",
-        });
-        expect(quoted(out, stray + 2, stray + 7)).toEqual({ item: 52, quote: { text: "stray", start: 20, end: 25 }, on: { item: 60, part: 2 }, text: "" });
-        // Across a reply and the item's own text: nothing.
-        expect(quoted(out, out.text.indexOf("UTF-8"), stray + 7)).toBeUndefined();
+    it("puts a comment copies before kept on a reply under the item's header", () => {
         const comment: Comment = { item: 52, quote: { text: "stray", start: 20, end: 25 }, on: { item: 60, part: 2 }, text: "Fine." };
         const written = laid([NOTE], [], banner, header, { ...EMPTY, comments: [comment] }, around);
-        expect(written.text).toBe("━━ s2 ━━\n── #52 ──\nI assumed UTF-8.\nyou: Every one?\n↳ Every one I read.\n  A stray byte is replaced.\nFine.\n\n");
-        const [region] = written.regions;
-        const [block] = region!.blocks;
-        expect(written.text.slice(block!.from, block!.to)).toBe("Fine.");
-        // Ctrl+Enter goes back to the passage's last character, in the reply.
-        expect(aboutAt(written, comment, block!)).toBe(written.text.indexOf("stray") + 4);
-        expect(threadAt(region!, written.text.indexOf("stray"))?.reply.id).toEqual({ item: 60, part: 2 });
+        expect(written.text.startsWith("━━ s2 ━━\n── #52 ──\nFine.\nI assumed UTF-8.\n")).toBe(true);
+        const [block] = written.regions[0]!.blocks;
+        expect(aboutAt(written, comment, block!)).toBe(written.regions[0]!.header.from);
+    });
+});
+
+describe("an answer in a turn's last words", () => {
+    const SESSION = from("s2");
+    /** The operator's review the turn's end answers: a comment on the session's note, one on another agent's, and a message to the session. */
+    const REVIEW: Item = {
+        number: 70,
+        reason: {
+            reason: "review",
+            covers: [52, 90],
+            comments: [
+                { item: 52, quote: { text: "UTF-8", start: 10, end: 15 }, on: null, text: "Every one? Even a stray byte?" },
+                { item: 90, quote: null, on: null, text: "Not yours." },
+            ],
+            letters: [{ to: SESSION, text: "Then split the reader\nout of the parser." }],
+            remarks: [],
+        },
+        sender: { party: "operator" },
+        recipient: SESSION,
+        replies: [],
+        citations: [],
+        edits: [],
+        quiet: false,
+        made: AT,
+        state: { state: "told", at: AT, how: "call" },
+        rank: WAITING,
+    };
+    const OTHERS: Item = { ...NOTE, number: 90, sender: from("s9") };
+    const END: Item = {
+        ...NOTE,
+        number: 72,
+        reason: {
+            reason: "message",
+            passages: [],
+            answers: [70],
+            ending: true,
+            kind: "note",
+            text: "Every one, @70.1[Even a stray byte?].\nSplitting it @70[nothing] next.",
+        },
+        rank: NEWS,
+        citations: [
+            {
+                said: "@70.1[Even a stray byte?]",
+                start: 11,
+                end: 36,
+                item: 70,
+                part: 1,
+                words: "Even a stray byte?",
+                found: { part: { item: 70, part: 1 }, start: 11, end: 29, text: "Even a stray byte?" },
+                candidates: [],
+            },
+            { said: "@70[nothing]", start: 51, end: 63, item: 70, part: null, words: "nothing", found: null, candidates: [] },
+        ],
+        edits: [{ at: "2026-10-17T12:05:00Z", before: "Every one.\nSplitting it @70[nothing] next." }],
+    };
+    const around: Around = { contexts: new Map(), files: new Map(), answers: [REVIEW], commented: [NOTE, OTHERS] };
+
+    it("lays the operator's words it answers above it, its own after the agent's name, each passage it cites folded under its line", () => {
+        const out = laid([END], [], banner, header, EMPTY, around);
+        expect(out.text).toBe(
+            "━━ s2 ━━\n── #72 ──\n" +
+                "you · @70, your review\n  Then split the reader\n  out of the parser.\n  on @52: “UTF-8”\n  Every one? Even a stray byte?\n" +
+                "s2 · @72, its answer\n" +
+                "edited 5m after it was sent · 1 line changed\n− Every one.\n+ Every one, @70.1[Even a stray byte?].\n" +
+                "Every one, @70.1[Even a stray byte?].\nyou, @70.1: Even a stray byte?\nSplitting it @70[nothing] next.\n\n",
+        );
+        const [region] = out.regions;
+        // The operator's words above it are theirs, by part, where its citations' passages are marked.
+        expect(region!.said.map((each) => [out.text.slice(each.from, each.to), each.part.part, each.own])).toEqual([
+            ["  Then split the reader", 3, -2],
+            ["  out of the parser.", 3, 20],
+            ["  Every one? Even a stray byte?", 1, -2],
+        ]);
+        expect(region!.changed).toEqual([out.text.indexOf("\nEvery one, @70.1") + 1]);
+        expect(region!.folds.map((each) => [each.kind, each.name, each.closed])).toEqual([
+            ["context", "you", false],
+            ["context", "edited", true],
+            ["context", "cited 0", true],
+            ["item", "", false],
+        ]);
+        // Nothing but its own words takes a comment.
+        expect(opened(out, out.text.indexOf("Then split"))).toBeUndefined();
+        expect(opened(out, out.text.indexOf("you, @70.1:"))).toBeUndefined();
+        expect(onItem(opened(out, out.text.indexOf("Splitting")))?.quote?.text).toBe("Splitting it @70[nothing] next.");
+    });
+
+    it("numbers the operator's words as the host does, after replies kept from before, and shows an agent the parts that were its own", () => {
+        const kept: Item = { ...REVIEW, replies: [{ number: 3, to: { item: 70, part: 1 }, text: "Old.", at: AT }] };
+        expect(spokenOf(REVIEW).map((each) => [each.id.part, each.text])).toEqual([
+            [1, "Every one? Even a stray byte?"],
+            [2, "Not yours."],
+            [3, "Then split the reader\nout of the parser."],
+        ]);
+        expect(spokenOf(kept).map((each) => each.id.part)).toEqual([1, 2, 4]);
+        expect(spokenOf(NOTE)).toEqual([]);
+        expect(above(END, [REVIEW], [NOTE, OTHERS]).map((each) => each.text)).toEqual([
+            "you · @70, your review",
+            "  Then split the reader",
+            "  out of the parser.",
+            "  on @52: “UTF-8”",
+            "  Every one? Even a stray byte?",
+        ]);
+    });
+
+    it("says a comment outdated where an edit changed the passage it quotes", () => {
+        const edited: Item = { ...NOTE, reason: { ...NOTE.reason, text: "I assumed ASCII." } as Item["reason"], edits: [{ at: AT, before: "I assumed UTF-8." }] };
+        expect([outdated(NOTE, { text: "UTF-8", start: 10, end: 15 }), outdated(edited, { text: "UTF-8", start: 10, end: 15 }), outdated(edited, { text: "I assumed", start: 0, end: 9 })]).toEqual([
+            false,
+            true,
+            false,
+        ]);
+        const later = laid([END], [], banner, header, EMPTY, { ...around, commented: [edited, OTHERS] });
+        expect(later.text).toContain("  on @52: “UTF-8” · outdated: the passage changed\n");
     });
 });
 

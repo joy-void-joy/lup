@@ -153,6 +153,7 @@ def test_the_socket_sends_a_watchs_replies_under_its_number_then_its_end(
                 "items": [],
                 "reviewed": None,
                 "answers": [],
+                "commented": [],
             },
         },
         {
@@ -191,7 +192,13 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
     assert second == {
         "kind": "watched",
         "number": 2,
-        "reply": {"kind": "inbox-items", "items": [], "reviewed": None, "answers": []},
+        "reply": {
+            "kind": "inbox-items",
+            "items": [],
+            "reviewed": None,
+            "answers": [],
+            "commented": [],
+        },
     }
     assert host.asked == [ListLaunches(), ListInbox()]
 
@@ -373,6 +380,7 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
     names = [each["name"] for each in listed.json()["launches"]]
     assert names == ["lup-impl", "guidance-voice", "main", "magpie-search"]
     assert [each["number"] for each in items.json()["items"]] == [
+        45,
         51,
         52,
         53,

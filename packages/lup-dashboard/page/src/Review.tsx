@@ -24,8 +24,12 @@
 // Space `z` act on the item or the drawer the cursor is in. The header over the
 // review says where the cursor is: the group, the item or the drawer, the file
 // and the folds it's in, and, while a comment is being written, whom it goes
-// to; at its end, how many items are to answer and how many are new
-// (`docs/dashboard.md`, *The review*, *The drawers*).
+// to; at its end, how many items are to answer and how many are new. An
+// agent's answer shows the operator's words it answers above it, each of its
+// citations of them as its id, the passage it cites folded under its line,
+// opened by a click on the id, and the passage it answers marked among the
+// operator's words, a click there going to it (`exchange.ts`;
+// `docs/dashboard.md`, *The review*, *The drawers*).
 import { RangeSetBuilder, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -35,9 +39,9 @@ import { changes, cited, moved, shownIn, type Block, type Change, type Folding, 
 import { closedAs, folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type DrawerKind, type ReviewPlace } from "./keys";
+import { markerEnd, outdated, unfound } from "./exchange";
 import { source, sourced, without, type Source } from "./markdown";
 import {
-    REPLY_MARK,
     aboutAt,
     answerAfter,
     answering,
@@ -65,12 +69,10 @@ import {
     sameId,
     scopeAt,
     shownAt,
-    shownInReply,
     showing,
     stepped,
     stranded,
     tallied,
-    threaded,
     toggled,
     waited,
     whose,
@@ -88,7 +90,6 @@ import {
     type Laid,
     type Region,
     type Scope,
-    type Threaded,
     type Where,
     type Written,
 } from "./review";
@@ -238,10 +239,17 @@ function sourcesOf(laidOut: Laid): Source[] {
         }
     }
     for (const region of laidOut.regions) {
-        add(source("text", region.lines.filter((line) => codeAt(region, line.from) === undefined).map(whole)));
+        const text = source("text", region.lines.filter((line) => codeAt(region, line.from) === undefined).map(whole));
+        // Each citation that found its passage shows its id alone, its words hidden: the passage unfolds under its line.
+        const hidden = (region.item.citations ?? []).flatMap((each) =>
+            each.found == null || markerEnd(each) >= each.end ? [] : [{ from: shownAt(region, markerEnd(each)), to: shownAt(region, each.end) }],
+        );
+        // Each that found none, or several, shows as written, its brackets kept.
+        const written = (region.item.citations ?? []).flatMap((each) => (each.found == null ? [{ from: shownAt(region, each.start), to: shownAt(region, each.end) }] : []));
+        add(text === null ? null : { ...text, hidden, written });
         let run: Span[] = [];
         for (const aside of region.asides) {
-            if (aside.kind === "agent" || aside.kind === "you") {
+            if (aside.kind === "agent" || aside.kind === "you" || aside.kind === "cited") {
                 run.push(whole(aside));
             } else {
                 add(source("text", run));
@@ -249,18 +257,6 @@ function sourcesOf(laidOut: Laid): Source[] {
             }
         }
         add(source("text", run));
-        // Each reply in the thread under the item, its lines one stretch.
-        let reply: Span[] = [];
-        let last: Threaded | undefined;
-        for (const line of region.threads) {
-            if (last !== undefined && !sameId(last.reply.id, line.reply.id)) {
-                add(source("text", reply));
-                reply = [];
-            }
-            reply.push(whole(line));
-            last = line;
-        }
-        add(source("text", reply));
         for (const block of region.blocks) {
             add(source("comment", [block]));
         }
@@ -311,16 +307,44 @@ function quotedIn(drawer: Drawer, written: Written): Span | null {
     return drawer.lines.length === 0 ? null : { from: shownAt(drawer, quote.start), to: shownAt(drawer, quote.end) };
 }
 
-/** Return where a comment on `region`'s item quotes, in the item's text or in the reply of the thread it's on; none for a remark, a comment on the whole, or an empty passage. */
+/** Return where a comment on `region`'s item quotes in the item's text; none for a remark, a comment on the whole, one copies before kept on a reply, or an empty passage. */
 function quotedUnder(region: Region, written: Written): Span | null {
-    if (isRemark(written) || isLetter(written) || written.quote == null || written.quote.end <= written.quote.start) {
+    if (isRemark(written) || isLetter(written) || written.quote == null || written.on != null || written.quote.end <= written.quote.start) {
         return null;
     }
-    const quote = written.quote;
-    const on = written.on ?? null;
-    return on === null
-        ? { from: shownAt(region, quote.start), to: shownAt(region, quote.end) }
-        : { from: shownInReply(region, on, quote.start), to: shownInReply(region, on, quote.end) };
+    return { from: shownAt(region, written.quote.start), to: shownAt(region, written.quote.end) };
+}
+
+/**
+ * Return what an item's citations of the operator's words draw: each that found its passage, its id marked as a
+ * citation, saying the passage on hover, and the passage among the operator's words above marked as answered there,
+ * saying where; each that found none, or several, marked as written, saying why.
+ */
+function citing(region: Region): { from: number; to: number; value: Decoration }[] {
+    const marks: { from: number; to: number; value: Decoration }[] = [];
+    for (const each of region.item.citations ?? []) {
+        const from = shownAt(region, each.start);
+        const found = each.found;
+        if (found == null) {
+            const said = Decoration.mark({ class: "citation-unresolved", attributes: { title: unfound(each) } });
+            marks.push({ from, to: shownAt(region, each.end), value: said });
+            continue;
+        }
+        const title = `you, @${found.part.item}.${found.part.part}: ${found.text}`;
+        marks.push({ from, to: shownAt(region, markerEnd(each)), value: Decoration.mark({ class: "citation", attributes: { title } }) });
+        for (const line of region.said) {
+            if (!sameId(line.part, found.part)) {
+                continue;
+            }
+            const start = Math.max(line.from, line.from + found.start - line.own);
+            const end = Math.min(line.to, line.from + found.end - line.own);
+            if (end > start) {
+                const answered = Decoration.mark({ class: "answered", attributes: { title: "answered below: click to go to it", "data-answered": `${from}` } });
+                marks.push({ from: start, to: end, value: answered });
+            }
+        }
+    }
+    return marks;
 }
 
 /** Draw the review: groups' banners and the messages under them, items' headers, done and parked items, the lines under each item and in each drawer, the changed files' headers, each comment's lines, and the passage each comment is on. */
@@ -364,10 +388,11 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
                 });
             }
         }
-        // Each line of a reply in the thread under an item, marked as the agent's answer.
+        // What an item's citations draw, and each of its lines an edit changed, barred.
         if (isRegion(scope)) {
-            for (const line of scope.threads) {
-                marks.push({ from: line.from - REPLY_MARK.length, to: line.from - REPLY_MARK.length, value: Decoration.line({ class: "thread-reply" }) });
+            marks.push(...citing(scope));
+            for (const at of scope.changed) {
+                marks.push({ from: at, to: at, value: Decoration.line({ class: "edited-line" }) });
             }
         }
         for (const block of scope.blocks) {
@@ -375,6 +400,10 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
             const comment = comments[block.comment];
             if (comment === undefined || isLetter(comment)) {
                 continue;
+            }
+            // A comment on a passage an edit changed since it was written is said to be outdated.
+            if (!isRemark(comment) && isRegion(scope) && outdated(scope.item, comment.quote)) {
+                marks.push({ from: block.from, to: block.from, value: Decoration.line({ class: "outdated", attributes: { "data-said": "outdated: the passage changed" } }) });
             }
             const span = isDrawer(scope) ? quotedIn(scope, comment) : quotedUnder(scope as Region, comment);
             if (span !== null && span.to > span.from) {
@@ -541,7 +570,7 @@ export function Review({
                         `${cited(item.number)} ${what(item)}${sentTo(item, called)}`,
                         ...(counted === "" ? [] : [counted]),
                         ...(typing ? ["reading types"] : []),
-                        ...(threaded(around.answers, item) ? ["replied"] : []),
+                        ...((item.edits ?? []).length > 0 ? ["edited"] : []),
                         ...(fresh(item, reviewed) ? ["new"] : []),
                         when(item.made),
                         waited(item.made, now),
@@ -553,6 +582,7 @@ export function Review({
                 around,
                 places.current,
                 drawers,
+                called,
             ),
         [items, agents, banner, called, draft, around, drawers, reviewed, now],
     );
@@ -599,6 +629,38 @@ export function Review({
     });
     const { view, landing, kept } = editor;
     const before = useRef<Laid | null>(null);
+    // What's laid out now, which a click on a citation, or on the passage of the operator's words it answers, reads.
+    const laidNow = useRef(laidOut);
+    laidNow.current = laidOut;
+
+    // A click on a citation's id opens or folds the passage it cites under its line; one on the passage it answers,
+    // among the operator's words above, goes to the citation.
+    useEffect(() => {
+        const current = view.current;
+        if (current === null) {
+            return undefined;
+        }
+        const clicked = (event: MouseEvent) => {
+            const target = event.target instanceof Element ? event.target.closest("[data-answered], .citation") : null;
+            if (target === null) {
+                return;
+            }
+            const answered = target.getAttribute("data-answered");
+            if (answered !== null) {
+                current.dispatch({ selection: { anchor: Number(answered) }, scrollIntoView: true });
+                return;
+            }
+            const at = current.posAtDOM(target);
+            const fold = laidNow.current.regions
+                .flatMap((each) => each.folds)
+                .find((each) => each.name.startsWith("cited ") && at >= each.summary.from && at <= each.summary.to);
+            if (fold !== undefined) {
+                current.dispatch({ effects: folding(fold, !isFolded(current.state, fold)) });
+            }
+        };
+        current.dom.addEventListener("click", clicked);
+        return () => current.dom.removeEventListener("click", clicked);
+    }, [view]);
     // What was written as it was last laid out.
     const wrote = useRef<Written[]>([]);
 
