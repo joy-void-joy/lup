@@ -653,6 +653,24 @@ kbd {
     font-weight: 400;
 }
 
+/* In "since you approved": a line changed since the operator last looked at
+   its file, its number in the drawer's colour after a dot (`data-gutter`); the
+   line after lines gone since, ruled above; and a file standing as they last
+   saw it, reviewed, a muted line of its own, ruled as a file's header is. */
+.buffer .cm-line.code-fresh::before {
+    color: var(--fold-since);
+    font-weight: 700;
+}
+
+.buffer .cm-line.code-gap {
+    border-top: 1px dashed var(--fold-since);
+}
+
+.buffer .cm-line.aside-reviewed {
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+}
+
 /* Each kind of fold in its colour: its mark, its bar, its placeholder, its part of the header. */
 .fold-item {
     color: var(--fold-item);

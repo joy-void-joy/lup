@@ -28,7 +28,7 @@ export interface Part<P extends string> {
  * Where the cursor is in the review, for the line of keys: writing a comment; on one written; on an agent's banner, or
  * on lup's approvals'; on an item's own lines, an approval's or a held change's as a change; on a changed file's
  * lines; on a drawer's summary line or a line of its tasks; on the agent's words in its trace or its conversation; on a
- * file's lines in its "since you approved" drawer; on a line under an item or in a drawer that isn't the agent's or a
+ * file's lines, or its line once it stands as the operator last saw it, in its "since you approved" drawer; on a line under an item or in a drawer that isn't the agent's or a
  * file's, as a fold's summary; or on nothing, the review empty.
  */
 export type ReviewPlace = "insert" | "written" | "banner" | "approvals" | "item" | "change" | "file" | "drawer" | "trace" | "since" | "aside" | "nothing";
@@ -130,7 +130,7 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
         keys: [
             {
                 keys: "␣a",
-                does: "approve the approval or held change, the comments under it going with it; in \"since you approved\", approve the file's flagged writes",
+                does: "approve the approval or held change, the comments under it going with it; in \"since you approved\", mark the file reviewed at the version shown, approving its flagged writes where it still stands so: it's a line until the agent writes it again, then shows what changed since",
                 short: "approve",
                 at: ["change", "file", "since"],
             },
@@ -144,15 +144,9 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
             { keys: "␣p", does: "park the item, leaving it for later, folded; on one parked, bring it back", short: "park", at: ["item"] },
             {
                 keys: "␣A",
-                does: "in \"since you approved\", mark all of it good: every flagged write on the branch approved, which its landing waits on, and the drawer read from there on",
-                short: "all good",
+                does: "in \"since you approved\", mark every file it shows reviewed, as Space a does each",
+                short: "all reviewed",
                 at: ["since"],
-            },
-            {
-                keys: "␣l",
-                does: "in \"since you approved\", bring the latest in: the writes that came since you read it, which never move what you read until you ask",
-                short: "latest",
-                at: ["since", "drawer"],
             },
             { keys: "h", does: "on a banner, hold each flagged write of the agent and its subagents for your answer, or let them land again; elsewhere, vim's h", short: "hold", at: ["banner"] },
             { keys: "^⏎", does: "send the reply: every comment, message, remark and item marked read", short: "send", at: [] },
