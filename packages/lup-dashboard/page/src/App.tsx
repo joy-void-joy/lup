@@ -13,7 +13,9 @@
 // since the operator last saw it as a call of its that may have written ends and
 // as its drawer opens, with the version shown, so the host answers without the
 // files where nothing changed, and laid out as it comes, live; each a minute
-// apart at most (`docs/dashboard.md`, *The review*, *The drawers*).
+// apart at most; a file marked reviewed there a line at once, as the host's
+// answer confirms or brings it back (`docs/dashboard.md`, *The review*, *The
+// drawers*).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { doing, everyone, launches, ring, running, type Activity, type Running } from "./agents";
@@ -24,6 +26,7 @@ import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
+import { marked, sameShown, type Marking } from "./since";
 import {
     UNREAD,
     answer,
@@ -473,8 +476,22 @@ export function App() {
         [drawn, again],
     );
 
-    // What each agent's branch changed since the operator last saw it, as the page shows it, by its conversation.
+    // What each agent's branch changed since the operator last saw it, as the host last read it, by its conversation;
+    // and the files of each being marked reviewed, each laid out as a reviewed line from the key's press until the
+    // host answers.
     const shown = useRef(new Map<string, Since>());
+    const marking = useRef(new Map<string, Marking[]>());
+
+    /** Lay out the drawer of the agent whose conversation is `key` as the host last read it, each file being marked as its reviewed line. */
+    const showSince = useCallback(
+        (key: string) => {
+            const now = shown.current.get(key);
+            if (now !== undefined) {
+                drawn(key, (before) => ({ ...before, since: marked(now, marking.current.get(key) ?? []) }));
+            }
+        },
+        [drawn],
+    );
 
     /** Ask what `agent`'s branch changed since the operator last saw it, with the version shown, and lay out what's changed, live; `loud` says why it couldn't be read. */
     const since = useCallback(
@@ -494,9 +511,9 @@ export function App() {
                 return;
             }
             shown.current.set(agent.key, now);
-            drawn(agent.key, (before) => ({ ...before, since: now }));
+            showSince(agent.key);
         },
-        [drawn],
+        [showSince],
     );
 
     // What each agent was last seen doing, by its conversation: a change is a hook of its the host heard.
@@ -558,24 +575,45 @@ export function App() {
         [live, readCalls],
     );
 
-    /** Mark files of an agent's branch reviewed at the versions shown, approving their flags where they stand so, say what came of it, and read the drawer anew from there. */
+    /**
+     * Mark files of an agent's branch reviewed at the versions shown, approving their flags where they stand so: each a
+     * reviewed line at once, the host's answer saying what came of it. Where the drawer stood as the page shows it, the
+     * answer is the drawer as it stands, taken in; else it's read anew, bringing back each file that moved since it was
+     * shown, its flags waiting. Refused, each is as it was.
+     */
     const reviewSince = useCallback(
         (conversation: InboxConversation, files: Viewed[]) => {
-            const agent = live.find((each) => each.key === whose(conversation));
-            void ask({ kind: "policy-review-since", conversation, files }).then((answer) => {
-                if (answer.kind === "refused") {
-                    setSaid(answer.error);
-                    return;
-                }
-                if (answer.kind === "policy-reviewed") {
+            const key = whose(conversation);
+            const agent = live.find((each) => each.key === key);
+            const was = shown.current.get(key) ?? null;
+            const at = new Date().toISOString();
+            const mine: Marking[] = files.map((each) => ({ path: each.path, version: each.version ?? null, at }));
+            marking.current.set(key, [...(marking.current.get(key) ?? []), ...mine]);
+            showSince(key);
+            const request: Asked = { kind: "policy-review-since", conversation, files, seen: was?.version ?? null };
+            void answered(request, (answer) => (answer.kind === "policy-reviewed" ? answer : null)).then(async (reply) => {
+                if ("refused" in reply) {
+                    setSaid(`Not marked reviewed: ${reply.refused}`);
+                } else {
+                    const answer = reply.shown;
                     setSaid(reviewedSaid(answer.reviewed, answer.approved ?? [], answer.moved ?? []));
+                    if (was !== null && answer.version != null && shown.current.get(key) === was) {
+                        const marked = new Map((answer.files ?? []).map((each) => [each.path, each]));
+                        shown.current.set(key, { ...was, version: answer.version, files: (was.files ?? []).map((each) => marked.get(each.path) ?? each) });
+                    } else if (agent !== undefined) {
+                        await since(agent, true);
+                    }
                 }
-                if (agent !== undefined) {
-                    void since(agent, true);
+                const left = (marking.current.get(key) ?? []).filter((each) => !mine.includes(each));
+                if (left.length === 0) {
+                    marking.current.delete(key);
+                } else {
+                    marking.current.set(key, left);
                 }
+                showSince(key);
             });
         },
-        [live, since],
+        [live, since, showSince],
     );
 
     const drafted = useRef(draft);
@@ -808,10 +846,9 @@ function reviewedSaid(reviewed: string[], approved: number[], moved: string[]): 
     return `Reviewed ${files}${flags}.${waiting}`;
 }
 
-/** Whether two of what's held of an agent's drawers say the same: as many steps of its record and the same calls read whole, its branch at the same version with as many files, and the same tasks, context and items exchanged. */
+/** Whether two of what's held of an agent's drawers say the same: as many steps of its record and the same calls read whole, its branch shown the same, and the same tasks, context and items exchanged. */
 function sameDrawers(a: AgentDrawers, b: AgentDrawers): boolean {
-    const sameSince = (x: Since | null, y: Since | null) =>
-        x === y || (x !== null && y !== null && x.version === y.version && (x.files ?? []).length === (y.files ?? []).length);
+    const sameSince = (x: Since | null, y: Since | null) => x === y || (x !== null && y !== null && sameShown(x, y));
     return (
         a.entries.length === b.entries.length &&
         a.calls === b.calls &&

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { shownOnce, type ChangedFile } from "./code";
-import { freshRows, reviewedLine } from "./since";
+import type { components } from "./generated/api";
+import { freshRows, marked, reviewedLine, sameShown } from "./since";
+
+type Since = components["schemas"]["Since"];
+type SinceFile = components["schemas"]["SinceFile"];
 
 const file = (before: string | null, after: string | null): ChangedFile => ({
     path: "reader.py",
@@ -51,5 +55,36 @@ describe("the lines changed since the operator last looked at a file", () => {
         expect([gone.rows.size, after.filter((row) => gone.gaps.has(row)).map((row) => row.text)]).toEqual([0, ["c = 3"]]);
         // Worked out once for each pair, as it's painted at each scroll.
         expect(freshRows(first, now)).toBe(grown);
+    });
+});
+
+describe("a file being marked reviewed", () => {
+    const at = "2026-10-23T21:00:00Z";
+    const a: SinceFile = { path: "a.py", version: "a1", flags: [70], file: { path: "a.py", before: null, after: { kind: "text", text: "a = 1\n" } } };
+    const b: SinceFile = { path: "b.py", version: "b1", flags: [], file: { path: "b.py", before: { kind: "text", text: "b = 1\n" }, after: { kind: "text", text: "b = 2\n" } } };
+    const drawer: Since = { kind: "policy-since", worktree: "/r/tree/feat", branch: "feat", version: "t1 0 s1", same: false, files: [a, b] };
+    const line: SinceFile = { path: "a.py", version: "a1", flags: [], file: null, since: null, reviewed: at };
+
+    it("is the line of one reviewed at once, its flags approved with it, the other files as they are", () => {
+        const shown = marked(drawer, [{ path: "a.py", version: "a1", at }]);
+        expect(shown.files).toEqual([line, b]);
+        expect(shown.files?.[1]).toBe(b);
+        expect(reviewedLine(line)).toBe("a.py · reviewed at a1");
+    });
+
+    it("stays as it is where it moved since the version marked, and the drawer is the one read where nothing's marked", () => {
+        expect(marked(drawer, [{ path: "a.py", version: "a0", at }])).toBe(drawer);
+        expect(marked(drawer, [])).toBe(drawer);
+    });
+
+    it("is laid out the same as the host's answer marking it, so the answer lays out nothing again", () => {
+        const shown = marked(drawer, [{ path: "a.py", version: "a1", at }]);
+        const answer: Since = { ...drawer, version: "t1 1 s2", files: [{ path: "a.py", version: "a1", flags: [], reviewed: "2026-10-23T21:00:01Z" }, b] };
+        expect(sameShown(shown, answer)).toBe(true);
+        // A flag waiting on it still, a file shown otherwise, or another branch are laid out anew.
+        const waiting: Since = { ...answer, files: [{ path: "a.py", version: "a1", flags: [70], reviewed: at }, b] };
+        expect(sameShown(shown, waiting)).toBe(false);
+        expect(sameShown(shown, drawer)).toBe(false);
+        expect(sameShown(drawer, { ...drawer, branch: "other" })).toBe(false);
     });
 });

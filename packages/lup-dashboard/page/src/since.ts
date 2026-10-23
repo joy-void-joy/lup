@@ -1,14 +1,17 @@
 // What the "since you approved" drawer shows beyond each changed file's own
 // lines (`docs/dashboard.md`, *The drawers*): the line a file standing as the
 // operator last saw it is said in, marked reviewed with the version where they
-// marked it so; and which lines of a file changed since they last looked at
-// it, the version shown when the cursor last left it, so what came in live is
-// found at a glance. Pure: the review lays the line out (`review.ts`), and its
-// editor paints the marks on the lines in view (`Review.tsx`).
+// marked it so, each file Space `a` marks one at once, while the host marks it;
+// and which lines of a file changed since they last looked at it, the version
+// shown when the cursor last left it, so what came in live is found at a
+// glance. Pure: the review lays the line out (`review.ts`), its editor paints
+// the marks on the lines in view (`Review.tsx`), and the page holds what's
+// being marked (`App.tsx`).
 import { shownOnce, type ChangedFile, type Row } from "./code";
 import { cited, hunks } from "./comments";
 import type { components } from "./generated/api";
 
+type Since = components["schemas"]["Since"];
 type SinceFile = components["schemas"]["SinceFile"];
 
 /** How many characters of git's id for a version a line says, as git abbreviates one. */
@@ -75,4 +78,52 @@ export function freshRows(looked: ChangedFile | null, file: ChangedFile): Fresh 
     const made = { rows, gaps };
     freshOnce.set(looked, kept.set(file, made));
     return made;
+}
+
+/** A file of a drawer the operator marked reviewed, at the version shown, which the host hasn't answered yet: when they marked it. */
+export interface Marking {
+    path: string;
+    version: string | null;
+    at: string;
+}
+
+/**
+ * Return the drawer `shown` as it's laid out while the host marks `marking`: each file being marked at the version it
+ * shows is the line of one reviewed there, its flags approved with it, as the host's answer shows it but where the file
+ * moved since; the rest as they are.
+ */
+export function marked(shown: Since, marking: Marking[]): Since {
+    const files = shown.files ?? [];
+    const lines = files.map((each) => {
+        const mark = marking.find((one) => one.path === each.path && one.version === (each.version ?? null));
+        return mark === undefined ? each : { ...each, file: null, flags: [], since: null, reviewed: mark.at };
+    });
+    return lines.every((each, at) => each === files[at]) ? shown : { ...shown, files: lines };
+}
+
+/**
+ * Whether two readings of a drawer are laid out the same: on the same branch and worktree, each file the same, or each
+ * the same line of one standing as the operator last saw it, as a file shown being marked and the host's answer
+ * marking it are; so the review isn't laid out again for the answer.
+ */
+export function sameShown(a: Since, b: Since): boolean {
+    const was = a.files ?? [];
+    const now = b.files ?? [];
+    const line = (x: SinceFile, y: SinceFile) =>
+        x.file == null &&
+        y.file == null &&
+        x.path === y.path &&
+        (x.version ?? null) === (y.version ?? null) &&
+        (x.since ?? null) === (y.since ?? null) &&
+        (x.reviewed == null) === (y.reviewed == null) &&
+        (x.flags ?? []).join() === (y.flags ?? []).join();
+    return (
+        a.branch === b.branch &&
+        a.worktree === b.worktree &&
+        was.length === now.length &&
+        was.every((each, at) => {
+            const other = now[at];
+            return other !== undefined && (each === other || line(each, other));
+        })
+    );
 }
