@@ -25,6 +25,7 @@ import {
     groupAt,
     heading,
     isLetter,
+    fileHeads,
     laid,
     messages,
     news,
@@ -1549,5 +1550,20 @@ describe("the drawers at the end of each agent's group", () => {
             ["file", "reader.py"],
             ["since", "since you approved on feat · 1 to review · 2 flagged · 2 reviewed"],
         ]);
+    });
+
+    it("says where each file's header is, where ]f and [f go and a key held down stops: a test folded whole among them, never a reviewed file's line", () => {
+        const kept = { path: "a.py", version: "a1b2c3d4e5f6", flags: [], reviewed: "2026-10-17T12:00:00Z" };
+        const test = {
+            path: "test_reader.py",
+            file: { path: "test_reader.py", before: null, after: { kind: "text" as const, text: "x = 1\n" }, reading: { role: "test", asks: [], findings: [] } },
+            version: "t1",
+            flags: [],
+        };
+        const shown: Since = { ...SINCE, files: [kept, ...SINCE.files, test] };
+        const laidOut = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, since: shown }]]));
+        const on = (line: string) => laidOut.text.indexOf(line);
+        expect(fileHeads(laidOut)).toEqual([on("reader.py · created"), on("test_reader.py · created")]);
+        expect(fileHeads(laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, since: { ...SINCE, files: [kept] } }]])))).toEqual([]);
     });
 });

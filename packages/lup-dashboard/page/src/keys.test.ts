@@ -7,7 +7,7 @@ const shown = (place: ReviewPlace) => barOf(REVIEW_KEYS, place).map((key) => key
 describe("the line of keys", () => {
     it("shows the keys that apply where the cursor is, in the list's order", () => {
         expect(shown("insert")).toEqual(["^⏎", "Esc", "Esc u"]);
-        expect(shown("change")).toEqual(["␣a", "␣x", "␣d", "o", "c…", "␣c", "]a [a", "]c [c", "]n [n", "za"]);
+        expect(shown("change")).toEqual(["␣a", "␣x", "␣d", "o", "c…", "␣c", "]a [a", "]c [c", "]f [f", "]n [n", "za"]);
         expect(shown("item")).toEqual(["␣d", "␣p", "o", "c…", "C", "␣c", "]] [[", "]a [a", "]n [n", "za"]);
         expect(shown("banner")).toEqual(["h", "o ␣c", "]] [[", "]a [a", "]n [n", "␣z"]);
         expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]a [a", "]n [n"]);
@@ -27,10 +27,10 @@ describe("the line of keys", () => {
     });
 
     it("offers a file since the operator approved marking it reviewed and every file shown reviewed, never declining", () => {
-        expect(shown("since")).toEqual(["␣a", "␣A", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "zf", "␣z"]);
+        expect(shown("since")).toEqual(["␣a", "␣A", "o", "c…", "]c [c", "]f [f", "]n [n", "za", "zr zm", "zf", "␣z"]);
         // A reviewed file's line takes no comment.
-        expect(shown("reviewed")).toEqual(["␣a", "␣A", "]c [c", "]n [n", "za", "zr zm", "zf", "␣z"]);
-        expect(shown("file")).toEqual(["␣a", "␣x", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "zf", "␣z"]);
+        expect(shown("reviewed")).toEqual(["␣a", "␣A", "]c [c", "]f [f", "]n [n", "za", "zr zm", "zf", "␣z"]);
+        expect(shown("file")).toEqual(["␣a", "␣x", "o", "c…", "]c [c", "]f [f", "]n [n", "za", "zr zm", "zf", "␣z"]);
     });
 
     it("shows no key of insert mode outside it, and none of the others in it", () => {

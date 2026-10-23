@@ -227,6 +227,18 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 at: ["change", "file", "since", "reviewed"],
             },
             {
+                keys: "]f [f",
+                does: "next and previous file's header, in what an approval, a held change or a \"since you approved\" drawer changes: one folded whole on its header, which it doesn't open; one in a closed fold, or standing as you last saw it, a line with nothing under it, passed over",
+                short: "files",
+                at: ["change", "file", "since", "reviewed"],
+            },
+            {
+                keys: "^d ^u ^f ^b",
+                does: "half a page or a page down or up, as vim's, stopping on the next file's header it reaches, as a motion repeated by a key held down does, j among them; held there until a key is pressed afresh, which goes on",
+                short: "page",
+                at: [],
+            },
+            {
                 keys: "]n [n",
                 does: "next and previous comment, message or remark written, where you last were in it, the folds hiding it opening, said under the review",
                 short: "comments",

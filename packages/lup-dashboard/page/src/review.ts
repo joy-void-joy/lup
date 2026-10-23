@@ -1212,6 +1212,16 @@ export function arrival(region: Region): number {
     return (whole ? undefined : region.stops[0]) ?? region.header.from;
 }
 
+/**
+ * Return the start of each file's header line, of every change and "since you approved" drawer, in the text's order:
+ * where `]f` and `[f` go, and where a key held down or a page scroll stops (`stopAt`, `editor.ts`). A file folded whole
+ * is one, its header the fold's summary line; one standing as the operator last saw it, a line with nothing under it to
+ * read, isn't.
+ */
+export function fileHeads(laidOut: Laid): number[] {
+    return [...laidOut.regions, ...laidOut.drawers].flatMap((scope) => scope.filed.map((each) => each.from)).sort((a, b) => a - b);
+}
+
 /** Return the stop after the line starting at `line`, or before it, of `stops`, in the text's order; none past the last, or before the first. */
 export function stepped(stops: number[], line: number, forward: boolean): number | undefined {
     return forward ? stops.find((each) => each > line) : [...stops].reverse().find((each) => each < line);

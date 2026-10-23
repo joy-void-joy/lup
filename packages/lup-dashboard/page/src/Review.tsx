@@ -40,7 +40,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type Taken } from "./code";
 import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
-import { closedAs, folding, isFolded, reached, reaching, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import { closedAs, folding, hiddenAt, isFolded, reached, reaching, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type DrawerKind, type ReviewPlace } from "./keys";
 import { markerEnd, outdated, unfound } from "./exchange";
@@ -57,6 +57,7 @@ import {
     codeAt,
     codeFrom,
     drawerAt,
+    fileHeads,
     firstApproval,
     foldKey,
     foldsOf,
@@ -622,6 +623,8 @@ export function Review({
         }),
         [laidOut],
     );
+    // The start of each file's header line: where `]f` and `[f` go, and where a key held down or a page scroll stops.
+    const heads = useMemo(() => fileHeads(laidOut), [laidOut]);
     const editor = useEditor<Draft, Written>({
         shown: laidFor,
         draft,
@@ -964,6 +967,28 @@ export function Review({
                 effects: EditorView.scrollIntoView(target, { y: "nearest", yMargin: current.scrollDOM.clientHeight / 3 }),
             });
         },
+        file: (forward) => {
+            const current = view.current;
+            if (current === null) {
+                return;
+            }
+            const line = current.state.doc.lineAt(editor.head()).from;
+            // A file a closed fold hides, in an item marked read or a drawer closed, is passed over, the fold counting as
+            // its summary line; one folded whole is gone to on its header, which it doesn't open.
+            const target = stepped(
+                heads.filter((each) => !hiddenAt(current.state, each)),
+                line,
+                forward,
+            );
+            if (target === undefined) {
+                return;
+            }
+            current.dispatch({ selection: { anchor: target } });
+            // Its header at the view's top, its lines under it: scrolled once vim's key is done, as vim then scrolls
+            // the cursor into view, which CodeMirror would take in place of an earlier scroll.
+            queueMicrotask(() => current.dispatch({ effects: EditorView.scrollIntoView(target, { y: "start" }) }));
+        },
+        stops: () => heads,
         cite: (forward) => {
             const current = view.current;
             if (current === null) {

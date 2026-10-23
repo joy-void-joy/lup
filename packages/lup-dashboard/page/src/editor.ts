@@ -8,8 +8,11 @@
 // keys of insert mode on the line; `v` and a motion, then `c` or `s`, on the
 // selection; where what's covered isn't one item's or one turn's, on the line. `]]` and
 // `[[` go to the next and previous item or turn, `]c` and `[c` to the next and
-// previous line that matters, where a view has some, `]n` and `[n` to the next
-// and previous comment, where the cursor last was in it. Ctrl+Enter in a comment ends
+// previous line that matters, where a view has some, `]f` and `[f` to the next
+// and previous file's header, `]n` and `[n` to the next and previous comment,
+// where the cursor last was in it. A motion repeated by a key held down, or a
+// page scroll, Ctrl+D, U, F or B, stops on the next file's header it reaches,
+// held there until the key is pressed afresh (`stopAt`). Ctrl+Enter in a comment ends
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
 // any change to the draft, `g-` and `g+` go through its history in the order it
 // was made (`History`). Each fold is folded or open as the view lays it out
@@ -69,6 +72,10 @@ interface Actions {
     move: (forward: boolean) => void;
     answer: (forward: boolean) => void;
     matter: (forward: boolean) => void;
+    /** `]f` and `[f`: the next or previous file's header. */
+    file: (forward: boolean) => void;
+    /** The start of each file's header line, in the text's order: where a key held down, or a page scroll, stops. */
+    stops: () => readonly number[];
     written: (forward: boolean) => void;
     /** `]q` and `[q`: the next or previous citation of the operator's words. */
     cite: (forward: boolean) => void;
@@ -112,6 +119,12 @@ interface Keyed {
     inserting: boolean;
     /** Whether it begins or makes a search, `/`, `n`, `N`, `*` or `#`, whose match opens the folds around it, where the cursor goes next. */
     searching: boolean;
+    /** Whether it's a key held down, repeated by the browser (`KeyboardEvent.repeat`), whose motion stops at a file. */
+    repeat: boolean;
+    /** Whether it scrolls a page or half of one, Ctrl+D, U, F or B, whose motion stops at a file, pressed afresh or held. */
+    paging: boolean;
+    /** Whether a key held down stopped on a file's header, where it stays until a key is pressed afresh. */
+    stopped: boolean;
     /** Where a dead key pressed outside insert mode is. */
     dead: Dead;
 }
@@ -310,7 +323,18 @@ interface Bound {
 /** Each editor's own, read by the keys, the filters and vim's actions, which vim's keymap shares between editors. */
 const binding = Facet.define<Bound, Bound | null>({ combine: (values) => values[0] ?? null });
 
-const NONE: Keyed = { from: 0, visual: false, passage: null, changing: false, inserting: false, searching: false, dead: UNPRESSED };
+const NONE: Keyed = {
+    from: 0,
+    visual: false,
+    passage: null,
+    changing: false,
+    inserting: false,
+    searching: false,
+    repeat: false,
+    paging: false,
+    stopped: false,
+    dead: UNPRESSED,
+};
 
 function boundOf(state: EditorState): Bound {
     return state.facet(binding) ?? { actions: null, keyed: NONE };
@@ -381,6 +405,8 @@ function mapKeys(): void {
     action("lupPreviousAnswer", (actions) => actions.answer(false));
     action("lupNextMatter", (actions) => actions.matter(true));
     action("lupPreviousMatter", (actions) => actions.matter(false));
+    action("lupNextFile", (actions) => actions.file(true));
+    action("lupPreviousFile", (actions) => actions.file(false));
     action("lupNextWritten", (actions) => actions.written(true));
     action("lupPreviousWritten", (actions) => actions.written(false));
     action("lupNextCitation", (actions) => actions.cite(true));
@@ -460,6 +486,8 @@ function mapKeys(): void {
     map("[a", "lupPreviousAnswer", "normal");
     map("]c", "lupNextMatter", "normal");
     map("[c", "lupPreviousMatter", "normal");
+    map("]f", "lupNextFile", "normal");
+    map("[f", "lupPreviousFile", "normal");
     map("]n", "lupNextWritten", "normal");
     map("[n", "lupPreviousWritten", "normal");
     map("]q", "lupNextCitation", "normal");
@@ -564,6 +592,12 @@ const keys = Prec.highest(
             }
             return false;
         },
+        keyup: (_, view) => {
+            const { keyed } = boundOf(view.state);
+            keyed.repeat = false;
+            keyed.paging = false;
+            return false;
+        },
         keydown: (event, view) => {
             const cm = vimOf(view);
             if (cm === null) {
@@ -581,6 +615,12 @@ const keys = Prec.highest(
             const modified = event.ctrlKey || event.metaKey || event.altKey;
             if (idle(cm)) {
                 keyed.changing = (event.key === "c" || event.key === "C") && !modified && !keyed.visual;
+            }
+            // A key pressed afresh goes on from a file a key held down stopped on.
+            keyed.repeat = event.repeat;
+            keyed.paging = event.ctrlKey && !event.altKey && !event.metaKey && PAGES.includes(event.key);
+            if (!event.repeat) {
+                keyed.stopped = false;
             }
             // A key typed in the search's prompt is the query's: the search stays begun until it's made.
             if (event.target === view.contentDOM) {
@@ -909,9 +949,66 @@ const outOfFolds = EditorState.transactionFilter.of((transaction) => {
         const opening = reaching(before, moved.main.head);
         return opening.length === 0 ? transaction : [transaction, { effects: opening, annotations: reached.of(opening.length) }];
     }
-    const past = pastFolds(before, moved, before.selection.main.head);
+    const was = before.selection.main.head;
+    const past = pastFolds(before, moved, was);
+    const landed = past ?? moved;
+    const stop = keyed.repeat || keyed.paging ? stopping(before, landed, was, keyed) : null;
+    if (stop !== null) {
+        return [transaction, { selection: EditorSelection.single(stop) }];
+    }
     return past === null ? transaction : [transaction, { selection: past, annotations: passed.of(true) }];
 });
+
+/** The keys that, with Ctrl, scroll half a page or a page, in vim: `^d` and `^u`, `^f` and `^b`. */
+const PAGES = ["d", "u", "f", "b"];
+
+/**
+ * Return where a key held down, or a page scroll, leaves the cursor, its motion putting the selection at `landed` from
+ * `was` (`keyed`): where a key held down stopped on a file's header, there, until a key is pressed afresh; else on the
+ * first file's header the motion reaches or goes through (`stopAt`), held there; none where it goes on, or the
+ * selection is a visual one, which runs past files as vim makes it.
+ */
+function stopping(state: EditorState, landed: EditorSelection, was: number, keyed: Keyed): number | null {
+    const { head } = landed.main;
+    if (!landed.main.empty || head === was) {
+        return null;
+    }
+    if (keyed.repeat && keyed.stopped) {
+        return was;
+    }
+    const at = stopAt(state, boundOf(state).actions?.stops() ?? [], was, head);
+    if (at === undefined) {
+        return null;
+    }
+    keyed.stopped = true;
+    // Landed on the header's line, it stays where on it the motion put it.
+    return state.doc.lineAt(head).from === at ? head : at;
+}
+
+/**
+ * Return the file's header a motion from `was` to `head` stops on, of `stops`, the start of each header's line, in the
+ * text's order: going forward, the first after the line it left, up to where it lands; going back, the last before
+ * that line, down to the line it lands on, the file it was in among them, so it stops at the top of that file; a header
+ * a closed fold hides passed over, the fold counting as its summary line. None where it reaches none.
+ */
+export function stopAt(state: EditorState, stops: readonly number[], was: number, head: number): number | undefined {
+    const from = state.doc.lineAt(was).from;
+    const shown = (at: number) => !hiddenAt(state, at);
+    if (head > was) {
+        return stops.find((each) => each > from && each <= head && shown(each));
+    }
+    const to = state.doc.lineAt(head).from;
+    return stops.findLast((each) => each < from && each >= to && shown(each));
+}
+
+/** Return whether a closed fold hides `position`, the start of a line: it's among the lines the fold hides. */
+export function hiddenAt(state: EditorState, position: number): boolean {
+    let hidden = false;
+    foldedRanges(state).between(position, position, (from, to) => {
+        hidden ||= from < position && position <= to;
+    });
+    return hidden;
+}
 
 /**
  * Say under the view how many folds a search or a jump opened to reach where it went (`reached`); and, where a plain
@@ -1075,6 +1172,10 @@ export interface Own<C> {
     toggle?: (list: "done" | "parked") => void;
     /** Go to the next or previous line that matters, as the review's are by the judge's reading, opening what folds it on the way. */
     matter?: (forward: boolean) => void;
+    /** Go to the next or previous file's header, as the review's `]f` and `[f` do; none where the view has none. */
+    file?: (forward: boolean) => void;
+    /** The start of each file's header line, in the text's order, where a key held down or a page scroll stops (`stopAt`); none where the view has none. */
+    stops?: () => readonly number[];
     /** Go to the next or previous citation of the operator's words, as the review's `]q` and `[q` do; none where the view has none. */
     cite?: (forward: boolean) => void;
     /** Follow a citation to what it cites, or back, as the review's `gd` does; none where the view has none. */
@@ -1373,6 +1474,8 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             move: own.move,
             answer: (forward) => own.answer?.(forward),
             matter: (forward) => own.matter?.(forward),
+            file: (forward) => own.file?.(forward),
+            stops: () => own.stops?.() ?? [],
             cite: (forward) => own.cite?.(forward),
             follow: () => own.follow?.(),
             written: (forward) => {
