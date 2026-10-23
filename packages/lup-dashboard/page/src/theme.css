@@ -1279,6 +1279,26 @@ kbd {
     pointer-events: auto;
 }
 
+.buffer.stack .cm-line.stack-line {
+    display: flex;
+    gap: 0 2ch;
+}
+
+.buffer.stack .stack-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* What settles what a pinned header heads, at its end. */
+.buffer.stack .stack-hint {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-weight: 400;
+    font-style: italic;
+}
+
 .buffer.stack .cm-line.stack-line:hover {
     background: var(--float-bg);
 }
@@ -1508,6 +1528,11 @@ kbd {
 @media (max-width: 640px) {
     .bar .outline-button {
         display: inline;
+    }
+
+    /* A phone's stack keeps its width for the headers. */
+    .buffer.stack .stack-hint {
+        display: none;
     }
 
     .outline.is-overlay {

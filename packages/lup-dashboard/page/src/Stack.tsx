@@ -22,6 +22,8 @@ interface Props {
     labelsOf: (sticky: Sticky) => RowLabel[];
     /** The letter of the fold each header heads, in the margin's column for its depth, as the buffer's margin marks it; none for a banner. */
     markOf: (sticky: Sticky) => Mark | null;
+    /** What settles what a header heads, said at its end: the key approving a change's file, marking a drawer's reviewed. */
+    hintOf: (sticky: Sticky) => string | null;
     narrow: boolean;
     jump: (position: number) => void;
     pull: (label: RowLabel) => void;
@@ -43,6 +45,7 @@ interface Drawn {
     at: number;
     labels: RowLabel[] | null;
     mark: Mark | null;
+    hint: string | null;
 }
 
 interface Shown {
@@ -55,11 +58,11 @@ interface Shown {
 
 const NONE: Shown = { lines: [], left: 0, right: 0, height: 0 };
 
-export function Stack({ following, roots, text, classesOf, labelsOf, markOf, narrow, jump, pull }: Props) {
+export function Stack({ following, roots, text, classesOf, labelsOf, markOf, hintOf, narrow, jump, pull }: Props) {
     const [shown, setShown] = useState<Shown>(NONE);
     // What's read in measuring is what's laid out now, whenever it's measured.
-    const now = useRef({ roots, text, classesOf, labelsOf, markOf, narrow });
-    now.current = { roots, text, classesOf, labelsOf, markOf, narrow };
+    const now = useRef({ roots, text, classesOf, labelsOf, markOf, hintOf, narrow });
+    now.current = { roots, text, classesOf, labelsOf, markOf, hintOf, narrow };
     useEffect(() => {
         const measure = () => {
             const view = following.view;
@@ -70,7 +73,7 @@ export function Stack({ following, roots, text, classesOf, labelsOf, markOf, nar
                 key: "lup-stack",
                 read: (read: EditorView): Shown => {
                     const began = performance.now();
-                    const { roots, text, classesOf, labelsOf, markOf, narrow } = now.current;
+                    const { roots, text, classesOf, labelsOf, markOf, hintOf, narrow } = now.current;
                     const scroller = read.scrollDOM.getBoundingClientRect();
                     const lineHeight = read.defaultLineHeight;
                     const geometry = {
@@ -89,6 +92,7 @@ export function Stack({ following, roots, text, classesOf, labelsOf, markOf, nar
                             at: sticky.header.from,
                             labels: null,
                             mark: markOf(sticky),
+                            hint: hintOf(sticky),
                         };
                         if (sticky.under === null || !withRow) {
                             return [header];
@@ -101,6 +105,7 @@ export function Stack({ following, roots, text, classesOf, labelsOf, markOf, nar
                             at: sticky.under.from,
                             labels: labelsOf(sticky),
                             mark: null,
+                            hint: null,
                         };
                         return [header, under];
                     });
@@ -153,7 +158,8 @@ export function Stack({ following, roots, text, classesOf, labelsOf, markOf, nar
                             onClick={line.labels === null ? () => jump(line.at) : undefined}
                             title={line.labels === null ? "go to it" : undefined}
                         >
-                            {line.labels === null ? line.text : labelled(line, pull)}
+                            <span className="stack-text">{line.labels === null ? line.text : labelled(line, pull)}</span>
+                            {line.hint === null ? null : <span className="stack-hint">{line.hint}</span>}
                         </div>
                     ))}
                 </div>
@@ -202,6 +208,7 @@ function sameShown(a: Shown, b: Shown): boolean {
             other.text === each.text &&
             other.classes === each.classes &&
             other.offset === each.offset &&
+            other.hint === each.hint &&
             JSON.stringify(other.mark) === JSON.stringify(each.mark) &&
             JSON.stringify(other.labels) === JSON.stringify(each.labels)
         );

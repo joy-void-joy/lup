@@ -77,7 +77,6 @@ import {
     laid,
     news,
     opened,
-    ownerOf,
     placeAt,
     quoted,
     recipient,
@@ -1293,6 +1292,22 @@ export function Review({
         const letter = FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? "";
         return { kind, letter, depth: sticky.kind === "file" ? 1 : 0 };
     };
+    // What settles what a pinned header heads, so the operator knows what would validate the file they're in.
+    const hintOf = (sticky: Sticky): string | null => {
+        const region = sticky.kind === "item" || sticky.kind === "file" ? regionAt(laidOut, sticky.header.from) : undefined;
+        const drawer = sticky.kind === "drawer" || sticky.kind === "file" ? drawerAt(laidOut, sticky.header.from) : undefined;
+        if (drawer?.kind === "since") {
+            return sticky.kind === "file" ? "␣a marks it reviewed" : "␣A marks every file reviewed";
+        }
+        if (region === undefined) {
+            return null;
+        }
+        const number = cited(region.item.number);
+        if (answering(region.item).kind === "answer") {
+            return sticky.kind === "file" ? `␣a approves ${number}, every file` : "␣a approves · ␣x declines";
+        }
+        return region.item.reason.reason === "question" ? "a comment answers it · ␣d reads it" : "␣d marks it read";
+    };
     const labelsOf = (sticky: Sticky): RowLabel[] => laidOut.groups.find((each) => each.banner.from === sticky.header.from)?.row?.labels ?? [];
     return (
         <>
@@ -1321,6 +1336,7 @@ export function Review({
                             classesOf={classesOf}
                             labelsOf={labelsOf}
                             markOf={markOf}
+                            hintOf={hintOf}
                             narrow={narrow}
                             jump={jumpTo}
                             pull={(label) => pull(label.of)}
