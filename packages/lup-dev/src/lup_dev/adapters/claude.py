@@ -8,6 +8,7 @@
 | `PostToolUse`, `PostToolUseFailure` | `CallFinished`: the checkpoint |
 | `Stop` | `TurnEnded` |
 | `SubagentStop` | `ConversationEnded` |
+| `StopFailure` | a subagent's: `ConversationEnded`; the session's: none |
 
 A file tool's write that asks is held in `PreToolUse` for the operator's answer
 in their inbox, then let through (`allow`), told beside the call that lup held
@@ -25,9 +26,10 @@ warned once in `systemMessage`.
 
 In a launched room (`docs/host.md`, *The one hook*), Claude Code runs the room's
 hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and
-`PostToolUseFailure` for every call, `Stop` and `SubagentStop` (`hooks`), so the
-host service hears each conversation's start, each turn's start and the prompt
-it starts on, its calls' starts and finishes, and its turn's ends
+`PostToolUseFailure` for every call, `Stop`, `SubagentStop` and `StopFailure`
+(`hooks`), so the host service hears each conversation's start, each turn's
+start and the prompt it starts on, its calls' starts and finishes, and its
+turn's ends, one failing on an error from the model's API among them
 (`docs/inbox.md`, *How an agent is told*). The judge reads every one of them
 (`heard`) but the calls `judging` leaves out: those to lup's own tools, and to a
 tool on the list of those that only read (`Reading`). So every
@@ -37,7 +39,9 @@ asks there until the operator answers, put back on a decline
 (`docs/judging-writes.md`, *After a call: the checkpoint*). A turn's end clears
 the calls its conversation left that no finish reported, runs a last checkpoint,
 and holds the session's turn while the files it touched have findings
-(`docs/judging-writes.md`, *The turn's end*). Every other hook the service
+(`docs/judging-writes.md`, *The turn's end*). A turn that failed holds nothing,
+since Claude Code reads none of `StopFailure`'s answer, and the judge reads a
+subagent's alone (`StopFailure`). Every other hook the service
 answers itself, without starting the judge, as no decision. Where the launch's
 judge can't answer a hook, the host service answers it through `unanswered`: a
 file tool's write is denied, naming why, since a write let through unjudged
@@ -55,7 +59,8 @@ the tool call"; `PostToolUse` and `PostToolUseFailure` "Shows stderr to Claude";
 `SubagentStop` "Prevents the subagent from stopping", each on the standard
 error, unless it "says a file is missing", which lup's line never does; and
 `UserPromptSubmit` "Blocks the prompt, so it never reaches Claude", which a
-turn's start mustn't do to the operator's prompt. So the service answers every
+turn's start mustn't do to the operator's prompt; `StopFailure`'s "Output and
+exit code are ignored", so its status 2 is no one's. So the service answers every
 hook with something, `{}` where it decides nothing: Claude Code reads output
 starting with `{` as JSON and checks it against its schema, every field of
 which is optional (2.1.308, `cte`), "Success. The fields apply", none here.
@@ -233,7 +238,7 @@ from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, MutableModel, Settings
 from lup_dev.adapters import Adapter, Pushing
-from lup_dev.host.courier import Heard, Spawned, Telling
+from lup_dev.host.courier import Failure, Heard, Spawned, Telling
 from lup_dev.host.records import (
     Called,
     Entry,
@@ -915,16 +920,17 @@ class SubagentStop(Payload):
     set to `"SubagentStop"`, for non-error feedback that keeps the subagent
     running".
 
-    Read in the 2.1.308 binary (`docs/field-notes.md`, *A subagent's end*): the
-    input carries `last_assistant_message`, as `Stop`'s does, when the
-    subagent's turn ends; and a subagent whose run broke off, stopped by the
-    operator or its parent or by an exception, runs `SubagentStop` once more as
-    it's cleaned up ("SubagentStop on interrupted query"), within 5 seconds and
-    with no message, so one without a message is taken as stopped: a turn
-    ending with no text is rare (2 of 2,507 `Stop`s, *The end after a held
-    end*), and taken so its end is held for nothing. One whose turn ends
-    on an error from the model's API runs `StopFailure` alone, which lup
-    doesn't hook: its parent isn't told.
+    Read in the 2.1.308 and 2.1.309 binaries (`docs/field-notes.md`, *A
+    subagent's end*): the input carries `last_assistant_message`, as `Stop`'s
+    does, when the subagent's turn ends; and a subagent whose run broke off,
+    stopped by the operator or its parent or by an exception, runs
+    `SubagentStop` once more as it's cleaned up ("SubagentStop on interrupted
+    query"), within 5 seconds and with no message, so one without a message is
+    taken as stopped: a turn ending with no text is rare (2 of 2,507 `Stop`s,
+    *The end after a held end*), and taken so its end is held for nothing, and
+    its time at work ends whatever it would tell (`ConversationEnded.final`),
+    since nothing reads that hook's answer. One whose turn ends on an error
+    from the model's API runs `StopFailure` instead (`StopFailure`).
     """
 
     hook_event_name: Literal["SubagentStop"]
@@ -932,6 +938,11 @@ class SubagentStop(Payload):
     """Whether the subagent goes on because a `SubagentStop` hook blocked it already."""
     last_assistant_message: str | None = None
     """Its last message of the turn; absent where its run broke off."""
+
+    @property
+    def stopped(self) -> bool:
+        """Say whether the subagent was stopped before it ended its turn: its run broke off, so the hook carries no message."""
+        return self.last_assistant_message is None
 
     def heard(self, fits: int) -> Heard:
         """Read a subagent's turn's end, or its stop where it carries no message: the judge reads it."""
@@ -943,7 +954,7 @@ class SubagentStop(Payload):
             after_block=self.stop_hook_active,
             fits=fits,
             said=self.last_assistant_message,
-            stopped=self.last_assistant_message is None,
+            stopped=self.stopped,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -953,7 +964,10 @@ class SubagentStop(Payload):
     @override
     def answer(self, bench: Bench) -> Output | None:
         ended = ConversationEnded(
-            session=self.session_id, agent=self.agent_id, cwd=self.cwd
+            session=self.session_id,
+            agent=self.agent_id,
+            cwd=self.cwd,
+            final=self.stopped,
         )
         reply = ended.apply(bench)
         return held(self.hook_event_name, reply.block) if reply.block else None
@@ -968,6 +982,75 @@ class SubagentStop(Payload):
 
     @override
     def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
+
+
+class StopFailure(Payload):
+    """`StopFailure`: a conversation's turn ends on an error from the model's API, a subagent's or the session's own, in place of `SubagentStop` or `Stop`.
+
+    The hooks reference (read 2026-10-23): it "Runs instead of Stop when the
+    turn ends due to an API error"; "Claude Code ignores the hook's output and
+    exit code, apart from `terminalSequence`", so nothing it's told holds it,
+    nor could; its `error` is the error's kind, "`rate_limit`, `overloaded`,
+    `authentication_failed`, `oauth_org_not_allowed`, `account_on_hold`,
+    `billing_error`, `invalid_request`, `model_not_found`, `server_error`,
+    `max_output_tokens`, `cloud_credential_error`, or `unknown`", and its
+    `last_assistant_message` "the API error string itself", not the agent's
+    words. Measured on 2.1.309 (`docs/field-notes.md`, *A subagent's end*): a
+    subagent's carries its `agent_id` and `agent_type` and runs no
+    `SubagentStop` after; the session's carries neither and runs no `Stop`.
+
+    A subagent's is its conversation's end, failed: its parent is told the
+    error's kind, and the judge ends it as at `SubagentStop`, its time at work
+    over whatever it would tell (`ConversationEnded.final`). The session's is
+    its turn's end, so the service knows it's idle, and is put before the
+    operator in lup's words, the error's kind and Claude Code's text for it,
+    rather than as the agent's last message, which it isn't; the judge doesn't
+    read it, since what it told would reach no one, and the next turn's end
+    judges what this one left.
+    """
+
+    hook_event_name: Literal["StopFailure"]
+    error: str = "unknown"
+    """The error's kind, which the hook's matcher filters on; Claude Code calls
+    one it has no kind for `unknown`."""
+    last_assistant_message: str | None = None
+    """The error as the conversation shows it, `API Error: …`; absent where
+    Claude Code renders it empty."""
+
+    def heard(self, fits: int) -> Heard:
+        """Read a subagent's end, or the session's turn's end, failed: the judge reads a subagent's alone."""
+        return Heard(
+            event="conversation-ended" if self.agent_id else "turn-ended",
+            session=self.session_id,
+            agent=self.agent_id or None,
+            judged=bool(self.agent_id),
+            fits=fits,
+            failed=Failure(kind=self.error, said=self.last_assistant_message),
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Add nothing: Claude Code reads none of this hook's answer."""
+        del telling
+        return said
+
+    @override
+    def answer(self, bench: Bench) -> Output | None:
+        """End the subagent's conversation as `SubagentStop` does, whatever its end would tell; for the session's own, nothing, which its next turn's end judges."""
+        if self.agent_id:
+            ConversationEnded(
+                session=self.session_id, agent=self.agent_id, cwd=self.cwd, final=True
+            ).apply(bench)
+        return None
+
+    @override
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
+        """Raise `failure`: no warning this hook answers is shown, so the launch's process and the host service say it in their output instead."""
+        raise failure
+
+    @override
+    def unanswered(self, said: str) -> Output:
+        """Warn the operator, which Claude Code drops as it drops every answer here: the host service's output has said it already."""
         return OperatorWarning(system_message=said)
 
 
@@ -1046,7 +1129,13 @@ def spawned(raw: str) -> Spawned | None:
 
 
 type Received = Annotated[
-    SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Stop | SubagentStop,
+    SessionStart
+    | UserPromptSubmit
+    | PreToolUse
+    | PostToolUse
+    | Stop
+    | SubagentStop
+    | StopFailure,
     Field(discriminator="hook_event_name"),
 ]
 """Any hook payload this adapter answers, told apart by its event's name."""
@@ -1168,7 +1257,10 @@ def hooks(command: Callable[[Event], list[str]], timeout: timedelta) -> list[Hoo
     call to lup's tools stamped with its caller; `PostToolUse` and
     `PostToolUseFailure` on every call, the checkpoint after it; `Stop` and
     `SubagentStop`, each conversation's turn's end, which clears the calls it
-    left that no finish reported and judges what the turn left. Each waits up to `timeout`, which a hold's wait for the operator
+    left that no finish reported and judges what the turn left; and
+    `StopFailure`, registered with `Stop` (`spelled`, `lup.adapters.claude.terminal`),
+    a turn's end on an error from the model's API, which ends a subagent's
+    conversation and leaves the session's idle. Each waits up to `timeout`, which a hold's wait for the operator
     needs, at a call's start, its finish or a turn's end.
     """
     events: list[Event] = [

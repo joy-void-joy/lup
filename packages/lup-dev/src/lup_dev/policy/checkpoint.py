@@ -2242,8 +2242,14 @@ class ConversationEnded(Event):
     checkpoint's notice, mail. It never holds on the type errors and ruff's
     findings left in its files: every worker passes the gate before it hands
     back. Its end ends its time at work, unless it's blocked, which keeps the
-    subagent going.
+    subagent going; an end its runtime reads no answer to (`final`) ends it
+    whatever it tells.
     """
+
+    final: bool = False
+    """Whether its runtime reads nothing its end answers, as where it was stopped
+    or its turn failed on an error from the model's API: no block keeps it
+    going, so its time at work ends."""
 
     @override
     def apply(self, bench: Bench) -> Reply:
@@ -2264,7 +2270,7 @@ class ConversationEnded(Event):
             if each.idle and (each.counted or root in works)
         ]
         reply = end_turn(bench, self, opened, idle, after_block=False, listing=False)
-        if self.agent and not reply.block:
+        if self.agent and (self.final or not reply.block):
             record = ConversationRecord(
                 layout=bench.services.layout, session=self.session
             )

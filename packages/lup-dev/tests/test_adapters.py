@@ -21,7 +21,7 @@ from lup_dev.codescan.contract import (
     Source,
     Span,
 )
-from lup_dev.host.courier import Conversations, Heard, Spawned, Telling
+from lup_dev.host.courier import Conversations, Failure, Heard, Spawned, Telling
 from lup_dev.inbox.store import Text
 from lup_dev.policy.checkpoint import Bench, Running, Services, Worktree
 from lup_dev.policy.holds import Response
@@ -356,6 +356,77 @@ def test_claude_subagent_stop_holds_once_on_a_held_changes_answer(
     first = claude.hook(subagent_stop, on_claude)
     assert held_on(first, "SubagentStop").startswith("lup held the write to")
     assert claude.hook(subagent_stop, on_claude) == ""
+
+
+def test_claude_a_failed_subagent_is_no_longer_at_work_and_its_hook_prints_nothing(
+    on_claude: Bench, repo: Path
+) -> None:
+    """Its turn ended on an error from the model's API, so `StopFailure` runs and no `SubagentStop`: from then on, the session's end holds on the file it touched too."""
+    claude_breaks_core(on_claude, repo)
+    claude_breaks_core(on_claude, repo, agent_id="sub")
+    stop = payload(repo, "Stop", stop_hook_active=False)
+    assert claude.hook(stop, on_claude) == ""
+    failed = payload(
+        repo,
+        "StopFailure",
+        agent_id="sub",
+        error="rate_limit",
+        last_assistant_message="API Error: Rate limit reached",
+    )
+    assert claude.hook(failed, on_claude) == ""
+    assert held_on(claude.hook(stop, on_claude)).startswith(
+        "lup won't end the turn yet"
+    )
+
+
+def test_claude_a_stopped_subagent_is_no_longer_at_work_whatever_its_end_would_say(
+    on_claude: Bench, repo: Path
+) -> None:
+    """Nothing reads what the `SubagentStop` of a subagent stopped answers, so what it would hold on doesn't keep it at work."""
+    claude_breaks_core(on_claude, repo)
+    claude_breaks_core(on_claude, repo, agent_id="sub")
+    claude.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "touch"},
+            tool_use_id="t2",
+            agent_id="sub",
+        ),
+        on_claude,
+    )
+    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+    stopped = payload(repo, "SubagentStop", agent_id="sub", stop_hook_active=False)
+    assert held_on(claude.hook(stopped, on_claude), "SubagentStop").startswith(
+        "lup held the write to"
+    )
+    stop = payload(repo, "Stop", stop_hook_active=False)
+    assert "lup won't end the turn yet" in held_on(claude.hook(stop, on_claude))
+
+
+def test_claude_a_failed_turns_hook_prints_nothing_and_a_judging_failure_is_raised(
+    on_claude: Bench, broken: Services, repo: Path
+) -> None:
+    """Claude Code reads none of `StopFailure`'s answer, so a warning there would reach no one: the judge's failure is raised for the host service to say."""
+    claude_breaks_core(on_claude, repo)
+    assert claude.hook(payload(repo, "StopFailure", error="overloaded"), on_claude) == ""
+    bench = Bench(runtime=claude.Claude(), services=broken)
+    claude.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "sed"},
+            tool_use_id="t2",
+            agent_id="sub",
+        ),
+        bench,
+    )
+    (repo / CORE).write_text((repo / CORE).read_text() + "z = 1\n")
+    failed = payload(repo, "StopFailure", agent_id="sub", error="rate_limit")
+    with pytest.raises(RuntimeError, match="the engine crashed"):
+        claude.hook(failed, bench)
 
 
 def test_claude_stop_after_a_block_on_the_same_findings_lets_the_turn_end_saying_nothing(
@@ -1687,6 +1758,45 @@ BOTH = "The operator answered.\n\nAnd again."
                 agent="a1",
                 judged=True,
                 stopped=True,
+            ),
+        ),
+        (
+            # A subagent's turn ending on an error from the model's API, as
+            # 2.1.309 sent it: its last message is the error, not its words.
+            payload(
+                Path("/w"),
+                "StopFailure",
+                agent_id="a1",
+                agent_type="general-purpose",
+                prompt_id="p1",
+                error="rate_limit",
+                last_assistant_message="API Error: Request rejected (429)",
+            ),
+            Heard(
+                fits=10_000,
+                event="conversation-ended",
+                session="s1",
+                agent="a1",
+                judged=True,
+                failed=Failure(
+                    kind="rate_limit", said="API Error: Request rejected (429)"
+                ),
+            ),
+        ),
+        (
+            # The session's own: its turn's end, which the judge doesn't read.
+            payload(
+                Path("/w"),
+                "StopFailure",
+                error="server_error",
+                last_assistant_message="API Error: 500",
+            ),
+            Heard(
+                fits=10_000,
+                event="turn-ended",
+                session="s1",
+                judged=False,
+                failed=Failure(kind="server_error", said="API Error: 500"),
             ),
         ),
     ],
