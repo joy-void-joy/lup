@@ -564,3 +564,24 @@ def test_the_demos_files_carry_readings_each_placed_on_a_line_its_file_has() -> 
                 *(found.start for found in each.reading.findings),
             ]
             assert all(1 <= line <= len(after.splitlines()) for line in placed)
+
+
+def test_the_demos_approval_holds_as_many_lines_more_as_asked_half_of_them_tests() -> (
+    None
+):
+    def held(lines: int) -> list[tuple[str, int]]:
+        shown = files(54, lines=lines)
+        assert isinstance(shown, Files)
+        return [
+            (each.reading.role, len(each.after.text.splitlines()))
+            for each in shown.files
+            if each.reading is not None and isinstance(each.after, Text)
+        ]
+
+    own = held(0)
+    grown = held(20_000)[len(own) :]
+    roles = {role for role, _ in grown}
+    total = sum(count for _, count in grown)
+    assert roles == {"production", "test"}
+    assert 20_000 <= total < 21_000
+    assert sum(count for role, count in grown if role == "test") == total // 2

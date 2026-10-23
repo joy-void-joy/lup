@@ -118,18 +118,29 @@ def demo(
             )
         ),
     ] = 0,
+    approval_lines: Annotated[
+        int,
+        typer.Option(
+            help=(
+                "How many lines the approval's change holds beside its own files, "
+                "as one of lup's own code may hold tens of thousands: half in "
+                "production modules, every function changed, half in their tests."
+            )
+        ),
+    ] = 0,
 ) -> None:
     """Serve the dashboard over stand-in data on `address` and `port`, until stopped, printing where to open it.
 
     The real page, every view populated, with no host service or session behind
     it (`lup_dashboard/demo.py`): for looking at a view while it's built, and
-    trying one before it lands, at a busy day's size (`--size`) and, with
+    trying one before it lands, at a busy day's size (`--size`), with an
+    approval of lup's own code at size (`--approval-lines`) and, with
     `--hooks`, under a busy day's watch answers.
     """
     token = secrets.token_urlsafe(16)
     listening = socket.create_server((address, port))
     bound = listening.getsockname()[1]
-    host = Demo(hooks=hooks)
+    host = Demo(hooks=hooks, approval_lines=approval_lines)
     if size is not None:
         host.size = size
     served = application(
