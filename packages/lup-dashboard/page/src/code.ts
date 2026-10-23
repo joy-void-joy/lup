@@ -125,7 +125,7 @@ export interface Shown {
 export type Folded = "test" | "data" | "first approval";
 
 /** What a file folded whole says in its header, and in a tally of an item's files. */
-const FOLDED: Record<Folded, Reason> = {
+export const FOLDED: Record<Folded, Reason> = {
     test: { said: "test", one: "test", many: "tests" },
     data: { said: "data", one: "data file", many: "data files" },
     "first approval": { said: "first approval", one: "of a first approval", many: "of a first approval" },
