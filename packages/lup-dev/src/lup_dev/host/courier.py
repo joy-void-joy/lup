@@ -42,6 +42,17 @@ if TYPE_CHECKING:
     from lup_dev.host.protocol import Register
 
 
+class Failure(Model):
+    """A turn's end on an error from the model's API, as its runtime reports it."""
+
+    kind: str
+    """The error's kind, in its runtime's word for it (`rate_limit`), which
+    says whether trying again makes sense."""
+    said: str | None = None
+    """The runtime's text for it, as it shows it in the conversation; none where
+    it gives none."""
+
+
 class Heard(Model):
     """One hook, as the host reads it."""
 
@@ -86,6 +97,12 @@ class Heard(Model):
     """At a subagent's end, whether it was stopped before it ended its turn,
     rather than ending it: told to its parent, and nothing it's told then holds
     it, since nothing would read it."""
+    failed: Failure | None = None
+    """At a turn's end, the session's or a subagent's, the error from the
+    model's API it ended on; none where it ended otherwise. A subagent's kind
+    is told to its parent, and a session's failure is put before the operator
+    (`Post.failed`); nothing either is told then holds it, since its runtime
+    reads no answer."""
     prompt: str | None = None
     """At a turn's start, the prompt it starts on, the operator's or one lup's
     tool server pushed; none for any other hook."""
@@ -200,9 +217,9 @@ class Post(ABC):
 
     @abstractmethod
     async def concluded(
-        self, launch: Register, conversation: Conversation, said: str
+        self, launch: Register, conversation: Conversation, heard: Heard
     ) -> None:
-        """Put the last message of a turn of `conversation` of `launch`, a session's own, before the operator, at its turn's end, held or let through."""
+        """Put a turn's end of `conversation` of `launch`, a session's own, before the operator, held or let through, as `heard` says it: its last message, or the error from the model's API it ended on; nothing where it says neither."""
 
 
 class Spawned(Model):

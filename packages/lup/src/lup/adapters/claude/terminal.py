@@ -91,8 +91,15 @@ other Claude Code sessions can then start a turn in the room too.
 | `turn-started` | `UserPromptSubmit` |
 | `call-started` | `PreToolUse` |
 | `call-finished` | `PostToolUse`, `PostToolUseFailure` |
-| `turn-ended` | `Stop` |
+| `turn-ended` | `Stop`, `StopFailure` |
 | `conversation-ended` | `SubagentStop` |
+
+`StopFailure` runs instead of `Stop` or `SubagentStop` where a turn ends on an
+error from the model's API, a subagent's as the session's own, its `agent_id`
+saying which (the `hooks` docs; measured on 2.1.309, `docs/field-notes.md`,
+*A subagent's end*). Its matcher
+filters by the error's kind, never by the conversation, so it's registered
+once, with `Stop`: listed under both ends, it would run twice.
 
 What this relies on, from Claude Code's docs (code.claude.com, `cli-reference`,
 `permissions`, `env-vars`, `settings`, `settings-reference`, `mcp`, `hooks`) and
@@ -338,7 +345,7 @@ def spelled(event: Event) -> list[str]:
         case "call-finished":
             return ["PostToolUse", "PostToolUseFailure"]
         case "turn-ended":
-            return ["Stop"]
+            return ["Stop", "StopFailure"]
         case "conversation-ended":
             return ["SubagentStop"]
 

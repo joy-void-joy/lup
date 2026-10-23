@@ -110,7 +110,7 @@ from typing import TYPE_CHECKING, override
 
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
-from lup_dev.host.courier import Heard, Post, Posted, Waker
+from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
 from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.ends import holding
 from lup_dev.inbox.notices import Notices
@@ -755,9 +755,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         At its turn's end, what waits holds the end once (`holding`), but for
         quiet items (`Item.quiet`), and a call it holds learns its turn ended;
         an end let through leaves its main conversation idle, and a subagent's
-        ended (`ended`). A subagent stopped is held for nothing, since nothing
-        would read it. A turn's start whose prompt carries the token of what
-        was pushed to it takes the push.
+        ended (`ended`). A subagent stopped, and a turn that failed on an error
+        from the model's API, the session's or a subagent's, are held for
+        nothing, since nothing would read it. A turn's start whose prompt
+        carries the token of what was pushed to it takes the push.
         """
         party = self.party(launch, conversation)
         self.heard_in(
@@ -774,9 +775,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     for item in self.tellable(party)
                     if not announced(item) and not item.quiet
                 ]
-                if not heard.stopped and holding(
-                    fresh, [], after_block=heard.after_block
-                ):
+                unread = heard.stopped or heard.failed is not None
+                if not unread and holding(fresh, [], after_block=heard.after_block):
                     posted = self.told(party, room, heard.fits, "turn's end")
                     if posted.items:
                         return posted
@@ -802,15 +802,27 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
     @override
     async def concluded(
-        self, launch: Register, conversation: Caller, said: str
+        self, launch: Register, conversation: Caller, heard: Heard
     ) -> None:
-        """Put a session's last message of a turn in the operator's inbox, as a note from it: they read what it ended its turn saying there, without it sending it again.
+        """Put a session's turn's end in the operator's inbox, as a note from it that lup made (`Message.ending`): its last message, so they read what it ended its turn saying there without it sending it again; or where its turn ended on an error from the model's API, that, in lup's words, with the error's kind and its runtime's text for it. One end makes one note at most, and one saying neither makes none.
 
         An end held to tell what waits makes its note too, as its message
-        stands: the turn goes on to another end, with words of its own.
+        stands: the turn goes on to another end, with words of its own. A failed
+        turn has no words of its own: the conversation shows the runtime's text
+        for the error among its steps, and the note says what it is. A reply to
+        either reaches the session, which a failure leaves idle, so it's woken.
         """
+        match heard:
+            case Heard(failed=Failure(kind=kind, said=said)):
+                opening = f"Its turn ended on an error from the model's API ({kind})"
+                shown = said is not None and bool(said.strip())
+                text = f"{opening}:\n{said}" if shown else f"{opening}."
+            case Heard(said=str() as said) if said.strip():
+                text = said
+            case _:
+                return
         await self.posted(
-            Message(kind="note", text=said, ending=True),
+            Message(kind="note", text=text, ending=True),
             self.party(launch, conversation),
             Operator(),
             launch.worktree,
@@ -862,8 +874,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         """Note that a subagent's conversation ended, pass what waits for it to its session's main conversation, and tell the conversation that spawned it.
 
         Its parent is told quietly (`Item.quiet`) which subagent it was, whether
-        it ended its turn or was stopped, and its last message where its
-        runtime doesn't hand that on (`Ended`): at the parent's next call, or by
+        it ended its turn, was stopped, or failed on an error from the model's
+        API, and its last message where its runtime doesn't hand that on
+        (`Ended`): at the parent's next call, or by
         `wait_inbox`, which returns on it, since the runtime wakes an idle
         parent for its subagent's end already.
         """
@@ -881,6 +894,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         news = Ended(
             name=conversation.own(launch.name or launch.launch),
             stopped=heard.stopped,
+            failed=None if heard.failed is None else heard.failed.kind,
             handed=conversation.handed,
             said=heard.said,
         )
