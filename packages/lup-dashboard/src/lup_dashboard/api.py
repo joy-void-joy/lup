@@ -51,7 +51,7 @@ from lup_dev.inbox.protocol import (
     ShowTalk,
     Talked,
 )
-from lup_dev.policy.since import Approved, ApproveSince, ShowSince, Since
+from lup_dev.policy.since import ReviewSince, ShowSince, Since, SinceReviewed
 
 type Asked = Annotated[
     ListLaunches
@@ -74,7 +74,7 @@ type Asked = Annotated[
     | ShowTalk
     | KeepTalk
     | ShowSince
-    | ApproveSince,
+    | ReviewSince,
     Field(discriminator="kind"),
 ]
 """A request the page may send: the launches served and their conversations,
@@ -85,7 +85,7 @@ an item's moment in its sender's conversation read, a whole conversation read
 from where the page left it, calls of it read whole, the items a conversation sent and was sent listed,
 the operator's draft reply shown, kept and sent, what they write on a
 conversation shown and kept, and what an agent's branch changed since they
-approved it read and marked good."""
+last saw it read and its files marked reviewed."""
 
 type Replied = Annotated[
     Listed
@@ -103,7 +103,7 @@ type Replied = Annotated[
     | Talked
     | Reviewed
     | Since
-    | Approved
+    | SinceReviewed
     | Refused,
     Field(discriminator="kind"),
 ]

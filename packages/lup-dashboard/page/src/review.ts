@@ -59,6 +59,7 @@ import {
 import { around } from "./folds";
 import type { components } from "./generated/api";
 import { DRAWERS, type DrawerKind, type FoldKind, type ReviewPlace } from "./keys";
+import { reviewedLine } from "./since";
 
 export { calls, type Block, type ChangedFile, type Line, type Span };
 
@@ -74,6 +75,7 @@ export type { Quote } from "./comments";
 export type Context = components["schemas"]["Context"];
 export type Since = components["schemas"]["Since"];
 export type SinceFile = components["schemas"]["SinceFile"];
+export type Viewed = components["schemas"]["ViewedFile"];
 export type Task = components["schemas"]["Task"];
 export type Usage = components["schemas"]["Usage"];
 export type { Call, Entry, Exchanged };
@@ -192,8 +194,8 @@ export const REPLY_MARK = "↳ ";
 /**
  * What the page holds of one agent, for its banner and its drawers: its conversation's steps as read so far, each call
  * read whole once its fold was opened, by its id, its task list and what its context holds, the items it exchanged
- * where they were asked, what its branch changed since the operator approved it as they read it (`since`), and what
- * stands now where that differs (`latest`), which Space `l` brings in. None of a drawer's before the host has answered.
+ * where they were asked, and what its branch changed since the operator last saw it, as last read (`since`). None of
+ * a drawer's before the host has answered.
  */
 export interface AgentDrawers {
     entries: Entry[];
@@ -202,19 +204,18 @@ export interface AgentDrawers {
     usage: Usage | null;
     exchanged: Exchanged | null;
     since: Since | null;
-    latest: Since | null;
 }
 
 /** Each agent's drawers' data, by `whose` its conversation is. */
 export type Drawers = Map<string, AgentDrawers>;
 
-export const UNREAD: AgentDrawers = { entries: [], calls: new Map(), tasks: [], usage: null, exchanged: null, since: null, latest: null };
+export const UNREAD: AgentDrawers = { entries: [], calls: new Map(), tasks: [], usage: null, exchanged: null, since: null };
 
 /**
  * What a line under an item or in a drawer that isn't the operator's or the agent's own text shows: a fold's summary;
  * a step of a context or a conversation, the operator's words, the agent's, a run of calls, a call and a line of its
  * input and output, or the call that made the item; an item of the inbox in a conversation, and a line of its text; a
- * task; or why the host showed none.
+ * task; a file standing as the operator last saw it, in "since you approved"; or why the host showed none.
  */
 export type Kind =
     | "summary"
@@ -228,7 +229,8 @@ export type Kind =
     | "item-from"
     | "item-to"
     | "item-text"
-    | "task";
+    | "task"
+    | "reviewed";
 
 /** A line under an item that isn't its own text, so no comment is on it. */
 export interface Aside extends Span {
@@ -329,8 +331,15 @@ export interface Drawer extends Scope {
     talk: Talk | null;
     /** What its "since you approved" shows, by file, where it's that drawer. */
     files: SinceFile[];
-    /** The worktree its files are in, for a remark on one. */
+    /** Where its "since you approved" says each file standing as the operator last saw it, in a line of its own. */
+    reviewed: ReviewedLine[];
+    /** The worktree its files are in, for a remark on one; none before the host has answered. */
     worktree: string | null;
+}
+
+/** A file standing as the operator last saw it, where its line is in "since you approved". */
+export interface ReviewedLine extends Span {
+    file: SinceFile;
 }
 
 /** The review's text, and where each group, each item and each drawer is in it. */
@@ -717,16 +726,22 @@ export function lastSpoken(entries: Entry[]): number {
     return entries.findLastIndex((each) => each.kind === "said" && each.by === "operator");
 }
 
-/** Say a "since you approved" drawer's summary line: on which branch, how many files, and how many writes came since the operator read it, which Space `l` brings in. */
-export function sinceSummary(shown: Since | null, latest: Since | null): string {
+/** Say a "since you approved" drawer's summary line: on which branch, how many files changed since the operator last saw them, to review, how many have flagged writes waiting on them, which the branch's landing waits on, and how many stand as they saw them, reviewed: the agent's flags in one line, as the inbox lists them. */
+export function sinceSummary(shown: Since | null): string {
     if (shown === null) {
         return "since you approved · not read yet";
     }
     const branch = shown.branch == null ? "" : ` on ${shown.branch}`;
-    const files = shown.files.length === 0 ? "nothing" : counted(shown.files.length, "file");
-    const came = latest === null || latest.version === shown.version ? null : Math.max(latest.writes - shown.writes, 0);
-    const newer = came === null ? "" : ` · ${came === 0 ? "changed" : counted(came, "write")} since · ␣l brings it in`;
-    return `since you approved${branch} · ${files}${newer}`;
+    const files = shown.files ?? [];
+    const changed = files.filter((each) => each.file != null).length;
+    const kept = files.length - changed;
+    const flagged = files.filter((each) => (each.flags ?? []).length > 0).length;
+    const said = [
+        ...(changed === 0 ? [] : [`${changed} to review`]),
+        ...(flagged === 0 ? [] : [`${flagged} flagged`]),
+        ...(kept === 0 ? [] : [`${kept} reviewed`]),
+    ];
+    return `since you approved${branch} · ${said.length === 0 ? "nothing" : said.join(" · ")}`;
 }
 
 /** Say a conversation drawer's summary line: how many steps it has, and how many since the operator's last words, where they spoke. */
@@ -1078,6 +1093,7 @@ export function laid(
         const mine: Placed[] = wrote.flatMap((comment, at) => (isRemark(comment) && whose(comment.to) === key ? [{ comment, at }] : []));
         let talk: Talk | null = null;
         let files: SinceFile[] = [];
+        const reviewed: ReviewedLine[] = [];
         let said: string;
         let summary: Span;
         switch (kind) {
@@ -1112,10 +1128,11 @@ export function laid(
                 break;
             }
             case "since": {
-                said = sinceSummary(data.since, data.latest);
+                said = sinceSummary(data.since);
                 summary = w.line(said);
                 files = data.since?.files ?? [];
-                const shown = filedOf(files.map((each) => each.file), "changes", (file) => file.before == null);
+                const changed = files.flatMap((each) => (each.file == null ? [] : [each.file]));
+                const shown = filedOf(changed, "changes", (file) => file.before == null);
                 const starts = startsOf(shown.map((each) => each.text));
                 const placed = placedOn(mine.filter(({ comment }) => isRemark(comment) && comment.code != null), starts);
                 const writeBlocks = (line: number | null) => {
@@ -1123,7 +1140,20 @@ export function laid(
                         into.blocks.push({ comment: at, ...w.line(comment.text) });
                     }
                 };
-                layCode(w, into, of, shown, 0, starts, writeBlocks);
+                // In the files' order, each standing as the operator last saw it a line among the others, so marking one reviewed moves none.
+                let first = 0;
+                for (const each of files) {
+                    if (each.file == null) {
+                        const line = { kind: "reviewed" as const, ...w.line(reviewedLine(each)) };
+                        into.asides.push(line);
+                        reviewed.push({ from: line.from, to: line.to, file: each });
+                        continue;
+                    }
+                    const next = shown.findIndex((row, at) => at > first && row.row === null);
+                    const own = shown.slice(first, next < 0 ? shown.length : next);
+                    layCode(w, into, of, own, first, starts, writeBlocks);
+                    first += own.length;
+                }
                 break;
             }
         }
@@ -1135,7 +1165,7 @@ export function laid(
             into.folds.push({ of, kind, name: "", label, closed: true, summary, from: summary.to, to: last });
         }
         w.line("");
-        return { kind, conversation, talk, files, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
+        return { kind, conversation, talk, files, reviewed, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
     }
 }
 
@@ -1319,7 +1349,7 @@ export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "inse
             return "drawer";
         }
         if (drawer.kind === "since") {
-            return codeAt(drawer, head) !== undefined ? "since" : "aside";
+            return codeAt(drawer, head) !== undefined ? "since" : reviewedAt(drawer, head) !== undefined ? "reviewed" : "aside";
         }
         return lineAt(drawer, head) !== undefined ? "words" : "aside";
     }
@@ -1387,14 +1417,15 @@ export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Wr
     if (scope === undefined) {
         return [...going, { kind: "group", text: naming.group(group) }];
     }
-    const file = scope.filed.find((each) => head >= each.from && head <= each.to);
+    // A file's path: from its lines, or from its line in "since you approved" once it stands as the operator last saw it.
+    const file = scope.filed.find((each) => head >= each.from && head <= each.to)?.file.path ?? (isDrawer(scope) ? reviewedAt(scope, head)?.file.path : undefined);
     const inner = around(scope.folds, head).filter((each) => each.kind !== "file" && each.of !== scope.of || (each.kind !== "item" && each.kind !== "file" && !(DRAWERS as string[]).includes(each.kind)));
     const named: Where = isRegion(scope) ? { kind: "item", text: naming.item(scope) } : { kind: (scope as Drawer).kind, text: (scope as Drawer).kind };
     return [
         ...going,
         { kind: "group", text: naming.group(group) },
         named,
-        ...(file === undefined ? [] : [{ kind: "file" as const, text: file.file.path }]),
+        ...(file === undefined ? [] : [{ kind: "file" as const, text: file }]),
         ...inner.map((each) => ({ kind: each.kind, text: each.label })),
     ];
 }
@@ -1471,6 +1502,20 @@ export function codeFrom(code: Coded[], position: number): number {
     return low;
 }
 
+/** Return the line of a file standing as the operator last saw it that `position` is on in a "since you approved" `drawer`; none where it's on none. */
+export function reviewedAt(drawer: Drawer, position: number): ReviewedLine | undefined {
+    return drawer.reviewed.find((each) => position >= each.from && position <= each.to);
+}
+
+/** Return the file of a "since you approved" `drawer` that `position` is on, by its lines or by its line standing as the operator last saw it; none where it's on none. */
+export function sinceFileAt(drawer: Drawer, position: number): SinceFile | undefined {
+    const coded = codeAt(drawer, position);
+    if (coded !== undefined) {
+        return drawer.files.find((each) => each.file === coded.file);
+    }
+    return reviewedAt(drawer, position)?.file;
+}
+
 /** Return the line of a changed file shown at `position`, where it's on one. */
 export function codeAt(scope: Scope, position: number): Coded | undefined {
     const found = scope.code[codeFrom(scope.code, position)];
@@ -1544,7 +1589,7 @@ function quotedCode(drawer: Drawer, lines: Line[]): NonNullable<Remark["code"]> 
     if (shown === undefined || shown.version == null || drawer.worktree === null || first === undefined) {
         return null;
     }
-    return { worktree: drawer.worktree, path: shown.file.path, version: shown.version, first: first.number, lines: rows.map((each) => each.text) };
+    return { worktree: drawer.worktree, path: shown.path, version: shown.version, first: first.number, lines: rows.map((each) => each.text) };
 }
 
 /**

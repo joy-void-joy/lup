@@ -9,11 +9,11 @@
 // group. Each agent's record is read at each of its hooks the host hears, which
 // the listing watched says (`Talker.activity`), and as its conversation drawer
 // opens, for its banner and its drawers, each call read whole as its fold opens,
-// again as the record grows where it hadn't returned; what its branch changed since
-// the operator approved it as a call of its that may have written ends, as its
-// drawer opens, and on Space `l`, with the version shown, so what they read
-// never moves until they bring the latest in; each a minute apart at most
-// (`docs/dashboard.md`, *The review*, *The drawers*).
+// again as the record grows where it hadn't returned; what its branch changed
+// since the operator last saw it as a call of its that may have written ends and
+// as its drawer opens, with the version shown, so the host answers without the
+// files where nothing changed, and laid out as it comes, live; each a minute
+// apart at most (`docs/dashboard.md`, *The review*, *The drawers*).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { doing, everyone, launches, ring, running, type Activity, type Running } from "./agents";
@@ -47,6 +47,7 @@ import {
     type Head,
     type Item,
     type Since,
+    type Viewed,
 } from "./review";
 
 /** How long the answers to items' contexts and files are gathered before the review is laid out with them, in milliseconds. */
@@ -472,18 +473,18 @@ export function App() {
         [drawn, again],
     );
 
-    // What each agent's branch changed since the operator approved it, as the page shows it, by its conversation.
+    // What each agent's branch changed since the operator last saw it, as the page shows it, by its conversation.
     const shown = useRef(new Map<string, Since>());
 
-    /** Ask what `agent`'s branch changed since the operator approved it: with the version shown, kept still where it isn't the one as it stands, unless `fresh`, which brings the latest in. */
+    /** Ask what `agent`'s branch changed since the operator last saw it, with the version shown, and lay out what's changed, live; `loud` says why it couldn't be read. */
     const since = useCallback(
-        async (agent: Live, fresh: boolean) => {
+        async (agent: Live, loud: boolean = false) => {
             const was = shown.current.get(agent.key) ?? null;
-            const reply = await answered({ kind: "policy-show-since", conversation: agent.conversation, seen: fresh ? null : (was?.version ?? null) }, (answer) =>
+            const reply = await answered({ kind: "policy-show-since", conversation: agent.conversation, seen: was?.version ?? null }, (answer) =>
                 answer.kind === "policy-since" ? answer : null,
             );
             if (!("shown" in reply)) {
-                if (fresh) {
+                if (loud) {
                     setSaid(`Since you approved couldn't be read: ${reply.refused}`);
                 }
                 return;
@@ -492,12 +493,8 @@ export function App() {
             if (now.same) {
                 return;
             }
-            if (was === null || fresh) {
-                shown.current.set(agent.key, now);
-                drawn(agent.key, (before) => ({ ...before, since: now, latest: null }));
-                return;
-            }
-            drawn(agent.key, (before) => ({ ...before, latest: now.version === was.version ? null : now }));
+            shown.current.set(agent.key, now);
+            drawn(agent.key, (before) => ({ ...before, since: now }));
         },
         [drawn],
     );
@@ -518,7 +515,7 @@ export function App() {
             void readRecord(agent);
             const was = before === undefined ? null : (JSON.parse(before) as Activity | null);
             if (before === undefined || (was?.state === "calling" && !was.lups)) {
-                void since(agent, false);
+                void since(agent);
             }
         }
     }, [live, readRecord, since]);
@@ -528,7 +525,7 @@ export function App() {
         const asking = setInterval(() => {
             for (const agent of live) {
                 void readRecord(agent);
-                void since(agent, false);
+                void since(agent);
             }
         }, FALLBACK);
         return () => clearInterval(asking);
@@ -542,7 +539,7 @@ export function App() {
                 return;
             }
             if (kind === "since") {
-                void since(agent, false);
+                void since(agent, true);
             } else if (kind !== "tasks") {
                 void readRecord(agent);
             }
@@ -561,33 +558,17 @@ export function App() {
         [live, readCalls],
     );
 
-    /** Bring the latest of what an agent's branch changed into its drawer. */
-    const bringIn = useCallback(
-        (conversation: InboxConversation) => {
+    /** Mark files of an agent's branch reviewed at the versions shown, approving their flags where they stand so, say what came of it, and read the drawer anew from there. */
+    const reviewSince = useCallback(
+        (conversation: InboxConversation, files: Viewed[]) => {
             const agent = live.find((each) => each.key === whose(conversation));
-            if (agent !== undefined) {
-                void since(agent, true);
-            }
-        },
-        [live, since],
-    );
-
-    /** Approve the flagged writes on an agent's branch, those on `path` or every one, and read the drawer anew from what was approved. */
-    const approveSince = useCallback(
-        (conversation: InboxConversation, path: string | null) => {
-            const agent = live.find((each) => each.key === whose(conversation));
-            void ask({ kind: "policy-approve-since", conversation, path }).then((answer) => {
+            void ask({ kind: "policy-review-since", conversation, files }).then((answer) => {
                 if (answer.kind === "refused") {
                     setSaid(answer.error);
                     return;
                 }
-                if (answer.kind === "policy-approved") {
-                    const flags = answer.flags;
-                    setSaid(
-                        flags.length === 0
-                            ? `Nothing flagged${path === null ? " on the branch" : ` on ${path}`} was waiting for your approval.`
-                            : `Approved ${flags.map(cited).join(", ")}${path === null ? ": the branch's landing waits on none of them" : ""}.`,
-                    );
+                if (answer.kind === "policy-reviewed") {
+                    setSaid(reviewedSaid(answer.reviewed, answer.approved ?? [], answer.moved ?? []));
                 }
                 if (agent !== undefined) {
                     void since(agent, true);
@@ -737,8 +718,7 @@ export function App() {
                             }
                         }}
                         approve={approve}
-                        approveSince={approveSince}
-                        latest={bringIn}
+                        reviewSince={reviewSince}
                         hold={hold}
                         opened={opened}
                         details={details}
@@ -817,6 +797,17 @@ function bannerOf(agent: Live, data: AgentDrawers, now: Date): string {
     ].join(" · ");
 }
 
+/** Say what marking files reviewed came to: how many, the flagged writes approved with them, and those that changed since the version shown, whose flags wait. */
+function reviewedSaid(reviewed: string[], approved: number[], moved: string[]): string {
+    const files = reviewed.length === 1 ? (reviewed[0] ?? "") : `${reviewed.length} files`;
+    const flags = approved.length === 0 ? "" : `, approving ${approved.map(cited).join(", ")}`;
+    const waiting =
+        moved.length === 0
+            ? ""
+            : ` ${moved.length === 1 ? moved[0] : `${moved.length} files`} changed since you read ${moved.length === 1 ? "it" : "them"}: shown with what came, ${moved.length === 1 ? "its" : "their"} flags waiting.`;
+    return `Reviewed ${files}${flags}.${waiting}`;
+}
+
 /** Whether two of what's held of an agent's drawers say the same: as many steps of its record and the same calls read whole, its branch at the same version with as many files, and the same tasks, context and items exchanged. */
 function sameDrawers(a: AgentDrawers, b: AgentDrawers): boolean {
     const sameSince = (x: Since | null, y: Since | null) =>
@@ -825,7 +816,6 @@ function sameDrawers(a: AgentDrawers, b: AgentDrawers): boolean {
         a.entries.length === b.entries.length &&
         a.calls === b.calls &&
         sameSince(a.since, b.since) &&
-        sameSince(a.latest, b.latest) &&
         JSON.stringify([a.tasks, a.usage, a.exchanged]) === JSON.stringify([b.tasks, b.usage, b.exchanged])
     );
 }

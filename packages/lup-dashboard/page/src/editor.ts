@@ -64,10 +64,8 @@ interface Actions {
     matter: (forward: boolean) => void;
     written: (forward: boolean) => void;
     approve: (approved: boolean) => void;
-    /** Space `A`: mark all of a "since you approved" drawer good. */
+    /** Space `A`: mark every file of a "since you approved" drawer reviewed. */
     approveAll: () => void;
-    /** Space `l`: bring the latest into a "since you approved" drawer. */
-    latest: () => void;
     /** `h` on a banner: turn the operator's switch to hold the agent's flagged writes; elsewhere it's vim's `h`, said by false. */
     hold: () => boolean;
     list: () => void;
@@ -308,7 +306,7 @@ let speaking: Bound | null = null;
 
 /**
  * Each chord Space leads in the review, as vim's keymap writes its keys, and the action it does: Space `p` parks an
- * item, leaving it for later; Space `A` marks a "since you approved" drawer good and Space `l` brings its latest in;
+ * item, leaving it for later; Space `A` marks every file of a "since you approved" drawer reviewed;
  * Space `z` and a letter, as vim's fold keys begin with `z`, opens every fold of its kind in the item or the drawer,
  * Shift and the letter closing them. The list of keys (`keys.ts`) says each of them.
  */
@@ -319,7 +317,6 @@ export const SPACED: readonly (readonly [keys: string, action: string])[] = [
     ["<Space>a", "lupApprove"],
     ["<Space>x", "lupDecline"],
     ["<Space>A", "lupApproveAll"],
-    ["<Space>l", "lupLatest"],
     ...FOLD_KINDS.filter((each) => each.chord).flatMap(({ kind, letter }) => [
         [`<Space>z${letter}`, `lupFoldOpen-${kind}`] as const,
         [`<Space>z${letter.toUpperCase()}`, `lupFoldClose-${kind}`] as const,
@@ -365,7 +362,6 @@ function mapKeys(): void {
     action("lupApprove", (actions) => actions.approve(true));
     action("lupDecline", (actions) => actions.approve(false));
     action("lupApproveAll", (actions) => actions.approveAll());
-    action("lupLatest", (actions) => actions.latest());
     // `h` holds an agent's flagged writes on its banner, and moves left, as vim's `h` does, anywhere else.
     action("lupHold", (actions, cm) => {
         if (!actions.hold()) {
@@ -924,10 +920,8 @@ export interface Own<C> {
     /** Go to the next or previous line that matters, as the review's are by the judge's reading, opening what folds it on the way. */
     matter?: (forward: boolean) => void;
     approve?: (approved: boolean) => void;
-    /** Mark all of the "since you approved" drawer the cursor is in good, as Space `A` does; none where the view has none. */
+    /** Mark every file of the "since you approved" drawer the cursor is in reviewed, as Space `A` does; none where the view has none. */
     approveAll?: () => void;
-    /** Bring the latest into the "since you approved" drawer the cursor is in, as Space `l` does. */
-    latest?: () => void;
     /** Turn the operator's switch for the agent whose banner the cursor is on, and say whether it was on one. */
     hold?: () => boolean;
     /** What's painted on the lines from `from` to `to` while they're in view, beyond what `draw` drew: a changed file's lines and their highlighting. */
@@ -1232,7 +1226,6 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             },
             approve: (approved) => own.approve?.(approved),
             approveAll: () => own.approveAll?.(),
-            latest: () => own.latest?.(),
             hold: () => own.hold?.() ?? false,
             list: config.list,
             fold: (how) => {
