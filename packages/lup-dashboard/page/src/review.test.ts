@@ -540,7 +540,7 @@ describe("what folds under an item", () => {
         });
     });
 
-    it("folds an automatic file whole under its header, and keeps where each line that matters starts, landing on the first", () => {
+    it("folds a test file whole under its header, and keeps where each line that matters starts, landing on the first", () => {
         const read: Around = {
             contexts: new Map(),
             files: new Map([
@@ -576,7 +576,7 @@ describe("what folds under an item", () => {
         const [file, created] = approval!.folds.filter((each) => each.kind === "file");
         expect(file).toMatchObject({ of: "54", kind: "file", name: "t.py", closed: true });
         expect(created).toMatchObject({ name: "n.py", closed: false });
-        expect(shown(file!.summary.from, file!.summary.to)).toBe("t.py · changed · +1 −1 · automatic");
+        expect(shown(file!.summary.from, file!.summary.to)).toBe("t.py · changed · +1 −1 · test");
         expect(shown(file!.from, file!.to)).toBe("\na\nb\nB");
         expect(approval!.stops.map((each) => shown(each, out.text.indexOf("\n", each)))).toEqual([
             "n.py · created · 2 lines · new file · told: regex",
@@ -684,7 +684,7 @@ describe("typed folds", () => {
     const region = out.regions.find((each) => each.item.number === 56)!;
     const said = (fold: Fold) => [fold.kind, fold.label, fold.closed];
 
-    it("folds each kind as it's laid out: the item, a file and a body open, an automatic file, unchanged lines and the context folded", () => {
+    it("folds each kind as it's laid out: the item, a file and a body open, a test file, unchanged lines and the context folded", () => {
         // The change is on line 15, in `Clock.run`, whose lines declaring it stay in view, 4 and 5.
         expect(region.folds.map(said)).toEqual([
             ["file", "t.py", true],
@@ -735,7 +735,7 @@ describe("typed folds", () => {
         expect(foldsOf(out, at("step3()")).map((each) => each.of)).toEqual(region.folds.map(() => "56"));
         expect(foldsOf(out, at("Which parser?")).every((each) => each.of === "51")).toBe(true);
         expect(foldsOf(out, at("━━ s1"))).toEqual([]);
-        // zr from the held change opens its automatic file alone, then its runs and bodies, then its context.
+        // zr from the held change opens its test file alone, then its runs and bodies, then its context.
         const closed = new Set(region.folds.filter((each) => each.closed));
         const step = (opening: boolean) => {
             const changed = levelled(foldsOf(out, at("step3()")), (fold) => closed.has(fold), opening, false);
@@ -839,8 +839,31 @@ describe("what a change shows open, as it's laid out", () => {
         expect(folded(FLAGGED)).toEqual(everyChange);
     });
 
-    it("keeps an approval's file showing the lines that ask alone, with their context, its other changes folded", () => {
-        expect(folded(APPROVAL)).toEqual({ runs: ["17 lines, 2 changed, 1–16", "7 unchanged lines, 24–30"], hidden: true });
+    it("opens every change of an approval too, however many lines it changes", () => {
+        expect(folded(APPROVAL)).toEqual(everyChange);
+    });
+
+    /** Whether each of `files` folds whole under `item`, by its path. */
+    const whole = (item: Item, files: ChangedFile[]) => {
+        const around: Around = { contexts: new Map(), files: new Map([[item.number, { shown: files }]]), answers: [] };
+        const out = laid([item], [], banner, header, EMPTY, around);
+        return Object.fromEntries(out.regions[0]!.folds.filter((each) => each.kind === "file").map((each) => [each.name, each.closed]));
+    };
+    const read = (path: string, role: string): ChangedFile => ({ ...signed, path, reading: { role, asks: [], findings: [] } });
+    const FILES = [read("a.py", "production"), read("t.py", "test"), read("d.json", "data"), read("n.md", "docs")];
+
+    it("folds a test and a data file whole, in every kind of change, and opens one that asks nothing, production code among them", () => {
+        const expected = { "a.py": false, "t.py": true, "d.json": true, "n.md": false };
+        expect(whole(HELD, FILES)).toEqual(expected);
+        expect(whole(APPROVAL, FILES)).toEqual(expected);
+    });
+
+    it("folds each file of a first approval whole under its header, which says so, and counts them so in the item's", () => {
+        const first: Item = { ...APPROVAL, reason: { ...APPROVAL.reason, first: true } as Item["reason"] };
+        expect(Object.values(whole(first, FILES))).toEqual([true, true, true, true]);
+        const around: Around = { contexts: new Map(), files: new Map([[54, { shown: [read("a.py", "production")] }]]), answers: [] };
+        const out = laid([first], [], banner, header, EMPTY, around);
+        expect(out.text).toContain("a.py · changed · +1 −1 · first approval\n");
     });
 });
 

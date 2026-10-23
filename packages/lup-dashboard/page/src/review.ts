@@ -16,11 +16,11 @@
 // gives, says only which `]a` and `[a` stop at. Each fold has a kind: the item
 // whole, a file, a function's or a class's body, a run of unchanged lines, the
 // context, a drawer. What's folded by default: the context, each run of a file's
-// unchanged lines away from its changes and the lines that matter, so a held
-// change and a drawer's file show every change, and, in an approval's file whose
-// asks are each on a line, every run of lines away from those, changed ones too;
-// an automatic file whole under its header, an item marked read or left for
-// later, and each drawer; a body is open, but a new module's in its drawer,
+// unchanged lines away from its changes and the lines that matter, so every
+// change shows, never a changed line among unchanged ones; a test and a data
+// file whole under its header, and each file of a first approval (`Folded`);
+// an item marked read or left for later, and each drawer; a body is open, but
+// a new module's in its drawer,
 // which shows its design. Each fold is named by what it hides, so an item or a
 // drawer laid out again keeps the folds the operator left; and where the cursor
 // is, said in the header over the review, is the group, the item or the drawer
@@ -29,7 +29,7 @@
 // (`docs/dashboard.md`, *The review*). What it shares with a conversation's
 // text is in `comments.ts`.
 import { since } from "./agents";
-import { shownOnce, type Body, type ChangedFile, type Matter, type Row, type Showing } from "./code";
+import { shownOnce, type Body, type ChangedFile, type Matter, type Row } from "./code";
 import {
     calls,
     lastOf,
@@ -234,10 +234,11 @@ export interface Coded extends Span {
 /**
  * What folds in an item or a drawer, by its kind (`FoldKind`): the item whole under its header, folded where it's
  * marked read or left for later; a drawer under its summary line, folded until opened; each file it changes under its
- * header, folded where it's automatic; a function's or a class's body under the line declaring it, open but in a new
- * module of a drawer; a run of a file's unchanged lines under a summary line, folded; and its context, folded. Each
- * sits whole inside another or beside it. It hides `from` to `to`, from the end of its summary line to the end of its
- * last; a file's and a body's from the end of the comments on their first line, which stay in view.
+ * header, folded where it's a test, data, or a first approval's (`Folded`); a function's or a class's body under the
+ * line declaring it, open but in a new module of a drawer; a run of a file's unchanged lines under a summary line,
+ * folded; and its context, folded. Each sits whole inside another or beside it. It hides `from` to `to`, from the end
+ * of its summary line to the end of its last; a file's and a body's from the end of the comments on their first line,
+ * which stay in view.
  */
 export interface Fold extends Span {
     /** What it's in: an item, by its number, or a drawer, by its agent and kind (`ownerOf`). */
@@ -472,7 +473,7 @@ function beneath(item: Item, around: Around): Under | null {
  * One line of a changed file that comments may be on: its header, or one of its rows, the run of unchanged rows it
  * opens, if any, before it, and whether it ends one; what it triggered, where it's a line that matters, and whether
  * it's a stop, the first line of what triggered; the bodies it declares and those it ends; and, for a file with rows,
- * the fold its header opens, folded where the file is automatic, and its last row ends.
+ * the fold its header opens, folded where the file folds whole (`Folded`), and its last row ends.
  */
 interface Filed {
     file: ChangedFile;
@@ -496,36 +497,33 @@ export function changing(item: Item): boolean {
     return reason === "approval" || reason === "held" || reason === "flagged";
 }
 
-/**
- * Return what an item's files whose asks are each on a line keep open (`Showing`): an approval's, which may change tens
- * of thousands of lines, the lines that ask alone; a held change's, every change, as the operator reads them whole.
- */
-export function showing(item: Item): Showing {
-    return item.reason.reason === "approval" ? "asks" : "changes";
+/** Return whether `item` is a first approval, which trusts the repository as it is: the review folds each of its files under its header (`Folded`). */
+export function firstApproval(item: Item): boolean {
+    return item.reason.reason === "approval" && item.reason.first;
 }
 
 /**
- * Return the lines of `files`, each file's header, then its rows, its runs of unchanged ones folding, or for an
- * approval every run away from the lines that ask (`showing`), each body able to fold under the row declaring it, and
- * the whole of each file able to fold under its header, an automatic one folded. Where `design` says so of a file, a
- * new module in a drawer, its bodies fold until opened, but those holding a line that matters.
+ * Return the lines of `files`, each file's header, then its rows, its runs of unchanged ones folding, each body able
+ * to fold under the row declaring it, and the whole of each file able to fold under its header, folded where it's a
+ * test, data, or, `first`, a first approval's (`Folded`). Where `design` says so of a file, a new module in a drawer,
+ * its bodies fold until opened, but those holding a line that matters.
  */
-function filedOf(files: ChangedFile[], showing: Showing, design: (file: ChangedFile) => boolean): Filed[] {
-    return files.flatMap((file) => filedOnce(file, showing, design(file)));
+function filedOf(files: ChangedFile[], first: boolean, design: (file: ChangedFile) => boolean): Filed[] {
+    return files.flatMap((file) => filedOnce(file, first, design(file)));
 }
 
-/** Each file's lines as laid out, by what it shows and whether its bodies fold as a design's, laid out once: the review is laid out again at each key typed in a comment, and a file's lines don't change (`shownOnce`). */
+/** Each file's lines as laid out, by whether it's a first approval's and whether its bodies fold as a design's, laid out once: the review is laid out again at each key typed in a comment, and a file's lines don't change (`shownOnce`). */
 const filedOut = new WeakMap<ChangedFile, Map<string, Filed[]>>();
 
-/** Return the lines of `file` showing what `showing` says, its bodies folding where `designed` (`filedOf`), laid out once and kept: its header, then its rows, each with the run it opens, the bodies it declares and those it ends, found by row. */
-function filedOnce(file: ChangedFile, showing: Showing, designed: boolean): Filed[] {
+/** Return the lines of `file`, `first` where it's a first approval's, its bodies folding where `designed` (`filedOf`), laid out once and kept: its header, then its rows, each with the run it opens, the bodies it declares and those it ends, found by row. */
+function filedOnce(file: ChangedFile, first: boolean, designed: boolean): Filed[] {
     const kept = filedOut.get(file) ?? new Map<string, Filed[]>();
-    const key = `${showing} ${designed ? "designed" : "shown"}`;
+    const key = `${first ? "first" : "later"} ${designed ? "designed" : "shown"}`;
     const found = kept.get(key);
     if (found !== undefined) {
         return found;
     }
-    const laidOut = shownOnce(file, showing);
+    const laidOut = shownOnce(file, first);
     const header: Filed = {
         file,
         row: null,
@@ -536,7 +534,7 @@ function filedOnce(file: ChangedFile, showing: Showing, designed: boolean): File
         stop: laidOut.whole,
         declares: [],
         finishes: [],
-        folds: laidOut.rows.length > 0 ? { closed: laidOut.automatic } : null,
+        folds: laidOut.rows.length > 0 ? { closed: laidOut.folded !== null } : null,
         ends: false,
         designed: false,
     };
@@ -584,7 +582,7 @@ function filed(item: Item, around: Around): Filed[] {
     if (!changing(item) || files === undefined || !("shown" in files)) {
         return [];
     }
-    return filedOf(files.shown, showing(item), () => false);
+    return filedOf(files.shown, firstApproval(item), () => false);
 }
 
 /** A group as it's laid out: what names it among the others, the agent it's of, what its banner names it by, and its items. */
@@ -1125,7 +1123,11 @@ export function laid(
                 said = sinceSummary(data.since, data.latest);
                 summary = w.line(said);
                 files = data.since?.files ?? [];
-                const shown = filedOf(files.map((each) => each.file), "changes", (file) => file.before == null);
+                const shown = filedOf(
+                    files.map((each) => each.file),
+                    false,
+                    (file) => file.before == null,
+                );
                 const starts = startsOf(shown.map((each) => each.text));
                 const placed = placedOn(mine.filter(({ comment }) => isRemark(comment) && comment.code != null), starts);
                 const writeBlocks = (line: number | null) => {

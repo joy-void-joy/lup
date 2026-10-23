@@ -19,8 +19,8 @@
 // `h` on a banner turns the operator's switch to hold the agent's flagged
 // writes. Each fold has a kind, its letter in the margin beside its summary
 // line, in the column of its depth, a bar under it for each fold the cursor is
-// in (`margin.ts`); the context, each run of unchanged lines, each automatic
-// file fold and each drawer, folded until opened, and `zr`, `zm`, `zR`, `zM` and
+// in (`margin.ts`); the context, each run of unchanged lines, each test, data
+// and first approval's file and each drawer, folded until opened, and `zr`, `zm`, `zR`, `zM` and
 // Space `z` act on the item or the drawer the cursor is in. The header over the
 // review says where the cursor is: the group, the item or the drawer, the file
 // and the folds it's in, and, while a comment is being written, whom it goes
@@ -47,6 +47,7 @@ import {
     codeAt,
     codeFrom,
     drawerAt,
+    firstApproval,
     foldKey,
     foldsOf,
     fresh,
@@ -66,7 +67,6 @@ import {
     scopeAt,
     shownAt,
     shownInReply,
-    showing,
     stepped,
     stranded,
     tallied,
@@ -354,8 +354,8 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
         const stops = new Set(scope.stops);
         for (const coded of scope.code) {
             if (coded.row === null) {
-                const shown = isDrawer(scope) ? "changes" : showing((scope as Region).item);
-                const automatic = shownOnce(coded.file, shown).automatic ? " code-automatic" : "";
+                const first = !isDrawer(scope) && firstApproval((scope as Region).item);
+                const automatic = shownOnce(coded.file, first).automatic ? " code-automatic" : "";
                 const whole = stops.has(coded.from) ? " code-matters" : "";
                 marks.push({
                     from: coded.from,
@@ -535,7 +535,7 @@ export function Review({
                 (head, later) => `━━ ${banner(head)}${later ? " · later" : ""} ━━`,
                 (item, later) => {
                     const files = around.files.get(item.number);
-                    const counted = files !== undefined && "shown" in files ? tally(files.shown) : "";
+                    const counted = files !== undefined && "shown" in files ? tally(files.shown, firstApproval(item)) : "";
                     const typing = item.reason.reason === "approval" && item.reason.typing;
                     const told = [
                         `${cited(item.number)} ${what(item)}${sentTo(item, called)}`,
