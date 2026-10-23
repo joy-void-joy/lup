@@ -1,34 +1,43 @@
-"""Since the operator approved: what a conversation's branch changed since the version of each file they last approved, read as its worktree stands, and marking it good.
+"""Since the operator approved: what a conversation's branch changed since the version of each file they last saw, read as its worktree stands, and marking files reviewed.
 
 `docs/dashboard.md`, *The drawers*. A flagged write (`lup_dev.policy.flags`)
 is no item of the review: the "since you approved" drawer under an agent's
-banner shows each file its branch changed, whole, from the version the
-operator last approved on that branch, or from the integration branch's tip
-where they approved none, as a hold at landing starts from it (`Baseline`,
+banner shows each file its branch changed, from the version of it the operator
+last saw on that branch, the one they marked reviewed or one kept beside an
+item of it they settled, or from the integration branch's tip where they saw
+none, as a hold at landing starts from it (`Baseline`,
 `lup_dev.policy.landing`), with the parts the judge flagged marked by its
-reading. Uncommitted changes count: the worktree is read as it stands,
-snapshotted through the judge's store of it (`Store`) by an index of this
-reader's own, so what git ignores is left out and the judge's index is
-never waited on. The reply says the version read (`Since.version`), the
-snapshot's tree, and how many writes the branch's flags gathered: the page
-keeps what the operator reads still and brings the rest in on a key, asking
-again with the version it shows (`ShowSince.seen`), which the files are left
-out for where it's the one as it stands.
+reading. A file that stands as they last saw it is said in a line, with
+nothing under it, so the drawer shows the whole branch. Uncommitted changes
+count: the worktree is read as it stands, snapshotted through the judge's
+store of it (`Store`) by an index of this reader's own, so what git ignores is
+left out and the judge's index is never waited on. The reply says the version
+read (`Since.version`), the snapshot's tree and the baseline: the page asks
+again with the version it shows (`ShowSince.seen`), and the files are left out
+where it's the one as it stands.
 
-Marking it good (`ApproveSince`) approves every flagged write on the branch,
-or those on one file, as the review's Space `a` on that file does: each stays
-in the store as it is, approved, which is what a landing waits on
-(`docs/judging-writes.md`, *Landing a branch*), and the baseline moves to it.
+Marking files reviewed (`ReviewSince`), as the review's Space `a` on one and
+Space `A` on the drawer do, keeps for each the version the page showed
+(`lup_dev.policy.reviewed`), whether or not anything flagged it: what the
+drawer shows of it starts there from then on. It approves the flagged writes
+on each file only where the file still stands at that version, so a write that
+came after the page read it, which the operator never saw, waits: the file
+comes back with it, and its landing waits on its flags
+(`docs/judging-writes.md`, *Landing a branch*).
 
 The host runs git on the repository pinned to its git directory
 (`docs/credentials.md`, *Running git on the host*), never from the worktree.
 """
 
 import asyncio
+import threading
+from datetime import datetime
 from pathlib import Path
-from typing import Literal, override
+from typing import Annotated, Literal, override
 
-from lup.types import Model
+from pydantic import Field, StringConstraints
+
+from lup.types import Model, MutableModel
 from lup_dev.git import Git
 from lup_dev.host.protocol import Reply, Request
 from lup_dev.host.service import Handler, Reading, Route
@@ -38,72 +47,112 @@ from lup_dev.layout import Layout
 from lup_dev.policy.landing import (
     Baseline,
     approved,
-    blob,
     changed_files,
     short,
+    started,
     worktrees,
 )
+from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.store import Store
 from lup_dev.policy.worktrees import SessionIndex
 
+type Version = Annotated[
+    str, StringConstraints(pattern=r"^[0-9a-f]{40}([0-9a-f]{24})?$")
+]
+"""git's id for a file's content: 40 hexadecimal digits, or 64 in a repository
+of SHA-256."""
+
 
 class ShowSince(Request, reads=True):
-    """Read what a conversation's branch changed since the operator approved it, as its worktree stands; with `seen`, the version the page shows, the files are left out where it's the one as it stands."""
+    """Read what a conversation's branch changed since the operator last saw it, as its worktree stands; with `seen`, the version the page shows, the files are left out where it's the one as it stands."""
 
     kind: Literal["policy-show-since"] = "policy-show-since"
     conversation: Conversation
     seen: str | None = None
 
 
-class ApproveSince(Request, reads=False):
-    """Approve every flagged write on a conversation's branch, or those on the file at `path`: the branch's landing waits on none of them, and what the operator reads since starts from them."""
+class ViewedFile(Model):
+    """A file of the drawer as the page shows it: its path, and the version shown."""
 
-    kind: Literal["policy-approve-since"] = "policy-approve-since"
+    path: Path
+    """From the worktree's root."""
+    version: Version | None = None
+    """git's id for the content shown (`SinceFile.version`); none where it's
+    shown deleted."""
+
+
+class ReviewSince(Request, reads=False):
+    """Mark files of a conversation's branch reviewed at the versions the page shows: what the drawer shows of each starts there, and the flagged writes on each still standing at it are approved."""
+
+    kind: Literal["policy-review-since"] = "policy-review-since"
     conversation: Conversation
-    path: Path | None = None
+    files: list[ViewedFile] = Field(min_length=1)
 
 
 class SinceFile(Model):
-    """One file a branch changed since the operator approved it: whole, from the version they approved, with the judge's reading of its latest flag; which flags cover it, and the version it stands at."""
+    """One file a branch changed, as the drawer shows it: whole, from the version the operator last saw, or none where it stands as that; with the judge's reading of its latest flag, which flags cover it, the version it stands at, and where they saw it."""
 
-    file: ChangedFile
+    path: Path
+    """From the worktree's root."""
+    file: ChangedFile | None = None
+    """Whole on each side, from the version they last saw to the file as it
+    stands; none where it stands as they saw it, which the drawer says in a
+    line."""
     version: str | None = None
     """git's id for the file's content as it stands, which a comment on it
-    records (`Quoted.version`); none where the branch deleted it."""
+    records (`Quoted.version`) and marking it reviewed keeps (`ViewedFile.version`);
+    none where the branch deleted it."""
     flags: list[int] = []
     """The flagged writes on it the operator hasn't approved, each approved
-    by Space `a` on the file."""
+    by marking it reviewed where it stands as shown."""
     since: int | None = None
     """The item whose version of the file it's shown from, the latest the
-    operator approved, read or commented on; none where they saw none, and
-    it's shown from the integration branch's tip."""
+    operator approved, read or commented on; none where they saw none, or
+    marked it reviewed since (`reviewed`)."""
+    reviewed: datetime | None = None
+    """When they marked the version it's shown from reviewed, where that's the
+    latest they saw of it; none else, and it's shown from the item `since`, or
+    from the integration branch's tip."""
 
 
 class Since(Reply):
-    """What a conversation's branch changed since the operator approved it, as its worktree stands."""
+    """What a conversation's branch changed since the operator last saw it, as its worktree stands."""
 
     kind: Literal["policy-since"] = "policy-since"
     worktree: Path
     branch: str | None
     """The branch the worktree has checked out; none on a detached `HEAD`,
-    where nothing is flagged by branch."""
+    where nothing is flagged or marked by branch."""
     version: str
     """The worktree as it stands and the baseline it's read from: the tree of
-    its snapshot, then how many flagged writes on the branch are approved, so
-    it changes as either does; what the page asks again with (`ShowSince.seen`)."""
-    writes: int
-    """How many writes the branch's flagged writes gathered, approved or not:
-    grows with each, so the page can say how many came since it last read."""
+    its snapshot, how many flagged writes on the branch are approved, and the
+    marks on it, so it changes as any does; what the page asks again with
+    (`ShowSince.seen`)."""
     same: bool = False
     """Whether the version is the one the page said it shows, its files left out."""
     files: list[SinceFile] = []
 
 
-class Approved(Reply):
-    """The flagged writes marking it good approved."""
+class SinceReviewed(Reply):
+    """The files marked reviewed, the flagged writes approved with them, and the files that changed since the version shown, whose flags wait."""
 
-    kind: Literal["policy-approved"] = "policy-approved"
-    flags: list[int]
+    kind: Literal["policy-reviewed"] = "policy-reviewed"
+    reviewed: list[Path]
+    approved: list[int] = []
+    moved: list[Path] = []
+    """The files that stand at another version than the one shown, a write
+    having come after the page read it: marked reviewed at the version shown,
+    their flags left waiting."""
+
+
+class Snapshotting(MutableModel, arbitrary_types_allowed=True):
+    """One snapshot at a time of each worktree through the reader's own index, which git locks while it writes it: the lock of each worktree, made the first time one's asked for."""
+
+    locks: dict[Path, threading.Lock] = {}
+
+    def of(self, root: Path) -> threading.Lock:
+        """Return the lock of the worktree at `root`."""
+        return self.locks.setdefault(root, threading.Lock())
 
 
 class Located(Model):
@@ -114,7 +163,7 @@ class Located(Model):
 
 
 class Snapshot(Model, arbitrary_types_allowed=True):
-    """The worktree as it stands, read once for each file: its snapshot's tree in the store, the branch's tip and the baseline's commit in the repository, and what the operator saw."""
+    """The worktree as it stands, read once for each file: its snapshot's tree in the store, the integration branch's tip in the repository, and what the operator saw."""
 
     baseline: Baseline
     store: Store
@@ -124,41 +173,43 @@ class Snapshot(Model, arbitrary_types_allowed=True):
     branches: list[str]
 
     def filed(self, path: Path) -> SinceFile | None:
-        """Return the file at `path` as the drawer shows it: as it stands in the tree, from the version the operator last saw on the branches, else from the baseline's commit; none where it's as they saw it."""
+        """Return the file at `path` as the drawer shows it: as it stands in the tree, from the version the operator last saw on the branches, else from the integration branch's tip; with no `file` where it stands as they saw it, and none where they saw none and it stands as at that tip."""
         after = self.store.content(self.tree, path)
-        seen = self.baseline.seen(path, self.branches)
-        kept = None if seen is None else self.baseline.kept(seen, path)
-        since = None if seen is None or kept is None else seen.number
-        before = (
-            kept
-            if kept is not None or self.old is None
-            else blob(self.git, self.old, path)
-        )
-        if before == after:
-            return None
+        saw = self.baseline.saw(path, self.branches)
+        before = started(saw, self.git, self.old, path)
         flags = self.baseline.flags(self.branches, path)
-        latest = max(flags, key=lambda each: each.number, default=None)
-        reading = None if latest is None else self.baseline.reading(latest, after)
-        return SinceFile(
-            file=ChangedFile.of(path, before, after, reading),
+        shown = SinceFile(
+            path=path,
             version=self.store.blob(self.tree, path),
             flags=[each.number for each in flags],
-            since=since,
+            since=None if saw is None else saw.item,
+            reviewed=None if saw is None or saw.reviewed is None else saw.reviewed.at,
+        )
+        if before == after:
+            return None if saw is None else shown
+        latest = max(flags, key=lambda each: each.number, default=None)
+        reading = None if latest is None else self.baseline.reading(latest, after)
+        return shown.model_copy(
+            update={"file": ChangedFile.of(path, before, after, reading)}
         )
 
 
 class Reader(Model, arbitrary_types_allowed=True):
-    """Reads what a conversation's branch changed since the operator approved it, and approves its flags, over the inbox and lup's state on the host."""
+    """Reads what a conversation's branch changed since the operator last saw it, and marks its files reviewed, over the inbox and lup's state on the host."""
 
     delivery: Delivery
     layout: Layout
-    """lup's state on the host: the judge's session index and stores."""
+    """lup's state on the host: the judge's session index and stores, and the
+    files marked reviewed."""
     integration: str
     """The integration branch's name, whose tip is the baseline where the
-    operator approved none of a file."""
+    operator saw none of a file."""
     remote: str = "origin"
     """The remote whose copy of the integration branch is read, as `land`
     lands on it; the local branch where there's none."""
+    snapshotting: Snapshotting = Field(default_factory=Snapshotting)
+    """Held while a worktree is snapshotted: a read at an agent's hook, one as
+    its drawer opens and a marking may come at once."""
 
     def located(self, party: Conversation) -> Located:
         """Return where `party` works: the worktree its file tools write in, as the judge's session index has it, else the one its launch started in; and the branch it has checked out.
@@ -190,6 +241,15 @@ class Reader(Model, arbitrary_types_allowed=True):
             layout=layout, worktree=root, common=party.repository, index=layout.reading
         )
 
+    def baseline(self, party: Conversation) -> Baseline:
+        """Return what the operator last saw of the files of `party`'s repository."""
+        repository = party.repository
+        return Baseline(
+            inbox=self.delivery.inbox,
+            repository=repository,
+            reviews=Reviews(layout=self.layout.reviewed(repository)),
+        )
+
     def flagged(self, party: Conversation, branch: str | None) -> list[Item]:
         """Return the flagged writes on `branch`, in every state."""
         return [
@@ -201,27 +261,24 @@ class Reader(Model, arbitrary_types_allowed=True):
         ]
 
     def version(self, party: Conversation, branch: str | None, tree: str) -> str:
-        """Say the version read: `tree`, the worktree as it stands, then how many flagged writes on `branch` are approved, the baseline."""
+        """Say the version read: `tree`, the worktree as it stands, then the baseline, how many flagged writes on `branch` are approved and the marks on it."""
         settled = [each for each in self.flagged(party, branch) if approved(each)]
-        return f"{tree} {len(settled)}"
+        reviews = self.baseline(party).reviews
+        marked = "-" if branch is None else reviews.stamp(branch)
+        return f"{tree} {len(settled)} {marked}"
 
     def read(self, request: ShowSince) -> Since:
-        """Read what the branch changed since the operator approved it, as the worktree stands (`Since`)."""
+        """Read what the branch changed since the operator last saw it, as the worktree stands (`Since`)."""
         party = request.conversation
         located = self.located(party)
         root, branch = located.root, located.branch
         git = Git.pinned(party.repository)
         store = self.store(party, root)
-        tree = store.snapshot()
-        flagged = self.flagged(party, branch)
-        writes = sum(
-            each.reason.writes for each in flagged if isinstance(each.reason, Flagged)
-        )
+        with self.snapshotting.of(root):
+            tree = store.snapshot()
         version = self.version(party, branch, tree)
         if request.seen == version:
-            return Since(
-                worktree=root, branch=branch, version=version, writes=writes, same=True
-            )
+            return Since(worktree=root, branch=branch, version=version, same=True)
         tip = None if branch is None else git.commit(f"refs/heads/{branch}")
         old = self.old(git)
         committed = [] if tip is None else changed_files(git, old, tip)
@@ -238,7 +295,7 @@ class Reader(Model, arbitrary_types_allowed=True):
             dict.fromkeys([*committed, *(Path(each) for each in uncommitted)])
         )
         snapshot = Snapshot(
-            baseline=Baseline(inbox=self.delivery.inbox, repository=party.repository),
+            baseline=self.baseline(party),
             store=store,
             git=git,
             tree=tree,
@@ -246,29 +303,71 @@ class Reader(Model, arbitrary_types_allowed=True):
             branches=[] if branch is None else [branch],
         )
         files = [found for path in paths if (found := snapshot.filed(path)) is not None]
-        return Since(
-            worktree=root, branch=branch, version=version, writes=writes, files=files
-        )
+        return Since(worktree=root, branch=branch, version=version, files=files)
 
-    def approved(self, request: ApproveSince) -> Approved:
-        """Approve every flagged write on the conversation's branch, or on the file at `path`, and return them; refused on a detached `HEAD`, where nothing is flagged by branch."""
+    def reviewed(self, request: ReviewSince) -> SinceReviewed:
+        """Mark each file of `request` reviewed at the version shown, approving the flagged writes on those still standing at it, and say which; refused on a detached `HEAD`, where nothing is marked by branch, and where a version shown isn't in the worktree's store."""
         party = request.conversation
         located = self.located(party)
-        if located.branch is None:
+        branch = located.branch
+        if branch is None:
             message = (
-                f"{located.root} has no branch checked out, so nothing is flagged "
-                "on one to approve"
+                f"{located.root} has no branch checked out, and a file is marked "
+                "reviewed on its branch"
             )
             raise InboxError(message)
-        baseline = Baseline(inbox=self.delivery.inbox, repository=party.repository)
-        flags = baseline.flags([located.branch], request.path)
-        for each in flags:
-            self.delivery.flag_approved(each.number)
-        return Approved(flags=[each.number for each in flags])
+        store = self.store(party, located.root)
+        contents = {
+            each.version: store.object(each.version)
+            for each in request.files
+            if each.version is not None
+        }
+        lost = [version for version, content in contents.items() if content is None]
+        if lost:
+            message = (
+                f"the worktree's store keeps no {', '.join(lost)}, a version the "
+                "page shows: read the drawer again"
+            )
+            raise InboxError(message)
+        with self.snapshotting.of(located.root):
+            tree = store.snapshot()
+        baseline = self.baseline(party)
+        moved = [
+            each.path
+            for each in request.files
+            if store.blob(tree, each.path) != each.version
+        ]
+        flags = [
+            flag
+            for each in request.files
+            if each.path not in moved
+            for flag in baseline.flags([branch], each.path)
+        ]
+        for flag in flags:
+            self.delivery.flag_approved(flag.number)
+        # Made once the flags are approved, so each mark is the latest the operator saw, at the same moment.
+        at = self.delivery.clock.now()
+        baseline.reviews.marked(
+            branch,
+            [
+                Mark(path=each.path, version=each.version, at=at)
+                for each in request.files
+            ],
+            {
+                version: content
+                for version, content in contents.items()
+                if content is not None
+            },
+        )
+        return SinceReviewed(
+            reviewed=[each.path for each in request.files],
+            approved=[each.number for each in flags],
+            moved=moved,
+        )
 
 
 class SinceShowing(Model, Reading[ShowSince], arbitrary_types_allowed=True):
-    """Answers `ShowSince`: what the branch changed since the operator approved it, read off the event loop; for a room, of a conversation of its repository alone."""
+    """Answers `ShowSince`: what the branch changed since the operator last saw it, read off the event loop; for a room, of a conversation of its repository alone."""
 
     reader: Reader
 
@@ -288,18 +387,20 @@ class SinceShowing(Model, Reading[ShowSince], arbitrary_types_allowed=True):
         return await self.answer(request)
 
 
-class SinceApproving(Model, Handler[ApproveSince], arbitrary_types_allowed=True):
-    """Answers `ApproveSince`: the branch's flagged writes approved."""
+class SinceReviewing(Model, Handler[ReviewSince], arbitrary_types_allowed=True):
+    """Answers `ReviewSince`: the files marked reviewed, one marking at a time, since each replaces its branch's marks whole; a room never reaches it."""
 
     reader: Reader
+    turns: asyncio.Lock = Field(default_factory=asyncio.Lock)
 
     @override
-    def request(self) -> type[ApproveSince]:
-        return ApproveSince
+    def request(self) -> type[ReviewSince]:
+        return ReviewSince
 
     @override
-    async def answer(self, request: ApproveSince) -> Reply:
-        return await asyncio.to_thread(self.reader.approved, request)
+    async def answer(self, request: ReviewSince) -> Reply:
+        async with self.turns:
+            return await asyncio.to_thread(self.reader.reviewed, request)
 
 
 def routes(delivery: Delivery, layout: Layout, integration: str) -> list[Route]:
@@ -307,5 +408,5 @@ def routes(delivery: Delivery, layout: Layout, integration: str) -> list[Route]:
     reader = Reader(delivery=delivery, layout=layout, integration=integration)
     return [
         Route.reading(SinceShowing(reader=reader)),
-        Route.to(SinceApproving(reader=reader)),
+        Route.to(SinceReviewing(reader=reader)),
     ]

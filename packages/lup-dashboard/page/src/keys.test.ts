@@ -12,8 +12,8 @@ describe("the line of keys", () => {
         expect(shown("banner")).toEqual(["h", "o ␣c", "]] [[", "]a [a", "]n [n", "␣z"]);
         expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]a [a", "]n [n"]);
         expect(shown("aside")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
-        expect(shown("drawer")).toEqual(["␣l", "]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
-        expect(shown("trace")).toEqual(["o", "c…", "]n [n", "za"]);
+        expect(shown("drawer")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
+        expect(shown("words")).toEqual(["o", "c…", "C", "]n [n", "za"]);
     });
 
     it("lists the jump to what's to answer beside the jump to any item, and shows it where either applies", () => {
@@ -26,13 +26,15 @@ describe("the line of keys", () => {
         expect(shown("since")).not.toContain("]a [a");
     });
 
-    it("offers a file since the operator approved approving its flags, all of it good and the latest, never declining", () => {
-        expect(shown("since")).toEqual(["␣a", "␣A", "␣l", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
+    it("offers a file since the operator approved marking it reviewed and every file shown reviewed, never declining", () => {
+        expect(shown("since")).toEqual(["␣a", "␣A", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
+        // A reviewed file's line takes no comment.
+        expect(shown("reviewed")).toEqual(["␣a", "␣A", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
         expect(shown("file")).toEqual(["␣a", "␣x", "o", "c…", "]c [c", "]n [n", "za", "zr zm", "␣z"]);
     });
 
     it("shows no key of insert mode outside it, and none of the others in it", () => {
-        const places: ReviewPlace[] = ["written", "banner", "approvals", "item", "change", "file", "drawer", "trace", "since", "aside", "nothing"];
+        const places: ReviewPlace[] = ["written", "banner", "approvals", "item", "change", "file", "drawer", "words", "since", "reviewed", "aside", "nothing"];
         const writing = shown("insert");
         for (const place of places) {
             expect(shown(place).filter((key) => writing.includes(key) && key !== "^⏎")).toEqual([]);
@@ -59,7 +61,7 @@ describe("what may follow a chord", () => {
         chords(REVIEW_KEYS, pressed, place).map((each) => `${each.keys.join(" ")} ${each.short}`);
 
     it("lists the keys after Space, from the same table as the line of keys and the list, once each", () => {
-        expect(following("␣", "item")).toEqual(["a approve", "x decline", "d read", "p park", "A all good", "l latest", "c on the item", "z by kind"]);
+        expect(following("␣", "item")).toEqual(["a approve", "x decline", "d read", "p park", "A all reviewed", "c on the item", "z by kind"]);
         // Of two keys alike, the one that applies where the cursor is: on a banner, Space c writes to its agent.
         expect(following("␣", "banner")).toContain("c message");
     });
@@ -67,13 +69,15 @@ describe("what may follow a chord", () => {
     it("lists the keys after Space z, as vim's fold keys begin with z, each kind of fold's letter opening it and Shift and the letter closing it", () => {
         expect(following("␣z", "file")).toEqual([
             "t T the tasks",
-            "r R the trace",
             "s S since you approved",
             "v V the conversation",
             "f F files",
+            "e E earlier exchanges",
             "b B bodies",
             "u U unchanged lines",
+            "k K runs of calls",
             "c C context",
+            "d D calls' input and output",
         ]);
         expect(following("␣f", "file")).toEqual([]);
         expect(following("␣x", "file")).toEqual([]);

@@ -15,7 +15,8 @@ again after.
   repository at once, and one's open threads aren't abandoned.
 - **Waiting for the operator:** the last main session's items and its
   subagents' first, then the rest. What waits on the operator is a line each;
-  news is counted by kind, and flagged writes by the landing each holds.
+  news is counted by kind, and flagged writes are an entry for each agent, its
+  files and the branches whose landings they hold (`Flags`, `inbox/reading.py`).
 - **Landed** on the remote's integration branch since the last main session
   started, its first-parent history, with whether that session still runs or
   when it was last heard, and how its exchange with the operator is read.
@@ -37,10 +38,9 @@ from lup_dev.git import Git, GitError, nul_separated
 from lup_dev.host.names import Names
 from lup_dev.host.service import Bearings, Running
 from lup_dev.inbox.delivery import Delivery, clocked, kind, opening, what
-from lup_dev.inbox.reading import Reader
+from lup_dev.inbox.reading import Flags, Reader, by_agent
 from lup_dev.inbox.store import (
     Conversation,
-    Flagged,
     Item,
     Operator,
     Waiting,
@@ -287,7 +287,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
     def waiting(
         self, items: list[Item], last: Conversation | None, reader: Reader
     ) -> list[str]:
-        """Say what waits for the operator: the last main session's items and its subagents' first, then the rest; each item waiting on them a line, news counted by kind, flagged writes by the landing each holds."""
+        """Say what waits for the operator: the last main session's items and its subagents' first, then the rest; each item waiting on them a line, news counted by kind, flagged writes an entry for each agent."""
         waiting = [
             item
             for item in items
@@ -323,7 +323,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
     def grouped(
         self, items: list[Item], reader: Reader, known: list[Item]
     ) -> list[str]:
-        """Say `items`: each waiting on the operator a line, then news counted by kind, then flagged writes by the branch whose landing each holds."""
+        """Say `items`: each waiting on the operator a line, then news counted by kind, then flagged writes, an entry for each agent saying its files and the branches whose landings they hold."""
         asking = [
             f"- {cited(item.number)} {what(item)} from "
             f"{reader.called(item.sender, known, naming='paths')}: {opening(item)}"
@@ -341,33 +341,20 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
             if news
             else []
         )
-        flags = [item for item in items if isinstance(item.reason, Flagged)]
-        branches = list(
-            dict.fromkeys(
-                item.reason.branch for item in flags if isinstance(item.reason, Flagged)
-            )
-        )
-
-        def holding(branch: str | None) -> str:
-            numbers = ", ".join(
-                cited(item.number)
-                for item in flags
-                if isinstance(item.reason, Flagged) and item.reason.branch == branch
-            )
-            return (
-                f"on no branch, {numbers}"
-                if branch is None
-                else f"`{branch}`'s, {numbers}"
-            )
-
+        agents = [each for each in by_agent(items) if isinstance(each, Flags)]
         flagged = (
             [
                 (
-                    f"- {many(len(flags), 'flagged write')}, holding landings: "
-                    f"{'; '.join(holding(each) for each in branches)}."
+                    "- Flagged writes, holding their branches' landings: "
+                    + "; ".join(
+                        f"{reader.called(each.sender, known, naming='paths')}, "
+                        f"{each.said()} ({each.cited(', ')})"
+                        for each in agents
+                    )
+                    + "."
                 )
             ]
-            if flags
+            if agents
             else []
         )
         return [*asking, *told, *flagged]

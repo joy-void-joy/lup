@@ -27,7 +27,8 @@
 // the view is told what's pressed, to show what may follow. `"+` and `"*` are
 // the system clipboard, and a yank or a put the clipboard refused is said in
 // the page's top line (`clipboard.ts`). What's written, an agent's text and a comment, is
-// Markdown, shown as such, Enter in a comment continuing the list it's in
+// Markdown, shown as such, Enter in a comment continuing the list it's in, and
+// `o` and `O` on one of its items opening the next item or the one before it
 // (`markdown.ts`); each view says which stretches of its text those are, in the
 // transaction that lays the text out. Each view says what else its keys do, lays
 // its own text out and draws it, and may paint the lines in view as well, as the
@@ -52,12 +53,13 @@ import { defineClipboard, shownBelow } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, foldEdge, levelled, nextFold } from "./folds";
 import { FOLD_KINDS, type FoldKind } from "./keys";
-import { continued, hiddenOn, markdown } from "./markdown";
+import { continued, hiddenOn, markdown, openedLine } from "./markdown";
 import { margin, placeheld, type Margined } from "./margin";
 
 /** What the vim keys and the editor's own events do, as a view stands: replaced at each render. */
 interface Actions {
-    comment: (cm: CodeMirrorV, on: "line" | "whole") => void;
+    /** Open a comment on the line or the whole, or, in a comment, a line below it to write on (`line`) or above it (`above`). */
+    comment: (cm: CodeMirrorV, on: "line" | "above" | "whole") => void;
     entered: (cm: CodeMirrorV) => void;
     left: () => void;
     finish: (cm: CodeMirrorV) => void;
@@ -67,10 +69,8 @@ interface Actions {
     matter: (forward: boolean) => void;
     written: (forward: boolean) => void;
     approve: (approved: boolean) => void;
-    /** Space `A`: mark all of a "since you approved" drawer good. */
+    /** Space `A`: mark every file of a "since you approved" drawer reviewed. */
     approveAll: () => void;
-    /** Space `l`: bring the latest into a "since you approved" drawer. */
-    latest: () => void;
     /** `h` on a banner: turn the operator's switch to hold the agent's flagged writes; elsewhere it's vim's `h`, said by false. */
     hold: () => boolean;
     list: () => void;
@@ -313,7 +313,7 @@ let speaking: Bound | null = null;
 
 /**
  * Each chord Space leads in the review, as vim's keymap writes its keys, and the action it does: Space `p` parks an
- * item, leaving it for later; Space `A` marks a "since you approved" drawer good and Space `l` brings its latest in;
+ * item, leaving it for later; Space `A` marks every file of a "since you approved" drawer reviewed;
  * Space `z` and a letter, as vim's fold keys begin with `z`, opens every fold of its kind in the item or the drawer,
  * Shift and the letter closing them. The list of keys (`keys.ts`) says each of them.
  */
@@ -324,7 +324,6 @@ export const SPACED: readonly (readonly [keys: string, action: string])[] = [
     ["<Space>a", "lupApprove"],
     ["<Space>x", "lupDecline"],
     ["<Space>A", "lupApproveAll"],
-    ["<Space>l", "lupLatest"],
     ...FOLD_KINDS.filter((each) => each.chord).flatMap(({ kind, letter }) => [
         [`<Space>z${letter}`, `lupFoldOpen-${kind}`] as const,
         [`<Space>z${letter.toUpperCase()}`, `lupFoldClose-${kind}`] as const,
@@ -356,6 +355,7 @@ function mapKeys(): void {
             }
         });
     action("lupCommentLine", (actions, cm) => actions.comment(cm, "line"));
+    action("lupCommentAbove", (actions, cm) => actions.comment(cm, "above"));
     action("lupCommentWhole", (actions, cm) => actions.comment(cm, "whole"));
     action("lupDone", (actions) => actions.toggle("done"));
     action("lupLater", (actions) => actions.toggle("parked"));
@@ -370,7 +370,6 @@ function mapKeys(): void {
     action("lupApprove", (actions) => actions.approve(true));
     action("lupDecline", (actions) => actions.approve(false));
     action("lupApproveAll", (actions) => actions.approveAll());
-    action("lupLatest", (actions) => actions.latest());
     // `h` holds an agent's flagged writes on its banner, and moves left, as vim's `h` does, anywhere else.
     action("lupHold", (actions, cm) => {
         if (!actions.hold()) {
@@ -410,6 +409,7 @@ function mapKeys(): void {
     const map = (keys: string, name: string, context: string) =>
         Vim.mapCommand(keys, "action", name, {}, { context });
     map("o", "lupCommentLine", "normal");
+    map("O", "lupCommentAbove", "normal");
     map("h", "lupHold", "normal");
     for (const [keys, name] of SPACED) {
         map(keys, name, "normal");
@@ -1046,10 +1046,8 @@ export interface Own<C> {
     /** Go to the next or previous line that matters, as the review's are by the judge's reading, opening what folds it on the way. */
     matter?: (forward: boolean) => void;
     approve?: (approved: boolean) => void;
-    /** Mark all of the "since you approved" drawer the cursor is in good, as Space `A` does; none where the view has none. */
+    /** Mark every file of the "since you approved" drawer the cursor is in reviewed, as Space `A` does; none where the view has none. */
     approveAll?: () => void;
-    /** Bring the latest into the "since you approved" drawer the cursor is in, as Space `l` does. */
-    latest?: () => void;
     /** Turn the operator's switch for the agent whose banner the cursor is on, and say whether it was on one. */
     hold?: () => boolean;
     /** What's painted on the lines from `from` to `to` while they're in view, beyond what `draw` drew: a changed file's lines and their highlighting. */
@@ -1273,10 +1271,12 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 if (editor === null) {
                     return;
                 }
-                if (on === "line" && blockAt(head()) !== undefined) {
-                    const end = editor.state.doc.lineAt(head()).to;
-                    editor.dispatch({ changes: { from: end, insert: "\n" }, selection: { anchor: end + 1 } });
-                    Vim.handleKey(cm, "i", "mapping");
+                // In a comment, a line below or above to write on, a list's next item or the one before it.
+                if (on !== "whole" && blockAt(head()) !== undefined) {
+                    editor.dispatch(openedLine(editor.state, head(), on === "line"));
+                    // The line opened and what's written on it are one step, as a comment opened is.
+                    writing.current = true;
+                    Vim.handleKey(cm, "A", "mapping");
                     return;
                 }
                 const comment = on === "whole" ? own.whole(head()) : own.opened(head());
@@ -1351,7 +1351,6 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             },
             approve: (approved) => own.approve?.(approved),
             approveAll: () => own.approveAll?.(),
-            latest: () => own.latest?.(),
             hold: () => own.hold?.() ?? false,
             list: config.list,
             fold: (how) => {
