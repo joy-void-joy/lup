@@ -664,3 +664,16 @@ describe("a review it was sent", () => {
         expect(out.text).toContain("← @61 your review of @52\n  Fine.");
     });
 });
+
+describe("lup's word on its citations", () => {
+    it("says it's lup's, and how many citations in which item named no passage, though the conversation is its sender", () => {
+        const missed = { said: "@50[the tone]", start: 0, end: 13, item: 50, part: null, words: "the tone", found: null, candidates: [] };
+        const told = { state: { state: "told" as const, at: at(9), how: "turn's end" as const }, recipient: SESSION };
+        const one = item(63, { reason: "unresolved", of: 56, citations: [missed] }, 9, told);
+        const two = item(64, { reason: "unresolved", of: 57, citations: [missed, missed] }, 9, told);
+        const beside: Beside = { ...ALONE, exchanged: { sent: [], received: [exchange(one, "A citation in @56 doesn't name one passage."), exchange(two, "")] } };
+        const out = laid(CALLED, beside, UNSAID);
+        expect(out.text).toContain("← @63 from lup: a citation of your words in @56 named no one passage\n  A citation in @56 doesn't name one passage.");
+        expect(out.text).toContain("← @64 from lup: 2 citations of your words in @57 named no one passage");
+    });
+});

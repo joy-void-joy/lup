@@ -85,6 +85,7 @@ from lup_dev.inbox.store import (
     Talk,
     Text,
     Told,
+    Unresolved,
     Waiting,
     cited,
 )
@@ -752,16 +753,19 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             for each in self.every()
             if conversation in (each.sender, each.recipient, each.addressed)
         ]
+
+        # lup's word on a conversation's citations is its own item, and told to it, as the host lists it.
+        def told(item: Item) -> bool:
+            return item.sender != conversation or isinstance(item.reason, Unresolved)
+
         return Exchanged(
             sent=[
                 Exchange(item=each, text=written(each))
                 for each in items
-                if each.sender == conversation
+                if not told(each)
             ],
             received=[
-                Exchange(item=each, text=body(each))
-                for each in items
-                if each.sender != conversation
+                Exchange(item=each, text=body(each)) for each in items if told(each)
             ],
         )
 
@@ -973,6 +977,22 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 made=self.ago(0.5),
             ),
             self.answer(voice),
+            Item(
+                number=63,
+                reason=Unresolved(
+                    of=56,
+                    citations=[
+                        each
+                        for each in self.answer(voice).citations
+                        if each.found is None
+                    ],
+                ),
+                sender=voice,
+                recipient=voice,
+                worktree=lup / "tree" / "guidance-voice",
+                made=self.ago(1.5),
+                state=Told(at=self.ago(1.5), how="turn's end"),
+            ),
             Item(
                 number=57,
                 reason=Friction(

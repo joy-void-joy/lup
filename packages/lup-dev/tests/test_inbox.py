@@ -4265,6 +4265,7 @@ def test_a_turns_end_answers_the_operators_words_told_citing_them_held_once_wher
             )
         )
         listed = host.ask(ListInbox(), Items)
+        exchange = host.ask(ListItems(conversation=party), Exchanged)
         fixed, error = call(
             mcp,
             "edit",
@@ -4306,6 +4307,10 @@ def test_a_turns_end_answers_the_operators_words_told_citing_them_held_once_wher
     ]
     assert [each.number for each in listed.answers] == [2]
     assert [each.number for each in listed.commented] == [1]
+    # lup's word is listed among what the conversation was sent, as it was told, though it's the conversation's own item.
+    assert [each.item.number for each in exchange.sent] == [1, 3]
+    assert [each.item.number for each in exchange.received] == [2, 4]
+    assert exchange.received[1].text == unresolved
     assert (fixed, error) == ("@3 is edited, and before the operator.", False)
     assert ended == ""
     assert turn.reason == Message(

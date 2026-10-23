@@ -211,9 +211,14 @@ function standing(item: Item, received: Exchange[]): string | null {
     }
 }
 
-/** Say what came to the conversation in an item it was sent: the operator's answer, reply, review or message; or what another sent it. */
+/** Say what came to the conversation in an item it was sent: the operator's answer, reply, review or message; lup's word on its citations that named no passage; or what another sent it. */
 function came(item: Item, whose: Whose): string {
     const reason = item.reason;
+    if (reason.reason === "unresolved") {
+        const many = reason.citations.length;
+        const said = many === 1 ? "a citation of your words" : `${many} citations of your words`;
+        return `from lup: ${said} in ${cited(reason.of)} named no one passage`;
+    }
     if (item.sender.party === "conversation") {
         return `${what(item)} from ${whose.name(item.sender)}`;
     }

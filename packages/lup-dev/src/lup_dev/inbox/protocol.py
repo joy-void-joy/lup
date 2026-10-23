@@ -65,6 +65,7 @@ from lup_dev.inbox.store import (
     Review,
     Ruling,
     Talk,
+    Unresolved,
     Waiting,
     cited,
 )
@@ -842,17 +843,21 @@ class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
         return self.exchanged(party, [each for each in items if each.of(repository)])
 
     def exchanged(self, party: Conversation, items: list[Item]) -> Exchanged:
-        """Return `items` as `party` sent them, as it wrote them, and as it was sent them, as it's told them."""
+        """Return `items` as `party` sent them, as it wrote them, and as it was sent them, as it's told them: lup's word on its citations that named no passage among those it was sent, though it's its own item, being lup's to it (`Unresolved`)."""
+
+        def told(item: Item) -> bool:
+            return item.sender != party or isinstance(item.reason, Unresolved)
+
         return Exchanged(
             sent=[
                 Exchange(item=each, text=written(each))
                 for each in items
-                if each.sender == party
+                if not told(each)
             ],
             received=[
                 Exchange(item=each, text=self.delivery.words(each))
                 for each in items
-                if each.sender != party
+                if told(each)
             ],
         )
 
