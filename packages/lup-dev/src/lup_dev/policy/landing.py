@@ -1,4 +1,4 @@
-"""Landing a branch: `land`, the tool that moves a gated branch on the remote once the operator approved what was flagged on what it lands.
+"""Landing a branch: `land`, the tool that merges a branch onto the integration branch, and moves it on the remote once the operator approved what was flagged on what it lands.
 
 `docs/judging-writes.md`, *Landing a branch*. A flagged write lands in its
 worktree and holds no one (`lup_dev.policy.flags`); the landing of its branch is
@@ -6,26 +6,42 @@ where it waits for the operator. `git push` runs in the agent's shell, which end
 a command within minutes, so a push can't wait hours for them; a call to one of
 lup's tools can, as `ask` with `wait` does (`docs/inbox.md`, *Holding a call*).
 So `land`, a tool the host service serves each launched session, moves the
-gated branch, `dev` by default, to a local branch's tip:
-1. the gated branch's tip on the remote is fetched, and the tip landed must hold
-   it: a landing is a fast-forward;
-2. the gate must have passed on the tip's files, as the room's gate recorded it
+gated branch, `dev` by default:
+1. the gated branch's tip on the remote is fetched, writing no ref, so git can
+   tell what holds it;
+2. given a branch and a message, the branch is merged (`Lander.merge`): in the
+   launch's room, by `lup-dev merge` behind the project's runner as the launch
+   recorded it (`Register.runner`), the message on its standard input, the
+   merge made apart from every checkout and gated with its fixes
+   (`lup_dev.merging`). It goes onto the local branch where that holds the
+   remote's tip, else onto the remote's (`base`); a branch already in that
+   history isn't merged again. The merge commit the room answers is read on
+   the host, its parents from the commit alone, checked as the steps below
+   check any tip, and the local branch fast-forwarded to it in the room, its
+   checkout by `git merge --ff-only`: all of it under the repository's lock
+   (`Turns`), so landings merge one at a time, each onto the last. Without a
+   branch, the local integration branch's tip lands as it is;
+3. the tip landed must hold the remote's: a landing is a fast-forward;
+4. the gate must have passed on the tip's files, as the room's gate recorded it
    (`lup_dev.gate`, `Passes`): the gate needs the project's environment, which
    the host doesn't run, so `land` reads the pass and never runs the gate. The
    room writes the passes, so this steers and guards nothing;
-3. each file the landing changes that's flagged on a branch it lands, and not
+5. each file the landing changes that's flagged on a branch it lands, and not
    approved, is a hold in the operator's inbox, one item a file covering every
    flag on it (`AtLanding`), its diff from the version of the file the operator
    last saw there to the tip's; the call waits until each is answered. Approved,
    each flag it covers is approved with it; a comment without approval, or a
    decline, sends the operator's words to the conversation landing, and nothing
    is pushed (`Delivery.held_back`, `Delivery.landing_decided`);
-4. the push goes the remote helper's way (`PushHandler`): held to the launch's
+6. the push goes the remote helper's way (`PushHandler`): held to the launch's
    limits, through the `publishing` moment, and told to `Remotes.landed`, which
    asks trust's approval where it moved the integration branch;
-5. each branch it landed is cleaned up after: its copy on the remote deleted,
+7. each branch it landed is cleaned up after: its copy on the remote deleted,
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
-   it's clean and nobody works in it; then the local branch deleted.
+   it's clean and nobody works in it; then the local branch deleted;
+8. the answer ends on what's still running or waiting to land (`going`): the
+   subagents of the session landing that lup hasn't heard end, and the local
+   branches not on what landed, each with who works in it.
 
 **Which branches it lands:** of the local branches in the history of the tip and
 not in that of the gated branch's tip on the remote, those the landing merged
@@ -75,16 +91,17 @@ from itertools import batched
 from pathlib import Path
 from typing import override
 
-from pydantic import Field, JsonValue, ValidationError
+from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
 from lup.programs import Ran
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused, ToolSpec, bound, declared, lup_tool
-from lup.types import Model
+from lup.types import Model, MutableModel
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Passed, Standing
 from lup_dev.git import LISTED, Git, Tracked, nul_separated
 from lup_dev.host.courier import Conversation as Caller
+from lup_dev.host.courier import Conversations
 from lup_dev.host.protocol import HostError, Register
 from lup_dev.host.rooms import RoomTools
 from lup_dev.host.service import Program, executed
@@ -107,7 +124,8 @@ from lup_dev.inbox.store import (
     Whereabouts,
     cited,
 )
-from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, Layout
+from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, HostLayout, Layout
+from lup_dev.merging import Conflicted, Failed, Merged, Merging
 from lup_dev.policy.holds import unified
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.remote.protocol import (
@@ -132,8 +150,17 @@ class Landing(Model):
     branch: str | None = Field(
         default=None,
         description=(
-            "The local branch whose tip lands, by its name, as `git branch` lists "
-            "it. Left out, the integration branch's own, `dev`, where you merged."
+            "The local branch to land, by its name, as `git branch` lists it: "
+            "merged onto `dev` with a merge commit. Left out, `dev` lands as it "
+            "is, for a change committed on it."
+        ),
+    )
+    message: str | None = Field(
+        default=None,
+        description=(
+            "The merge commit's message, whole, as `git commit -m` takes one: what "
+            "changed and why, how it was tested. Given with `branch`, and only "
+            "with it."
         ),
     )
     onto: str | None = Field(
@@ -202,7 +229,7 @@ class Worker(Model):
 
 
 class Reached(Model):
-    """The launch's room as a landing's cleanup reaches it: its container's name where podman has it, else why no worktree is removed, said once."""
+    """The launch's room as a landing reaches it: its container's name where podman has it, else why lup can't reach it, said once."""
 
     container: str | None = None
     unreached: str | None = None
@@ -221,6 +248,39 @@ class Cleaned(Model):
             done=[line for part in parts for line in part.done],
             left=[line for part in parts for line in part.left],
         )
+
+
+class Merge(Model):
+    """A branch a landing merges, and where: the gated branch it lands on, by its ref's full name, on `remote`, at `old` there; the local branch's name and its tip."""
+
+    onto: str
+    remote: str
+    old: str | None
+    branch: str
+    tip: str
+
+
+class Made(Model):
+    """What a landing lands, once any merge it asked for is made: its tip, what to say of the merge first, whether it's checked already, and what to say of the local branch where the landing then stops."""
+
+    tip: str
+    said: list[str] = []
+    checked: bool = False
+    """Whether the tip was checked as a landing is (`Lander.checked`), as a
+    merge is before its branch moves."""
+    moved: str | None = None
+    """Where the merge moved the local branch, what an answer landing nothing
+    says of it."""
+
+
+class Turns(MutableModel, arbitrary_types_allowed=True):
+    """One landing at a time in each repository, from its merge to its local branch moved: the lock each holds, made the first time one's asked for."""
+
+    locks: dict[Path, asyncio.Lock] = {}
+
+    def of(self, repository: Path) -> asyncio.Lock:
+        """Return the lock of the repository whose git directory is `repository`."""
+        return self.locks.setdefault(repository, asyncio.Lock())
 
 
 def short(ref: str) -> str:
@@ -488,6 +548,8 @@ class Lander(Model, arbitrary_types_allowed=True):
     """The integration branch's name: what lands, and where, unless the call says."""
     run: Callable[[Program], Awaitable[Ran]] = executed
     """Runs one program on the host: `podman exec` into the launch's room."""
+    turns: Turns
+    """The lock a merge holds until its local branch moved, the service's."""
 
     @property
     def party(self) -> Conversation:
@@ -503,20 +565,30 @@ class Lander(Model, arbitrary_types_allowed=True):
     async def land(self, landing: Landing) -> str:
         """Land a branch on the integration branch.
 
-        Puts your local `branch`'s tip on the remote's integration branch,
-        `dev`, as `git push origin dev` would, once it's a fast-forward of the
-        remote's, the gate passed on its files (`uv run lup-dev check`, with
-        everything committed, records the pass), and the operator approved
-        each file the landing changes that was flagged on a branch it lands: a
-        new file, a file written whole, a change to the public API. Each such
-        file is a hold in the operator's inbox, showing what changed since they
-        last saw it, and this call waits for their answers, which may take
-        hours. Approved, it lands. Where they comment without approving, or
-        decline, it returns their words and lands nothing: answer them,
-        commit, and call it again; what they approved stays approved. Once
-        landed, it cleans up after each branch it landed: deletes its copy on
-        the remote, removes its worktree where it's clean and nobody works in
-        it, and deletes the local branch; what it leaves, it says, and why.
+        Merges your local `branch` onto `dev` with a merge commit carrying
+        `message`, in your room and apart from every checkout, and puts it on
+        the remote's `dev`, as `git push origin dev` would. Where the merge
+        conflicts, it names the files and changes nothing: merge `dev` into the
+        branch in its worktree, resolve, run the gate there, and call it again.
+        The gate runs on the merge with `--fix`, its fixes amended into the
+        merge commit, unless it passed on those files already, as on a branch
+        that held `dev`; where it fails, it answers with its report and changes
+        nothing. Then `dev`'s checkout is fast-forwarded to the merge, which
+        git refuses rather than touch uncommitted work there. Without a branch,
+        `dev` lands as it is, once the gate passed on its files (`uv run
+        lup-dev check`, with everything committed, records the pass). Each file
+        the landing changes that was flagged on a branch it lands (a new file,
+        a file written whole, a change to the public API) is a hold in the
+        operator's inbox, showing what changed since they last saw it, and
+        this call waits for their answers, which may take hours. Approved, it
+        lands. Where they comment without approving, or decline, it returns
+        their words and lands nothing: answer them, commit, and call it again;
+        what they approved stays approved. Once landed, it cleans up after each
+        branch it landed: deletes its copy on the remote, removes its worktree
+        where it's clean and nobody works in it, and deletes the local branch;
+        what it leaves, it says, and why. Its last lines say what's still
+        running or waiting to land: your session's subagents lup hasn't heard
+        end, and the local branches not on `dev`, with who works in each.
         """
         try:
             return await self.landed(landing)
@@ -535,8 +607,21 @@ class Lander(Model, arbitrary_types_allowed=True):
         return ref
 
     async def landed(self, landing: Landing) -> str:
-        """Land `landing`'s branch, waiting on its holds, and clean up after it: what the agent reads."""
+        """Land `landing`'s branch, merged where it names one, waiting on its holds, and clean up after it: what the agent reads."""
         onto = self.onto(landing)
+        merging = landing.branch not in [None, short(onto)]
+        if merging and not (landing.message or "").strip():
+            message = (
+                f"landing `{landing.branch}` merges it with a merge commit, which "
+                "needs its `message`: what changed and why, how it was tested"
+            )
+            raise HostError(message)
+        if not merging and landing.message is not None:
+            message = (
+                f"without a branch to merge, `{short(onto)}` lands as it is, making "
+                "no merge commit for a `message`: leave it out, or name the branch"
+            )
+            raise HostError(message)
         source = landing.branch or self.integration
         remote = landing.remote
         git = Git.pinned(self.launch.repository)
@@ -547,25 +632,40 @@ class Lander(Model, arbitrary_types_allowed=True):
         require("push", self.launch)
         refs = await self.remotes.listed(self.launch, remote, push=True)
         old = next((ref.object for ref in refs if ref.name == onto), None)
-        if old == tip:
-            return (
-                f"Nothing to land: `{short(onto)}` on `{remote}` is at {tip} already."
+        await self.fetched(remote, onto, old)
+        made = Made(tip=tip)
+        if merging:
+            merged = await self.merge(
+                git,
+                Merge(onto=onto, remote=remote, old=old, branch=source, tip=tip),
+                landing.message or "",
             )
-        refused = await self.forward(remote, onto, source, tip, old)
-        if refused is not None:
-            return refused
-        unpassed = await asyncio.to_thread(self.unpassed, git, tip, source)
-        if unpassed is not None:
-            return unpassed
+            if isinstance(merged, str):
+                return merged
+            made = merged
+        # The branch whose tip lands: `onto`'s own once a merge was asked for.
+        named = short(onto) if merging else source
+        lands = made.tip
+        if old == lands:
+            nothing = (
+                f"Nothing to land: `{short(onto)}` on `{remote}` is at {lands} already."
+            )
+            return "\n".join([*made.said, nothing])
+        if not made.checked:
+            refused = await self.checked(
+                git, Merge(onto=onto, remote=remote, old=old, branch=named, tip=lands)
+            )
+            if refused is not None:
+                return refused
         branches = await asyncio.to_thread(
-            landed_branches, git, tip, old, f"refs/heads/{source}"
+            landed_branches, git, lands, old, f"refs/heads/{named}"
         )
-        holds = await self.holds(git, onto, tip, old, branches.landed)
+        holds = await self.holds(git, onto, lands, old, branches.landed)
         waited = await self.waited(holds)
         if not all(each.approved for each in waited.outcomes):
-            return unapproved(waited)
+            return unapproved(waited, made.moved)
         reply = await PushHandler(remotes=self.remotes).answer(
-            Pushing(remote=remote, updates=[Update(source=tip, destination=onto)]),
+            Pushing(remote=remote, updates=[Update(source=lands, destination=onto)]),
             self.launch,
         )
         if not isinstance(reply, Pushed):
@@ -575,33 +675,319 @@ class Lander(Model, arbitrary_types_allowed=True):
         if update.error is not None:
             kept = " What the operator approved stays approved." if holds else ""
             refusals = f"\n{reply.said}" if reply.said else ""
-            return f"Not landed: {update.error}.{kept}{refusals}"
+            moved = [] if made.moved is None else [made.moved]
+            return "\n".join([f"Not landed: {update.error}.{kept}{refusals}", *moved])
         cleaned = await self.cleaned(git, remote, refs, branches.landed, onto)
         was = "new there" if old is None else f"which was at {old}"
+        going = await self.going(git, lands, onto)
         return "\n".join(
             [
-                f"Landed {tip} on `{short(onto)}` at `{remote}`, {was}.",
+                *made.said,
+                f"Landed {lands} on `{short(onto)}` at `{remote}`, {was}.",
                 *approvals(waited),
                 *said(cleaned),
-                *left_alone(source, branches.alone),
+                *left_alone(named, branches.alone),
+                *going,
             ]
         )
 
-    async def forward(
-        self, remote: str, onto: str, source: str, tip: str, old: str | None
-    ) -> str | None:
-        """Say why `tip` doesn't land on `onto`, at `old` on `remote`, where it isn't a fast-forward of it; none where it is, or `onto` isn't there yet.
+    async def fetched(self, remote: str, onto: str, old: str | None) -> None:
+        """Fetch `old`, `onto`'s tip on `remote`, into the store, writing no ref, so git can tell what holds it; nothing where `onto` isn't there yet.
 
-        `old` is fetched into the store first, writing no ref, so git can tell.
+        Raise `HostError` where it moved since it was listed.
         """
         if old is None:
-            return None
+            return
         wanted = [Wanted(object=old, name=onto)]
         if await self.remotes.fetched(self.launch, remote, wanted, push=True):
             message = (
                 f"`{short(onto)}` moved on `{remote}` while lup read it: land again"
             )
             raise HostError(message)
+
+    async def checked(self, git: Git, landing: Merge) -> str | None:
+        """Say why `landing`'s tip, its branch's, doesn't land: it isn't a fast-forward of the remote's, or the gate has no pass on its files; none where it lands."""
+        refused = await self.forward(
+            landing.remote, landing.onto, landing.branch, landing.tip, landing.old
+        )
+        if refused is not None:
+            return refused
+        return await asyncio.to_thread(self.unpassed, git, landing.tip, landing.branch)
+
+    async def merge(self, git: Git, asked: Merge, message: str) -> Made | str:
+        """Merge `asked`'s branch onto the integration branch in the launch's room, with `message`, check the merge as a landing is checked, and fast-forward the local branch to it, one landing at a time; return what lands, or say why nothing does.
+
+        The merge goes onto the local branch where it holds the remote's tip,
+        else onto the remote's (`base`). A branch already in that history merges
+        nothing: what lands is that history's tip. The room's answer is read
+        as its model (`Merging`), and the commit it names is checked on the
+        host: its parents read from it alone, the remote's tip in its history,
+        a pass of the gate recorded for its files.
+        """
+        onto, branch = short(asked.onto), asked.branch
+        async with self.turns.of(self.launch.repository):
+            local = await asyncio.to_thread(git.commit, asked.onto)
+            base = await self.base(asked, local)
+            if await self.remotes.descends(self.launch, base, asked.tip):
+                return Made(
+                    tip=base,
+                    said=[
+                        (
+                            f"`{branch}` is in `{onto}`'s history already, so "
+                            f"nothing was merged: `{onto}` lands as it is."
+                        )
+                    ],
+                )
+            if self.launch.runner is None:
+                return (
+                    "Not landed: this launch began before lup kept the project's "
+                    "runner with it, which the merge runs in your room through: "
+                    f"relaunch it, or merge `{branch}` into `{onto}` yourself and "
+                    "call `land` without a branch."
+                )
+            room = await self.reached()
+            if room.container is None:
+                return f"Not landed: {room.unreached}, so nothing was merged."
+            ran = await self.run(
+                Program(
+                    command=[
+                        "podman",
+                        "exec",
+                        "--interactive",
+                        "--workdir",
+                        str(self.launch.worktree),
+                        room.container,
+                        *self.launch.runner,
+                        "lup-dev",
+                        "merge",
+                        base,
+                        asked.tip,
+                    ],
+                    payload=message,
+                    directory=self.launch.repository,
+                )
+            )
+            match room_merged(ran):
+                case str() as unread:
+                    return unread
+                case Conflicted(files=files):
+                    return await self.conflicted(git, asked, files)
+                case Failed(commit=commit, report=report):
+                    return gate_failed(asked, commit, report)
+                case Merged() as done:
+                    pass
+            parents = await self.parents(done.commit)
+            if parents != [base, asked.tip]:
+                return (
+                    f"Not landed: the merge your room answered, {done.commit}, isn't "
+                    f"one of {base} and {asked.tip}: nothing has changed."
+                )
+            landing = asked.model_copy(update={"tip": done.commit})
+            refused = await self.checked(git, landing)
+            if refused is not None:
+                return refused
+            moved = await self.moved(git, room.container, asked.onto, local, done)
+            if moved is not None:
+                return moved
+        here = "" if local is None else f", and moved `{onto}` here to it"
+        held = (
+            None
+            if local is None
+            else (
+                f"`{onto}` here holds the merge, {done.commit}, which `{asked.remote}`'s "
+                "doesn't yet: the next `land` lands it."
+            )
+        )
+        return Made(
+            tip=done.commit,
+            said=[
+                f"Merged `{branch}` onto `{onto}` as {done.commit}{here}: {gated(done)}."
+            ],
+            checked=True,
+            moved=held,
+        )
+
+    async def base(self, asked: Merge, local: str | None) -> str:
+        """Return the commit a merge of `asked` goes onto: the local branch's tip, `local`, where it holds the remote's; the remote's where the local one is behind it.
+
+        Raise `HostError` where neither has the branch, or each has moved since
+        they parted.
+        """
+        onto, old = short(asked.onto), asked.old
+        if local is None:
+            if old is None:
+                message = (
+                    f"neither this repository nor `{asked.remote}` has a `{onto}` to "
+                    "merge onto"
+                )
+                raise HostError(message)
+            return old
+        if old is None or await self.remotes.descends(self.launch, local, old):
+            return local
+        if await self.remotes.descends(self.launch, old, local):
+            return old
+        message = (
+            f"`{onto}` here and on `{asked.remote}` have each moved since they parted, "
+            f"at {local} and {old}: merge `{asked.remote}`'s into `{onto}` where it's "
+            "checked out, and land again"
+        )
+        raise HostError(message)
+
+    async def parents(self, commit: str) -> list[str]:
+        """Return `commit`'s parents, read from the commit alone (`Remotes.git`, `own_parents`), as the room can't have them read otherwise.
+
+        Raise `HostError` where git can't read it.
+        """
+        ran = await self.remotes.git(
+            self.launch,
+            "rev-list",
+            "--parents",
+            "--max-count=1",
+            commit,
+            own_parents=True,
+        )
+        if ran.status != 0:
+            message = f"git couldn't read {commit}'s parents: {oneline(ran.said())}"
+            raise HostError(message)
+        _, *parents = ran.text().split()
+        return parents
+
+    async def moved(
+        self, git: Git, container: str, onto: str, local: str | None, merged: Merged
+    ) -> str | None:
+        """Fast-forward the local branch `onto`, at `local`, to the merge `merged` in the launch's room, `container`; say why it didn't, or none where it did, or there's no local branch to move.
+
+        Where a worktree has it checked out, `git merge --ff-only` moves it
+        there, refusing rather than touch uncommitted work in the files the
+        merge changes; elsewhere, the ref alone moves, from `local` alone.
+        """
+        if local is None:
+            return None
+        trees = await asyncio.to_thread(worktrees, git)
+        checkout = next((each.root for each in trees if each.branch == onto), None)
+        how = "git update-ref" if checkout is None else "git merge --ff-only"
+        moving = (
+            ["git", "update-ref", onto, merged.commit, local]
+            if checkout is None
+            else ["git", "merge", "--ff-only", "--quiet", merged.commit]
+        )
+        ran = await self.run(
+            Program(
+                command=[
+                    "podman",
+                    "exec",
+                    "--workdir",
+                    str(checkout or self.launch.worktree),
+                    container,
+                    *moving,
+                ],
+                payload="",
+                directory=self.launch.repository,
+            )
+        )
+        if ran.status == 0:
+            return None
+        said = oneline(ran.said()) or f"it ended with status {ran.status}"
+        where = (
+            f"`{short(onto)}`"
+            if checkout is None
+            else f"`{short(onto)}`'s checkout, {checkout},"
+        )
+        return (
+            f"Not landed: {where} wasn't fast-forwarded to the merge, {merged.commit}, "
+            f"which no branch names (`{how}`: {said}). Nothing else has changed: "
+            "commit or set aside what's in the way there, and call `land` again, "
+            "which finds the gate's pass and runs nothing."
+        )
+
+    async def conflicted(self, git: Git, asked: Merge, files: list[Path]) -> str:
+        """Say that merging `asked`'s branch conflicts in `files`, and how it lands: merged the other way in its worktree, by whoever works there."""
+        branch = f"refs/heads/{asked.branch}"
+        trees = await asyncio.to_thread(worktrees, git)
+        places = list(self.delivery.inbox.whereabouts.values())
+        working = await asyncio.to_thread(self.working, places)
+        roots = [each.root for each in trees if each.branch == branch]
+        where = (
+            "in a worktree of its own"
+            if not roots
+            else f"in its worktree, {roots[0]} ({working[roots[0]]})"
+            if roots[0] in working
+            else f"in its worktree, {roots[0]}"
+        )
+        onto = short(asked.onto)
+        return "\n".join(
+            [
+                f"Not landed: merging `{asked.branch}` onto `{onto}` conflicts, in:",
+                *(f"- {each}" for each in files),
+                (
+                    f"Nothing has changed. Merge `{onto}` into `{asked.branch}` "
+                    f"{where}, resolve, run the gate there, and call `land` again."
+                ),
+            ]
+        )
+
+    async def going(self, git: Git, tip: str, onto: str) -> list[str]:
+        """Say what's still running or waiting to land, once `tip` landed on `onto`: the subagents of the session landing that lup hasn't heard end, then the local branches not in `tip`'s history, but the gated and protected ones, each with where it's checked out and who works there; or that nothing is.
+
+        It's only as true as lup's hearing of each subagent's end (`Whereabouts.ended`).
+        """
+        limits = self.launch.limits
+        places = list(self.delivery.inbox.whereabouts.values())
+        subagents = [
+            place
+            for place in places
+            if place.launch == self.launch.launch
+            and place.conversation.session == self.caller.session
+            and place.conversation.agent not in [None, self.caller.agent]
+            and place.parent is not None
+            and place.ended is None
+        ]
+        listed = await asyncio.to_thread(
+            git.run,
+            "for-each-ref",
+            "--format=%(refname)",
+            f"--no-merged={tip}",
+            "refs/heads/",
+        )
+        branches = [
+            ref
+            for ref in listed.output.decode().splitlines()
+            if not matching(ref, limits.gated) and not matching(ref, limits.protected)
+        ]
+        trees = await asyncio.to_thread(worktrees, git)
+        working = await asyncio.to_thread(self.working, places)
+        host = self.layout.host
+        lines = [
+            *(
+                f"- {called(host, place)}, a subagent of yours lup hasn't heard end"
+                for place in subagents
+            ),
+            *(
+                waiting(
+                    ref, [each.root for each in trees if each.branch == ref], working
+                )
+                for ref in branches
+            ),
+        ]
+        if not lines:
+            return [
+                (
+                    "Nothing else is running or waiting to land: no subagent of "
+                    f"yours lup hasn't heard end, and no local branch off "
+                    f"`{short(onto)}`."
+                )
+            ]
+        return ["Still running or waiting to land:", *lines]
+
+    async def forward(
+        self, remote: str, onto: str, source: str, tip: str, old: str | None
+    ) -> str | None:
+        """Say why `tip` doesn't land on `onto`, at `old` on `remote`, where it isn't a fast-forward of it; none where it is, or `onto` isn't there yet.
+
+        `old` is in the store already (`fetched`), so git can tell.
+        """
+        if old is None:
+            return None
         if await self.remotes.descends(self.launch, tip, old):
             return None
         return (
@@ -770,7 +1156,11 @@ class Lander(Model, arbitrary_types_allowed=True):
         room = await self.reached() if removing else Reached()
         return Cleaned.joined(
             [
-                Cleaned(left=[] if room.unreached is None else [room.unreached]),
+                Cleaned(
+                    left=[]
+                    if room.unreached is None
+                    else [f"{room.unreached}, so no worktree was removed"]
+                ),
                 *[
                     await self.branch_cleaned(
                         git,
@@ -788,7 +1178,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         )
 
     async def reached(self) -> Reached:
-        """Reach the launch's room for the cleanup: its container, named as the launch's record has it at this moment, where podman has it; else why no worktree is removed.
+        """Reach the launch's room, for a merge or the cleanup: its container, named as the launch's record has it at this moment, where podman has it; else why lup can't.
 
         `rename` renames the container with the launch (`Launches.moved`),
         and the launch as this call was given it keeps the name it registered
@@ -803,10 +1193,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         container = (self.launch if record is None else record).container
         if container is None:
             return Reached(
-                unreached=(
-                    "lup can't reach your room, its launch naming no container, so "
-                    "no worktree was removed"
-                )
+                unreached="lup can't reach your room, its launch naming no container"
             )
         ran = await self.run(
             Program(
@@ -822,7 +1209,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 return Reached(
                     unreached=(
                         f"no container named `{container}`, your room's as lup has "
-                        "it, is there, so no worktree was removed"
+                        "it, is there"
                     )
                 )
             case status:
@@ -830,7 +1217,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 return Reached(
                     unreached=(
                         "podman couldn't say whether your room's container "
-                        f"`{container}` is there ({said}), so no worktree was removed"
+                        f"`{container}` is there ({said})"
                     )
                 )
 
@@ -950,7 +1337,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 for record in live.values()
             ),
             *(
-                Worker(root=root, why=f"{who(place.conversation)} works there")
+                Worker(root=root, why=f"{called(host, place)} works there")
                 for place in going
                 if (held := index.read(place.conversation.session)) is not None
                 for root in held.works(place.conversation.agent or "")
@@ -967,6 +1354,98 @@ def recorded(path: Path) -> Register | None:
         return None
 
 
+def room_merged(ran: Ran) -> Merging | str:
+    """Read what the room's `lup-dev merge` answered, as its model (`Merging`); where it ended without one, say that nothing landed, and why."""
+    if ran.status != 0:
+        said = ran.said() or f"It ended with status {ran.status}, saying nothing."
+        return (
+            "Not landed: the merge couldn't be made in your room, and nothing has "
+            f"changed. `lup-dev merge` said:\n{said}"
+        )
+    try:
+        return TypeAdapter[Merging](Merging).validate_json(ran.output)
+    except ValidationError as unread:
+        return (
+            "Not landed: what your room's `lup-dev merge` answered doesn't read, and "
+            f"nothing has changed: {unread}"
+        )
+
+
+def gated(merged: Merged) -> str:
+    """Say how the gate went on a merge it passed on.
+
+    >>> gated(Merged(commit="c", ran=True, fixed=True))
+    'the gate passed on it, its fixes amended into it'
+    """
+    if not merged.ran:
+        return "the gate passed on its files already, so it ran nothing"
+    if merged.fixed:
+        return "the gate passed on it, its fixes amended into it"
+    return "the gate passed on it"
+
+
+def gate_failed(asked: Merge, commit: str, report: str) -> str:
+    """Say that the gate failed on the merge of `asked`'s branch, `commit`, with what it printed, `report`."""
+    onto = short(asked.onto)
+    return "\n".join(
+        [
+            (
+                f"Not landed: the gate failed on the merge of `{asked.branch}` onto "
+                f"`{onto}`, {commit}, which no branch names, and nothing has "
+                f"changed. Merge `{onto}` into `{asked.branch}` in its worktree, fix "
+                "it there, run the gate, and call `land` again. The gate's report:"
+            ),
+            report.rstrip(),
+        ]
+    )
+
+
+def called(host: HostLayout, place: Whereabouts) -> str:
+    """Say the conversation at `place` as people call it, `dev/explore-auth`, from what the service keeps of its launch; by its runtime's ids where that names none."""
+    record = recorded(host.record(place.launch))
+    try:
+        kept = read_model(host.conversations(place.launch), Conversations)
+    except OSError, ValidationError:
+        kept = None
+    conversation = place.conversation
+    found = (
+        None
+        if kept is None
+        else next(
+            (
+                each
+                for each in kept.known
+                if each.session == conversation.session
+                and each.agent == conversation.agent
+            ),
+            None,
+        )
+    )
+    if record is None or kept is None or found is None:
+        return who(conversation)
+    return f"`{kept.path(found, record.name or record.launch)}`"
+
+
+def waiting(ref: str, roots: list[Path], working: dict[Path, str]) -> str:
+    """Say the local branch `ref`, not landed, a line: where it's checked out, `roots`, and who works there, as `working` has it.
+
+    >>> waiting("refs/heads/idea", [], {})
+    '- `idea`, checked out nowhere'
+    >>> waiting("refs/heads/fix", [Path("/r/fix")], {Path("/r/fix"): "`dev/fix` works there"})
+    '- `fix`, checked out in /r/fix: `dev/fix` works there'
+    """
+    places = [
+        f"{root}: {working[root]}"
+        if root in working
+        else f"{root}, where no conversation lup knows of works"
+        for root in roots
+    ]
+    where = (
+        f"checked out in {'; in '.join(places)}" if places else "checked out nowhere"
+    )
+    return f"- `{short(ref)}`, {where}"
+
+
 def local_deleted(git: Git, ref: str, commit: str) -> Cleaned:
     """Delete the local branch `ref` where it's still at `commit`, the tip it landed at, and say how it went."""
     try:
@@ -976,8 +1455,8 @@ def local_deleted(git: Git, ref: str, commit: str) -> Cleaned:
     return Cleaned(done=[f"deleted the local branch `{short(ref)}`"])
 
 
-def unapproved(waited: Waited) -> str:
-    """Say that a landing didn't land, the operator not having approved each hold: how they answered each, then what reached the conversation meanwhile, their words among it."""
+def unapproved(waited: Waited, moved: str | None = None) -> str:
+    """Say that a landing didn't land, the operator not having approved each hold: how they answered each, where its merge `moved` the local branch, then what reached the conversation meanwhile, their words among it."""
     lines = [
         f"- {cited(each.held.number)} (`{each.held.path}`): {each.said}"
         for each in waited.outcomes
@@ -992,6 +1471,7 @@ def unapproved(waited: Waited) -> str:
                 "and call `land` again: each file left is held again, shown from "
                 "the version they last saw."
             ),
+            *([] if moved is None else [moved]),
             *told,
         ]
     )
@@ -1040,6 +1520,8 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
     """The integration branch's name."""
     run: Callable[[Program], Awaitable[Ran]] = executed
     """Runs one program on the host: `podman exec` into a launch's room."""
+    turns: Turns = Field(default_factory=Turns)
+    """One landing's merge at a time in each repository, across every call."""
 
     @override
     def specs(self) -> list[ToolSpec]:
@@ -1069,6 +1551,7 @@ class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
             call=call,
             integration=self.integration,
             run=self.run,
+            turns=self.turns,
         )
         [tool] = [tool for tool in bound(lander) if tool.spec().name == name]
         match await tool.call(arguments):

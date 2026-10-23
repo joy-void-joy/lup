@@ -238,6 +238,12 @@ class Register(Request, reads=False):
     remote, in its git directory, when the launch started: the one repository
     lup's GitHub tools act on for the launch, never one the room names. None
     where it couldn't be named, which the launch said."""
+    runner: list[str] | None = None
+    """What the room puts before a tool of the project's environment, as the
+    declaration at the commit the operator approved runs one
+    (`Runner.command([])`): `land` runs `lup-dev merge` behind it in the room.
+    None in a record from before launches kept it, which `land` merges nothing
+    for."""
     name: Name | None = None
     """Its name, as it stands: the one asked at registration, made unique
     (`exact`), and each rename since. None in a record from before launches

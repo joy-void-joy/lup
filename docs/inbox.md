@@ -16,7 +16,7 @@ Everything between a session and the operator goes through the inbox, which the 
 | `withdraw` | Takes back a message or question the agent sent that no longer needs the operator, with its reason |
 | `reply` | Answers the operator's comments by their ids, several in one call, each kept on their item under what it answers, a thread the dashboard shows there (*Replying by id*) |
 | `judged` | Reads what the judge made of the repository's writes, and its holds, changing nothing (`docs/judging-writes.md`, *The verdict log*) |
-| `land` | Lands a local branch on the integration branch once the gate passed on it and the operator approved each file flagged on what it lands, holding the call while they review, then cleans up after each branch it landed (`docs/judging-writes.md`, *Landing a branch*) |
+| `land` | Merges a local branch onto the integration branch in the room, the gate run on the merge, and lands it once the operator approved each file flagged on what it lands, holding the call while they review; then cleans up after each branch it landed, and says what's still running or waiting to land (`docs/judging-writes.md`, *Landing a branch*) |
 | `rename` | Names the session's launch, or a subagent, after its task (`docs/launch.md`, *Names*) |
 | `read_issue`, `find_issues`, `file_issue`, `edit_issue`, `close_issue`, `reopen_issue`, `comment`, `edit_comment`, `draft_pull_request` | GitHub, through the operator's login on the host (`docs/credentials.md`, *GitHub through `gh`*) |
 

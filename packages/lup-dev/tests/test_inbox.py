@@ -31,7 +31,7 @@ from mcp.types import (
     ToolAnnotations,
     jsonrpc_message_adapter,
 )
-from pydantic import Field
+from pydantic import Field, TypeAdapter
 from typer.testing import CliRunner
 
 from lup.github.tools import GitHubTools
@@ -42,7 +42,9 @@ from lup_dev import Modules, Project, cli
 from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
 from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.resolve import resolve
-from lup_dev.gate import Passed, Standing
+from lup_dev.declaration.runner import Uv
+from lup_dev.gate import Passed, Passes, Processes, Standing
+from lup_dev.gate import Ran as GateRan
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted, Spawned, Spawns
@@ -143,6 +145,7 @@ from lup_dev.inbox.tools import specs
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import GitDirectoryLayout, InboxLayout, Layout
+from lup_dev.merging import Merging, merged
 from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import Bench, CallFinished, CallStarted
 from lup_dev.policy.flags import InboxFlagging
@@ -5957,6 +5960,12 @@ def test_a_sent_draft_approves_what_it_marks_read_and_held_changes_commented_on(
 
 # Landing a branch: `land`, waiting on what was flagged on it.
 
+NOTHING_GOING = (
+    "Nothing else is running or waiting to land: no subagent of yours lup hasn't "
+    "heard end, and no local branch off `dev`."
+)
+"""What a landing ends on where nothing else waits."""
+
 
 class Landings:
     """lup's layout of a repository for landing: its git directory bare, its worktrees under `tree/`, `dev` checked out in one and `feat` in another; its remote `origin` a bare forge on disk holding `main` and `dev`; and a launch of `runtime` served, started in `dev`'s worktree, whose room is the test's own machine, each command it runs there recorded."""
@@ -5985,6 +5994,10 @@ class Landings:
         """Each command run in the launch's room, as the host asked it."""
         self.containers: list[str] | None = None
         """The containers podman has, as the host's `podman container exists` is answered; none has every one."""
+        self.gate = MergeGate()
+        """The gate the room's `lup-dev merge` runs on a merge."""
+        self.unmerging: str | None = None
+        """What the room's `lup-dev merge` says failing, where it fails, as one without the command does."""
 
     def branched(self, name: str) -> Path:
         """Add a worktree on a new branch `name` from `dev`, and return its root."""
@@ -6005,9 +6018,45 @@ class Landings:
                 return await executed(
                     Program(command=command, payload="", directory=Path(workdir))
                 )
+            case [
+                "podman",
+                "exec",
+                "--interactive",
+                "--workdir",
+                workdir,
+                _,
+                "uv",
+                "run",
+                "lup-dev",
+                "merge",
+                base,
+                tip,
+            ]:
+                return await asyncio.to_thread(
+                    self.merging, Path(workdir), base, tip, program.payload
+                )
             case _:
                 message = f"the room was asked {program.command}"
                 raise AssertionError(message)
+
+    def merging(self, root: Path, base: str, tip: str, message: str) -> Ran:
+        """Run `lup-dev merge` as the room does, in this process, from the worktree at `root`, its gate the test's (`gate`); or fail as told (`unmerging`)."""
+        if self.unmerging is not None:
+            failing = self.unmerging.encode()
+            return Ran(command=["lup-dev", "merge"], status=2, error=failing)
+        merging = merged(
+            root,
+            base,
+            tip,
+            message,
+            processes=self.gate,
+            passes=Passes.of(root, self.clock),
+            runner=Uv(),
+            say=self.gate.said.append,
+            stop=self.gate.stopped.append,
+        )
+        printed = TypeAdapter[Merging](Merging).dump_json(merging)
+        return Ran(command=["lup-dev", "merge"], status=0, output=printed)
 
     def wrote(self, root: Path, path: str, content: str) -> None:
         """Write `path` in the worktree at `root`, and commit it."""
@@ -6040,7 +6089,12 @@ class Landings:
         return found or None
 
     def launched(
-        self, runtime: str, name: str = "one", worktree: Path | None = None
+        self,
+        runtime: str,
+        name: str = "one",
+        worktree: Path | None = None,
+        *,
+        runner: bool = True,
     ) -> Register:
         """Register a launch of `runtime` in the repository with the running service, started in `worktree`, `dev`'s by default, landing on `dev`."""
         judge = self.repository.parent / "judges" / "bin" / "lup-dev"
@@ -6060,6 +6114,7 @@ class Landings:
             ),
             github=None,
             name=name,
+            runner=["uv", "run"] if runner else None,
         )
         client(self.machine.host, self.clock).register(registered)
         return registered
@@ -6084,6 +6139,26 @@ class Landings:
             file=ChangedFile.of(Path(path), None, content.encode(), reading),
         )
         return client(self.machine.host, self.clock).ask(asking, Shown).item.number
+
+
+class MergeGate(Processes):
+    """The gate a merge runs in the room, going as the test says: its exit code, and the files its fixes rewrite, from the worktree's root."""
+
+    def __init__(self) -> None:
+        self.code = 0
+        self.fixes: dict[str, str] = {}
+        self.ran: list[list[str]] = []
+        self.said: list[str] = []
+        self.stopped: list[Path] = []
+
+    @override
+    def run(self, command: list[str], cwd: Path) -> GateRan:
+        self.ran.append(command)
+        for path, content in self.fixes.items():
+            (cwd / path).write_text(content)
+        return GateRan(
+            code=self.code, output=f"the gate's report, ending {self.code}\n"
+        )
 
 
 @pytest.fixture
@@ -6147,7 +6222,7 @@ def test_land_puts_the_branch_on_dev_and_cleans_up_what_it_landed_but_what_s_in_
         f"- the local branch `busy`, checked out in {busy}\n"
         f"- the worktree {kept}: `git worktree remove`: fatal: '{kept}' contains "
         "modified or untracked files, use --force to delete it\n"
-        f"- the local branch `kept`, checked out in {kept}"
+        f"- the local branch `kept`, checked out in {kept}\n{NOTHING_GOING}"
     )
     assert landings.on_forge("refs/heads/dev") == tip
     assert landings.on_forge("refs/heads/feat") is None
@@ -6268,7 +6343,7 @@ def test_land_says_once_where_no_container_is_there_and_names_each_worktree_left
         f"- the worktree {feat}\n"
         f"- the local branch `feat`, checked out in {feat}\n"
         f"- the worktree {kept}\n"
-        f"- the local branch `kept`, checked out in {kept}"
+        f"- the local branch `kept`, checked out in {kept}\n{NOTHING_GOING}"
     )
     assert landings.ran == [["podman", "container", "exists", "lup-one"]]
     assert feat.is_dir()
@@ -6320,7 +6395,8 @@ def test_land_leaves_alone_a_branch_with_nothing_of_its_own_and_a_flag_on_it_hol
         "- deleted the local branch `feat`\n"
         f"- removed the worktree {later}\n"
         "- deleted the local branch `later`\n"
-        "Left alone, `dev` having merged none of them: `fresh`, `mid`."
+        "Left alone, `dev` having merged none of them: `fresh`, `mid`.\n"
+        f"{NOTHING_GOING}"
     )
     assert holds == []
     assert states == [Waiting(), Waiting()]
@@ -6592,6 +6668,375 @@ def test_a_land_sent_again_across_a_restart_holds_on_its_holds_again_and_lands_o
     assert (hold.call, hold.number) == ("l1", flag + 1)
     assert holds == [hold.number]
     assert landings.on_forge("refs/heads/dev") == tip
+
+
+MESSAGE = "feat(rooms): rooms, `merged` by $(land)\n\nWhat changed, and why.  \n\n\n"
+"""A merge commit's message holding what a shell would read, and the blank lines `git commit -m` cleans away."""
+
+CLEANED = "feat(rooms): rooms, `merged` by $(land)\n\nWhat changed, and why."
+"""`MESSAGE` as the merge commit carries it."""
+
+
+def merging(landings: Landings, mcp: Path, message: str = MESSAGE) -> str:
+    """Land `feat` through the launch's `mcp`, merged with `message`: the answer, which mustn't be an error."""
+    answer, error = call(mcp, "land", {"branch": "feat", "message": message})
+    assert not error, answer
+    return answer
+
+
+def moved_on(landings: Landings) -> str:
+    """Commit on `dev` and push it, as a landing meanwhile would: return the remote's tip."""
+    landings.wrote(landings.dev, "src/pkg/hall.py", '"""Hall."""\n')
+    landings.shell.git(landings.repository, "push", "-q", "origin", "dev")
+    old = landings.on_forge("refs/heads/dev")
+    assert old is not None
+    return old
+
+
+def test_land_merges_a_branch_onto_dev_in_the_room_gates_the_merge_and_moves_dev_there(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    branch = shell.git(dev, "rev-parse", "feat")
+    old = moved_on(landings)
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    merge = landings.on_forge("refs/heads/dev")
+    assert answer == (
+        f"Merged `feat` onto `dev` as {merge}, and moved `dev` here to it: the gate "
+        "passed on it.\n"
+        f"Landed {merge} on `dev` at `origin`, which was at {old}.\n"
+        "Cleaned up after it:\n"
+        f"- removed the worktree {feat}\n"
+        "- deleted the local branch `feat`\n"
+        f"{NOTHING_GOING}"
+    )
+    assert merge is not None
+    assert shell.git(dev, "rev-parse", f"{merge}^@").splitlines() == [old, branch]
+    assert shell.git(dev, "log", "-1", "--format=%B", merge) == CLEANED
+    assert shell.git(dev, "rev-parse", "HEAD") == merge
+    assert (dev / "src/pkg/rooms.py").read_text() == '"""Rooms."""\n'
+    assert landings.gate.ran == [Uv().judging(["lup-dev", "check", "--fix"])]
+    assert landings.ran == [
+        ["podman", "container", "exists", "lup-one"],
+        [
+            *["podman", "exec", "--interactive", "--workdir", str(dev), "lup-one"],
+            *["uv", "run", "lup-dev", "merge", old, branch],
+        ],
+        [
+            *["podman", "exec", "--workdir", str(dev), "lup-one"],
+            *["git", "merge", "--ff-only", "--quiet", merge],
+        ],
+        ["podman", "container", "exists", "lup-one"],
+        [
+            *["podman", "exec", "--workdir", str(dev), "lup-one"],
+            *["git", "worktree", "remove", str(feat)],
+        ],
+    ]
+
+
+def test_land_amends_the_gate_s_fixes_into_the_merge_its_parents_and_message_kept(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    branch = shell.git(dev, "rev-parse", "feat")
+    old = moved_on(landings)
+    landings.gate.fixes = {"src/pkg/rooms.py": '"""Rooms, formatted."""\n'}
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    merge = shell.git(dev, "rev-parse", "HEAD")
+    assert answer.startswith(
+        f"Merged `feat` onto `dev` as {merge}, and moved `dev` here to it: the gate "
+        "passed on it, its fixes amended into it.\n"
+    )
+    assert shell.git(dev, "show", f"{merge}:src/pkg/rooms.py") == (
+        '"""Rooms, formatted."""'
+    )
+    assert shell.git(dev, "rev-parse", f"{merge}^@").splitlines() == [old, branch]
+    assert shell.git(dev, "log", "-1", "--format=%B", merge) == CLEANED
+    assert landings.on_forge("refs/heads/dev") == merge
+
+
+def test_land_of_a_branch_that_held_dev_finds_its_pass_and_the_gate_runs_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    moved_on(landings)
+    shell.git(feat, "merge", "-q", "--no-edit", "dev")
+    branch = shell.git(feat, "rev-parse", "HEAD")
+    landings.passing(branch)
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    merge = shell.git(dev, "rev-parse", "HEAD")
+    assert answer.startswith(
+        f"Merged `feat` onto `dev` as {merge}, and moved `dev` here to it: the gate "
+        "passed on its files already, so it ran nothing.\n"
+    )
+    assert landings.gate.ran == []
+    assert shell.git(dev, "rev-parse", f"{merge}^{{tree}}") == shell.git(
+        dev, "rev-parse", f"{branch}^{{tree}}"
+    )
+    assert landings.on_forge("refs/heads/dev") == merge
+
+
+def test_land_of_a_branch_that_conflicts_names_the_files_and_who_resolves_them_changing_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "README.md", "# Feat's\n")
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.wrote(dev, "README.md", "# Dev's\n")
+    landings.wrote(dev, "src/pkg/rooms.py", '"""Chambers."""\n')
+    before = shell.git(dev, "rev-parse", "HEAD")
+    old = landings.on_forge("refs/heads/dev")
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        landings.launched("claude", name="two", worktree=feat)
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    assert answer == (
+        "Not landed: merging `feat` onto `dev` conflicts, in:\n"
+        "- README.md\n"
+        "- src/pkg/rooms.py\n"
+        f"Nothing has changed. Merge `dev` into `feat` in its worktree, {feat} "
+        "(launch `two` started there), resolve, run the gate there, and call `land` "
+        "again."
+    )
+    assert shell.git(dev, "rev-parse", "HEAD") == before
+    assert landings.on_forge("refs/heads/dev") == old
+    assert feat.is_dir()
+    assert landings.gate.ran == []
+
+
+def test_land_where_the_gate_fails_on_the_merge_answers_its_report_changing_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    old = moved_on(landings)
+    landings.gate.code = 1
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    assert answer.startswith(
+        "Not landed: the gate failed on the merge of `feat` onto `dev`, "
+    )
+    assert answer.endswith(
+        ", which no branch names, and nothing has changed. Merge `dev` into `feat` "
+        "in its worktree, fix it there, run the gate, and call `land` again. The "
+        "gate's report:\nthe gate's report, ending 1"
+    )
+    assert shell.git(dev, "rev-parse", "HEAD") == old
+    assert landings.on_forge("refs/heads/dev") == old
+    assert feat.is_dir()
+
+
+def test_land_leaves_dev_where_uncommitted_work_is_in_the_way_and_lands_once_it_s_gone(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev = landings.feat, landings.dev
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    old = moved_on(landings)
+    (dev / "src/pkg/rooms.py").write_text("work not committed\n")
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, started("claude"))
+        refused = merging(landings, mcp)
+        (dev / "src/pkg/rooms.py").unlink()
+        answer = merging(landings, mcp)
+    assert refused.startswith(
+        f"Not landed: `dev`'s checkout, {dev}, wasn't fast-forwarded to the merge, "
+    )
+    assert "(`git merge --ff-only`: error: " in refused
+    assert refused.endswith(
+        "Nothing else has changed: commit or set aside what's in the way there, and "
+        "call `land` again, which finds the gate's pass and runs nothing."
+    )
+    merge = landings.on_forge("refs/heads/dev")
+    assert merge != old
+    assert answer.startswith(
+        f"Merged `feat` onto `dev` as {merge}, and moved `dev` here to it: the gate "
+        "passed on its files already, so it ran nothing.\n"
+    )
+    assert len(landings.gate.ran) == 1
+
+
+def test_land_refuses_a_merge_without_its_message_a_message_without_a_branch_and_a_launch_keeping_no_runner(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude", runner=False)
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, started("claude"))
+        unsaid, _ = call(mcp, "land", {"branch": "feat", "message": " \n"})
+        unmerged, _ = call(mcp, "land", {"message": "feat: rooms"})
+        unrun, _ = call(mcp, "land", {"branch": "feat", "message": "feat: rooms"})
+    assert unsaid == (
+        "Not landed: landing `feat` merges it with a merge commit, which needs its "
+        "`message`: what changed and why, how it was tested"
+    )
+    assert unmerged == (
+        "Not landed: without a branch to merge, `dev` lands as it is, making no "
+        "merge commit for a `message`: leave it out, or name the branch"
+    )
+    assert unrun == (
+        "Not landed: this launch began before lup kept the project's runner with "
+        "it, which the merge runs in your room through: relaunch it, or merge "
+        "`feat` into `dev` yourself and call `land` without a branch."
+    )
+    assert landings.ran == []
+
+
+def test_land_where_the_room_can_t_merge_says_what_it_said_changing_nothing(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    old = landings.on_forge("refs/heads/dev")
+    landings.unmerging = "Error: No such command 'merge'.\n"
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    assert answer == (
+        "Not landed: the merge couldn't be made in your room, and nothing has "
+        "changed. `lup-dev merge` said:\nError: No such command 'merge'."
+    )
+    assert landings.shell.git(landings.dev, "rev-parse", "HEAD") == old
+    assert landings.on_forge("refs/heads/dev") == old
+
+
+def test_land_of_a_branch_dev_holds_already_lands_dev_as_it_is(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, mcp)
+        again = merging(landings, mcp)
+    assert answer.startswith(
+        "`feat` is in `dev`'s history already, so nothing was merged: `dev` lands "
+        f"as it is.\nLanded {tip} on `dev` at `origin`, which was at {old}.\n"
+    )
+    assert again == ("Not landed: this repository has no local branch `feat`")
+    assert landings.gate.ran == []
+    assert landings.on_forge("refs/heads/dev") == tip
+
+
+def test_land_ends_on_the_subagents_lup_hasn_t_heard_end_and_the_branches_off_dev(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    idea = landings.branched("idea")
+    landings.wrote(idea, "src/pkg/idea.py", '"""Idea."""\n')
+    landings.shell.git(landings.repository, "branch", "draft", "idea")
+    with inboxed(machine, clock, notices, said, spawns=Unguided(), rooms=landings.room):
+        landings.launched("claude")
+        hook = machine.host.launch("one").hook
+        send(hook, started("claude"))
+        send(hook, bash("b1", agent_id="a1", agent_type="general-purpose"))
+        send(hook, bash("b2", agent_id="a2", agent_type="general-purpose"))
+        send(hook, claude("SubagentStop", agent_id="a2", agent_type="general-purpose"))
+        answer = merging(landings, machine.host.launch("one").mcp)
+    assert answer.endswith(
+        "Still running or waiting to land:\n"
+        "- `one/sub-a1`, a subagent of yours lup hasn't heard end\n"
+        "- `draft`, checked out nowhere\n"
+        f"- `idea`, checked out in {idea}, where no conversation lup knows of works"
+    )
+
+
+def test_a_hold_declined_after_a_merge_leaves_it_on_dev_here_and_says_so(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    rooms, path = '"""Rooms."""\n', "src/pkg/rooms.py"
+    landings.wrote(landings.feat, path, rooms)
+    old = landings.on_forge("refs/heads/dev")
+    session = lander(landings, "claude")
+    with (
+        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, started("claude"))
+        landings.flag(path, rooms, session)
+        landing = pool.submit(merging, landings, mcp)
+        assert delivery.holding.wait(timeout=60)
+        [hold] = [
+            each
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.reason, HeldChange)
+        ]
+        inbox("answer", str(hold.number), "--decline", "--comment", "Not yet.")
+        answer = landing.result(timeout=60)
+    merge = landings.shell.git(landings.dev, "rev-parse", "HEAD")
+    assert f"- @{hold.number} (`{path}`): declined\n" in answer
+    assert (
+        f"`dev` here holds the merge, {merge}, which `origin`'s doesn't yet: the "
+        "next `land` lands it.\n"
+    ) in answer
+    assert landings.on_forge("refs/heads/dev") == old
+    assert merge != old
 
 
 def test_lup_s_tools_say_which_may_be_sent_again_across_a_restart(
