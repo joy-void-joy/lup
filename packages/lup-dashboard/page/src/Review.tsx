@@ -40,7 +40,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type Taken } from "./code";
 import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
-import { closedAs, folding, hiddenAt, isFolded, reached, reaching, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import { closedAs, folding, hiddenAt, isFolded, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, type Landing } from "./editor";
 import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type DrawerKind, type ReviewPlace } from "./keys";
 import { markerEnd, outdated, unfound } from "./exchange";
@@ -883,17 +883,11 @@ export function Review({
         if (reaches) {
             opening(current, at);
         }
-        if (at === region.header.from) {
-            current.dispatch({ selection: { anchor: at }, scrollIntoView: true });
-            return;
-        }
-        // Its header stays in view above the line it lands on, where both fit.
+        // Its header at the view's top, the line it lands on under it, where both fit; else that line in the middle.
         const top = current.lineBlockAt(region.header.from).top;
-        const fits = current.lineBlockAt(at).bottom - top < current.scrollDOM.clientHeight * 0.8;
-        current.dispatch({
-            selection: { anchor: at },
-            effects: fits ? EditorView.scrollIntoView(region.header.from, { y: "start" }) : EditorView.scrollIntoView(at, { y: "center" }),
-        });
+        const fits = at === region.header.from || current.lineBlockAt(at).bottom - top < current.scrollDOM.clientHeight * 0.8;
+        current.dispatch({ selection: { anchor: at } });
+        scrollAfterKey(current, fits ? EditorView.scrollIntoView(region.header.from, { y: "start" }) : EditorView.scrollIntoView(at, { y: "center" }));
     }
 
     /** Return where the line of the file Space `a` marked reviewed is, once its drawer is read anew and shows it so; none else, or before. */
@@ -962,10 +956,9 @@ export function Review({
                 return;
             }
             opening(current, target);
-            current.dispatch({
-                selection: { anchor: target },
-                effects: EditorView.scrollIntoView(target, { y: "nearest", yMargin: current.scrollDOM.clientHeight / 3 }),
-            });
+            current.dispatch({ selection: { anchor: target } });
+            // A third of the view from its edges, so what's around it shows.
+            scrollAfterKey(current, EditorView.scrollIntoView(target, { y: "nearest", yMargin: current.scrollDOM.clientHeight / 3 }));
         },
         file: (forward) => {
             const current = view.current;
@@ -984,9 +977,8 @@ export function Review({
                 return;
             }
             current.dispatch({ selection: { anchor: target } });
-            // Its header at the view's top, its lines under it: scrolled once vim's key is done, as vim then scrolls
-            // the cursor into view, which CodeMirror would take in place of an earlier scroll.
-            queueMicrotask(() => current.dispatch({ effects: EditorView.scrollIntoView(target, { y: "start" }) }));
+            // Its header at the view's top, its lines under it.
+            scrollAfterKey(current, EditorView.scrollIntoView(target, { y: "start" }));
         },
         stops: () => heads,
         cite: (forward) => {
