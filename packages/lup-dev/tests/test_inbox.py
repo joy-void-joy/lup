@@ -112,6 +112,7 @@ from lup_dev.inbox.store import (
     Decided,
     Done,
     Draft,
+    Edit,
     Ended,
     Flagged,
     Found,
@@ -137,6 +138,7 @@ from lup_dev.inbox.store import (
     TalkComment,
     Text,
     Told,
+    Unresolved,
     Waiting,
     Whereabouts,
     cited,
@@ -144,8 +146,8 @@ from lup_dev.inbox.store import (
     ranked,
 )
 from lup_dev.inbox.store import Asked as Ask
-from lup_dev.inbox.store import Reply as Replied
 from lup_dev.inbox.store import Stop as Stopped
+from lup_dev.inbox.threads import spoken
 from lup_dev.inbox.tools import specs
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
@@ -3513,7 +3515,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "wait_inbox",
         "inbox",
         "withdraw",
-        "reply",
+        "edit",
     ]
     assert [spec.input_schema for spec in served[:5]] == [
         tool.spec().input_schema for tool in SPEAKING
@@ -3529,7 +3531,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "Wait until something reaches your inbox.",
         "Read this repository's inbox, changing nothing.",
         "Take back an item the operator needn't see.",
-        "Reply to the operator's comments, each by its id.",
+        "Edit what you sent the operator.",
     ]
     assert "inbox as a problem" in served[0].description
     github = GitHubTools.specs()
@@ -3919,7 +3921,7 @@ def test_a_message_written_in_the_review_goes_with_the_reply_its_agent_reading_i
     assert left == Draft()
     assert context(told_one) == (
         '<review item="2" from="operator" covers="1">\n'
-        "<message>Also rename the module.</message>\n"
+        '<message id="2.2">Also rename the module.</message>\n'
         '<on item="1" kind="note">\n'
         "<opening>I assumed UTF-8.</opening>\n"
         '<comment id="2.1">Fine.</comment>\n'
@@ -3933,7 +3935,7 @@ def test_a_message_written_in_the_review_goes_with_the_reply_its_agent_reading_i
     )
     assert context(told_two) == (
         '<review item="3" from="operator" covers="1">\n'
-        "<message>Pick up the parser next.</message>\n"
+        '<message id="3.3">Pick up the parser next.</message>\n'
         "<context>\n"
         f"{CONTEXT_LINE}\n"
         f'<on item="1" kind="note" from="claude session s1" worktree="{tmp_path / "one"}">\n'
@@ -3975,7 +3977,8 @@ def test_a_draft_of_messages_alone_is_sent_waking_an_agent_with_nothing_waiting(
         )
     ]
     assert context(told) == (
-        '<review item="1" from="operator">\n<message>Rename it.</message>\n</review>'
+        '<review item="1" from="operator">\n<message id="1.1">Rename it.</message>\n'
+        "</review>"
     )
 
 
@@ -4010,7 +4013,7 @@ def test_a_reply_to_an_ended_subagent_reaches_its_session_as_the_subagents_own(
     assert context(told) == (
         '<review item="2" from="operator" for="subagent a1 of claude session s1, '
         'whose conversation had ended" covers="1">\n'
-        "<message>Then stop there.</message>\n"
+        '<message id="2.2">Then stop there.</message>\n'
         '<on item="1" kind="question">\n'
         "<opening>Rename it?</opening>\n"
         '<comment id="2.1">Yes.</comment>\n'
@@ -4202,76 +4205,31 @@ def test_a_review_quotes_by_part_and_first_line_reads_in_one_line_and_names_othe
     )
 
 
-def test_reply_answers_the_operators_comments_by_id_as_threads_the_item_coming_back_before_them_on_each_runtime(
-    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_a_turns_end_answers_the_operators_words_told_citing_them_held_once_where_a_citation_names_no_passage_on_each_runtime(
+    runtime: str,
+    *,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
 ) -> None:
-    other = tmp_path / "other"
-    other.mkdir()
-    one = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
-    two = Conversation(repository=other / ".git", runtime="codex", session="t1")
-    draft = Draft(
-        comments=[
-            Comment(
-                item=1, quote=Quote(text="UTF-8", start=10, end=15), text="Every one?"
-            ),
-            Comment(item=1, text="Fine."),
-            Comment(
-                item=2, quote=Quote(text="Elsewhere.", start=0, end=10), text="Where?"
-            ),
-        ]
-    )
+    """An agent answers the operator in its turn's last words, which lup puts before them with the items of theirs told since its last end, and its citations of their words read; one naming no passage, or several, still lands, and the end is held once to tell the agent which, with where they read, so it fixes them with `edit`."""
+    payload = {"claude": claude, "codex": codex}[runtime]
+    calling = {"claude": bash, "codex": codex_bash}[runtime]
+    session = {"claude": "s1", "codex": "t1"}[runtime]
+    party = Conversation(repository=tmp_path / ".git", runtime=runtime, session=session)
     host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+    answer = (
+        "Every one I read, @2.1[Even a stray byte?]: it's replaced. Splitting "
+        "@2[the reader … parser] next, as @2.2[a stray byte] and @2[the] said."
+    )
     with inboxed(machine, clock, notices, said) as delivery:
-        launched(machine, clock, tmp_path, "one", "claude")
-        launched(machine, clock, other, "two", "codex")
+        launched(machine, clock, tmp_path, "one", runtime)
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
-        hook2, mcp2 = machine.host.launch("two").hook, machine.host.launch("two").mcp
-        send(hook, claude("SessionStart", source="startup"))
-        send(hook2, codex("SessionStart", source="startup"))
+        send(hook, payload("SessionStart", source="startup"))
         call(mcp, "note", {"remark": "I assumed UTF-8.\n\nAlso the cache is off."})
-        call(mcp2, "note", {"remark": "Elsewhere."})
-        drafting(machine, clock, draft)
-        reviews = sending(machine, clock)
-        send(hook, bash("b1"))
-        before = [delivery.inbox.item(each).state for each in [1, 2]]
-
-        def replying(where: Path, *replies: tuple[str, str]) -> str:
-            text, error = call(
-                where,
-                "reply",
-                {"replies": [{"to": to, "text": text} for to, text in replies]},
-            )
-            assert not error, text
-            return text
-
-        refusals = [
-            replying(mcp, ("3.3", "Here.")),
-            replying(mcp, ("3.9", "Here.")),
-            replying(mcp, ("4.3", "Here.")),
-            replying(mcp, ("1.1", "Here.")),
-            replying(mcp, ("x", "Here.")),
-            replying(mcp, ("3.1", "Kept?"), ("3.9", "Here.")),
-        ]
-        untouched = delivery.inbox.item(3).replies
-        replied = replying(
-            mcp,
-            ("3.1", "Every one I read.\nA stray byte is replaced."),
-            ("3.2", "Thanks."),
-        )
-        own = replying(mcp, ("3.4", "Again."))
-        replied2 = replying(mcp2, ("4.3", "In the cache."))
-        after = [delivery.inbox.item(each).state for each in [1, 2]]
-        kept = [delivery.inbox.item(each).replies for each in [3, 4]]
-        listed = host.ask(ListInbox(), Items)
-
-        def reading(**arguments: JsonValue) -> str:
-            text, error = call(mcp, "inbox", arguments)
-            assert not error, text
-            return text
-
-        part = reading(part="3.1")
-        reply = reading(part="3.4")
-        # The operator answers the reply: a comment on it, which continues the thread.
         drafting(
             machine,
             clock,
@@ -4279,107 +4237,302 @@ def test_reply_answers_the_operators_comments_by_id_as_threads_the_item_coming_b
                 comments=[
                     Comment(
                         item=1,
-                        quote=Quote(text="A stray byte is replaced.", start=18, end=43),
-                        on=PartId(item=3, part=4),
-                        text="Never raised?",
-                    )
+                        quote=Quote(text="I assumed UTF-8.", start=0, end=16),
+                        text="Every one? Even a stray byte?",
+                    ),
+                    Comment(item=1, text="Fine otherwise."),
                 ],
-                done=[2],
+                letters=[
+                    Letter(to=party, text="Then split the reader out of the parser.")
+                ],
             ),
         )
-        [continued] = sending(machine, clock)
-        told = context(send(hook, bash("b2")))
-        settled = [delivery.inbox.item(each).state for each in [1, 2]]
-        # A question reopened by a reply raises a notice, as a question does.
-        call(mcp, "ask", {"question": "May I?"})
-        inbox("answer", "6", "--comment", "Yes.")
-        send(hook, bash("b3"))
-        raised = len(notices.raised)
-        asked_again = replying(mcp, ("7.1", "Then I will."))
-        question = delivery.inbox.item(6).state
-    assert [each.number for each in reviews] == [3, 4]
-    assert before == [Done(at=clock.now()), Done(at=clock.now())]
-    assert refusals == [
-        (
-            "Not replied: @3.3 is the operator's comment on @2, another agent's "
-            "item, not yours to answer; @3's parts you may answer: 3.1, 3.2"
-        ),
-        "Not replied: @3.9 names no part of @3; its parts you may answer: 3.1, 3.2",
-        (
-            "Not replied: @4 is a review from the operator to codex session t1, "
-            "not the operator's words to you: `reply` answers a part of a review, "
-            "a message or an answer sent to you"
-        ),
-        (
-            "Not replied: @1 is a note from claude session s1 to the operator, not "
-            "the operator's words to you: `reply` answers a part of a review, a "
-            "message or an answer sent to you"
-        ),
-        (
-            "Not replied: `x` isn't a part's id: an item's number, a dot and the "
-            "part's place in it, as `414.3`"
-        ),
-        "Not replied: @3.9 names no part of @3; its parts you may answer: 3.1, 3.2",
-    ]
-    assert untouched == []
-    assert replied == (
-        "Your replies are with the operator: @3.4 on @3.1 (on your @1); @3.5 on "
-        "@3.2 (on your @1)."
-    )
-    assert own == (
-        "Not replied: @3.4 is your own reply to @3.1; @3's parts you may answer: "
-        "3.1, 3.2"
-    )
-    assert replied2 == "Your replies are with the operator: @4.4 on @4.3 (on your @2)."
-    # Each reply is kept on the operator's item, after its parts; the agents' items wait again.
-    assert kept == [
-        [
-            Replied(
-                number=4,
-                to=PartId(item=3, part=1),
-                text="Every one I read.\nA stray byte is replaced.",
-                at=clock.now(),
-            ),
-            Replied(
-                number=5, to=PartId(item=3, part=2), text="Thanks.", at=clock.now()
-            ),
-        ],
-        [
-            Replied(
-                number=4,
-                to=PartId(item=4, part=3),
-                text="In the cache.",
-                at=clock.now(),
+        [review] = sending(machine, clock)
+        send(hook, calling("c1"))
+        held = json.loads(
+            send(
+                hook,
+                payload("Stop", stop_hook_active=False, last_assistant_message=answer),
             )
-        ],
-    ]
-    assert after == [Waiting(), Waiting()]
-    assert [each.number for each in listed.items] == [1, 2]
-    # The page reads each thread from the copy of the review sent to the item's sender.
-    assert [(each.number, each.recipient) for each in listed.answers] == [
-        (3, one),
-        (4, two),
-    ]
-    assert part == '<part id="3.1" on="1">Every one?</part>'
-    assert reply == (
-        '<reply id="3.4" to="3.1">\nEvery one I read.\nA stray byte is replaced.\n</reply>'
+        )
+        listed = host.ask(ListInbox(), Items)
+        fixed, error = call(
+            mcp,
+            "edit",
+            {
+                "number": 3,
+                "old": "as @2.2[a stray byte] and @2[the] said",
+                "new": "as @2.1[a stray byte] said",
+            },
+        )
+        ended = send(
+            hook,
+            payload("Stop", stop_hook_active=True, last_assistant_message="Fixed."),
+        )
+        turn, word, after = [delivery.inbox.item(each) for each in [3, 4, 5]]
+    holding = {
+        "claude": held.get("hookSpecificOutput", {}).get("additionalContext"),
+        "codex": held.get("reason") if held.get("decision") == "block" else None,
+    }[runtime]
+    unresolved = (
+        "2 citations in @3 don't name one passage of the operator's words to you: "
+        "it reached them as you wrote it, shown as written and marked as not found.\n"
+        '<citation said="@2.2[a stray byte]">Nothing in @2.2 reads it; it reads '
+        "@2.1: “a stray byte”.</citation>\n"
+        '<citation said="@2[the]">It reads 2 places in @2, in @2.3 twice: give more '
+        "of the words, so they read one.</citation>\n"
+        "`edit` @3 to name the place you meant, or to drop the citation: the edit's "
+        "answer says what still doesn't resolve."
     )
-    assert continued.recipient == one
-    assert told == (
-        '<review item="5" from="operator" covers="1 2">\n'
-        '<on item="1" kind="note">\n'
-        '<quote part="3.4">A stray byte is replaced.</quote>\n'
-        '<reply id="5.1">Never raised?</reply>\n'
-        "</on>\n"
-        "</review>"
-    )
-    assert settled == [Done(at=clock.now()), Done(at=clock.now())]
+    assert review.number == 2
     assert (
-        asked_again == "Your replies are with the operator: @7.2 on @7.1 (on your @6)."
+        holding
+        == f'<unresolved item="4" from="lup" of="3">\n{unresolved}\n</unresolved>'
     )
-    assert question == Waiting()
+    assert isinstance(word.reason, Unresolved)
+    assert (word.reason.of, word.sender, word.recipient) == (3, party, party)
+    assert [each.said for each in word.reason.citations] == [
+        "@2.2[a stray byte]",
+        "@2[the]",
+    ]
+    assert [each.number for each in listed.answers] == [2]
+    assert (fixed, error) == ("@3 is edited, and before the operator.", False)
+    assert ended == ""
+    assert turn.reason == Message(
+        kind="note",
+        text=answer.replace(
+            "as @2.2[a stray byte] and @2[the] said", "as @2.1[a stray byte] said"
+        ),
+        ending=True,
+        answers=[2],
+    )
+    assert turn.edits == [Edit(at=clock.now(), before=answer)]
+    assert [
+        (
+            each.said,
+            None if each.found is None else (each.found.part.said(), each.found.text),
+        )
+        for each in turn.citations
+    ] == [
+        ("@2.1[Even a stray byte?]", ("2.1", "Even a stray byte?")),
+        ("@2[the reader … parser]", ("2.3", "the reader out of the parser")),
+        ("@2.1[a stray byte]", ("2.1", "a stray byte")),
+    ]
+    assert after.reason == Message(kind="note", text="Fixed.", ending=True)
+    assert notices.raised == []
+
+
+def test_a_tools_answer_says_which_citations_name_no_passage_and_each_is_kept_on_its_item(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A citation in a message sent by a tool is read as the turn's end's are, its call's answer saying at once which name no passage; a part's id alone cites it whole, and one naming nothing of the operator's is the inbox's own citation, left alone."""
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        inbox("send", "one", "Keep the cache.")
+        send(hook, bash("b1"))
+        sent, _ = call(
+            mcp,
+            "send",
+            {
+                "to": "operator",
+                "kind": "note",
+                "text": "On @1, @1.1: kept, @1[the cache]. Not @1[the parser], nor `@1[x]`.",
+            },
+        )
+        kept = delivery.inbox.item(2)
+    assert sent == (
+        "Your message is with the operator, @2.\n\n"
+        "A citation in @2 doesn't name one passage of the operator's words to you: "
+        "it reached them as you wrote it, shown as written and marked as not found.\n"
+        '<citation said="@1[the parser]">Nothing of the operator\'s words to you '
+        "reads it.</citation>\n"
+        "`edit` @2 to name the place you meant, or to drop the citation: the edit's "
+        "answer says what still doesn't resolve."
+    )
+    assert [
+        (each.said, each.start, None if each.found is None else each.found.text)
+        for each in kept.citations
+    ] == [
+        ("@1.1", 7, "Keep the cache."),
+        ("@1[the cache]", 19, "the cache"),
+        ("@1[the parser]", 38, None),
+    ]
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_a_subagents_last_words_after_the_operators_reach_them_as_its_turns_end_on_each_runtime(
+    runtime: str,
+    *,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+) -> None:
+    """A subagent's last words are its parent's, and reach the operator too where the operator's words reached it since it last answered them, as its turn's end: how a subagent they wrote to answers them, on either runtime."""
+    payload = {"claude": claude, "codex": codex}[runtime]
+
+    def calling(call: str) -> str:
+        if runtime == "claude":
+            return bash(call, agent_id="a1")
+        return codex_bash(call, agent="a1")
+
+    host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", runtime)
+        hook = machine.host.launch("one").hook
+        send(hook, payload("SessionStart", source="startup"))
+        send(hook, calling("c0"))
+        host.ask(SendItem(launch="one", text="Which three kinds?", agent="a1"), Shown)
+        send(hook, calling("c1"))
+        send(
+            hook,
+            payload(
+                "SubagentStop",
+                agent_id="a1",
+                stop_hook_active=False,
+                last_assistant_message="Strings, numbers and lists: @1[which three].",
+            ),
+        )
+        send(
+            hook,
+            payload(
+                "SubagentStop",
+                agent_id="b1",
+                stop_hook_active=False,
+                last_assistant_message="Nothing the operator asked.",
+            ),
+        )
+        notes = [
+            (each.sender, each.reason, [c.found is not None for c in each.citations])
+            for each in delivery.inbox.waiting(Operator())
+        ]
+    subagent = Conversation(
+        repository=tmp_path / ".git",
+        runtime=runtime,
+        session={"claude": "s1", "codex": "t1"}[runtime],
+        agent="a1",
+    )
+    assert notes == [
+        (
+            subagent,
+            Message(
+                kind="note",
+                text="Strings, numbers and lists: @1[which three].",
+                ending=True,
+                answers=[1],
+            ),
+            [True],
+        )
+    ]
+
+
+def test_edit_changes_what_an_agent_sent_the_operator_alone_and_puts_it_back_before_them(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """`edit` replaces a passage found once, or the text whole, of an agent's own words to the operator, keeps what it said before, and brings it back before them, a notice raised where its kind raises one; anything else is refused, saying why."""
+    other = tmp_path / "other"
+    other.mkdir()
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        launched(machine, clock, other, "two", "codex")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        hook2, mcp2 = machine.host.launch("two").hook, machine.host.launch("two").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, codex("SessionStart", source="startup"))
+        call(mcp, "blocked", {"problem": "The gate hangs, and the gate hangs again."})
+        call(mcp, "ask", {"question": "Split it?"})
+        call(mcp2, "note", {"remark": "Theirs."})
+        inbox("done", "1")
+        inbox("answer", "2", "--comment", "Yes.")
+
+        def editing(**arguments: JsonValue) -> str:
+            text, _ = call(mcp, "edit", arguments)
+            return text
+
+        refusals = [
+            editing(number=3, new="Mine now."),
+            editing(number=2, new="Split it later?"),
+            editing(number=4, new="No."),
+            editing(number=1, old="gate hangs", new="cache"),
+            editing(number=1, old="nowhere", new="cache"),
+            editing(number=1, new="  "),
+            editing(number=1, old="again", new="again"),
+        ]
+        raised = len(notices.raised)
+        edited = editing(number=1, old="and the gate hangs again", new="on the cache")
+        whole = editing(number=1, new="The gate hangs on the cache.")
+        kept = delivery.inbox.item(1)
+    assert refusals == [
+        "Not edited: @3 is a note from codex session t1: only its sender edits it",
+        "Not edited: @2 is a question the operator answered: `send` what changed",
+        "Not edited: @4 is an answer from the operator: only its sender edits it",
+        (
+            "Not edited: `old` is in @1's text 2 times: give more of it, so it's "
+            "found once"
+        ),
+        (
+            "Not edited: @1's text doesn't hold `old` as written: give a passage of "
+            "it exactly as it stands"
+        ),
+        "Not edited: the edit leaves @1 empty: `withdraw` it instead",
+        "Not edited: the edit leaves @1 as it was",
+    ]
+    assert edited == "@1 is edited, and before the operator."
+    assert whole == "@1 is edited, and before the operator."
+    assert kept.reason == Message(kind="problem", text="The gate hangs on the cache.")
+    assert kept.edits == [
+        Edit(at=clock.now(), before="The gate hangs, and the gate hangs again."),
+        Edit(at=clock.now(), before="The gate hangs, on the cache."),
+    ]
+    assert kept.state == Waiting()
     assert notices.raised[raised:] == [
-        "lup: claude session s1 replied on @6, a question\nMay I?\nlup-dev inbox show 6"
+        (
+            "lup: claude session s1 edited @1, a problem\nThe gate hangs, on the "
+            "cache.\nlup-dev inbox show 1"
+        )
+    ]
+
+
+def test_the_operators_words_have_ids_after_replies_copies_before_kept_so_each_id_keeps_its_meaning(
+    tmp_path: Path,
+) -> None:
+    """A review's messages and remarks, and a message's words, are parts of the operator's item too, which a citation names: numbered after their comments and after any reply copies before kept on the item, so an id a reply was given still names it; an item kept with replies still reads."""
+    party = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    at = datetime(2026, 10, 1, tzinfo=UTC)
+    kept = {
+        "number": 9,
+        "reason": {
+            "reason": "review",
+            "covers": [3],
+            "comments": [{"item": 3, "text": "Why?"}],
+            "letters": [{"to": party.model_dump(mode="json"), "text": "Go on."}],
+        },
+        "sender": {"party": "operator"},
+        "recipient": party.model_dump(mode="json"),
+        "replies": [
+            {"number": 2, "to": "9.1", "text": "Because.", "at": at.isoformat()}
+        ],
+        "made": at.isoformat(),
+    }
+    item = Item.model_validate(kept)
+    fresh = item.model_copy(update={"replies": []})
+    plain = Item(
+        number=10,
+        reason=Message(kind="note", text="Hello."),
+        sender=Operator(),
+        recipient=party,
+        made=at,
+    )
+    assert [(each.id.said(), each.text) for each in spoken(item)] == [
+        ("9.1", "Why?"),
+        ("9.3", "Go on."),
+    ]
+    assert [each.id.said() for each in spoken(fresh)] == ["9.1", "9.2"]
+    assert [(each.id.said(), each.text) for each in spoken(plain)] == [
+        ("10.1", "Hello.")
     ]
 
 
@@ -5279,7 +5432,7 @@ def test_a_turns_end_held_to_tell_an_item_still_puts_its_message_before_the_oper
     assert ended == ""
     assert notes == [
         (2, Message(kind="note", text="Two decisions for you.", ending=True)),
-        (3, Message(kind="note", text="Done now.", ending=True)),
+        (3, Message(kind="note", text="Done now.", ending=True, answers=[1])),
     ]
 
 
@@ -7564,7 +7717,7 @@ def test_the_github_module_s_tools_answer_through_the_server_with_and_without_ar
 def exchanged(
     machine: Layout, clock: FakeClock, tmp_path: Path, records: Subagents
 ) -> Path:
-    """Make an exchange in a launch named `w`, and return its tool socket: session `s0`'s note at 12:00; then at 13:00 session `s1`'s note, its question, and its subagent `explore-auth`'s note; at 14:00 the operator's answer, their review commenting on a passage of the note with a message, `s1`'s reply to the comment by its id, its turn's end and the operator's reply to it, and the subagent's end."""
+    """Make an exchange in a launch named `w`, and return its tool socket: session `s0`'s note at 12:00; then at 13:00 session `s1`'s note, its question, and its subagent `explore-auth`'s note; at 14:00 the operator's answer, their review commenting on a passage of the note with a message, both told to `s1` at a call, its turn's end answering them, citing the comment, and the operator's reply to it, and the subagent's end."""
     launched(machine, clock, tmp_path / "w", "one", "claude")
     hook = machine.host.launch("one").hook
     mcp = machine.host.launch("one").mcp
@@ -7599,10 +7752,11 @@ def exchanged(
         Draft(comments=[comment], letters=[Letter(to=own, text="Carry on.")]),
     )
     sending(machine, clock)
-    reply: dict[str, JsonValue] = {"to": "6.1", "text": "The grammar has twenty."}
-    call(mcp, "reply", {"replies": [reply]})
+    send(hook, bash("b1"))
     ending = claude(
-        "Stop", stop_hook_active=False, last_assistant_message="Done for now."
+        "Stop",
+        stop_hook_active=False,
+        last_assistant_message="The grammar has twenty, @6.1[Why twenty]. Done for now.",
     )
     send(hook, ending)
     inbox("answer", "7", "--comment", "Thanks, rest.")
@@ -7634,9 +7788,9 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
         "claude session s0, last heard 2026-10-01 12:00."
     )
     at, then = "2026-10-01 13:00", "2026-10-01 14:00"
-    told = f"told at {then} (turn's end)"
+    told = f"told at {then} (call)"
     lines = {
-        2: f"@2  {at}  a note from you to the operator, waiting: I assumed UTF-8.",
+        2: f"@2  {at}  a note from you to the operator, done at {then}: I assumed UTF-8.",
         3: (
             f"@3  {at}  a question from you to the operator, answered at {then}, "
             "@5: Which parser?"
@@ -7649,7 +7803,7 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
         6: f"@6  {then}  a review from the operator to you, {told}: Carry on.",
         7: (
             f"@7  {then}  the end of a turn from you to the operator, done at "
-            f"{then}: Done for now."
+            f"{then}: The grammar has twenty, @6.1[Why twenty]. Done for now."
         ),
         8: f"@8  {then}  a note from the operator to you, waiting: Thanks, rest.",
         9: (
@@ -7666,10 +7820,9 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
     assert waiting.splitlines() == [
         several,
         "The exchange of `w` (claude session s1): what still waits, oldest first.",
-        lines[2],
         lines[8],
         lines[9],
-        "Not listed: 4 items no longer waiting, which `every` lists.",
+        "Not listed: 5 items no longer waiting, which `every` lists.",
     ]
     assert below.splitlines() == [
         (
@@ -7715,11 +7868,11 @@ def test_inbox_reads_an_exchange_whole_the_operators_words_under_what_they_answe
         whole = reading(conversation="s1", every=True, whole=True)
         latest = reading(conversation="s1", every=True, whole=True, limit=1)
     at, then = "2026-10-01 13:00", "2026-10-01 14:00"
-    told = f"told at {then} (turn's end)"
+    told = f"told at {then} (call)"
     assert whole == "\n".join(
         [
             "The exchange of `w` (claude session s1): every item, oldest first.",
-            f"@2  {at}  a note from you to the operator, waiting:",
+            f"@2  {at}  a note from you to the operator, done at {then}:",
             '<item item="2" kind="note" from="w">',
             "I assumed UTF-8.",
             "",
@@ -7727,7 +7880,6 @@ def test_inbox_reads_an_exchange_whole_the_operators_words_under_what_they_answe
             f'<review item="6" from="operator" made="{then}">',
             '<quote part="2.2">The parser reads twenty kinds.</quote>',
             '<reply id="6.1">Why twenty?</reply>',
-            '<reply id="6.2" to="6.1" from="w">The grammar has twenty.</reply>',
             "</review>",
             "</item>",
             "",
@@ -7753,13 +7905,13 @@ def test_inbox_reads_an_exchange_whole_the_operators_words_under_what_they_answe
             "",
             f"@6  {then}  a review from the operator to you, {told}:",
             '<review item="6" from="operator" covers="2">',
-            "<message>Carry on.</message>",
+            '<message id="6.2">Carry on.</message>',
             "What it says on @2 is told under it.",
             "</review>",
             "",
             f"@7  {then}  the end of a turn from you to the operator, done at {then}:",
-            '<item item="7" kind="turn\'s end" from="w">',
-            "Done for now.",
+            '<item item="7" kind="turn\'s end" from="w" answers="5 6">',
+            "The grammar has twenty, @6.1[Why twenty]. Done for now.",
             f'<message item="8" from="operator" made="{then}">',
             '<comment id="8.1">Thanks, rest.</comment>',
             "</message>",
@@ -7800,7 +7952,7 @@ def test_lup_dev_inbox_narrows_the_operators_own_exchange_as_the_tool_reads(
         questions = inbox("--kind", "question", "--every")
         whole = inbox("--conversation", "s1", "--whole", "--every", "--limit", "2")
         unknown = runner.invoke(cli.app, ["inbox", "--kind", "nonsense"])
-    assert [line.split()[0] for line in plain.splitlines()] == ["@1", "@2", "@4"]
+    assert [line.split()[0] for line in plain.splitlines()] == ["@1", "@4"]
     assert waiting.splitlines() == [
         (
             "`w` names 2 conversations; this reads the one last heard, claude "
@@ -7808,35 +7960,32 @@ def test_lup_dev_inbox_narrows_the_operators_own_exchange_as_the_tool_reads(
             "reads by id: claude session s0, last heard 2026-10-01 12:00."
         ),
         "The exchange of `w` (claude session s1): what still waits, oldest first.",
-        "@2  2026-10-01 13:00  a note from `w` to you, waiting: I assumed UTF-8.",
-        "Not listed: 5 items not waiting for you, which `--every` lists.",
+        "Nothing waits for you.",
+        "Not listed: 6 items not waiting for you, which `--every` lists.",
     ]
     s0, s1 = "`w` (claude session s0)", "`w` (claude session s1)"
     sub = "`w/explore-auth` (subagent a1 of claude session s1)"
     assert [line.partition("  2026-10-01 ")[2] for line in every.splitlines()] == [
         f"12:00  a note from {s0} to you, waiting: An earlier session's note.",
-        f"13:00  a note from {s1} to you, waiting: I assumed UTF-8.",
+        f"13:00  a note from {s1} to you, done at 2026-10-01 14:00: I assumed UTF-8.",
         (
             f"13:00  a question from {s1} to you, answered at 2026-10-01 14:00, "
             "@5: Which parser?"
         ),
         f"13:00  a note from {sub} to you, waiting: Found the token.",
+        (f"14:00  an answer from you to {s1}, told at 2026-10-01 14:00 (call): Go."),
         (
-            f"14:00  an answer from you to {s1}, told at 2026-10-01 14:00 (turn's "
-            "end): Go."
-        ),
-        (
-            f"14:00  a review from you to {s1}, told at 2026-10-01 14:00 (turn's "
-            "end): Carry on."
+            f"14:00  a review from you to {s1}, told at 2026-10-01 14:00 (call): "
+            "Carry on."
         ),
         (
             f"14:00  the end of a turn from {s1} to you, done at 2026-10-01 14:00: "
-            "Done for now."
+            "The grammar has twenty, @6.1[Why twenty]. Done for now."
         ),
         f"14:00  a note from you to {s1}, waiting: Thanks, rest.",
     ]
     assert [line.split()[0] for line in questions.splitlines() if line] == ["@3"]
-    assert '<item item="7" kind="turn\'s end" from="w">' in whole
+    assert '<item item="7" kind="turn\'s end" from="w" answers="5 6">' in whole
     assert "a `--limit` of 6 lists them all." in whole
     assert unknown.exit_code == 2
     assert "--kind takes one of turn's end, note, problem" in unknown.output

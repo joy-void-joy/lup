@@ -141,6 +141,11 @@ class Message(Model):
     """The conversation it was sent to, where it's the operator's copy of a
     message one conversation sent another (`send`), which they read as news
     whatever its kind; none where its recipient is whom it was sent to."""
+    answers: list[int] = []
+    """For a turn's last words, the operator's items told to the conversation
+    since its last such words, which they answer: a review, a message, an
+    answer. The dashboard shows their words above the agent's (`docs/inbox.md`,
+    *A turn's last message*)."""
 
 
 def labelled(opening: str, parts: dict[str, str]) -> str:
@@ -295,6 +300,55 @@ class Ended(Model):
         It ended its turn. Its last message reaches you from your runtime.
         """
         return self.heading if self.passed is None else f"{self.heading}\n{self.passed}"
+
+
+class Place(Model):
+    """A passage of the operator's words: the part of their item it's in, where in that part's text, and the passage itself."""
+
+    part: PartId
+    start: int
+    """Where it starts in the part's text, counted in characters."""
+    end: int
+    """Where it ends, after its last character."""
+    text: str
+
+
+class Citation(Model):
+    """A citation of the operator's words in an item a conversation sent: where it's written, what it names, and the passage it found, or the places it might mean where it found none or several (`inbox/citations.py`).
+
+    Written `@820.9[first words … last words]`, `@820[…]` for any part of item
+    820, or `@820.9` for the part whole (`docs/inbox.md`, *Citing the
+    operator's words*).
+    """
+
+    said: str
+    """The citation as it's written: `@820.9[first words … last words]`."""
+    start: int
+    """Where it's written in the item's text, its `@`, counted in characters."""
+    end: int
+    """Where it ends there, after its `]`, or its id's last digit."""
+    item: int
+    part: int | None = None
+    """The part named; none where it names the item alone."""
+    words: str | None = None
+    """What's between its brackets, as written; none for an id alone."""
+    found: Place | None = None
+    """The passage it names, where it names one; none where it names none, or
+    several."""
+    candidates: list[Place] = []
+    """Where it found none, the places of the operator's words its words read
+    elsewhere; where it found several, each of them."""
+
+
+class Unresolved(Model):
+    """lup's word to a conversation that citations in an item it sent the operator named no passage, or several: told at once, holding its turn's end once, so it can fix them with `edit` (`docs/inbox.md`, *Citing the operator's words*)."""
+
+    reason: Literal["unresolved"] = "unresolved"
+    of: int
+    """The item the citations are in."""
+    citations: list[Citation]
+    """Those that named no passage, or several, each with the places it might
+    mean, as the item kept them then."""
 
 
 class Question(Model):
@@ -454,9 +508,9 @@ class Comment(Model):
     """The passage it's on; none for a comment on the item whole. On a reply
     (`on`), a passage of that reply's text, its offsets counted there."""
     on: PartId | None = None
-    """The reply of the agent's it answers, by its id, where it continues a
-    thread (`docs/inbox.md`, *Replying by id*); none for a comment on the
-    item's own text."""
+    """The reply of the agent's it answers, by its id, where it's a comment
+    copies before kept on a reply made with `reply` (`Reply`); none for a
+    comment on the item's own text, as the dashboard writes every one."""
     text: str
 
 
@@ -520,6 +574,7 @@ type Reason = Annotated[
     | HowItWent
     | Stop
     | Ended
+    | Unresolved
     | Question
     | Answer
     | Approval
@@ -732,12 +787,12 @@ class Decided(Model):
 
 
 class Superseded(Model):
-    """An approval of a host zone a later approval of the same repository replaced, the integration branch's tip having moved; or a hold at landing a later landing's hold on the same file replaced."""
+    """An approval of a host zone a later approval of the same repository replaced, the integration branch's tip having moved; a hold at landing a later landing's hold on the same file replaced; or lup's word on citations that didn't resolve, its item edited before it was told, its citations read again."""
 
     state: Literal["superseded"] = "superseded"
     at: datetime
     by: int
-    """The approval, or the hold, replacing it."""
+    """The approval, or the hold, replacing it; the item edited."""
 
 
 class Withdrawn(Model):
@@ -771,7 +826,7 @@ def ranked(reason: Reason) -> Rank:
     | Rank | Kinds | Order | Notice |
     |---|---|---|---|
     | waiting on you | a question, a held change, an approval, a problem (`blocked`), a disagreement, a question sent as a message | first | yes |
-    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice, a subagent's end, the operator's copy of a message between conversations | next | no |
+    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice, a subagent's end, lup's word on citations that didn't resolve, the operator's copy of a message between conversations | next | no |
     | flag | a write that landed flagged | last | no |
 
     A message to the operator ranks by its kind, whichever tool sent it: a note
@@ -779,7 +834,8 @@ def ranked(reason: Reason) -> Rank:
     question, asked. A copy of one a conversation sent another is news of any
     kind, since it waits on that other, not on them. The operator's own items,
     an answer and a review, go to agents, so neither the review nor a notice
-    reads theirs; nor a subagent's end, which goes to its parent.
+    reads theirs; nor a subagent's end, which goes to its parent, nor lup's word
+    on citations, which goes to the conversation that wrote them.
 
     >>> ranked(Stop(why="Done."))
     Rank(name='news', order=1, notifies=False)
@@ -794,6 +850,7 @@ def ranked(reason: Reason) -> Rank:
             | HowItWent()
             | Stop()
             | Ended()
+            | Unresolved()
         ):
             return Rank(name="news", order=1, notifies=False)
         case Flagged():
@@ -803,15 +860,23 @@ def ranked(reason: Reason) -> Rank:
 
 
 class Reply(Model):
-    """One reply of an agent's, kept on the operator's item it answers, under the part it answers (`docs/inbox.md`, *Replying by id*)."""
+    """One reply of an agent's to a part of the operator's item, as copies before kept them, when an agent answered the operator's comments one by one with `reply`: still read, and shown as the agent's words under the operator's (`docs/dashboard.md`, *The review*)."""
 
     number: int
     """Its own place among the item's parts, after the operator's own, so it's
-    cited `@546.6` and the operator's next comment can be on it."""
+    cited `@546.6`; the operator's words numbered since come after it
+    (`inbox/threads.py`, `spoken`)."""
     to: PartId
     """The part of the item it answers: a comment or a reply of the operator's."""
     text: str
     at: datetime
+
+
+class Edit(Model):
+    """One edit its sender made of an item's text (`edit`): the text whole before it, and when."""
+
+    at: datetime
+    before: str
 
 
 class Item(Model):
@@ -823,10 +888,16 @@ class Item(Model):
     recipient: Party
     """Whose inbox it's in, who's told it."""
     replies: list[Reply] = []
-    """The replies its recipient made to its parts, in the order they came:
-    the threads under the operator's comments, which the dashboard shows there
-    and the operator's next comments continue (`docs/inbox.md`, *Replying by
-    id*). Only an item of the operator's takes any."""
+    """The replies its recipient made to its parts, kept from before agents
+    answered in their turn's last words: every value a stored model once
+    accepted stays read. Only an item of the operator's has any."""
+    citations: list[Citation] = []
+    """The citations of the operator's words in its text, each with the passage
+    it found or the places it might mean, where a conversation sent it the
+    operator (`inbox/citations.py`); read again at each edit."""
+    edits: list[Edit] = []
+    """Each edit its sender made of its text, oldest first (`edit`): the
+    dashboard says it was edited and shows what changed."""
     addressed: Conversation | None = None
     """Whom it was for, where it was passed on from a conversation that had
     ended; none where it wasn't."""

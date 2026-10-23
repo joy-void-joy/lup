@@ -52,17 +52,22 @@ answers. What the operator said on an agent's item is `<on item kind>`: a
 passage they quoted as `<quote part>`, cut to its first line where the part's
 id finds the rest (`inbox/threads.py`), with their `<reply id>` under it; a
 comment on the whole item as `<comment id>` after the item's first line as
-`<opening>`; each id the part of the operator's item the agent's `reply`
-answers (`replied`). Items only marked read are one `<read items>`. A review's
-words on other agents' items and to other agents sit in its `<context>`, each
-other item named and never repeated. The doorbell and an announcement are tags
-too. The dashboard shows what's inside an item's tag (`words`), as its agent
-reads it.
+`<opening>`; their message to the agent and their remarks in its drawers each
+with its id too, which a citation of their words names (`inbox/citations.py`).
+Items only marked read are one `<read items>`. A review's words on other
+agents' items and to other agents sit in its `<context>`, each other item named
+and never repeated. The doorbell, an announcement and lup's word on citations
+that didn't resolve (`<unresolved>`) are tags too. The dashboard shows what's
+inside an item's tag (`words`), as its agent reads it.
 
-**A reply by id** (`replied`) is kept on the operator's item it answers, after
-their parts (`Item.replies`), never an item of its own; the agent's item the
-part is on goes back before the operator, where the review shows the thread
-under their comment and their next comment continues it (`Comment.on`).
+**A turn's end** (`concluded`, `ended_saying`) is the agent's answer: its last
+words, put before the operator with the operator's items told to it since its
+last turn's end (`answering`), which the dashboard shows above them; a
+subagent's too where the operator's words reached it, since its last words are
+otherwise its parent's alone (`subagent_answered`). Its citations of the
+operator's words are read as any of an agent's words to them are (`cited`);
+where one names no passage, the conversation is told so, an item that holds its
+turn's end once, so it can `edit` what it sent (`edited`).
 
 **An item for a conversation that has ended** goes to its session's main
 conversation, saying whose it was: one made for it then (`Inbox.made`), and
@@ -73,7 +78,7 @@ conversation that spawned it, or to one of its own subagents) is an item for
 its recipient, told as the operator's are: at its next call, its turn's end,
 by `wait_inbox`, or waking its idle session where it's a main conversation.
 The operator reads a copy, news whatever its kind (`Message.to`), from its
-sender, which a review's comment or a reply answers as any message's.
+sender, which a review's comment answers as any message's.
 
 **A subagent's end, and what it says of its work,** reach the conversation that
 spawned it (`Whereabouts.parent`): which subagent ended and how, with its last
@@ -121,6 +126,8 @@ from lup_dev.clock import Clock
 from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
 from lup_dev.host.names import Names
 from lup_dev.host.pushes import Pushes
+from lup_dev.inbox.citations import failing, plainly, resolved, unresolved
+from lup_dev.inbox.edits import replaced
 from lup_dev.inbox.ends import holding
 from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.store import (
@@ -134,6 +141,7 @@ from lup_dev.inbox.store import (
     Decided,
     Done,
     Draft,
+    Edit,
     Ended,
     Flagged,
     Friction,
@@ -151,12 +159,12 @@ from lup_dev.inbox.store import (
     Quoted,
     Reason,
     Remark,
-    Reply,
     Review,
     Ruling,
     Stop,
     Superseded,
     Told,
+    Unresolved,
     Verdict,
     Waiting,
     Whereabouts,
@@ -166,13 +174,12 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.tags import Tag, inside
 from lup_dev.inbox.threads import (
     Anchor,
-    Replying,
     addressed_to,
     anchors,
-    answerable,
     cue,
     located,
     parts_of,
+    spoken,
 )
 from lup_dev.layout import HostLayout
 
@@ -220,6 +227,8 @@ def what(item: Item) -> str:
             return "a subagent stopped"
         case Ended():
             return "the end of a subagent's turn"
+        case Unresolved():
+            return "lup's word on citations that didn't resolve"
         case Question():
             return "a question"
         case Answer():
@@ -251,6 +260,8 @@ def opening(item: Item) -> str:
             | Flagged(text=text)
         ):
             said = text
+        case Unresolved(of=of, citations=citations):
+            said = plainly(citations, of)
         case Answer(comment=comment):
             said = comment
         case Review(letters=letters, comments=comments):
@@ -278,6 +289,8 @@ def body(item: Item) -> str:
             | Flagged(text=text)
         ):
             return text
+        case Unresolved(of=of, citations=citations):
+            return plainly(citations, of)
         case Answer(comment=comment):
             return comment
         case Review(letters=letters, comments=comments):
@@ -344,6 +357,7 @@ type ItemKind = Literal[
     "how it went",
     "stop",
     "ended",
+    "unresolved",
     "question",
     "answer",
     "approval",
@@ -380,6 +394,8 @@ def kind(item: Item) -> ItemKind:
             return "stop"
         case Ended():
             return "ended"
+        case Unresolved():
+            return "unresolved"
         case Question():
             return "question"
         case Answer():
@@ -511,23 +527,6 @@ def remarked(item: Item, comment: Comment, anchor: Anchor | None) -> list[Tag | 
     return [quoted, Tag(name="reply", attributes=numbered, parts=[comment.text])]
 
 
-def replied_to(replies: list[Reply], anchor: Anchor) -> str:
-    """Say what a reply answers, for the agent that made it: the operator's part, and the item of the agent's it's on where it's on one.
-
-    >>> from datetime import UTC, datetime
-    >>> from lup_dev.inbox.parts import PartId
-    >>> anchor = Anchor(id=PartId(item=546, part=2), text="Why?", item=414)
-    >>> reply = Reply(number=6, to=anchor.id, text="Because.", at=datetime(2026, 1, 1, tzinfo=UTC))
-    >>> replied_to([reply], anchor)
-    '@546.6 on @546.2 (on your @414)'
-    """
-    where = "" if anchor.item is None else f" (on your {cited(anchor.item)})"
-    return ", ".join(
-        f"{cited(each.to.item)}.{each.number} on {each.to.cited()}{where}"
-        for each in replies
-    )
-
-
 def changed_since(code: Quoted) -> str | None:
     """Say which of the lines `code` quotes have changed since the comment was written on them, as the file stands in its worktree: their numbers in the version quoted, `all` where the file is gone or isn't text; none where each is still there.
 
@@ -557,7 +556,7 @@ def changed_since(code: Quoted) -> str | None:
 
 
 def remarking(remark: Remark, attributes: dict[str, str]) -> Tag:
-    """Tag one of the operator's remarks in an agent's drawer, as a review tells it: its passage's quote, saying on code which quoted lines have changed since (`changed_since`), then their reply; `attributes` say whose it is where it's told as context."""
+    """Tag one of the operator's remarks in an agent's drawer, as a review tells it: its passage's quote, saying on code which quoted lines have changed since (`changed_since`), then their reply; `attributes` say whose it is where it's told as context, or its id where it's the reader's own."""
     since = None if remark.code is None else changed_since(remark.code)
     changed = {} if since is None else {"changed": since}
     return Tag(
@@ -645,6 +644,49 @@ def answered_hold(item: Item, did: str, comment: str) -> str:
         f"the landing of {landing.tip} on `{onto}`."
     )
     return f"{said} Their comment:\n{comment}" if comment.strip() else said
+
+
+def editable(item: Item, party: Conversation) -> str:
+    """Return the text of `item` its sender `party` may edit (`Delivery.edited`): its own words to the operator, a message's, a question's, a friction's, how it went's or a stop's; refuse any other, saying why."""
+    match item:
+        case Item(sender=sender) if sender != party:
+            message = f"{cited(item.number)} is {what(item)} from {who(sender)}: only its sender edits it"
+            raise InboxError(message)
+        case Item(reason=Message(to=Conversation() as to)):
+            message = (
+                f"{cited(item.number)} is the operator's copy of your message to "
+                f"{who(to)}, which read it as it was: `send` a correction"
+            )
+            raise InboxError(message)
+        case Item(state=Withdrawn()):
+            message = f"{cited(item.number)} is withdrawn: send anew what still holds"
+            raise InboxError(message)
+        case Item(reason=Question(), state=Answered()):
+            message = f"{cited(item.number)} is a question the operator answered: `send` what changed"
+            raise InboxError(message)
+        case Item(
+            recipient=Operator(),
+            reason=Message(text=text)
+            | Question(text=text)
+            | Friction(text=text)
+            | HowItWent(text=text)
+            | Stop(text=text),
+        ):
+            return text
+        case _:
+            message = f"{cited(item.number)} is {what(item)}, which isn't your words to the operator: it isn't edited"
+            raise InboxError(message)
+
+
+def rewritten(reason: Reason, text: str) -> Reason:
+    """Return `reason` with `text` for its words, where it's one an edit takes (`editable`); as it is for any other."""
+    match reason:
+        case Message() | Question() | Friction() | HowItWent():
+            return reason.model_copy(update={"text": text})
+        case Stop():
+            return reason.model_copy(update={"why": text})
+        case _:
+            return reason
 
 
 class Dispatched(Model):
@@ -809,7 +851,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         At its turn's end, what waits holds the end once (`holding`), but for
         quiet items (`Item.quiet`), and a call it holds learns its turn ended;
         an end let through leaves its main conversation idle, and a subagent's
-        ended (`ended`). A subagent stopped, and a turn that failed on an error
+        ended (`ended`), its last words put before the operator first where
+        they answer the operator's (`subagent_answered`). A subagent stopped, and a turn that failed on an error
         from the model's API, the session's or a subagent's, are held for
         nothing, since nothing would read it. A turn's start whose prompt
         carries the token of what was pushed to it takes the push.
@@ -827,6 +870,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case "turn-ended" | "conversation-ended":
                 for each in presence.held:
                     each.ended = True
+                if heard.event == "conversation-ended":
+                    await self.subagent_answered(party, launch, heard)
                 fresh = [
                     item
                     for item in self.tellable(party)
@@ -861,7 +906,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     async def concluded(
         self, launch: Register, conversation: Caller, heard: Heard
     ) -> None:
-        """Put a session's turn's end in the operator's inbox, as a note from it that lup made (`Message.ending`): its last message, so they read what it ended its turn saying there without it sending it again; or where its turn ended on an error from the model's API, that, in lup's words, with the error's kind and its runtime's text for it. One end makes one note at most, and one saying neither makes none.
+        """Put a session's turn's end in the operator's inbox, as a note from it that lup made (`Message.ending`): its last message, so they read what it ended its turn saying there without it sending it again, with the operator's items it answers (`answering`); or where its turn ended on an error from the model's API, that, in lup's words, with the error's kind and its runtime's text for it. One end makes one note at most, and one saying neither makes none.
 
         An end held to tell what waits makes its note too, as its message
         stands: the turn goes on to another end, with words of its own. A failed
@@ -878,12 +923,91 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 text = said
             case _:
                 return
-        await self.posted(
-            Message(kind="note", text=text, ending=True),
-            self.party(launch, conversation),
+        await self.ended_saying(self.party(launch, conversation), text, launch.worktree)
+
+    async def ended_saying(
+        self, party: Conversation, text: str, worktree: Path | None
+    ) -> Item:
+        """Put `party`'s last words of a turn, `text`, before the operator as its turn's end, with the operator's items it answers (`answering`) and its citations of their words read (`cited`); where some name no passage, tell `party` so, which holds its turn's end once (`docs/inbox.md`, *Citing the operator's words*)."""
+        answers = self.answering(party)
+        note = await self.posted(
+            Message(kind="note", text=text, ending=True, answers=answers),
+            party,
             Operator(),
-            launch.worktree,
+            worktree,
         )
+        missed = failing(note.citations)
+        if missed:
+            await self.posted(
+                Unresolved(of=note.number, citations=missed), party, party, worktree
+            )
+        return note
+
+    async def subagent_answered(
+        self, party: Conversation, launch: Register, heard: Heard
+    ) -> None:
+        """Put a subagent's last words before the operator as its turn's end, where the operator's words were told to it since it last did (`answering`): what answers them, which its parent alone would read otherwise. None for a subagent stopped or failing, or one leaving no words."""
+        said = heard.said
+        if party.agent is None or heard.stopped or heard.failed is not None:
+            return
+        if said is None or not said.strip() or not self.answering(party):
+            return
+        await self.ended_saying(party, said, launch.worktree)
+
+    def answering(self, party: Conversation) -> list[int]:
+        """Return the operator's items told to `party` since its last turn's end that lup put before the operator, and not among those that end answers: what its next turn's end answers, oldest first."""
+        ordered = [self.inbox.items[number] for number in sorted(self.inbox.items)]
+        last = next(
+            (
+                each
+                for each in reversed(ordered)
+                if each.sender == party
+                and isinstance(each.reason, Message)
+                and each.reason.ending
+            ),
+            None,
+        )
+        since = None if last is None else last.made
+        before = (
+            []
+            if last is None or not isinstance(last.reason, Message)
+            else last.reason.answers
+        )
+        return [
+            each.number
+            for each in ordered
+            if addressed_to(each, party)
+            and isinstance(each.state, Told)
+            and (since is None or each.state.at >= since)
+            and each.number not in before
+        ]
+
+    def said_to(self, party: Conversation) -> list[Anchor]:
+        """Return every part of the operator's words addressed to `party`, oldest first: what its citations of their words are read against (`spoken`)."""
+        ordered = [self.inbox.items[number] for number in sorted(self.inbox.items)]
+        return [
+            anchor
+            for item in ordered
+            if addressed_to(item, party)
+            for anchor in spoken(item)
+        ]
+
+    def cited(self, item: Item) -> Item:
+        """Read the citations of the operator's words in `item`, where it's in a conversation's own words to the operator, and keep them on it (`inbox/citations.py`); as it is where it's none, or cites nothing."""
+        match item:
+            case Item(
+                sender=Conversation() as sender,
+                recipient=Operator(),
+                reason=Message() | Friction() | HowItWent() | Stop() | Question(),
+            ):
+                citations = resolved(body(item), self.said_to(sender))
+                if citations or item.citations:
+                    return self.inbox.kept(
+                        item.model_copy(update={"citations": citations})
+                    )
+                return item
+            case _:
+                return item
 
     @override
     def returned(self, posted: Posted) -> None:
@@ -1086,7 +1210,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     parts=self.reviewing(
                         review,
                         item.addressed or item.recipient,
-                        parts,
+                        spoken(item),
                         under=placed,
                         context=context,
                     ),
@@ -1097,6 +1221,12 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     name="ended",
                     attributes={**head, "name": name},
                     parts=[heading, *said],
+                )
+            case Unresolved(of=of, citations=citations):
+                return Tag(
+                    name="unresolved",
+                    attributes={"item": str(item.number), "from": "lup", "of": str(of)},
+                    parts=unresolved(citations, of),
                 )
             case (
                 Friction()
@@ -1122,7 +1252,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         under: list[int] | None = None,
         context: bool = True,
     ) -> list[Tag | str]:
-        """Tag a review for the conversation it's for: the operator's message to it, their remarks in its drawers (`remarking`) and its own items they commented on first, each comment with the id of its part among `parts`, the review's (`remarked`); its items read with nothing to add in one line; then, in its context, the other agents' items they commented on, each named and never repeated, and their messages and remarks to other agents, each saying whom it was for.
+        """Tag a review for the conversation it's for: the operator's message to it, their remarks in its drawers (`remarking`) and its own items they commented on first, each with the id of its part among `parts`, the review's (`spoken`; `remarked`); its items read with nothing to add in one line; then, in its context, the other agents' items they commented on, each named and never repeated, and their messages and remarks to other agents, each saying whom it was for.
 
         Its comments on each of its own items among `under` are told under that
         item instead, where an exchange is read whole, a line saying so; its
@@ -1132,12 +1262,22 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         items = [self.inbox.item(each) for each in review.covers]
         commented = [each.item for each in review.comments]
         addressed = list(dict.fromkeys(each.to for each in review.letters))
+        on_items = parts[: len(review.comments)]
+        rest = [each.id.said() for each in parts[len(review.comments) :]]
+
+        def numbered(at: int) -> dict[str, str]:
+            """Return the id of the review's `at`th message or remark, its messages first, as an attribute; none where `parts` gives it none."""
+            return {"id": rest[at]} if at < len(rest) else {}
 
         def written(to: Conversation) -> str:
             return "\n\n".join(each.text for each in review.letters if each.to == to)
 
-        def mine(to: Conversation) -> Tag:
-            return Tag(name="message", parts=[written(to)])
+        def mine(to: Conversation) -> list[Tag]:
+            return [
+                Tag(name="message", attributes=numbered(at), parts=[each.text])
+                for at, each in enumerate(review.letters)
+                if each.to == to
+            ]
 
         def placed(to: Conversation) -> dict[str, str]:
             place = self.inbox.whereabouts.get(to.key())
@@ -1152,9 +1292,13 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         def remarks_to(to: Conversation) -> list[Tag]:
             theirs = to != recipient
+            after = len(review.letters)
             return [
-                remarking(each, {"to": who(to), **placed(to)} if theirs else {})
-                for each in review.remarks
+                remarking(
+                    each,
+                    {"to": who(to), **placed(to)} if theirs else numbered(after + at),
+                )
+                for at, each in enumerate(review.remarks)
                 if each.to == to
             ]
 
@@ -1163,7 +1307,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         def remarks(item: Item, *, own: bool) -> list[Tag | str]:
             return [
                 part
-                for each, anchor in zip(review.comments, parts, strict=True)
+                for each, anchor in zip(review.comments, on_items, strict=True)
                 if each.item == item.number
                 for part in remarked(item, each, anchor if own else None)
             ]
@@ -1191,7 +1335,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             if item.sender == recipient and item.number not in commented
         ]
         own: list[Tag | str] = [
-            *(mine(to) for to in addressed if to == recipient),
+            *(tag for to in addressed if to == recipient for tag in mine(to)),
             *(tag for to in remarked_to if to == recipient for tag in remarks_to(to)),
             *(
                 yours(item)
@@ -1230,63 +1374,15 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
         return [*own, *moved, *around]
 
-    async def replied_by(
-        self, party: Conversation, replies: list[Replying]
-    ) -> list[Reply]:
-        """Keep each of `replies` on the operator's item it answers, from `party`, and return them as kept, each numbered after the item's parts (`threaded`); put each item of the agent's a reply is on back before the operator, so the review shows the thread (`reopened`).
-
-        Each reply's part is checked first (`answerable`), so a call with one
-        wrong id keeps nothing: refused where an id names no item, an item
-        that isn't the operator's words to `party`, a comment on another
-        agent's item, or one of the agent's own replies, naming what it may
-        answer. A reply on a passage of the agent's conversation reopens
-        nothing: it's shown where the conversation is read.
-        """
-        anchored = [self.anchored(party, each) for each in replies]
-        at = self.clock.now()
-        kept = [self.threaded(each, at) for each in replies]
-        for anchor in anchored:
-            if anchor.item is not None:
-                await self.reopened(party, anchor.item)
-        return kept
-
-    def threaded(self, replying: Replying, at: datetime) -> Reply:
-        """Keep `replying` on the item it answers, numbered after the item's parts and the replies before it, and return it."""
-        item = self.inbox.item(replying.to.item)
-        reply = Reply(
-            number=len(anchors(item)) + len(item.replies) + 1,
-            to=replying.to,
-            text=replying.text,
-            at=at,
-        )
-        self.inbox.kept(item.model_copy(update={"replies": [*item.replies, reply]}))
-        return reply
-
-    def anchored(self, party: Conversation, replying: Replying) -> Anchor:
-        """Return the part `replying` answers, where `party` may answer it; raise `InboxError` saying why not."""
-        item = self.inbox.item(replying.to.item)
-        if not addressed_to(item, party):
-            message = (
-                f"{cited(item.number)} is {what(item)} from {who(item.sender)} to "
-                f"{who(item.recipient)}, not the operator's words to you: `reply` "
-                "answers a part of a review, a message or an answer sent to you"
-            )
-            raise InboxError(message)
-        senders = [item.recipient, item.addressed]
-        sent = [
-            each.number for each in self.inbox.items.values() if each.sender in senders
-        ]
-        return answerable(item, replying.to, sent)
-
     async def reopened(self, party: Conversation, number: int) -> None:
-        """Put item `number` of the agent's back before the operator, where it had left their list: waiting again, with a notice where its kind raises one, saying `party` replied on it."""
+        """Put item `number` of the agent's back before the operator, where it had left their list: waiting again, with a notice where its kind raises one, saying `party` edited it."""
         item = self.inbox.item(number)
         if item.recipient != Operator() or isinstance(item.state, Waiting):
             return
         reopened = self.inbox.kept(item.model_copy(update={"state": Waiting()}))
         if not reopened.rank.notifies:
             return
-        summary = f"lup: {who(party)} replied on {cited(number)}, {what(item)}"
+        summary = f"lup: {who(party)} edited {cited(number)}, {what(item)}"
         await self.notices.notify(
             summary, f"{opening(item)}\nlup-dev inbox show {number}"
         )
@@ -1575,8 +1671,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         call: str | None = None,
         quiet: bool = False,
     ) -> Item:
-        """Make an item and deliver it (`delivered`); `call` is the runtime's id for the agent's call that made it, where one did, and `quiet` says it waits for a call (`Item.quiet`)."""
-        item = self.inbox.made(
+        """Make an item, its citations of the operator's words read where it's a conversation's own words to them (`cited`), and deliver it (`delivered`); `call` is the runtime's id for the agent's call that made it, where one did, and `quiet` says it waits for a call (`Item.quiet`)."""
+        made = self.inbox.made(
             reason,
             sender,
             recipient,
@@ -1585,6 +1681,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             call=call,
             quiet=quiet,
         )
+        item = self.cited(made)
         await self.delivered(item)
         return item
 
@@ -1941,6 +2038,44 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     f"{standing(item)}"
                 )
                 raise InboxError(message)
+
+    async def edited(
+        self, number: int, party: Conversation, old: str | None, new: str
+    ) -> Item:
+        """Edit item `number` for `party`, who sent it the operator: `old`, a passage of its text found there once, replaced by `new`; or, with no `old`, its text whole replaced by `new`. Keep the text before beside it (`Item.edits`), read its citations again (`cited`), take back lup's word on those that didn't resolve where it still waits, and put it back before the operator where it had left their list (`reopened`).
+
+        Refused where it isn't `party`'s words to the operator (another's, lup's
+        own, or a copy of a message to a conversation, which that conversation
+        read as it was), where it's a question answered or an item withdrawn,
+        where `old` isn't in its text once, or the edit changes nothing or
+        leaves it empty.
+        """
+        item = self.inbox.item(number)
+        text = editable(item, party)
+        after = new if old is None else replaced(text, old, new, number)
+        if not after.strip():
+            message = f"the edit leaves {cited(number)} empty: `withdraw` it instead"
+            raise InboxError(message)
+        if after == text:
+            message = f"the edit leaves {cited(number)} as it was"
+            raise InboxError(message)
+        now = self.clock.now()
+        changed = self.inbox.kept(
+            item.model_copy(
+                update={
+                    "reason": rewritten(item.reason, after),
+                    "edits": [*item.edits, Edit(at=now, before=text)],
+                }
+            )
+        )
+        for each in self.inbox.waiting(party):
+            if isinstance(each.reason, Unresolved) and each.reason.of == number:
+                taken = Superseded(at=now, by=number)
+                self.inbox.kept(each.model_copy(update={"state": taken}))
+        result = self.cited(changed)
+        await self.reopened(party, number)
+        self.say(f"{cited(number)}, {what(item)}, was edited by its sender")
+        return self.inbox.item(result.number)
 
     async def sent(
         self,

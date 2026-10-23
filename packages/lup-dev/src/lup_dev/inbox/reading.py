@@ -14,9 +14,10 @@ what's left out said with what reads it), and further:
 - **the kinds** of item (`kinds`), as a tag's `kind` names them;
 - **whole** (`whole`): each item as its sender wrote it, or as it was told to
   whom it was for. The operator's words on a conversation's item are told under
-  it, each with the conversation's replies to them, so an exchange reads as one
-  thread, and their item says so where it's listed too; a review's context, the
-  operator's words to others, is left out.
+  it, with any reply copies before kept on them, and a turn's end says which of
+  their items it answers, so an exchange reads as one thread; their item says
+  so where it's listed too, and a review's context, the operator's words to
+  others, is left out.
 
 Waiting items alone are listed unless `every` is asked, and what that leaves out
 is counted too, with the parameter that reads it.
@@ -100,9 +101,9 @@ class Narrowing(Span):
         description=(
             "Each item whole, rather than a line: as its sender wrote it, or as it "
             "was told to whom it was for. The operator's words on a "
-            "conversation's item come under it, each with the conversation's "
-            "replies to them, so an exchange reads as one thread; a review's "
-            "words to other agents are left out."
+            "conversation's item come under it, and a turn's end says which of "
+            "their items it answers, so an exchange reads as one thread; a "
+            "review's words to other agents are left out."
         ),
     )
     every: bool = Field(
@@ -303,16 +304,22 @@ class Reader(Model, arbitrary_types_allowed=True):
     def whole(
         self, item: Item, placed: list[int], items: list[Item], *, naming: Naming
     ) -> str:
-        """Say an item whole under its heading: a conversation's as it wrote it, the operator's words on it and its replies to them under it; any other's as it was told to whom it was for, what it says on the items `placed` told under them, and a review's context left out."""
+        """Say an item whole under its heading: a conversation's as it wrote it, saying which of the operator's items a turn's end answers, the operator's words on it under it, with any reply copies before kept on them; any other's as it was told to whom it was for, what it says on the items `placed` told under them, and a review's context left out."""
         heading = self.headed(item, items, naming=naming)
         match item.sender:
             case Conversation() as sender:
+                answering = (
+                    {"answers": " ".join(str(each) for each in item.reason.answers)}
+                    if isinstance(item.reason, Message) and item.reason.answers
+                    else {}
+                )
                 tag = Tag(
                     name="item",
                     attributes={
                         "item": str(item.number),
                         "kind": kind(item),
                         "from": self.attributed(sender, items, naming=naming),
+                        **answering,
                     },
                     parts=[
                         written(item),
@@ -348,7 +355,7 @@ class Reader(Model, arbitrary_types_allowed=True):
         *,
         naming: Naming,
     ) -> Tag:
-        """Tag what the operator's item `theirs` says on `item`, its parts `on`, as it told them to `sender`, each with its id; then each of `sender`'s replies to them."""
+        """Tag what the operator's item `theirs` says on `item`, its parts `on`, as it told them to `sender`, each with its id; then each reply of `sender`'s to them copies before kept."""
         match theirs.reason:
             case Review(comments=comments):
                 parts: list[Tag | str] = [

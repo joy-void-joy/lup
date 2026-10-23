@@ -290,10 +290,11 @@ class Items(Reply):
     """When the operator's last reply was sent, from the review; none before
     their first: what came after it is new to them."""
     answers: list[Item] = []
-    """The operator's own items answering those listed, a review, a reply or
-    an answer, with the replies the agents made on them (`Item.replies`): the
-    page lays each comment and the thread under it out under the line it's on
-    (`docs/dashboard.md`, *The review*)."""
+    """The operator's own items about those listed: those a turn's end listed
+    answers or cites, which the page lays out above it, and a review, a reply
+    or an answer to one listed, with the replies copies before kept on them
+    (`Item.replies`), which it lays out under it (`docs/dashboard.md`, *The
+    review*)."""
 
 
 class Readout(Reply):
@@ -457,11 +458,11 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
         return [each for each in waiting if window.covers(each.made)]
 
     def answering(self, items: list[Item]) -> list[Item]:
-        """Return the operator's items that answer any of `items`, oldest first, each the one sent to the item's sender: a review covering it with a comment on it, a reply to it, or an answer to it; what the threads under them are read from.
+        """Return the operator's items that any of `items` answers or that answer it, oldest first: those a turn's end follows (`Message.answers`) or cites (`Item.citations`), shown above it; and, each the one sent to the item's sender, a review covering it with a comment on it, a reply to it, or an answer to it, whose comments and the replies copies before kept on them are shown under it.
 
         A review goes to each conversation it reaches as an item of its own,
         each carrying every comment, so only the copy sent to the item's
-        sender answers it: the thread under the item is read once.
+        sender answers it: what's under the item is read once.
         """
         found = self.delivery.inbox.items
 
@@ -478,11 +479,23 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
                 case _:
                     return False
 
+        def followed(item: Item) -> list[int]:
+            after = item.reason.answers if isinstance(item.reason, Message) else []
+            named = [
+                each.found.part.item
+                for each in item.citations
+                if each.found is not None
+            ]
+            return [*after, *named]
+
+        before = [number for item in items for number in followed(item)]
         return [
             found[number]
             for number in sorted(found)
             if found[number].sender == Operator()
-            and any(answers(found[number], item) for item in items)
+            and (
+                number in before or any(answers(found[number], item) for item in items)
+            )
         ]
 
 

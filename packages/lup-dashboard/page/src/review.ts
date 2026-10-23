@@ -379,6 +379,8 @@ export function body(item: Item): string {
             return reason.why;
         case "ended":
             return reason.said ?? "";
+        case "unresolved":
+            return reason.citations.map((each) => each.said).join("\n");
         case "question": {
             const decisions = reason.decisions.map(
                 (each, at) => `${at + 1}. ${each.text}\n   lean: ${each.lean}`,
