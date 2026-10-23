@@ -15,7 +15,10 @@ from lup_dashboard.host import Host
 from lup_dashboard.server import Access, application
 from lup_dev.clock import Clock
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
+from lup_dev.host.records import Called
 from lup_dev.inbox.protocol import (
+    Calls,
+    Conversed,
     Exchanged,
     Files,
     Items,
@@ -24,6 +27,8 @@ from lup_dev.inbox.protocol import (
     Reviewed,
     SendItem,
     Settled,
+    ShowCalls,
+    ShowConversation,
 )
 from lup_dev.inbox.store import (
     Approval,
@@ -426,6 +431,32 @@ def test_the_demo_lists_a_conversations_items_a_message_sent_from_the_page_among
     }
 
 
+def test_the_demo_reads_a_conversations_calls_each_a_line_and_whole_on_asking(
+    page: Path,
+) -> None:
+    served = client(Demo(clock=Fixed()), page)
+    asked = ShowConversation(runtime="claude", session="s1", agent="a02")
+    read = Conversed.model_validate(
+        served.post("/api/ask", json=asked.model_dump(), headers=bearing()).json()
+    )
+    called = [each for each in read.entries if isinstance(each, Called)]
+    ids = [each.id for each in called if each.id is not None]
+    whole = served.post(
+        "/api/ask",
+        json=ShowCalls(
+            runtime="claude", session="s1", agent="a02", calls=[*ids, "none"]
+        ).model_dump(),
+        headers=bearing(),
+    )
+    found = Calls.model_validate(whole.json())
+    assert all(each.gist is not None for each in called)
+    assert [each.id for each in found.calls] == ids
+    assert found.calls[0].input == {
+        "command": "ls /home/op/records/projects/-home-op-lup-git-tree-dev | head -4",
+        "description": "List the session records",
+    }
+
+
 def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) -> None:
     served = client(Demo(clock=Fixed()), page)
     draft = {
@@ -572,3 +603,24 @@ def test_the_demos_files_carry_readings_each_placed_on_a_line_its_file_has() -> 
                 *(found.start for found in each.reading.findings),
             ]
             assert all(1 <= line <= len(after.splitlines()) for line in placed)
+
+
+def test_the_demos_approval_holds_as_many_lines_more_as_asked_half_of_them_tests() -> (
+    None
+):
+    def held(lines: int) -> list[tuple[str, int]]:
+        shown = files(54, lines=lines)
+        assert isinstance(shown, Files)
+        return [
+            (each.reading.role, len(each.after.text.splitlines()))
+            for each in shown.files
+            if each.reading is not None and isinstance(each.after, Text)
+        ]
+
+    own = held(0)
+    grown = held(20_000)[len(own) :]
+    roles = {role for role, _ in grown}
+    total = sum(count for _, count in grown)
+    assert roles == {"production", "test"}
+    assert 20_000 <= total < 21_000
+    assert sum(count for role, count in grown if role == "test") == total // 2

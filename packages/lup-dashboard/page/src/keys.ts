@@ -27,51 +27,78 @@ export interface Part<P extends string> {
 /**
  * Where the cursor is in the review, for the line of keys: writing a comment; on one written; on an agent's banner, or
  * on lup's approvals'; on an item's own lines, an approval's or a held change's as a change; on a changed file's
- * lines; on a drawer's summary line or a line of its tasks; on the agent's words in its trace or its conversation; on a
- * file's lines in its "since you approved" drawer; on a line under an item or in a drawer that isn't the agent's or a
- * file's, as a fold's summary; or on nothing, the review empty.
+ * lines; on a drawer's summary line or a line of its tasks; on the agent's words in its conversation; on a file's lines
+ * in its "since you approved" drawer, or on the line of one standing as the operator last saw it, reviewed, which takes
+ * no comment; on a line under an item or in a drawer that isn't the agent's or a file's, as a fold's summary or a call;
+ * or on nothing, the review empty.
  */
-export type ReviewPlace = "insert" | "written" | "banner" | "approvals" | "item" | "change" | "file" | "drawer" | "trace" | "since" | "aside" | "nothing";
+export type ReviewPlace =
+    | "insert"
+    | "written"
+    | "banner"
+    | "approvals"
+    | "item"
+    | "change"
+    | "file"
+    | "drawer"
+    | "words"
+    | "since"
+    | "reviewed"
+    | "aside"
+    | "nothing";
 
-/** The kinds of drawer under an agent's banner, in the order they come: its task list, its trace, what its branch changed since the operator approved it, and its whole conversation. */
-export type DrawerKind = "tasks" | "trace" | "since" | "conversation";
-
-/** A kind of fold in the review: an item whole, a file, a function's or a class's body, a run of unchanged lines, an item's context, or one of an agent's drawers. */
-export type FoldKind = "item" | "file" | "body" | "lines" | "context" | DrawerKind;
+/** The kinds of drawer under an agent's banner, in the order they come: its task list, what its branch changed since the operator approved it, and its whole conversation. */
+export type DrawerKind = "tasks" | "since" | "conversation";
 
 /**
- * One kind of fold: the letter naming it, what its folds are called together, whether Space `z` and its letter open
- * them, the level `zr` and `zm` open and close them at, the item's own first, and whether it's the fold holding the
- * rest, as the item's own and a drawer's are, which `zm` never closes.
+ * A kind of fold in the review: an item whole, a file, a function's or a class's body, a run of unchanged lines, an
+ * item's context or an item's text in a conversation, one of an agent's drawers; and in a conversation, each exchange
+ * before the operator's last words, a run of calls, and a call's input and output.
+ */
+export type FoldKind = "item" | "file" | "body" | "lines" | "context" | "earlier" | "calls" | "call" | DrawerKind;
+
+/**
+ * One kind of fold: the letter naming it, what its folds are called together, and what the one the cursor is in is
+ * called, which `zf` and the letter closes; whether Space `z` `f` and its letter open them, the level `zr` and `zm` open
+ * and close them at, the item's own first, and whether it's the fold holding the rest, as the item's own and a
+ * drawer's are, which `zm` never closes. `back` folds open one at a time, the latest first, so each `zr` reaches one
+ * step further back, and close the earliest first; `deep` ones only by their own keys, `za` or Space `z` `f` and the
+ * letter, never by `zr` or `zR`, since what they hold is read as they open.
  */
 export interface FoldKindKeys {
     kind: FoldKind;
     letter: string;
     called: string;
+    one: string;
     chord: boolean;
     level: number;
     own: boolean;
+    back?: boolean;
+    deep?: boolean;
 }
 
 /**
- * Each kind of fold, outermost first, by the letter naming it: the mark beside its summary line, and, but for an
- * item's own, which its header's `za` folds, the key after Space `z`, as vim's fold keys begin with `z`, that opens
- * every fold of that kind in the item or the drawer, as Shift and the letter closes them.
+ * Each kind of fold, outermost first, by the letter naming it: the mark beside its summary line; the key after `zf`
+ * that closes the fold of that kind the cursor is in, as vim's fold keys begin with `z`; and, but for an item's own,
+ * which its header's `za` folds, the key after Space `z` `f` that opens every fold of that kind in the item or the
+ * drawer, as after Space `z` `F` it closes them.
  */
 export const FOLD_KINDS: FoldKindKeys[] = [
-    { kind: "item", letter: "i", called: "the item", chord: false, level: 0, own: true },
-    { kind: "tasks", letter: "t", called: "the tasks", chord: true, level: 0, own: true },
-    { kind: "trace", letter: "r", called: "the trace", chord: true, level: 0, own: true },
-    { kind: "since", letter: "s", called: "since you approved", chord: true, level: 0, own: true },
-    { kind: "conversation", letter: "v", called: "the conversation", chord: true, level: 0, own: true },
-    { kind: "file", letter: "f", called: "files", chord: true, level: 1, own: false },
-    { kind: "body", letter: "b", called: "bodies", chord: true, level: 2, own: false },
-    { kind: "lines", letter: "u", called: "unchanged lines", chord: true, level: 2, own: false },
-    { kind: "context", letter: "c", called: "context", chord: true, level: 3, own: false },
+    { kind: "item", letter: "i", called: "the item", one: "the item", chord: false, level: 0, own: true },
+    { kind: "tasks", letter: "t", called: "the tasks", one: "the tasks", chord: true, level: 0, own: true },
+    { kind: "since", letter: "s", called: "since you approved", one: "since you approved", chord: true, level: 0, own: true },
+    { kind: "conversation", letter: "v", called: "the conversation", one: "the conversation", chord: true, level: 0, own: true },
+    { kind: "file", letter: "f", called: "files", one: "the file", chord: true, level: 1, own: false },
+    { kind: "earlier", letter: "e", called: "earlier exchanges", one: "the earlier exchange", chord: true, level: 1, own: false, back: true },
+    { kind: "body", letter: "b", called: "bodies", one: "the body", chord: true, level: 2, own: false },
+    { kind: "lines", letter: "u", called: "unchanged lines", one: "the unchanged lines", chord: true, level: 2, own: false },
+    { kind: "calls", letter: "k", called: "runs of calls", one: "the run of calls", chord: true, level: 2, own: false },
+    { kind: "context", letter: "c", called: "context", one: "the context", chord: true, level: 3, own: false },
+    { kind: "call", letter: "d", called: "calls' input and output", one: "the call's input and output", chord: true, level: 4, own: false, deep: true },
 ];
 
 /** The drawers, in the order they come under a banner. */
-export const DRAWERS: DrawerKind[] = ["tasks", "trace", "since", "conversation"];
+export const DRAWERS: DrawerKind[] = ["tasks", "since", "conversation"];
 
 /** What the line of keys says where the cursor is, before its keys. */
 export const REVIEW_PLACES: Record<ReviewPlace, string> = {
@@ -83,8 +110,9 @@ export const REVIEW_PLACES: Record<ReviewPlace, string> = {
     change: "change",
     file: "file",
     drawer: "drawer",
-    trace: "the agent's words",
+    words: "the agent's words",
     since: "since you approved",
+    reviewed: "reviewed file",
     aside: "fold",
     nothing: "nothing waiting",
 };
@@ -130,9 +158,9 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
         keys: [
             {
                 keys: "␣a",
-                does: "approve the approval or held change, the comments under it going with it; in \"since you approved\", approve the file's flagged writes",
+                does: "approve the approval or held change, the comments under it going with it; in \"since you approved\", mark the file reviewed at the version shown, approving its flagged writes where it still stands so: it's a line until the agent writes it again, then shows what changed since",
                 short: "approve",
-                at: ["change", "file", "since"],
+                at: ["change", "file", "since", "reviewed"],
             },
             {
                 keys: "␣x",
@@ -144,15 +172,9 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
             { keys: "␣p", does: "park the item, leaving it for later, folded; on one parked, bring it back", short: "park", at: ["item"] },
             {
                 keys: "␣A",
-                does: "in \"since you approved\", mark all of it good: every flagged write on the branch approved, which its landing waits on, and the drawer read from there on",
-                short: "all good",
-                at: ["since"],
-            },
-            {
-                keys: "␣l",
-                does: "in \"since you approved\", bring the latest in: the writes that came since you read it, which never move what you read until you ask",
-                short: "latest",
-                at: ["since", "drawer"],
+                does: "in \"since you approved\", mark every file it shows reviewed, as Space a does each",
+                short: "all reviewed",
+                at: ["since", "reviewed"],
             },
             { keys: "h", does: "on a banner, hold each flagged write of the agent and its subagents for your answer, or let them land again; elsewhere, vim's h", short: "hold", at: ["banner"] },
             { keys: "^⏎", does: "send the reply: every comment, message, remark and item marked read", short: "send", at: [] },
@@ -161,18 +183,24 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
     {
         title: "Commenting",
         keys: [
-            { keys: "o", does: "comment on the line: an item's, a file's, or the agent's words in its trace or conversation", short: "comment", at: ["item", "change", "file", "trace", "since"] },
+            { keys: "o", does: "comment on the line: an item's, a file's, or the agent's words in its conversation", short: "comment", at: ["item", "change", "file", "words", "since"] },
             {
                 keys: "c…",
                 does: "comment on the passage a motion covers: ct. ciw cip, cc the line",
                 short: "on a passage",
-                at: ["item", "change", "file", "trace", "since"],
+                at: ["item", "change", "file", "words", "since"],
             },
-            { keys: "C", does: "comment from the cursor to the line's end", short: "to its end", at: ["item"] },
+            { keys: "C", does: "comment from the cursor to the line's end", short: "to its end", at: ["item", "words"] },
             { keys: "v… c", does: "comment on a selection: v or V and a motion, then c or s", short: "on a selection", at: [] },
             { keys: "␣c", does: "comment on the item whole", short: "on the item", at: ["item", "change"] },
             { keys: "o ␣c", does: "on a banner, write a message to its agent, which its drawers' remarks go with", short: "message", at: ["banner"] },
             { keys: "i a A", does: "in a comment, write in it, with vim's keys of insert mode", short: "write in it", at: ["written"] },
+            {
+                keys: "o O",
+                does: "in a comment, a line below or above to write on; on a list's item, the next item or the one before it, at its indentation, with its bullet or its number, as ⏎ starts one",
+                short: "line below above",
+                at: [],
+            },
             { keys: "u ^r", does: "undo and redo a change to the draft, a comment written one step", short: "undo redo", at: ["written"] },
             { keys: "g- g+", does: "the draft as it was a step earlier or later, what was undone then changed after among them", short: "earlier later", at: [] },
         ],
@@ -180,24 +208,35 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
     {
         title: "Moving",
         keys: [
-            { keys: "]] [[", does: "next and previous item, on its first line that matters", short: "items", at: ["banner", "approvals", "item", "aside", "written", "drawer"] },
+            {
+                keys: "]] [[",
+                does: "next and previous item, on its first line that matters, or on the summary line of the closed fold hiding it, which, as every motion of vim's, it doesn't open",
+                short: "items",
+                at: ["banner", "approvals", "item", "aside", "written", "drawer"],
+            },
             {
                 keys: "]a [a",
-                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; news and what's marked read or left for later are passed over",
+                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; news and what's marked read or left for later are passed over; the folds hiding where it lands open, said under the review",
                 short: "to answer",
                 at: ["banner", "approvals", "item", "change", "aside", "written", "drawer"],
             },
             {
                 keys: "]c [c",
-                does: "next and previous line that matters, in what an approval, a held change or a \"since you approved\" drawer changes",
+                does: "next and previous line that matters, in what an approval, a held change or a \"since you approved\" drawer changes, the folds hiding it opening, said under the review",
                 short: "what matters",
-                at: ["change", "file", "since"],
+                at: ["change", "file", "since", "reviewed"],
             },
             {
                 keys: "]n [n",
-                does: "next and previous comment, message or remark written, where you last were in it",
+                does: "next and previous comment, message or remark written, where you last were in it, the folds hiding it opening, said under the review",
                 short: "comments",
-                at: ["written", "banner", "approvals", "item", "change", "file", "trace", "since"],
+                at: ["written", "banner", "approvals", "item", "change", "file", "words", "since", "reviewed"],
+            },
+            {
+                keys: "/ n N",
+                does: "search, then the next and previous match, the folds hiding it opening, said under the review; / then N searches back, ? being this list",
+                short: "search",
+                at: [],
             },
             { keys: "^k", does: "go to an agent's group", short: "go to", at: [] },
         ],
@@ -207,26 +246,45 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
         keys: [
             {
                 keys: "za",
-                does: "open or close the innermost fold the cursor is in: on an item's header or its own text, the item whole; on a drawer's summary line, the drawer",
+                does: "open or close the innermost fold the cursor is in: on an item's header or its own text, the item whole; on a drawer's summary line, the drawer; on a call's line, its input and output, read as it opens",
                 short: "fold",
-                at: ["item", "change", "file", "drawer", "trace", "since", "aside"],
+                at: ["item", "change", "file", "drawer", "words", "since", "reviewed", "aside"],
             },
             { keys: "zo zc", does: "open or close it", short: "open close", at: [] },
             {
                 keys: "zr zm",
-                does: "open or close one more level of the item or the drawer the cursor is in: its files, then their bodies and unchanged lines, then its context",
+                does: "open or close one more level of the item or the drawer the cursor is in: its files, then their bodies and unchanged lines, then its context; in a conversation, the exchange before those open, one further back each time, then its runs of calls",
                 short: "a level",
-                at: ["file", "since", "drawer", "aside"],
+                at: ["file", "since", "reviewed", "drawer", "aside"],
             },
-            { keys: "zR zM", does: "open or close every fold in the item or the drawer the cursor is in", short: "all of it", at: ["aside", "drawer"] },
+            { keys: "zR zM", does: "open or close every fold in the item or the drawer the cursor is in, but for calls' input and output, which za and ␣zfd open", short: "all of it", at: ["aside", "drawer"] },
+            {
+                keys: "zf",
+                does: "and a letter: close the fold of its kind the cursor is in, the file, the run of unchanged lines, the item, a drawer, or in a conversation an earlier exchange, a run of calls or a call's input and output, the cursor going to its summary line",
+                short: "close one",
+                at: ["file", "since", "reviewed", "aside"],
+            },
+            ...FOLD_KINDS.map((each) => ({ keys: `zf${each.letter}`, does: `close ${each.one} the cursor is in`, short: each.one, at: [] })),
             {
                 keys: "␣z",
-                does: "and a letter: open every fold of its kind in the item or the drawer the cursor is in, or, on a banner, open that drawer of the agent's; Shift and the letter closes them",
+                does: "f or F, then a letter: open or close every fold of its kind in the item or the drawer the cursor is in",
                 short: "by kind",
-                at: ["file", "since", "drawer", "aside", "banner"],
+                at: ["file", "since", "reviewed", "drawer", "aside", "banner"],
+            },
+            {
+                keys: "␣zf",
+                does: "and a letter: open every fold of its kind in the item or the drawer the cursor is in, or, on a banner, that drawer of the agent's",
+                short: "open by kind",
+                at: [],
+            },
+            {
+                keys: "␣zF",
+                does: "and a letter: close every fold of its kind in the item or the drawer the cursor is in, or, on a banner, that drawer of the agent's",
+                short: "close by kind",
+                at: [],
             },
             ...FOLD_KINDS.filter((each) => each.chord).map((each) => ({
-                keys: `␣z${each.letter} ␣z${each.letter.toUpperCase()}`,
+                keys: `␣zf${each.letter} ␣zF${each.letter}`,
                 does: `open or close ${each.called}`,
                 short: each.called,
                 at: [],
@@ -262,7 +320,7 @@ export interface Following {
 }
 
 /**
- * Return the keys that may follow `pressed`, the keys of a chord pressed so far as the list writes them (`␣`, `␣z`),
+ * Return the keys that may follow `pressed`, the keys of a chord pressed so far as the list writes them (`␣`, `␣z`, `zf`),
  * with the cursor at `place`, in the list's order: each key of `parts` that `pressed` begins and one more key ends,
  * once by that key; of two that share it, as `␣c` on an item and on a banner, the one the line of keys shows at `place`,
  * else the first. A key leading further, as `␣z`, shows by its own line of the list. None before a chord is begun.

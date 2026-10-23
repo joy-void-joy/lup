@@ -1,18 +1,19 @@
 // The page: everything waiting for the operator as one review in groups, one
 // per agent, every agent running having one, its banner saying what the agent
 // is doing, what it's working on and its context, its drawers at the group's end
-// holding its tasks, its trace, what its branch changed since the operator
-// approved it and its whole conversation; the operator's reply written into it,
+// holding its tasks, what its branch changed since the operator approved it and
+// its whole conversation; the operator's reply written into it,
 // their messages to agents and their remarks in the drawers among it, and a line
 // saying what the reply covers and who it reaches: every agent it covers or
 // writes to, each getting all of it. The palette (Ctrl+K) goes to an agent's
 // group. Each agent's record is read at each of its hooks the host hears, which
-// the listing watched says (`Talker.activity`), and as its trace or conversation
-// drawer opens, for its banner and its drawers; what its branch changed since
-// the operator approved it as a call of its that may have written ends, as its
-// drawer opens, and on Space `l`, with the version shown, so what they read
-// never moves until they bring the latest in; each a minute apart at most
-// (`docs/dashboard.md`, *The review*, *The drawers*).
+// the listing watched says (`Talker.activity`), and as its conversation drawer
+// opens, for its banner and its drawers, each call read whole as its fold opens,
+// again as the record grows where it hadn't returned; what its branch changed
+// since the operator last saw it as a call of its that may have written ends and
+// as its drawer opens, with the version shown, so the host answers without the
+// files where nothing changed, and laid out as it comes, live; each a minute
+// apart at most (`docs/dashboard.md`, *The review*, *The drawers*).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { doing, everyone, launches, ring, running, type Activity, type Running } from "./agents";
@@ -37,6 +38,7 @@ import {
     whose,
     type AgentDrawers,
     type Answered,
+    type Call,
     type ChangedFile,
     type Context,
     type Conversation as InboxConversation,
@@ -45,6 +47,7 @@ import {
     type Head,
     type Item,
     type Since,
+    type Viewed,
 } from "./review";
 
 /** How long the answers to items' contexts and files are gathered before the review is laid out with them, in milliseconds. */
@@ -349,6 +352,76 @@ export function App() {
     const have = useRef(new Map<string, number>());
     const reading = useRef(new Map<string, boolean>());
 
+    // Each agent's calls asked for whole, by its conversation, so each is asked once, but again where the host
+    // couldn't answer, and those that hadn't returned when read, asked again as the record grows; and those asked in
+    // one moment, as `␣zfd` opens many, gathered into one asking.
+    const callsAsked = useRef(new Map<string, Set<string>>());
+    const callsRunning = useRef(new Map<string, Set<string>>());
+    const callsWanted = useRef(new Map<string, { agent: Live; ids: Set<string> }>());
+
+    /** Read the calls gathered for each agent whole, those not asked yet, one asking an agent. */
+    const askCalls = useCallback(() => {
+        const wanted = [...callsWanted.current.values()];
+        callsWanted.current = new Map();
+        for (const { agent, ids } of wanted) {
+            const asked = callsAsked.current.get(agent.key) ?? new Set<string>();
+            const fresh = [...ids].filter((each) => !asked.has(each));
+            if (fresh.length === 0) {
+                continue;
+            }
+            callsAsked.current.set(agent.key, new Set([...asked, ...fresh]));
+            const { conversation } = agent;
+            const request: Asked = { kind: "inbox-show-calls", runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null, calls: fresh };
+            void answered(request, (answer) => (answer.kind === "inbox-calls" ? answer.calls : null)).then((reply) => {
+                const read = new Map<string, Answered<Call>>(
+                    fresh.map((id) => {
+                        if ("refused" in reply) {
+                            return [id, reply];
+                        }
+                        const found = reply.shown.find((each) => each.id === id);
+                        return [id, found === undefined ? { refused: "its record doesn't hold it" } : { shown: found }];
+                    }),
+                );
+                const running = [...read].flatMap(([id, each]) => ("shown" in each && each.shown.output == null ? [id] : []));
+                callsRunning.current.set(agent.key, new Set([...(callsRunning.current.get(agent.key) ?? []), ...running]));
+                // One the host couldn't read is asked again as its fold opens again.
+                if ("refused" in reply) {
+                    fresh.forEach((each) => callsAsked.current.get(agent.key)?.delete(each));
+                }
+                drawn(agent.key, (before) => ({ ...before, calls: new Map([...before.calls, ...read]) }));
+            });
+        }
+    }, [drawn]);
+
+    /** Read `ids` of `agent`'s calls whole, with any others asked for in the same moment. */
+    const readCalls = useCallback(
+        (agent: Live, ids: string[]) => {
+            const held = callsWanted.current.get(agent.key) ?? { agent, ids: new Set<string>() };
+            ids.forEach((each) => held.ids.add(each));
+            const first = callsWanted.current.size === 0;
+            callsWanted.current.set(agent.key, held);
+            if (first) {
+                setTimeout(askCalls, 0);
+            }
+        },
+        [askCalls],
+    );
+
+    /** Read again `agent`'s calls that hadn't returned when they were read, its record having grown. */
+    const again = useCallback(
+        (agent: Live) => {
+            const running = [...(callsRunning.current.get(agent.key) ?? [])];
+            if (running.length === 0) {
+                return;
+            }
+            callsRunning.current.delete(agent.key);
+            const asked = callsAsked.current.get(agent.key);
+            running.forEach((each) => asked?.delete(each));
+            readCalls(agent, running);
+        },
+        [readCalls],
+    );
+
     /** Read `agent`'s record for the steps since those the page has, with its task list and its context, and the items it exchanged; once at a time, again where asked meanwhile. */
     const readRecord = useCallback(
         async (agent: Live): Promise<void> => {
@@ -371,6 +444,9 @@ export function App() {
                     if (steps.kind !== "inbox-conversation") {
                         drawn(key, (before) => ({ ...before, exchanged }));
                     } else {
+                        if (steps.entries.length > 0) {
+                            again(agent);
+                        }
                         const whole = steps.total < since;
                         if (whole) {
                             // The record is shorter than what the page read of it: read it again whole.
@@ -395,21 +471,21 @@ export function App() {
                 reading.current.delete(key);
             }
         },
-        [drawn],
+        [drawn, again],
     );
 
-    // What each agent's branch changed since the operator approved it, as the page shows it, by its conversation.
+    // What each agent's branch changed since the operator last saw it, as the page shows it, by its conversation.
     const shown = useRef(new Map<string, Since>());
 
-    /** Ask what `agent`'s branch changed since the operator approved it: with the version shown, kept still where it isn't the one as it stands, unless `fresh`, which brings the latest in. */
+    /** Ask what `agent`'s branch changed since the operator last saw it, with the version shown, and lay out what's changed, live; `loud` says why it couldn't be read. */
     const since = useCallback(
-        async (agent: Live, fresh: boolean) => {
+        async (agent: Live, loud: boolean = false) => {
             const was = shown.current.get(agent.key) ?? null;
-            const reply = await answered({ kind: "policy-show-since", conversation: agent.conversation, seen: fresh ? null : (was?.version ?? null) }, (answer) =>
+            const reply = await answered({ kind: "policy-show-since", conversation: agent.conversation, seen: was?.version ?? null }, (answer) =>
                 answer.kind === "policy-since" ? answer : null,
             );
             if (!("shown" in reply)) {
-                if (fresh) {
+                if (loud) {
                     setSaid(`Since you approved couldn't be read: ${reply.refused}`);
                 }
                 return;
@@ -418,12 +494,8 @@ export function App() {
             if (now.same) {
                 return;
             }
-            if (was === null || fresh) {
-                shown.current.set(agent.key, now);
-                drawn(agent.key, (before) => ({ ...before, since: now, latest: null }));
-                return;
-            }
-            drawn(agent.key, (before) => ({ ...before, latest: now.version === was.version ? null : now }));
+            shown.current.set(agent.key, now);
+            drawn(agent.key, (before) => ({ ...before, since: now }));
         },
         [drawn],
     );
@@ -444,7 +516,7 @@ export function App() {
             void readRecord(agent);
             const was = before === undefined ? null : (JSON.parse(before) as Activity | null);
             if (before === undefined || (was?.state === "calling" && !was.lups)) {
-                void since(agent, false);
+                void since(agent);
             }
         }
     }, [live, readRecord, since]);
@@ -454,13 +526,13 @@ export function App() {
         const asking = setInterval(() => {
             for (const agent of live) {
                 void readRecord(agent);
-                void since(agent, false);
+                void since(agent);
             }
         }, FALLBACK);
         return () => clearInterval(asking);
     }, [live, readRecord, since]);
 
-    /** Read what an agent's drawer shows as it opens: its record for the trace or the conversation, its branch for "since you approved". */
+    /** Read what an agent's drawer shows as it opens: its record for the conversation, its branch for "since you approved". */
     const opened = useCallback(
         (conversation: InboxConversation, kind: DrawerKind) => {
             const agent = live.find((each) => each.key === whose(conversation));
@@ -468,7 +540,7 @@ export function App() {
                 return;
             }
             if (kind === "since") {
-                void since(agent, false);
+                void since(agent, true);
             } else if (kind !== "tasks") {
                 void readRecord(agent);
             }
@@ -476,33 +548,28 @@ export function App() {
         [live, readRecord, since],
     );
 
-    /** Bring the latest of what an agent's branch changed into its drawer. */
-    const bringIn = useCallback(
-        (conversation: InboxConversation) => {
+    /** Read an agent's calls whole as their folds open. */
+    const details = useCallback(
+        (conversation: InboxConversation, ids: string[]) => {
             const agent = live.find((each) => each.key === whose(conversation));
             if (agent !== undefined) {
-                void since(agent, true);
+                readCalls(agent, ids);
             }
         },
-        [live, since],
+        [live, readCalls],
     );
 
-    /** Approve the flagged writes on an agent's branch, those on `path` or every one, and read the drawer anew from what was approved. */
-    const approveSince = useCallback(
-        (conversation: InboxConversation, path: string | null) => {
+    /** Mark files of an agent's branch reviewed at the versions shown, approving their flags where they stand so, say what came of it, and read the drawer anew from there. */
+    const reviewSince = useCallback(
+        (conversation: InboxConversation, files: Viewed[]) => {
             const agent = live.find((each) => each.key === whose(conversation));
-            void ask({ kind: "policy-approve-since", conversation, path }).then((answer) => {
+            void ask({ kind: "policy-review-since", conversation, files }).then((answer) => {
                 if (answer.kind === "refused") {
                     setSaid(answer.error);
                     return;
                 }
-                if (answer.kind === "policy-approved") {
-                    const flags = answer.flags;
-                    setSaid(
-                        flags.length === 0
-                            ? `Nothing flagged${path === null ? " on the branch" : ` on ${path}`} was waiting for your approval.`
-                            : `Approved ${flags.map(cited).join(", ")}${path === null ? ": the branch's landing waits on none of them" : ""}.`,
-                    );
+                if (answer.kind === "policy-reviewed") {
+                    setSaid(reviewedSaid(answer.reviewed, answer.approved ?? [], answer.moved ?? []));
                 }
                 if (agent !== undefined) {
                     void since(agent, true);
@@ -652,10 +719,10 @@ export function App() {
                             }
                         }}
                         approve={approve}
-                        approveSince={approveSince}
-                        latest={bringIn}
+                        reviewSince={reviewSince}
                         hold={hold}
                         opened={opened}
+                        details={details}
                         jump={jump}
                         say={setSaid}
                         inserting={setInserting}
@@ -731,14 +798,25 @@ function bannerOf(agent: Live, data: AgentDrawers, now: Date): string {
     ].join(" · ");
 }
 
-/** Whether two of what's held of an agent's drawers say the same: as many steps of its record, its branch at the same version with as many files, and the same tasks, context and items exchanged. */
+/** Say what marking files reviewed came to: how many, the flagged writes approved with them, and those that changed since the version shown, whose flags wait. */
+function reviewedSaid(reviewed: string[], approved: number[], moved: string[]): string {
+    const files = reviewed.length === 1 ? (reviewed[0] ?? "") : `${reviewed.length} files`;
+    const flags = approved.length === 0 ? "" : `, approving ${approved.map(cited).join(", ")}`;
+    const waiting =
+        moved.length === 0
+            ? ""
+            : ` ${moved.length === 1 ? moved[0] : `${moved.length} files`} changed since you read ${moved.length === 1 ? "it" : "them"}: shown with what came, ${moved.length === 1 ? "its" : "their"} flags waiting.`;
+    return `Reviewed ${files}${flags}.${waiting}`;
+}
+
+/** Whether two of what's held of an agent's drawers say the same: as many steps of its record and the same calls read whole, its branch at the same version with as many files, and the same tasks, context and items exchanged. */
 function sameDrawers(a: AgentDrawers, b: AgentDrawers): boolean {
     const sameSince = (x: Since | null, y: Since | null) =>
         x === y || (x !== null && y !== null && x.version === y.version && (x.files ?? []).length === (y.files ?? []).length);
     return (
         a.entries.length === b.entries.length &&
+        a.calls === b.calls &&
         sameSince(a.since, b.since) &&
-        sameSince(a.latest, b.latest) &&
         JSON.stringify([a.tasks, a.usage, a.exchanged]) === JSON.stringify([b.tasks, b.usage, b.exchanged])
     );
 }

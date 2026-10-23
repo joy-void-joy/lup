@@ -227,19 +227,21 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, get_args, override
 
-from pydantic import Field, TypeAdapter, ValidationError
+from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
 
 import lup
 from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.adapters.claude.terminal import own_settings
+from lup.adapters.claude.windows import catalogued, reach
 from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, MutableModel, Settings
 from lup_dev.adapters import Adapter, Pushing
 from lup_dev.host.courier import Failure, Heard, Spawned, Telling
 from lup_dev.host.records import (
+    Call,
     Called,
     Entry,
     Reader,
@@ -249,6 +251,8 @@ from lup_dev.host.records import (
     Task,
     Transcript,
     Usage,
+    first,
+    gist,
     within,
 )
 from lup_dev.host.records import Said as Spoken
@@ -1435,11 +1439,42 @@ class ToolUse(Model, extra="ignore"):
     input: JsonObject = {}
 
 
+class ResultPart(Model, extra="ignore"):
+    """A part of a call's result: text, an image, or a tool found by `ToolSearch`."""
+
+    type: str
+    text: str | None = None
+    tool_name: str | None = None
+
+    def said(self) -> str:
+        """Return what the part says: its text, or what it is where it isn't text.
+
+        >>> ResultPart(type="tool_reference", tool_name="mcp__lup__rename").said()
+        '[tool_reference: mcp__lup__rename]'
+        """
+        if self.text is not None:
+            return self.text
+        named = "" if self.tool_name is None else f": {self.tool_name}"
+        return f"[{self.type}{named}]"
+
+
 class ToolResult(Model, extra="ignore"):
-    """A call's result, by the id of the call it answers."""
+    """A call's result, by the id of the call it answers: what the agent was given, and whether Claude Code marked it an error."""
 
     type: Literal["tool_result"]
     tool_use_id: str
+    content: str | list[ResultPart] | None = None
+    is_error: bool = False
+
+    def said(self) -> str:
+        """Return what the agent was given, its parts one after another."""
+        match self.content:
+            case None:
+                return ""
+            case str() as text:
+                return text
+            case parts:
+                return "\n".join(part.said() for part in parts)
 
 
 class TaskMade(Model, extra="ignore"):
@@ -1449,10 +1484,80 @@ class TaskMade(Model, extra="ignore"):
     subject: str
 
 
-class ToolResulted(Model, extra="ignore"):
-    """What a `user` line keeps of a call's result beyond its text (`toolUseResult`): the task a `TaskCreate` made, where it's one."""
+class ToolResulted(
+    Model, extra="ignore", alias_generator=to_camel, populate_by_name=True
+):
+    """What a `user` line keeps of a call's result beyond its text (`toolUseResult`): the task a `TaskCreate` made, where it's one, and where a command's whole output was saved where the agent was given only its start."""
 
     task: TaskMade | None = None
+    persisted_output_path: Path | None = None
+    """The file Claude Code saved a command's whole output to, under the
+    session's own folder, where the result the agent was given is its start and
+    that path (`docs/field-notes.md`, *A session's record*)."""
+
+
+class CommandRun(Model, extra="ignore"):
+    """`Bash`'s input: the command, and what it does in a few words, where the agent said."""
+
+    command: str
+    description: str | None = None
+
+
+class FileRead(Model, extra="ignore"):
+    """`Read`'s input: the file, and the line it starts at, where it isn't the first."""
+
+    file_path: str
+    offset: int | None = None
+
+
+class FileWritten(Model, extra="ignore"):
+    """The input of a tool writing one file, `Edit`'s or `Write`'s: the file."""
+
+    file_path: str
+
+
+class NotebookWritten(Model, extra="ignore"):
+    """`NotebookEdit`'s input: the notebook."""
+
+    notebook_path: str
+
+
+class Searched(Model, extra="ignore"):
+    """A search's input, `Grep`'s or `Glob`'s: its pattern."""
+
+    pattern: str
+
+
+def gisted(call: ToolUse) -> str | None:
+    """Return what a call did, in a line: `Bash`'s description, else its command; the file a `Read` reads, at the line it starts at; the file an `Edit`, a `Write` or a `NotebookEdit` writes; a search's pattern; any other's first argument, as its input is read where it isn't its tool's.
+
+    >>> gisted(ToolUse(type="tool_use", name="Read", input={"file_path": "/w/src/review.ts", "offset": 480}))
+    'review.ts:480'
+    >>> gisted(ToolUse(type="tool_use", name="Bash", input={"command": "uv run pytest", "description": "Run the tests"}))
+    'Run the tests'
+    """
+    try:
+        match call.name:
+            case "Bash":
+                run = CommandRun.model_validate(call.input)
+                return gist(run.description or run.command)
+            case "Read":
+                read = FileRead.model_validate(call.input)
+                name = PurePosixPath(read.file_path).name
+                return gist(name if read.offset is None else f"{name}:{read.offset}")
+            case "Edit" | "Write":
+                written = FileWritten.model_validate(call.input)
+                return gist(PurePosixPath(written.file_path).name)
+            case "NotebookEdit":
+                notebook = NotebookWritten.model_validate(call.input)
+                return gist(PurePosixPath(notebook.notebook_path).name)
+            case "Grep" | "Glob":
+                return gist(Searched.model_validate(call.input).pattern)
+            case _:
+                pass
+    except ValidationError:
+        pass
+    return gist(first(call.input))
 
 
 class TaskCreated(
@@ -1537,8 +1642,12 @@ class UserLine(Model, extra="ignore", alias_generator=to_camel):
     is_compact_summary: bool = False
     is_sidechain: bool = False
     cwd: Path | None = None
-    tool_use_result: ToolResulted | None = None
-    """What the line keeps of the result it carries, where it carries one."""
+    tool_use_result: Annotated[
+        ToolResulted | JsonValue, Field(union_mode="left_to_right")
+    ] = None
+    """What the line keeps of the result it carries, where it carries one: an
+    object for most tools, which lup reads; the error's text for a call that
+    failed or was refused, and the parts of a server's result, which it doesn't."""
 
     def answers(self) -> list[str]:
         """Return the ids of the calls whose results the line carries."""
@@ -1582,8 +1691,8 @@ class AssistantMessage(Model, extra="ignore"):
 
     content: list[Block] = []
     model: str | None = None
-    """The model, as the API names it: without the `[1m]` the operator's
-    settings may add, so the window isn't read from it (`window`)."""
+    """The model that made it, as the API names it, never with `[1m]` after it;
+    `<synthetic>` on a reply of Claude Code's own."""
     usage: Counted | None = None
 
 
@@ -1594,6 +1703,9 @@ class AssistantLine(Model, extra="ignore", alias_generator=to_camel):
     message: AssistantMessage
     timestamp: datetime | None = None
     is_sidechain: bool = False
+    requested_model: str | None = None
+    """The model the conversation asked for, `[1m]` after it where it chose
+    the long variant; none in a record before Claude Code 2.1.295."""
 
 
 class Queued(Model, extra="ignore", alias_generator=to_camel):
@@ -1648,18 +1760,22 @@ type Line = Annotated[
 
 
 class ClaudeTranscripts(Model, Reader):
-    """Claude Code's records, read: a session's file per session under `projects/<folder>/`, its subagents' in a folder beside it; each conversation's context from its last reply, in the window the operator's `settings` choose."""
+    """Claude Code's records, read: a session's file per session under `projects/<folder>/`, its subagents' in a folder beside it; each conversation's context from its last reply, in the window of the model that made it."""
 
     settings: Path | None = None
-    """The operator's own settings file, whose model says the window; none
-    reads no window, as for a copy of the records."""
+    """The operator's own settings file, whose `env` may turn the long window
+    off for every session it starts; none reads nothing of it, as for a copy
+    of the records."""
     window: int = 200_000
-    """The context window of Claude's models, in tokens, but for the long one."""
+    """The standard context window, in tokens."""
     long: str = "[1m]"
-    """What the operator's settings add after a model's name to choose its long
-    context (`model-config`, *Setting your model*)."""
+    """What follows a model's name, in any case, where the long variant was
+    chosen (`model-config`, *1M context window*)."""
     long_window: int = 1_000_000
     """The long context's window, in tokens."""
+    synthetic: str = "<synthetic>"
+    """The model a reply of Claude Code's own names, an error's or an
+    interruption's: no model made it, and its usage counts nothing."""
 
     @override
     def sessions(self, copies: Path) -> list[Path]:
@@ -1690,39 +1806,103 @@ class ClaudeTranscripts(Model, Reader):
             tasks=tasks(lines),
         )
 
+    @override
+    def calls(self, record: Path, ids: list[str]) -> list[Call]:
+        """Read calls whole: each one's input from the `tool_use` part calling it, and its output from the `tool_result` answering it, or from the file Claude Code saved a command's whole output to, where that's in the session's own folder.
+
+        A saved output is read only from the session's folder, as Claude Code
+        writes it there, so a record naming a file elsewhere, written in a room,
+        reads nothing outside the records.
+        """
+        lines = list(parsed(record))
+        inputs = {
+            block.id: block.input
+            for line in lines
+            if isinstance(line, AssistantLine)
+            for block in line.message.content
+            if isinstance(block, ToolUse) and block.id is not None and block.id in ids
+        }
+        results = {
+            block.tool_use_id: Call(
+                id=block.tool_use_id,
+                input=None,
+                output=saved(record, line) or block.said(),
+                failed=block.is_error,
+            )
+            for line in lines
+            if isinstance(line, UserLine) and isinstance(line.message.content, list)
+            for block in line.message.content
+            if isinstance(block, ToolResult) and block.tool_use_id in ids
+        }
+        return [
+            (results.get(each) or Call(id=each, input=None)).model_copy(
+                update={"input": inputs[each]}
+            )
+            for each in ids
+            if each in inputs
+        ]
+
     def usage(self, own: list[AssistantLine]) -> Usage | None:
-        """Return what the context held at the last of `own`, the conversation's replies, that counted its input; none where none did."""
-        counted = [each for each in own if each.message.usage is not None]
+        """Return what the context held at the last of `own`, the conversation's replies, that a model made and that counted its input; none where none did."""
+        counted = [
+            each
+            for each in own
+            if each.message.usage is not None and each.message.model != self.synthetic
+        ]
         if not counted:
             return None
-        last = counted[-1].message
+        last = counted[-1]
         return Usage(
-            used=last.usage.used() if last.usage is not None else 0,
-            window=self.windowed(self.model()),
-            model=last.model,
+            used=last.message.usage.used() if last.message.usage is not None else 0,
+            window=self.windowed(last, shortened=self.shortened()),
+            model=last.message.model,
         )
 
-    def windowed(self, model: str | None) -> int | None:
-        """Return the context window of the model the operator's settings name: the long one where the name ends `[1m]`, else the usual; none where they name none, Claude Code running its default.
+    def windowed(self, reply: AssistantLine, *, shortened: bool | None) -> int | None:
+        """Return the context window `reply` was made in, by the model that made it (`lup.adapters.claude.windows`); none where that isn't known.
 
-        The record names each reply's model without the suffix, so the window is
-        read from the settings, which the launch applies (`--setting-sources
-        user`): a model changed there mid-session reads as it stands.
+        A model with the long window natively reads it, and one that reaches it
+        only through its `[1m]` variant reads it where the conversation asked
+        for that variant, which its record says from Claude Code 2.1.295 on
+        (`requested_model`). Every model reads the standard window where
+        `shortened`, the long one turned off; none where that can't be read.
 
-        >>> reading = ClaudeTranscripts()
-        >>> reading.windowed("opus[1m]"), reading.windowed("sonnet"), reading.windowed(None)
-        (1000000, 200000, None)
+        >>> reading, reply = ClaudeTranscripts(), AssistantLine.model_validate(
+        ...     {"type": "assistant", "message": {"model": "claude-opus-4-6"}, "requestedModel": "claude-opus-4-6[1m]"}
+        ... )
+        >>> reading.windowed(reply, shortened=False), reading.windowed(reply, shortened=True)
+        (1000000, 200000)
         """
-        if model is None:
+        model = reply.message.model
+        if model is None or not catalogued(model) or shortened is None:
             return None
-        return self.long_window if model.endswith(self.long) else self.window
+        if shortened:
+            return self.window
+        match reach(model), reply.requested_model:
+            case "long", _:
+                return self.long_window
+            case "chosen", str() as requested:
+                chose = self.long in requested.lower()
+                return self.long_window if chose else self.window
+            case "chosen", None:
+                return None
+            case "standard", _:
+                return self.window
 
-    def model(self) -> str | None:
-        """Return the model the operator's settings choose; none where they choose none, or there are no settings to read."""
+    def shortened(self) -> bool | None:
+        """Return whether the operator's settings turn the long window off for the sessions they start, as the file stands at this reading; none where it doesn't read.
+
+        A session applies its settings' `env` as it starts, so a change made
+        after reads here before the session has it. `/model` never writes it, as it
+        writes the model the record names instead (#282), so it changes only
+        where the operator edits it. A launched room's environment carries the
+        variable only from that file: lup's own settings and its environment
+        never set it, and the operator's shell doesn't reach the room.
+        """
         if self.settings is None:
-            return None
+            return False
         try:
-            return own_settings(self.settings).model
+            return own_settings(self.settings).shortened()
         except TerminalError:
             return None
 
@@ -1824,6 +2004,28 @@ def parsed(record: Path) -> Iterator[Line]:
                 continue
 
 
+def saved(record: Path, line: UserLine) -> str | None:
+    """Return the whole output Claude Code saved of the call whose result `line` carries, where it saved one in the session's own folder beside `record`; none where it saved none, or the file isn't there.
+
+    The session's folder is `<session>/` beside its record, and a subagent's
+    record is in its `subagents/` folder, so it's the folder holding that.
+    """
+    match line.tool_use_result:
+        case ToolResulted(persisted_output_path=Path() as path):
+            pass
+        case _:
+            return None
+    folder = (
+        record.parent.parent
+        if record.parent.name == "subagents"
+        else record.with_suffix("")
+    ).resolve()
+    whole = path.resolve()
+    if not whole.is_relative_to(folder) or not whole.is_file():
+        return None
+    return whole.read_text(encoding="utf-8", errors="replace")
+
+
 def recorded(transcript: Path, agent: str) -> Path:
     """Return where Claude Code records conversation `agent` of the session whose transcript is `transcript`: the transcript for the session's own, `<session>/subagents/agent-<id>.jsonl` beside it for a subagent's (`docs/field-notes.md`, *Subagents' records*)."""
     if not agent:
@@ -1890,8 +2092,8 @@ def said_by_agent(block: Block, at: datetime | None) -> Entry | None:
     match block:
         case TextBlock(text=text):
             return Spoken(by="agent", text=text, at=at)
-        case ToolUse(name=name, id=id_):
-            return Called(tool=name, id=id_, at=at)
+        case ToolUse(name=name, id=id_) as call:
+            return Called(tool=name, gist=gisted(call), id=id_, at=at)
         case _:
             return None
 

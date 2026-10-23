@@ -62,7 +62,7 @@ from lup_dev.host.protocol import (
     Stop,
 )
 from lup_dev.host.pushes import Pushes
-from lup_dev.host.records import Called, Recorded, Said
+from lup_dev.host.records import Call, Called, Recorded, Said
 from lup_dev.host.service import UNDECIDED, HostService, Naming, Program, executed
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import LaunchJudge, LaunchModules, WorkerJudge, Workers
@@ -74,6 +74,7 @@ from lup_dev.inbox.protocol import (
     AnswerApproval,
     AskApproval,
     AskFlag,
+    Calls,
     Context,
     Conversed,
     Drafted,
@@ -89,6 +90,7 @@ from lup_dev.inbox.protocol import (
     SendDraft,
     SendItem,
     Settled,
+    ShowCalls,
     ShowContext,
     ShowConversation,
     ShowDraft,
@@ -98,7 +100,7 @@ from lup_dev.inbox.protocol import (
     ShowTalk,
     Talked,
 )
-from lup_dev.inbox.reading import Narrowing, Reader
+from lup_dev.inbox.reading import Narrowing, Reader, by_agent
 from lup_dev.inbox.store import (
     Answer,
     Answered,
@@ -166,6 +168,7 @@ from lup_dev.policy.holds import (
     stores,
 )
 from lup_dev.policy.landing import LandingTools
+from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.remote.protocol import Remotes
@@ -3379,11 +3382,15 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         room = RoomClient(socket=machine.host.launch("one").request)
         read = room.ask(ShowConversation(runtime="claude", session="s1"), Conversed)
+        called = room.ask(
+            ShowCalls(runtime="claude", session="s1", calls=["n1"]), Calls
+        )
         items = room.ask(ListItems(conversation=mine), Exchanged)
         holding = room.ask(ShowHolding(runtime="claude", session="s1"), Holding)
         refusals: list[str] = []
         for request in [
             ShowConversation(runtime="claude", session="s9"),
+            ShowCalls(runtime="claude", session="s9", calls=["n9"]),
             ListItems(conversation=elsewhere),
             ShowGathering(sender=elsewhere, worktree=other, path=Path("a.py")),
             ShowDraft(),
@@ -3393,9 +3400,11 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
                 room.ask(request, Conversed)
             refusals.append(str(refusal.value))
     assert read.total == 2
+    assert called == Calls(calls=[Call(id="n1", input={})])
     assert items == Exchanged(sent=[], received=[])
     assert holding == Holding(on=False)
     assert refusals == [
+        "the conversation isn't one of this repository's",
         "the conversation isn't one of this repository's",
         "the conversation isn't one of this repository's",
         "the conversation isn't one of this repository's",
@@ -5360,12 +5369,30 @@ def test_a_conversation_is_read_from_its_record_from_where_the_asker_left_it(
         first = host.ask(ShowConversation(runtime="claude", session="s1"), Conversed)
         with record.open("a") as grown:
             grown.write(
-                agent({"type": "tool_use", "id": "b1", "name": "Bash", "input": {}})
+                agent(
+                    {
+                        "type": "tool_use",
+                        "id": "b1",
+                        "name": "Bash",
+                        "input": {"command": "ls"},
+                    }
+                )
                 + "\n"
             )
         after = host.ask(
             ShowConversation(runtime="claude", session="s1", since=first.total),
             Conversed,
+        )
+        running = host.ask(
+            ShowCalls(runtime="claude", session="s1", calls=["b1", "b9"]), Calls
+        )
+        with record.open("a") as grown:
+            result = {"type": "tool_result", "tool_use_id": "b1", "content": "a.py"}
+            grown.write(
+                line(type="user", message={"role": "user", "content": [result]}) + "\n"
+            )
+        returned = host.ask(
+            ShowCalls(runtime="claude", session="s1", calls=["b1"]), Calls
         )
         with pytest.raises(HostError) as missing:
             host.ask(ShowConversation(runtime="claude", session="s9"), Conversed)
@@ -5375,7 +5402,11 @@ def test_a_conversation_is_read_from_its_record_from_where_the_asker_left_it(
         Said(by="agent", text="Going.", at=when),
     ]
     assert (after.since, after.total) == (2, 3)
-    assert after.entries == [Called(tool="Bash", id="b1", at=when)]
+    assert after.entries == [Called(tool="Bash", gist="ls", id="b1", at=when)]
+    assert running == Calls(calls=[Call(id="b1", input={"command": "ls"})])
+    assert returned == Calls(
+        calls=[Call(id="b1", input={"command": "ls"}, output="a.py")]
+    )
     assert str(missing.value) == "the record of claude session s9 isn't on this machine"
 
 
@@ -7163,6 +7194,52 @@ def test_a_comment_on_a_hold_lands_nothing_and_the_next_hold_shows_what_changed_
     assert flag_state == Waiting()
 
 
+def test_a_hold_at_landing_starts_from_the_version_the_operator_marked_reviewed(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    first, second = '"""Rooms."""\n', '"""Chambers."""\n'
+    feat, path = landings.feat, "src/pkg/rooms.py"
+    landings.wrote(feat, path, first)
+    version = landings.shell.git(feat, "rev-parse", f"HEAD:{path}")
+    mark = Mark(path=Path(path), version=version, at=clock.now())
+    reviews = Reviews(layout=machine.reviewed(landings.repository))
+    reviews.marked("feat", [mark], {version: first.encode()})
+    landings.wrote(feat, path, second)
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with (
+        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        landings.flag(path, second, session)
+        landing = pool.submit(call, machine.host.launch("one").mcp, "land", {})
+        assert delivery.holding.wait(timeout=60)
+        [hold] = [
+            each
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.reason, HeldChange)
+        ]
+        diff = inbox("show", str(hold.number), "--diff")
+        inbox("answer", str(hold.number), "--approve", "--comment", "")
+        answer, error = landing.result(timeout=60)
+    assert not error
+    assert isinstance(hold.reason, HeldChange)
+    assert hold.reason.landing is not None
+    assert (hold.reason.landing.since, hold.reason.landing.reviewed) == (None, mark.at)
+    assert hold.reason.summary.endswith(
+        "Shown since the version you last marked reviewed in its agent's drawer, "
+        f"{version}."
+    )
+    assert '-"""Rooms."""\n+"""Chambers."""' in diff
+    assert answer.startswith(f"Landed {tip} on `dev` at `origin`")
+
+
 def test_a_land_sent_again_across_a_restart_holds_on_its_holds_again_and_lands_once_approved(
     landings: Landings,
     machine: Layout,
@@ -8106,6 +8183,107 @@ def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_n
     )
 
 
+def test_each_conversations_flagged_writes_are_one_entry_wherever_the_inbox_is_listed(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    inbox = Inbox.opened(
+        Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path).inbox
+    )
+    main = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    parser = main.model_copy(update={"agent": "a1"})
+    inbox.placed(
+        Whereabouts(
+            conversation=parser, launch="one", worktree=tmp_path, since=clock.now()
+        )
+    )
+
+    def flag(path: str, branch: str | None) -> Flagged:
+        return Flagged(
+            text=f"{path} landed, flagged for the operator's review.",
+            summary=f"{path} is a new production file",
+            worktree=tmp_path,
+            path=Path(path),
+            branch=branch,
+        )
+
+    start = clock.now()
+    for minutes, (reason, sender) in enumerate(
+        [
+            (flag("src/parser.py", "feat"), parser),
+            (Message(kind="note", text="Header first."), main),
+            (flag("src/lexer.py", "feat"), parser),
+            (flag("src/clock.py", None), main),
+            (flag("src/tokens.py", "feat"), parser),
+        ]
+    ):
+        inbox.made(
+            reason, sender, Operator(), tmp_path, start + timedelta(minutes=minutes)
+        )
+    approved = inbox.item(5).model_copy(
+        update={"state": Decided(at=clock.now(), approved=True)}
+    )
+    inbox.kept(approved)
+    reader = Reader(
+        delivery=Delivery.model_construct(inbox=inbox, clock=clock),
+        reader=Operator(),
+        names={"s1": "w"},
+        mine=True,
+    )
+    items = inbox.about(tmp_path / ".git")
+    listed = reader.read(items, Narrowing())
+    assert listed.found == 4
+    assert listed.text.splitlines() == [
+        (
+            "@2  2026-10-01 12:01  a note from `w` (claude session s1) to you, "
+            "waiting: Header first."
+        ),
+        (
+            "@1 @3  2026-10-01 12:02  2 flagged writes from `w/a1` (subagent a1 of "
+            "claude session s1) to you, waiting: 2 files on `feat`"
+        ),
+        (
+            "@4  2026-10-01 12:03  1 flagged write from `w` (claude session s1) to "
+            "you, waiting: 1 file on no branch"
+        ),
+        "Not listed: 1 item not waiting for you, which `every` lists.",
+    ]
+    # An entry counts as one against the limit, and what it leaves out is counted in items.
+    latest = reader.read(items, Narrowing(limit=1, every=True))
+    assert latest.text.splitlines() == [
+        (
+            "@1 @3 @5  2026-10-01 12:04  3 flagged writes from `w/a1` (subagent a1 "
+            "of claude session s1) to you, 2 waiting, 1 approved: 3 files on `feat`"
+        ),
+        (
+            "Not listed: 2 earlier items, which `until` "
+            f'"{(start + timedelta(minutes=4)).astimezone().isoformat()}" reads; a '
+            "`limit` of 3 lists them all."
+        ),
+    ]
+    # Read whole, each is under the entry's heading, naming its file.
+    whole = reader.read(items, Narrowing(whole=True, kinds=["flagged write"]))
+    assert whole.text.split("\n\n")[0].splitlines()[:3] == [
+        (
+            "@1 @3  2026-10-01 12:02  2 flagged writes from `w/a1` (subagent a1 of "
+            "claude session s1) to you, waiting:"
+        ),
+        '<item item="1" kind="flagged write" from="w/a1">',
+        "src/parser.py landed, flagged for the operator's review.",
+    ]
+    # `lup-dev inbox` lists them so too.
+    entries = by_agent([each for each in items if isinstance(each.state, Waiting)])
+    assert [cli.line(each) for each in entries][1:] == [
+        (
+            "@1 @3  2026-10-01 12:02  2 flagged writes from subagent a1 of claude "
+            f"session s1 in {tmp_path}: 2 files on `feat`"
+        ),
+        (
+            f"   @4  2026-10-01 12:03  1 flagged write from claude session s1 in "
+            f"{tmp_path}: 1 file on no branch"
+        ),
+    ]
+
+
 def dated(root: Path, message: str, at: str) -> str:
     """Commit everything in `root`'s worktree as made at `at`, and return the commit's short id: what landed since a moment is read by its date."""
     when = {**os.environ, "GIT_AUTHOR_DATE": at, "GIT_COMMITTER_DATE": at}
@@ -8322,7 +8500,11 @@ def test_the_bearings_list_what_waits_on_the_operator_the_last_sessions_first(
             "- News, by kind: 1 `how it went`, 1 `note` (`inbox` with those `kinds` "
             "lists them)."
         ),
-        "- 3 flagged writes, holding landings: `parser`'s, @2, @3; `lexer`'s, @5.",
+        (
+            "- Flagged writes, holding their branches' landings: claude session s1, "
+            "1 file on `parser` (@2); subagent a1 of claude session s1, 2 files on "
+            "`parser` and `lexer` (@3, @5)."
+        ),
         "- @7 a question from claude session s9: Which lexer?",
     ]
     nowhere = Register(

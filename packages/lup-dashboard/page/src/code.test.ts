@@ -68,7 +68,7 @@ describe("a changed file's lines", () => {
         expect(deleted.rows).toEqual([{ change: "removed", side: "before", number: 1, offset: 0, text: "old" }]);
         const same = shown({ path: "s.py", before: text(numbered(5)), after: text(numbered(5)) });
         expect(same.header).toBe("s.py · changed · no line differs");
-        expect(same.runs).toEqual([{ from: 0, to: 5, summary: "5 unchanged lines, 1–5", changed: 0, name: '["","l1"]' }]);
+        expect(same.runs).toEqual([{ from: 0, to: 5, summary: "5 unchanged lines, 1–5", name: '["","l1"]' }]);
         expect(shown({ path: "i.png", before: null, after: { kind: "binary", size: 1150 } })).toMatchObject({
             header: "i.png · created · binary, not shown · 1,150 bytes",
             rows: [],
@@ -246,22 +246,20 @@ describe("the judge's reading", () => {
         ]);
     });
 
-    it("shows every change of a file whose asks are each on a line, but where it shows the lines that ask alone, as an approval does", () => {
+    it("shows every change of a file, its unchanged lines alone folding, three kept around each change and each line that matters", () => {
         const reading: Reading = {
             ...PRODUCTION,
             asks: [{ name: "public-api", taken: "flagged", line: 20, side: "after", api: { kind: "function-added", name: "f" } }],
         };
         const file: ChangedFile = { path: "a.py", before: text(numbered(30)), after: text(numbered(30, { 10: "ten" })), reading };
-        const summaries = (showing?: "changes" | "asks", read: Reading = reading) =>
-            shown({ ...file, reading: read }, showing).runs.map((each) => each.summary);
-        // Unchanged lines alone fold, three kept around the change on line 10 and around the line that asks.
-        const everyChange = ["6 unchanged lines, 1–6", "3 unchanged lines, 14–16", "7 unchanged lines, 24–30"];
-        expect(summaries()).toEqual(everyChange);
-        expect(summaries("changes")).toEqual(everyChange);
-        // The line that asks alone, with its context, the change on line 10 folding with the lines around it.
-        expect(summaries("asks")).toEqual(["17 lines, 2 changed, 1–16", "7 unchanged lines, 24–30"]);
-        const whole: Reading = { ...reading, asks: [...reading.asks!, { name: "whole-file", taken: "held", side: "after" }] };
-        expect(summaries("asks", whole)).toEqual(everyChange);
+        const laid = shown(file);
+        expect(laid.runs.map((each) => each.summary)).toEqual(["6 unchanged lines, 1–6", "3 unchanged lines, 14–16", "7 unchanged lines, 24–30"]);
+        // No changed line is among what a run hides, in a file that asks nothing either.
+        const plain = shown({ ...file, reading: PRODUCTION });
+        for (const { rows, runs } of [laid, plain]) {
+            expect(runs.flatMap((run) => rows.slice(run.from, run.to)).every((row) => row.change === "same")).toBe(true);
+        }
+        expect(plain.folded).toBeNull();
     });
 
     it("places a name taken out of a package's root on the line it was, and what's on no line shown on the header", () => {
@@ -292,10 +290,25 @@ describe("the judge's reading", () => {
         expect([informed.header, informed.automatic]).toEqual(["core.py · changed · +1 −1 · automatic · told: regex", true]);
         const spacing = shown(changed(numbered(8, { 3: "    l3" }), PRODUCTION));
         expect([spacing.header, spacing.automatic]).toEqual(["core.py · changed · +1 −1 · automatic", true]);
-        const test = shown({ ...changed(numbered(8, { 3: "three" }), { ...PRODUCTION, role: "test" }), path: "test_a.py" });
-        expect([test.header, test.automatic]).toEqual(["test_a.py · changed · +1 −1 · automatic", true]);
         const unread = shown({ path: "a.py", before: text("a\n"), after: text("b\n") });
-        expect([unread.header, unread.automatic, unread.reasons]).toEqual(["a.py · changed · +1 −1", false, []]);
+        expect([unread.header, unread.automatic, unread.folded, unread.reasons]).toEqual(["a.py · changed · +1 −1", false, null, []]);
+    });
+
+    it("folds whole a test and a data file, by its role, and any file of a first approval, its header saying why where `automatic` stood", () => {
+        const file = (path: string, role: string, findings: Reading["findings"] = []) => changed(numbered(8, { 3: "three" }), { ...PRODUCTION, role, findings });
+        const said = (laid: ReturnType<typeof shown>) => [laid.header, laid.automatic, laid.folded];
+        expect(said(shown({ ...file("core.py", "test"), path: "test_a.py" }))).toEqual(["test_a.py · changed · +1 −1 · test", true, "test"]);
+        expect(said(shown({ ...file("core.py", "data"), path: "lock.json" }))).toEqual(["lock.json · changed · +1 −1 · data", true, "data"]);
+        expect(said(shown(file("core.py", "production"), true))).toEqual(["core.py · changed · +1 −1 · first approval", true, "first approval"]);
+        // Its findings told are said after.
+        const told: Reading["findings"] = [{ rule: "regex", message: "a pattern", steer: "", start: 3, end: 3, taken: "told" }];
+        expect(shown({ ...file("core.py", "test", told), path: "t.py" }).header).toBe("t.py · changed · +1 −1 · test · told: regex");
+        // What a file asks stays said first, the reason it folds after.
+        const protectedData: Reading = { role: "data", asks: [{ name: "protected", taken: "held", side: "after" }], findings: [] };
+        const asked = shown({ ...changed(numbered(8, { 3: "three" }), protectedData), path: "d.json" });
+        expect([asked.header, asked.automatic, asked.folded]).toEqual(["d.json · changed · +1 −1 · protected · data", false, "data"]);
+        // Docs, production and protected files open.
+        expect(["docs", "production", "protected", "operator"].map((role) => shown(file("core.py", role)).folded)).toEqual([null, null, null, null]);
     });
 
     it("counts a new file's public names, and names four of another's changes at most", () => {
@@ -331,6 +344,11 @@ describe("the judge's reading", () => {
         ).toBe("3 automatic · 1 new file · 1 public API");
         expect(tally([file("n.py", created), file("m.py", created), file("x.py")])).toBe("2 new files · 1 unread");
         expect(tally([file("x.py"), file("y.py")])).toBe("");
+        // Files folded whole, counted by why.
+        const tests: Reading = { role: "test", asks: [], findings: [] };
+        const data: Reading = { role: "data", asks: [], findings: [] };
+        expect(tally([file("t.py", tests), file("u.py", tests), file("d.json", data), file("a.md", docs)])).toBe("2 tests · 1 data file · 1 automatic");
+        expect(tally([file("a.md", docs), file("p.py", PRODUCTION)], true)).toBe("2 of a first approval");
     });
 });
 

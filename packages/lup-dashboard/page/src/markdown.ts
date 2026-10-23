@@ -6,17 +6,29 @@
 // GFM parser, mounted in the buffer's syntax tree where the stretch is
 // (`language`), the comments under an item's lines left out of the item's text,
 // so a table or a list goes on past them; so the tree knows the list item at
-// the cursor, and Enter in a comment continues it (`continued`). From the
-// tree: emphasis, strong, code, headings and links highlighted by their tags,
-// as a changed file's code is; the marks of each hidden, but on the line the
-// cursor is on in a comment, where they're shown to be edited, as Markdown
-// editors preview; and each table's cells padded so its columns line up, by
-// decorations and never text, so a row stays one line of the buffer, vim moves
-// over it as one, and a comment on it quotes its source (`decorate`;
+// the cursor, and Enter in a comment continues it (`continued`), as `o` and
+// `O` on one of its items open the next item or the one before (`openedLine`).
+// From the tree: emphasis, strong, code, headings and links highlighted by
+// their tags, as a changed file's code is; the marks of each hidden, but on the
+// line the cursor is on in a comment, where they're shown to be edited, as
+// Markdown editors preview; and each table's cells padded so its columns line
+// up, by decorations and never text, so a row stays one line of the buffer, vim
+// moves over it as one, and a comment on it quotes its source (`decorate`;
 // `docs/dashboard.md`, *The review*).
 import { insertNewlineContinueMarkupCommand, markdownLanguage } from "@codemirror/lang-markdown";
 import { Language, ParseContext, defineLanguageFacet, languageDataProp, syntaxHighlighting, syntaxTree } from "@codemirror/language";
-import { StateEffect, StateField, type ChangeDesc, type EditorState, type Extension, type Range, type Text } from "@codemirror/state";
+import {
+    StateEffect,
+    StateField,
+    type ChangeDesc,
+    type ChangeSpec,
+    type EditorState,
+    type Extension,
+    type Range,
+    type Text,
+    type Transaction,
+    type TransactionSpec,
+} from "@codemirror/state";
 import { Decoration, ViewPlugin, WidgetType, type DecorationSet, type EditorView, type ViewUpdate } from "@codemirror/view";
 import { NodeType, Parser, Tree, parseMixed, type Input, type PartialParse, type SyntaxNode, type SyntaxNodeRef, type TreeFragment } from "@lezer/common";
 import { classHighlighter, tagHighlighter, tags } from "@lezer/highlight";
@@ -205,6 +217,130 @@ export const language = new Language(own, new Sourced(), [], "sources");
  * number, or the quote mark of the quote it's in; on an empty item, the list's end. A plain line break elsewhere.
  */
 export const continued = insertNewlineContinueMarkupCommand({ nonTightLists: false });
+
+/** The marks a line of Markdown begins its blocks with: a quote's `>`, a list item's bullet or number, a task's box. */
+const BLOCK_MARKS = new Set(["QuoteMark", "ListMark", "TaskMarker"]);
+
+/** The blocks a line's marks continue: a list's item, a quote. */
+const CONTINUED = new Set(["ListItem", "Blockquote"]);
+
+/**
+ * What a line of a comment begins with, which a line opened beside it takes: its marks and the space around them, up
+ * to its words (`prefix`); the list item it begins, if any, with its number where its list is numbered, and where that
+ * number is written in `prefix`; and whether nothing follows its marks, as on an item just begun.
+ */
+interface Markup {
+    prefix: string;
+    item: SyntaxNode | null;
+    number: { value: number; from: number; to: number } | null;
+    blank: boolean;
+}
+
+/** Return whether the character at `at` of `state`'s text is a space or a tab. */
+function spaceAt(state: EditorState, at: number): boolean {
+    const character = state.doc.sliceString(at, at + 1);
+    return character === " " || character === "\t";
+}
+
+/**
+ * Return what the line `line` of `state` begins with (`Markup`), read from the Markdown tree: its marks, a task's box
+ * unticked; none where it's in no list and no quote, or in a block of code, whose lines carry no marks.
+ */
+function markupOf(state: EditorState, line: Span): Markup | null {
+    const tree = syntaxTree(state);
+    let at = line.from;
+    let prefix = "";
+    let item: SyntaxNode | null = null;
+    let number: Markup["number"] = null;
+    for (;;) {
+        const from = at;
+        while (at < line.to && spaceAt(state, at)) {
+            at += 1;
+        }
+        prefix += state.sliceDoc(from, at);
+        const mark = at < line.to ? tree.resolveInner(at, 1) : null;
+        if (mark === null || mark.from !== at || !BLOCK_MARKS.has(mark.name)) {
+            break;
+        }
+        const written = state.sliceDoc(mark.from, mark.to);
+        if (mark.name === "ListMark") {
+            item = mark.parent;
+            // A numbered item's mark is its number, then `.` or `)`.
+            const value = Number.parseInt(written, 10);
+            number = item?.parent?.name === "OrderedList" ? { value, from: prefix.length, to: prefix.length + written.length - 1 } : null;
+        }
+        prefix += mark.name === "TaskMarker" ? "[ ]" : written;
+        at = mark.to;
+    }
+    let inside = false;
+    for (let node: SyntaxNode | null = tree.resolveInner(at, at < line.to ? 1 : -1); node !== null; node = node.parent) {
+        if (CODE_BLOCKS.has(node.name)) {
+            return null;
+        }
+        inside ||= CONTINUED.has(node.name);
+    }
+    return inside || item !== null ? { prefix, item, number, blank: at >= line.to } : null;
+}
+
+/** Return the marks of `markup` with its item's number written as `value`, where it has one. */
+function numbered(markup: Markup, value: number): string {
+    const number = markup.number;
+    return number === null ? markup.prefix : `${markup.prefix.slice(0, number.from)}${value}${markup.prefix.slice(number.to)}`;
+}
+
+/**
+ * Return the changes that number each item of a numbered list from `first` on one more, as long as they're numbered one
+ * after another from `from`, as Enter does once it adds an item before them.
+ */
+function renumbered(state: EditorState, first: SyntaxNode | null, from: number): ChangeSpec[] {
+    const changes: ChangeSpec[] = [];
+    let expected = from;
+    for (let node = first; node !== null; node = node.nextSibling) {
+        const mark = node.name === "ListItem" ? node.getChild("ListMark") : null;
+        if (mark === null) {
+            continue;
+        }
+        if (Number.parseInt(state.sliceDoc(mark.from, mark.to), 10) !== expected) {
+            break;
+        }
+        changes.push({ from: mark.from, to: mark.to - 1, insert: `${expected + 1}` });
+        expected += 1;
+    }
+    return changes;
+}
+
+/**
+ * Return what `o` (`below`) or `O` does on the line of a comment at `position`: a line opened below it or above it,
+ * the cursor at its end. Below a list's item, the next item, as Enter at the line's end starts it (`continued`); above
+ * one, the item before it, at its indentation, with its bullet, or with its number, the items from it on numbered one
+ * more; beside a quote's line, its quote mark; beside an item's further line, its indentation. On an item just begun,
+ * where Enter would end the list, `o` starts the next all the same, since it never changes the line it's on. A plain
+ * line elsewhere.
+ */
+export function openedLine(state: EditorState, position: number, below: boolean): TransactionSpec {
+    const line = state.doc.lineAt(position);
+    const markup = markupOf(state, line);
+    if (below && (markup === null || !markup.blank)) {
+        const made: Transaction[] = [];
+        const atEnd = state.update({ selection: { anchor: line.to } }).state;
+        const done = continued({ state: atEnd, dispatch: (transaction) => made.push(transaction) }) ? made[0] : undefined;
+        if (done === undefined) {
+            return { changes: { from: line.to, insert: "\n" }, selection: { anchor: line.to + 1 } };
+        }
+        return { changes: done.changes, selection: done.selection };
+    }
+    if (markup === null) {
+        return { changes: { from: line.from, insert: "\n" }, selection: { anchor: line.from } };
+    }
+    const value = markup.number?.value ?? 0;
+    if (below) {
+        const prefix = numbered(markup, value + 1);
+        const later = markup.number === null ? [] : renumbered(state, markup.item?.nextSibling ?? null, value + 1);
+        return { changes: [{ from: line.to, insert: `\n${prefix}` }, ...later], selection: { anchor: line.to + 1 + prefix.length } };
+    }
+    const later = markup.number === null ? [] : renumbered(state, markup.item, value);
+    return { changes: [{ from: line.from, insert: `${markup.prefix}\n` }, ...later], selection: { anchor: line.from + markup.prefix.length } };
+}
 
 /** Return the Markdown tree's root of `each`, in `tree`, where it's been read; none before it has. */
 function rootOf(tree: Tree, each: Source): SyntaxNode | null {

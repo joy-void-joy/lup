@@ -38,9 +38,11 @@
     --fold-lines: var(--muted);
     --fold-context: var(--cyan);
     --fold-tasks: var(--link);
-    --fold-trace: var(--ok);
     --fold-since: var(--warn);
     --fold-conversation: var(--cyan);
+    --fold-earlier: var(--ok);
+    --fold-calls: var(--purple);
+    --fold-call: var(--orange);
     /* How many columns the review's margin has, one for each depth folds nest to,
        and how wide each is: a letter's width, and a little. */
     --columns: 6;
@@ -560,10 +562,6 @@ kbd {
     color: var(--fold-tasks);
 }
 
-.buffer .cm-line.drawer-trace {
-    color: var(--fold-trace);
-}
-
 .buffer .cm-line.drawer-since {
     color: var(--fold-since);
 }
@@ -595,6 +593,16 @@ kbd {
 .aside-calls,
 .aside-refused {
     color: var(--muted);
+}
+
+/* A call in a conversation, saying what it did, in the orange of the call that
+   made an item; its input and output under it as they are, set off by a bar. */
+.aside-call {
+    color: var(--orange);
+}
+
+.aside-call-text {
+    border-left: 2px solid var(--fold-call);
 }
 
 .aside-anchor {
@@ -703,6 +711,24 @@ kbd {
     font-weight: 400;
 }
 
+/* In "since you approved": a line changed since the operator last looked at
+   its file, its number in the drawer's colour after a dot (`data-gutter`); the
+   line after lines gone since, ruled above; and a file standing as they last
+   saw it, reviewed, a muted line of its own, ruled as a file's header is. */
+.buffer .cm-line.code-fresh::before {
+    color: var(--fold-since);
+    font-weight: 700;
+}
+
+.buffer .cm-line.code-gap {
+    border-top: 1px dashed var(--fold-since);
+}
+
+.buffer .cm-line.aside-reviewed {
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+}
+
 /* Each kind of fold in its colour: its mark, its bar, its placeholder, its part of the header. */
 .fold-item {
     color: var(--fold-item);
@@ -728,16 +754,24 @@ kbd {
     color: var(--fold-tasks);
 }
 
-.fold-trace {
-    color: var(--fold-trace);
-}
-
 .fold-since {
     color: var(--fold-since);
 }
 
 .fold-conversation {
     color: var(--fold-conversation);
+}
+
+.fold-earlier {
+    color: var(--fold-earlier);
+}
+
+.fold-calls {
+    color: var(--fold-calls);
+}
+
+.fold-call {
+    color: var(--fold-call);
 }
 
 /* The review's margin: a row a line, as tall as the line beside it, and a
@@ -836,10 +870,6 @@ kbd {
     color: var(--fold-tasks);
 }
 
-.buffer .cm-editor .cm-foldPlaceholder.fold-trace {
-    color: var(--fold-trace);
-}
-
 .buffer .cm-editor .cm-foldPlaceholder.fold-since {
     color: var(--fold-since);
 }
@@ -848,20 +878,16 @@ kbd {
     color: var(--fold-conversation);
 }
 
-.fold-tasks {
-    color: var(--fold-tasks);
+.buffer .cm-editor .cm-foldPlaceholder.fold-earlier {
+    color: var(--fold-earlier);
 }
 
-.fold-trace {
-    color: var(--fold-trace);
+.buffer .cm-editor .cm-foldPlaceholder.fold-calls {
+    color: var(--fold-calls);
 }
 
-.fold-since {
-    color: var(--fold-since);
-}
-
-.fold-conversation {
-    color: var(--fold-conversation);
+.buffer .cm-editor .cm-foldPlaceholder.fold-call {
+    color: var(--fold-call);
 }
 
 /* The header over the review: whom what's being written goes to and the group,
@@ -965,9 +991,6 @@ kbd {
     color: var(--fold-tasks);
 }
 
-.where-trace .where-mark {
-    color: var(--fold-trace);
-}
 
 .where-since .where-mark {
     color: var(--fold-since);
@@ -975,6 +998,18 @@ kbd {
 
 .where-conversation .where-mark {
     color: var(--fold-conversation);
+}
+
+.where-earlier .where-mark {
+    color: var(--fold-earlier);
+}
+
+.where-calls .where-mark {
+    color: var(--fold-calls);
+}
+
+.where-call .where-mark {
+    color: var(--fold-call);
 }
 
 .where-group {

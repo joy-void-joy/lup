@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
 import {
+    AROUND,
     begun,
     chordOf,
     closedAs,
@@ -12,8 +13,11 @@ import {
     deadTyped,
     keptFolds,
     nextWritten,
+    openedSaid,
     ownOf,
+    pastFolds,
     pastHidden,
+    reaching,
     rewritten,
     SPACED,
     stepped,
@@ -25,7 +29,7 @@ import {
     type Pressed,
     type Typing,
 } from "./editor";
-import { REVIEW_KEYS } from "./keys";
+import { FOLD_KINDS, REVIEW_KEYS } from "./keys";
 import { markdown, source, sourced } from "./markdown";
 
 describe("vim's cursor and the marks the Markdown hides", () => {
@@ -248,6 +252,70 @@ describe("folds kept as the operator left them", () => {
     });
 });
 
+describe("motions past a closed fold, which counts as its summary line", () => {
+    // `head` folds `h1` and `h2` away under it, from its end to `h2`'s; `h1` folds `h2` away, inside.
+    const text = "head\nh1\nh2\nafter";
+    const at = (needle: string, offset = 0) => text.indexOf(needle) + offset;
+    const outer = { from: at("\nh1"), to: at("\nafter") };
+    const inner = { from: at("\nh2"), to: at("\nafter") };
+    const folded = (doc: string, ...folds: { from: number; to: number }[]) =>
+        EditorState.create({ doc, extensions: [foldState] }).update({ effects: folds.map((each) => foldEffect.of(each)) }).state;
+    const state = folded(text, outer);
+    /** Where the cursor rests once a motion from `was` puts the selection at `head`, from `anchor` in visual mode: the text it's on, or the selection; none where it stays. */
+    const rests = (on: EditorState, head: number, was: number, anchor = head) => {
+        const moved = pastFolds(on, EditorSelection.single(anchor, head), was);
+        const doc = on.doc.toString();
+        return moved === null ? null : moved.main.empty ? doc.slice(moved.main.head) : doc.slice(moved.main.from, moved.main.to);
+    };
+
+    it("goes on past the fold onto the line after it, going on past the summary line, as `w` does", () => {
+        expect(rests(state, at("h1", 1), at("head"))).toBe("after");
+        expect(rests(state, at("h2"), at("ad"))).toBe("after");
+    });
+
+    it("comes back onto the summary line's last character, coming back into it, as `b` does, or where no line follows", () => {
+        expect(rests(state, at("h2", 1), at("after"))).toBe("d\nh1\nh2\nafter");
+        const last = "head\nh1\nh2";
+        expect(rests(folded(last, { from: 4, to: last.length }), at("h2"), 0)).toBe("d\nh1\nh2");
+        expect(rests(folded("\nh1\nafter", { from: 0, to: 3 }), 2, 6)).toBe("\nh1\nafter");
+    });
+
+    it("passes the outermost fold folded, and leaves the cursor where no closed fold hides it, its summary line's end and the fold's own end among them", () => {
+        expect(rests(folded(text, outer, inner), at("h2", 1), at("head"))).toBe("after");
+        expect(rests(folded(text, inner), at("h2", 1), at("head"))).toBe("after");
+        expect(rests(state, at("ad", 1), at("head"))).toBeNull();
+        expect(rests(state, outer.from, at("head"))).toBeNull();
+        expect(rests(state, outer.to, at("after"))).toBeNull();
+        expect(rests(state, at("after"), at("head"))).toBeNull();
+    });
+
+    it("keeps a visual selection's anchor, its head past the character the cursor is on where it runs forward, as vim draws it", () => {
+        expect(rests(state, at("h1", 1), at("head"), at("ead"))).toBe("ead\nh1\nh2\na");
+        // Selecting to the summary line's end, as `v$` does, stops on its last character, the line break being the fold's.
+        expect(rests(state, outer.from + 1, at("ad"), 0)).toBe("head");
+        expect(rests(state, at("h1"), at("after"), at("fter"))).toBe("d\nh1\nh2\na");
+    });
+});
+
+describe("a search or a jump to what a closed fold hides", () => {
+    const text = "head\nh1\nh2\nafter";
+    const outer = { from: 4, to: text.indexOf("\nafter") };
+    const inner = { from: text.indexOf("\nh2"), to: outer.to };
+    const state = EditorState.create({ doc: text, extensions: [foldState] }).update({ effects: [foldEffect.of(outer), foldEffect.of(inner)] }).state;
+
+    it("opens the folds around where it goes, those alone, one ending there among them", () => {
+        expect(reaching(state, text.indexOf("h2")).length).toBe(2);
+        expect(reaching(state, text.indexOf("h1")).length).toBe(1);
+        expect(reaching(state, outer.to).length).toBe(2);
+        expect(reaching(state, outer.from).length).toBe(0);
+        expect(reaching(state, text.indexOf("after")).length).toBe(0);
+    });
+
+    it("says how many folds it opened", () => {
+        expect([openedSaid(1), openedSaid(2)]).toEqual(["opened a fold to reach it", "opened 2 folds to reach it"]);
+    });
+});
+
 describe("a chord begun", () => {
     const held = (keys: string[], mode: { insertMode?: boolean; visualMode?: boolean } = {}) =>
         chordOf({
@@ -257,30 +325,60 @@ describe("a chord begun", () => {
     it("says what vim holds of a chord begun with Space, as the list writes it, and nothing of any other", () => {
         expect(held(["<Space>"])).toBe("␣");
         expect(held(["<Space>", "z"])).toBe("␣z");
+        expect(held(["<Space>", "z", "F"])).toBe("␣zF");
         expect(held([])).toBe("");
-        expect(held(["z"])).toBe("");
         expect(held(["<Space>"], { insertMode: true })).toBe("");
+    });
+
+    it("says `zf` waiting for a kind's letter, and nothing of `z` alone, which begins vim's own keys too", () => {
+        expect(held(["z", "f"])).toBe("zf");
+        expect(held(["z"])).toBe("");
+        expect(held(["z", "f"], { visualMode: true })).toBe("");
     });
 });
 
 describe("the chords Space leads", () => {
     const mapped = new Map(SPACED);
 
-    it("opens the folds of a kind with Space z and its letter, closing them with Shift and the letter, as vim's fold keys begin with z", () => {
-        expect(["<Space>zf", "<Space>zb", "<Space>zu", "<Space>zc"].map((keys) => mapped.get(keys))).toEqual([
+    it("opens the folds of a kind with Space z f and its letter, closing them with Space z F and the letter, as vim's fold keys begin with z", () => {
+        expect(["<Space>zff", "<Space>zfb", "<Space>zfu", "<Space>zfc", "<Space>zfs"].map((keys) => mapped.get(keys))).toEqual([
             "lupFoldOpen-file",
             "lupFoldOpen-body",
             "lupFoldOpen-lines",
             "lupFoldOpen-context",
+            "lupFoldOpen-since",
         ]);
-        expect(["<Space>zF", "<Space>zB", "<Space>zU", "<Space>zC"].map((keys) => mapped.get(keys))).toEqual([
+        expect(["<Space>zFf", "<Space>zFb", "<Space>zFu", "<Space>zFc", "<Space>zFs"].map((keys) => mapped.get(keys))).toEqual([
             "lupFoldClose-file",
             "lupFoldClose-body",
             "lupFoldClose-lines",
             "lupFoldClose-context",
+            "lupFoldClose-since",
         ]);
-        // Space z alone leads, doing nothing of its own, and Space f is no chord.
-        expect([...mapped.keys()].filter((keys) => keys === "<Space>z" || keys.startsWith("<Space>f"))).toEqual([]);
+        // Space z, Space z f and Space z F lead, doing nothing of their own; a kind's letter right after Space z, Shift
+        // and the letter among them, and Space f, are no chord.
+        const keys = [...mapped.keys()];
+        expect(keys.filter((each) => ["<Space>z", "<Space>zf", "<Space>zF"].includes(each) || each.startsWith("<Space>f"))).toEqual([]);
+        expect(keys.filter((each) => each.startsWith("<Space>z") && !each.startsWith("<Space>zf") && !each.startsWith("<Space>zF"))).toEqual([]);
+    });
+
+    it("closes the fold of a kind the cursor is in with z f and its letter, every kind's, the item's own among them", () => {
+        const around = new Map(AROUND);
+        expect([...around.keys()]).toEqual(FOLD_KINDS.map((each) => `zf${each.letter}`));
+        expect(["zfi", "zff", "zfu", "zfe", "zfk", "zfd"].map((keys) => around.get(keys))).toEqual([
+            "lupFoldAround-item",
+            "lupFoldAround-file",
+            "lupFoldAround-lines",
+            "lupFoldAround-earlier",
+            "lupFoldAround-calls",
+            "lupFoldAround-call",
+        ]);
+        // No trace drawer any more, so no `r`.
+        expect(around.has("zfr")).toBe(false);
+        // Each is in the list of keys, and plain zF stays vim's, unmapped.
+        const listed = new Set(REVIEW_KEYS.flatMap((part) => part.keys).flatMap((key) => key.keys.split(" ")));
+        expect([...around.keys()].every((keys) => listed.has(keys))).toBe(true);
+        expect([...around.keys(), ...SPACED.map(([keys]) => keys)].some((keys) => keys.startsWith("zF"))).toBe(false);
     });
 
     it("parks an item with Space p, leaving it for later, which no other chord begins", () => {

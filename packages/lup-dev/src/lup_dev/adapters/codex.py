@@ -205,6 +205,7 @@ unavailable; a launch runs what's kept instead.
   doesn't check.
 """
 
+import shlex
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -221,6 +222,7 @@ from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
 from lup_dev.host.courier import Heard, Spawned, Telling
 from lup_dev.host.records import (
+    Call,
     Called,
     Entry,
     Reader,
@@ -230,6 +232,8 @@ from lup_dev.host.records import (
     Task,
     Transcript,
     Usage,
+    first,
+    gist,
     within,
 )
 from lup_dev.host.records import Said as Spoken
@@ -1216,7 +1220,7 @@ class PlanWritten(Model, extra="ignore"):
 
 
 class ToolCalled(Model, extra="ignore"):
-    """A `function_call` or `custom_tool_call`: a tool, by its namespace and name (`protocol/src/models.rs`, `ResponseItem`), and its arguments, read for the call that writes the plan."""
+    """A `function_call` or `custom_tool_call`: a tool, by its namespace and name (`protocol/src/models.rs`, `ResponseItem`), and its arguments, read for the call that writes the plan and for what each call did."""
 
     type: Literal["function_call", "custom_tool_call"]
     name: str
@@ -1224,7 +1228,44 @@ class ToolCalled(Model, extra="ignore"):
     call_id: str | None = None
     """The call's id, which its hooks carry as `tool_use_id`."""
     arguments: str | None = None
-    """Its arguments, as the model wrote them: JSON in a string."""
+    """A `function_call`'s arguments, as the model wrote them: JSON in a string."""
+    input: str | None = None
+    """A `custom_tool_call`'s input, the text the tool takes: a patch for
+    `apply_patch`, a cell of code for `exec`."""
+
+    def given(self) -> JsonValue:
+        """Return what the call was given: a `function_call`'s arguments read as JSON, or as written where they don't read as it; a `custom_tool_call`'s text."""
+        if self.arguments is None:
+            return self.input
+        try:
+            return TypeAdapter[JsonValue](JsonValue).validate_json(self.arguments)
+        except ValidationError:
+            return self.arguments
+
+    def gist(self) -> str | None:
+        r"""Return what the call did, in a line: the files a patch touches, the command a shell runs, else its first argument, or its text's first line.
+
+        >>> ToolCalled(type="custom_tool_call", name="apply_patch", input="*** Begin Patch\n*** Update File: src/review.ts\n@@\n*** End Patch").gist()
+        'review.ts'
+        >>> ToolCalled(type="function_call", name="exec_command", arguments='{"cmd": "rg -n gist", "workdir": "/w"}').gist()
+        'rg -n gist'
+        """
+        given = self.given()
+        match given:
+            case str() if self.name == "apply_patch":
+                return gist(
+                    ", ".join(PurePosixPath(each).name for each in patched(given))
+                )
+            case {"input": str() as patch} if self.name == "apply_patch":
+                return gist(
+                    ", ".join(PurePosixPath(each).name for each in patched(patch))
+                )
+            case {"command": [*words]} if all(isinstance(each, str) for each in words):
+                return gist(shlex.join(str(each) for each in words))
+            case dict():
+                return gist(first(given))
+            case _:
+                return gist(given)
 
     def planned(self) -> list[Task] | None:
         """Return the plan this call writes, where it's `update_plan` and its arguments read as one, each step numbered in order; none for any other call."""
@@ -1247,10 +1288,45 @@ class ToolCalled(Model, extra="ignore"):
 
 
 class ShellCalled(Model, extra="ignore"):
-    """A `local_shell_call`: a command, with no tool's name."""
+    """A `local_shell_call`: a command, with no tool's name, and what it runs (`LocalShellAction`)."""
 
     type: Literal["local_shell_call"]
     call_id: str | None = None
+    action: JsonObject = {}
+
+    def gist(self) -> str | None:
+        """Return the command it runs, as a shell would read it; its action as JSON where it isn't a command."""
+        match self.action:
+            case {"command": [*words]} if all(isinstance(each, str) for each in words):
+                return gist(shlex.join(str(each) for each in words))
+            case _:
+                return gist(self.action or None)
+
+
+class OutputPart(Model, extra="ignore"):
+    """A part of a call's output: its text, where it's text; an image otherwise."""
+
+    type: str
+    text: str | None = None
+
+
+class ToolOutput(Model, extra="ignore"):
+    """A `function_call_output` or `custom_tool_call_output`: what a call returned, by the call's id, as the model was given it, text or parts (`FunctionCallOutputPayload`)."""
+
+    type: Literal["function_call_output", "custom_tool_call_output"]
+    call_id: str
+    output: str | list[OutputPart] = ""
+
+    def said(self) -> str:
+        """Return what the model was given, its parts one after another, an image said as such."""
+        match self.output:
+            case str() as text:
+                return text
+            case parts:
+                return "\n".join(
+                    part.text if part.text is not None else f"[{part.type}]"
+                    for part in parts
+                )
 
 
 class OtherItem(Model, extra="ignore"):
@@ -1265,7 +1341,8 @@ class ResponseRecord(Model, extra="ignore"):
     type: Literal["response_item"]
     timestamp: datetime | None = None
     payload: Annotated[
-        ToolCalled | ShellCalled | OtherItem, Field(union_mode="left_to_right")
+        ToolCalled | ShellCalled | ToolOutput | OtherItem,
+        Field(union_mode="left_to_right"),
     ]
 
 
@@ -1314,6 +1391,48 @@ class CodexTranscripts(Model, Reader):
             usage=usage(lines),
             tasks=planned(lines),
         )
+
+    @override
+    def calls(self, record: Path, ids: list[str]) -> list[Call]:
+        """Read calls whole: each one's input from the `response_item` calling it, and its output from the one answering it, by the call's id; Codex keeps no mark of a call that failed beside its output."""
+        lines = list(rolled(record))
+        given: dict[str, JsonValue] = {
+            payload.call_id: (
+                payload.given() if isinstance(payload, ToolCalled) else payload.action
+            )
+            for line in lines
+            if isinstance(line, ResponseRecord)
+            and isinstance(payload := line.payload, ToolCalled | ShellCalled)
+            and payload.call_id is not None
+            and payload.call_id in ids
+        }
+        returned = {
+            line.payload.call_id: line.payload.said()
+            for line in lines
+            if isinstance(line, ResponseRecord)
+            and isinstance(line.payload, ToolOutput)
+            and line.payload.call_id in ids
+        }
+        return [
+            Call(id=each, input=given[each], output=returned.get(each))
+            for each in ids
+            if each in given
+        ]
+
+
+def patched(patch: str) -> list[str]:
+    r"""Return the files a patch in Codex's own format touches, by the header naming each: added, updated or deleted (`apply-patch/src/parser.rs`).
+
+    >>> patched("*** Begin Patch\n*** Add File: a.py\n+x\n*** Delete File: b.py\n*** End Patch")
+    ['a.py', 'b.py']
+    """
+    heads = ["*** Add File: ", "*** Update File: ", "*** Delete File: "]
+    return [
+        line.removeprefix(head)
+        for line in patch.splitlines()
+        for head in heads
+        if line.startswith(head)
+    ]
 
 
 def usage(lines: list[Rolled]) -> Usage | None:
@@ -1394,9 +1513,11 @@ def stepped(line: Rolled) -> list[Entry]:
         ):
             return [Spoken(by="agent", text=item.text(), at=at)]
         case ResponseRecord(payload=ToolCalled() as called, timestamp=at):
-            return [Called(tool=called.tool(), id=called.call_id, at=at)]
-        case ResponseRecord(payload=ShellCalled(call_id=id_), timestamp=at):
-            return [Called(tool="shell", id=id_, at=at)]
+            return [
+                Called(tool=called.tool(), gist=called.gist(), id=called.call_id, at=at)
+            ]
+        case ResponseRecord(payload=ShellCalled(call_id=id_) as shell, timestamp=at):
+            return [Called(tool="shell", gist=shell.gist(), id=id_, at=at)]
         case _:
             return []
 

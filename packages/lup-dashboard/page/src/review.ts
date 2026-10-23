@@ -6,21 +6,23 @@
 // own are, the lines that matter in it, by the judge's reading, kept in order
 // for the keys to walk; under each item its context. At the end of each agent's
 // group, after its items, its drawers (`docs/dashboard.md`, *The drawers*): its
-// task list, its trace since the operator's last message, what its branch
-// changed since they approved it, each file laid out as an item's, and its whole
-// conversation (`conversation.ts`), each a fold of its own kind, folded until
-// opened; a comment in the trace, the conversation or on the changed files is a
-// remark to the agent, which records the version of the code it was written on.
+// task list, what its branch changed since they approved it, each file laid out
+// as an item's, and its whole conversation (`conversation.ts`), its latest part
+// open, each a fold of its own kind, folded until opened but "since you
+// approved", which is open, as it's the code waiting on them; a comment in the
+// conversation or on the changed files is a remark to the agent, the one on code
+// recording the version it was written on.
 // Its groups and items in the order they arrived, never sorted again, so what
 // the operator reads stays put as items come; their kind's rank, which the host
 // gives, says only which `]a` and `[a` stop at. Each fold has a kind: the item
 // whole, a file, a function's or a class's body, a run of unchanged lines, the
 // context, a drawer. What's folded by default: the context, each run of a file's
-// unchanged lines away from its changes and the lines that matter, so a held
-// change and a drawer's file show every change, and, in an approval's file whose
-// asks are each on a line, every run of lines away from those, changed ones too;
-// an automatic file whole under its header, an item marked read or left for
-// later, and each drawer; a body is open, but a new module's in its drawer,
+// unchanged lines away from its changes and the lines that matter, so every
+// change shows, never a changed line among unchanged ones; a test and a data
+// file whole under its header, and each file of a first approval (`Folded`);
+// an item marked read or left for later, and each drawer but "since you
+// approved"; a body is open, but
+// a new module's in its drawer,
 // which shows its design. Each fold is named by what it hides, so an item or a
 // drawer laid out again keeps the folds the operator left; and where the cursor
 // is, said in the header over the review, is the group, the item or the drawer
@@ -29,7 +31,7 @@
 // (`docs/dashboard.md`, *The review*). What it shares with a conversation's
 // text is in `comments.ts`.
 import { since } from "./agents";
-import { shownOnce, type Body, type ChangedFile, type Matter, type Row, type Showing } from "./code";
+import { FOLDED, foldedOf, shownOnce, type Body, type ChangedFile, type Folded, type Matter, type Row } from "./code";
 import {
     calls,
     lastOf,
@@ -48,11 +50,11 @@ import {
 import {
     UNEXCHANGED,
     aboutAt as aboutTalk,
-    history,
     laid as laidTalk,
     opened as openedTalk,
     quoted as quotedTalk,
     shifted,
+    type Call,
     type Entry,
     type Exchanged,
     type Laid as Talk,
@@ -61,6 +63,7 @@ import { SET_IN, above, citedOn, editedOf, passageOf, type Row as Beside, type R
 import { around } from "./folds";
 import type { components } from "./generated/api";
 import { DRAWERS, type DrawerKind, type FoldKind, type ReviewPlace } from "./keys";
+import { reviewedLine } from "./since";
 
 export { calls, type Block, type ChangedFile, type Line, type Span };
 
@@ -76,9 +79,10 @@ export type { Quote } from "./comments";
 export type Context = components["schemas"]["Context"];
 export type Since = components["schemas"]["Since"];
 export type SinceFile = components["schemas"]["SinceFile"];
+export type Viewed = components["schemas"]["ViewedFile"];
 export type Task = components["schemas"]["Task"];
 export type Usage = components["schemas"]["Usage"];
-export type { Entry, Exchanged };
+export type { Call, Entry, Exchanged };
 
 /** What the operator writes in the review, as its editor holds it: a comment on an item, a message to an agent, or a remark in one of its drawers. */
 export type Written = Comment | Letter | Remark;
@@ -181,31 +185,46 @@ export function threadsOf(answers: Item[], number: number): Thread {
 
 
 /**
- * What the page holds of one agent, for its banner and its drawers: its conversation's steps as read so far, its task
- * list and what its context holds, the items it exchanged where they were asked, what its branch changed since the
- * operator approved it as they read it (`since`), and what stands now where that differs (`latest`), which Space `l`
- * brings in. None of a drawer's before the host has answered.
+ * What the page holds of one agent, for its banner and its drawers: its conversation's steps as read so far, each call
+ * read whole once its fold was opened, by its id, its task list and what its context holds, the items it exchanged
+ * where they were asked, and what its branch changed since the operator last saw it, as last read (`since`). None of
+ * a drawer's before the host has answered.
  */
 export interface AgentDrawers {
     entries: Entry[];
+    calls: ReadonlyMap<string, Answered<Call>>;
     tasks: Task[];
     usage: Usage | null;
     exchanged: Exchanged | null;
     since: Since | null;
-    latest: Since | null;
 }
 
 /** Each agent's drawers' data, by `whose` its conversation is. */
 export type Drawers = Map<string, AgentDrawers>;
 
-export const UNREAD: AgentDrawers = { entries: [], tasks: [], usage: null, exchanged: null, since: null, latest: null };
+export const UNREAD: AgentDrawers = { entries: [], calls: new Map(), tasks: [], usage: null, exchanged: null, since: null };
 
 /**
  * What a line under an item or in a drawer that isn't the operator's or the agent's own text shows: a fold's summary;
- * a step of a context or a conversation, the operator's words, the agent's, a run of calls, or the call that made the
- * item; an item of the inbox in a conversation, and a line of its text; a task; or why the host showed none.
+ * a step of a context or a conversation, the operator's words, the agent's, a run of calls, a call and a line of its
+ * input and output, or the call that made the item; an item of the inbox in a conversation, and a line of its text; a
+ * task; a file standing as the operator last saw it, in "since you approved"; or why the host showed none. Around an
+ * agent's answer, who wrote what follows, what the operator's words are on, their words, the agent's, a passage a
+ * citation cites, and a line an edit took away or put in (`RowKind`, `exchange.ts`).
  */
-export type Kind = "summary" | RowKind | "calls" | "anchor" | "refused" | "item-from" | "item-to" | "item-text" | "task";
+export type Kind =
+    | "summary"
+    | RowKind
+    | "calls"
+    | "call"
+    | "call-text"
+    | "anchor"
+    | "refused"
+    | "item-from"
+    | "item-to"
+    | "item-text"
+    | "task"
+    | "reviewed";
 
 /** A line under an item that isn't its own text, so no comment is on it. */
 export interface Aside extends Span {
@@ -222,11 +241,13 @@ export interface Coded extends Span {
 
 /**
  * What folds in an item or a drawer, by its kind (`FoldKind`): the item whole under its header, folded where it's
- * marked read or left for later; a drawer under its summary line, folded until opened; each file it changes under its
- * header, folded where it's automatic; a function's or a class's body under the line declaring it, open but in a new
- * module of a drawer; a run of a file's unchanged lines under a summary line, folded; and its context, folded. Each
- * sits whole inside another or beside it. It hides `from` to `to`, from the end of its summary line to the end of its
- * last; a file's and a body's from the end of the comments on their first line, which stay in view.
+ * marked read or left for later; a drawer under its summary line, folded until opened, but "since you approved", open;
+ * each file it changes under its
+ * header, folded where it's automatic, asking nothing held or flagged, a test, data, or a first approval's (`Folded`); a function's or a class's body under the
+ * line declaring it, open but in a new module of a drawer; a run of a file's unchanged lines under a summary line,
+ * folded; and its context, folded. Each sits whole inside another or beside it. It hides `from` to `to`, from the end
+ * of its summary line to the end of its last; a file's and a body's from the end of the comments on their first line,
+ * which stay in view.
  */
 export interface Fold extends Span {
     /** What it's in: an item, by its number, or a drawer, by its agent and kind (`ownerOf`). */
@@ -304,15 +325,22 @@ export interface Region extends Scope {
     changed: number[];
 }
 
-/** One of an agent's drawers, where it's shown: which, whose, and, for its trace and its conversation, the conversation as laid out in it, which its remarks are placed by. */
+/** One of an agent's drawers, where it's shown: which, whose, and, for its conversation, the conversation as laid out in it, which its remarks are placed by. */
 export interface Drawer extends Scope {
     kind: DrawerKind;
     conversation: Conversation;
     talk: Talk | null;
     /** What its "since you approved" shows, by file, where it's that drawer. */
     files: SinceFile[];
-    /** The worktree its files are in, for a remark on one. */
+    /** Where its "since you approved" says each file standing as the operator last saw it, in a line of its own. */
+    reviewed: ReviewedLine[];
+    /** The worktree its files are in, for a remark on one; none before the host has answered. */
     worktree: string | null;
+}
+
+/** A file standing as the operator last saw it, where its line is in "since you approved". */
+export interface ReviewedLine extends Span {
+    file: SinceFile;
 }
 
 /** The review's text, and where each group, each item and each drawer is in it. */
@@ -470,7 +498,7 @@ function beneath(item: Item, around: Around): Under | null {
  * One line of a changed file that comments may be on: its header, or one of its rows, the run of unchanged rows it
  * opens, if any, before it, and whether it ends one; what it triggered, where it's a line that matters, and whether
  * it's a stop, the first line of what triggered; the bodies it declares and those it ends; and, for a file with rows,
- * the fold its header opens, folded where the file is automatic, and its last row ends.
+ * the fold its header opens, folded where the file folds whole (`Folded`) or is automatic, and its last row ends.
  */
 interface Filed {
     file: ChangedFile;
@@ -494,36 +522,33 @@ export function changing(item: Item): boolean {
     return reason === "approval" || reason === "held" || reason === "flagged";
 }
 
-/**
- * Return what an item's files whose asks are each on a line keep open (`Showing`): an approval's, which may change tens
- * of thousands of lines, the lines that ask alone; a held change's, every change, as the operator reads them whole.
- */
-export function showing(item: Item): Showing {
-    return item.reason.reason === "approval" ? "asks" : "changes";
+/** Return whether `item` is a first approval, which trusts the repository as it is: the review folds each of its files under its header (`Folded`). */
+export function firstApproval(item: Item): boolean {
+    return item.reason.reason === "approval" && item.reason.first;
 }
 
 /**
- * Return the lines of `files`, each file's header, then its rows, its runs of unchanged ones folding, or for an
- * approval every run away from the lines that ask (`showing`), each body able to fold under the row declaring it, and
- * the whole of each file able to fold under its header, an automatic one folded. Where `design` says so of a file, a
- * new module in a drawer, its bodies fold until opened, but those holding a line that matters.
+ * Return the lines of `files`, each file's header, then its rows, its runs of unchanged ones folding, each body able
+ * to fold under the row declaring it, and the whole of each file able to fold under its header, folded where it's
+ * automatic, asking nothing held or flagged, a test, data, or, `first`, a first approval's (`Folded`). Where `design` says so of a file, a new module in a drawer,
+ * its bodies fold until opened, but those holding a line that matters.
  */
-function filedOf(files: ChangedFile[], showing: Showing, design: (file: ChangedFile) => boolean): Filed[] {
-    return files.flatMap((file) => filedOnce(file, showing, design(file)));
+function filedOf(files: ChangedFile[], first: boolean, design: (file: ChangedFile) => boolean): Filed[] {
+    return files.flatMap((file) => filedOnce(file, first, design(file)));
 }
 
-/** Each file's lines as laid out, by what it shows and whether its bodies fold as a design's, laid out once: the review is laid out again at each key typed in a comment, and a file's lines don't change (`shownOnce`). */
+/** Each file's lines as laid out, by whether it's a first approval's and whether its bodies fold as a design's, laid out once: the review is laid out again at each key typed in a comment, and a file's lines don't change (`shownOnce`). */
 const filedOut = new WeakMap<ChangedFile, Map<string, Filed[]>>();
 
-/** Return the lines of `file` showing what `showing` says, its bodies folding where `designed` (`filedOf`), laid out once and kept: its header, then its rows, each with the run it opens, the bodies it declares and those it ends, found by row. */
-function filedOnce(file: ChangedFile, showing: Showing, designed: boolean): Filed[] {
+/** Return the lines of `file`, `first` where it's a first approval's, its bodies folding where `designed` (`filedOf`), laid out once and kept: its header, then its rows, each with the run it opens, the bodies it declares and those it ends, found by row. */
+function filedOnce(file: ChangedFile, first: boolean, designed: boolean): Filed[] {
     const kept = filedOut.get(file) ?? new Map<string, Filed[]>();
-    const key = `${showing} ${designed ? "designed" : "shown"}`;
+    const key = `${first ? "first" : "later"} ${designed ? "designed" : "shown"}`;
     const found = kept.get(key);
     if (found !== undefined) {
         return found;
     }
-    const laidOut = shownOnce(file, showing);
+    const laidOut = shownOnce(file, first);
     const header: Filed = {
         file,
         row: null,
@@ -534,7 +559,7 @@ function filedOnce(file: ChangedFile, showing: Showing, designed: boolean): File
         stop: laidOut.whole,
         declares: [],
         finishes: [],
-        folds: laidOut.rows.length > 0 ? { closed: laidOut.automatic } : null,
+        folds: laidOut.rows.length > 0 ? { closed: laidOut.folded !== null || laidOut.automatic } : null,
         ends: false,
         designed: false,
     };
@@ -582,7 +607,7 @@ function filed(item: Item, around: Around): Filed[] {
     if (!changing(item) || files === undefined || !("shown" in files)) {
         return [];
     }
-    return filedOf(files.shown, showing(item), () => false);
+    return filedOf(files.shown, firstApproval(item), () => false);
 }
 
 /** A group as it's laid out: what names it among the others, the agent it's of, what its banner names it by, and its items. */
@@ -701,32 +726,43 @@ export function lastSpoken(entries: Entry[]): number {
     return entries.findLastIndex((each) => each.kind === "said" && each.by === "operator");
 }
 
-/** Say a trace's summary line: how many steps since the operator's last message, or that the record isn't read yet. */
-export function traceSummary(entries: Entry[], read: boolean): string {
-    if (!read) {
-        return "trace · not read yet";
-    }
-    const spoke = lastSpoken(entries);
-    const steps = entries.length - spoke - 1;
-    const since = spoke < 0 ? "" : " since your last message";
-    return steps === 0 ? `trace · nothing${since}` : `trace · ${counted(steps, "step")}${since}`;
-}
-
-/** Say a "since you approved" drawer's summary line: on which branch, how many files, and how many writes came since the operator read it, which Space `l` brings in. */
-export function sinceSummary(shown: Since | null, latest: Since | null): string {
+/**
+ * Say a "since you approved" drawer's summary line: on which branch, how many files changed since the operator last saw
+ * them are to review, how many have flagged writes waiting on them, which the branch's landing waits on, how many are
+ * tests or data files, folded whole and left out of what's to review (`foldedOf`), and how many stand as they saw them,
+ * reviewed: the agent's flags in one line, as the inbox lists them.
+ */
+export function sinceSummary(shown: Since | null): string {
     if (shown === null) {
         return "since you approved · not read yet";
     }
     const branch = shown.branch == null ? "" : ` on ${shown.branch}`;
-    const files = shown.files.length === 0 ? "nothing" : counted(shown.files.length, "file");
-    const came = latest === null || latest.version === shown.version ? null : Math.max(latest.writes - shown.writes, 0);
-    const newer = came === null ? "" : ` · ${came === 0 ? "changed" : counted(came, "write")} since · ␣l brings it in`;
-    return `since you approved${branch} · ${files}${newer}`;
+    const files = shown.files ?? [];
+    const changed = files.flatMap((each) => (each.file == null ? [] : [each.file]));
+    const folded = new Map<Folded, number>();
+    for (const each of changed) {
+        const why = foldedOf(each, false);
+        if (why !== null) {
+            folded.set(why, (folded.get(why) ?? 0) + 1);
+        }
+    }
+    const open = changed.length - [...folded.values()].reduce((sum, each) => sum + each, 0);
+    const kept = files.length - changed.length;
+    const flagged = files.filter((each) => (each.flags ?? []).length > 0).length;
+    const said = [
+        ...(open === 0 ? [] : [`${open} to review`]),
+        ...(flagged === 0 ? [] : [`${flagged} flagged`]),
+        ...[...folded].map(([why, count]) => `${count} ${count === 1 ? FOLDED[why].one : FOLDED[why].many}`),
+        ...(kept === 0 ? [] : [`${kept} reviewed`]),
+    ];
+    return `since you approved${branch} · ${said.length === 0 ? "nothing" : said.join(" · ")}`;
 }
 
-/** Say a conversation drawer's summary line: how many steps it has, or that the record isn't read yet. */
-export function conversationSummary(entries: Entry[], read: boolean): string {
-    return read ? `conversation · ${counted(entries.length, "step")}` : "conversation · not read yet";
+/** Say a conversation drawer's summary line: how many steps it has, and how many since the operator's last words, where they spoke. */
+export function conversationSummary(entries: Entry[]): string {
+    const spoke = lastSpoken(entries);
+    const since = spoke < 0 ? "" : `, ${entries.length - spoke - 1} since your last words`;
+    return `conversation · ${counted(entries.length, "step")}${since}`;
 }
 
 /** The text being laid out, line by line. */
@@ -1093,6 +1129,7 @@ export function laid(
         const mine: Placed[] = wrote.flatMap((comment, at) => (isRemark(comment) && whose(comment.to) === key ? [{ comment, at }] : []));
         let talk: Talk | null = null;
         let files: SinceFile[] = [];
+        const reviewed: ReviewedLine[] = [];
         let said: string;
         let summary: Span;
         switch (kind) {
@@ -1105,47 +1142,33 @@ export function laid(
                 }
                 break;
             }
-            case "trace":
             case "conversation": {
-                const spoke = lastSpoken(data.entries);
-                const tracing = kind === "trace";
-                said = tracing ? traceSummary(data.entries, true) : conversationSummary(data.entries, true);
+                said = conversationSummary(data.entries);
                 summary = w.line(said);
-                // A remark on a step since the operator's last words shows in the trace, which holds the same steps, never twice.
+                // Each remark on the agent's words, under the line it's on.
                 const steps = mine.flatMap(({ comment, at }) =>
-                    isRemark(comment) && comment.step != null && (tracing ? comment.step > spoke : comment.step <= spoke)
-                        ? [{ remark: { step: comment.step, quote: comment.quote, text: comment.text }, at }]
-                        : [],
+                    isRemark(comment) && comment.step != null ? [{ remark: { step: comment.step, quote: comment.quote, text: comment.text }, at }] : [],
                 );
-                const first = tracing ? spoke + 1 : 0;
-                const entries = tracing ? data.entries.slice(first) : data.entries;
-                const beside = {
-                    sent: [],
-                    exchanged: tracing || data.exchanged === null ? UNEXCHANGED : data.exchanged,
-                    whose: { agent: conversation.agent ?? null, name },
-                };
-                const earlier = tracing ? ("nothing" as const) : history(data.entries, []);
-                const laidOut = laidTalk(entries, beside, { comments: steps.map((each) => each.remark) }, earlier, first);
-                // Where the talk starts: its folds' labels are read from its own text, not the whole being built.
-                const offset = w.at;
-                talk = shifted(laidOut, offset);
+                const beside = { exchanged: data.exchanged ?? UNEXCHANGED, whose: { agent: conversation.agent ?? null, name }, calls: data.calls };
+                const laidOut = laidTalk(data.entries, beside, { comments: steps.map((each) => each.remark) });
+                talk = shifted(laidOut, w.at);
                 if (laidOut.text !== "") {
                     w.text += `${laidOut.text}\n`;
                 }
                 into.lines.push(...talk.words.flatMap((words) => words.lines.map(({ from, to, own }) => ({ from, to, own }))));
                 into.blocks.push(...talk.blocks.map((block) => ({ ...block, comment: steps[block.comment]?.at ?? block.comment })));
                 into.asides.push(...talk.asides);
-                const folds = [...(talk.fold === null ? [] : [talk.fold]), ...talk.items.flatMap((item) => (item.fold === null ? [] : [item.fold]))];
-                for (const fold of folds) {
-                    into.folds.push({ of, kind: "context", name: fold.key, label: laidOut.text.slice(fold.summary.from - offset, fold.summary.to - offset), closed: fold.closed, summary: fold.summary, from: fold.from, to: fold.to });
+                for (const fold of talk.folds) {
+                    into.folds.push({ of, kind: fold.kind ?? "context", name: fold.key, label: fold.label ?? "", closed: fold.closed, summary: fold.summary, from: fold.from, to: fold.to });
                 }
                 break;
             }
             case "since": {
-                said = sinceSummary(data.since, data.latest);
+                said = sinceSummary(data.since);
                 summary = w.line(said);
                 files = data.since?.files ?? [];
-                const shown = filedOf(files.map((each) => each.file), "changes", (file) => file.before == null);
+                const changed = files.flatMap((each) => (each.file == null ? [] : [each.file]));
+                const shown = filedOf(changed, false, (file) => file.before == null);
                 const starts = startsOf(shown.map((each) => each.text));
                 const placed = placedOn(mine.filter(({ comment }) => isRemark(comment) && comment.code != null), starts);
                 const writeBlocks = (line: number | null) => {
@@ -1153,19 +1176,33 @@ export function laid(
                         into.blocks.push({ comment: at, ...w.line(comment.text) });
                     }
                 };
-                layCode(w, into, of, shown, 0, starts, writeBlocks);
+                // In the files' order, each standing as the operator last saw it a line among the others, so marking one reviewed moves none.
+                let first = 0;
+                for (const each of files) {
+                    if (each.file == null) {
+                        const line = { kind: "reviewed" as const, ...w.line(reviewedLine(each)) };
+                        into.asides.push(line);
+                        reviewed.push({ from: line.from, to: line.to, file: each });
+                        continue;
+                    }
+                    const next = shown.findIndex((row, at) => at > first && row.row === null);
+                    const own = shown.slice(first, next < 0 ? shown.length : next);
+                    layCode(w, into, of, own, first, starts, writeBlocks);
+                    first += own.length;
+                }
                 break;
             }
         }
         // Labelled by the words written, not sliced from the text being built, which copies it whole each time.
         const label = said;
         const last = w.at - 1;
-        // A drawer with nothing under its summary line hides nothing, so it has no fold.
+        // A drawer with nothing under its summary line hides nothing, so it has no fold. "Since you approved" is open,
+        // as it's the code waiting on the operator; the others fold until opened.
         if (last > summary.to) {
-            into.folds.push({ of, kind, name: "", label, closed: true, summary, from: summary.to, to: last });
+            into.folds.push({ of, kind, name: "", label, closed: kind !== "since", summary, from: summary.to, to: last });
         }
         w.line("");
-        return { kind, conversation, talk, files, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
+        return { kind, conversation, talk, files, reviewed, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
     }
 }
 
@@ -1349,9 +1386,9 @@ export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "inse
             return "drawer";
         }
         if (drawer.kind === "since") {
-            return codeAt(drawer, head) !== undefined ? "since" : "aside";
+            return codeAt(drawer, head) !== undefined ? "since" : reviewedAt(drawer, head) !== undefined ? "reviewed" : "aside";
         }
-        return lineAt(drawer, head) !== undefined ? "trace" : "aside";
+        return lineAt(drawer, head) !== undefined ? "words" : "aside";
     }
     const region = regionAt(laidOut, head);
     if (region === undefined || asideAt(region, head) !== undefined) {
@@ -1414,14 +1451,15 @@ export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Wr
     if (scope === undefined) {
         return [...going, { kind: "group", text: naming.group(group) }];
     }
-    const file = scope.filed.find((each) => head >= each.from && head <= each.to);
+    // A file's path: from its lines, or from its line in "since you approved" once it stands as the operator last saw it.
+    const file = scope.filed.find((each) => head >= each.from && head <= each.to)?.file.path ?? (isDrawer(scope) ? reviewedAt(scope, head)?.file.path : undefined);
     const inner = around(scope.folds, head).filter((each) => each.kind !== "file" && each.of !== scope.of || (each.kind !== "item" && each.kind !== "file" && !(DRAWERS as string[]).includes(each.kind)));
     const named: Where = isRegion(scope) ? { kind: "item", text: naming.item(scope) } : { kind: (scope as Drawer).kind, text: (scope as Drawer).kind };
     return [
         ...going,
         { kind: "group", text: naming.group(group) },
         named,
-        ...(file === undefined ? [] : [{ kind: "file" as const, text: file.file.path }]),
+        ...(file === undefined ? [] : [{ kind: "file" as const, text: file }]),
         ...inner.map((each) => ({ kind: each.kind, text: each.label })),
     ];
 }
@@ -1483,6 +1521,20 @@ export function codeFrom(code: Coded[], position: number): number {
         }
     }
     return low;
+}
+
+/** Return the line of a file standing as the operator last saw it that `position` is on in a "since you approved" `drawer`; none where it's on none. */
+export function reviewedAt(drawer: Drawer, position: number): ReviewedLine | undefined {
+    return drawer.reviewed.find((each) => position >= each.from && position <= each.to);
+}
+
+/** Return the file of a "since you approved" `drawer` that `position` is on, by its lines or by its line standing as the operator last saw it; none where it's on none. */
+export function sinceFileAt(drawer: Drawer, position: number): SinceFile | undefined {
+    const coded = codeAt(drawer, position);
+    if (coded !== undefined) {
+        return drawer.files.find((each) => each.file === coded.file);
+    }
+    return reviewedAt(drawer, position)?.file;
 }
 
 /** Return the line of a changed file shown at `position`, where it's on one. */
@@ -1558,13 +1610,13 @@ function quotedCode(drawer: Drawer, lines: Line[]): NonNullable<Remark["code"]> 
     if (shown === undefined || shown.version == null || drawer.worktree === null || first === undefined) {
         return null;
     }
-    return { worktree: drawer.worktree, path: shown.file.path, version: shown.version, first: first.number, lines: rows.map((each) => each.text) };
+    return { worktree: drawer.worktree, path: shown.path, version: shown.version, first: first.number, lines: rows.map((each) => each.text) };
 }
 
 /**
  * Return where a comment opened on the line at `position` goes: on that line of its item, or on the item whole from
  * its header or an empty line of its own; on a line of a changed file, or its header, empty or not; in a drawer, a
- * remark to its agent on the agent's words in its trace or conversation, or on a line of a file since they approved it,
+ * remark to its agent on the agent's words in its conversation, or on a line of a file since they approved it,
  * which records the file's version. On a group's banner, a message to its agent, laid out under its group among those
  * to answer now, from the banner of what's left for later too. None on a line no comment is on, or on the banner of
  * lup's approvals.
