@@ -509,18 +509,17 @@ def test_a_calls_moment_runs_from_the_operators_last_words_to_their_next() -> No
 def test_claude_codes_record_reads_its_context_in_use_and_its_task_list(
     tmp_path: Path,
 ) -> None:
-    """The context is the last reply's input, its cached parts included, in the window the operator's model chooses; the task list is replayed from the calls that wrote it, each task numbered by its result."""
-    settings = tmp_path / "settings.json"
-    settings.write_text(json.dumps({"model": "opus[1m]"}))
+    """The context is the last reply's input, its cached parts included, in the window of the model that made it; the task list is replayed from the calls that wrote it, each task numbered by its result."""
     folder = tmp_path / "projects" / "-w"
     folder.mkdir(parents=True)
 
     def replied(*blocks: dict[str, object], usage: dict[str, int]) -> str:
         return line(
             type="assistant",
+            requestedModel="claude-opus-5-5[1m]",
             message={
                 "role": "assistant",
-                "model": "claude-opus-4-1",
+                "model": "claude-opus-5-5",
                 "content": list(blocks),
                 "usage": usage,
             },
@@ -587,13 +586,12 @@ def test_claude_codes_record_reads_its_context_in_use_and_its_task_list(
         )
         + "\n"
     )
-    reader = ClaudeTranscripts(settings=settings)
-    read = reader.read(folder / "s1.jsonl")
+    read = ClaudeTranscripts().read(folder / "s1.jsonl")
     assert read.usage is not None
     assert (read.usage.used, read.usage.window, read.usage.model) == (
         1,
         1_000_000,
-        "claude-opus-4-1",
+        "claude-opus-5-5",
     )
     assert [
         (each.id, each.subject, each.status, each.active) for each in read.tasks
@@ -601,7 +599,7 @@ def test_claude_codes_record_reads_its_context_in_use_and_its_task_list(
         ("1", "Write the sampler", "in_progress", "Writing the sampler"),
         ("2", "Write the models", "pending", None),
     ]
-    # `TodoWrite` replaces the list; a `TaskUpdate` to `deleted` takes a task off; no settings read no window.
+    # `TodoWrite` replaces the list; a `TaskUpdate` to `deleted` takes a task off.
     with (folder / "s1.jsonl").open("a") as grown:
         grown.write(
             replied(
@@ -631,8 +629,84 @@ def test_claude_codes_record_reads_its_context_in_use_and_its_task_list(
         ("2", "Measure", "pending")
     ]
     assert read.usage is not None
-    assert (read.usage.used, read.usage.window) == (41, None)
-    assert ClaudeTranscripts(settings=tmp_path / "none.json").model() is None
+    assert (read.usage.used, read.usage.window) == (41, 1_000_000)
+
+
+def reply(
+    model: str, used: int, requested: str | None = None, *, side: bool = False
+) -> str:
+    """An `assistant` line as Claude Code 2.1.309 writes one: the model the API names, and the one asked for where the record keeps it."""
+    asked = {} if requested is None else {"requestedModel": requested}
+    return line(
+        type="assistant",
+        isSidechain=side,
+        message={
+            "role": "assistant",
+            "model": model,
+            "content": [{"type": "text", "text": "ok"}],
+            "usage": {"input_tokens": used},
+        },
+        **asked,
+    )
+
+
+@pytest.mark.parametrize(
+    ("model", "requested", "window"),
+    [
+        # The issue's session: Opus 5.5, whatever the operator's settings say.
+        ("claude-opus-5-5", "claude-opus-5-5[1m]", 1_000_000),
+        ("claude-opus-5-5", "claude-opus-5-5", 1_000_000),
+        ("claude-fable-5-1", "claude-fable-5-1", 1_000_000),
+        ("claude-haiku-5-5", None, 1_000_000),
+        ("claude-opus-4-6", "claude-opus-4-6[1m]", 1_000_000),
+        ("claude-sonnet-4-6", "claude-sonnet-4-6[1M]", 1_000_000),
+        ("claude-opus-4-6", "claude-opus-4-6", 200_000),
+        # A record before 2.1.295 doesn't say whether the long variant ran.
+        ("claude-opus-4-6", None, None),
+        ("claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001[1m]", 200_000),
+        # A model the table doesn't know isn't guessed.
+        ("claude-opus-9", "claude-opus-9", None),
+    ],
+)
+def test_claude_codes_window_is_the_model_that_made_the_reply(
+    tmp_path: Path, model: str, requested: str | None, window: int | None
+) -> None:
+    """The window is read from the reply's own model, and the `[1m]` the conversation asked for, never from the model the operator's settings choose for new sessions (#282)."""
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"model": "fable"}))
+    record = tmp_path / "s1.jsonl"
+    record.write_text(reply(model, 1_000, requested) + "\n")
+    read = ClaudeTranscripts(settings=settings).read(record)
+    assert read.usage is not None
+    assert (read.usage.used, read.usage.window, read.usage.model) == (
+        1_000,
+        window,
+        model,
+    )
+
+
+def test_claude_codes_window_is_the_standard_one_where_the_operators_env_turns_the_long_off(
+    tmp_path: Path,
+) -> None:
+    """`CLAUDE_CODE_DISABLE_1M_CONTEXT` in the settings' `env` keeps every model at 200K, one with 1M natively too; settings that don't read give no window."""
+    record = tmp_path / "s1.jsonl"
+    record.write_text(reply("claude-opus-5-5", 1_000, "claude-opus-5-5[1m]") + "\n")
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}}))
+    read = ClaudeTranscripts(settings=settings).read(record)
+    assert read.usage is not None
+    assert read.usage.window == 200_000
+    settings.write_text(json.dumps({"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "0"}}))
+    read = ClaudeTranscripts(settings=settings).read(record)
+    assert read.usage is not None
+    assert read.usage.window == 1_000_000
+    settings.write_text(json.dumps({"env": "not a table"}))
+    read = ClaudeTranscripts(settings=settings).read(record)
+    assert read.usage is not None
+    assert read.usage.window is None
+    read = ClaudeTranscripts(settings=tmp_path / "none.json").read(record)
+    assert read.usage is not None
+    assert read.usage.window == 1_000_000
 
 
 def test_codexs_window_is_the_threads_own_and_none_where_the_count_overflows_it(

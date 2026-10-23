@@ -168,7 +168,7 @@ its 2.1.294, 2.1.296 and 2.1.301 binaries:
 
 from datetime import timedelta
 from shlex import join
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, get_args
 
 from pydantic import JsonValue, ValidationError
 from pydantic.alias_generators import to_camel
@@ -203,6 +203,14 @@ NO_UPDATES = "DISABLE_AUTOUPDATER"
 
 CONFIG_DIR = "CLAUDE_CONFIG_DIR"
 """The variable moving Claude Code's directory."""
+
+LONG_CONTEXT_OFF = "CLAUDE_CODE_DISABLE_1M_CONTEXT"
+"""The variable keeping every model at the standard window, those with the long
+one by default too (`model-config`, *Turn off 1M context*)."""
+
+type Truthy = Literal["1", "true", "yes", "on"]
+"""What Claude Code reads as a variable turned on, any case, around blanks (its
+2.1.309 binary)."""
 
 
 class Wire(Model, alias_generator=to_camel, populate_by_name=True):
@@ -293,12 +301,8 @@ class State(Wire):
 
 
 class OwnSettings(Wire):
-    """What a launch reads of the operator's own Claude Code settings: which session settings they set themselves, and the model their `/model` saved."""
+    """What lup reads of the operator's own Claude Code settings: which session settings they set themselves, and whether their `env` turns the long window off."""
 
-    model: str | None = None
-    """The model `/model` saved, by its alias or its name, `[1m]` after it for
-    the long context (`model-config`, *Setting your model*); none where they
-    saved none, and Claude Code runs its default."""
     subagent_prompt_cache_ttl: Literal["5m", "1h"] | None = None
     auto_memory_enabled: bool | None = None
     idle_compaction: bool | None = None
@@ -318,6 +322,18 @@ class OwnSettings(Wire):
             or CONNECTORS in self.env,
         }
         return [field for field, theirs in spelled.items() if theirs]
+
+    def shortened(self) -> bool:
+        """Return whether their `env` turns the long window off (`LONG_CONTEXT_OFF`), so every session it starts runs at the standard window.
+
+        >>> OwnSettings(env={LONG_CONTEXT_OFF: " True "}).shortened(), OwnSettings().shortened()
+        (True, False)
+        """
+        match self.env.get(LONG_CONTEXT_OFF):
+            case str() as value:
+                return value.strip().lower() in get_args(Truthy.__value__)
+            case _:
+                return False
 
 
 def own_settings(settings: Path) -> OwnSettings:
