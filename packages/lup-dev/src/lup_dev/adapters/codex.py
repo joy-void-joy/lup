@@ -208,7 +208,7 @@ unavailable; a launch runs what's kept instead.
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Literal, override
+from typing import TYPE_CHECKING, Annotated, Literal, get_args, override
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
@@ -419,19 +419,27 @@ class Payload(Model, ABC):
         """Return what to print where lup's judge couldn't answer the hook at all, `said` saying why."""
 
 
+type FreshStart = Literal["startup", "clear"]
+"""The starts (`SessionStart`'s `source`) whose thread begins empty: started, or
+cleared; a resume, a compaction or a fork carries one on (`Heard.fresh`)."""
+
+
 class SessionStart(Payload):
     """`SessionStart`: a session starts, resumes, or is cleared or compacted."""
 
     hook_event_name: Literal["SessionStart"]
+    source: str | None = None
+    """How it started: `startup`, `resume`, `clear`, `compact` or `fork`."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the session's start: the judge reads it."""
+        """Read the session's start, and whether its thread begins empty (`FreshStart`): the judge reads it."""
         return Heard(
             event="session-started",
             session=self.session_id,
             agent=self.agent_id,
             judged=True,
             fits=fits,
+            fresh=self.source in get_args(FreshStart.__value__) and not self.agent_id,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:

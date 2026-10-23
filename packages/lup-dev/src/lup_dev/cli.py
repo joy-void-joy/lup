@@ -98,6 +98,7 @@ from lup_dev.host.records import Called, Recorded
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import WorkerJudge, Workers
+from lup_dev.inbox.bearings import RepositoryBearings
 from lup_dev.inbox.delivery import (
     Delivery,
     ItemKind,
@@ -520,6 +521,9 @@ def host_serve(context: typer.Context) -> None:
         judge=WorkerJudge(modules=workers),
         spawns=SpawnRecords(adapters=known),
         post=delivery,
+        bearings=RepositoryBearings(
+            delivery=delivery, integration=settings.lup_integration_branch
+        ),
         routes=control_routes(delivery, recorded(), dashboard, layout),
         tools=room_tools(delivery, layout, remotes),
         room_routes=[*remote_routes(remotes), *clipboard_routes(Desktop.of(settings))],

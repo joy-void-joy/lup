@@ -10,6 +10,7 @@ otherwise hang.
 import asyncio
 import gc
 import json
+import os
 import socket
 import sys
 import threading
@@ -35,7 +36,7 @@ from pydantic import Field
 from typer.testing import CliRunner
 
 from lup.github.tools import GitHubTools
-from lup.programs import Ran
+from lup.programs import Ran, run
 from lup.rooms import Podman
 from lup.tools.speaking import SPEAKING
 from lup.transcripts.module import Transcripts
@@ -63,6 +64,7 @@ from lup_dev.host.records import Called, Recorded, Said
 from lup_dev.host.service import UNDECIDED, HostService, Naming, Program, executed
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import LaunchJudge, LaunchModules, WorkerJudge, Workers
+from lup_dev.inbox.bearings import Repository, RepositoryBearings, Unlanded
 from lup_dev.inbox.delivery import Delivery, clocked, opening
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.parts import PartId, blocks
@@ -379,8 +381,9 @@ def inboxed(
     modules: LaunchModules | None = None,
     remotes: Callable[[Delivery], Remotes] | None = None,
     rooms: Callable[[Program], Awaitable[Ran]] | None = None,
+    bearings: bool = False,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, and running in a launch's room through `rooms`, where given."""
+    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, and running in a launch's room through `rooms`, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     wakers = cli.Wakers(adapters=known)
@@ -408,6 +411,11 @@ def inboxed(
         courier=couriers,
         spawns=spawns or cli.SpawnRecords(adapters=known),
         post=delivery,
+        bearings=(
+            RepositoryBearings(delivery=delivery, integration="dev")
+            if bearings
+            else None
+        ),
         routes=cli.control_routes(delivery, recorded or {}, None, judging or machine),
         tools=[
             each.model_copy(update={"run": rooms})
@@ -7206,3 +7214,239 @@ def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_n
         "The exchange of `w/parser` (subagent a1 of claude session s1) and its 1 "
         "subagent: every item, oldest first."
     )
+
+
+def dated(root: Path, message: str, at: str) -> str:
+    """Commit everything in `root`'s worktree as made at `at`, and return the commit's short id: what landed since a moment is read by its date."""
+    when = {**os.environ, "GIT_AUTHOR_DATE": at, "GIT_COMMITTER_DATE": at}
+    run("git", "add", "-A", cwd=root)
+    run("git", "commit", "-q", "-m", message, cwd=root, env=when)
+    return run("git", "rev-parse", "--short", "HEAD", cwd=root).text().strip()
+
+
+def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_starts(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    shell: Shell,
+) -> None:
+    repository = tmp_path / "w"
+    repository.mkdir()
+    shell.git(repository, "init", "-q", "-b", "dev")
+    (repository / ".git" / "info" / "exclude").write_text("judges/\n")
+    (repository / "README.md").write_text("lup\n")
+    dated(repository, "Start.", "2026-10-01T11:00:00+00:00")
+    origin = tmp_path / "origin.git"
+    shell.git(tmp_path, "init", "-q", "--bare", str(origin))
+    shell.git(repository, "remote", "add", "origin", str(origin))
+    shell.git(repository, "push", "-q", "origin", "dev")
+    feature = tmp_path / "parser"
+    shell.git(repository, "worktree", "add", "-q", "-b", "parser", str(feature))
+    (feature / "parser.py").write_text("header = 1\n")
+    parsed = dated(feature, "Parse the header.", "2026-10-01T11:30:00+00:00")
+    (feature / "draft.md").write_text("A draft.\n")
+    with inboxed(machine, clock, notices, said, bearings=True):
+        launched(machine, clock, repository, "one", "claude")
+        hook = machine.host.launch("one").hook
+        mcp = machine.host.launch("one").mcp
+
+        def started(source: str, session: str) -> str:
+            clock.sleep(60)
+            return send(hook, claude("SessionStart", source=source, session_id=session))
+
+        first = context(started("startup", "s0"))
+        call(mcp, "ask", {"question": "Which parser?"})
+        call(mcp, "note", {"remark": "The header comes first."})
+        (repository / "lexer.py").write_text("tokens = []\n")
+        lexed = dated(repository, "Land the lexer.", "2026-10-01T12:30:00+00:00")
+        shell.git(repository, "push", "-q", "origin", "dev")
+        clock.sleep(3600)
+        resumed = context(started("resume", "s0"))
+        second = context(started("startup", "s1"))
+        compacted = context(started("compact", "s1"))
+        cleared = context(started("clear", "s2"))
+        for name, session in [("two", "t2"), ("three", "t3")]:
+            (tmp_path / name).mkdir()
+            launched(
+                machine,
+                clock,
+                tmp_path / name,
+                name,
+                "claude",
+                repository=repository / ".git",
+            )
+            clock.sleep(60)
+            send(
+                machine.host.launch(name).hook,
+                claude("SessionStart", source="resume", session_id=session),
+            )
+        beside = context(started("startup", "s4"))
+    opening = (
+        "lup: where this repository stands as you start, told once. Each line "
+        "says where to read more."
+    )
+    unlanded = (
+        "Not landed on `origin/dev` (`git log <branch> --not --remotes` reads a "
+        "branch's commits; `git -C <worktree> status` its changes):\n"
+        f'- `parser`, in {feature}: 1 commit, the last {parsed} "Parse the '
+        'header.", 2026-10-01 11:30; 1 file changed, not committed.'
+    )
+    assert first.split("\n\n") == [
+        opening,
+        unlanded,
+        "Nothing waits for the operator.",
+        "No main session of this repository was heard before you.",
+    ]
+    assert resumed == ""
+    assert compacted == ""
+    s0 = "`w` (claude session s0)"
+    assert second == "\n\n".join(
+        [
+            opening,
+            unlanded,
+            "\n".join(
+                [
+                    (
+                        f"Waiting for the operator: 2 items, all from {s0} and its "
+                        "subagents (`inbox` lists them; with `number`, one whole):"
+                    ),
+                    "- @1 a question from `w`: Which parser?",
+                    (
+                        "- News, by kind: 1 `note` (`inbox` with those `kinds` lists "
+                        "them)."
+                    ),
+                ]
+            ),
+            "\n".join(
+                [
+                    (
+                        f"Landed on `origin/dev` since {s0}, the last main session "
+                        "(last heard at 2026-10-01 12:01), started at 2026-10-01 "
+                        "12:01 (`git show <commit>` reads one):"
+                    ),
+                    f"- {lexed} Land the lexer.",
+                    (
+                        f"What {s0} and the operator said to each other: `inbox` "
+                        'with `conversation` "s0", `every` and `whole`.'
+                    ),
+                ]
+            ),
+        ]
+    )
+    assert cleared.splitlines()[-3:] == [
+        (
+            "Landed on `origin/dev` since `w` (claude session s1), the last main "
+            "session (last heard at 2026-10-01 13:03), started at 2026-10-01 13:03 "
+            "(`git show <commit>` reads one):"
+        ),
+        "- Nothing.",
+        (
+            "What `w` (claude session s1) and the operator said to each other: "
+            '`inbox` with `conversation` "s1", `every` and `whole`.'
+        ),
+    ]
+    assert "Waiting for the operator: 2 items (`inbox` lists them" in cleared
+    assert (
+        "Main sessions of this repository running beside you:\n"
+        f"- `two` (claude session t2), in {tmp_path / 'two'}.\n"
+        f"- `three` (claude session t3), in {tmp_path / 'three'}."
+    ) in beside
+    assert "`three` (claude session t3), the last main session (still running)" in (
+        beside
+    )
+
+
+def test_the_bearings_list_what_waits_on_the_operator_the_last_sessions_first(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
+    inbox = Inbox.opened(layout.inbox)
+    last = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
+    worker = last.model_copy(update={"agent": "a1"})
+    other = last.model_copy(update={"session": "s9"})
+    at = clock.now()
+    inbox.placed(
+        Whereabouts(conversation=last, launch="one", worktree=tmp_path, since=at)
+    )
+
+    def flag(branch: str) -> Flagged:
+        return Flagged(
+            text="parser.py landed, flagged.",
+            summary="new-file",
+            worktree=tmp_path,
+            path=Path("parser.py"),
+            branch=branch,
+        )
+
+    for reason, sender in [
+        (Question(text="Which parser?"), last),
+        (flag("parser"), last),
+        (flag("parser"), worker),
+        (HowItWent(text="Calm."), worker),
+        (flag("lexer"), worker),
+        (Message(kind="note", text="Header first."), worker),
+        (Question(text="Which lexer?"), other),
+    ]:
+        inbox.made(reason, sender, Operator(), tmp_path, at)
+    bearings = RepositoryBearings(
+        delivery=Delivery.model_construct(inbox=inbox, clock=clock, layout=layout.host),
+        integration="dev",
+    )
+    starting = last.model_copy(update={"session": "s2"})
+    page = bearings.page(
+        starting,
+        last,
+        Repository(
+            unlanded=[
+                Unlanded(
+                    branch="lexer",
+                    worktree=None,
+                    commits=2,
+                    changed=0,
+                    last='abc1234 "Lex."',
+                    at=at,
+                )
+            ],
+            landed=[],
+            onto="dev",
+        ),
+        [],
+    )
+    unlanded, waiting = page.split("\n\n")[1:3]
+    assert unlanded == (
+        "Not landed on `dev` (`git log <branch> --not --remotes` reads a "
+        "branch's commits; `git -C <worktree> status` its changes):\n"
+        '- `lexer`, with no worktree: 2 commits, the last abc1234 "Lex.", '
+        "2026-10-01 12:00."
+    )
+    assert waiting.splitlines() == [
+        (
+            "Waiting for the operator: 7 items, 6 from claude session s1 and its "
+            "subagents, listed first (`inbox` lists them; with `number`, one whole):"
+        ),
+        "- @1 a question from claude session s1: Which parser?",
+        (
+            "- News, by kind: 1 `how it went`, 1 `note` (`inbox` with those `kinds` "
+            "lists them)."
+        ),
+        "- 3 flagged writes, holding landings: `parser`'s, @2, @3; `lexer`'s, @5.",
+        "- @7 a question from claude session s9: Which lexer?",
+    ]
+    nowhere = Register(
+        launch="one",
+        runtime="claude",
+        worktree=tmp_path,
+        repository=tmp_path / ".git",
+        judge=tmp_path / "lup-dev",
+        container="lup-one",
+        limits=Limits(actions=[], protected=[]),
+        github=None,
+    )
+    unread = asyncio.run(bearings.told(nowhere, "s2", [])) or ""
+    assert unread.split("\n\n")[1].startswith(
+        "lup couldn't read this repository's git: git "
+    )
+    assert "- Unread: git couldn't be read, as said above." in unread
