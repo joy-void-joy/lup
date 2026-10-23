@@ -59,7 +59,7 @@ import {
     type Exchanged,
     type Laid as Talk,
 } from "./conversation";
-import { SET_IN, above, citedOn, editedOf, passageOf, type Row as Beside, type RowKind } from "./exchange";
+import { SET_IN, above, citedOn, editedOf, markerEnd, passageOf, type Citation, type Row as Beside, type RowKind } from "./exchange";
 import { around } from "./folds";
 import type { components } from "./generated/api";
 import { DRAWERS, type DrawerKind, type FoldKind, type ReviewPlace } from "./keys";
@@ -1735,6 +1735,61 @@ export function answer(comments: Comment[]): string {
         return `${lines.join("\n")}\n\n${each.text.trim()}`;
     });
     return [...parts, ...whole.map((each) => each.text.trim())].join("\n\n");
+}
+
+/**
+ * A citation of the operator's words in an agent's answer, where it's shown: its item's region; the citation as
+ * written, and the id a resolved one shows of it; the fold of the passages cited on its line; and, for one that found
+ * its passage, each stretch of the operator's words above the answer it marks.
+ */
+export interface Cited {
+    region: Region;
+    citation: Citation;
+    written: Span;
+    marker: Span;
+    fold: Fold | null;
+    passages: Span[];
+}
+
+/** Return each citation of the operator's words the agents' answers in `laidOut` hold, in the text's order (`Cited`). */
+export function citationsOf(laidOut: Laid): Cited[] {
+    return laidOut.regions.flatMap((region) =>
+        (region.item.citations ?? []).map((citation): Cited => {
+            const from = shownAt(region, citation.start);
+            const found = citation.found;
+            const passages =
+                found == null
+                    ? []
+                    : region.said.flatMap((line) => {
+                          const start = Math.max(line.from, line.from + found.start - line.own);
+                          const end = Math.min(line.to, line.from + found.end - line.own);
+                          return sameId(line.part, found.part) && end > start ? [{ from: start, to: end }] : [];
+                      });
+            const fold = region.folds.find((each) => each.name.startsWith("cited ") && from >= each.summary.from && from <= each.summary.to) ?? null;
+            return {
+                region,
+                citation,
+                written: { from, to: shownAt(region, citation.end) },
+                marker: { from, to: shownAt(region, found == null ? citation.end : markerEnd(citation)) },
+                fold,
+                passages,
+            };
+        }),
+    );
+}
+
+/**
+ * Return where `gd` follows from `head`: from a citation that found its passage, to the passage among the operator's
+ * words above the answer, where they're shown; from a passage they wrote that one cites, back to the citation; none
+ * elsewhere.
+ */
+export function following(cited: Cited[], head: number): number | undefined {
+    const on = (span: Span) => head >= span.from && head <= span.to;
+    const from = cited.find((each) => on(each.written));
+    if (from !== undefined) {
+        return from.passages[0]?.from;
+    }
+    return cited.find((each) => each.passages.some(on))?.written.from;
 }
 
 /** Return where in the text an offset of a scope's own text is shown. */

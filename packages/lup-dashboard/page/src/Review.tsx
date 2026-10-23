@@ -48,6 +48,8 @@ import { source, sourced, without, type Source } from "./markdown";
 import {
     aboutAt,
     answerAfter,
+    citationsOf,
+    following,
     answering,
     arrival,
     blockAt,
@@ -85,6 +87,7 @@ import {
     written,
     type Around,
     type Aside,
+    type Cited,
     type Conversation,
     type Draft,
     type Drawer,
@@ -330,35 +333,23 @@ function quotedUnder(region: Region, written: Written): Span | null {
 }
 
 /**
- * Return what an item's citations of the operator's words draw: each that found its passage, its id marked as a
- * citation, saying the passage on hover, and the passage among the operator's words above marked as answered there,
- * saying where; each that found none, or several, marked as written, saying why.
+ * Return what the citations of the operator's words in agents' answers draw (`citationsOf`): each that found its
+ * passage, its id marked as a citation, saying the passage on hover, and the passage among the operator's words above
+ * marked as answered there, saying where; each that found none, or several, marked as written, saying why.
  */
-function citing(region: Region): { from: number; to: number; value: Decoration }[] {
-    const marks: { from: number; to: number; value: Decoration }[] = [];
-    for (const each of region.item.citations ?? []) {
-        const from = shownAt(region, each.start);
-        const found = each.found;
+function citing(cited: Cited[]): { from: number; to: number; value: Decoration }[] {
+    return cited.flatMap(({ citation, written, marker, passages }) => {
+        const found = citation.found;
         if (found == null) {
-            const said = Decoration.mark({ class: "citation-unresolved", attributes: { title: unfound(each) } });
-            marks.push({ from, to: shownAt(region, each.end), value: said });
-            continue;
+            return [{ ...written, value: Decoration.mark({ class: "citation-unresolved", attributes: { title: unfound(citation) } }) }];
         }
-        const title = `you, @${found.part.item}.${found.part.part}: ${found.text}`;
-        marks.push({ from, to: shownAt(region, markerEnd(each)), value: Decoration.mark({ class: "citation", attributes: { title } }) });
-        for (const line of region.said) {
-            if (!sameId(line.part, found.part)) {
-                continue;
-            }
-            const start = Math.max(line.from, line.from + found.start - line.own);
-            const end = Math.min(line.to, line.from + found.end - line.own);
-            if (end > start) {
-                const answered = Decoration.mark({ class: "answered", attributes: { title: "answered below: click to go to it", "data-answered": `${from}` } });
-                marks.push({ from: start, to: end, value: answered });
-            }
-        }
-    }
-    return marks;
+        const title = `you, @${found.part.item}.${found.part.part}: ${found.text}\n(za or a click opens it under the line, gd goes to it above; ]q [q move between citations)`;
+        const answered = Decoration.mark({ class: "answered", attributes: { title: "answered below: gd or a click goes to it", "data-answered": `${written.from}` } });
+        return [
+            { ...marker, value: Decoration.mark({ class: "citation", attributes: { title } }) },
+            ...passages.map((each) => ({ ...each, value: answered })),
+        ];
+    });
 }
 
 /** Draw the review: groups' banners and the messages under them, items' headers, done and parked items, the lines under each item and in each drawer, the changed files' headers, each comment's lines, and the passage each comment is on. */
@@ -402,9 +393,8 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
                 });
             }
         }
-        // What an item's citations draw, and each of its lines an edit changed, barred.
+        // Each of an item's lines an edit changed, barred.
         if (isRegion(scope)) {
-            marks.push(...citing(scope));
             for (const at of scope.changed) {
                 marks.push({ from: at, to: at, value: Decoration.line({ class: "edited-line" }) });
             }
@@ -425,6 +415,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
             }
         }
     }
+    marks.push(...citing(citationsOf(laidOut)));
     marks.sort((a, b) => a.from - b.from || a.to - b.to);
     const builder = new RangeSetBuilder<Decoration>();
     for (const each of marks) {
@@ -690,10 +681,8 @@ export function Review({
                 return;
             }
             const at = current.posAtDOM(target);
-            const fold = laidNow.current.regions
-                .flatMap((each) => each.folds)
-                .find((each) => each.name.startsWith("cited ") && at >= each.summary.from && at <= each.summary.to);
-            if (fold !== undefined) {
+            const fold = citationsOf(laidNow.current).find((each) => at >= each.marker.from && at <= each.marker.to)?.fold;
+            if (fold != null) {
                 current.dispatch({ effects: folding(fold, !isFolded(current.state, fold)) });
             }
         };
@@ -974,6 +963,38 @@ export function Review({
                 selection: { anchor: target },
                 effects: EditorView.scrollIntoView(target, { y: "nearest", yMargin: current.scrollDOM.clientHeight / 3 }),
             });
+        },
+        cite: (forward) => {
+            const current = view.current;
+            if (current === null) {
+                return;
+            }
+            const head = editor.head();
+            const all = citationsOf(laidOut);
+            const target = forward ? all.find((each) => each.marker.from > head) : all.findLast((each) => each.marker.from < head);
+            if (target === undefined) {
+                say(`No citation of your words ${forward ? "after" : "before"} this.`);
+                return;
+            }
+            // The folds hiding it open, said under the review, and the passages cited on its line under it.
+            const effects = reaching(current.state, target.marker.from);
+            const passages = target.fold !== null && isFolded(current.state, target.fold) ? [folding(target.fold, false)] : [];
+            current.dispatch({
+                selection: { anchor: target.marker.from },
+                effects: [...effects, ...passages],
+                scrollIntoView: true,
+                annotations: reached.of(effects.length),
+            });
+        },
+        follow: () => {
+            const current = view.current;
+            const target = current === null ? undefined : following(citationsOf(laidOut), editor.head());
+            if (current === null || target === undefined) {
+                say("gd follows a citation of your words to the passage it cites, and that passage back: put the cursor on one.");
+                return;
+            }
+            const effects = reaching(current.state, target);
+            current.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true, annotations: reached.of(effects.length) });
         },
         approve: (approved) => {
             const drawer = sinceHere();

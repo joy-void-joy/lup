@@ -14,11 +14,13 @@ import {
     body,
     calls,
     changing,
+    citationsOf,
     covered,
     flag,
     foldAt,
     foldKey,
     foldsOf,
+    following,
     fresh,
     groupAt,
     heading,
@@ -1244,6 +1246,24 @@ describe("an answer in a turn's last words", () => {
         expect(opened(out, out.text.indexOf("Then split"))).toBeUndefined();
         expect(opened(out, out.text.indexOf("you, @70.1:"))).toBeUndefined();
         expect(onItem(opened(out, out.text.indexOf("Splitting")))?.quote?.text).toBe("Splitting it @70[nothing] next.");
+    });
+
+    it("places each citation where it's shown, the passage it marks above, and follows one to the other", () => {
+        const out = laid([END], [], banner, header, EMPTY, around);
+        const [found, unresolved] = citationsOf(out);
+        const slice = (span: { from: number; to: number }) => out.text.slice(span.from, span.to);
+        expect([slice(found!.written), slice(found!.marker), found!.passages.map(slice), found!.fold?.name]).toEqual([
+            "@70.1[Even a stray byte?]",
+            "@70.1",
+            ["Even a stray byte?"],
+            "cited 0",
+        ]);
+        expect([slice(unresolved!.written), slice(unresolved!.marker), unresolved!.passages, unresolved!.fold]).toEqual(["@70[nothing]", "@70[nothing]", [], null]);
+        // gd goes from the citation to the passage it cites, and back; nowhere from elsewhere.
+        expect(following(citationsOf(out), found!.marker.from + 2)).toBe(found!.passages[0]!.from);
+        expect(following(citationsOf(out), found!.passages[0]!.from + 3)).toBe(found!.written.from);
+        expect(following(citationsOf(out), unresolved!.written.from)).toBeUndefined();
+        expect(following(citationsOf(out), out.text.indexOf("Splitting"))).toBeUndefined();
     });
 
     it("numbers the operator's words as the host does, after replies kept from before, and shows an agent the parts that were its own", () => {
