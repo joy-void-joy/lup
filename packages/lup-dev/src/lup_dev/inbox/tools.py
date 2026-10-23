@@ -381,10 +381,11 @@ class Speaker(Model, arbitrary_types_allowed=True):
         Holds this call until an item reaches your inbox, and returns
         everything waiting there, each whole: what a hook announced as too
         long to tell is read here. An item is the operator's answer or
-        message; one of your own subagents ending its turn, or stopped, which
-        names it; or a subagent's `friction` or `how_it_went`. Something
-        already waiting, a subagent that ended since your last call among it,
-        is returned at once; each is told once, here or beside another call.
+        message; one of your own subagents ending its turn, stopped, or
+        failed on an error from the model's API, which names it; or a
+        subagent's `friction` or `how_it_went`. Something already waiting, a
+        subagent that ended since your last call among it, is returned at
+        once; each is told once, here or beside another call.
 
         It doesn't return for what no item says: a background command's end,
         another session's or another conversation's subagents, the operator

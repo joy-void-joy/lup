@@ -1375,6 +1375,43 @@ def test_the_operator_replies_to_a_note_the_reply_saying_what_it_answers(
     assert again == ("Replied to @1: your reply, @3, is for claude session s1.\n")
 
 
+def test_a_sessions_turn_failing_on_an_api_error_is_one_note_whose_reply_wakes_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """`StopFailure` in place of `Stop`: the turn's end in lup's words, never the error as the agent's, and the session idle from then on."""
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, bash("b1"))
+        failed = send(
+            hook,
+            claude(
+                "StopFailure",
+                error="rate_limit",
+                last_assistant_message="API Error: Request rejected (429)",
+            ),
+        )
+        noted = delivery.inbox.item(1)
+        replied = inbox("answer", "1", "--comment", "Try again.")
+        numbers = list(delivery.inbox.items)
+        messages.close()
+    assert failed == ""
+    assert noted.reason == Message(
+        kind="note",
+        text=(
+            "Its turn ended on an error from the model's API (rate_limit):\n"
+            "API Error: Request rejected (429)"
+        ),
+        ending=True,
+    )
+    assert noted.recipient == Operator()
+    assert numbers == [1, 2]
+    assert replied == "Replied to @1: your reply, @2, is for claude session s1.\n"
+    assert "one: woke claude session s1 for @2" in said
+
+
 def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
@@ -2044,6 +2081,18 @@ class Subagents:
             **({} if said is None else {"last_assistant_message": said}),
         )
 
+    def failed(self, agent: str, kind: str, error: str) -> str:
+        """Subagent `agent`'s turn ending on an error from the model's API of kind `error`, as Claude Code 2.1.309 sends it: `StopFailure`, and no `SubagentStop`."""
+        return claude(
+            "StopFailure",
+            agent_id=agent,
+            agent_type=kind,
+            transcript_path=str(self.transcript),
+            prompt_id="p1",
+            error=error,
+            last_assistant_message="API Error: Request rejected (429)",
+        )
+
     def lup(
         self,
         hooks: tuple[Path, Path],
@@ -2464,6 +2513,35 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_and_never_for_anothers_on
         repository=tmp_path / "x" / ".git", runtime="claude", session="s1"
     )
     assert elsewhere.state == Waiting()
+
+
+def test_wait_inbox_returns_when_its_own_subagent_fails_on_an_api_error_on_claude_code(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A subagent whose first request failed, first heard at its `StopFailure`: its parent is told the error's kind, the runtime's notice saying the rest."""
+    records = Subagents(tmp_path)
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting = pool.submit(call, mcp, "wait_inbox", {})
+            assert delivery.holding.wait(timeout=60)
+            failed = send(hook, records.failed("a1", "Explore", "rate_limit"))
+            returned = waiting.result(timeout=60)
+        items = list(delivery.inbox.items.values())
+    assert failed == ""
+    assert returned == (
+        (
+            '<ended item="1" from="subagent a1 of claude session s1" name="parser">'
+            "It failed on an error from the model's API (rate_limit). Your "
+            "runtime's notice of its end says more.</ended>"
+        ),
+        False,
+    )
+    assert [(each.number, each.quiet) for each in items] == [(1, True)]
 
 
 def test_a_subagents_end_waits_for_its_parents_call_never_holding_its_end_nor_waking_it(

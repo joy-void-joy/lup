@@ -40,6 +40,7 @@ On the host alone:
 | The connection lost before an answer, at a call's start, its finish or a turn's end: status 2 | the call blocked, or lup's line told beside its result, or the turn's end held once on it | the same |
 | The same at a session's or a turn's start: status 1 | a non-blocking error; the prompt goes on | the run marked failed; the prompt goes on |
 
+- **A turn that ends on an error from the model's API** runs Claude Code's `StopFailure`, which reads neither the answer nor the status, so nothing there holds or tells, and a lost connection there is no one's: the service hears it as the end it is, a subagent's or the session's turn's (`StopFailure`, `adapters/claude.py`). Codex runs no hook for it.
 - **Which hooks the judge reads** is each adapter's word (`heard`): every one, but on Claude Code a call's start and finish to lup's own tools or to a tool that only reads (`READING`, `adapters/claude.py`). The service answers the rest itself, in about 4.5 ms; one the judge reads where nothing changed takes 8 to 21 ms, the judgement and a hop to the launch's process (`docs/field-notes.md`, *A hook the judge doesn't read, and one it does*).
 - **A hook the judge can't answer goes on,** since the judge steers and doesn't guard. Where the service is up, it refuses only a file tool's write on Claude Code, since let through unjudged it would land unseen; where the service can't be reached, even that write goes ahead, with the runtime's error shown.
 - **`socat` waits 25 hours** for the answer, above a hold's day.

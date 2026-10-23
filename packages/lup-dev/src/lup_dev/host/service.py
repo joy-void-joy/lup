@@ -1020,9 +1020,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         The conversation the hook names gets lup's id here the first time, and
         is told what the post says waits for it, in what room the judge's answer
         leaves; the post hears of the conversation that spawned it too, where a
-        conversation did (`Conversations.spawner`), which hears of its end. A session's own turn's end puts its last message before the
-        operator (`Post.concluded`) before anything is told, so the message is
-        theirs to read whether the end is held or let through. A session's own
+        conversation did (`Conversations.spawner`), which hears of its end. A session's own turn's end puts its last message, or the error from
+        the model's API it ended on, before the operator (`Post.concluded`)
+        before anything is told, so the note is theirs to read whether the end
+        is held or let through. A session's own
         start, and its own prompt where the hook takes a title, name its launch
         (`named_at`). A payload the courier can't read goes to the judge as it
         is, which answers it or says it couldn't; where the courier can't add to
@@ -1065,11 +1066,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             - len(answer.encode())
             - sum(len(each.encode()) for each in naming)
         )
-        ended = (
-            heard.said if heard.event == "turn-ended" and heard.agent is None else None
-        )
-        if self.post is not None and ended is not None and ended.strip():
-            await self.post.concluded(request, conversation, ended)
+        if self.post is not None and heard.event == "turn-ended" and own:
+            await self.post.concluded(request, conversation, heard)
         parent = conversations.spawner(conversation)
         posted = (
             Posted()
