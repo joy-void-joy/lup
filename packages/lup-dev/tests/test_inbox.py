@@ -1426,7 +1426,8 @@ def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
             "send",
             {"to": "operator", "kind": "disagreement", "text": "Not this way."},
         )
-        invalid = call(mcp, "send", {"to": "someone", "kind": "note", "text": "x"})
+        unknown = call(mcp, "send", {"to": "someone", "kind": "note", "text": "x"})
+        invalid = call(mcp, "send", {"to": "operator", "kind": "memo", "text": "x"})
         listed = inbox()
     assert reported == (
         "Your problem is with the operator, @1. End your turn.",
@@ -1434,6 +1435,14 @@ def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
     )
     assert noted == ("Your note is with the operator, @2. Carry on.", False)
     assert sent == ("Your message is with the operator, @3.", False)
+    assert unknown == (
+        (
+            "Not sent: no subagent of yours is `someone`. `to` takes `operator`, or "
+            "one of your own subagents by its name, its path or its runtime's id: "
+            "none lup has heard."
+        ),
+        False,
+    )
     assert invalid[1]
     assert invalid[0].startswith("Refused: 1 validation error for Sending")
     assert listed.splitlines() == [
@@ -2700,11 +2709,13 @@ def test_a_subagents_friction_and_how_it_went_reach_its_parent_whole_on_each_run
     assert how == ("How it went is with the operator, @3 and your parent.", False)
     assert ended == ""
     assert told.startswith(
-        '<item item="2" from="subagent a1 of claude session s1" kind="friction">'
+        '<item item="2" from="subagent a1 of claude session s1" name="parser" '
+        'kind="friction">'
     )
     assert friction.text in told
     assert told2.startswith(
-        '<item item="4" from="subagent th1 of codex session t1" kind="how it went">'
+        '<item item="4" from="subagent th1 of codex session t1" name="lexer" '
+        'kind="how it went">'
     )
     assert how_it_went.text in told2
     assert operators == [1, 3]

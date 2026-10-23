@@ -410,6 +410,12 @@ function what(item: Item): string {
     }
 }
 
+/** Say whom the operator's copy of a message between conversations was sent to, after what it is in its header (` to explore-auth`); nothing for any other item. */
+function sentTo(item: Item, called: (party: Conversation) => string): string {
+    const reason = item.reason;
+    return reason.reason === "message" && reason.to != null ? ` to ${called(reason.to)}` : "";
+}
+
 /** How an item's header says when it came: made once, since `toLocaleString` makes one at each call, and the review is laid out again at each key typed in a comment. */
 const WHEN = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -532,7 +538,7 @@ export function Review({
                     const counted = files !== undefined && "shown" in files ? tally(files.shown) : "";
                     const typing = item.reason.reason === "approval" && item.reason.typing;
                     const told = [
-                        `${cited(item.number)} ${what(item)}`,
+                        `${cited(item.number)} ${what(item)}${sentTo(item, called)}`,
                         ...(counted === "" ? [] : [counted]),
                         ...(typing ? ["reading types"] : []),
                         ...(threaded(around.answers, item) ? ["replied"] : []),
@@ -548,7 +554,7 @@ export function Review({
                 places.current,
                 drawers,
             ),
-        [items, agents, banner, draft, around, drawers, reviewed, now],
+        [items, agents, banner, called, draft, around, drawers, reviewed, now],
     );
     const laidFor = useMemo(
         () => ({

@@ -135,6 +135,10 @@ class Message(Model):
     sending it: its last words, or, where its turn ended on an error from the
     model's API, that error in lup's words. The conversation already shows
     either among its steps, the error as its runtime's text for it."""
+    to: Conversation | None = None
+    """The conversation it was sent to, where it's the operator's copy of a
+    message one conversation sent another (`send`), which they read as news
+    whatever its kind; none where its recipient is whom it was sent to."""
 
 
 def labelled(opening: str, parts: dict[str, str]) -> str:
@@ -765,14 +769,15 @@ def ranked(reason: Reason) -> Rank:
     | Rank | Kinds | Order | Notice |
     |---|---|---|---|
     | waiting on you | a question, a held change, an approval, a problem (`blocked`), a disagreement, a question sent as a message | first | yes |
-    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice, a subagent's end | next | no |
+    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice, a subagent's end, the operator's copy of a message between conversations | next | no |
     | flag | a write that landed flagged | last | no |
 
-    A message ranks by its kind, whichever tool sent it: a note is a remark to
-    read, where a doubt that needs the operator soon is a question, asked.
-    The operator's own items, an answer and a review, go to agents, so neither
-    the review nor a notice reads theirs; nor a subagent's end, which goes to
-    its parent.
+    A message to the operator ranks by its kind, whichever tool sent it: a note
+    is a remark to read, where a doubt that needs the operator soon is a
+    question, asked. A copy of one a conversation sent another is news of any
+    kind, since it waits on that other, not on them. The operator's own items,
+    an answer and a review, go to agents, so neither the review nor a notice
+    reads theirs; nor a subagent's end, which goes to its parent.
 
     >>> ranked(Stop(why="Done."))
     Rank(name='news', order=1, notifies=False)
@@ -780,7 +785,14 @@ def ranked(reason: Reason) -> Rank:
     'news'
     """
     match reason:
-        case Message(kind="note") | Friction() | HowItWent() | Stop() | Ended():
+        case (
+            Message(kind="note")
+            | Message(to=Conversation())
+            | Friction()
+            | HowItWent()
+            | Stop()
+            | Ended()
+        ):
             return Rank(name="news", order=1, notifies=False)
         case Flagged():
             return Rank(name="flag", order=2, notifies=False)
@@ -879,6 +891,11 @@ class Whereabouts(Model):
     """The conversation that spawned it, for a subagent a conversation spawned,
     which hears of its end and of what it says of its work; none for a session's
     own, and for the runtime's own agents."""
+    name: str | None = None
+    """How lup called it at its last hook: its launch's name for a session's
+    own conversation, a subagent's name, or an unnamed one's kind and its
+    runtime's id (`courier.Conversation.own`), which `send` takes it by; none
+    where it was last heard before lup kept names here."""
 
 
 def read[M: Model](path: Path, model: type[M]) -> M:

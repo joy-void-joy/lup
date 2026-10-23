@@ -697,7 +697,7 @@ def reading() -> HostClient | FromRoom:
 
 
 def line(item: Item, listed: Listed | None = None) -> str:
-    """Say an item in a line: its number, when it was made, what it is, from whom (as it's called, where `listed` knows it), and its first line; for an approval, how to read it whole and answer it."""
+    """Say an item in a line: its number, when it was made, what it is, from whom (as it's called, where `listed` knows it) and, for a copy of a message between conversations, to whom, and its first line; for an approval, how to read it whole and answer it."""
     where = "" if item.worktree is None else f" in {item.worktree}"
     reading = (
         f" (`answer {item.number}` shows its summary, offers its whole diff, and "
@@ -705,9 +705,15 @@ def line(item: Item, listed: Listed | None = None) -> str:
         if isinstance(item.reason, Approval)
         else ""
     )
+    known = listed or Listed(launches=[])
+    match item.reason:
+        case Message(to=InboxConversation() as to):
+            between = f" to {sender_named(to, known)}"
+        case _:
+            between = ""
     return (
         f"{cited(item.number):>5}  {clocked(item.made)}  {what(item)} from "
-        f"{sender_named(item.sender, listed or Listed(launches=[]))}{where}: "
+        f"{sender_named(item.sender, known)}{between}{where}: "
         f"{opening(item)}{reading}"
     )
 
@@ -735,11 +741,16 @@ def settled(*, approved: bool) -> str:
 
 
 def heading(item: Item) -> str:
-    """Say what an item is, whose to whom, when it was made and where it stands."""
+    """Say what an item is, whose to whom, when it was made and where it stands: a copy of a message between conversations to the conversation it was sent to."""
     where = "" if item.worktree is None else f" in {item.worktree}"
+    match item.reason:
+        case Message(to=InboxConversation() as to):
+            recipient = f"{who(to)}, your copy"
+        case _:
+            recipient = who(item.recipient)
     return (
         f"{cited(item.number)}, {what(item)} from {who(item.sender)}{where} to "
-        f"{who(item.recipient)}, made {clocked(item.made)}, {standing(item)}:"
+        f"{recipient}, made {clocked(item.made)}, {standing(item)}:"
     )
 
 
