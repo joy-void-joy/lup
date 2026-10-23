@@ -265,6 +265,41 @@ def test_a_file_nothing_flagged_carries_its_role_by_the_declaration_the_judge_la
     }
 
 
+def test_a_file_is_shown_from_where_the_branch_left_the_integration_branch_so_what_that_took_in_since_is_never_shown_undone(
+    bare: Path, shell: Shell, clock: FakeClock, tmp_path: Path
+) -> None:
+    delivery = alone(tmp_path, clock)
+    branch = Branch(bare, shell, delivery, clock)
+    reader = branch.reader(tmp_path)
+    middle = "x = 0\ny = 0\nz = 0\n"
+    (branch.dev / "shared.py").write_text(f"a = 1\n{middle}b = 1\n")
+    shell.commit(branch.dev, "shared")
+    shell.git(branch.feat, "merge", "-q", "--ff-only", "dev")
+    # The branch changes the shared module's last line; the integration branch, after it left, its first, and a file
+    # of its own.
+    branch.wrote("shared.py", f"a = 1\n{middle}b = 2\n")
+    (branch.dev / "shared.py").write_text(f"a = 2\n{middle}b = 1\n")
+    (branch.dev / "landed.py").write_text("landed = True\n")
+    shell.commit(branch.dev, "landed")
+
+    [shared] = reader.read(ShowSince(conversation=branch.party)).files
+    assert shared.file == ChangedFile(
+        path=Path("shared.py"),
+        before=Text(text=f"a = 1\n{middle}b = 1\n"),
+        after=Text(text=f"a = 1\n{middle}b = 2\n"),
+    )
+
+    # Merged into the branch, what the integration branch took in is its own still: the shared module shows the
+    # branch's change alone, on the integration branch's version.
+    shell.git(branch.feat, "merge", "-q", "--no-edit", "dev")
+    [merged] = reader.read(ShowSince(conversation=branch.party)).files
+    assert merged.file == ChangedFile(
+        path=Path("shared.py"),
+        before=Text(text=f"a = 2\n{middle}b = 1\n"),
+        after=Text(text=f"a = 2\n{middle}b = 2\n"),
+    )
+
+
 def reviewed_at(clock: FakeClock) -> datetime:
     """Return when the file was marked reviewed: a minute before `clock`'s time."""
     return clock.now() - timedelta(minutes=1)

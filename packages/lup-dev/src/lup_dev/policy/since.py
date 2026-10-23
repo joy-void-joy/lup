@@ -4,10 +4,11 @@
 is no item of the review: the "since you approved" drawer under an agent's
 banner shows each file its branch changed, from the version of it the operator
 last saw on that branch, the one they marked reviewed or one kept beside an
-item of it they settled, or from the integration branch's tip where they saw
-none, as a hold at landing starts from it (`Baseline`,
-`lup_dev.policy.landing`), with the parts the judge flagged marked by its
-reading. A file that stands as they last saw it is said in a line, with
+item of it they settled (`Baseline`, `lup_dev.policy.landing`), or, where they
+saw none, from where the branch left the integration branch, the merge base of
+the two branches' tips (`Reader.base`), so what the integration branch took in
+since is never shown as the branch undoing it; with the parts the judge flagged
+marked by its reading. A file that stands as they last saw it is said in a line, with
 nothing under it, so the drawer shows the whole branch. Uncommitted changes
 count: the worktree is read as it stands, snapshotted through the judge's
 store of it (`Store`) by an index of this reader's own, so what git ignores is
@@ -116,7 +117,7 @@ class SinceFile(Model):
     reviewed: datetime | None = None
     """When they marked the version it's shown from reviewed, where that's the
     latest they saw of it; none else, and it's shown from the item `since`, or
-    from the integration branch's tip."""
+    from where the branch left the integration branch (`Reader.base`)."""
 
 
 class Since(Reply):
@@ -167,23 +168,25 @@ class Located(Model):
 
 
 class Snapshot(Model, arbitrary_types_allowed=True):
-    """The worktree as it stands, read once for each file: its snapshot's tree in the store, the integration branch's tip in the repository, and what the operator saw."""
+    """The worktree as it stands, read once for each file: its snapshot's tree in the store, where the branch left the integration branch in the repository, and what the operator saw."""
 
     baseline: Baseline
     store: Store
     git: Git
     tree: str
-    old: str | None
+    base: str | None
+    """The commit the branch left the integration branch at (`Reader.base`),
+    which a file the operator saw none of is shown from."""
     branches: list[str]
     roles: Roles | None
     """The role of each path, by the repository's declaration the judge last
     loaded; none where it has loaded none, and an unflagged file has no role."""
 
     def filed(self, path: Path) -> SinceFile | None:
-        """Return the file at `path` as the drawer shows it: as it stands in the tree, from the version the operator last saw on the branches, else from the integration branch's tip; with no `file` where it stands as they saw it, and none where they saw none and it stands as at that tip."""
+        """Return the file at `path` as the drawer shows it: as it stands in the tree, from the version the operator last saw on the branches, else from `base`; with no `file` where it stands as they saw it, and none where they saw none and it stands as at `base`."""
         after = self.store.content(self.tree, path)
         saw = self.baseline.saw(path, self.branches)
-        before = started(saw, self.git, self.old, path)
+        before = started(saw, self.git, self.base, path)
         flags = self.baseline.flags(self.branches, path)
         shown = SinceFile(
             path=path,
@@ -217,8 +220,8 @@ class Reader(Model, arbitrary_types_allowed=True):
     """lup's state on the host: the judge's session index and stores, and the
     files marked reviewed."""
     integration: str
-    """The integration branch's name, whose tip is the baseline where the
-    operator saw none of a file."""
+    """The integration branch's name, where the branch left which is the
+    baseline where the operator saw none of a file (`base`)."""
     remote: str = "origin"
     """The remote whose copy of the integration branch is read, as `land`
     lands on it; the local branch where there's none."""
@@ -248,6 +251,18 @@ class Reader(Model, arbitrary_types_allowed=True):
         """Return the integration branch's tip, the remote's copy where it's there, else the local branch's; none where there's neither."""
         remote = git.commit(f"refs/remotes/{self.remote}/{self.integration}")
         return remote or git.commit(f"refs/heads/{self.integration}")
+
+    def base(self, git: Git, old: str | None, tip: str | None) -> str | None:
+        """Return where the branch at `tip` left the integration branch at `old`: their merge base, the latest commit both hold, so a file only the integration branch changed since isn't one the branch changed, and one both changed shows the branch's change alone; `old` where there's no `tip`, or the two share no history.
+
+        Once the integration branch is merged into the branch, the merge base
+        moves to the tip merged, so what the merge brought in isn't shown as
+        the branch's.
+        """
+        if old is None or tip is None:
+            return old
+        found = git.run("merge-base", old, tip, ok=[0, 1])
+        return found.output.decode().strip() if found.status == 0 else old
 
     def store(self, party: Conversation, root: Path) -> Store:
         """Return the judge's store of the worktree at `root`, read through this reader's own index."""
@@ -295,8 +310,8 @@ class Reader(Model, arbitrary_types_allowed=True):
         if request.seen == version:
             return Since(worktree=root, branch=branch, version=version, same=True)
         tip = None if branch is None else git.commit(f"refs/heads/{branch}")
-        old = self.old(git)
-        committed = [] if tip is None else changed_files(git, old, tip)
+        base = self.base(git, self.old(git), tip)
+        committed = [] if tip is None else changed_files(git, base, tip)
         at_tip = (
             {} if tip is None else {each.path: each.object for each in git.tracked(tip)}
         )
@@ -314,7 +329,7 @@ class Reader(Model, arbitrary_types_allowed=True):
             store=store,
             git=git,
             tree=tree,
-            old=old,
+            base=base,
             branches=[] if branch is None else [branch],
             roles=self.roles(party, root),
         )
