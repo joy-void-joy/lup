@@ -15,7 +15,10 @@ from lup_dashboard.host import Host
 from lup_dashboard.server import Access, application
 from lup_dev.clock import Clock
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
+from lup_dev.host.records import Called
 from lup_dev.inbox.protocol import (
+    Calls,
+    Conversed,
     Exchanged,
     Files,
     Items,
@@ -24,6 +27,8 @@ from lup_dev.inbox.protocol import (
     Reviewed,
     SendItem,
     Settled,
+    ShowCalls,
+    ShowConversation,
 )
 from lup_dev.inbox.store import (
     Approval,
@@ -415,6 +420,32 @@ def test_the_demo_lists_a_conversations_items_a_message_sent_from_the_page_among
     assert unsent.json() == {
         "kind": "refused",
         "error": "no session of launch `d4c3` has started",
+    }
+
+
+def test_the_demo_reads_a_conversations_calls_each_a_line_and_whole_on_asking(
+    page: Path,
+) -> None:
+    served = client(Demo(clock=Fixed()), page)
+    asked = ShowConversation(runtime="claude", session="s1", agent="a02")
+    read = Conversed.model_validate(
+        served.post("/api/ask", json=asked.model_dump(), headers=bearing()).json()
+    )
+    called = [each for each in read.entries if isinstance(each, Called)]
+    ids = [each.id for each in called if each.id is not None]
+    whole = served.post(
+        "/api/ask",
+        json=ShowCalls(
+            runtime="claude", session="s1", agent="a02", calls=[*ids, "none"]
+        ).model_dump(),
+        headers=bearing(),
+    )
+    found = Calls.model_validate(whole.json())
+    assert all(each.gist is not None for each in called)
+    assert [each.id for each in found.calls] == ids
+    assert found.calls[0].input == {
+        "command": "ls /home/op/records/projects/-home-op-lup-git-tree-dev | head -4",
+        "description": "List the session records",
     }
 
 
