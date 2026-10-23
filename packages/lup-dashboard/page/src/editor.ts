@@ -15,12 +15,14 @@
 // was made (`History`). Each fold is folded or open as the view lays it out
 // until the operator opens or closes it, which is kept by its key: `za` opens or
 // closes the fold the cursor is in, `zo` and `zc` open and close it; `zr` and
-// `zm` open or close a level more, `zR` and `zM` all of them, and Space `z` and a
-// letter those of a kind, within what the view says (in the review, the item the
-// cursor is in; in a conversation, everything); `zj` and `zk` go to the next
-// fold's start and the previous one's end, `[z` and `]z` to the start and the end
-// of the open fold the cursor is in (`folds.ts`). `?` opens the list of every key, in place of vim's
-// search backward; once a chord is begun, as with Space, the view is told what's
+// `zm` open or close a level more, `zR` and `zM` all of them, and Space `z` `f`
+// and a letter those of a kind, Space `z` `F` closing them, within what the view
+// says (in the review, the item the cursor is in; in a conversation,
+// everything); `zf` and a kind's letter closes the one of that kind the cursor
+// is in; `zj` and `zk` go to the next fold's start and the previous one's end,
+// `[z` and `]z` to the start and the end of the open fold the cursor is in
+// (`folds.ts`). `?` opens the list of every key, in place of vim's search
+// backward; once a chord is begun, as with Space or `zf`, the view is told what's
 // pressed, to show what may follow. `"+` and `"*` are the system clipboard, and a
 // yank or a put the clipboard refused is said in the page's top line
 // (`clipboard.ts`). What's written, an agent's text and a comment, is
@@ -47,7 +49,7 @@ import { useEffect, useRef, type RefObject } from "react";
 
 import { defineClipboard } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
-import { around, foldEdge, levelled, nextFold } from "./folds";
+import { around, aroundOf, foldEdge, levelled, nextFold } from "./folds";
 import { FOLD_KINDS, type FoldKind } from "./keys";
 import { continued, hiddenOn, markdown } from "./markdown";
 import { margin, placeheld, type Margined } from "./margin";
@@ -72,6 +74,8 @@ interface Actions {
     fold: (how: "toggle" | "open" | "close") => void;
     foldLevel: (opening: boolean, all: boolean) => void;
     foldKind: (kind: FoldKind, closing: boolean) => void;
+    /** `zf` and a kind's letter: close the fold of that kind the cursor is in, the cursor going to its summary line. */
+    foldAround: (kind: FoldKind) => void;
     /** Where `zj` and `zk` (`next`), or `[z` and `]z` (`edge`), go from the line starting at `line`. */
     foldMotion: (line: number, how: "next" | "edge", forward: boolean) => number | undefined;
     folded: (update: ViewUpdate) => void;
@@ -306,9 +310,9 @@ let speaking: Bound | null = null;
 
 /**
  * Each chord Space leads in the review, as vim's keymap writes its keys, and the action it does: Space `p` parks an
- * item, leaving it for later; Space `A` marks every file of a "since you approved" drawer reviewed;
- * Space `z` and a letter, as vim's fold keys begin with `z`, opens every fold of its kind in the item or the drawer,
- * Shift and the letter closing them. The list of keys (`keys.ts`) says each of them.
+ * item, leaving it for later; Space `A` marks every file of a "since you approved" drawer reviewed; Space `z` `f` and a
+ * letter, as vim's fold keys begin with `z`, opens every fold of its kind in the item or the drawer, Space `z` `F` and
+ * the letter closing them. The list of keys (`keys.ts`) says each of them.
  */
 export const SPACED: readonly (readonly [keys: string, action: string])[] = [
     ["<Space>c", "lupCommentWhole"],
@@ -318,10 +322,18 @@ export const SPACED: readonly (readonly [keys: string, action: string])[] = [
     ["<Space>x", "lupDecline"],
     ["<Space>A", "lupApproveAll"],
     ...FOLD_KINDS.filter((each) => each.chord).flatMap(({ kind, letter }) => [
-        [`<Space>z${letter}`, `lupFoldOpen-${kind}`] as const,
-        [`<Space>z${letter.toUpperCase()}`, `lupFoldClose-${kind}`] as const,
+        [`<Space>zf${letter}`, `lupFoldOpen-${kind}`] as const,
+        [`<Space>zF${letter}`, `lupFoldClose-${kind}`] as const,
     ]),
 ];
+
+/**
+ * `zf` and each kind's letter, as vim's keymap writes them, and the action closing the fold of that kind the cursor is
+ * in: vim's `zf` makes a fold, which nothing here needs, the folds being laid out.
+ */
+export const AROUND: readonly (readonly [keys: string, action: string])[] = FOLD_KINDS.map(
+    ({ kind, letter }) => [`zf${letter}`, `lupFoldAround-${kind}`] as const,
+);
 
 let mapped = false;
 
@@ -382,6 +394,7 @@ function mapKeys(): void {
             action(`lupFoldOpen-${kind}`, (actions) => actions.foldKind(kind, false));
             action(`lupFoldClose-${kind}`, (actions) => actions.foldKind(kind, true));
         }
+        action(`lupFoldAround-${kind}`, (actions) => actions.foldAround(kind));
     }
     // `zj`, `zk`, `[z` and `]z` are motions, as in vim, so `v]z` selects to a fold's end.
     const motion = (name: string, how: "next" | "edge", forward: boolean) =>
@@ -414,6 +427,9 @@ function mapKeys(): void {
     map("zM", "lupFoldCloseAll", "normal");
     map("zr", "lupFoldOpenLevel", "normal");
     map("zm", "lupFoldCloseLevel", "normal");
+    for (const [keys, name] of AROUND) {
+        map(keys, name, "normal");
+    }
     const motions = { zj: "lupNextFold", zk: "lupPreviousFold", "[z": "lupFoldStart", "]z": "lupFoldEnd" };
     for (const [keys, name] of Object.entries(motions)) {
         Vim.mapCommand(keys, "motion", name, {}, {});
@@ -566,12 +582,16 @@ const keys = Prec.highest(
 );
 
 /**
- * Return the keys of a chord begun with Space, as the list of keys writes them (`␣`, `␣z`): what vim holds of a mapping
- * typed but not done, in normal mode; none for any other.
+ * Return the keys of a chord begun with Space, or of `zf` waiting for a kind's letter, as the list of keys writes them
+ * (`␣`, `␣z`, `zf`): what vim holds of a mapping typed but not done, in normal mode; none for any other, as `z` alone,
+ * which begins vim's own keys too.
  */
 export function chordOf(cm: CodeMirrorV): string {
     const vim = cm.state.vim;
     const held = vim.insertMode || vim.visualMode ? [] : vim.inputState.keyBuffer;
+    if (held.join("") === "zf") {
+        return "zf";
+    }
     return held[0] === "<Space>" ? held.map((key) => (key === "<Space>" ? "␣" : key)).join("") : "";
 }
 
@@ -1252,6 +1272,15 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 const closed = (fold: Folding) => isFolded(editor.state, fold);
                 const folds = own.level?.(head(), opening, all, closed) ?? levelled(shown.folds, closed, opening, all);
                 foldEvery(folds, !opening);
+            },
+            foldAround: (kind) => {
+                const editor = view.current;
+                const fold = aroundOf(shown.folds, head(), kind);
+                if (editor === null || fold === undefined) {
+                    return;
+                }
+                const effects = isFolded(editor.state, fold) ? [] : [folding(fold, true)];
+                editor.dispatch({ effects, selection: { anchor: fold.summary.from }, scrollIntoView: true });
             },
             foldKind: (kind, closing) => {
                 const editor = view.current;

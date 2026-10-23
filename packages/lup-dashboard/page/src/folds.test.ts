@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
-import { around, depths, foldEdge, levelled, nextFold, ofKind } from "./folds";
+import { around, aroundOf, depths, foldEdge, levelled, nextFold, ofKind } from "./folds";
 import type { FoldKind } from "./keys";
 
 // A text of lines two characters long, line `n` starting at `3n`.
@@ -115,7 +115,16 @@ describe("opening and closing one item's folds", () => {
         expect(levelled(READ, open, false, true).map((each) => each.key)).toEqual(["file", "body", "lines", "context"]);
     });
 
-    it("opens with Space z and a letter each fold of a kind, and the item's own so they're seen; closes with Shift and the letter", () => {
+    it("finds the innermost fold of a kind the cursor is in, from its summary line, for z f and the kind's letter", () => {
+        const at = (key: string) => READ.find((each) => each.key === key)!;
+        const lines = at("lines");
+        expect(aroundOf(READ, lines.summary.from, "lines")?.key).toBe("lines");
+        expect(aroundOf(READ, lines.to, "file")?.key).toBe("file");
+        expect(aroundOf(READ, lines.to, "item")?.key).toBe("item");
+        expect(aroundOf(READ, at("item").summary.from, "file")).toBeUndefined();
+    });
+
+    it("opens with Space z f and a letter each fold of a kind, and the item's own so they're seen; closes with Space z F and the letter", () => {
         expect(ofKind(READ, closed, "lines", false).map((each) => each.key)).toEqual(["item", "lines"]);
         expect(ofKind(READ, closed, "body", false).map((each) => each.key)).toEqual(["item"]);
         expect(ofKind(READ, closed, "body", true).map((each) => each.key)).toEqual(["body"]);
