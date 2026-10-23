@@ -1001,6 +1001,15 @@ export function stopAt(state: EditorState, stops: readonly number[], was: number
     return stops.findLast((each) => each < from && each >= to && shown(each));
 }
 
+/**
+ * Scroll `view` by `effect` once the key being handled is done. Vim, ending its key, scrolls the cursor into view the
+ * nearest way, and CodeMirror takes the last scroll asked of it alone, so a scroll a jump asks with its selection, as
+ * an item's header at the view's top, never takes.
+ */
+export function scrollAfterKey(view: Pick<EditorView, "dispatch">, effect: StateEffect<unknown>): void {
+    queueMicrotask(() => view.dispatch({ effects: effect }));
+}
+
 /** Return whether a closed fold hides `position`, the start of a line: it's among the lines the fold hides. */
 export function hiddenAt(state: EditorState, position: number): boolean {
     let hidden = false;

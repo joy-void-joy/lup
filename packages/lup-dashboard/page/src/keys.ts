@@ -210,13 +210,13 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
         keys: [
             {
                 keys: "]] [[",
-                does: "next and previous item, on its first line that matters, or on the summary line of the closed fold hiding it, which, as every motion of vim's, it doesn't open",
+                does: "next and previous item, on its first line that matters, its header at the view's top, or on the summary line of the closed fold hiding it, which, as every motion of vim's, it doesn't open",
                 short: "items",
                 at: ["banner", "approvals", "item", "aside", "written", "drawer"],
             },
             {
                 keys: "]a [a",
-                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; news and what's marked read or left for later are passed over; the folds hiding where it lands open, said under the review",
+                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing, its header at the view's top; news and what's marked read or left for later are passed over; the folds hiding where it lands open, said under the review",
                 short: "to answer",
                 at: ["banner", "approvals", "item", "change", "aside", "written", "drawer"],
             },

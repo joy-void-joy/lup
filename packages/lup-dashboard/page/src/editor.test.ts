@@ -1,5 +1,6 @@
 import { foldEffect, foldState, unfoldEffect } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import type { CodeMirrorV } from "@replit/codemirror-vim";
 import { describe, expect, it } from "vitest";
 
@@ -16,6 +17,7 @@ import {
     openedSaid,
     ownOf,
     pastFolds,
+    scrollAfterKey,
     stopAt,
     pastHidden,
     reaching,
@@ -295,6 +297,21 @@ describe("motions past a closed fold, which counts as its summary line", () => {
         // Selecting to the summary line's end, as `v$` does, stops on its last character, the line break being the fold's.
         expect(rests(state, outer.from + 1, at("ad"), 0)).toBe("head");
         expect(rests(state, at("h1"), at("after"), at("fter"))).toBe("d\nh1\nh2\na");
+    });
+});
+
+describe("a jump's own scroll", () => {
+    it("is asked once the key is done, after vim's scroll of the cursor into view, so it's the one CodeMirror takes", async () => {
+        const asked: unknown[] = [];
+        const view = { dispatch: (...specs: unknown[]) => void asked.push(...specs) };
+        const top = EditorView.scrollIntoView(0, { y: "start" });
+        scrollAfterKey(view, top);
+        expect(asked).toEqual([]);
+        // Vim ends its key by scrolling the cursor into view.
+        const vims = { scrollIntoView: true };
+        view.dispatch(vims);
+        await Promise.resolve();
+        expect(asked).toEqual([vims, { effects: top }]);
     });
 });
 
