@@ -6,13 +6,14 @@ lands. Its data are the host's own models, so it shows what the page would show.
 """
 
 import asyncio
+import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
-from pydantic import Field
+from pydantic import Field, JsonValue
 
-from lup.types import MutableModel
+from lup.types import Model, MutableModel
 from lup_dashboard.host import Host
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.host.protocol import (
@@ -26,10 +27,11 @@ from lup_dev.host.protocol import (
     SetHolding,
     Talker,
 )
-from lup_dev.host.records import Called, Entry, Said, Task, Usage
+from lup_dev.host.records import Call, Called, Entry, Said, Task, Usage
 from lup_dev.inbox.delivery import body, written
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
+    Calls,
     Context,
     Conversed,
     Drafted,
@@ -44,6 +46,7 @@ from lup_dev.inbox.protocol import (
     Reviewed,
     SendDraft,
     SendItem,
+    ShowCalls,
     ShowContext,
     ShowConversation,
     ShowDraft,
@@ -58,6 +61,7 @@ from lup_dev.inbox.store import (
     Binary,
     ChangedFile,
     Comment,
+    Content,
     Conversation,
     Decision,
     Done,
@@ -82,12 +86,58 @@ from lup_dev.inbox.store import (
     cited,
 )
 from lup_dev.inbox.store import Asked as Ask
-from lup_dev.policy.since import Approved, ApproveSince, ShowSince, Since, SinceFile
+from lup_dev.policy.reviewed import Mark, Marks
+from lup_dev.policy.since import (
+    ReviewSince,
+    ShowSince,
+    Since,
+    SinceFile,
+    SinceReviewed,
+    ViewedFile,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from lup_dashboard.api import Asked, Replied
+
+
+class StandIn(Model):
+    """A stand-in call: its step in a conversation, and what reading it whole answers."""
+
+    step: Called
+    whole: Call
+
+
+def stand_in(
+    id_: str,
+    tool: str,
+    gist: str | None,
+    at: datetime,
+    given: JsonValue,
+    *,
+    output: str | None = None,
+) -> StandIn:
+    """Return a stand-in call to `tool` saying `gist`, given `given`, which returned `output`; none while it runs."""
+    return StandIn(
+        step=Called(tool=tool, gist=gist, id=id_, at=at),
+        whole=Call(id=id_, input=given, output=output),
+    )
+
+
+def steps(recorded: list[Said | StandIn]) -> list[Entry]:
+    """Return a stand-in conversation's steps, as its record would hold them."""
+    return [each.step if isinstance(each, StandIn) else each for each in recorded]
+
+
+class Stands(Model):
+    """A file of a stand-in branch as it stands: what the integration branch holds of it, what the branch makes of it, and the flagged write on it, with the judge's reading."""
+
+    path: Path
+    before: Content | None
+    after: Content | None
+    flag: int | None = None
+    reading: Reading | None = None
 
 
 class Standing(MutableModel):
@@ -148,11 +198,20 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     began: datetime | None = None
     """When the demo began, as of the clock the first time it's asked (`ago`)."""
     approved: list[int] = []
-    """The flagged writes marked good from the drawer, by number, kept in memory."""
+    """The flagged writes approved from the drawer, by number, kept in memory."""
+    marks: dict[str, Marks] = {}
+    """The files the operator marked reviewed in a drawer, by branch, kept in
+    memory."""
+    versions: dict[str, Content | None] = {}
+    """Each version of a file a drawer showed, by its stand-in of git's id for
+    it, which marking it reviewed keeps."""
     grows: timedelta = timedelta(seconds=20)
-    """How long after the page first asks what the parser subagent's branch changed since the operator approved it two more writes come to it, so a session can watch the drawer say so and bring them in."""
+    """How long after the page first asks what the parser subagent's branch changed since the operator approved it two more writes come to it, so a session can watch the drawer bring them in."""
     growth: asyncio.TimerHandle | None = None
     """The growth under way, once the page asked."""
+    editing: bool = False
+    """Whether the parser subagent is making the two writes: calling a tool that
+    isn't lup's, whose end the page reads its drawer at."""
     grew: bool = False
     """Whether the two writes came."""
 
@@ -218,6 +277,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     usage=standing.usage,
                     tasks=standing.tasks,
                 )
+            case ShowCalls(session=session, agent=agent, calls=ids):
+                return self.calls(session, agent, ids)
             case ListItems(conversation=conversation):
                 return self.exchanged(conversation)
             case ShowSince(conversation=conversation, seen=seen):
@@ -226,17 +287,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                         self.grows.total_seconds(), self.grow
                     )
                 return self.since(conversation, seen)
-            case ApproveSince(conversation=conversation, path=path):
-                flags = [
-                    each.flags
-                    for each in self.since(conversation, None).files
-                    if path is None or each.file.path == path
-                ]
-                approved = [number for each in flags for number in each]
-                self.approved = [*self.approved, *approved]
-                self.changed.set()
-                self.changed = asyncio.Event()
-                return Approved(flags=approved)
+            case ReviewSince(conversation=conversation, files=viewed):
+                return self.reviewed(conversation, viewed)
             case _:
                 return Refused(error=f"the demo doesn't answer `{request.kind}`")
 
@@ -271,8 +323,18 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         self.changed = asyncio.Event()
 
     def grow(self) -> None:
-        """Let two more writes come to the parser subagent's branch: its drawer says so at the page's next asking, and brings them in on its key."""
+        """Let the parser subagent start the two writes to its branch, calling `Edit`, and end the call a moment later (`wrote`), as its hooks would say."""
+        self.editing = True
+        self.changed.set()
+        self.changed = asyncio.Event()
+        asyncio.get_running_loop().call_later(1.5, self.wrote)
+
+    def wrote(self) -> None:
+        """Let the two writes land on the parser subagent's branch as its call ends: its drawer brings them in as the page reads it at that hook."""
+        self.editing = False
         self.grew = True
+        self.changed.set()
+        self.changed = asyncio.Event()
 
     def standing(self, session: str, agent: str | None) -> Standing:
         """Return what a stand-in conversation's record says of it: the parser subagent's three tasks and a ninth of the long window; its session's half of it and no task; the second runtime's session's own window and plan; none for the rest."""
@@ -313,7 +375,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return Standing()
 
     def since(self, conversation: Conversation, seen: str | None) -> Since:
-        """Return what a stand-in conversation's branch changed since the operator approved it: the parser subagent's new reader module and, once `grew`, a change to the clock beside it, from its session's worktree; each file approved from the drawer left out; nothing for the rest."""
+        """Return what a stand-in conversation's branch changed since the operator last saw it (`drawn`): the parser subagent's new reader module and its test and, once `grew`, the reader grown and a change to the clock beside it; a worker's modules; nothing for the rest."""
         dev = conversation.repository / "tree" / "dev"
         worker = next(
             (
@@ -324,71 +386,161 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             None,
         )
         if conversation.session == "s1" and worker is not None and self.size > 0:
-            return self.worked_since(worker, seen)
-        parser = conversation.session == "s1" and conversation.agent == "a02"
-        if not parser:
-            return Since(
-                worktree=dev,
-                branch=None,
-                version="demo 0",
-                writes=0,
-                same=seen == "demo 0",
+            return self.drawn(
+                worker_worktree(worker),
+                f"worker-{worker}",
+                self.worked_stands(worker),
+                seen,
             )
+        if conversation.session == "s1" and conversation.agent == "a02":
+            return self.drawn(dev, "feat-reader", self.parser_stands(), seen)
+        return Since(worktree=dev, branch=None, version="demo", same=seen == "demo")
 
-        def filed(number: int) -> SinceFile | None:
-            found = files(number)
-            if number in self.approved or not isinstance(found, Files):
-                return None
-            [file] = found.files
-            return SinceFile(file=file, version=f"blob-{number}", flags=[number])
-
-        shown = [
-            each
-            for number in [59, *([60] if self.grew else [])]
-            if (each := filed(number)) is not None
-        ]
-        writes = 5 if self.grew else 3
-        version = f"demo-{'grown' if self.grew else 'first'} {len(self.approved)}"
-        if seen == version:
-            return Since(
-                worktree=dev,
-                branch="feat-reader",
-                version=version,
-                writes=writes,
-                same=True,
-            )
-        return Since(
-            worktree=dev,
-            branch="feat-reader",
-            version=version,
-            writes=writes,
-            files=shown,
+    def parser_stands(self) -> list[Stands]:
+        """Return the parser subagent's branch as it stands: its new reader module, flagged, and its test; once `grew`, the reader with a method more and the clock's change, flagged."""
+        [reader] = flagged_files(59)
+        [clock] = flagged_files(60)
+        grown = Text(text=READER + READER_GROWN)
+        test = Stands(
+            path=Path("packages/lup/tests/test_reader.py"),
+            before=None,
+            after=Text(text=TEST_READER),
         )
+        return [
+            *(
+                [
+                    Stands(
+                        path=clock.path,
+                        before=clock.before,
+                        after=clock.after,
+                        flag=60,
+                        reading=clock.reading,
+                    )
+                ]
+                if self.grew
+                else []
+            ),
+            Stands(
+                path=reader.path,
+                before=None,
+                after=grown if self.grew else reader.after,
+                flag=59,
+                reading=reader.reading,
+            ),
+            test,
+        ]
 
-    def worked_since(self, n: int, seen: str | None) -> Since:
-        """Return what worker `n`'s branch changed since the operator approved it: the module of each of its flagged writes (`worked_files`), each approved from the drawer left out, from its worktree; the files left out where `seen` is the version as it stands."""
+    def worked_stands(self, n: int) -> list[Stands]:
+        """Return worker `n`'s branch as it stands: the module of each of its flagged writes (`worked_files`)."""
         numbers = [
             each.number
             for each in self.worked()
             if isinstance(each.reason, Flagged) and each.sender == self.worker(n)
         ]
+        return [
+            Stands(
+                path=file.path,
+                before=file.before,
+                after=file.after,
+                flag=number,
+                reading=file.reading,
+            )
+            for number in numbers
+            if isinstance(found := self.worked_files(number), Files)
+            for file in found.files
+        ]
 
-        def filed(number: int) -> SinceFile | None:
-            found = self.worked_files(number)
-            if number in self.approved or not isinstance(found, Files):
-                return None
-            [file] = found.files
-            return SinceFile(file=file, version=f"blob-{number}", flags=[number])
+    def drawn(
+        self, worktree: Path, branch: str, stands: list[Stands], seen: str | None
+    ) -> Since:
+        """Return the drawer of a stand-in branch as the host reads it (`lup_dev.policy.since`): each file of `stands` from the version the operator last marked reviewed, else from the integration branch's, one standing as it was marked with nothing under it; its flag's reading while it isn't approved; the files left out where `seen` is the version as it stands."""
+        marks = self.marks.get(branch, Marks(branch=branch))
+        self.versions = {
+            **self.versions,
+            **{
+                version: each.after
+                for each in stands
+                if (version := stand_in_id(each.after)) is not None
+            },
+        }
 
-        version = f"worker-{n} {len(self.approved)}"
-        shown = [each for number in numbers if (each := filed(number)) is not None]
-        return Since(
-            worktree=worker_worktree(n),
-            branch=f"worker-{n}",
-            version=version,
-            writes=len(numbers),
-            same=seen == version,
-            files=[] if seen == version else shown,
+        def filed(each: Stands) -> SinceFile | None:
+            mark = marks.of(each.path)
+            before = each.before
+            if mark is not None:
+                before = (
+                    None if mark.version is None else self.versions.get(mark.version)
+                )
+            flags = (
+                [] if each.flag is None or each.flag in self.approved else [each.flag]
+            )
+            shown = SinceFile(
+                path=each.path,
+                version=stand_in_id(each.after),
+                flags=flags,
+                reviewed=None if mark is None else mark.at,
+            )
+            if before == each.after:
+                return None if mark is None else shown
+            file = ChangedFile(
+                path=each.path,
+                before=before,
+                after=each.after,
+                reading=each.reading if flags else None,
+            )
+            return shown.model_copy(update={"file": file})
+
+        shown = [
+            found
+            for each in sorted(stands, key=lambda stand: stand.path)
+            if (found := filed(each)) is not None
+        ]
+        version = (
+            stand_in_id(
+                Text(text=f"{[each.version for each in shown]} {self.approved} {marks}")
+            )
+            or ""
+        )
+        if seen == version:
+            return Since(worktree=worktree, branch=branch, version=version, same=True)
+        return Since(worktree=worktree, branch=branch, version=version, files=shown)
+
+    def reviewed(
+        self, conversation: Conversation, viewed: list[ViewedFile]
+    ) -> SinceReviewed | Refused:
+        """Mark each file of `viewed` reviewed at the version shown, in memory, approving the flag on each still standing at it, as the host does (`lup_dev.policy.since`); each watch answers again."""
+        standing = self.since(conversation, None)
+        if standing.branch is None:
+            return Refused(error="the demo's conversation has no branch to mark on")
+        versions = {each.path: each.version for each in standing.files}
+        flags = {each.path: each.flags for each in standing.files}
+        moved = [
+            each.path for each in viewed if versions.get(each.path) != each.version
+        ]
+        approved = [
+            number
+            for each in viewed
+            if each.path not in moved
+            for number in flags.get(each.path, [])
+        ]
+        self.approved = [*self.approved, *approved]
+        at = self.clock.now()
+        before = self.marks.get(standing.branch, Marks(branch=standing.branch))
+        latest = {
+            each.path: each
+            for each in [
+                *before.files,
+                *(Mark(path=each.path, version=each.version, at=at) for each in viewed),
+            ]
+        }
+        self.marks = {
+            **self.marks,
+            standing.branch: Marks(branch=standing.branch, files=list(latest.values())),
+        }
+        self.changed.set()
+        self.changed = asyncio.Event()
+        return SinceReviewed(
+            reviewed=[each.path for each in viewed], approved=approved, moved=moved
         )
 
     def ago(self, minutes: float) -> datetime:
@@ -443,7 +595,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 talker(
                     "parser",
                     "s1",
-                    Activity(
+                    Activity(state="calling", since=self.ago(0), tool="Edit")
+                    if self.editing
+                    else Activity(
                         state="calling",
                         since=self.ago(4),
                         tool="mcp__lup__ask",
@@ -899,6 +1053,18 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         """Return a stand-in moment for each item an agent's call made: the operator's last words, what the agent said and called after them, the call, and what came after; the approval, which no call made, has none; a worker's item has its own (`worked_context`)."""
         if number >= self.first_worked:
             return self.worked_context(number)
+        entries = steps(self.moments().get(number, []))
+        anchors = [
+            at
+            for at, each in enumerate(entries)
+            if isinstance(each, Called) and each.id == f"call-{number}"
+        ]
+        if not anchors:
+            return Refused(error=f"{cited(number)} was made by no agent's call")
+        return Context(number=number, entries=entries, anchor=anchors[0])
+
+    def moments(self) -> dict[int, list[Said | StandIn]]:
+        """Return the stand-in moment of each item an agent's call made, by its number, each call with what reading it whole answers."""
 
         def operator(text: str, minutes: float) -> Said:
             return Said(by="operator", text=text, at=self.ago(minutes))
@@ -906,46 +1072,176 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         def agent(text: str, minutes: float) -> Said:
             return Said(by="agent", text=text, at=self.ago(minutes))
 
-        def called(tool: str, minutes: float, id_: str | None = None) -> Called:
-            return Called(tool=tool, id=id_, at=self.ago(minutes))
+        def called(
+            tool: str,
+            minutes: float,
+            gist: str | None,
+            given: JsonValue,
+            output: str | None = None,
+            *,
+            id_: str | None = None,
+        ) -> StandIn:
+            return stand_in(
+                id_ or f"toolu_{tool}_{minutes}",
+                tool,
+                gist,
+                self.ago(minutes),
+                given,
+                output=output,
+            )
 
-        moments: dict[int, list[Entry]] = {
+        building = (
+            "Build the transcript reader, both runtimes. Ask me about the shape "
+            "before you build on it."
+        )
+        records = "/home/op/records/projects/-home-op-lup-git-tree-dev"
+        tree = "/home/op/lup.git/tree/dev"
+        return {
             51: [
-                operator(
-                    "Build the transcript reader, both runtimes. Ask me about the "
-                    "shape before you build on it.",
-                    9,
-                ),
+                operator(building, 9),
                 agent(
                     "Reading the first runtime's records, to see what each line holds.",
                     8,
                 ),
-                called("Bash", 8),
-                called("Bash", 7.8),
-                called("Read", 7.5),
+                called(
+                    "Bash",
+                    8,
+                    "Count each kind of line in the session records",
+                    {
+                        "command": (
+                            "python3 - <<'EOF'\nimport collections, glob, json\n"
+                            "kinds = collections.Counter()\n"
+                            f"for path in glob.glob('{records}/*.jsonl'):\n"
+                            "    for line in open(path):\n"
+                            "        kinds[json.loads(line).get('type')] += 1\n"
+                            "print(kinds.most_common())\nEOF"
+                        ),
+                        "description": "Count each kind of line in the session records",
+                    },
+                    "[('assistant', 9190), ('attachment', 7643), ('user', 5254), "
+                    "('api-request', 3109), ('last-prompt', 1466), ('mode', 1452), "
+                    "('permission-mode', 1452), ('ai-title', 1451), "
+                    "('custom-title', 802), ('agent-name', 730), ('system', 234), "
+                    "('queue-operation', 172), ('file-history-snapshot', 81), "
+                    "('cost-state', 21), ('summary', 3), ('mcp-instructions', 2), "
+                    "('worktree-state', 2), ('pr-link', 1), ('tag', 1), "
+                    "('away-summary', 1)]\n",
+                ),
+                called(
+                    "Bash",
+                    7.8,
+                    "Show the start of one record",
+                    {
+                        "command": f"head -c 400 {records}/0a1f3339.jsonl",
+                        "description": "Show the start of one record",
+                    },
+                    '{"type":"permission-mode","permissionMode":"default",'
+                    '"sessionId":"0a1f3339"}\n{"type":"user","message":{"role":'
+                    '"user","content":"Look into reading transcripts."},"origin":'
+                    '{"kind":"human"},"promptSource":"typed","cwd":'
+                    f'"{tree}","timestamp":"2026-10-17T12:00:00.000Z"}}',
+                ),
+                called(
+                    "Read",
+                    7.5,
+                    "records.py:40",
+                    {
+                        "file_path": f"{tree}/packages/lup-dev/src/lup_dev/host/records.py",
+                        "offset": 40,
+                        "limit": 12,
+                    },
+                    "40\tclass Said(Model):\n"
+                    '41\t    """Something said in a session: the operator\'s words, or the agent\'s."""\n'
+                    "42\t\n"
+                    '43\t    kind: Literal["said"] = "said"\n'
+                    '44\t    by: Literal["operator", "agent"]\n'
+                    "45\t    text: str\n"
+                    "46\t    at: datetime | None = None\n",
+                ),
                 agent(
                     "Twenty kinds of line; four carry what was said. Two ways to read "
                     "them: a model per kind, or a dict walked by hand.",
                     5,
                 ),
-                called("mcp__lup__ask", 4, "call-51"),
+                called(
+                    "mcp__lup__ask",
+                    4,
+                    "Which way should the reader read each kind of line?",
+                    {
+                        "question": "Which way should the reader read each kind of line?",
+                        "decisions": [
+                            {"text": "A model per kind", "lean": "yes"},
+                            {"text": "A dict walked by hand", "lean": "no"},
+                        ],
+                    },
+                    id_="call-51",
+                ),
                 agent("While that waits, I'll read the second runtime's.", 3.9),
-                called("Grep", 3.8),
+                called(
+                    "Grep",
+                    3.8,
+                    "rollout-",
+                    {"pattern": "rollout-", "path": "/home/op/records/sessions"},
+                ),
             ],
             52: [
                 operator("Keep going on the guidance rewrite.", 30),
                 agent("Checking how the records are encoded before I search them.", 14),
-                called("Bash", 13),
-                called("mcp__lup__note", 12, "call-52"),
+                called(
+                    "Bash",
+                    13,
+                    "Check the records' encoding",
+                    {"command": f"file {records}/*.jsonl | sort | uniq -c"},
+                    "  45 JSON text data\n",
+                ),
+                called(
+                    "mcp__lup__note",
+                    12,
+                    "The records are UTF-8 JSON lines; no other encoding found.",
+                    {
+                        "remark": "The records are UTF-8 JSON lines; no other encoding found."
+                    },
+                    "Noted for the operator: @52.",
+                    id_="call-52",
+                ),
                 agent("Carrying on with the search command.", 11.9),
             ],
             53: [
                 operator("Render the second scene at full size.", 20),
                 agent("Rendering frames 1 to 600.", 10),
-                called("exec_command", 9),
-                called("exec_command", 3),
+                called(
+                    "exec_command",
+                    9,
+                    "uv run zoetrope render scenes/second.toml --frames 1-600",
+                    {
+                        "cmd": "uv run zoetrope render scenes/second.toml --frames 1-600",
+                        "workdir": "/home/op/zoetrope.git/tree/main",
+                        "yield_time_ms": 600000,
+                    },
+                    "Process exited with code 1\nOutput:\nframe 412/600\n"
+                    "ffmpeg: clips/harbour.mov: Invalid data found when processing input\n",
+                ),
+                called(
+                    "exec_command",
+                    3,
+                    "ffprobe -v error -show_streams clips/harbour.mov",
+                    {
+                        "cmd": "ffprobe -v error -show_streams clips/harbour.mov",
+                        "workdir": "/home/op/zoetrope.git/tree/main",
+                    },
+                    "Process exited with code 1\nOutput:\n"
+                    "clips/harbour.mov: moov atom not found\n",
+                ),
                 agent("ffmpeg stops at frame 412, on the source clip.", 2.2),
-                called("blocked", 2, "call-53"),
+                called(
+                    "blocked",
+                    2,
+                    "The source clip clips/harbour.mov is truncated: its moov atom is missing.",
+                    {
+                        "why": "The source clip clips/harbour.mov is truncated: its moov atom is missing."
+                    },
+                    id_="call-53",
+                ),
             ],
             55: [
                 operator(
@@ -954,64 +1250,157 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     6,
                 ),
                 agent("Adding the language packages to the page.", 1),
-                called("Bash", 0.8),
-                called("Edit", 0.5, "call-55"),
+                called(
+                    "Bash",
+                    0.8,
+                    "Add CodeMirror's language packages",
+                    {
+                        "command": "npm install --save-exact @codemirror/lang-python @codemirror/lang-javascript",
+                        "description": "Add CodeMirror's language packages",
+                    },
+                    "added 4 packages in 2s\n",
+                ),
+                called(
+                    "Edit",
+                    0.5,
+                    "code.ts",
+                    {
+                        "file_path": f"{tree}/packages/lup-dashboard/page/src/code.ts",
+                        "old_string": 'import { tags } from "@lezer/highlight";',
+                        "new_string": 'import { python } from "@codemirror/lang-python";\nimport { tags } from "@lezer/highlight";',
+                        "replace_all": False,
+                    },
+                    id_="call-55",
+                ),
             ],
             57: [
                 agent("Running the gate on the reader.", 7.5),
-                called("Bash", 7.4),
-                called("mcp__lup__friction", 3, "call-57"),
+                called(
+                    "Bash",
+                    7.4,
+                    "Run the gate",
+                    {"command": "uv run lup-dev check", "description": "Run the gate"},
+                    "passed   rules\npassed   ruff\npassed   pyright\n"
+                    "passed   pytest (1,214 tests, 41.2s)\n\nThe gate passed.\n",
+                ),
+                called(
+                    "mcp__lup__friction",
+                    3,
+                    "the gate's 41 seconds",
+                    {
+                        "got_in_the_way": "the gate's 41 seconds",
+                        "trying": "to iterate on the reader",
+                        "would_change": "run only the tests the change touches",
+                    },
+                    id_="call-57",
+                ),
                 agent("The tests pass; on to the second runtime's records.", 2.9),
             ],
             58: [
                 operator("Keep going on the guidance rewrite.", 30),
                 agent("The voice section is done, and the gate passes.", 1.6),
-                called("mcp__lup__how_it_went", 1.4, "call-58"),
+                called(
+                    "mcp__lup__how_it_went",
+                    1.4,
+                    "The rewrite went smoothly once the voice was settled.",
+                    {"text": "The rewrite went smoothly once the voice was settled."},
+                    id_="call-58",
+                ),
             ],
             59: [
-                operator(
-                    "Build the transcript reader, both runtimes. Ask me about the "
-                    "shape before you build on it.",
-                    9,
-                ),
+                operator(building, 9),
                 agent(
                     "A module of its own for the reader, with a model per turn.", 6.5
                 ),
-                called("Write", 6, "call-59"),
-                called("Edit", 5.5),
-                called("Edit", 5),
+                called(
+                    "Write",
+                    6,
+                    "reader.py",
+                    {
+                        "file_path": f"{tree}/packages/lup/src/lup/transcripts/reader.py",
+                        "content": '"""Reading a session\'s record."""\n\nclass Turn(BaseModel):\n    said: str\n',
+                    },
+                    id_="call-59",
+                ),
+                called(
+                    "Edit",
+                    5.5,
+                    "reader.py",
+                    {
+                        "file_path": f"{tree}/packages/lup/src/lup/transcripts/reader.py",
+                        "old_string": "class Turn(BaseModel):",
+                        "new_string": "class Turn(Model):",
+                    },
+                ),
+                called(
+                    "Edit",
+                    5,
+                    "reader.py",
+                    {
+                        "file_path": f"{tree}/packages/lup/src/lup/transcripts/reader.py",
+                        "old_string": "    said: str",
+                        "new_string": "    said: str\n    at: datetime | None = None",
+                    },
+                ),
             ],
             60: [
                 operator("Let the tests say why they wait.", 4),
                 agent("The clock says why its last wait waited.", 2.7),
-                called("Edit", 2.5, "call-60"),
+                called(
+                    "Edit",
+                    2.5,
+                    "clock.py",
+                    {
+                        "file_path": f"{tree}/packages/lup-dev/src/lup_dev/clock.py",
+                        "old_string": "    def sleep(self, seconds: float) -> None:",
+                        "new_string": "    def sleep(self, seconds: float) -> None:\n        self.waited = seconds",
+                    },
+                    id_="call-60",
+                ),
             ],
             62: [
-                operator(
-                    "Build the transcript reader, both runtimes. Ask me about the "
-                    "shape before you build on it.",
-                    9,
-                ),
+                operator(building, 9),
                 agent(
                     "Counting what each kind of line holds, before the reader is shaped.",
                     1.2,
                 ),
-                called("Bash", 1.1),
-                called("mcp__lup__note", 0.8, "call-62"),
+                called(
+                    "Bash",
+                    1.1,
+                    "Count the parts of each kind of line",
+                    {
+                        "command": f"jq -r '.type' {records}/*.jsonl | sort | uniq -c | sort -rn | head",
+                        "description": "Count the parts of each kind of line",
+                    },
+                    "   9190 assistant\n   7643 attachment\n   5254 user\n",
+                ),
+                called(
+                    "mcp__lup__note",
+                    0.8,
+                    "Four kinds of line carry what was said.",
+                    {"remark": "Four kinds of line carry what was said."},
+                    "Noted for the operator: @62.",
+                    id_="call-62",
+                ),
             ],
         }
-        entries = moments.get(number)
-        if entries is None:
-            return Refused(error=f"{cited(number)} was made by no agent's call")
-        [anchor] = [
-            at
-            for at, each in enumerate(entries)
-            if isinstance(each, Called) and each.id == f"call-{number}"
-        ]
-        return Context(number=number, entries=entries, anchor=anchor)
 
     def conversation(self, session: str, agent: str | None) -> list[Entry]:
-        """Return a stand-in conversation: for the parser subagent, the call that sent @47, then its moment around @51 with what led to it; for the first worker, a day's work (`long_conversation`); for any other, a short exchange."""
+        """Return a stand-in conversation's steps (`recorded`)."""
+        return steps(self.recorded(session, agent))
+
+    def calls(self, session: str, agent: str | None, ids: list[str]) -> Calls:
+        """Return the calls of a stand-in conversation asked for, read whole, in the order asked: those it holds."""
+        wholes = {
+            each.whole.id: each.whole
+            for each in self.recorded(session, agent)
+            if isinstance(each, StandIn)
+        }
+        return Calls(calls=[wholes[each] for each in ids if each in wholes])
+
+    def recorded(self, session: str, agent: str | None) -> list[Said | StandIn]:
+        """Return a stand-in conversation, each call with what reading it whole answers: for the parser subagent, the call that sent @47, then its moment around @51 with what led to it, then what it read since the demo began; for the first worker, a day's work (`long_conversation`); for the second runtime's session and its subagent, a render that broke; for any other, a short exchange."""
+        tree = "/home/op/lup.git/tree/dev"
         if (session, agent) == ("s1", worker_agent(1)) and self.size > 0:
             return self.long_conversation()
         if (session, agent) == ("s1", "a02"):
@@ -1029,19 +1418,75 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     ),
                     at=self.ago(29),
                 ),
-                Called(tool="Bash", at=self.ago(28)),
-                Called(tool="Read", at=self.ago(27)),
-                Called(tool="mcp__lup__note", id="call-47", at=self.ago(26)),
+                stand_in(
+                    "toolu_p1",
+                    "Bash",
+                    "List the session records",
+                    self.ago(28),
+                    {
+                        "command": "ls /home/op/records/projects/-home-op-lup-git-tree-dev | head -4",
+                        "description": "List the session records",
+                    },
+                    output="0a1f3339-dd0c-456f-86ff-9a95af8bb48f\n"
+                    "0a1f3339-dd0c-456f-86ff-9a95af8bb48f.jsonl\n"
+                    "1a39941b-776b-425d-8bd8-be8542a9b28d\n"
+                    "1a39941b-776b-425d-8bd8-be8542a9b28d.jsonl\n",
+                ),
+                stand_in(
+                    "toolu_p2",
+                    "Read",
+                    "field-notes.md:613",
+                    self.ago(27),
+                    {
+                        "file_path": f"{tree}/docs/field-notes.md",
+                        "offset": 613,
+                        "limit": 4,
+                    },
+                    output="613\t### A session's record (measured 2026-10-18)\n"
+                    "614\t\n"
+                    "615\tWhat `lup-dev transcripts` reads of "
+                    "`projects/<folder>/<session>.jsonl`.\n",
+                ),
+                stand_in(
+                    "call-47",
+                    "mcp__lup__note",
+                    "Each session's record is a JSONL file; a subagent's is beside it.",
+                    self.ago(26),
+                    {
+                        "remark": "Each session's record is a JSONL file; a subagent's is beside it."
+                    },
+                    output="Noted for the operator: @47.",
+                ),
                 Said(
                     by="agent",
                     text="Reading the first runtime's records.",
                     at=self.ago(25.5),
                 ),
-                Called(tool="Read", at=self.ago(24)),
-                Called(tool="Grep", at=self.ago(22)),
-                *self.moment(51),
+                stand_in(
+                    "toolu_p3",
+                    "Read",
+                    "records.py",
+                    self.ago(24),
+                    {
+                        "file_path": f"{tree}/packages/lup-dev/src/lup_dev/host/records.py"
+                    },
+                    output='1\t"""Where a runtime keeps each session\'s record on this machine."""\n'
+                    "2\t\n3\tfrom abc import ABC, abstractmethod\n",
+                ),
+                stand_in(
+                    "toolu_p4",
+                    "Grep",
+                    "class Transcript",
+                    self.ago(22),
+                    {"pattern": "class Transcript", "path": f"{tree}/packages"},
+                    output="packages/lup-dev/src/lup_dev/host/records.py:118:"
+                    "class Transcript(Model):\n",
+                ),
+                *self.moments()[51],
                 *self.growing(),
             ]
+        if session == "s3":
+            return self.rendering()
         return [
             Said(
                 by="operator",
@@ -1049,16 +1494,93 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 at=self.ago(20),
             ),
             Said(by="agent", text="On it: reading the code first.", at=self.ago(19)),
-            Called(tool="Grep", at=self.ago(18)),
-            Called(tool="Read", at=self.ago(17)),
-            Called(tool="Read", at=self.ago(17)),
+            stand_in(
+                "toolu_d1",
+                "Grep",
+                "def laid",
+                self.ago(18),
+                {
+                    "pattern": "def laid",
+                    "path": f"{tree}/packages",
+                    "output_mode": "content",
+                },
+                output="packages/lup-dashboard/page/src/review.ts:871:export function laid(\n",
+            ),
+            stand_in(
+                "toolu_d2",
+                "Read",
+                "review.ts:871",
+                self.ago(17),
+                {
+                    "file_path": f"{tree}/packages/lup-dashboard/page/src/review.ts",
+                    "offset": 871,
+                    "limit": 3,
+                },
+                output="871\texport function laid(\n872\t    items: Item[],\n"
+                "873\t    agents: Conversation[],\n",
+            ),
+            stand_in(
+                "toolu_d3",
+                "Read",
+                "conversation.ts",
+                self.ago(17),
+                {
+                    "file_path": f"{tree}/packages/lup-dashboard/page/src/conversation.ts"
+                },
+                output="1\t// One conversation laid out as one text to read and move through\n",
+            ),
             Said(by="agent", text="Found it. Writing the fix next.", at=self.ago(15)),
         ]
 
-    def growing(self) -> list[Entry]:
-        """Return the steps the parser subagent took since the demo began: a call, then what it found, in turn."""
+    def rendering(self) -> list[Said | StandIn]:
+        """Return the second runtime's session's conversation: a render asked for, the scene's settings read and patched, and the render breaking on its source clip, its calls as that runtime makes them."""
+        main = "/home/op/zoetrope.git/tree/main"
+        patch = (
+            "*** Begin Patch\n*** Update File: scenes/second.toml\n@@\n"
+            "-size = [960, 540]\n+size = [1920, 1080]\n*** End Patch\n"
+        )
         return [
-            Called(tool="Read", at=self.ago(0))
+            Said(
+                by="operator",
+                text="Render the second scene at full size.",
+                at=self.ago(20),
+            ),
+            Said(
+                by="agent", text="Checking the scene's settings first.", at=self.ago(19)
+            ),
+            stand_in(
+                "call_r1",
+                "exec_command",
+                "sed -n '1,20p' scenes/second.toml",
+                self.ago(18),
+                {"cmd": "sed -n '1,20p' scenes/second.toml", "workdir": main},
+                output='Process exited with code 0\nOutput:\n[scene]\nname = "harbour"\n'
+                "size = [960, 540]\nframes = 600\n",
+            ),
+            stand_in(
+                "call_r2",
+                "apply_patch",
+                "second.toml",
+                self.ago(16),
+                patch,
+                output="Success. Updated the following files:\nM scenes/second.toml\n",
+            ),
+            *self.moments()[53][1:],
+        ]
+
+    def growing(self) -> list[Said | StandIn]:
+        """Return the steps the parser subagent took since the demo began: a call, then what it found, in turn."""
+        rollouts = "/home/op/records/sessions/2026/10/17"
+        return [
+            stand_in(
+                f"toolu_g{step}",
+                "Read",
+                f"rollout-{step // 2 + 1}.jsonl",
+                self.ago(0),
+                {"file_path": f"{rollouts}/rollout-{step // 2 + 1}.jsonl"},
+                output='1\t{"type":"session_meta","payload":{"id":"th-1","cwd":"/w"}}\n'
+                '2\t{"type":"event_msg","payload":{"type":"user_message","message":"go"}}\n',
+            )
             if step % 2 == 0
             else Said(
                 by="agent",
@@ -1067,11 +1589,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             )
             for step in range(self.grown)
         ]
-
-    def moment(self, number: int) -> list[Entry]:
-        """Return the stand-in steps around item `number`, none where it has none."""
-        found = self.context(number)
-        return found.entries if isinstance(found, Context) else []
 
     def hook(self) -> None:
         """Let a stand-in hook call come: what one worker does changes (`working`), each watch answers again, and the next comes after the interval `hooks` gives."""
@@ -1257,9 +1774,73 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
         return Context(number=number, entries=entries, anchor=5)
 
-    def long_conversation(self, steps: int = 300) -> list[Entry]:
-        """Return the first worker's conversation, `steps` long: its brief, then a call and what it found, in turn, as a day's work reads."""
-        tools = ["Read", "Edit", "Bash"]
+    def long_conversation(self, length: int = 300) -> list[Said | StandIn]:
+        """Return the first worker's conversation, `length` steps after its brief, as a day's work reads: what it's on, then a run of calls reading a module, changing a function, running its tests and reading them, in turn; the operator's word every hundred steps, from the fiftieth."""
+        tree = worker_worktree(1)
+
+        def step(at: int) -> Said | StandIn:
+            k = at // 5 + 1
+            module = f"packages/lup/src/lup/worker1/step_{k}.py"
+            tests = f"packages/lup/tests/test_step_{k}.py"
+            when = self.ago(400 - at)
+            if at % 100 == 50:
+                return Said(
+                    by="operator",
+                    text=f"Good. Carry on from step {k}.",
+                    at=when,
+                )
+            match at % 5:
+                case 0:
+                    return Said(
+                        by="agent",
+                        text=f"Step {k}: read the module, change one function, run its tests.",
+                        at=when,
+                    )
+                case 1:
+                    return stand_in(
+                        f"toolu_w{at}",
+                        "Read",
+                        f"step_{k}.py",
+                        when,
+                        {"file_path": str(tree / module)},
+                        output=function(k),
+                    )
+                case 2:
+                    return stand_in(
+                        f"toolu_w{at}",
+                        "Edit",
+                        f"step_{k}.py",
+                        when,
+                        {
+                            "file_path": str(tree / module),
+                            "old_string": f"    count: int = {k}",
+                            "new_string": f"    count: int = {k + 1}",
+                            "replace_all": False,
+                        },
+                        output=f"The file {tree / module} has been updated successfully.",
+                    )
+                case 3:
+                    return stand_in(
+                        f"toolu_w{at}",
+                        "Bash",
+                        f"Run step {k}'s tests",
+                        when,
+                        {
+                            "command": f"uv run pytest {tests} -q",
+                            "description": f"Run step {k}'s tests",
+                        },
+                        output="..\n2 passed in 0.04s\n",
+                    )
+                case _:
+                    return stand_in(
+                        f"toolu_w{at}",
+                        "Read",
+                        f"test_step_{k}.py",
+                        when,
+                        {"file_path": str(tree / tests), "limit": 20},
+                        output=f"1\tfrom lup.worker1.step_{k} import step_{k}\n",
+                    )
+
         return [
             Said(
                 by="operator",
@@ -1269,19 +1850,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ),
                 at=self.ago(400),
             ),
-            *(
-                Called(tool=tools[step % len(tools)], at=self.ago(400 - step))
-                if step % 2 == 0
-                else Said(
-                    by="agent",
-                    text=(
-                        f"Step {step // 2 + 1}: read the module, changed one function, "
-                        "ran its tests."
-                    ),
-                    at=self.ago(400 - step),
-                )
-                for step in range(steps)
-            ),
+            *(step(at) for at in range(length)),
         ]
 
 
@@ -1623,6 +2192,26 @@ class Reader(BaseModel):
         return [Turn.model_validate(json.loads(line)) for line in lines if line]
 '''
 
+READER_GROWN = '''
+    def kinds(self) -> list[str]:
+        """Return each kind of step the record holds, once, in the order they come."""
+        return list(dict.fromkeys(turn.by for turn in self.turns()))
+'''
+
+TEST_READER = '''"""The reader of a runtime's records."""
+
+from pathlib import Path
+
+from lup.transcripts.reader import Reader
+
+
+def test_each_line_is_a_turn(tmp_path: Path) -> None:
+    record = tmp_path / "record.jsonl"
+    record.write_text('{"by": "operator", "text": "Go."}\\n')
+    [turn] = Reader(path=record).turns()
+    assert (turn.by, turn.text) == ("operator", "Go.")
+'''
+
 CLOCK_HEAD = '''"""Time, through one seam, so tests drive it."""
 
 from abc import ABC, abstractmethod
@@ -1682,6 +2271,22 @@ def turns(path: Path) -> list[Entry]:
 See [the field notes](docs/field-notes.md) and `records.py`.
 """
 """A session's note written in Markdown, as agents write them: a table, emphasis, a list, a heading, code and a link, for the page to show as such."""
+
+
+def stand_in_id(content: Content | None) -> str | None:
+    """Return git's id for a stand-in file's content, as a drawer says its version, a binary one's made of its size; none for no file."""
+    if content is None:
+        return None
+    data = content.text.encode() if isinstance(content, Text) else b"\0" * content.size
+    return hashlib.sha1(
+        b"blob %d\0" % len(data) + data, usedforsecurity=False
+    ).hexdigest()
+
+
+def flagged_files(number: int) -> list[ChangedFile]:
+    """Return the files a stand-in flagged write changes (`files`), none where it changes none."""
+    found = files(number)
+    return found.files if isinstance(found, Files) else []
 
 
 def text(*parts: str) -> Text:

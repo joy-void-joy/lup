@@ -3,7 +3,8 @@
 The homes:
 - lup's own state, under `$XDG_STATE_HOME/lup/`: each worktree's store, outside the
   worktree so the restore source is out of the agent's reach, and each
-  repository's verdict log and the host zone its operator approved;
+  repository's verdict log, the host zone its operator approved and the files
+  they marked reviewed in its agents' drawers;
 - each worktree engine's socket, under `$XDG_RUNTIME_DIR/lup/`, since a socket's
   path is limited in length;
 - the host service's sockets and the launches it serves, under
@@ -183,6 +184,24 @@ class StoreLayout(Model):
     def waiter(self, hold: str) -> Path:
         """Say where the call waiting on hold `hold` holds its lock while it waits, which the OS frees where its process ends."""
         return self.holds / f"{hold}.lock"
+
+
+class ReviewedLayout(Model):
+    """Where one repository's files the operator marked reviewed in their agents' drawers are kept (`lup_dev.policy.reviewed`): each branch's marks, and each version marked, by git's id for it."""
+
+    home: Path
+
+    def branch(self, branch: str) -> Path:
+        """Say where the marks on branch `branch` are kept, by a digest of its name, which may hold slashes."""
+        return (
+            self.home
+            / "branches"
+            / f"{hashlib.sha256(branch.encode()).hexdigest()}.json"
+        )
+
+    def version(self, version: str) -> Path:
+        """Say where the content git's id `version` names is kept, as it was marked."""
+        return self.home / "versions" / version
 
 
 class CheckoutLayout(Model):
@@ -715,6 +734,10 @@ class Layout(Model):
     def verdicts(self, repository: Path) -> Path:
         """Say where the verdict log of a repository lives, by its git directory."""
         return self.repository(repository) / "verdicts.jsonl"
+
+    def reviewed(self, repository: Path) -> ReviewedLayout:
+        """Say where the files of a repository's branches the operator marked reviewed are kept, by its git directory."""
+        return ReviewedLayout(home=self.repository(repository) / "reviewed")
 
     def heads(self, repository: Path) -> Path:
         """Say where each worktree's `HEAD` at its last checkpoint is kept."""

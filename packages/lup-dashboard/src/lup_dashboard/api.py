@@ -25,6 +25,7 @@ from lup_dev.host.protocol import (
 from lup_dev.inbox.protocol import (
     AnswerApproval,
     AnswerItem,
+    Calls,
     Context,
     Conversed,
     Drafted,
@@ -40,6 +41,7 @@ from lup_dev.inbox.protocol import (
     SendDraft,
     SendItem,
     Settled,
+    ShowCalls,
     ShowContext,
     ShowConversation,
     ShowDraft,
@@ -49,7 +51,7 @@ from lup_dev.inbox.protocol import (
     ShowTalk,
     Talked,
 )
-from lup_dev.policy.since import Approved, ApproveSince, ShowSince, Since
+from lup_dev.policy.since import ReviewSince, ShowSince, Since, SinceReviewed
 
 type Asked = Annotated[
     ListLaunches
@@ -64,6 +66,7 @@ type Asked = Annotated[
     | ShowFiles
     | ShowContext
     | ShowConversation
+    | ShowCalls
     | ListItems
     | ShowDraft
     | KeepDraft
@@ -71,7 +74,7 @@ type Asked = Annotated[
     | ShowTalk
     | KeepTalk
     | ShowSince
-    | ApproveSince,
+    | ReviewSince,
     Field(discriminator="kind"),
 ]
 """A request the page may send: the launches served and their conversations,
@@ -79,10 +82,10 @@ a launch renamed, the operator's switch for a conversation turned, "hold each
 flagged write", and the operator's inbox, its items read, answered, finished
 and sent, an approval or a held change answered and the files it changes read,
 an item's moment in its sender's conversation read, a whole conversation read
-from where the page left it, the items a conversation sent and was sent listed,
+from where the page left it, calls of it read whole, the items a conversation sent and was sent listed,
 the operator's draft reply shown, kept and sent, what they write on a
 conversation shown and kept, and what an agent's branch changed since they
-approved it read and marked good."""
+last saw it read and its files marked reviewed."""
 
 type Replied = Annotated[
     Listed
@@ -94,12 +97,13 @@ type Replied = Annotated[
     | Files
     | Context
     | Conversed
+    | Calls
     | Exchanged
     | Drafted
     | Talked
     | Reviewed
     | Since
-    | Approved
+    | SinceReviewed
     | Refused,
     Field(discriminator="kind"),
 ]

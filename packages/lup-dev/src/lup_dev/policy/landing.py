@@ -57,8 +57,9 @@ that branch's landing.
 
 **The version a hold starts from** is the latest the operator saw of the file on
 the branches landed: a flagged write or a hold at landing they approved, read or
-commented on, so a hold after a comment shows what changed in answer to it.
-Where they saw none, it's the file at the gated branch's tip on the remote,
+commented on, so a hold after a comment shows what changed in answer to it, or
+the version they last marked reviewed in its agent's drawer
+(`lup_dev.policy.reviewed`), whichever came last. Where they saw none, it's the file at the gated branch's tip on the remote,
 which the tip holds, so the integration branch's own changes don't show. One
 they saw before the integration branch changed the file too, merged since,
 shows that change as well.
@@ -127,6 +128,7 @@ from lup_dev.inbox.store import (
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, HostLayout, Layout
 from lup_dev.merging import Conflicted, Failed, Merged, Merging
 from lup_dev.policy.holds import unified
+from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.remote.protocol import (
     Pushed,
@@ -371,6 +373,15 @@ def blob(git: Git, commit: str, path: Path) -> bytes | None:
             return None
 
 
+def started(saw: Saw | None, git: Git, old: str | None, path: Path) -> bytes | None:
+    """Return the version of the file at `path` its diff starts from: the one the operator last saw, `saw`; else the file at `old`, the integration branch's tip; none where there's neither, or `old` has no file there."""
+    if saw is not None:
+        return saw.content
+    if old is None:
+        return None
+    return blob(git, old, path)
+
+
 def worktrees(git: Git) -> list[Worktree]:
     """Return the repository's worktrees, its main one first, as `git worktree list` gives them, each with the branch it has checked out."""
     fields = nul_separated(git.run("worktree", "list", "--porcelain", "-z").output)
@@ -457,8 +468,16 @@ def flagged_on(path: Path, landed: list[str], item: Item) -> bool:
             return False
 
 
-def shown_from(onto: str, since: int | None, old: str | None) -> str:
-    """Say which version of the file a hold's diff starts from: the item `since`, the gated branch `onto`'s tip on the remote, `old`, or none."""
+def shown_from(
+    onto: str, since: int | None, old: str | None, reviewed: Mark | None = None
+) -> str:
+    """Say which version of the file a hold's diff starts from: the one the operator marked `reviewed`, the item `since`, the gated branch `onto`'s tip on the remote, `old`, or none."""
+    if reviewed is not None:
+        version = "its deletion" if reviewed.version is None else reviewed.version
+        return (
+            f"Shown since the version you last marked reviewed in its agent's "
+            f"drawer, {version}."
+        )
     if since is not None:
         return f"Shown since {cited(since)}, the version of it you last saw."
     if old is not None:
@@ -473,12 +492,22 @@ def approved(item: Item) -> bool:
     return isinstance(item.state, Decided) and item.state.approved
 
 
+class Saw(Model):
+    """The version of a file the operator last saw on a branch, which its diff starts from: its bytes, none where they saw it deleted; and where they saw it, an item of it they settled or the mark they made reviewing it in its agent's drawer."""
+
+    content: bytes | None
+    item: int | None = None
+    reviewed: Mark | None = None
+
+
 class Baseline(Model, arbitrary_types_allowed=True):
-    """What the operator last saw of a repository's files, read from the inbox: the version each hold at landing starts from, and each file of an agent's drawer since they approved it (`lup_dev.policy.since`)."""
+    """What the operator last saw of a repository's files, read from the inbox and from what they marked reviewed: the version each hold at landing starts from, and each file of an agent's drawer since they approved it (`lup_dev.policy.since`)."""
 
     inbox: Inbox
     repository: Path
     """The repository's git directory."""
+    reviews: Reviews
+    """The files of its branches the operator marked reviewed."""
 
     def flags(self, branches: list[str], path: Path | None = None) -> list[Flag]:
         """Return the flagged writes on `branches` the operator hasn't approved, those on the file at `path` alone where one's given."""
@@ -500,6 +529,25 @@ class Baseline(Model, arbitrary_types_allowed=True):
         ]
         latest = max(seen, key=lambda each: each.at, default=None)
         return None if latest is None else latest.item
+
+    def saw(self, path: Path, landed: list[str]) -> Saw | None:
+        """Return the version of the file at `path` the operator last saw on the branches `landed`: the one they last marked reviewed, or the one kept beside the latest item of it they settled (`seen`), whichever came last, a mark made as the item was settled winning; none where they saw none, or what they saw isn't kept, an item's not as text."""
+        seen = self.seen(path, landed)
+        marks = [
+            mark
+            for branch in landed
+            if (mark := self.reviews.marks(branch).of(path)) is not None
+        ]
+        mark = max(marks, key=lambda each: each.at, default=None)
+        settled = None if seen is None else settled_at(seen)
+        if mark is not None and (settled is None or mark.at >= settled):
+            content = self.reviews.content(mark)
+            if mark.version is None or content is not None:
+                return Saw(content=content, reviewed=mark)
+        if seen is None:
+            return None
+        kept = self.kept(seen, path)
+        return None if kept is None else Saw(content=kept, item=seen.number)
 
     def kept(self, item: Item, path: Path) -> bytes | None:
         """Return the version of `path` kept beside `item`, what it changed it to; none where none is kept as text."""
@@ -559,7 +607,12 @@ class Lander(Model, arbitrary_types_allowed=True):
     @property
     def baseline(self) -> Baseline:
         """Return what the operator last saw of the repository's files."""
-        return Baseline(inbox=self.delivery.inbox, repository=self.launch.repository)
+        repository = self.launch.repository
+        return Baseline(
+            inbox=self.delivery.inbox,
+            repository=repository,
+            reviews=Reviews(layout=self.layout.reviewed(repository)),
+        )
 
     @lup_tool(idempotent=True)
     async def land(self, landing: Landing) -> str:
@@ -1068,16 +1121,10 @@ class Lander(Model, arbitrary_types_allowed=True):
             }
         )
         baseline = self.baseline
-        seen = baseline.seen(path, landed)
-        kept = (
-            None if seen is None else await asyncio.to_thread(baseline.kept, seen, path)
-        )
-        since = None if seen is None or kept is None else seen.number
-        before = (
-            kept
-            if kept is not None or old is None
-            else await asyncio.to_thread(blob, git, old, path)
-        )
+        saw = await asyncio.to_thread(baseline.saw, path, landed)
+        since = None if saw is None else saw.item
+        reviewed = None if saw is None or saw.reviewed is None else saw.reviewed
+        before = await asyncio.to_thread(started, saw, git, old, path)
         after = await asyncio.to_thread(blob, git, landing.tip, path)
         latest = max(flags, key=lambda each: each.number)
         reading = await asyncio.to_thread(baseline.reading, latest, after)
@@ -1091,9 +1138,14 @@ class Lander(Model, arbitrary_types_allowed=True):
                 f"Let `{path}` land on `{onto}`? It's flagged on {named}, and the "
                 f"landing of {landing.tip} waits on your approval."
             ),
-            summary="\n".join([*asks, shown_from(onto, since, old)]),
+            summary="\n".join([*asks, shown_from(onto, since, old, reviewed)]),
             worktree=latest.flagged.worktree,
-            landing=landing.model_copy(update={"since": since}),
+            landing=landing.model_copy(
+                update={
+                    "since": since,
+                    "reviewed": None if reviewed is None else reviewed.at,
+                }
+            ),
         )
         diff = unified(path, text(before), text(after))
         file = ChangedFile.of(path, before, after, reading)
