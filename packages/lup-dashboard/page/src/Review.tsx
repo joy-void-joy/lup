@@ -15,7 +15,8 @@
 // item, its context. At the end of each agent's group, its drawers
 // (`review.ts`): its tasks, its trace, what its branch changed since the
 // operator last saw it, live, where Space `a` marks a file reviewed at the
-// version shown and Space `A` every file shown, and its conversation;
+// version shown and Space `A` every file shown, each line changed since they
+// last looked at its file marked (`since.ts`), and its conversation;
 // `h` on a banner turns the operator's switch to hold the agent's flagged
 // writes. Each fold has a kind, its letter in the margin beside its summary
 // line, in the column of its depth, a bar under it for each fold the cursor is
@@ -24,13 +25,15 @@
 // Space `z` act on the item or the drawer the cursor is in. The header over the
 // review says where the cursor is: the group, the item or the drawer, the file
 // and the folds it's in, and, while a comment is being written, whom it goes
-// to; at its end, how many items are to answer and how many are new
-// (`docs/dashboard.md`, *The review*, *The drawers*).
+// to; at its end, how many items are to answer and how many are new. As what
+// it shows changes, the cursor's line stays where it is on screen, so nothing
+// arriving above moves what the operator reads (`docs/dashboard.md`, *The
+// review*, *The drawers*).
 import { RangeSetBuilder, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { shownOnce, tally, tokensOf, within, type Matter, type Taken } from "./code";
+import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type Taken } from "./code";
 import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
 import { closedAs, folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import { levelled, ofKind } from "./folds";
@@ -95,6 +98,7 @@ import {
     type Where,
     type Written,
 } from "./review";
+import { freshRows, type Fresh } from "./since";
 
 /** Where the page asks the review to go: an agent's group, by its conversation, numbered so the same one asked twice goes twice. */
 export interface Jump {
@@ -153,9 +157,9 @@ function asideClasses(aside: Aside, code: boolean): string {
 /** How a changed file's line is marked after its number: added, removed, or neither. */
 const SIGNS = { added: "+", removed: "−", same: " " } as const;
 
-/** Return what a changed file's line shows in its gutter: its number, then its mark, in the gutter's width. */
-function gutter(number: number, change: keyof typeof SIGNS): string {
-    return `${`${number}`.padStart(5)} ${SIGNS[change]} `;
+/** Return what a changed file's line shows in its gutter: its number, a dot where it changed since the operator last looked at its file, then its mark, in the gutter's width. */
+function gutter(number: number, change: keyof typeof SIGNS, fresh: boolean = false): string {
+    return `${`${number}`.padStart(5)}${fresh ? "•" : " "}${SIGNS[change]} `;
 }
 
 /** Each class of highlighting, as one mark, made once. */
@@ -193,8 +197,11 @@ function scopesOf(laidOut: Laid): Scope[] {
     return [...laidOut.regions, ...laidOut.drawers].sort((a, b) => a.header.from - b.header.from);
 }
 
-/** Paint the changed files' lines from `from` to `to`: each row numbered and marked added, removed or the same, its text highlighted in its file's language, and each that matters barred, saying what it triggered. */
-function painted(laidOut: Laid, from: number, to: number): Range<Decoration>[] {
+/** Which lines of a file in `scope` changed since the operator last looked at it; none outside "since you approved". */
+type Freshness = (scope: Scope, file: ChangedFile) => Fresh | null;
+
+/** Paint the changed files' lines from `from` to `to`: each row numbered and marked added, removed or the same, its text highlighted in its file's language, each that matters barred, saying what it triggered, and each changed since the operator last looked at its file (`fresh`) marked. */
+function painted(laidOut: Laid, from: number, to: number, fresh: Freshness): Range<Decoration>[] {
     const ranges: Range<Decoration>[] = [];
     for (const scope of scopesOf(laidOut)) {
         for (let at = codeFrom(scope.code, from); at < scope.code.length; at += 1) {
@@ -207,9 +214,12 @@ function painted(laidOut: Laid, from: number, to: number): Range<Decoration>[] {
                 continue;
             }
             const matters = mattering(coded.matter);
+            const since = fresh(scope, coded.file);
+            const changed = since?.rows.has(row) === true;
+            const gap = since?.gaps.has(row) === true ? " code-gap" : "";
             const line = Decoration.line({
-                class: `code-row code-${row.change}${matters.classes}`,
-                attributes: { "data-gutter": gutter(row.number, row.change), ...matters.said },
+                class: `code-row code-${row.change}${matters.classes}${changed ? " code-fresh" : ""}${gap}`,
+                attributes: { "data-gutter": gutter(row.number, row.change, changed), ...matters.said },
             });
             ranges.push(line.range(coded.from));
             for (const token of within(tokensOf(coded.file, row.side), row)) {
@@ -463,9 +473,21 @@ function Heading({ parts, tally }: { parts: Where[]; tally: string }) {
     );
 }
 
+/** Return what names a file of a "since you approved" drawer among what the operator looked at: the drawer, and its path. */
+function lookedAt(of: string, path: string): string {
+    return `${of}\n${path}`;
+}
+
 /** Return a file of a "since you approved" drawer as marking it reviewed names it: its path, and the version shown. */
 function viewed(file: SinceFile): Viewed {
     return { path: file.path, version: file.version ?? null };
+}
+
+/** Return how far below the top of the view the start of the line at `head` is, as a scroll to it measures it, where it's in view; none where it isn't. */
+function screenOffset(view: EditorView, head: number): number | null {
+    const start = view.coordsAtPos(view.state.doc.lineAt(head).from);
+    const top = start === null ? -1 : start.top - view.scrollDOM.getBoundingClientRect().top;
+    return top >= 0 && top < view.scrollDOM.clientHeight ? top : null;
 }
 
 /** Return where the cursor goes in the comment or message being written at `head` once the text is laid out again: as far into the same one as it was, wherever an item arriving moved it; none where it isn't in one. */
@@ -591,6 +613,7 @@ export function Review({
         moved: (at) => {
             setHead(at);
             placed(placeAt(laidOut, at));
+            left(at);
         },
         list,
         pending,
@@ -604,9 +627,55 @@ export function Review({
     });
     const { view, landing, kept } = editor;
     const before = useRef<Laid | null>(null);
+    // What the operator last looked at of each file of a "since you approved" drawer (`lookedAt`): the version shown
+    // as the cursor last left it, or as the drawer was first read; none for a file they never looked at, as one that
+    // came later or came back once reviewed. And the file the cursor is in, which it's looked at once the cursor leaves.
+    const looked = useRef(new Map<string, ChangedFile>());
+    const firstRead = useRef(new Set<string>());
+    const inFile = useRef<{ of: string; path: string } | null>(null);
     // The file Space `a` marked reviewed, and what its drawer showed then, so the cursor goes onto its line once the
     // drawer reads it as reviewed.
     const reviewing = useRef<{ of: string; path: string; files: SinceFile[] } | null>(null);
+    const freshOf: Freshness = (scope, file) =>
+        isDrawer(scope) && scope.kind === "since" ? freshRows(looked.current.get(lookedAt(scope.of, file.path)) ?? null, file) : null;
+
+    /** Take each "since you approved" drawer read for the first time as looked at, and forget what was looked at of each file standing as the operator last saw it, which shows each of its changes once it comes back. */
+    function read(laid: Laid) {
+        for (const drawer of laid.drawers) {
+            if (drawer.kind !== "since" || drawer.worktree === null) {
+                continue;
+            }
+            const first = !firstRead.current.has(drawer.of);
+            firstRead.current.add(drawer.of);
+            for (const each of drawer.files) {
+                const key = lookedAt(drawer.of, each.path);
+                if (each.file == null) {
+                    looked.current.delete(key);
+                } else if (first) {
+                    looked.current.set(key, each.file);
+                }
+            }
+        }
+    }
+
+    /** Take the file of a "since you approved" drawer the cursor leaves, moving to `at`, as looked at, as it stands: its marks of what changed go. */
+    function left(at: number) {
+        const drawer = drawerAt(laidOut, at);
+        const file = drawer?.kind === "since" ? sinceFileAt(drawer, at) : undefined;
+        const now = drawer === undefined || file === undefined ? null : { of: drawer.of, path: file.path };
+        const was = inFile.current;
+        inFile.current = now;
+        if (was === null || (now !== null && now.of === was.of && now.path === was.path)) {
+            return;
+        }
+        const standing = laidOut.drawers.find((each) => each.of === was.of)?.files.find((each) => each.path === was.path)?.file;
+        if (standing == null) {
+            return;
+        }
+        looked.current.set(lookedAt(was.of, was.path), standing);
+        // Drawn once the cursor's move is done, which this is told of while CodeMirror is still telling it.
+        queueMicrotask(() => editor.draw(decorations(laidOut, draft, reviewed)));
+    }
     // What was written as it was last laid out.
     const wrote = useRef<Written[]>([]);
 
@@ -637,6 +706,8 @@ export function Review({
                 onReviewed ??
                 (arriving === null ? moved(head, made, doc) : followed(before.current, laidOut, head, made, doc, arriving));
             const landed = arriving !== null || away !== undefined;
+            // Where the cursor's line is on screen, where it's in view: kept there, whatever arrives above it.
+            const onScreen = landed ? null : screenOffset(current, head);
             const closed = laidFor.folds.filter((each) => closedAs(each, kept.current));
             // Where the view is, anchored to the text at its top and mapped through the changes.
             const changing = current.state.changes(made);
@@ -650,16 +721,21 @@ export function Review({
                 effects: sourced.of(laidFor.sources),
             });
             refold(current, laidFor.folds, kept.current);
-            // Restored after the folds, whose heights it takes in. It keeps a comment being written where it is on
+            // Restored after the folds, whose heights it takes in: the cursor's line where it was on screen, or, where
+            // it was out of view, the text at the view's top. Either keeps a comment being written where it is on
             // screen too, as only what arrives above moves it; a scroll to the cursor after it would replace it, since
             // CodeMirror keeps the last scroll asked of it alone.
-            if (!landed && scrolled !== undefined) {
+            if (onScreen !== null) {
+                const line = current.state.doc.lineAt(current.state.selection.main.head).from;
+                current.dispatch({ effects: EditorView.scrollIntoView(line, { y: "start", yMargin: onScreen }) });
+            } else if (!landed && scrolled !== undefined) {
                 current.dispatch({ effects: scrolled });
             }
         } else {
             // What folds can change with the text the same, as an item marked read folds.
             refold(current, laidFor.folds, kept.current);
         }
+        read(laidOut);
         before.current = laidOut;
         wrote.current = written(draft);
         places.current = items.length === 0 ? [] : laidOut.groups.map((each) => each.place);
@@ -845,7 +921,7 @@ export function Review({
             return true;
         },
         send,
-        paint: (from, to) => painted(laidOut, from, to),
+        paint: (from, to) => painted(laidOut, from, to, freshOf),
         level: (position, opening, all, closed) => levelled(scopeFolds(position), closed, opening, all),
         kind: (position, kind, closing, closed) => {
             // On a banner, Space z and a drawer's letter opens that drawer of the agent's.
