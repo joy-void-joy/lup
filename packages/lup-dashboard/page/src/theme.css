@@ -1539,3 +1539,12 @@ kbd {
     bottom: 0;
     left: 0;
 }
+
+/* The bar's line saying the layout trials, which opens them in the palette. */
+.bar .trials {
+    color: var(--purple);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}

@@ -2,7 +2,7 @@
 // group in the review; and the layout trials, a switch at a time (`trials.ts`).
 // Ctrl+K opens it, Escape closes it.
 import { Command } from "cmdk";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { doing, type Agent } from "./agents";
 import { CHOICES, type Trials } from "./trials";
@@ -17,9 +17,17 @@ interface Props {
     /** The layout trials as they stand, and how to change them. */
     trials: Trials;
     choose: (trials: Trials) => void;
+    /** What's typed in it as it opens: the layout trials' word, opened from the bar's line saying them. */
+    typed?: string;
 }
 
-export function Palette({ open, setOpen, agents, select, now, trials, choose }: Props) {
+export function Palette({ open, setOpen, agents, select, now, trials, choose, typed = "" }: Props) {
+    const [search, setSearch] = useState(typed);
+    useEffect(() => {
+        if (open) {
+            setSearch(typed);
+        }
+    }, [open, typed]);
     useEffect(() => {
         function pressed(event: KeyboardEvent) {
             if (event.key === "k" && (event.ctrlKey || event.metaKey)) {
@@ -38,7 +46,7 @@ export function Palette({ open, setOpen, agents, select, now, trials, choose }: 
             overlayClassName="palette-overlay"
             contentClassName="palette"
         >
-            <Command.Input placeholder="Go to an agent…" />
+            <Command.Input placeholder="Go to an agent, or Layout: …" value={search} onValueChange={setSearch} />
             <Command.List>
                 <Command.Empty>Nothing matches.</Command.Empty>
                 <Command.Group heading="Agents">

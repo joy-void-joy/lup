@@ -80,7 +80,7 @@ export function Stack({ following, roots, text, classesOf, labelsOf, markOf, nar
                         at: (height: number) => read.lineBlockAtHeight(height).from,
                     };
                     const found = pinned(roots, geometry, narrow ? narrowSlot : undefined);
-                    const lines = found.flatMap(({ sticky, offset }): Drawn[] => {
+                    const lines = found.flatMap(({ sticky, offset, under: withRow }): Drawn[] => {
                         const header: Drawn = {
                             key: `${sticky.kind} ${sticky.header.from}`,
                             text: text.slice(sticky.header.from, sticky.header.to),
@@ -90,7 +90,7 @@ export function Stack({ following, roots, text, classesOf, labelsOf, markOf, nar
                             labels: null,
                             mark: markOf(sticky),
                         };
-                        if (sticky.under === null) {
+                        if (sticky.under === null || !withRow) {
                             return [header];
                         }
                         const under: Drawn = {

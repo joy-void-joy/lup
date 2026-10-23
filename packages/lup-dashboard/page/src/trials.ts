@@ -113,3 +113,14 @@ export const CHOICES: Choice[] = [
     { id: "nest-off", said: "subagents: beside their parent (today)", made: (each) => ({ ...each, nest: false }), chosen: (each) => !each.nest },
     { id: "today", said: "today's, every switch off", made: () => TODAY, chosen: (each) => searchOf(each, "") === "" },
 ];
+
+/** Say the switches in a few words, for the bar: `today` where none is on. */
+export function trialsSaid(trials: Trials): string {
+    const said = [
+        ...(trials.header === "stack" ? ["stack"] : trials.header === "stack-status" ? ["stack + status"] : []),
+        ...(trials.outline ? ["outline"] : []),
+        ...(trials.drawers === "row" ? ["drawers in a row"] : trials.drawers === "stack" ? ["drawers in the stack"] : []),
+        ...(trials.nest ? ["nested"] : []),
+    ];
+    return said.length === 0 ? "today" : said.join(" · ");
+}

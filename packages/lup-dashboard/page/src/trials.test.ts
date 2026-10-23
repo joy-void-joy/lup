@@ -185,6 +185,28 @@ describe("the header stack", () => {
         expect(shown(91)).toEqual(["0 ━━ s2 ━━", "10 ── @3 note ──"]);
     });
 
+    it("pins the row of drawers under the innermost group's banner alone, a subagent's rather than its parent's too", () => {
+        const drawers = new Map([
+            [whose(PARENT), TASKED],
+            [whose(CHILD), TASKED],
+        ]);
+        const nestedOut = laid([note(1, CHILD), note(4, PARENT)], [PARENT, CHILD], banner, header, EMPTY, NOTHING, [], drawers, undefined, {
+            parents: PARENTS,
+            row: { pulled: new Set() },
+        });
+        const nestedRoots = stickies(nestedOut, nestedOut.groups.map((each) => each.depth), true);
+        const deep = nestedOut.text.indexOf("Second line.", nestedOut.text.indexOf("@1"));
+        const lines = nestedOut.text.slice(0, deep).split("\n").length - 1;
+        // The line under the stack is @1's second line: the parent's banner, the subagent's and its row, @1's header.
+        const found = pinned(nestedRoots, geometry(nestedOut.text, lines * 10 - 40));
+        expect(found.map((each) => [nestedOut.text.slice(each.sticky.header.from, each.sticky.header.to), each.under])).toEqual([
+            ["━━ s1 ━━", false],
+            ["━━ a1 ━━", true],
+            ["── @1 note ──", true],
+        ]);
+        expect(linesOver(nestedRoots, deep, false)).toBe(4);
+    });
+
     it("keeps the cursor's line clear of what it pins over it, two slots on a narrow screen", () => {
         const at = out.text.indexOf("Second line.", out.text.indexOf("@2"));
         expect(around(roots, at).map((each) => each.kind)).toEqual(["group", "item"]);

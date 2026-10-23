@@ -27,7 +27,7 @@ import { Keys } from "./Keys";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
 import { marked, sameShown, type Marking } from "./since";
-import { searchOf, trialsOf, type Trials } from "./trials";
+import { searchOf, trialsOf, trialsSaid, type Trials } from "./trials";
 import {
     UNREAD,
     answer,
@@ -97,6 +97,8 @@ export function App() {
         url.search = searchOf(next, url.search);
         window.history.replaceState(window.history.state, "", url);
     }, []);
+    // What's typed in the palette as it opens: "Layout" where it's opened from the bar's line saying the trials.
+    const [typed, setTyped] = useState("");
     // The outline on a narrow screen, where it's an overlay its key opens.
     const [outlining, setOutlining] = useState(false);
     const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -773,12 +775,29 @@ export function App() {
                 <span className="count">
                     {agents.length} {agents.length === 1 ? "agent" : "agents"} · {waiting.length} waiting on you
                 </span>
+                <button
+                    type="button"
+                    className="trials"
+                    title="The layout trials: Ctrl+K, Layout"
+                    onClick={() => {
+                        setTyped("Layout");
+                        setPalette(true);
+                    }}
+                >
+                    layout: {trialsSaid(trials)}
+                </button>
                 {trials.outline ? (
                     <button type="button" className="outline-button" onClick={() => setOutlining((before) => !before)}>
                         Outline <kbd>gO</kbd>
                     </button>
                 ) : null}
-                <button type="button" onClick={() => setPalette(true)}>
+                <button
+                    type="button"
+                    onClick={() => {
+                        setTyped("");
+                        setPalette(true);
+                    }}
+                >
                     Go to <kbd>Ctrl</kbd> <kbd>K</kbd>
                 </button>
             </header>
@@ -845,7 +864,21 @@ export function App() {
                     />
                 </div>
             </main>
-            <Palette open={palette} setOpen={setPalette} agents={agents} select={goTo} now={now} trials={trials} choose={choose} />
+            <Palette
+                open={palette}
+                setOpen={(open) => {
+                    setPalette(open);
+                    if (!open) {
+                        setTyped("");
+                    }
+                }}
+                agents={agents}
+                select={goTo}
+                now={now}
+                trials={trials}
+                choose={choose}
+                typed={typed}
+            />
         </div>
     );
 }
