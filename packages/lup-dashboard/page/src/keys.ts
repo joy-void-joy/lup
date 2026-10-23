@@ -173,6 +173,12 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
             { keys: "␣c", does: "comment on the item whole", short: "on the item", at: ["item", "change"] },
             { keys: "o ␣c", does: "on a banner, write a message to its agent, which its drawers' remarks go with", short: "message", at: ["banner"] },
             { keys: "i a A", does: "in a comment, write in it, with vim's keys of insert mode", short: "write in it", at: ["written"] },
+            {
+                keys: "o O",
+                does: "in a comment, a line below or above to write on; on a list's item, the next item or the one before it, at its indentation, with its bullet or its number, as ⏎ starts one",
+                short: "line below above",
+                at: [],
+            },
             { keys: "u ^r", does: "undo and redo a change to the draft, a comment written one step", short: "undo redo", at: ["written"] },
             { keys: "g- g+", does: "the draft as it was a step earlier or later, what was undone then changed after among them", short: "earlier later", at: [] },
         ],
