@@ -13,7 +13,9 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
 - `ask` puts a question to the operator, its decisions numbered, each with the
   agent's lean; with `wait` it holds until they answer;
 - `send` is the inbox's general verb, a message of a kind to a party's inbox:
-  the operator's, in this piece;
+  the operator's, the conversation's parent's, or one of its own subagents',
+  each by a name the conversation knows it by, the operator reading a copy of
+  a message between conversations; one whom nothing would read is refused;
 - `wait_inbox` holds until something reaches the agent's inbox, one of its own
   subagents' ends among it. It isn't called `wait`, a name a runtime has for a
   tool of its own;
@@ -33,7 +35,7 @@ runtime's tool search finds. Each answers in words, as `content`.
 """
 
 import inspect
-from typing import TYPE_CHECKING, Literal, override
+from typing import TYPE_CHECKING, override
 
 from pydantic import Field, JsonValue
 
@@ -66,6 +68,7 @@ from lup_dev.inbox.store import (
     Kind,
     Message,
     Operator,
+    Party,
     Question,
     Stop,
     cited,
@@ -118,7 +121,13 @@ class Asking(Model):
 class Sending(Model):
     """A message to a party's inbox."""
 
-    to: Literal["operator"] = Field(description="Whose inbox: the operator's.")
+    to: str = Field(
+        description=(
+            "Whose inbox: `operator`; `parent`, the conversation that spawned you; "
+            "or one of your own subagents, by its name as lup calls it "
+            "(`explore-auth`), its path (`dev/explore-auth`), or its runtime's id."
+        )
+    )
     kind: Kind = Field(
         description=(
             "What it is: a `note`, a `problem`, a `disagreement`, or a `question` "
@@ -357,12 +366,145 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         A message of a kind: a `note`, a `problem`, a `disagreement`, or a
         `question` asking for no answer you wait on (a decision of the
-        operator's is `ask`'s). A note is news to the operator, raising no
-        notice, as `note`'s is; the other kinds wait on them. The operator's
-        inbox is the one there is; it never holds.
+        operator's is `ask`'s). To the operator, a note is news, raising no
+        notice, as `note`'s is; the other kinds wait on them.
+
+        To your parent, the conversation that spawned you, or to one of your
+        own subagents: the moment something changes the work, such as a
+        brief found wrong on what matters, rather than at the end. It's told
+        to them at their next call, their turn's end or their `wait_inbox`,
+        whichever comes first, and an idle session is woken for it where its
+        runtime can be; the answer says which. The operator reads a copy, as
+        news. One that has ended, or isn't yours, is refused, saying why.
+        Nothing holds: your work goes on.
         """
-        number = await self.said(Message(kind=sending.kind, text=sending.text))
-        return Said(text=f"Your message is with the {sending.to}, {cited(number)}.")
+        try:
+            recipient = self.addressed(sending.to)
+        except InboxError as unreached:
+            return Said(text=f"Not sent: {unreached}")
+        message = Message(kind=sending.kind, text=sending.text)
+        match recipient:
+            case Operator():
+                number = await self.said(message)
+                return Said(text=f"Your message is with the operator, {cited(number)}.")
+            case Conversation():
+                item = await self.delivery.posted(
+                    message,
+                    self.party,
+                    recipient,
+                    self.launch.worktree,
+                    call=self.call,
+                )
+                copy = await self.said(message.model_copy(update={"to": recipient}))
+                return Said(text=self.arriving(recipient, item.number, copy))
+
+    def addressed(self, to: str) -> Party:
+        """Return the party `to` names for this conversation: the operator, its parent, or one of its own subagents, by its name, its path or its runtime's id.
+
+        Raise `InboxError` where it names none, or one nothing reads: no
+        parent, a subagent that isn't this conversation's own, or one that
+        ended, whose inbox no call reads until its runtime resumes it.
+        """
+        match to:
+            case "operator":
+                return Operator()
+            case "parent":
+                parent = self.delivery.parent(self.party)
+                if parent is None:
+                    message = (
+                        "no conversation spawned you, so you have no parent. "
+                        f"{self.yours()}"
+                    )
+                    raise InboxError(message)
+                return self.reachable(parent, "your parent")
+            case _:
+                found = next(
+                    (
+                        each.conversation
+                        for each in self.delivery.subagents(self.party)
+                        if to in self.calls(each.conversation)
+                    ),
+                    None,
+                )
+                if found is None:
+                    message = f"no subagent of yours is `{to}`. {self.yours()}"
+                    raise InboxError(message)
+                return self.reachable(found, "your subagent")
+
+    def calls(self, conversation: Conversation) -> list[str]:
+        """Return what `send` takes a subagent by: its own name and its path, as `inbox` reads them (`Reader`), and its runtime's id."""
+        reader = Reader(
+            delivery=self.delivery,
+            reader=self.party,
+            names=Names(path=self.delivery.layout.names).all(),
+        )
+        items = self.delivery.inbox.about(self.party.repository)
+        said = [
+            reader.own(conversation, items),
+            reader.path(conversation, items),
+            conversation.agent,
+        ]
+        return [each for each in said if each is not None]
+
+    def called(self, conversation: Conversation) -> str:
+        """Name `conversation` for this one, in an answer of `send`'s: by the name lup calls it by, a subagent with none by its runtime's id."""
+        return (
+            self.delivery.called(conversation)
+            or conversation.agent
+            or who(conversation)
+        )
+
+    def reachable(self, conversation: Conversation, whose: str) -> Conversation:
+        """Return `conversation`, `whose` it is to this one, where a call of its can still read its inbox; raise `InboxError` where it ended, saying when."""
+        place = self.delivery.inbox.whereabouts.get(conversation.key())
+        if place is None or place.ended is None:
+            return conversation
+        message = (
+            f"{whose} `{self.called(conversation)}` "
+            f"ended at {clocked(place.ended)}, so nothing reads its inbox: once its "
+            "runtime resumes it, lup hears it again and it can be sent to"
+        )
+        raise InboxError(message)
+
+    def yours(self) -> str:
+        """Say whom `send` reaches from this conversation, its own subagents each by its name, for a refusal."""
+        parent = [] if self.delivery.parent(self.party) is None else ["`parent`"]
+        spawned = [
+            f"`{each.name or each.conversation.agent}`"
+            + ("" if each.ended is None else f" (ended at {clocked(each.ended)})")
+            for each in self.delivery.subagents(self.party)
+        ]
+        theirs = ", ".join(spawned) if spawned else "none lup has heard"
+        return (
+            f"`to` takes {', '.join(['`operator`', *parent])}, or one of your own "
+            f"subagents by its name, its path or its runtime's id: {theirs}."
+        )
+
+    def arriving(self, recipient: Conversation, number: int, copy: int) -> str:
+        """Say where message `number` to `recipient`, another conversation, is, and how it'll be told, with the number of the operator's `copy`."""
+        whose = (
+            "your parent"
+            if recipient == self.delivery.parent(self.party)
+            else "your subagent"
+        )
+        return (
+            f"Your message is in the inbox of {whose} `{self.called(recipient)}`, "
+            f"{cited(number)}, "
+            f"and the operator has a copy, {cited(copy)}. It's told at its next "
+            "call, its turn's end or its `wait_inbox`, whichever comes first"
+            f"{self.idle(recipient)}."
+        )
+
+    def idle(self, recipient: Conversation) -> str:
+        """Say what an item for `recipient` does while its session is idle between turns, for `arriving`: nothing for a subagent, which is never woken; else wake it, where its runtime can be."""
+        if recipient.agent is not None:
+            return ""
+        if self.delivery.wakes(recipient):
+            return "; idle between turns, its session is woken for it"
+        return (
+            "; idle between turns, it waits for the session's next turn, since its "
+            "runtime can't be woken"
+        )
 
     @lup_tool(idempotent=True)
     async def wait_inbox(self, nothing: Nothing) -> Said:
@@ -371,9 +513,10 @@ class Speaker(Model, arbitrary_types_allowed=True):
         Holds this call until an item reaches your inbox, and returns
         everything waiting there, each whole: what a hook announced as too
         long to tell is read here. An item is the operator's answer or
-        message; one of your own subagents ending its turn, stopped, or
-        failed on an error from the model's API, which names it; or a
-        subagent's `friction` or `how_it_went`. Something already waiting, a
+        message; a message your parent or one of your subagents sent you;
+        one of your own subagents ending its turn, stopped, or failed on an
+        error from the model's API, which names it; or a subagent's
+        `friction` or `how_it_went`. Something already waiting, a
         subagent that ended since your last call among it, is returned at
         once; each is told once, here or beside another call.
 

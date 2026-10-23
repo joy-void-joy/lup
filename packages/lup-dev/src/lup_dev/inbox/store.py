@@ -17,6 +17,8 @@ for an approval decided. An item for a conversation that has ended goes to its
 session's main conversation, saying whose it was. A subagent's end, and a copy
 of what it says of its work, go to the conversation that spawned it, which its
 whereabouts keep: quiet items, told at a call and never holding a turn's end.
+A message one conversation sends another, its parent or one of its own
+subagents, is that other's, and the operator reads a copy (`Message.to`).
 
 An approval is trust on launch's: the launch's own question, put to the
 operator's inbox and answered at the launching terminal or any other, whichever
@@ -135,6 +137,10 @@ class Message(Model):
     sending it: its last words, or, where its turn ended on an error from the
     model's API, that error in lup's words. The conversation already shows
     either among its steps, the error as its runtime's text for it."""
+    to: Conversation | None = None
+    """The conversation it was sent to, where it's the operator's copy of a
+    message one conversation sent another (`send`), which they read as news
+    whatever its kind; none where its recipient is whom it was sent to."""
 
 
 def labelled(opening: str, parts: dict[str, str]) -> str:
@@ -765,14 +771,15 @@ def ranked(reason: Reason) -> Rank:
     | Rank | Kinds | Order | Notice |
     |---|---|---|---|
     | waiting on you | a question, a held change, an approval, a problem (`blocked`), a disagreement, a question sent as a message | first | yes |
-    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice, a subagent's end | next | no |
+    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice, a subagent's end, the operator's copy of a message between conversations | next | no |
     | flag | a write that landed flagged | last | no |
 
-    A message ranks by its kind, whichever tool sent it: a note is a remark to
-    read, where a doubt that needs the operator soon is a question, asked.
-    The operator's own items, an answer and a review, go to agents, so neither
-    the review nor a notice reads theirs; nor a subagent's end, which goes to
-    its parent.
+    A message to the operator ranks by its kind, whichever tool sent it: a note
+    is a remark to read, where a doubt that needs the operator soon is a
+    question, asked. A copy of one a conversation sent another is news of any
+    kind, since it waits on that other, not on them. The operator's own items,
+    an answer and a review, go to agents, so neither the review nor a notice
+    reads theirs; nor a subagent's end, which goes to its parent.
 
     >>> ranked(Stop(why="Done."))
     Rank(name='news', order=1, notifies=False)
@@ -780,7 +787,14 @@ def ranked(reason: Reason) -> Rank:
     'news'
     """
     match reason:
-        case Message(kind="note") | Friction() | HowItWent() | Stop() | Ended():
+        case (
+            Message(kind="note")
+            | Message(to=Conversation())
+            | Friction()
+            | HowItWent()
+            | Stop()
+            | Ended()
+        ):
             return Rank(name="news", order=1, notifies=False)
         case Flagged():
             return Rank(name="flag", order=2, notifies=False)
@@ -881,9 +895,9 @@ class Whereabouts(Model):
     own, and for the runtime's own agents."""
     name: str | None = None
     """A subagent's own name as its latest hook was heard, kept once its launch
-    has ended, so `inbox` reads it by its name then; none while it has none,
-    and for a session's own conversation, named as its launch (`SessionNames`,
-    `host/names.py`)."""
+    has ended, so `inbox` reads it by its name then, and `send` reaches it by
+    it; none while it has none, and for a session's own conversation, named as
+    its launch (`SessionNames`, `host/names.py`)."""
 
 
 def read[M: Model](path: Path, model: type[M]) -> M:

@@ -286,11 +286,18 @@ class Reader(Model, arbitrary_types_allowed=True):
         return f"{self.headed(item, items, naming=naming)}: {opening(item)}"
 
     def headed(self, item: Item, items: list[Item], *, naming: Naming) -> str:
-        """Say an item's heading: its number, when it was made, what it is, from whom to whom, and where it stands; each conversation as `naming` says."""
+        """Say an item's heading: its number, when it was made, what it is, from whom to whom, and where it stands; each conversation as `naming` says, and the operator's copy of a message between conversations to whom it was sent."""
+        match item.reason:
+            case Message(to=Conversation() as to):
+                recipient = (
+                    f"{self.called(to, items, naming=naming)}, the operator's copy"
+                )
+            case _:
+                recipient = self.called(item.recipient, items, naming=naming)
         return (
             f"{cited_at(item)}  {what(item)} from "
-            f"{self.called(item.sender, items, naming=naming)} to "
-            f"{self.called(item.recipient, items, naming=naming)}, {standing(item)}"
+            f"{self.called(item.sender, items, naming=naming)} to {recipient}, "
+            f"{standing(item)}"
         )
 
     def whole(

@@ -13,8 +13,9 @@ conversation is told together, oldest first, by whichever comes first:
   whose result is the items (`held`);
 - **its session's start or resumption,** in the start's answer;
 - **its turn's start,** beside the prompt it starts on (`turn-started`);
-- **its idle session starting a turn,** for an item the operator's own act made
-  to an idle session: one whose turn ended, one just started, or one the
+- **its idle session starting a turn,** for an item the operator's own act made,
+  or a message one of its subagents sent it (`send`), to an idle session: one
+  whose turn ended, one just started, or one the
   service hasn't heard since it started. A session in its turn is told at its
   next call, or its turn's end, instead. Where its runtime takes a push (the
   waker's `pushed`), the items themselves are pushed through lup's tool
@@ -67,6 +68,13 @@ under their comment and their next comment continues it (`Comment.on`).
 conversation, saying whose it was: one made for it then (`Inbox.made`), and
 those still waiting when it ends.
 
+**A message between conversations** (`send`, from a subagent to the
+conversation that spawned it, or to one of its own subagents) is an item for
+its recipient, told as the operator's are: at its next call, its turn's end,
+by `wait_inbox`, or waking its idle session where it's a main conversation.
+The operator reads a copy, news whatever its kind (`Message.to`), from its
+sender, which a review's comment or a reply answers as any message's.
+
 **A subagent's end, and what it says of its work,** reach the conversation that
 spawned it (`Whereabouts.parent`): which subagent ended and how, with its last
 message where its runtime doesn't hand that on (`ended`); a copy of each
@@ -111,6 +119,7 @@ from typing import TYPE_CHECKING, Literal, override
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
 from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
+from lup_dev.host.names import Names
 from lup_dev.host.pushes import Pushes
 from lup_dev.inbox.ends import holding
 from lup_dev.inbox.notices import Notices
@@ -923,6 +932,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         place = self.inbox.whereabouts.get(party.key())
         return None if place is None else place.parent
 
+    def subagents(self, party: Conversation) -> list[Whereabouts]:
+        """Return where each subagent `party` spawned was last heard, those heard in the launch `party` was last heard in alone, in the order each was first heard there: those that ended among them."""
+        place = self.inbox.whereabouts.get(party.key())
+        if place is None:
+            return []
+        spawned = [
+            each
+            for each in self.inbox.whereabouts.values()
+            if each.parent == party and each.launch == place.launch
+        ]
+        return sorted(spawned, key=lambda each: each.since)
+
     async def ended(
         self, party: Conversation, launch: Register, conversation: Caller, heard: Heard
     ) -> None:
@@ -963,10 +984,21 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         """Return what `item` tells the conversation it's told to, inside its tag: a message's text, a reply on the item it replies to, an answer beside its question, a review said to its recipient."""
         return inside(self.tagged(item).parts)
 
+    def called(self, party: Party) -> str | None:
+        """Return the name lup calls `party` by where it's a conversation: a session's own, its launch's as lup last kept it (`SessionNames`); a subagent's own, as its whereabouts last heard it; none for the operator, and where lup knows none."""
+        match party:
+            case Conversation(agent=None):
+                return Names(path=self.layout.names).last(party.session)
+            case Conversation():
+                place = self.inbox.whereabouts.get(party.key())
+                return None if place is None else place.name
+            case Operator():
+                return None
+
     def tagged(
         self, item: Item, *, under: list[int] | None = None, context: bool = True
     ) -> Tag:
-        """Return `item` as the tag it's told in: named for what it is, saying its number and whom it's from, whom it was for where it was passed on from a conversation that had ended, and what it answers.
+        """Return `item` as the tag it's told in: named for what it is, saying its number, whom it's from and, for a conversation, the name lup calls it by, whom it was for where it was passed on from a conversation that had ended, and what it answers.
 
         Where it's read beside the items it's on, as `inbox` reads an exchange
         whole, what it says on each of `under` is told under that item instead,
@@ -979,7 +1011,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             if item.addressed is None
             else {"for": f"{who(item.addressed)}, whose conversation had ended"}
         )
-        head = {"item": str(item.number), "from": named(item.sender), **passed}
+        sender = self.called(item.sender)
+        name = {} if sender is None else {"name": sender}
+        head = {
+            "item": str(item.number),
+            "from": named(item.sender),
+            **name,
+            **passed,
+        }
         parts = anchors(item)
         match item.reason:
             case Message(kind=said, of=int() as of) if of in placed:
@@ -1550,14 +1589,21 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return item
 
     async def delivered(self, item: Item) -> None:
-        """Tell the recipient that `item` reached its inbox: the operator through a desktop notice, a conversation through its held calls, or by waking it where the operator made it."""
+        """Tell the recipient that `item` reached its inbox: the operator through a desktop notice, a conversation through its held calls, or by waking it where the item isn't quiet: the operator's own, or a message another conversation sent it."""
         match item.recipient:
             case Operator():
                 await self.noticed(item)
             case Conversation() as conversation:
                 self.arrive(conversation)
-                if isinstance(item.sender, Operator):
+                if not item.quiet:
                     await self.wake(conversation)
+
+    def wakes(self, party: Conversation) -> bool:
+        """Say whether `party`'s session can be woken idle at all: its runtime spells a push or a line for its messaging socket (`Waker`); not where its adapter declares neither."""
+        return (
+            self.waker.pushed(party.runtime, "", "") is not None
+            or self.waker.woken(party.runtime, party.session, "") is not None
+        )
 
     async def noticed(self, item: Item) -> None:
         """Raise a desktop notice for an item reaching the operator, where its kind's rank raises one (`ranked`): where it's from, what it is, and its first line."""
@@ -1844,11 +1890,25 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     def withdrawn(self, number: int, party: Conversation, why: str) -> Item:
         """Take the message or question item `number` back for `party`, who sent it, off the operator's list, with its reason.
 
-        Another's item, one that isn't waiting for the operator, and an approval
-        or a held change, which only the operator answers, are refused.
+        Another's item, one that isn't waiting for the operator, an approval or a
+        held change, which only the operator answers, and a message sent to
+        another conversation or the operator's copy of it, which the operator
+        sees as agents send each other, are refused.
         """
         item = self.inbox.item(number)
         match item:
+            case (
+                Item(reason=Message(to=Conversation() as to))
+                | Item(recipient=Conversation() as to)
+            ) if item.sender == party:
+                called = self.called(to)
+                whom = who(to) if called is None else f"`{called}`"
+                message = (
+                    f"{cited(number)} is your message to {whom}, which the operator "
+                    "reads a copy of: neither is withdrawn. Where it was wrong, `send` "
+                    "a correction"
+                )
+                raise InboxError(message)
             case Item(
                 reason=Message() | Friction() | HowItWent() | Stop() | Question(),
                 recipient=Operator(),
