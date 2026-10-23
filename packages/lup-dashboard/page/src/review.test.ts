@@ -1342,8 +1342,15 @@ describe("the drawers at the end of each agent's group", () => {
         expect(sinceFileAt(since!, on("a.py · reviewed"))).toBe(kept);
         expect(sinceFileAt(since!, on("        a = 1"))).toBe(shown.files[1]);
         expect(sinceFileAt(since!, on("z.py ·"))).toBe(seen);
-        expect(placeAt(laidOut, on("a.py · reviewed"))).toBe("since");
-        expect(placeAt(laidOut, on("z.py ·"))).toBe("since");
+        expect(placeAt(laidOut, on("a.py · reviewed"))).toBe("reviewed");
+        expect(placeAt(laidOut, on("z.py ·"))).toBe("reviewed");
+        // The header over the review names the file a reviewed line is, as it does one whose lines the cursor is on.
+        const naming: Naming = { group: () => "g", item: (each) => `#${each.item.number}`, party: () => "" };
+        expect(heading(laidOut, on("a.py · reviewed"), false, [], naming).map((each) => `${each.kind}: ${each.text}`)).toEqual([
+            "group: g",
+            "since: since",
+            "file: a.py",
+        ]);
         // Nothing under a reviewed line folds: the reader's folds are as they were.
         expect(since!.folds.map((each) => [each.kind, each.label])).toEqual([
             ["body", "Reader"],

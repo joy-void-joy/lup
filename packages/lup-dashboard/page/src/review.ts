@@ -1353,7 +1353,7 @@ export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "inse
             return "drawer";
         }
         if (drawer.kind === "since") {
-            return codeAt(drawer, head) !== undefined || reviewedAt(drawer, head) !== undefined ? "since" : "aside";
+            return codeAt(drawer, head) !== undefined ? "since" : reviewedAt(drawer, head) !== undefined ? "reviewed" : "aside";
         }
         return lineAt(drawer, head) !== undefined ? "trace" : "aside";
     }
@@ -1421,14 +1421,15 @@ export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Wr
     if (scope === undefined) {
         return [...going, { kind: "group", text: naming.group(group) }];
     }
-    const file = scope.filed.find((each) => head >= each.from && head <= each.to);
+    // A file's path: from its lines, or from its line in "since you approved" once it stands as the operator last saw it.
+    const file = scope.filed.find((each) => head >= each.from && head <= each.to)?.file.path ?? (isDrawer(scope) ? reviewedAt(scope, head)?.file.path : undefined);
     const inner = around(scope.folds, head).filter((each) => each.kind !== "file" && each.of !== scope.of || (each.kind !== "item" && each.kind !== "file" && !(DRAWERS as string[]).includes(each.kind)));
     const named: Where = isRegion(scope) ? { kind: "item", text: naming.item(scope) } : { kind: (scope as Drawer).kind, text: (scope as Drawer).kind };
     return [
         ...going,
         { kind: "group", text: naming.group(group) },
         named,
-        ...(file === undefined ? [] : [{ kind: "file" as const, text: file.file.path }]),
+        ...(file === undefined ? [] : [{ kind: "file" as const, text: file }]),
         ...inner.map((each) => ({ kind: each.kind, text: each.label })),
     ];
 }
