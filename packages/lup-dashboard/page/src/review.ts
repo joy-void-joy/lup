@@ -253,7 +253,7 @@ export interface Coded extends Span {
  * What folds in an item or a drawer, by its kind (`FoldKind`): the item whole under its header, folded where it's
  * marked read or left for later; a drawer under its summary line, folded until opened, but "since you approved", open;
  * each file it changes under its
- * header, folded where it's a test, data, or a first approval's (`Folded`); a function's or a class's body under the
+ * header, folded where it's automatic, asking nothing held or flagged, a test, data, or a first approval's (`Folded`); a function's or a class's body under the
  * line declaring it, open but in a new module of a drawer; a run of a file's unchanged lines under a summary line,
  * folded; and its context, folded. Each sits whole inside another or beside it. It hides `from` to `to`, from the end
  * of its summary line to the end of its last; a file's and a body's from the end of the comments on their first line,
@@ -499,7 +499,7 @@ function beneath(item: Item, around: Around): Under | null {
  * One line of a changed file that comments may be on: its header, or one of its rows, the run of unchanged rows it
  * opens, if any, before it, and whether it ends one; what it triggered, where it's a line that matters, and whether
  * it's a stop, the first line of what triggered; the bodies it declares and those it ends; and, for a file with rows,
- * the fold its header opens, folded where the file folds whole (`Folded`), and its last row ends.
+ * the fold its header opens, folded where the file folds whole (`Folded`) or is automatic, and its last row ends.
  */
 interface Filed {
     file: ChangedFile;
@@ -530,8 +530,8 @@ export function firstApproval(item: Item): boolean {
 
 /**
  * Return the lines of `files`, each file's header, then its rows, its runs of unchanged ones folding, each body able
- * to fold under the row declaring it, and the whole of each file able to fold under its header, folded where it's a
- * test, data, or, `first`, a first approval's (`Folded`). Where `design` says so of a file, a new module in a drawer,
+ * to fold under the row declaring it, and the whole of each file able to fold under its header, folded where it's
+ * automatic, asking nothing held or flagged, a test, data, or, `first`, a first approval's (`Folded`). Where `design` says so of a file, a new module in a drawer,
  * its bodies fold until opened, but those holding a line that matters.
  */
 function filedOf(files: ChangedFile[], first: boolean, design: (file: ChangedFile) => boolean): Filed[] {
@@ -560,7 +560,7 @@ function filedOnce(file: ChangedFile, first: boolean, designed: boolean): Filed[
         stop: laidOut.whole,
         declares: [],
         finishes: [],
-        folds: laidOut.rows.length > 0 ? { closed: laidOut.folded !== null } : null,
+        folds: laidOut.rows.length > 0 ? { closed: laidOut.folded !== null || laidOut.automatic } : null,
         ends: false,
         designed: false,
     };

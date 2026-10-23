@@ -6,9 +6,9 @@
 // CodeMirror's own language packages, chosen by its name. The judge's reading of
 // the file says why it's open, in its header's last words, and which of its
 // lines matter, each saying what it triggered; a file that asks nothing, held or
-// flagged, is automatic. A test and a data file, by the reading's role, and each
-// file of a first approval, which trusts the repository as it is, fold whole
-// under their header, which says why (`Folded`). Each function's and class's
+// flagged, is automatic, and folds whole under its header, as do a test and a
+// data file, by the reading's role, and each file of a first approval, which
+// trusts the repository as it is, each header saying why (`Folded`). Each function's and class's
 // body, read from the file's syntax, can fold under the line declaring it; a run
 // of lines never crosses a body's edge, so every fold sits whole inside another.
 // Pure: the review lays these rows into its text (`review.ts`), and its editor
