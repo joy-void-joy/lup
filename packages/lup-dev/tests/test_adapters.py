@@ -2045,7 +2045,13 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
     patch = json.loads(sent["2-pre-tool-use-add"])["tool_use_id"]
 
     assert [codex.heard(raw) for raw in sent.values()] == [
-        Heard(fits=10_000, event="session-started", session=session, judged=True),
+        Heard(
+            fits=10_000,
+            event="session-started",
+            session=session,
+            judged=True,
+            fresh=True,
+        ),
         Heard(
             fits=10_000,
             event="call-started",
@@ -2363,3 +2369,25 @@ def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
     assert codex.spawned(subagent("th-a4", None)) == explorer
     assert codex.spawned(subagent("th-a1", roots)) == explorer
     assert codex.spawned((CAPTURED / "6-pre-tool-use-bash.json").read_text()) is None
+
+
+@pytest.mark.parametrize(
+    ("source", "fresh"),
+    [
+        ("startup", True),
+        ("clear", True),
+        ("resume", False),
+        ("compact", False),
+        ("fork", False),
+    ],
+)
+def test_each_runtime_hears_whether_a_sessions_own_conversation_starts_empty(
+    source: str, *, fresh: bool
+) -> None:
+    from_claude = payload(Path("/w"), "SessionStart", source=source)
+    started = json.loads((CAPTURED / "1-session-start.json").read_text())
+    from_codex = json.dumps({**started, "source": source})
+    assert claude.heard(from_claude).fresh is fresh
+    assert codex.heard(from_codex).fresh is fresh
+    subagent = json.dumps({**json.loads(from_claude), "agent_id": "a1"})
+    assert not claude.heard(subagent).fresh

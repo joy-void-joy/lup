@@ -85,6 +85,12 @@ class Heard(Model):
     """At a session's start or a prompt, the runtime's own title for the
     session, where it has one and says so: one the operator gave it there (a
     rename in the runtime), or one lup gave it; none otherwise."""
+    fresh: bool = False
+    """At a session's own start, whether its conversation starts empty: started
+    anew or cleared, not resumed, compacted or forked, as both runtimes' start
+    says (`docs/field-notes.md`, *A conversation resumed in a later launch*).
+    A new main session is told where its repository stands then, and only
+    then."""
     takes_title: bool = False
     """Whether the runtime takes a title for the session from this hook's
     answer (`Telling.title`): at the session's own start or prompt, where its
