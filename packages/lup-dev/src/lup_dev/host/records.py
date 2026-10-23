@@ -9,14 +9,15 @@ the record itself, the directory it says it ran in, never guessed from where the
 runtime filed it.
 """
 
+import json
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import Field, ValidationInfo, field_validator
+from pydantic import Field, JsonValue, ValidationInfo, field_validator
 
-from lup.types import Model
+from lup.types import JsonObject, Model
 
 
 class Record(Model):
@@ -50,14 +51,36 @@ class Said(Model):
 
 
 class Called(Model):
-    """A tool the agent called, by its runtime's name for it."""
+    """A tool the agent called, by its runtime's name for it, and what the call did, in a line."""
 
     kind: Literal["called"] = "called"
     tool: str
+    gist: str | None = None
+    """What the call did, in a line, read from its input by its runtime's
+    reader: a command's description or the command, the file read or written, a
+    search's pattern, else its first argument; none where its input says
+    nothing. The input and what the call returned are read whole on asking
+    (`Reader.calls`), so a conversation read at each hook carries a line a
+    call."""
     id: str | None = None
     """The runtime's id for the call, where its record keeps one: what an inbox
-    item made by the call is anchored to."""
+    item made by the call is anchored to, and what reads the call whole."""
     at: datetime | None = None
+
+
+class Call(Model):
+    """One call whole, as its runtime recorded it: its input, and what it returned."""
+
+    id: str
+    input: JsonValue
+    """Its arguments as the agent wrote them: an object of them, or the text a
+    tool taking text was given, as a patch or a cell of code."""
+    output: str | None = None
+    """What the call returned, whole, as the agent was given it, or as the
+    runtime kept it beside the record where it gave the agent only its start;
+    none while the call runs, or where the record keeps none."""
+    failed: bool = False
+    """Whether the runtime recorded the call as failed."""
 
 
 type Entry = Annotated[Said | Called, Field(discriminator="kind")]
@@ -162,12 +185,55 @@ class Reader(ABC):
         Lines the runtime writes that this doesn't know are passed over.
         """
 
+    @abstractmethod
+    def calls(self, record: Path, ids: list[str]) -> list[Call]:
+        """Read calls of one conversation's record whole, by the runtime's ids for them: each the record holds, in the order asked."""
+
 
 class Recorded(Model, arbitrary_types_allowed=True):
     """A runtime's records on this machine, and how they're read: what reads a conversation's record without naming the runtime."""
 
     records: Records
     reader: Reader
+
+
+def gist(value: JsonValue, width: int = 160) -> str | None:
+    r"""Say `value` in a line, as a call's gist says what it did: a string's first line with words in it, any other value as JSON; cut at `width` characters, marked `…`, where it's longer; none where it says nothing.
+
+    The call's input is kept whole beside it (`Reader.calls`), so a cut line
+    points at the whole rather than standing for it.
+
+    >>> gist("cd /w\nuv run pytest")
+    'cd /w'
+    >>> gist({"a": 1}), gist(""), gist(None)
+    ('{"a": 1}', None, None)
+    >>> gist("x" * 9, width=4)
+    'xxxx…'
+    """
+    match value:
+        case None:
+            return None
+        case str():
+            said = next(
+                (line.strip() for line in value.splitlines() if line.strip()), ""
+            )
+        case _:
+            said = json.dumps(value, ensure_ascii=False)
+    if said == "":
+        return None
+    if len(said) <= width:
+        return said
+    # lup: ignore("string-slice", why="a gist's line cut for the page to show, marked, the call's input kept whole and read when its fold opens")
+    return f"{said[:width]}…"
+
+
+def first(arguments: JsonObject) -> JsonValue:
+    """Return a call's first argument, as its input names them in order; none where it has none.
+
+    >>> first({"pattern": "def ", "path": "src"}), first({})
+    ('def ', None)
+    """
+    return next(iter(arguments.values()), None)
 
 
 def within(directory: Path, under: list[Path]) -> bool:

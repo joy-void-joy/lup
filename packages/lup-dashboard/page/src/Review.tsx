@@ -13,15 +13,16 @@
 // view, each line that matters by the judge's reading barred and saying what it
 // triggered; the item's header counts its files by why each is open; under each
 // item, its context. At the end of each agent's group, its drawers
-// (`review.ts`): its tasks, its trace, what its branch changed since the
-// operator last saw it, live, where Space `a` marks a file reviewed at the
-// version shown and Space `A` every file shown, each line changed since they
-// last looked at its file marked (`since.ts`), and its conversation;
+// (`review.ts`): its tasks, what its branch changed since the operator last saw
+// it, live, where Space `a` marks a file reviewed at the version shown and Space
+// `A` every file shown, each line changed since they last looked at its file
+// marked (`since.ts`), and its conversation, each call's input and output read
+// as its fold opens;
 // `h` on a banner turns the operator's switch to hold the agent's flagged
 // writes. Each fold has a kind, its letter in the margin beside its summary
 // line, in the column of its depth, a bar under it for each fold the cursor is
-// in (`margin.ts`); the context, each run of unchanged lines, each automatic
-// file fold and each drawer, folded until opened, and `zr`, `zm`, `zR`, `zM` and
+// in (`margin.ts`); the context, each run of unchanged lines, each test, data
+// and first approval's file and each drawer but "since you approved", folded until opened, and `zr`, `zm`, `zR`, `zM` and
 // Space `z` act on the item or the drawer the cursor is in. The header over the
 // review says where the cursor is: the group, the item or the drawer, the file
 // and the folds it's in, and, while a comment is being written, whom it goes
@@ -35,7 +36,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type Taken } from "./code";
 import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
-import { closedAs, folding, isFolded, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import { closedAs, isFolded, reached, reaching, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
 import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type DrawerKind, type ReviewPlace } from "./keys";
 import { source, sourced, without, type Source } from "./markdown";
@@ -50,6 +51,7 @@ import {
     codeAt,
     codeFrom,
     drawerAt,
+    firstApproval,
     foldKey,
     foldsOf,
     fresh,
@@ -69,7 +71,6 @@ import {
     scopeAt,
     shownAt,
     shownInReply,
-    showing,
     sinceFileAt,
     stepped,
     stranded,
@@ -128,6 +129,8 @@ interface Props {
     hold: (conversation: Conversation) => void;
     /** Told each drawer the operator opens, so the page reads what it shows. */
     opened: (conversation: Conversation, kind: DrawerKind) => void;
+    /** Told the calls whose input and output the operator opens in an agent's conversation, so the page reads them whole. */
+    details: (conversation: Conversation, ids: string[]) => void;
     /** Where the page asks the review to go, as the palette does: an agent's group. */
     jump: Jump | null;
     /** Say something on the page's line of messages, as why a key did nothing. */
@@ -232,7 +235,7 @@ function painted(laidOut: Laid, from: number, to: number, fresh: Freshness): Ran
 
 /**
  * Return what of the review is written in Markdown (`markdown.ts`): each item's own text, its lines whole and the
- * comments under them left out; the agent's words in a context, in a trace and in a conversation, each run of them one,
+ * comments under them left out; the agent's words in a context and in a conversation, each run of them one,
  * the remarks under them left out; and each comment, message and remark.
  */
 function sourcesOf(laidOut: Laid): Source[] {
@@ -365,8 +368,8 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null): Deco
         const stops = new Set(scope.stops);
         for (const coded of scope.code) {
             if (coded.row === null) {
-                const shown = isDrawer(scope) ? "changes" : showing((scope as Region).item);
-                const automatic = shownOnce(coded.file, shown).automatic ? " code-automatic" : "";
+                const first = !isDrawer(scope) && firstApproval((scope as Region).item);
+                const automatic = shownOnce(coded.file, first).automatic ? " code-automatic" : "";
                 const whole = stops.has(coded.from) ? " code-matters" : "";
                 marks.push({
                     from: coded.from,
@@ -539,6 +542,7 @@ export function Review({
     reviewSince,
     hold,
     opened: told,
+    details,
     jump,
     say,
     inserting,
@@ -562,7 +566,7 @@ export function Review({
                 (head, later) => `━━ ${banner(head)}${later ? " · later" : ""} ━━`,
                 (item, later) => {
                     const files = around.files.get(item.number);
-                    const counted = files !== undefined && "shown" in files ? tally(files.shown) : "";
+                    const counted = files !== undefined && "shown" in files ? tally(files.shown, firstApproval(item)) : "";
                     const typing = item.reason.reason === "approval" && item.reason.typing;
                     const told = [
                         `${cited(item.number)} ${what(item)}${sentTo(item, called)}`,
@@ -622,6 +626,13 @@ export function Review({
             const drawer = laidOut.drawers.find((each) => each.folds.some((own) => foldKey(own) === fold.key && own.kind === each.kind));
             if (drawer !== undefined) {
                 told(drawer.conversation, drawer.kind);
+            }
+            // A call's input and output, read as its fold opens.
+            for (const each of laidOut.drawers) {
+                const call = each.talk?.calls.find((shown) => foldKey({ of: each.of, kind: "call", name: shown.fold.key }) === fold.key);
+                if (call !== undefined) {
+                    details(each.conversation, [call.id]);
+                }
             }
         },
     });
@@ -721,6 +732,12 @@ export function Review({
                 effects: sourced.of(laidFor.sources),
             });
             refold(current, laidFor.folds, kept.current);
+            // A comment opened where a closed fold hides it, as on the header of an item marked read, opens the folds
+            // over it, as a jump does, saying so, so the cursor goes into it.
+            const opens = arriving !== null && "comment" in arriving ? reaching(current.state, anchor) : [];
+            if (opens.length > 0) {
+                current.dispatch({ effects: opens, selection: { anchor }, scrollIntoView: true, annotations: reached.of(opens.length) });
+            }
             // Restored after the folds, whose heights it takes in: the cursor's line where it was on screen, or, where
             // it was out of view, the text at the view's top. Either keeps a comment being written where it is on
             // screen too, as only what arrives above moves it; a scroll to the cursor after it would replace it, since
@@ -781,24 +798,36 @@ export function Review({
         editor.record(toggled(editor.latest.current, list, region.item.number));
     }
 
-    /** Open each fold over `target`, as a motion into it would, so the line it's on is in view. */
+    /** Open each fold over `target`, as a jump to it does, so the line it's on is in view, saying so under the review. */
     function opening(current: EditorView, target: number) {
-        const effects = laidFor.folds
-            .filter((fold) => target > fold.from && target <= fold.to && isFolded(current.state, fold))
-            .map((fold) => folding(fold, false));
+        const effects = reaching(current.state, target);
         if (effects.length > 0) {
-            current.dispatch({ effects });
+            current.dispatch({ effects, annotations: reached.of(effects.length) });
         }
     }
 
-    /** Go to `region`'s item, where there's one: onto where it lands (`arrival`), its header kept in view above the line where both fit. */
-    function goTo(region: Region | undefined) {
+    /** Return where `target` is seen: there, or, where a closed fold hides it, on the outermost one's summary line, which a closed fold counts as. */
+    function seen(current: EditorView, target: number): number {
+        return uncovered(
+            laidFor.folds.filter((each) => isFolded(current.state, each)),
+            target,
+        );
+    }
+
+    /**
+     * Go to `region`'s item, where there's one: onto where it lands (`arrival`), its header kept in view above the line
+     * where both fit; `reaching` it, as `]a` does, opening the folds over it, else, as `]]` does, on the summary line of
+     * the closed fold hiding it, which a plain motion never opens.
+     */
+    function goTo(region: Region | undefined, reaches: boolean) {
         const current = view.current;
         if (current === null || region === undefined) {
             return;
         }
-        const at = arrival(region);
-        opening(current, at);
+        const at = reaches ? arrival(region) : seen(current, arrival(region));
+        if (reaches) {
+            opening(current, at);
+        }
         if (at === region.header.from) {
             current.dispatch({ selection: { anchor: at }, scrollIntoView: true });
             return;
@@ -843,14 +872,19 @@ export function Review({
         about: (comment, block) => aboutAt(laidOut, comment, block),
         toggle,
         move: (forward) => {
+            const current = view.current;
+            if (current === null) {
+                return;
+            }
             const head = editor.head();
-            const landings = laidOut.regions.map((region) => ({ region, at: arrival(region) }));
+            // Where each item is seen to land, a closed fold over it counting as its summary line, which `]]` never opens.
+            const landings = laidOut.regions.map((region) => ({ region, at: seen(current, arrival(region)) }));
             const target = forward
                 ? landings.find((each) => each.at > head)
                 : [...landings].reverse().find((each) => each.at < head);
-            goTo(target?.region);
+            goTo(target?.region, false);
         },
-        answer: (forward) => goTo(answerAfter(laidOut, draft, editor.head(), forward)),
+        answer: (forward) => goTo(answerAfter(laidOut, draft, editor.head(), forward), true),
         matter: (forward) => {
             const current = view.current;
             if (current === null) {

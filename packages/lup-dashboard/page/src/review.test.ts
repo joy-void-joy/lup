@@ -49,7 +49,7 @@ import {
     sinceFileAt,
     sinceSummary,
     tasksSummary,
-    traceSummary,
+    conversationSummary,
     UNREAD,
     type AgentDrawers,
     type Around,
@@ -119,6 +119,7 @@ const APPROVAL: Item = {
         repository: "/r/.git",
         fingerprint: "f",
         typing: false,
+        first: false,
     },
     sender: { party: "operator" },
     recipient: { party: "operator" },
@@ -540,7 +541,7 @@ describe("what folds under an item", () => {
         });
     });
 
-    it("folds an automatic file whole under its header, and keeps where each line that matters starts, landing on the first", () => {
+    it("folds a test file whole under its header, and keeps where each line that matters starts, landing on the first", () => {
         const read: Around = {
             contexts: new Map(),
             files: new Map([
@@ -576,7 +577,7 @@ describe("what folds under an item", () => {
         const [file, created] = approval!.folds.filter((each) => each.kind === "file");
         expect(file).toMatchObject({ of: "54", kind: "file", name: "t.py", closed: true });
         expect(created).toMatchObject({ name: "n.py", closed: false });
-        expect(shown(file!.summary.from, file!.summary.to)).toBe("t.py · changed · +1 −1 · automatic");
+        expect(shown(file!.summary.from, file!.summary.to)).toBe("t.py · changed · +1 −1 · test");
         expect(shown(file!.from, file!.to)).toBe("\na\nb\nB");
         expect(approval!.stops.map((each) => shown(each, out.text.indexOf("\n", each)))).toEqual([
             "n.py · created · 2 lines · new file · told: regex",
@@ -684,7 +685,7 @@ describe("typed folds", () => {
     const region = out.regions.find((each) => each.item.number === 56)!;
     const said = (fold: Fold) => [fold.kind, fold.label, fold.closed];
 
-    it("folds each kind as it's laid out: the item, a file and a body open, an automatic file, unchanged lines and the context folded", () => {
+    it("folds each kind as it's laid out: the item, a file and a body open, a test file, unchanged lines and the context folded", () => {
         // The change is on line 15, in `Clock.run`, whose lines declaring it stay in view, 4 and 5.
         expect(region.folds.map(said)).toEqual([
             ["file", "t.py", true],
@@ -735,7 +736,7 @@ describe("typed folds", () => {
         expect(foldsOf(out, at("step3()")).map((each) => each.of)).toEqual(region.folds.map(() => "56"));
         expect(foldsOf(out, at("Which parser?")).every((each) => each.of === "51")).toBe(true);
         expect(foldsOf(out, at("━━ s1"))).toEqual([]);
-        // zr from the held change opens its automatic file alone, then its runs and bodies, then its context.
+        // zr from the held change opens its test file alone, then its runs and bodies, then its context.
         const closed = new Set(region.folds.filter((each) => each.closed));
         const step = (opening: boolean) => {
             const changed = levelled(foldsOf(out, at("step3()")), (fold) => closed.has(fold), opening, false);
@@ -839,8 +840,31 @@ describe("what a change shows open, as it's laid out", () => {
         expect(folded(FLAGGED)).toEqual(everyChange);
     });
 
-    it("keeps an approval's file showing the lines that ask alone, with their context, its other changes folded", () => {
-        expect(folded(APPROVAL)).toEqual({ runs: ["17 lines, 2 changed, 1–16", "7 unchanged lines, 24–30"], hidden: true });
+    it("opens every change of an approval too, however many lines it changes", () => {
+        expect(folded(APPROVAL)).toEqual(everyChange);
+    });
+
+    /** Whether each of `files` folds whole under `item`, by its path. */
+    const whole = (item: Item, files: ChangedFile[]) => {
+        const around: Around = { contexts: new Map(), files: new Map([[item.number, { shown: files }]]), answers: [] };
+        const out = laid([item], [], banner, header, EMPTY, around);
+        return Object.fromEntries(out.regions[0]!.folds.filter((each) => each.kind === "file").map((each) => [each.name, each.closed]));
+    };
+    const read = (path: string, role: string): ChangedFile => ({ ...signed, path, reading: { role, asks: [], findings: [] } });
+    const FILES = [read("a.py", "production"), read("t.py", "test"), read("d.json", "data"), read("n.md", "docs")];
+
+    it("folds a test and a data file whole, in every kind of change, and opens one that asks nothing, production code among them", () => {
+        const expected = { "a.py": false, "t.py": true, "d.json": true, "n.md": false };
+        expect(whole(HELD, FILES)).toEqual(expected);
+        expect(whole(APPROVAL, FILES)).toEqual(expected);
+    });
+
+    it("folds each file of a first approval whole under its header, which says so, and counts them so in the item's", () => {
+        const first: Item = { ...APPROVAL, reason: { ...APPROVAL.reason, first: true } as Item["reason"] };
+        expect(Object.values(whole(first, FILES))).toEqual([true, true, true, true]);
+        const around: Around = { contexts: new Map(), files: new Map([[54, { shown: [read("a.py", "production")] }]]), answers: [] };
+        const out = laid([first], [], banner, header, EMPTY, around);
+        expect(out.text).toContain("a.py · changed · +1 −1 · first approval\n");
     });
 });
 
@@ -1204,6 +1228,7 @@ describe("the drawers at the end of each agent's group", () => {
     };
     const DATA: AgentDrawers = {
         entries: ENTRIES,
+        calls: new Map(),
         tasks: [
             { id: "1", subject: "Write the sampler", status: "completed", active: null },
             { id: "2", subject: "Write the models", status: "in_progress", active: "Writing the models" },
@@ -1218,29 +1243,44 @@ describe("the drawers at the end of each agent's group", () => {
     const at = (text: string) => out.text.indexOf(text);
     const lines = (from: number, to: number) => out.text.slice(from, to).split("\n");
 
-    it("lays four drawers after the group's items, each folded under its summary line, a new module's bodies folded too", () => {
+    it("lays the drawers after the group's items, each its own fold, folded but \"since you approved\", a new module's bodies folded too", () => {
         const [group] = out.groups;
-        expect(group?.drawers.map((each) => each.kind)).toEqual(["tasks", "trace", "since", "conversation"]);
+        expect(group?.drawers.map((each) => each.kind)).toEqual(["tasks", "since", "conversation"]);
         expect(out.groups[1]?.drawers).toEqual([]);
         const texts = out.drawers.map((each) => lines(each.header.from, each.folds.at(-1)!.to));
         expect(texts[0]).toEqual(["tasks · 3 entries, 1 done, 1 in progress", "✓ Write the sampler", "▶ Writing the models", "· Measure"]);
-        expect(texts[1]).toEqual(["trace · 2 steps since your last message", "Twenty kinds of line.", "· called Grep"]);
-        expect(texts[2]?.slice(0, 2)).toEqual(["since you approved on feat · 1 to review · 1 flagged", "reader.py · created · 8 lines · new file"]);
-        expect(texts[3]?.slice(0, 3)).toEqual(["conversation · 7 steps", "earlier · 4 steps, from 5m before your last words", "you: Build the reader."]);
-        // Each drawer is its own fold, folded; the new module's bodies fold until opened, its file open.
+        expect(texts[1]?.slice(0, 2)).toEqual(["since you approved on feat · 1 to review · 1 flagged", "reader.py · created · 8 lines · new file"]);
+        expect(texts[2]).toEqual([
+            "conversation · 7 steps, 2 since your last words",
+            "you: Build the reader.",
+            "Reading the records.",
+            "· Bash",
+            "· Read",
+            "you: Ask me first.",
+            "Twenty kinds of line.",
+            "· Grep",
+        ]);
+        // Each drawer is its own fold, folded but "since you approved", the code waiting on the operator; the new
+        // module's bodies fold until opened, its file open.
         const own = out.drawers.map((each) => each.folds.at(-1)!);
         expect(own.map((each) => [each.kind, each.closed, each.of])).toEqual([
             ["tasks", true, `tasks ${whose(S1)}`],
-            ["trace", true, `trace ${whose(S1)}`],
-            ["since", true, `since ${whose(S1)}`],
+            ["since", false, `since ${whose(S1)}`],
             ["conversation", true, `conversation ${whose(S1)}`],
         ]);
-        const since = out.drawers[2]!;
+        // In the conversation, each exchange before the operator's last words folds under their words.
+        const talked = out.drawers[2]!;
+        expect(talked.folds.map((each) => [each.kind, each.label, each.closed])).toEqual([
+            ["earlier", "you: Build the reader.", true],
+            ["conversation", "conversation · 7 steps, 2 since your last words", true],
+        ]);
+        expect(foldKey(talked.folds[0]!)).toBe(`conversation ${whose(S1)} earlier you 0`);
+        const since = out.drawers[1]!;
         expect(since.folds.map((each) => [each.kind, each.label, each.closed])).toEqual([
             ["body", "Reader", true],
             ["body", "turns", true],
             ["file", "reader.py", false],
-            ["since", "since you approved on feat · 1 to review · 1 flagged", true],
+            ["since", "since you approved on feat · 1 to review · 1 flagged", false],
         ]);
         expect(foldKey(since.folds[1]!)).toBe(`since ${whose(S1)} body reader.py ["Reader","turns"]`);
         // The items came before the drawers, the group after them where it is.
@@ -1249,11 +1289,11 @@ describe("the drawers at the end of each agent's group", () => {
         // An agent the host hasn't answered of has no drawers; a drawer with nothing under its summary line has no fold.
         expect(laid([QUESTION], [S1], banner, header, EMPTY, NOTHING).drawers).toEqual([]);
         const bare = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), UNREAD]]));
-        expect(bare.drawers.map((each) => [each.kind, each.folds.length])).toEqual([["tasks", 0], ["trace", 0], ["since", 0], ["conversation", 0]]);
-        expect(bare.text).toContain("tasks · none kept\n\ntrace · nothing\n\nsince you approved · not read yet\n\nconversation · 0 steps\n\n");
+        expect(bare.drawers.map((each) => [each.kind, each.folds.length])).toEqual([["tasks", 0], ["since", 0], ["conversation", 0]]);
+        expect(bare.text).toContain("tasks · none kept\n\nsince you approved · not read yet\n\nconversation · 0 steps\n\n");
     });
 
-    it("opens a remark on the agent's words in the trace, and on a file's line since you approved, recording the version", () => {
+    it("opens a remark on the agent's words in the conversation, and on a file's line since you approved, recording the version", () => {
         expect(opened(out, at("Twenty"))).toEqual({ to: S1, quote: { text: "Twenty kinds of line.", start: 0, end: 21 }, text: "", step: 5 });
         expect(opened(out, at("        a = 1"))).toEqual({
             to: S1,
@@ -1265,13 +1305,13 @@ describe("the drawers at the end of each agent's group", () => {
         const to = at("        return") + 8;
         const across = quoted(out, from, to);
         expect(across !== undefined && "code" in across ? across.code : null).toEqual({ worktree: "/w/feat", path: "reader.py", version: "b1", first: 6, lines: ["        a = 1", "        b = 2", "        return a + b"] });
-        for (const line of ["tasks ·", "✓ Write", "· called Grep", "trace ·", "since you approved", "earlier ·"]) {
+        for (const line of ["tasks ·", "✓ Write", "· Grep", "conversation ·", "since you approved", "you: Build"]) {
             expect(opened(out, at(line))).toBeUndefined();
         }
         expect(opened(out, at("━━ s1"))).toEqual({ to: S1, text: "" });
     });
 
-    it("places each remark under its line, one on a step since your last words in the trace alone, and says whom it goes to", () => {
+    it("places each remark under its line in the conversation, before the operator's last words or since, and says whom it goes to", () => {
         const onCode = opened(out, at("        a = 1"));
         const quote = onCode !== undefined && "quote" in onCode && onCode.quote != null ? onCode.quote : { text: "", start: 0, end: 0 };
         const remarks: Remark[] = [
@@ -1283,9 +1323,17 @@ describe("the drawers at the end of each agent's group", () => {
         const wrote = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers);
         const text = wrote.text;
         expect(text.split("Which twenty?").length).toBe(2);
-        expect(text).toContain("Twenty kinds of line.\nWhich twenty?\n· called Grep");
+        expect(text).toContain("Twenty kinds of line.\nWhich twenty?\n· Grep");
         expect(text).toContain("Reading the records.\nGood.\n");
         expect(text.indexOf("Good.")).toBeGreaterThan(text.indexOf("conversation · 7 steps"));
+        // Opened on a line of the earlier exchange, it's there, under that line, and the header says it's in that exchange.
+        expect(blockAt(wrote, text.indexOf("Good."))?.comment).toBe(1);
+        expect(heading(wrote, text.indexOf("Good."), true, written(draft), { group: () => "g", item: () => "i", party: () => "p" }).map((each) => each.kind)).toEqual([
+            "to",
+            "group",
+            "conversation",
+            "earlier",
+        ]);
         expect(text).toContain("        a = 1\nName it.\n");
         const naming: Naming = { group: () => "g", item: (each) => `#${each.item.number}`, party: (party) => `agent ${party.session}/${party.agent}` };
         expect(heading(wrote, text.indexOf("Name it."), true, written(draft), naming).map((each) => `${each.kind}: ${each.text}`)).toEqual([
@@ -1304,8 +1352,8 @@ describe("the drawers at the end of each agent's group", () => {
     it("says where the cursor is in a drawer for the line of keys", () => {
         expect(placeAt(out, at("tasks ·"))).toBe("drawer");
         expect(placeAt(out, at("✓ Write"))).toBe("drawer");
-        expect(placeAt(out, at("Twenty"))).toBe("trace");
-        expect(placeAt(out, at("· called Grep"))).toBe("aside");
+        expect(placeAt(out, at("Twenty"))).toBe("words");
+        expect(placeAt(out, at("· Grep"))).toBe("aside");
         expect(placeAt(out, at("        a = 1"))).toBe("since");
         expect(placeAt(out, at("reader.py · created"))).toBe("since");
         expect(placeAt(out, at("you: Build"))).toBe("aside");
@@ -1313,9 +1361,9 @@ describe("the drawers at the end of each agent's group", () => {
 
     it("says in each summary line what the drawer holds: in since you approved, the files changed and those standing as reviewed", () => {
         expect(tasksSummary([])).toBe("tasks · none kept");
-        expect(traceSummary(ENTRIES, true)).toBe("trace · 2 steps since your last message");
-        expect(traceSummary(ENTRIES.slice(0, 5), true)).toBe("trace · nothing since your last message");
-        expect(traceSummary([], false)).toBe("trace · not read yet");
+        expect(conversationSummary(ENTRIES)).toBe("conversation · 7 steps, 2 since your last words");
+        expect(conversationSummary(ENTRIES.slice(0, 5))).toBe("conversation · 5 steps, 0 since your last words");
+        expect(conversationSummary(ENTRIES.slice(1, 4))).toBe("conversation · 3 steps");
         expect(sinceSummary(null)).toBe("since you approved · not read yet");
         expect(sinceSummary(SINCE)).toBe("since you approved on feat · 1 to review · 1 flagged");
         expect(sinceSummary({ ...SINCE, files: [] })).toBe("since you approved on feat · nothing");
@@ -1331,7 +1379,7 @@ describe("the drawers at the end of each agent's group", () => {
         const seen = { path: "z.py", version: "f6e5", flags: [71], since: 12 };
         const shown: Since = { ...SINCE, files: [kept, ...SINCE.files, seen] };
         const laidOut = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, since: shown }]]));
-        const [, , since] = laidOut.drawers;
+        const [, since] = laidOut.drawers;
         const text = laidOut.text.slice(since!.header.from, since!.folds.at(-1)!.to).split("\n");
         expect(text.slice(0, 3)).toEqual([
             "since you approved on feat · 1 to review · 2 flagged · 2 reviewed",

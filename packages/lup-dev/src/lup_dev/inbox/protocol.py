@@ -21,8 +21,10 @@ flagged (`AskFlag`, joining the item `ShowGathering` finds gathering the
 conversation's flagged writes to the file).
 
 The dashboard reads a conversation whole: its steps, as its runtime records
-them (`ShowConversation`), and the items it sent and was sent, in every state
-(`ListItems`), which its page places among them.
+them (`ShowConversation`), each call a line saying what it did, each call's
+input and output whole once its fold is opened (`ShowCalls`), and the items it
+sent and was sent, in every state (`ListItems`), which its page places among
+them.
 """
 
 import asyncio
@@ -34,7 +36,15 @@ from lup.types import Model
 from lup_dev.git import Git
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import LaunchId, Reply, Request
-from lup_dev.host.records import Entry, Recorded, Task, Transcript, Usage, within
+from lup_dev.host.records import (
+    Call,
+    Entry,
+    Recorded,
+    Task,
+    Transcript,
+    Usage,
+    within,
+)
 from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.inbox import context
 from lup_dev.inbox.delivery import Delivery, written
@@ -167,6 +177,8 @@ class AskApproval(Request, reads=False):
     pushed_by: Conversation | None = None
     """The main conversation of the session whose push asked it; none for a
     launch's."""
+    first: bool = False
+    """Whether it's the zone's first approval (`Approval.first`)."""
 
     def approval(self) -> Approval:
         """Return the approval as the inbox keeps it, its diff and files beside it."""
@@ -177,6 +189,7 @@ class AskApproval(Request, reads=False):
             fingerprint=self.fingerprint,
             pushed_by=self.pushed_by,
             typing=self.typing,
+            first=self.first,
         )
 
 
@@ -265,6 +278,20 @@ class ShowConversation(Request, reads=True):
     """The runtime's id for the subagent; none for the session's own conversation."""
     since: int = 0
     """How many of its steps the asker has already: only those after are sent."""
+
+
+class ShowCalls(Request, reads=True):
+    """Read calls of one conversation whole, as its runtime records them: each one's input, and what it returned."""
+
+    kind: Literal["inbox-show-calls"] = "inbox-show-calls"
+    runtime: str
+    session: str
+    """The runtime's id for the session."""
+    agent: str | None = None
+    """The runtime's id for the subagent; none for the session's own conversation."""
+    calls: list[str]
+    """The runtime's ids for the calls, as the conversation's steps carry them
+    (`Called.id`)."""
 
 
 class ShowContext(Request, reads=True):
@@ -386,6 +413,13 @@ class Conversed(Reply):
     nothing of it."""
     tasks: list[Task] = []
     """Its task list as it stands; empty where it keeps none."""
+
+
+class Calls(Reply):
+    """Calls of one conversation whole, in the order asked: each its record holds, with its input and what it returned."""
+
+    kind: Literal["inbox-calls"] = "inbox-calls"
+    calls: list[Call]
 
 
 class Context(Reply):
@@ -830,6 +864,47 @@ class ConversationShowing(
         )
 
 
+class CallsShowing(Model, Reading[ShowCalls], arbitrary_types_allowed=True):
+    """Answers `ShowCalls`: calls of one conversation read whole from its record as it stands, for a room only from a record that ran in its repository, as `ConversationShowing` answers."""
+
+    recorded: dict[str, Recorded]
+    """Each runtime's records on this machine, and how they're read, by its name."""
+    recording: context.Recording = context.Recording()
+
+    @override
+    def request(self) -> type[ShowCalls]:
+        return ShowCalls
+
+    @override
+    async def answer(self, request: ShowCalls) -> Reply:
+        read = await asyncio.to_thread(self.read, request)
+        return await self.calls(request, read.record)
+
+    @override
+    async def scoped(self, request: ShowCalls, repository: Path) -> Reply:
+        """Answer only where the record says it ran in the repository's git directory or one of its worktrees."""
+        read = await asyncio.to_thread(self.read, request)
+        under = await asyncio.to_thread(
+            lambda: [repository, *Git.pinned(repository).worktrees()]
+        )
+        ran = read.transcript.directory
+        if ran is None or not within(ran, under):
+            message = "the conversation isn't one of this repository's"
+            raise InboxError(message)
+        return await self.calls(request, read.record)
+
+    def read(self, request: ShowCalls) -> context.Read:
+        """Read the conversation's record as it stands: kept as last read where it hasn't changed."""
+        return self.recording.read(
+            self.recorded, request.runtime, request.session, request.agent
+        )
+
+    async def calls(self, request: ShowCalls, record: Path) -> Calls:
+        """Return the calls asked for, read whole from `record`, off the event loop."""
+        reader = self.recorded[request.runtime].reader
+        return Calls(calls=await asyncio.to_thread(reader.calls, record, request.calls))
+
+
 class DiffShowing(Model, Reading[ShowDiff], arbitrary_types_allowed=True):
     """Answers `ShowDiff`: the item's whole diff."""
 
@@ -961,7 +1036,8 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
 
 
 def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
-    """Route each of the inbox's kinds to its handler, over one delivery; an item's moment read from the records `recorded`."""
+    """Route each of the inbox's kinds to its handler, over one delivery; an item's moment, a conversation and its calls read from the records `recorded`, a conversation's record read again only once it changed."""
+    recording = context.Recording()
     return [
         Route.reading(Listing(delivery=delivery)),
         Route.reading(InboxReading(delivery=delivery)),
@@ -978,7 +1054,8 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.reading(DiffShowing(delivery=delivery)),
         Route.reading(FilesShowing(delivery=delivery)),
         Route.reading(ContextShowing(delivery=delivery, recorded=recorded)),
-        Route.reading(ConversationShowing(recorded=recorded)),
+        Route.reading(ConversationShowing(recorded=recorded, recording=recording)),
+        Route.reading(CallsShowing(recorded=recorded, recording=recording)),
         Route.reading(ItemsListing(delivery=delivery)),
         Route.reading(DraftShowing(delivery=delivery)),
         Route.to(DraftKeeping(delivery=delivery)),

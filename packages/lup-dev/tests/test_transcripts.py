@@ -10,9 +10,9 @@ from typer.testing import CliRunner
 from lup.transcripts import views
 from lup.transcripts.module import Transcripts
 from lup_dev import cli
-from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts
+from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts, resulted
 from lup_dev.adapters.codex import CodexRecords, CodexTranscripts
-from lup_dev.host.records import Called, Entry, Said, Transcript
+from lup_dev.host.records import Call, Called, Entry, Said, Transcript
 from lup_dev.inbox.context import moment
 from lup_dev.layout import Layout
 from lup_dev.settings import LupDevSettings
@@ -144,9 +144,9 @@ def test_claude_codes_record_reads_as_the_operators_words_the_agents_and_its_too
     assert session.entries == [
         Said(by="operator", text="Can we talk about the dashboard?", at=at),
         Said(by="agent", text="Yes. Two options:\n1. queue\n2. agents", at=at),
-        Called(tool="Bash", at=at),
-        Called(tool="Bash", at=at),
-        Called(tool="Read", at=at),
+        Called(tool="Bash", gist="ls", at=at),
+        Called(tool="Bash", gist="ls", at=at),
+        Called(tool="Read", gist="a", at=at),
         Said(by="agent", text="Which do you want?", at=at),
         Said(by="operator", text="An older release's words, with no origin.", at=at),
         Said(by="operator", text="Also, the queue first.", at=at),
@@ -413,7 +413,7 @@ def test_codexs_rollouts_read_in_either_history_mode_a_subagents_left_out(
         Said(by="operator", text="fix it", at=when),
         Called(tool="exec_command", id="c1", at=when),
         Called(tool="mcp__lup__ask", id="c2", at=when),
-        Called(tool="shell", id="c3", at=when),
+        Called(tool="shell", gist="ls", id="c3", at=when),
         Said(by="agent", text="Fixed.", at=when),
     ]
     assert paginated.title is None
@@ -1062,9 +1062,13 @@ def test_codexs_rollout_as_0_163_writes_it_reads_its_words_calls_and_context(
     assert (read.session, read.title, str(read.directory)) == ("th-1", None, "/w")
     assert read.entries == [
         Said(by="operator", text="go", at=when),
-        Called(tool="exec", id="c1", at=when),
+        Called(tool="exec", gist="await tools.note({text: 'x'})", id="c1", at=when),
         Called(tool="collaborationspawn_agent", id="c3", at=when),
         Said(by="agent", text="Done.", at=when),
+    ]
+    assert CodexTranscripts().calls(rollout, ["c3", "c1", "c9"]) == [
+        Call(id="c3", input={}),
+        Call(id="c1", input="await tools.note({text: 'x'})", output="ok"),
     ]
     assert read.usage is not None
     assert (read.usage.used, read.usage.window, read.usage.model) == (
@@ -1117,4 +1121,190 @@ def test_codexs_plan_call_as_0_145_writes_it_reads_its_last_steps(
         ("1", "Write the reader", "completed"),
         ("2", "Test it", "in_progress"),
         ("3", "Document it", "pending"),
+    ]
+
+
+def test_claude_codes_calls_read_as_a_line_each_and_whole_on_asking(
+    tmp_path: Path,
+) -> None:
+    """Each call's line says what it did, from its input; asked for, it's read whole: its input, and the result the agent was given, or the whole output Claude Code saved in the session's own folder, never a file elsewhere a record names (`docs/field-notes.md`, *A session's record*)."""
+    folder = tmp_path / "projects" / "-w"
+    saved = folder / "s1" / "tool-results"
+    saved.mkdir(parents=True)
+    (saved / "b1.txt").write_text("line 1\nline 2\n… and 3,000 more\n")
+    elsewhere = tmp_path / "secret.txt"
+    elsewhere.write_text("the operator's own file")
+
+    def call(id_: str, name: str, **input_: object) -> dict[str, object]:
+        return {"type": "tool_use", "id": id_, "name": name, "input": input_}
+
+    def result(
+        id_: str, content: object, *, error: bool = False, kept: object = None
+    ) -> str:
+        block = {"type": "tool_result", "tool_use_id": id_, "content": content}
+        return line(
+            type="user",
+            message={"role": "user", "content": [{**block, "is_error": error}]},
+            **({} if kept is None else {"toolUseResult": kept}),
+        )
+
+    preview = "<persisted-output>\nOutput too large (52KB).\n</persisted-output>"
+    record = folder / "s1.jsonl"
+    record.write_text(
+        "\n".join(
+            [
+                human("Fix the review."),
+                agent(
+                    call(
+                        "t1",
+                        "Bash",
+                        command="uv run pytest -q",
+                        description="Run the tests",
+                    ),
+                    call("t2", "Read", file_path="/w/page/src/review.ts", offset=480),
+                    call(
+                        "t3", "Edit", file_path="/w/page/src/review.ts", old_string="a"
+                    ),
+                    call("t4", "Bash", command="cat big.log\n| head"),
+                    call("t5", "Bash", command="cat other.log"),
+                    call("t6", "Grep", pattern="def laid", path="/w"),
+                    call("t7", "mcp__lup__send", to="parent", kind="note", text="x"),
+                ),
+                result("t1", "5 passed"),
+                result(
+                    "t2",
+                    [
+                        {"type": "text", "text": "480 export function laid("},
+                        {"type": "image", "source": {"type": "base64", "data": "AA"}},
+                    ],
+                ),
+                result(
+                    "t3",
+                    "File has not been read yet.",
+                    error=True,
+                    kept="Error: File has not been read yet.",
+                ),
+                result(
+                    "t4", preview, kept={"persistedOutputPath": str(saved / "b1.txt")}
+                ),
+                result("t5", preview, kept={"persistedOutputPath": str(elsewhere)}),
+            ]
+        )
+        + "\n"
+    )
+    reader = ClaudeTranscripts()
+    gists = [
+        (each.tool, each.gist)
+        for each in reader.read(record).entries
+        if isinstance(each, Called)
+    ]
+    whole = reader.calls(record, ["t4", "t1", "t2", "t3", "t5", "t6", "t9"])
+    assert gists == [
+        ("Bash", "Run the tests"),
+        ("Read", "review.ts:480"),
+        ("Edit", "review.ts"),
+        ("Bash", "cat big.log"),
+        ("Bash", "cat other.log"),
+        ("Grep", "def laid"),
+        ("mcp__lup__send", "parent"),
+    ]
+    assert whole == [
+        Call(
+            id="t4",
+            input={"command": "cat big.log\n| head"},
+            output="line 1\nline 2\n… and 3,000 more\n",
+        ),
+        Call(
+            id="t1",
+            input={"command": "uv run pytest -q", "description": "Run the tests"},
+            output="5 passed",
+        ),
+        Call(
+            id="t2",
+            input={"file_path": "/w/page/src/review.ts", "offset": 480},
+            output="480 export function laid(\n[image]",
+        ),
+        Call(
+            id="t3",
+            input={"file_path": "/w/page/src/review.ts", "old_string": "a"},
+            output="File has not been read yet.",
+            failed=True,
+        ),
+        Call(id="t5", input={"command": "cat other.log"}, output=preview),
+        Call(id="t6", input={"pattern": "def laid", "path": "/w"}),
+    ]
+    # A refused call's result carries its error as text, read as a result all the same.
+    assert resulted(record, ["t3", "t6"]) == ["t3"]
+
+
+def test_codexs_calls_read_as_a_line_each_and_whole_on_asking(tmp_path: Path) -> None:
+    """Each call's line says what it did: a command's words, the files a patch touches, else its first argument; asked for, it's read whole, its arguments read as JSON where they are, and what it returned, text or parts (`docs/field-notes.md`, *A thread's rollout*)."""
+
+    def called(kind: str, id_: str, name: str, **given: object) -> str:
+        return rolled(
+            "response_item", {"type": kind, "name": name, "call_id": id_, **given}
+        )
+
+    def output(kind: str, id_: str, said: object) -> str:
+        return rolled("response_item", {"type": kind, "call_id": id_, "output": said})
+
+    patch = (
+        "*** Begin Patch\n*** Update File: page/src/review.ts\n@@\n-a\n+b\n"
+        "*** Add File: docs/calls.md\n+x\n*** End Patch"
+    )
+    day = tmp_path / "codex" / "sessions" / "2026" / "10" / "23"
+    day.mkdir(parents=True)
+    rollout = day / "rollout-2026-10-23T12-00-00-th-1.jsonl"
+    rollout.write_text(
+        "\n".join(
+            [
+                meta("th-1", "paginated"),
+                called(
+                    "function_call",
+                    "c1",
+                    "exec_command",
+                    arguments=json.dumps({"cmd": "uv run pytest -q", "workdir": "/w"}),
+                ),
+                called("custom_tool_call", "c2", "apply_patch", input=patch),
+                called(
+                    "function_call",
+                    "c3",
+                    "shell",
+                    arguments=json.dumps({"command": ["bash", "-lc", "ls -la"]}),
+                ),
+                called("function_call", "c4", "wait", arguments="not json"),
+                output("function_call_output", "c1", "5 passed"),
+                output(
+                    "custom_tool_call_output",
+                    "c2",
+                    [
+                        {"type": "input_text", "text": "Success."},
+                        {"type": "input_image", "image_url": "data:"},
+                    ],
+                ),
+            ]
+        )
+        + "\n"
+    )
+    reader = CodexTranscripts()
+    gists = [
+        (each.tool, each.gist)
+        for each in reader.read(rollout).entries
+        if isinstance(each, Called)
+    ]
+    assert gists == [
+        ("exec_command", "uv run pytest -q"),
+        ("apply_patch", "review.ts, calls.md"),
+        ("shell", "bash -lc 'ls -la'"),
+        ("wait", "not json"),
+    ]
+    assert reader.calls(rollout, ["c2", "c1", "c3", "c4"]) == [
+        Call(id="c2", input=patch, output="Success.\n[input_image]"),
+        Call(
+            id="c1",
+            input={"cmd": "uv run pytest -q", "workdir": "/w"},
+            output="5 passed",
+        ),
+        Call(id="c3", input={"command": ["bash", "-lc", "ls -la"]}),
+        Call(id="c4", input="not json"),
     ]

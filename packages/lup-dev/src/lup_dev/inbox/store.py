@@ -353,6 +353,10 @@ class Approval(Model):
     files carrying the reading of their parse alone until it's done
     (`docs/trust.md`); once it is, their whole reading
     replaces it, or the summary's last line says why it couldn't."""
+    first: bool = False
+    """Whether it's the zone's first approval, which trusts the repository as it
+    is, its files read by their roles alone: the review folds each under its
+    header (`docs/dashboard.md`, *The review*)."""
 
 
 class AtLanding(Model):
