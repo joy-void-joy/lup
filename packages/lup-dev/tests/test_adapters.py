@@ -410,7 +410,9 @@ def test_claude_a_failed_turns_hook_prints_nothing_and_a_judging_failure_is_rais
 ) -> None:
     """Claude Code reads none of `StopFailure`'s answer, so a warning there would reach no one: the judge's failure is raised for the host service to say."""
     claude_breaks_core(on_claude, repo)
-    assert claude.hook(payload(repo, "StopFailure", error="overloaded"), on_claude) == ""
+    assert (
+        claude.hook(payload(repo, "StopFailure", error="overloaded"), on_claude) == ""
+    )
     bench = Bench(runtime=claude.Claude(), services=broken)
     claude.hook(
         payload(
