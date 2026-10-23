@@ -29,7 +29,9 @@ from a branch that passed has none of it. A pass is recorded only where the file
 after the steps are those the steps checked. `--at` runs the gate on a commit, in
 a worktree made at it and removed after (`at_commit`), unless a pass is recorded
 for its files: lup's remote helper runs it before a push updates the integration
-branch (`lup_dev.remote.helper`).
+branch (`lup_dev.remote.helper`). With `--fix` too, what the fixes change is
+committed in place of the commit, with its parents and message (`Amended`):
+`land` runs it so on the merge it makes (`lup_dev.merging`).
 
 This is the gate's first shape (`DESIGN.md`, *Keeping the operator in the loop*): comparing against a
 branch's base (`--changed`), nested projects' own environments and bounds in time
@@ -103,8 +105,8 @@ class Fixes(Model):
 
     ruff's safe fixes, then each `# lup: ignore` that keeps nothing removed, then
     the formatter: what the agent is never told of (`docs/judging-writes.md`,
-    *Findings*), applied by the session landing the work
-    on the merged result (`AGENTS.md`). `--fix-only` applies ruff's without
+    *Findings*), applied to the merge `land` makes, where the gate runs on it
+    (`lup_dev.merging`). `--fix-only` applies ruff's without
     reporting what's left, which the gate's `rules` step reports. Without
     `--fix`, as in CI, the gate only checks. Each runs through the project's
     runner, as the gate's steps do.
@@ -448,6 +450,26 @@ def report(gated: Gated) -> str:
     return "\n\n".join([summary, *failures, verdict + kept])
 
 
+class Amended(Model):
+    """The gate passed on a commit once its fixes changed files: the commit made in its place, holding them, with its parents and its message."""
+
+    commit: str
+    amends: str
+    """The commit the gate ran on, which no ref names in its place."""
+    ran: Ran
+
+    def said(self) -> str:
+        """Say where the fixes went.
+
+        >>> print(Amended(commit="c2", amends="c1", ran=Ran(code=0, output="")).said())
+        The fixes changed files: they're in c2, a commit with c1's parents and message, which no branch names.
+        """
+        return (
+            f"The fixes changed files: they're in {self.commit}, a commit with "
+            f"{self.amends}'s parents and message, which no branch names."
+        )
+
+
 def at_commit(
     root: Path,
     revision: str,
@@ -458,7 +480,8 @@ def at_commit(
     say: Callable[[str], None],
     stop: Callable[[Path], None],
     again: bool = False,
-) -> Passed | Ran:
+    fix: bool = False,
+) -> Passed | Ran | Amended:
     """Run the gate on the commit `revision` names, in a worktree made at it, unless a pass is recorded for its files.
 
     The worktree at `root` asks: `revision` is read there, and its person's own
@@ -469,6 +492,12 @@ def at_commit(
     `stop` ends what the run left behind for it, its engine. A pass the run
     doesn't record itself, as a commit's `lup-dev` from before passes were kept
     doesn't, is recorded here, without its steps.
+
+    With `fix`, the run is `lup-dev check --fix`, and where it passes having
+    changed files, they're committed in the worktree made, amending the
+    commit (`fixed`): the commit made in its place is returned (`Amended`),
+    its files the ones the pass is recorded for. A pass found answers as
+    without, since on files the gate passed the fixes change nothing.
 
     Raise `GateError` where `revision` names no commit.
     """
@@ -497,15 +526,44 @@ def at_commit(
             raise
         try:
             say(f"The gate runs on {commit}, in a worktree made for it at {made}.")
-            command = ["lup-dev", "check", *(["--again"] if again else [])]
+            command = [
+                "lup-dev",
+                "check",
+                *(["--fix"] if fix else []),
+                *(["--again"] if again else []),
+            ]
             ran = processes.run(runner.judging(command), made)
+            amended = fixed(made, files) if fix and ran.code == 0 else None
         finally:
             stop(made)
             git.run("worktree", "remove", "--force", str(made))
     (locks / f"{made.name}.lock").unlink(missing_ok=True)
-    if ran.code == 0 and passes.found(files) is None:
-        passes.record(files, [])
-    return ran
+    passed = (
+        files
+        if amended is None
+        else files.model_copy(
+            update={"tree": git.text("rev-parse", f"{amended}^{{tree}}")}
+        )
+    )
+    if ran.code == 0 and passes.found(passed) is None:
+        passes.record(passed, [])
+    if amended is None:
+        return ran
+    return Amended(commit=amended, amends=commit, ran=ran)
+
+
+def fixed(made: Path, files: Standing) -> str | None:
+    """Commit what the fixes changed in the worktree `made`, made at a commit whose files were `files`, amending it: the same parents, the same message, kept as written; return the commit made, or none where nothing changed.
+
+    It holds every file the gate's pass counts (`standing`), and is made with
+    git's hooks off, as every git lup runs is (`Git`).
+    """
+    if standing(made).tree == files.tree:
+        return None
+    git = Git(cwd=made)
+    git.run("add", "--all")
+    git.run("commit", "--amend", "--no-edit", "--cleanup=verbatim", "--quiet")
+    return git.text("rev-parse", "--verify", "HEAD")
 
 
 MADE = "lup-gate-"
