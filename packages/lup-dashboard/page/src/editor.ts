@@ -8,8 +8,9 @@
 // keys of insert mode on the line; `v` and a motion, then `c` or `s`, on the
 // selection; where what's covered isn't one item's or one turn's, on the line. `]]` and
 // `[[` go to the next and previous item or turn, `]c` and `[c` to the next and
-// previous line that matters, where a view has some, `]n` and `[n` to the next
-// and previous comment, where the cursor last was in it. Ctrl+Enter in a comment ends
+// previous line that matters, where a view has some, `]f` and `[f` to the next
+// and previous file's header, `]n` and `[n` to the next and previous comment,
+// where the cursor last was in it. Ctrl+Enter in a comment ends
 // it, back on what it's about; elsewhere it sends. `u` and Ctrl+R undo and redo
 // any change to the draft, `g-` and `g+` go through its history in the order it
 // was made (`History`). Each fold is folded or open as the view lays it out
@@ -69,6 +70,8 @@ interface Actions {
     move: (forward: boolean) => void;
     answer: (forward: boolean) => void;
     matter: (forward: boolean) => void;
+    /** `]f` and `[f`: the next or previous file's header. */
+    file: (forward: boolean) => void;
     written: (forward: boolean) => void;
     /** `]q` and `[q`: the next or previous citation of the operator's words. */
     cite: (forward: boolean) => void;
@@ -381,6 +384,8 @@ function mapKeys(): void {
     action("lupPreviousAnswer", (actions) => actions.answer(false));
     action("lupNextMatter", (actions) => actions.matter(true));
     action("lupPreviousMatter", (actions) => actions.matter(false));
+    action("lupNextFile", (actions) => actions.file(true));
+    action("lupPreviousFile", (actions) => actions.file(false));
     action("lupNextWritten", (actions) => actions.written(true));
     action("lupPreviousWritten", (actions) => actions.written(false));
     action("lupNextCitation", (actions) => actions.cite(true));
@@ -460,6 +465,8 @@ function mapKeys(): void {
     map("[a", "lupPreviousAnswer", "normal");
     map("]c", "lupNextMatter", "normal");
     map("[c", "lupPreviousMatter", "normal");
+    map("]f", "lupNextFile", "normal");
+    map("[f", "lupPreviousFile", "normal");
     map("]n", "lupNextWritten", "normal");
     map("[n", "lupPreviousWritten", "normal");
     map("]q", "lupNextCitation", "normal");
@@ -913,6 +920,15 @@ const outOfFolds = EditorState.transactionFilter.of((transaction) => {
     return past === null ? transaction : [transaction, { selection: past, annotations: passed.of(true) }];
 });
 
+/** Return whether a closed fold hides `position`, the start of a line: it's among the lines the fold hides. */
+export function hiddenAt(state: EditorState, position: number): boolean {
+    let hidden = false;
+    foldedRanges(state).between(position, position, (from, to) => {
+        hidden ||= from < position && position <= to;
+    });
+    return hidden;
+}
+
 /**
  * Say under the view how many folds a search or a jump opened to reach where it went (`reached`); and, where a plain
  * motion's visual selection was moved past a fold (`pastFolds`), give it to vim as a selection it didn't make, once its
@@ -1075,6 +1091,8 @@ export interface Own<C> {
     toggle?: (list: "done" | "parked") => void;
     /** Go to the next or previous line that matters, as the review's are by the judge's reading, opening what folds it on the way. */
     matter?: (forward: boolean) => void;
+    /** Go to the next or previous file's header, as the review's `]f` and `[f` do; none where the view has none. */
+    file?: (forward: boolean) => void;
     /** Go to the next or previous citation of the operator's words, as the review's `]q` and `[q` do; none where the view has none. */
     cite?: (forward: boolean) => void;
     /** Follow a citation to what it cites, or back, as the review's `gd` does; none where the view has none. */
@@ -1373,6 +1391,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             move: own.move,
             answer: (forward) => own.answer?.(forward),
             matter: (forward) => own.matter?.(forward),
+            file: (forward) => own.file?.(forward),
             cite: (forward) => own.cite?.(forward),
             follow: () => own.follow?.(),
             written: (forward) => {
