@@ -32,11 +32,13 @@ from typing import Literal, override
 
 from lup.types import Model
 from lup_dev.git import Git
+from lup_dev.host.names import Names
 from lup_dev.host.protocol import LaunchId, Reply, Request
 from lup_dev.host.records import Entry, Recorded, Task, Transcript, Usage, within
 from lup_dev.host.service import Handler, Reading, Route
 from lup_dev.inbox import context
-from lup_dev.inbox.delivery import Delivery, body
+from lup_dev.inbox.delivery import Delivery, written
+from lup_dev.inbox.reading import Narrowing, Reader, Spelling
 from lup_dev.inbox.store import (
     Answer,
     Approval,
@@ -63,6 +65,12 @@ class ListInbox(Request, Span, reads=True):
     """List what waits in the operator's inbox, oldest first, made within `since` and `until`: a duration counted back by the service's clock, and every item waiting, where neither is given."""
 
     kind: Literal["inbox-list"] = "inbox-list"
+
+
+class ReadInbox(Request, Narrowing, reads=True):
+    """Read the operator's own exchange, the items they sent or were sent, as the agents' `inbox` tool reads the repository's: a line an item or each whole, narrowed to their exchange with one conversation, to kinds, to a time, and to what waits for them unless `every` is asked (`inbox/reading.py`)."""
+
+    kind: Literal["inbox-read"] = "inbox-read"
 
 
 class ShowItem(Request, reads=True):
@@ -288,6 +296,14 @@ class Items(Reply):
     (`docs/dashboard.md`, *The review*)."""
 
 
+class Readout(Reply):
+    """What a reading of the inbox says, and how many items it found before its limit: none where it found no conversation of the name it was given."""
+
+    kind: Literal["inbox-readout"] = "inbox-readout"
+    text: str
+    found: int = 0
+
+
 class Shown(Reply):
     """One item, whole."""
 
@@ -468,6 +484,40 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
             if found[number].sender == Operator()
             and any(answers(found[number], item) for item in items)
         ]
+
+
+class InboxReading(Model, Reading[ReadInbox], arbitrary_types_allowed=True):
+    """Answers `ReadInbox`: the operator's own exchange read as the `inbox` tool reads the repository's, what waits for them unless `every` is asked; every repository's on the host, a room's own for a room; each option named as `lup-dev inbox` names it."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[ReadInbox]:
+        return ReadInbox
+
+    @override
+    async def answer(self, request: ReadInbox) -> Reply:
+        inbox = self.delivery.inbox
+        items = [inbox.items[number] for number in sorted(inbox.items)]
+        return self.readout(request, items, "")
+
+    @override
+    async def scoped(self, request: ReadInbox, repository: Path) -> Reply:
+        items = self.delivery.inbox.about(repository)
+        return self.readout(request, items, " about this repository")
+
+    def readout(self, request: ReadInbox, items: list[Item], where: str) -> Readout:
+        """Read `items` as `request` narrows them, for the operator; `where` says what they are where none is listed."""
+        reader = Reader(
+            delivery=self.delivery,
+            reader=Operator(),
+            names=Names(path=self.delivery.layout.names).all(),
+            where=where,
+            mine=True,
+            spelling=Spelling.command(),
+        )
+        read = reader.read(items, request)
+        return Readout(text=read.text, found=read.found)
 
 
 class Showing(Model, Reading[ShowItem], arbitrary_types_allowed=True):
@@ -686,17 +736,6 @@ class ContextShowing(Model, Reading[ShowContext], arbitrary_types_allowed=True):
         """Read `item`'s moment from its sender's record, off the event loop."""
         found = await asyncio.to_thread(context.read, item, self.recorded)
         return Context(number=item.number, entries=found.entries, anchor=found.anchor)
-
-
-def written(item: Item) -> str:
-    """Return the text of an item a conversation sent, whole: as it wrote it, a question with its decisions and leans; a change held from it, with what's held and why, or one that landed flagged, with what's flagged."""
-    match item.reason:
-        case (
-            HeldChange(text=text, summary=summary) | Flagged(text=text, summary=summary)
-        ):
-            return f"{text}\n{summary}"
-        case _:
-            return body(item)
 
 
 class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
@@ -925,6 +964,7 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
     """Route each of the inbox's kinds to its handler, over one delivery; an item's moment read from the records `recorded`."""
     return [
         Route.reading(Listing(delivery=delivery)),
+        Route.reading(InboxReading(delivery=delivery)),
         Route.reading(Showing(delivery=delivery)),
         Route.to(Answering(delivery=delivery)),
         Route.to(Finishing(delivery=delivery)),

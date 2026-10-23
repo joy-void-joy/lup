@@ -27,7 +27,7 @@ from lup_dev.host.protocol import (
     Talker,
 )
 from lup_dev.host.records import Called, Entry, Said, Task, Usage
-from lup_dev.inbox.delivery import body
+from lup_dev.inbox.delivery import body, written
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
     Context,
@@ -51,7 +51,6 @@ from lup_dev.inbox.protocol import (
     Shown,
     ShowTalk,
     Talked,
-    written,
 )
 from lup_dev.inbox.store import (
     ApiChanged,
