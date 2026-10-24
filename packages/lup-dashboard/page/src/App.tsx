@@ -28,7 +28,6 @@ import { useNarrow } from "./Outline";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
 import { marked, sameShown, type Marking } from "./since";
-import { searchOf, trialsOf, trialsSaid, type Trials } from "./trials";
 import {
     UNREAD,
     answer,
@@ -90,17 +89,6 @@ export function App() {
     const minute = useNow(60_000);
     const soon = useNow(5000);
     const [palette, setPalette] = useState(false);
-    // The layout trials, as the address says them, changed from the palette and written back into the address.
-    const [trials, setTrials] = useState<Trials>(() => trialsOf(window.location.search));
-    const choose = useCallback((next: Trials) => {
-        setTrials(next);
-        const url = new URL(window.location.href);
-        url.search = searchOf(next, url.search);
-        window.history.replaceState(window.history.state, "", url);
-    }, []);
-    // What's typed in the palette as it opens: "Layout" where it's opened from the bar's line saying the trials.
-    const [typed, setTyped] = useState("");
-    // The outline on a narrow screen, where it's an overlay its key opens.
     // Whether the overview pane is shown: beside the review, hidden by `\`; over it on a narrow screen, opened by `gO`.
     const narrow = useNarrow();
     const [overview, setOverview] = useState(() => !window.matchMedia("(max-width: 640px)").matches);
@@ -219,7 +207,7 @@ export function App() {
         }, [served]),
         (map) => JSON.stringify([...map]),
     );
-    // What each conversation running is doing, by `whose` it is, for the outline's marks.
+    // What each conversation running is doing, by `whose` it is, for the overview's marks.
     const states = useSame(
         useMemo(() => new Map(live.map((each) => [each.key, each.talker.activity?.state ?? null])), [live]),
         (map) => JSON.stringify([...map]),
@@ -786,29 +774,10 @@ export function App() {
                 <span className="count">
                     {agents.length} {agents.length === 1 ? "agent" : "agents"} · {waiting.length} waiting on you
                 </span>
-                <button
-                    type="button"
-                    className="trials"
-                    title="The layout trials: Ctrl+K, Layout"
-                    onClick={() => {
-                        setTyped("Layout");
-                        setPalette(true);
-                    }}
-                >
-                    layout: {trialsSaid(trials)}
+                <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title="the overview of every agent and item">
+                    Overview <kbd>{"\\"}</kbd>
                 </button>
-                {trials.overview === "pane" ? (
-                    <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title="the overview of every agent and item">
-                        Overview <kbd>{"\\"}</kbd>
-                    </button>
-                ) : null}
-                <button
-                    type="button"
-                    onClick={() => {
-                        setTyped("");
-                        setPalette(true);
-                    }}
-                >
+                <button type="button" onClick={() => setPalette(true)}>
                     Go to <kbd>Ctrl</kbd> <kbd>K</kbd>
                 </button>
             </header>
@@ -842,7 +811,6 @@ export function App() {
                         list={openList}
                         reviewed={inbox.reply?.kind === "inbox-items" ? (inbox.reply.reviewed ?? null) : null}
                         now={minute}
-                        trials={trials}
                         parents={parents}
                         states={states}
                         overview={overview}
@@ -875,21 +843,7 @@ export function App() {
                     />
                 </div>
             </main>
-            <Palette
-                open={palette}
-                setOpen={(open) => {
-                    setPalette(open);
-                    if (!open) {
-                        setTyped("");
-                    }
-                }}
-                agents={agents}
-                select={goTo}
-                now={now}
-                trials={trials}
-                choose={choose}
-                typed={typed}
-            />
+            <Palette open={palette} setOpen={setPalette} agents={agents} select={goTo} now={now} />
         </div>
     );
 }

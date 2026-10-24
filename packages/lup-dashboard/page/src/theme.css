@@ -553,10 +553,16 @@ kbd {
     color: var(--muted);
 }
 
-/* A drawer's summary line, in its kind's colour, set off from the item above it; a task's line in its drawer. */
-.buffer .cm-line.drawer-summary {
+/* A drawer's label under its banner, a line each with no room between them: in its kind's colour, dotted under as
+   what opens on a click, bold where it holds what waits on the operator; a task's line in its drawer. */
+.buffer .cm-line.drawer-label {
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+}
+
+.buffer .cm-line.drawer-label.is-waiting {
     font-weight: 700;
-    padding-top: 0.2em;
 }
 
 .buffer .cm-line.drawer-tasks {
@@ -1419,22 +1425,6 @@ kbd {
     color: var(--muted);
 }
 
-/* A subagent's own lines as a panel, where that's how it's set apart (`frame=panel`): tinted by how deep it is. */
-:where(.cm-line.panel-1) {
-    background-color: #0a222b;
-    border-left: 2px solid rgb(102 204 204 / 0.45);
-}
-
-:where(.cm-line.panel-2) {
-    background-color: #0f2e39;
-    border-left: 2px solid rgb(102 204 204 / 0.6);
-}
-
-:where(.cm-line.panel-3) {
-    background-color: #133a48;
-    border-left: 2px solid rgb(102 204 204 / 0.75);
-}
-
 /* Where each item ends, a faint rule; where a group does, a line saying whose, set in as its banner is. */
 .buffer .cm-line.item-end {
     background: linear-gradient(to bottom, transparent 8px, rgb(255 153 51 / 0.45) 8px, rgb(255 153 51 / 0.45) 9px, transparent 9px) no-repeat;
@@ -1465,39 +1455,6 @@ kbd {
     content: "  " attr(data-to);
     color: var(--muted);
     font-style: italic;
-}
-
-/* The row of an agent's drawers under its banner, side by side: each a label in its kind's colour, pulled out below
-   the row where it's bold, and bold too where it holds files to review. */
-.buffer .cm-line.drawer-row {
-    color: var(--muted);
-}
-
-.row-label {
-    cursor: pointer;
-    text-decoration: underline dotted;
-    text-underline-offset: 3px;
-}
-
-.row-tasks {
-    color: var(--fold-tasks);
-}
-
-.row-since {
-    color: var(--fold-since);
-}
-
-.row-conversation {
-    color: var(--fold-conversation);
-}
-
-.row-label.is-pulled {
-    font-weight: 700;
-    text-decoration: none;
-}
-
-.row-label.is-waiting {
-    font-weight: 700;
 }
 
 /* The overview: a narrow pane beside the review, each entry a row, set in by how deep it is; what's in view
@@ -1616,15 +1573,6 @@ kbd {
     color: var(--fg);
 }
 
-/* The bar's line saying the layout's switches still open, which opens them in the palette. */
-.bar .trials {
-    color: var(--purple);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-}
-
 @media (max-width: 640px) {
     .outline {
         position: absolute;
@@ -1646,9 +1594,5 @@ kbd {
     .buffer.stack .cm-line.stack-line,
     .buffer.stack .stack-mark {
         pointer-events: none;
-    }
-
-    .bar .trials {
-        display: none;
     }
 }

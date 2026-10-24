@@ -1198,8 +1198,6 @@ export interface Own<C> {
     level?: (position: number, opening: boolean, all: boolean, closed: (fold: Folding) => boolean) => Folding[];
     /** The folds Space `z` `f` and a letter opens, or Space `z` `F` and the letter closes, from `position`; none where none's said. */
     kind?: (position: number, kind: FoldKind, closing: boolean, closed: (fold: Folding) => boolean) => Folding[];
-    /** What `za`, `zo` or `zc` does at `position` where the view folds something no fold of the text is, as a drawer's label in a row: whether it did it. */
-    foldHere?: (position: number, how: "toggle" | "open" | "close") => boolean;
 }
 
 /** One editor, as a view uses it. */
@@ -1503,10 +1501,6 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             fold: (how) => {
                 const editor = view.current;
                 const at = head();
-                // Where the view folds something of its own there, as a drawer's label in a row, it's done.
-                if (own.foldHere?.(at, how) === true) {
-                    return;
-                }
                 // Of folds one inside another, the innermost the cursor is in.
                 const fold = around(shown.folds, at).at(-1);
                 if (editor === null || fold === undefined) {

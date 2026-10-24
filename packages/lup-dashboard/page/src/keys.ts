@@ -84,7 +84,7 @@ export interface FoldKindKeys {
  * drawer, as after Space `z` `F` it closes them.
  */
 export const FOLD_KINDS: FoldKindKeys[] = [
-    // An agent's group whole under its banner, where the layout trials give it a fold (`trials.ts`, `frame` or `nest`).
+    // An agent's group whole under its banner, a subagent's inside its parent's.
     { kind: "group", letter: "a", called: "agents' groups", one: "the agent's group", chord: true, level: 0, own: true },
     { kind: "item", letter: "i", called: "the item", one: "the item", chord: false, level: 0, own: true },
     { kind: "tasks", letter: "t", called: "the tasks", one: "the tasks", chord: true, level: 0, own: true },
@@ -309,7 +309,7 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
     {
         title: "The overview",
         keys: [
-            { keys: "\\", does: "hide the overview of every agent and item beside the review, or show it again; where it's the review zoomed out, zoom out to every header, or back", short: "overview", at: ["banner", "approvals"] },
+            { keys: "\\", does: "hide the overview of every agent and item beside the review, or show it again", short: "overview", at: ["banner", "approvals"] },
             { keys: "gO", does: "take the keyboard to the overview, opening it, on a phone over the review: j k move, ⏎ goes there, Esc or q back", short: "into it", at: [] },
         ],
     },

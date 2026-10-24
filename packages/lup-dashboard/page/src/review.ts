@@ -8,8 +8,8 @@
 // banner, before its items, its drawers (`docs/dashboard.md`, *The drawers*):
 // its task list, what its branch changed since they approved it, each file laid
 // out as an item's, and its whole conversation (`conversation.ts`), its latest
-// part open, each a fold of its own kind, a line folded until opened, or a
-// label side by side, pulled out below; a comment in the conversation or on the
+// part open, each a fold of its own kind under a short label, one under the
+// other, folded until opened in place; a comment in the conversation or on the
 // changed files is a remark to the agent, the one on code recording the version
 // it was written on. A subagent's group under its parent's, each group folding
 // whole under its banner.
@@ -293,34 +293,13 @@ export interface Group {
     drawers: Drawer[];
     /** How many groups it's laid out under, its subagent's under its parent's, where they're nested (`Arranging.parents`); 0 else. */
     depth: number;
-    /** The row of its drawers under its banner, where they're a row (`Arranging.row`); none else, or where it has none. */
-    row: DrawerRow | null;
-    /** Its fold whole, under its banner, where groups fold (`Arranging.folds`); none else, or where nothing's under its banner. */
+    /** Its fold whole, under its banner; none where nothing's under its banner. */
     fold: Fold | null;
 }
 
-/** One drawer's label in the row under a banner: which, whose (`ownerOf`), whether it's pulled out below the row, and whether it holds what waits on the operator. */
-export interface RowLabel extends Span {
-    kind: DrawerKind;
-    of: string;
-    pulled: boolean;
-    waiting: boolean;
-}
-
-/** The row of an agent's drawers under its banner: a line, each drawer a label on it. */
-export interface DrawerRow extends Span {
-    labels: RowLabel[];
-}
-
-/**
- * How the review's groups are arranged beyond the order items came in, as the layout trials switch it (`trials.ts`):
- * each subagent's group under its parent's, by `whose` each conversation is and its parent's; and the drawers as a row
- * under the banner, those pulled out laid below it, open, by `ownerOf` each is, the rest only a label.
- */
+/** How the review's groups are arranged beyond the order items came in: each subagent's group under its parent's, by `whose` each conversation is and its parent's. */
 export interface Arranging {
     parents?: ReadonlyMap<string, string> | null;
-    /** How the drawers are said under the banner: each laid there whole, a line each, folded (`lines`, the default); or a row of labels, those `pulled` out laid below it. */
-    side?: { pulled: ReadonlySet<string> } | null;
 }
 
 /**
@@ -369,6 +348,8 @@ export interface Drawer extends Scope {
     settled: Span | null;
     /** The worktree its files are in, for a remark on one; none before the host has answered. */
     worktree: string | null;
+    /** Whether it holds what waits on the operator: files to review or flagged writes, in "since you approved". */
+    waiting: boolean;
 }
 
 /** A file standing as the operator last saw it, where its line is in "since you approved". */
@@ -733,18 +714,6 @@ function counted(count: number, one: string): string {
 /** The marks before a task, by its status: done, in progress, to do. */
 const TASK_MARKS = { completed: "✓", in_progress: "▶", pending: "·" } as const;
 
-/** Say a task list's summary line: how many entries, and how they stand. */
-export function tasksSummary(tasks: Task[]): string {
-    if (tasks.length === 0) {
-        return "tasks · none kept";
-    }
-    const done = tasks.filter((each) => each.status === "completed").length;
-    const going = tasks.filter((each) => each.status === "in_progress").length;
-    const parts = [...(done === 0 ? [] : [`${done} done`]), ...(going === 0 ? [] : [`${going} in progress`])];
-    const entries = tasks.length === 1 ? "1 entry" : `${tasks.length} entries`;
-    return [`tasks · ${entries}`, ...parts].join(", ");
-}
-
 /** Return the current entry of a task list: the one in progress, what it says while in progress, else the first to do; none where there's neither. */
 export function currentTask(tasks: Task[]): string | null {
     const going = tasks.find((each) => each.status === "in_progress");
@@ -752,11 +721,6 @@ export function currentTask(tasks: Task[]): string | null {
         return going.active ?? going.subject;
     }
     return tasks.find((each) => each.status === "pending")?.subject ?? null;
-}
-
-/** Return where the operator last spoke in `entries`: the index of their last words; none before any. */
-export function lastSpoken(entries: Entry[]): number {
-    return entries.findLastIndex((each) => each.kind === "said" && each.by === "operator");
 }
 
 /**
@@ -790,13 +754,6 @@ export function sinceSummary(shown: Since | null): string {
         ...(kept === 0 ? [] : [`${kept} reviewed`]),
     ];
     return `since you approved${branch} · ${said.length === 0 ? "nothing" : said.join(" · ")}`;
-}
-
-/** Say a conversation drawer's summary line: how many steps it has, and how many since the operator's last words, where they spoke. */
-export function conversationSummary(entries: Entry[]): string {
-    const spoke = lastSpoken(entries);
-    const since = spoke < 0 ? "" : `, ${entries.length - spoke - 1} since your last words`;
-    return `conversation · ${counted(entries.length, "step")}${since}`;
 }
 
 /** The text being laid out, line by line. */
@@ -950,7 +907,7 @@ export function nested(groups: Grouping[], parents: ReadonlyMap<string, string> 
     return out;
 }
 
-/** Return a drawer's label in the row under its banner, from what the host answered of its agent, and whether it holds what waits on the operator; none where it has nothing in it. */
+/** Return a drawer's label under its banner, from what the host answered of its agent, and whether it holds what waits on the operator; none where it has nothing in it. */
 export function rowLabel(kind: DrawerKind, data: AgentDrawers): { text: string; waiting: boolean } | null {
     switch (kind) {
         case "tasks": {
@@ -1064,9 +1021,6 @@ export function laid(
         const opening = w.line(said);
         const conversation = group.conversation;
         const data = conversation !== null && !isParked ? drawers.get(group.key) : undefined;
-        // Side by side, the drawers are a row right under the banner, each drawer's label on it; a line each, there's no row.
-        const side = arranging.side ?? null;
-        const row = side !== null && conversation !== null && data !== undefined ? layRow(conversation, data, side.pulled) : null;
         const blocks: Block[] = [];
         if (!isParked) {
             letters.forEach((letter, at) => {
@@ -1084,27 +1038,21 @@ export function laid(
             blocks,
             drawers: [],
             depth,
-            row,
             fold: null,
         };
         groups.push(made);
-        const lay = (kinds: DrawerKind[], open: boolean) => {
-            if (conversation === null || data === undefined) {
-                return;
-            }
-            for (const kind of kinds) {
-                const drawer = layDrawer(kind, conversation, data, open);
+        // Under the banner, before the items, one under the other: each drawer a label, folded until opened in place.
+        if (conversation !== null && data !== undefined) {
+            for (const kind of DRAWERS) {
+                const drawer = layDrawer(kind, conversation, data);
                 if (drawer !== null) {
                     made.drawers.push(drawer);
                     laidDrawers.push(drawer);
                 }
             }
-        };
-        // Under the banner, before the items: each drawer a line of its own, folded; or those pulled out of the row, open.
-        if (row !== null) {
-            lay(row.labels.filter((each) => each.pulled).map((each) => each.kind), true);
-        } else if (side === null) {
-            lay(DRAWERS, false);
+            if (made.drawers.length > 0) {
+                w.line("");
+            }
         }
         for (const item of group.items) {
             layItem(item, isParked);
@@ -1247,38 +1195,11 @@ export function laid(
     }
 
     /**
-     * Lay the row of `conversation`'s drawers under its banner, a label each for those with something in them, from
-     * `data`, those `pulled` out marked so; none where none has anything.
-     */
-    function layRow(conversation: Conversation, data: AgentDrawers, pulled: ReadonlySet<string>): DrawerRow | null {
-        const shown = DRAWERS.flatMap((kind) => {
-            const label = rowLabel(kind, data);
-            return label === null ? [] : [{ kind, ...label, of: ownerOf({ drawer: kind, conversation }) }];
-        });
-        if (shown.length === 0) {
-            return null;
-        }
-        let text = "";
-        const labels: RowLabel[] = [];
-        const from = w.at;
-        for (const each of shown) {
-            const out = pulled.has(each.of);
-            const said = `${out ? "▾" : "▸"} ${each.text}`;
-            if (text !== "") {
-                text += "   ";
-            }
-            labels.push({ kind: each.kind, of: each.of, pulled: out, waiting: each.waiting, from: from + text.length, to: from + text.length + said.length });
-            text += said;
-        }
-        return { ...w.line(text), labels };
-    }
-
-    /**
      * Lay one of `conversation`'s drawers of `kind` from `data`, and return it; none where it has nothing under its
-     * summary line, as a task list none keeps, a branch with nothing since the operator approved it, or one not read yet.
-     * It's `open`, as one pulled out of the row under the banner is, or folded, until the operator opens it.
+     * label, as a task list none keeps, a branch with nothing since the operator approved it, or one not read yet; its
+     * label a short line saying what it holds (`rowLabel`), folded until the operator opens it.
      */
-    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers, open: boolean): Drawer | null {
+    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers): Drawer | null {
         const of = ownerOf({ drawer: kind, conversation });
         const into = gathering();
         const key = whose(conversation);
@@ -1287,12 +1208,14 @@ export function laid(
         let files: SinceFile[] = [];
         const reviewed: ReviewedLine[] = [];
         let settled: Span | null = null;
-        let said: string;
-        let summary: Span;
+        const labelled = rowLabel(kind, data);
+        if (labelled === null) {
+            return null;
+        }
+        const said = labelled.text;
+        const summary = w.line(said);
         switch (kind) {
             case "tasks": {
-                said = tasksSummary(data.tasks);
-                summary = w.line(said);
                 for (const task of data.tasks) {
                     const shown = task.status === "in_progress" ? (task.active ?? task.subject) : task.subject;
                     into.asides.push({ kind: "task", ...w.line(`${TASK_MARKS[task.status]} ${shown}`) });
@@ -1300,8 +1223,6 @@ export function laid(
                 break;
             }
             case "conversation": {
-                said = conversationSummary(data.entries);
-                summary = w.line(said);
                 // Each remark on the agent's words, under the line it's on.
                 const steps = mine.flatMap(({ comment, at }) =>
                     isRemark(comment) && comment.step != null ? [{ remark: { step: comment.step, quote: comment.quote, text: comment.text }, at }] : [],
@@ -1321,8 +1242,6 @@ export function laid(
                 break;
             }
             case "since": {
-                said = sinceSummary(data.since);
-                summary = w.line(said);
                 files = data.since?.files ?? [];
                 const changed = files.flatMap((each) => (each.file == null ? [] : [each.file]));
                 const shown = filedOf(changed, false, (file) => file.before == null);
@@ -1379,10 +1298,9 @@ export function laid(
             w.text = w.text.slice(0, summary.from);
             return null;
         }
-        // "Since you approved" is open, as it's the code waiting on the operator; the others fold until opened.
-        into.folds.push({ of, kind, name: "", label, closed: !open, summary, from: summary.to, to: last });
-        w.line("");
-        return { kind, conversation, talk, files, reviewed, settled, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
+        // Folded until opened, a line under the banner.
+        into.folds.push({ of, kind, name: "", label, closed: true, summary, from: summary.to, to: last });
+        return { kind, conversation, talk, files, reviewed, settled, worktree: data.since?.worktree ?? null, waiting: labelled.waiting, of, header: summary, ...into };
     }
 }
 

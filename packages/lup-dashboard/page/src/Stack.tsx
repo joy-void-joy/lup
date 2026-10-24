@@ -11,7 +11,6 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Following } from "./follow";
 import type { Labelled } from "./rails";
 import { narrowSlot, pinned, type Sticky } from "./stack";
-import { measured } from "./timing";
 
 interface Props {
     following: Following;
@@ -70,7 +69,6 @@ export function Stack({ following, roots, text, classesOf, markOf, hintOf, narro
             view.requestMeasure({
                 key: "lup-stack",
                 read: (read: EditorView): Shown => {
-                    const began = performance.now();
                     const { roots, text, classesOf, markOf, hintOf, narrow } = now.current;
                     const scroller = read.scrollDOM.getBoundingClientRect();
                     const lineHeight = read.defaultLineHeight;
@@ -92,7 +90,6 @@ export function Stack({ following, roots, text, classesOf, markOf, hintOf, narro
                         }),
                     );
                     const bottom = lines.reduce((most, each) => Math.max(most, each.offset + lineHeight), 0);
-                    measured("lup-stack", began);
                     return {
                         lines,
                         left: read.contentDOM.getBoundingClientRect().left - scroller.left,

@@ -6,22 +6,18 @@
 // view. A click on an entry, or Enter on it, goes there in the review; `gO`
 // takes the keyboard to it, where `j` and `k` move and Esc goes back; `\`
 // hides it or shows it again. On a narrow screen it's an overlay `gO`, `\` or
-// the bar's button opens, closing as it goes somewhere. Where the overview is
-// the review zoomed out to its headers instead (`trials.ts`), `\` and `gO`
-// zoom.
+// the bar's button opens, closing as it goes somewhere.
 import { EditorView } from "@codemirror/view";
 import { Vim } from "@replit/codemirror-vim";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import type { Following } from "./follow";
-import { measured } from "./timing";
 import { cursorRow, outlineOf, type DraftMark, type OutlineMark, type OutlineRow, type Reading } from "./outline";
 import type { Laid } from "./review";
 
-/** What `gO` does in the review: take the keyboard to the overview; and what `\` does: hide it or show it, or zoom. */
+/** What `gO` does in the review: take the keyboard to the overview; and what `\` does: hide it or show it. */
 let outlineFocus: (() => void) | null = null;
 let outlineToggle: (() => void) | null = null;
-let zoomToggle: (() => void) | null = null;
 let outlineMapped = false;
 
 /** Set what `gO` does, as the overview is shown or goes. */
@@ -29,25 +25,20 @@ export function setOutlineFocus(focus: (() => void) | null): void {
     outlineFocus = focus;
 }
 
-/** Set what `\` does where the overview is a pane: hide it or show it. */
+/** Set what `\` does: hide the overview or show it. */
 export function setOutlineToggle(toggle: (() => void) | null): void {
     outlineToggle = toggle;
 }
 
-/** Set what `\` and `gO` do where the overview is the review zoomed out: zoom out or back. */
-export function setZoom(toggle: (() => void) | null): void {
-    zoomToggle = toggle;
-}
-
-/** Map `gO`, Neovim's outline key, and `\` in the review's vim, once: into the overview, and the overview hidden or shown, or zoomed. */
+/** Map `gO`, Neovim's outline key, and `\` in the review's vim, once: into the overview, and the overview hidden or shown. */
 export function mapOutlineKey(): void {
     if (outlineMapped) {
         return;
     }
     outlineMapped = true;
-    Vim.defineAction("lupOutline", () => (zoomToggle ?? outlineFocus)?.());
+    Vim.defineAction("lupOutline", () => outlineFocus?.());
     Vim.mapCommand("gO", "action", "lupOutline", {}, { context: "normal" });
-    Vim.defineAction("lupOverview", () => (zoomToggle ?? outlineToggle)?.());
+    Vim.defineAction("lupOverview", () => outlineToggle?.());
     Vim.mapCommand("\\", "action", "lupOverview", {}, { context: "normal" });
 }
 
@@ -163,12 +154,7 @@ function glyphOf(row: OutlineRow): { glyph: string; mark: string } {
 
 export function Outline({ following, laidOut, reading, narrow, open, setOpen, jump, back, focusing }: Props) {
     const [viewed, setViewed] = useState<Viewed>({ seen: [], cursor: null });
-    const rows = useMemo(() => {
-        const began = performance.now();
-        const made = outlineOf(laidOut, reading);
-        measured("lup-outline-rows", began);
-        return made;
-    }, [laidOut, reading]);
+    const rows = useMemo(() => outlineOf(laidOut, reading), [laidOut, reading]);
     const now = useRef(rows);
     now.current = rows;
     useEffect(() => {
@@ -183,7 +169,6 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
             view.requestMeasure({
                 key: "lup-outline",
                 read: (read: EditorView): Viewed => {
-                    const began = performance.now();
                     const scroller = read.scrollDOM.getBoundingClientRect();
                     const top = scroller.top - read.documentTop;
                     const from = read.lineBlockAtHeight(Math.max(top, 0)).from;
@@ -193,7 +178,6 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                         seen: rows.flatMap((row) => (row.kind !== "repository" && row.from <= to && row.to >= from ? [row.key] : [])),
                         cursor: cursorRow(rows, read.state.selection.main.head)?.key ?? null,
                     };
-                    measured("lup-outline", began);
                     return viewed;
                 },
                 write: (measured: Viewed) => setViewed((before) => (sameViewed(before, measured) ? before : measured)),

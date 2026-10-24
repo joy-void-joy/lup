@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
 import { EMPTY, laid, nested, ownerOf, rowLabel, whose, UNREAD, type AgentDrawers, type Around, type Conversation, type Head, type Item } from "./review";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
-import { CHOICES, DEFAULTS, searchOf, trialsOf } from "./trials";
 
 const AT = "2026-10-17T12:00:00Z";
 const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
@@ -56,19 +55,6 @@ const TASKED: AgentDrawers = {
         { kind: "said", by: "agent", text: "Going.", at: AT },
     ],
 };
-
-describe("the layout's switches still open", () => {
-    it("reads them from the address's query, the defaults for any left out or said wrong, and writes them back keeping the rest", () => {
-        expect(trialsOf("")).toEqual(DEFAULTS);
-        expect(DEFAULTS).toEqual({ labels: "lines", overview: "pane", frame: "band" });
-        expect(trialsOf("?labels=side&overview=zoom&frame=panel")).toEqual({ labels: "side", overview: "zoom", frame: "panel" });
-        expect(trialsOf("?labels=sideways&overview=yes&frame=box&header=stack")).toEqual(DEFAULTS);
-        expect(searchOf({ ...DEFAULTS, frame: "panel" }, "?timing=on")).toBe("?timing=on&frame=panel");
-        expect(searchOf(DEFAULTS, "?labels=side&frame=panel")).toBe("");
-        expect(CHOICES.find((each) => each.id === "overview-zoom")!.made(DEFAULTS)).toEqual({ ...DEFAULTS, overview: "zoom" });
-        expect(CHOICES.find((each) => each.id === "defaults")!.chosen(DEFAULTS)).toBe(true);
-    });
-});
 
 describe("subagents nested under their parent", () => {
     it("lays each subagent's group under its nearest forebear with a group, after its items and drawers, set in by how deep it is", () => {
@@ -127,32 +113,21 @@ describe("the drawers under the banner", () => {
     const drawers = new Map([[whose(PARENT), TASKED]]);
     const tasks = ownerOf({ drawer: "tasks", conversation: PARENT });
 
-    it("lays a label for each drawer with something in it on a line under the banner, side by side, those pulled out below it, open, the rest nowhere else", () => {
-        const out = laid([note(4, PARENT)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { side: { pulled: new Set() } });
-        const lines = out.text.split("\n");
-        expect(lines.slice(0, 3)).toEqual(["━━ s1 ━━", "▸ tasks 1/2   ▸ conversation · 2 steps", "── @4 note ──"]);
-        expect(out.drawers).toEqual([]);
-        const row = out.groups[0]!.row!;
-        expect(row.labels.map((each) => [each.kind, out.text.slice(each.from, each.to), each.pulled])).toEqual([
-            ["tasks", "▸ tasks 1/2", false],
-            ["conversation", "▸ conversation · 2 steps", false],
-        ]);
-        const pulled = laid([note(4, PARENT)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { side: { pulled: new Set([tasks]) } });
-        expect(pulled.text.split("\n").slice(0, 6)).toEqual(["━━ s1 ━━", "▾ tasks 1/2   ▸ conversation · 2 steps", "tasks · 2 entries, 1 done, 1 in progress", "✓ Read", "▶ Writing", ""]);
-        expect(pulled.drawers.map((each) => [each.kind, each.folds.at(-1)?.closed])).toEqual([["tasks", false]]);
-    });
-
-    it("lays each drawer under the banner a line of its own, folded, by default", () => {
+    it("lays each drawer under the banner, one under the other, a short label folding what it holds, the items after them", () => {
         const out = laid([note(4, PARENT)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers);
-        expect(out.text.split("\n").slice(0, 2)).toEqual(["━━ s1 ━━", "tasks · 2 entries, 1 done, 1 in progress"]);
-        expect(out.groups[0]!.row).toBeNull();
+        expect(out.text.split("\n").slice(0, 4)).toEqual(["━━ s1 ━━", "tasks 1/2", "✓ Read", "▶ Writing"]);
+        // No line between them, one after the last.
+        expect(out.text).toContain("▶ Writing\nconversation · 2 steps\n");
+        expect(out.text).toContain("\n\n── @4 note ──");
         expect(out.drawers.map((each) => [each.kind, each.folds.at(-1)?.closed])).toEqual([
             ["tasks", true],
             ["conversation", true],
         ]);
-        expect(out.text.indexOf("conversation · 2 steps")).toBeLessThan(out.text.indexOf("── @4"));
+        expect(out.drawers.map((each) => each.waiting)).toEqual([false, false]);
         const [group] = stickies(out, [0]);
         expect(group!.children.map((each) => each.kind)).toEqual(["drawer", "drawer", "item"]);
+        // Left out where there's nothing for one to hold.
+        expect(laid([note(4, PARENT)], [PARENT], banner, header, EMPTY, NOTHING, [], new Map([[whose(PARENT), UNREAD]])).text.split("\n").slice(0, 2)).toEqual(["━━ s1 ━━", "── @4 note ──"]);
     });
 
     it("says each label short, what waits in \"since you approved\" marking it, none for a drawer with nothing in it", () => {
@@ -235,19 +210,21 @@ describe("the header stack", () => {
 
 describe("the overview", () => {
     const items = [note(1, CHILD, WAITING), note(2, OTHER), note(4, PARENT)];
-    const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], new Map([[whose(PARENT), TASKED]]));
+    const drawers = new Map([[whose(PARENT), TASKED]]);
     const reading: Reading = {
         draft: { ...EMPTY, done: [2], comments: [{ item: 1, text: "Why?" }] },
         reviewed: null,
-        parents: PARENTS,
         states: new Map([[whose(PARENT), "calling"]]),
         called: (party) => (party.agent === null ? party.session : `${party.session}/${party.agent}`),
     };
+    const said = (rows: ReturnType<typeof outlineOf>) =>
+        rows.map((each) => `${"  ".repeat(each.depth)}${each.text} [${each.marks.join(",")}]${each.draft.length === 0 ? "" : ` {${each.draft.join(",")}}`}`);
 
-    it("lists each repository, its agents with each subagent under its parent whatever the review's order, then their items, each marked", () => {
+    it("lists each agent and its items in the review's own order, nested as the review nests them, each marked", () => {
+        const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS });
         const rows = outlineOf(out, reading);
         // How each stands, then, apart, what the draft does with it on the next Ctrl+Enter.
-        expect(rows.map((each) => `${"  ".repeat(each.depth)}${each.text} [${each.marks.join(",")}]${each.draft.length === 0 ? "" : ` {${each.draft.join(",")}}`}`)).toEqual([
+        expect(said(rows)).toEqual([
             "lup []",
             "  s2 [ended]",
             "    @2 note [] {read}",
@@ -256,9 +233,24 @@ describe("the overview", () => {
             "    a1 [ended]",
             "      @1 note [waiting] {comment}",
         ]);
+        // As the groups are laid out, never another order.
+        expect(rows.filter((each) => each.kind === "agent").map((each) => each.from)).toEqual(out.groups.map((each) => each.banner.from));
         // The cursor's entry is the deepest holding it.
         expect(cursorRow(rows, out.text.indexOf("Note 1."))?.text).toBe("@1 note");
         expect(cursorRow(rows, out.text.indexOf("━━ s1"))?.text).toBe("s1");
         expect(itemStanding(out.regions.find((each) => each.item.number === 1)!, { ...EMPTY, parked: [1], comments: [{ item: 1, text: "x" }] }, null)).toEqual({ marks: ["parked"], draft: [], fresh: false });
+    });
+
+    it("follows the review where it doesn't nest, a subagent's group where its first item put it", () => {
+        const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers);
+        expect(said(outlineOf(out, reading))).toEqual([
+            "lup []",
+            "  s1/a1 [ended]",
+            "    @1 note [waiting] {comment}",
+            "  s2 [ended]",
+            "    @2 note [] {read}",
+            "  s1 [calling]",
+            "    @4 note [news]",
+        ]);
     });
 });

@@ -9,7 +9,7 @@
 // unchanged lines, an item's context, an exchange, a call, has its letter in
 // its column, and a bar down it while the cursor's in it. A click on a label
 // goes there, on a letter opens or closes its fold. A CodeMirror gutter, whose
-// rows are as tall as the lines beside them, so the outline's heights are the
+// rows are as tall as the lines beside them, so the structure's heights are the
 // text's by construction.
 import { foldedRanges } from "@codemirror/language";
 import { StateEffect, type EditorState, type Extension } from "@codemirror/state";
@@ -18,7 +18,6 @@ import { GutterMarker, gutter, type BlockInfo } from "@codemirror/view";
 import type { Folding } from "./comments";
 import { around, depths } from "./folds";
 import { FOLD_KINDS, type FoldKind } from "./keys";
-import { measured } from "./timing";
 
 /** The kinds of fold that are the review's scopes, a bar their full height in the margin, labelled: an agent's group, an item, a drawer, a file. */
 export const SCOPES: ReadonlySet<FoldKind> = new Set<FoldKind>(["group", "item", "tasks", "since", "conversation", "file"]);
@@ -255,12 +254,7 @@ function besideLine(state: EditorState, structured: Structured, line: BlockInfo,
 export function structureMargin(structured: () => Structured, labels: boolean): Extension {
     return gutter({
         class: labels ? "fold-margin structure-margin" : "fold-margin structure-margin is-bare",
-        lineMarker: (view, line) => {
-            const began = performance.now();
-            const beside = besideLine(view.state, structured(), line, labels);
-            measured("lup-margin", began);
-            return beside;
-        },
+        lineMarker: (view, line) => besideLine(view.state, structured(), line, labels),
         lineMarkerChange: (update) =>
             update.selectionSet ||
             update.docChanged ||
