@@ -1327,8 +1327,9 @@ kbd {
     height: 100%;
 }
 
-/* Set in as the buffer's content is, past its padding, which a line placed absolutely would start before. */
-.buffer.stack .cm-line.stack-line {
+/* Set in as the buffer's content is, past its padding, which a line placed absolutely would start before; one row
+   each, whatever the line it pins pads itself with in the buffer, as a banner's band does. */
+.buffer.stack .cm-content .cm-line.stack-line.stack-line {
     position: absolute;
     left: 1ch;
     right: 1ch;
