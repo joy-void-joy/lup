@@ -332,8 +332,10 @@ export interface Drawer extends Scope {
     talk: Talk | null;
     /** What its "since you approved" shows, by file, where it's that drawer. */
     files: SinceFile[];
-    /** Where its "since you approved" says each file standing as the operator last saw it, in a line of its own. */
+    /** Where its "since you approved" says each file standing as the operator last saw it, in a line of its own: one with flagged writes still waiting in its place, the rest under `settled`. */
     reviewed: ReviewedLine[];
+    /** The line at the end of its "since you approved" that the files settled fold under, reviewed or as the operator saw them in an item with nothing waiting (`5 reviewed`); none where there's none. */
+    settled: Span | null;
     /** The worktree its files are in, for a remark on one; none before the host has answered. */
     worktree: string | null;
 }
@@ -747,7 +749,8 @@ export function sinceSummary(shown: Since | null): string {
         }
     }
     const open = changed.length - [...folded.values()].reduce((sum, each) => sum + each, 0);
-    const kept = files.length - changed.length;
+    // Reviewed, settled: those standing as the operator saw them with no flagged write waiting, which fold at the end.
+    const kept = files.filter((each) => each.file == null && (each.flags ?? []).length === 0).length;
     const flagged = files.filter((each) => (each.flags ?? []).length > 0).length;
     const said = [
         ...(open === 0 ? [] : [`${open} to review`]),
@@ -1132,6 +1135,7 @@ export function laid(
         let talk: Talk | null = null;
         let files: SinceFile[] = [];
         const reviewed: ReviewedLine[] = [];
+        let settled: Span | null = null;
         let said: string;
         let summary: Span;
         switch (kind) {
@@ -1178,19 +1182,40 @@ export function laid(
                         into.blocks.push({ comment: at, ...w.line(comment.text) });
                     }
                 };
-                // In the files' order, each standing as the operator last saw it a line among the others, so marking one reviewed moves none.
+                const seen = (each: SinceFile) => {
+                    const line = { kind: "reviewed" as const, ...w.line(reviewedLine(each)) };
+                    into.asides.push(line);
+                    reviewed.push({ from: line.from, to: line.to, file: each });
+                    return line;
+                };
+                // In the files' order, what's left to review: each file changed since the operator saw it, and in its place
+                // each standing as they saw it with flagged writes still waiting on it, a line of its own.
+                const done: SinceFile[] = [];
                 let first = 0;
                 for (const each of files) {
                     if (each.file == null) {
-                        const line = { kind: "reviewed" as const, ...w.line(reviewedLine(each)) };
-                        into.asides.push(line);
-                        reviewed.push({ from: line.from, to: line.to, file: each });
+                        if ((each.flags ?? []).length > 0) {
+                            seen(each);
+                        } else {
+                            done.push(each);
+                        }
                         continue;
                     }
                     const next = shown.findIndex((row, at) => at > first && row.row === null);
                     const own = shown.slice(first, next < 0 ? shown.length : next);
                     layCode(w, into, of, own, first, starts, writeBlocks);
                     first += own.length;
+                }
+                // What's settled, at the drawer's end, folded under one line: out of the way of what's left.
+                if (done.length > 0) {
+                    const label = `${done.length} reviewed`;
+                    const line = { kind: "summary" as const, ...w.line(label) };
+                    into.asides.push(line);
+                    settled = { from: line.from, to: line.to };
+                    const last = done.map(seen).at(-1);
+                    if (last !== undefined) {
+                        into.folds.push({ of, kind: "lines", name: "reviewed", label, closed: true, summary: settled, from: line.to, to: last.to });
+                    }
                 }
                 break;
             }
@@ -1206,7 +1231,7 @@ export function laid(
         // "Since you approved" is open, as it's the code waiting on the operator; the others fold until opened.
         into.folds.push({ of, kind, name: "", label, closed: kind !== "since", summary, from: summary.to, to: last });
         w.line("");
-        return { kind, conversation, talk, files, reviewed, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
+        return { kind, conversation, talk, files, reviewed, settled, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
     }
 }
 
