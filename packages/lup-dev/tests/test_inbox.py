@@ -6575,11 +6575,11 @@ class Landings:
         self.unmerging: str | None = None
         """What the room's `lup-dev merge` says failing, where it fails, as one without the command does."""
 
-    def branched(self, name: str) -> Path:
-        """Add a worktree on a new branch `name` from `dev`, and return its root."""
+    def branched(self, name: str, start: str = "dev") -> Path:
+        """Add a worktree on a new branch `name` from `start`, `dev` by default, and return its root."""
         root = self.repository / "tree" / name
         self.shell.git(
-            self.repository, "worktree", "add", "-q", "-b", name, str(root), "dev"
+            self.repository, "worktree", "add", "-q", "-b", name, str(root), start
         )
         return root
 
@@ -7362,6 +7362,114 @@ def test_land_merges_a_branch_onto_dev_in_the_room_gates_the_merge_and_moves_dev
             *["git", "worktree", "remove", str(feat)],
         ],
     ]
+
+
+def test_land_of_a_branch_leaves_alone_one_made_from_its_tip_worktree_and_all(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    """Seen on 2026-10-23 (#252): a worker handed back `since-merge-base`, then made `since-review-instant` from its tip to start its next piece, with no commit of its own yet; the landing merged that tip, and took both branches for landed."""
+    dev, shell = landings.dev, landings.shell
+    handed = landings.branched("since-merge-base")
+    landings.wrote(handed, "src/pkg/since.py", '"""Since the merge base."""\n')
+    branch = shell.git(dev, "rev-parse", "since-merge-base")
+    # Its worker hasn't written there yet, so the judge's session index doesn't
+    # place it in its new worktree (#240): nothing says anyone works there.
+    following = landings.branched("since-review-instant", start="since-merge-base")
+    old = landings.on_forge("refs/heads/dev")
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer, error = call(
+            machine.host.launch("one").mcp,
+            "land",
+            {"branch": "since-merge-base", "message": MESSAGE},
+        )
+    merge = landings.on_forge("refs/heads/dev")
+    assert not error, answer
+    assert answer == (
+        f"Merged `since-merge-base` onto `dev` as {merge}, and moved `dev` here to "
+        "it: the gate passed on it.\n"
+        f"Landed {merge} on `dev` at `origin`, which was at {old}.\n"
+        "Cleaned up after it:\n"
+        f"- removed the worktree {handed}\n"
+        "- deleted the local branch `since-merge-base`\n"
+        "Left alone, at the commit `since-merge-base` landed at, so made from it "
+        "with nothing of its own yet: `since-review-instant`.\n"
+        f"{NOTHING_GOING}"
+    )
+    assert merge is not None
+    assert shell.git(dev, "rev-parse", f"{merge}^@").splitlines() == [old, branch]
+    assert not handed.exists()
+    assert following.is_dir()
+    assert shell.git(dev, "rev-parse", "since-review-instant") == branch
+    assert shell.git(dev, "branch", "--list", "since-merge-base") == ""
+    assert landings.ran == [
+        ["podman", "container", "exists", "lup-one"],
+        [
+            *["podman", "exec", "--interactive", "--workdir", str(dev), "lup-one"],
+            *["uv", "run", "lup-dev", "merge", old, branch],
+        ],
+        [
+            *["podman", "exec", "--workdir", str(dev), "lup-one"],
+            *["git", "merge", "--ff-only", "--quiet", merge],
+        ],
+        ["podman", "container", "exists", "lup-one"],
+        [
+            *["podman", "exec", "--workdir", str(dev), "lup-one"],
+            *["git", "worktree", "remove", str(handed)],
+        ],
+    ]
+
+
+def test_land_leaves_alone_each_branch_at_a_tip_merged_that_another_shares_and_their_flags_hold_it(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    """`dev` merged `feat` by hand and lands as it is, while a worker made `next` from `feat`'s tip: which of the two was merged, the graph can't tell, so neither is cleaned up, and a flag on either holds the landing."""
+    rooms, path = '"""Rooms."""\n', "src/pkg/rooms.py"
+    feat, shell = landings.feat, landings.shell
+    landings.wrote(feat, path, rooms)
+    following = landings.branched("next", start="feat")
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with (
+        inboxed(machine, clock, notices, said, rooms=landings.room) as delivery,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        landings.launched("claude")
+        mcp = machine.host.launch("one").mcp
+        send(machine.host.launch("one").hook, started("claude"))
+        landings.flag(path, rooms, session)
+        landing = pool.submit(call, mcp, "land", {})
+        assert delivery.holding.wait(timeout=60)
+        [hold] = [
+            each
+            for each in delivery.inbox.waiting(Operator())
+            if isinstance(each.reason, HeldChange)
+        ]
+        inbox("answer", str(hold.number), "--approve", "--comment", "")
+        answer, error = landing.result(timeout=60)
+    assert not error, answer
+    assert answer == (
+        f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        f"The operator approved @{hold.number} (`{path}`).\n"
+        "Left alone, at a tip `dev` merged that another branch points at too, so "
+        "which of them was merged can't be told: `feat`, `next`.\n"
+        f"{NOTHING_GOING}"
+    )
+    assert landings.on_forge("refs/heads/dev") == tip
+    assert feat.is_dir()
+    assert following.is_dir()
+    assert shell.git(feat, "rev-parse", "next") == shell.git(feat, "rev-parse", "feat")
+    assert landings.ran == []
 
 
 def test_land_amends_the_gate_s_fixes_into_the_merge_its_parents_and_message_kept(
