@@ -846,6 +846,12 @@ def spawned(raw: str) -> Spawned | None:
     heard at its end is linked too; a rollout whose meta is another thread's
     says nothing of it.
 
+    None is Codex's own (`Spawned.internal`): a hook names an agent only for a
+    thread `spawn_agent` spawned (`thread_spawn_subagent_hook_context`,
+    `core/src/hook_runtime.rs`), and its own threads, a review, the approvals'
+    reviewer and the memory writer, are named by none (read at
+    `rust-v0.163.0`, `docs/field-notes.md`, *A runtime's own agents*).
+
     Codex hands a subagent with a path its last message itself
     (`Spawned.handed`): as the subagent's turn completes, it queues a
     `FINAL_ANSWER` message holding it in its parent's mailbox

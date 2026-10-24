@@ -2295,6 +2295,17 @@ def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
     )
     # Claude Code's own agents, a prompt's suggestion among them: no type, no record.
     assert claude.spawned(subagent("a5", "")) == Spawned(internal=True, handed=True)
+    # A progress summary's fork calling a tool, as 2.1.309 hooks it: no type at all.
+    fork = payload(
+        Path("/w"),
+        "PreToolUse",
+        tool_name="Bash",
+        tool_input={"command": "ls"},
+        tool_use_id="c2",
+        agent_id="a6",
+        transcript_path=str(transcript),
+    )
+    assert claude.spawned(fork) == Spawned(internal=True, handed=True)
     assert claude.spawned(pre_tool_use(Path("/w"), "Bash", {"command": "ls"})) is None
 
 
