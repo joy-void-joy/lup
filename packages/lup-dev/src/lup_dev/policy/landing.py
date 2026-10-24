@@ -45,12 +45,19 @@ gated branch, `dev` by default:
 
 **Which branches it lands:** of the local branches in the history of the tip and
 not in that of the gated branch's tip on the remote, those the landing merged
-(`landed_branches`): the branch landed, and each whose tip is a parent beyond the
-first of a merge on the first-parent line from the tip down to the remote's. A
-branch whose tip is one of that line's own commits, just made from the
-integration branch say, has nothing of its own in the landing: it's left alone,
-its worktree with it, holds the landing on no flag, and the answer names it, so
-the session landing isn't surprised to find it there. A flag keeps the branch
+(`landed_branches`): the branch given to the landing, and each other whose tip
+is a parent beyond the first of a merge on the first-parent line from the tip
+down to the remote's, where no branch given was given at that tip and no other
+branch points at it. The graph can't tell two branches at one commit apart, but
+the landing knows which it was given: one at the tip of the branch landed was
+made from it, a worker's next piece say, and is left alone, its worktree with
+it, holding the landing on no flag; several at one merged tip, none given, may
+each be the one merged, so none is cleaned up after, and a flag on any holds
+the landing. A branch whose tip is one of that line's own commits, just made
+from the integration branch say, has nothing of its own in the landing: it's
+left alone, its worktree with it, holds the landing on no flag. The answer
+names each branch left alone, a line for each why, so the session landing
+isn't surprised to find it there. A flag keeps the branch
 its worktree had checked out (`Flagged.branch`): one on a branch renamed or
 deleted since holds nothing, and a stale one on a branch name used again holds
 that branch's landing.
@@ -77,7 +84,9 @@ that isn't there is said once, with its name, and each worktree named as left.
 Left alone, and said: the repository's main worktree, one where the conversation
 landing works, and one where a conversation of a launch still served works, as
 the judge's session index has it (`Holding.works`); the local branch it has
-checked out stays with it.
+checked out stays with it. The index places a subagent in a worktree only once
+its file tools wrote there (#240), so a worker's fresh worktree is kept by which
+branches count as landed, not by this check.
 
 The tool's docstring's first line is its summary, 50 characters at most, which
 the guidance lists (`launch/guidance.py`); the rest is its description. It
@@ -86,6 +95,7 @@ answers in words, as `content`.
 
 import asyncio
 import hashlib
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from itertools import batched
@@ -295,22 +305,45 @@ def short(ref: str) -> str:
 
 
 class Branches(Model):
-    """The local branches in a landing's history and not in the remote's: those it lands, each ref's full name with its tip, and those it leaves alone, having merged none of them."""
+    """The local branches in a landing's history and not in the remote's: those it lands, each ref's full name with its tip, and those it leaves alone, why for each."""
 
     landed: dict[str, str] = {}
     alone: list[str] = []
+    """Those whose tip is one of the first-parent line's own commits: the
+    landing merged nothing of theirs."""
+    made: dict[str, list[str]] = {}
+    """By each branch given to the landing, the others at the tip it was
+    given at, where that tip is merged: made from it, with nothing of their
+    own yet."""
+    shared: list[str] = []
+    """Those at a tip merged that more than one of them points at, none given
+    to the landing: which of them was merged, the graph can't tell."""
+
+    @property
+    def holding(self) -> list[str]:
+        """The branches whose flags hold the landing: those it lands, and those of which it may have merged one (`shared`)."""
+        return [*self.landed, *self.shared]
 
 
-def landed_branches(git: Git, tip: str, old: str | None, source: str) -> Branches:
-    """Return the local branches a landing of `tip`, the branch `source`'s, lands, and those it leaves alone.
+def landed_branches(
+    git: Git, tip: str, old: str | None, given: dict[str, str]
+) -> Branches:
+    """Return the local branches a landing of `tip` lands, and those it leaves alone.
 
-    Of the local branches in `tip`'s history and not in `old`'s, the gated
-    branch's tip on the remote where it has one, it lands those the landing
-    merged: `source` itself, and each whose tip is a parent beyond the first
-    of a merge on the first-parent line from `tip` down to `old`. The rest
-    have nothing of their own in it, their tip being one of that line's own
-    commits: a branch just made from the integration branch, say, whose
-    worktree a session may be about to work in.
+    `given` are the branches given to the landing, each ref's full name with
+    its tip as given: the branch landed, and the gated branch a merge moves
+    onto `tip`. Of the local branches in `tip`'s history and not in `old`'s,
+    the gated branch's tip on the remote where it has one, it lands those
+    the landing merged: each given, and each other whose tip is a parent
+    beyond the first of a merge on the first-parent line from `tip` down to
+    `old`, where no given branch was given at that tip and no other branch
+    points at it. The graph can't tell two branches at one commit apart:
+    one at the tip a given branch was given at was made from it, as a worker
+    starts its next piece (`made`); several at a tip merged, none given, may
+    be either (`shared`); each is left alone. The rest have nothing of their
+    own in it, their tip being one of that line's own commits: a branch just
+    made from the integration branch, say, whose worktree a session may be
+    about to work in.
     """
     excluded = [] if old is None else [f"^{old}"]
     walked = git.text("rev-list", "--first-parent", "--parents", tip, *excluded)
@@ -329,16 +362,29 @@ def landed_branches(git: Git, tip: str, old: str | None, source: str) -> Branche
         "refs/heads/",
     )
     found = dict(nul_separated(line) for line in listed.output.splitlines())
+    # The branch given at each tip it was given at.
+    tips = {at: ref for ref, at in given.items()}
+    pointing = Counter(found.values())
+    landed = {
+        ref: commit
+        for ref, commit in found.items()
+        if ref in given
+        or (commit in merged and commit not in tips and pointing[commit] == 1)
+    }
+    rest = {ref: commit for ref, commit in found.items() if ref not in landed}
+    made = {
+        ref: [each for each, commit in rest.items() if commit == at]
+        for ref, at in given.items()
+        if at in merged
+    }
     return Branches(
-        landed={
-            ref: commit
-            for ref, commit in found.items()
-            if ref == source or commit in merged
-        },
-        alone=[
+        landed=landed,
+        alone=[ref for ref, commit in rest.items() if commit not in merged],
+        made={ref: others for ref, others in made.items() if others},
+        shared=[
             ref
-            for ref, commit in found.items()
-            if ref != source and commit not in merged
+            for ref, commit in rest.items()
+            if commit in merged and commit not in tips
         ],
     )
 
@@ -647,8 +693,12 @@ class Lander(Model, arbitrary_types_allowed=True):
         their words and lands nothing: answer them, commit, and call it again;
         what they approved stays approved. Once landed, it cleans up after each
         branch it landed: deletes its copy on the remote, removes its worktree
-        where it's clean and nobody works in it, and deletes the local branch;
-        what it leaves, it says, and why. Its last lines say what's still
+        where it's clean and nobody works in it, and deletes the local branch.
+        The branches it landed are the one you gave, and each other merged
+        into `dev` whose tip no other branch shares; a branch made from the
+        one you gave, at its tip, is left alone, worktree and all, as is each
+        of several sharing a merged tip, and each one just made from `dev`.
+        What it leaves, it says, and why. Its last lines say what's still
         running or waiting to land: your session's subagents lup hasn't heard
         end, and the local branches not on `dev`, with who works in each.
         """
@@ -719,10 +769,11 @@ class Lander(Model, arbitrary_types_allowed=True):
             )
             if refused is not None:
                 return refused
-        branches = await asyncio.to_thread(
-            landed_branches, git, lands, old, f"refs/heads/{named}"
-        )
-        holds = await self.holds(git, onto, lands, old, branches.landed)
+        # The branches given to the landing: the one landed, at its tip as
+        # given, and the gated one a merge moved onto what lands.
+        given = {f"refs/heads/{source}": tip, f"refs/heads/{named}": lands}
+        branches = await asyncio.to_thread(landed_branches, git, lands, old, given)
+        holds = await self.holds(git, onto, lands, old, branches.holding)
         waited = await self.waited(holds)
         if not all(each.approved for each in waited.outcomes):
             return unapproved(waited, made.moved)
@@ -748,7 +799,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 f"Landed {lands} on `{short(onto)}` at `{remote}`, {was}.",
                 *approvals(waited),
                 *said(cleaned),
-                *left_alone(named, branches.alone),
+                *left_alone(named, branches),
                 *going,
             ]
         )
@@ -1088,9 +1139,9 @@ class Lander(Model, arbitrary_types_allowed=True):
         onto: str,
         tip: str,
         old: str | None,
-        branches: dict[str, str],
+        branches: list[str],
     ) -> list[Held]:
-        """Put a hold in the operator's inbox for each file the landing changes that's flagged on a branch it lands and not approved, covering every such flag on it, and return them."""
+        """Put a hold in the operator's inbox for each file the landing changes that's flagged on one of `branches`, those it lands or may have merged (`Branches.holding`), and not approved, covering every such flag on it, and return them."""
         names = [short(ref) for ref in branches]
         changed = await asyncio.to_thread(changed_files, git, old, tip)
         flags = [
@@ -1562,12 +1613,37 @@ def said(cleaned: Cleaned) -> list[str]:
     return [*done, *left]
 
 
-def left_alone(source: str, alone: list[str]) -> list[str]:
-    """Say which branches in the landing's history it left alone, the branch `source` having merged none of them, in a line; nothing where there's none."""
-    if not alone:
-        return []
-    named = ", ".join(f"`{short(ref)}`" for ref in alone)
-    return [f"Left alone, `{source}` having merged none of them: {named}."]
+def left_alone(source: str, branches: Branches) -> list[str]:
+    """Say which branches in the landing's history it left alone, and why, a line for each why: the branch `source` having merged nothing of theirs, their being made from a branch landed, or sharing a tip `source` merged; nothing where there's none."""
+
+    def named(refs: list[str]) -> str:
+        return ", ".join(f"`{short(ref)}`" for ref in refs)
+
+    return [
+        *(
+            [f"Left alone, `{source}` having merged none of them: {named(alone)}."]
+            if (alone := branches.alone)
+            else []
+        ),
+        *(
+            (
+                f"Left alone, at the commit `{short(ref)}` landed at, so made from "
+                f"it with nothing of its own yet: {named(others)}."
+            )
+            for ref, others in branches.made.items()
+        ),
+        *(
+            [
+                (
+                    f"Left alone, at a tip `{source}` merged that another branch "
+                    "points at too, so which of them was merged can't be told: "
+                    f"{named(shared)}."
+                )
+            ]
+            if (shared := branches.shared)
+            else []
+        ),
+    ]
 
 
 class LandingTools(Model, RoomTools, arbitrary_types_allowed=True):
