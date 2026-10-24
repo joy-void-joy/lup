@@ -41,9 +41,11 @@ from lup_dev.inbox.protocol import (
     Files,
     Items,
     KeepDraft,
+    KeepOrder,
     KeepTalk,
     ListInbox,
     ListItems,
+    Ordered,
     Reviewed,
     SendDraft,
     SendItem,
@@ -53,6 +55,7 @@ from lup_dev.inbox.protocol import (
     ShowDraft,
     ShowFiles,
     Shown,
+    ShowOrder,
     ShowTalk,
     Talked,
 )
@@ -77,6 +80,7 @@ from lup_dev.inbox.store import (
     Letter,
     Message,
     Operator,
+    Order,
     Question,
     Quote,
     Reading,
@@ -153,13 +157,15 @@ class Standing(MutableModel):
 
 
 class Demo(MutableModel, Host, arbitrary_types_allowed=True):
-    """A host serving stand-in launches, conversations and items, as of the clock's time, and keeping the operator's draft in memory; what it can't answer it refuses, saying it's a demo."""
+    """A host serving stand-in launches, conversations and items, as of the clock's time, and keeping the operator's draft and where the review lays out its groups in memory; what it can't answer it refuses, saying it's a demo."""
 
     clock: Clock = SystemClock()
     # lup: ignore("runtime-mention", why="stand-in data: the runtimes the demo's launches show, not a feature built for one")
     runtimes: list[str] = ["claude", "codex"]
     """The runtimes the demo's launches run, by name: the first for most, the second for one."""
     draft: Draft = Draft()
+    order: Order = Order()
+    """Where the review lays out its groups, kept in memory, as the host keeps it: each page open on the demo shares it."""
     talks: dict[str, Talk] = {}
     """What the operator writes on each conversation, by its key, kept in memory."""
     sent: list[Item] = []
@@ -259,6 +265,13 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 self.changed.set()
                 self.changed = asyncio.Event()
                 return Reviewed(items=[])
+            case ShowOrder():
+                return Ordered(order=self.order)
+            case KeepOrder(places=places, gone=gone):
+                self.order = self.order.laid(places, gone)
+                self.changed.set()
+                self.changed = asyncio.Event()
+                return Ordered(order=self.order)
             case ShowTalk(conversation=conversation):
                 return Talked(talk=self.talks.get(conversation.key(), Talk()))
             case KeepTalk(conversation=conversation, talk=talk):

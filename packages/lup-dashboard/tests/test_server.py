@@ -501,6 +501,23 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
     }
 
 
+def test_the_demo_keeps_one_order_of_the_reviews_groups_for_every_page(
+    page: Path,
+) -> None:
+    served = client(Demo(clock=Fixed()), page)
+
+    def keep(places: list[str], gone: list[str]) -> JsonValue:
+        asked = {"kind": "inbox-keep-order", "places": places, "gone": gone}
+        return served.post("/api/ask", json=asked, headers=bearing()).json()
+
+    one = keep(["now b", "now a"], [])
+    other = keep(["now a", "now c"], ["now b"])
+    shown = served.post("/api/ask", json={"kind": "inbox-order"}, headers=bearing())
+    assert one == {"kind": "inbox-ordered", "order": {"places": ["now b", "now a"]}}
+    assert other == {"kind": "inbox-ordered", "order": {"places": ["now a", "now c"]}}
+    assert shown.json() == other
+
+
 def settling(approved: bool, reason: Approval | Message) -> Settled:
     """The host's reply to an approval answered: its item, as it stands."""
     item = Item(

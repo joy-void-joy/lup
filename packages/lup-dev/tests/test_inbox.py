@@ -83,9 +83,11 @@ from lup_dev.inbox.protocol import (
     FinishItem,
     Items,
     KeepDraft,
+    KeepOrder,
     KeepTalk,
     ListInbox,
     ListItems,
+    Ordered,
     Reviewed,
     SendDraft,
     SendItem,
@@ -97,6 +99,7 @@ from lup_dev.inbox.protocol import (
     ShowFiles,
     ShowGathering,
     Shown,
+    ShowOrder,
     ShowTalk,
     Talked,
 )
@@ -3395,6 +3398,7 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
             ShowGathering(sender=elsewhere, worktree=other, path=Path("a.py")),
             ShowDraft(),
             ShowTalk(conversation=mine),
+            ShowOrder(),
         ]:
             with pytest.raises(HostError) as refusal:
                 room.ask(request, Conversed)
@@ -3410,6 +3414,7 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
         "the conversation isn't one of this repository's",
         "the operator's draft reply is theirs until they send it",
         "what the operator writes on a conversation is theirs until they send it",
+        "the operator's review is theirs, across every repository",
     ]
 
 
@@ -3761,6 +3766,37 @@ def drafting(machine: Layout, clock: FakeClock, draft: Draft) -> Draft:
     """Keep `draft` as the operator's, as the dashboard does, and return it as kept."""
     host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
     return host.ask(KeepDraft(draft=draft), Drafted).draft
+
+
+def test_the_reviews_order_keeps_each_place_where_it_was_whatever_order_a_page_lays_it_in(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str]
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        host = client(machine.host, clock)
+        unread = host.ask(ShowOrder(), Ordered)
+        first = host.ask(KeepOrder(places=["now a", "now b"]), Ordered)
+        other = host.ask(KeepOrder(places=["now c", "now b", "later a"]), Ordered)
+        shown = host.ask(ShowOrder(), Ordered)
+    assert unread.order.places == []
+    assert first.order.places == ["now a", "now b"]
+    assert other.order.places == ["now a", "now b", "now c", "later a"]
+    assert shown == other
+
+
+def test_a_place_a_page_no_longer_lays_out_is_dropped_its_group_coming_back_last(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str]
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        host = client(machine.host, clock)
+        host.ask(KeepOrder(places=["now a", "now b", "now c"]), Ordered)
+        emptied = host.ask(
+            KeepOrder(places=["now a", "now c"], gone=["now b", "now a"]), Ordered
+        )
+        elsewhere = host.ask(KeepOrder(places=["now c"]), Ordered)
+        back = host.ask(KeepOrder(places=["now a", "now b", "now c"]), Ordered)
+    assert emptied.order.places == ["now a", "now c"]
+    assert elsewhere.order.places == ["now a", "now c"]
+    assert back.order.places == ["now a", "now c", "now b"]
 
 
 def sending(machine: Layout, clock: FakeClock) -> list[Item]:

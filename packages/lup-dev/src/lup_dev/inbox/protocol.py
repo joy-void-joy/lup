@@ -61,6 +61,7 @@ from lup_dev.inbox.store import (
     Item,
     Message,
     Operator,
+    Order,
     Passage,
     Review,
     Ruling,
@@ -131,6 +132,25 @@ class KeepDraft(Request, reads=False):
 
     kind: Literal["inbox-keep-draft"] = "inbox-keep-draft"
     draft: Draft
+
+
+class ShowOrder(Request, reads=True):
+    """Show where the dashboard's review lays out its groups, as the operator has seen them: kept for every page they open, across reloads."""
+
+    kind: Literal["inbox-order"] = "inbox-order"
+
+
+class KeepOrder(Request, reads=False):
+    """Keep where the dashboard's review lays out its groups once a page laid them out: each kept where it was, any other after them, and those gone from the page dropped (`Order.laid`)."""
+
+    kind: Literal["inbox-keep-order"] = "inbox-keep-order"
+    places: list[str]
+    """Each group the page laid out, by what names its place (`Group.place`,
+    `page/src/review.ts`), in the order it laid them out."""
+    gone: list[str] = []
+    """The places of the groups gone from the page: each its last layout laid
+    out and this one doesn't, and, as it first lays the review out, each kept
+    it doesn't lay out."""
 
 
 class ShowTalk(Request, reads=True):
@@ -360,6 +380,13 @@ class Drafted(Reply):
 
     kind: Literal["inbox-drafted"] = "inbox-drafted"
     draft: Draft
+
+
+class Ordered(Reply):
+    """Where the dashboard's review lays out its groups, as kept."""
+
+    kind: Literal["inbox-ordered"] = "inbox-ordered"
+    order: Order
 
 
 class Talked(Reply):
@@ -1030,6 +1057,40 @@ class DraftKeeping(Model, Handler[KeepDraft], arbitrary_types_allowed=True):
         return Drafted(draft=self.delivery.drafted(request.draft))
 
 
+class OrderShowing(Model, Reading[ShowOrder], arbitrary_types_allowed=True):
+    """Answers `ShowOrder`: where the review lays out its groups; never to a room, since it names the operator's conversations across every repository."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[ShowOrder]:
+        return ShowOrder
+
+    @override
+    async def answer(self, request: ShowOrder) -> Reply:
+        return Ordered(order=self.delivery.inbox.order())
+
+    @override
+    async def scoped(self, request: ShowOrder, repository: Path) -> Reply:
+        message = "the operator's review is theirs, across every repository"
+        raise InboxError(message)
+
+
+class OrderKeeping(Model, Handler[KeepOrder], arbitrary_types_allowed=True):
+    """Answers `KeepOrder`: where the review lays out its groups, kept."""
+
+    delivery: Delivery
+
+    @override
+    def request(self) -> type[KeepOrder]:
+        return KeepOrder
+
+    @override
+    async def answer(self, request: KeepOrder) -> Reply:
+        order = self.delivery.inbox.ordered(request.places, request.gone)
+        return Ordered(order=order)
+
+
 class TalkShowing(Model, Reading[ShowTalk], arbitrary_types_allowed=True):
     """Answers `ShowTalk`: what the operator wrote on the conversation, as it stands; never to a room, since what they haven't sent is theirs."""
 
@@ -1111,6 +1172,8 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.reading(DraftShowing(delivery=delivery)),
         Route.to(DraftKeeping(delivery=delivery)),
         Route.to(DraftSending(delivery=delivery)),
+        Route.reading(OrderShowing(delivery=delivery)),
+        Route.to(OrderKeeping(delivery=delivery)),
         Route.reading(TalkShowing(delivery=delivery)),
         Route.to(TalkKeeping(delivery=delivery)),
     ]

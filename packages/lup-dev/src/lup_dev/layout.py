@@ -397,6 +397,11 @@ class InboxLayout(Model):
         return self.home / "draft.json"
 
     @property
+    def order(self) -> Path:
+        """Where the dashboard's review lays out its groups, as the operator has seen them, kept for every page and across reloads (`docs/dashboard.md`, *The review*)."""
+        return self.home / "order.json"
+
+    @property
     def talks(self) -> Path:
         """What the operator writes on each conversation they read in the dashboard, a file named by its key (`docs/dashboard.md`, *The drawers*)."""
         return self.home / "talks"
