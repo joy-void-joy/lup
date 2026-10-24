@@ -1,12 +1,13 @@
-"""The judge in a launch's own process: each hook answered at once, in a thread of its own, by the copy the repository approved.
+"""The judge in a repository's process: each hook answered at once, in a thread of its own, by the copy the repository approved, for every launch of it.
 
-The first tests answer hooks in this process, through the routes the launch's
-process serves. The others start real processes: `lup-dev worker` itself, on a
-repository the judge reads, and a stand-in copy of `lup-dev` whose process
-answers through the same routes with a judge the test drives, so a hold waits
-until the test lets it go, and a hook can end its process. Nothing sleeps:
+The first tests answer hooks in this process, through the routes the
+repository's process serves. The others start real processes: `lup-dev worker`
+itself, on a repository the judge reads, and a stand-in copy of `lup-dev` whose
+process answers through the same routes with a judge the test drives, so a hold
+waits until the test lets it go, and a hook can end its process. Nothing sleeps:
 what must overlap meets at a barrier or on a socket the test serves, whose
-timeouts only end a test that would otherwise hang.
+timeouts only end a test that would otherwise hang, and a process nothing holds
+ends at once where a test says it idles for no time.
 """
 
 import asyncio
@@ -14,6 +15,7 @@ import json
 import sys
 import threading
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,6 +29,7 @@ from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
     HookJudged,
     JudgeHook,
+    Worker,
     WorkerJudge,
     Workers,
     exchanged,
@@ -52,10 +55,10 @@ def short(tmp_path_factory: pytest.TempPathFactory) -> Path:
 async def served(
     judge: Callable[[str, str], str], at: Path, said: list[str]
 ) -> asyncio.Server:
-    """Serve the routes a launch's process serves, its modules unmade, judging with `judge`, on `at`."""
+    """Serve the routes a repository's process serves, its modules unmade, judging with `judge`, on `at`."""
     dispatcher = Dispatcher(
         routes={route.kind: route for route in routes(None, judge)},
-        answering="a launch's process",
+        answering="a repository's process",
         say=said.append,
         changes=Changes(),
     )
@@ -128,14 +131,16 @@ def test_judging_that_ends_its_thread_fails_its_hook_and_no_other(
     assert any("LupDevError: judging ended its thread" in line for line in said)
 
 
-def registered(worktree: Path, judge: Path) -> Register:
+def registered(
+    worktree: Path, judge: Path, launch: str = "one", repository: Path | None = None
+) -> Register:
     return Register(
-        launch="one",
+        launch=launch,
         runtime="claude",
         worktree=worktree,
-        repository=worktree / ".git",
+        repository=repository or worktree / ".git",
         judge=judge,
-        container="lup-one",
+        container=f"lup-{launch}",
         limits=Limits(actions=[], protected=[]),
         github=None,
     )
@@ -151,7 +156,7 @@ def isolated(state: Layout, short: Path, monkeypatch: pytest.MonkeyPatch) -> Hos
     return host
 
 
-def test_a_launch_s_process_answers_a_hook_as_the_hook_command_does(
+def test_a_repository_s_process_answers_a_hook_as_the_hook_command_does(
     repo: Path, isolated: HostLayout
 ) -> None:
     launch = registered(repo, Path(sys.executable).parent / "lup-dev")
@@ -178,9 +183,12 @@ def test_a_launch_s_process_answers_a_hook_as_the_hook_command_does(
     assert printed.exit_code == 0
 
     async def exercised() -> list[str]:
-        workers = Workers(layout=isolated, say=lambda line: None)
+        workers = Workers(
+            layout=isolated, say=lambda line: None, approval=lambda repository: None
+        )
         judge = WorkerJudge(modules=workers)
         try:
+            await workers.open(launch)
             heard = [
                 await judge.judged(launch, each) for each in [started, write("t2")]
             ]
@@ -188,7 +196,7 @@ def test_a_launch_s_process_answers_a_hook_as_the_hook_command_does(
                 await judge.judged(launch, "not a payload")
             return heard
         finally:
-            await workers.close(launch)
+            await workers.stop()
 
     begun, wrote = asyncio.run(exercised())
     assert begun == ""
@@ -207,7 +215,6 @@ import socket
 import sys
 from pathlib import Path
 
-from lup_dev.host.protocol import Register
 from lup_dev.worker import routes, serve
 
 here = Path(__file__).parent
@@ -228,8 +235,7 @@ def said(line: str) -> None:
     sys.stderr.write(f"{{line}}\\n")
 
 
-launch = Register.model_validate_json(sys.stdin.readline())
-asyncio.run(serve(routes(None, judge), Path(sys.argv[2]), launch, said))
+asyncio.run(serve(routes(None, judge), Path(sys.argv[2]), Path(sys.argv[3]), said))
 """
 
 
@@ -289,23 +295,74 @@ class Copies:
         return self.link / "lup-dev"
 
 
+class Approvals(dict[Path, str]):
+    """What the operator approved last for each repository, by a fingerprint the test sets."""
+
+    def of(self, repository: Path) -> str | None:
+        return self.get(repository)
+
+
 @asynccontextmanager
 async def stand_ins(
-    short: Path, isolated: HostLayout, said: list[str]
+    short: Path,
+    isolated: HostLayout,
+    said: list[str],
+    idle: timedelta = timedelta(hours=1),
+    approvals: Approvals | None = None,
 ) -> AsyncGenerator[tuple[Workers, Copies, Holds]]:
+    """Workers starting stand-in copies, each repository's process running on for `idle` once nothing holds it, ended as the context closes."""
     copies = Copies(short)
     holds = Holds()
     copies.made("a")
     copies.made("b")
     copies.switch("a")
-    workers = Workers(layout=isolated, say=said.append)
+    workers = Workers(
+        layout=isolated,
+        say=said.append,
+        approval=(approvals or Approvals()).of,
+        idle=idle,
+    )
     server = await asyncio.start_unix_server(holds.heard, path=short / "h.sock")
     try:
         yield workers, copies, holds
     finally:
         await holds.release()
+        await workers.stop()
         server.close()
         await server.wait_closed()
+
+
+def running(workers: Workers, launch: Register) -> Worker:
+    """Return the process answering `launch`'s repository, which the test expects to run."""
+    found = workers.processes(launch.repository).running
+    assert found is not None
+    return found
+
+
+def test_launches_of_one_repository_share_its_process_and_another_s_has_its_own(
+    short: Path, isolated: HostLayout
+) -> None:
+    said: list[str] = []
+
+    async def exercised() -> None:
+        async with stand_ins(short, isolated, said) as (workers, copies, _):
+            one = registered(short, copies.command, "one")
+            two = registered(short, copies.command, "two")
+            other = registered(
+                short, copies.command, "three", repository=short / "other.git"
+            )
+            judge = WorkerJudge(modules=workers)
+            for each in [one, two, other]:
+                await workers.open(each)
+            assert await judge.judged(one, "x") == "a answers x"
+            assert await judge.judged(two, "y") == "a answers y"
+            assert await judge.judged(other, "z") == "a answers z"
+            assert running(workers, one) is running(workers, two)
+            assert running(workers, other) is not running(workers, one)
+            assert len(workers.commands()) == 2
+
+    asyncio.run(exercised())
+    assert len([line for line in said if "its modules serve" in line]) == 2
 
 
 def test_a_new_copy_takes_new_hooks_while_the_one_before_finishes_its_hold(
@@ -316,13 +373,17 @@ def test_a_new_copy_takes_new_hooks_while_the_one_before_finishes_its_hold(
     async def exercised() -> list[str]:
         async with stand_ins(short, isolated, said) as (workers, copies, holds):
             launch = registered(short, copies.command)
+            other = registered(short, copies.command, "two")
             judge = WorkerJudge(modules=workers)
+            await workers.open(launch)
+            await workers.open(other)
             assert await judge.judged(launch, "x") == "a answers x"
-            first = workers.running["one"]
+            first = running(workers, launch)
             held = asyncio.create_task(judge.judged(launch, "hold"))
             assert await holds.next() == "a"
             copies.switch("b")
-            after = await judge.judged(launch, "y")
+            # The repository's next request, whichever launch's, reaches the new copy.
+            after = await judge.judged(other, "y")
             # The process of `a` still answers the hold it was asked, and
             # nothing new reaches it.
             assert first.process.status is None
@@ -337,13 +398,11 @@ def test_a_new_copy_takes_new_hooks_while_the_one_before_finishes_its_hold(
             assert not first.socket.exists()
             assert [each.parent.name for each in workers.commands()] == ["b"]
             again = await judge.judged(launch, "z")
-            await workers.close(launch)
             return [after, answered, again]
 
     assert asyncio.run(exercised()) == ["b answers y", "a answers hold", "b answers z"]
     assert any(
-        f"its repository's approved copy is {short / 'b' / 'lup-dev'}" in line
-        for line in said
+        f"approved anew, its copy {short / 'b' / 'lup-dev'}" in line for line in said
     )
     assert any(
         f"its process from {short / 'a' / 'lup-dev'} has answered what it was asked"
@@ -352,53 +411,197 @@ def test_a_new_copy_takes_new_hooks_while_the_one_before_finishes_its_hold(
     )
 
 
-def test_a_launch_s_process_that_dies_judging_fails_that_hook_and_starts_again(
+def test_an_approval_of_the_same_copy_switches_the_process_as_a_new_copy_does(
+    short: Path, isolated: HostLayout
+) -> None:
+    """Approving the person's own layer alone installs no copy, but the
+    declaration the modules are made from changed: a process of the approval
+    answers from the next request, the one before finishing what it was asked."""
+    approvals = Approvals({short / ".git": "before"})
+
+    async def exercised() -> None:
+        async with stand_ins(short, isolated, [], approvals=approvals) as (
+            workers,
+            copies,
+            holds,
+        ):
+            launch = registered(short, copies.command)
+            judge = WorkerJudge(modules=workers)
+            await workers.open(launch)
+            first = running(workers, launch)
+            held = asyncio.create_task(judge.judged(launch, "hold"))
+            assert await holds.next() == "a"
+            approvals[short / ".git"] = "after"
+            assert await judge.judged(launch, "y") == "a answers y"
+            second = running(workers, launch)
+            assert second is not first
+            assert (first.approval, second.approval) == ("before", "after")
+            assert first.process.status is None
+            await holds.release()
+            assert await asyncio.wait_for(held, PATIENCE) == "a answers hold"
+            await asyncio.wait_for(asyncio.gather(*workers.retiring), PATIENCE)
+            assert first.process.status is not None
+            assert running(workers, launch) is second
+
+    asyncio.run(exercised())
+
+
+def test_a_repository_s_process_that_dies_fails_all_it_answers_and_starts_again(
     short: Path, isolated: HostLayout
 ) -> None:
     said: list[str] = []
 
     async def exercised() -> str:
-        async with stand_ins(short, isolated, said) as (workers, copies, _):
+        async with stand_ins(short, isolated, said) as (workers, copies, holds):
             launch = registered(short, copies.command)
+            other = registered(short, copies.command, "two")
             judge = WorkerJudge(modules=workers)
             await workers.open(launch)
-            dying = workers.running["one"]
+            await workers.open(other)
+            dying = running(workers, launch)
+            # Another launch's hook waits in the same process as it dies.
+            held = asyncio.create_task(judge.judged(other, "hold"))
+            assert await holds.next() == "a"
             with pytest.raises(HostError, match="ended before it answered"):
                 await judge.judged(launch, "die")
+            with pytest.raises(HostError, match="ended before it answered"):
+                await asyncio.wait_for(held, PATIENCE)
             await asyncio.wait_for(dying.process.process.wait(), timeout=PATIENCE)
-            again = await judge.judged(launch, "x")
-            assert workers.running["one"] is not dying
+            again = await judge.judged(other, "x")
+            assert running(workers, launch) is not dying
             assert not dying.socket.exists()
-            await workers.close(launch)
             return again
 
     assert asyncio.run(exercised()) == "a answers x"
-    assert "one: its process is gone; starting it again" in said
+    assert f"{short / '.git'}: its process is gone; starting it again" in said
 
 
-def test_a_launch_ending_ends_its_processes_a_replaced_one_holding_among_them(
+def test_a_launch_s_end_lets_go_and_the_last_one_s_ends_the_process_once_idle(
+    short: Path, isolated: HostLayout
+) -> None:
+    said: list[str] = []
+
+    async def exercised() -> None:
+        async with stand_ins(short, isolated, said, idle=timedelta(0)) as (
+            workers,
+            copies,
+            _,
+        ):
+            one = registered(short, copies.command, "one")
+            two = registered(short, copies.command, "two")
+            judge = WorkerJudge(modules=workers)
+            await workers.open(one)
+            await workers.open(two)
+            assert await judge.judged(one, "x") == "a answers x"
+            shared = running(workers, one)
+            await workers.close(one)
+            processes = workers.processes(one.repository)
+            # Another launch holds it still: it runs on, and the ended launch's
+            # request still on its way starts nothing.
+            assert processes.stopping is None
+            with pytest.raises(HostError, match="launch one has ended"):
+                await judge.judged(one, "late")
+            assert await judge.judged(two, "y") == "a answers y"
+            assert running(workers, two) is shared
+            await workers.close(two)
+            stopping = processes.stopping
+            assert stopping is not None
+            await asyncio.wait_for(stopping, PATIENCE)
+            assert shared.process.status is not None
+            assert not shared.socket.exists()
+            assert workers.commands() == []
+            # A launch opening afterwards starts it again.
+            three = registered(short, copies.command, "three")
+            await workers.open(three)
+            assert await judge.judged(three, "z") == "a answers z"
+            assert running(workers, three) is not shared
+
+    asyncio.run(exercised())
+    assert (
+        f"{short / '.git'}: nothing has held its process for 0:00:00, so it ended"
+        in said
+    )
+
+
+def test_a_hold_taken_while_the_process_idles_keeps_it_running(
     short: Path, isolated: HostLayout
 ) -> None:
     async def exercised() -> None:
-        async with stand_ins(short, isolated, []) as (workers, copies, holds):
+        async with stand_ins(short, isolated, []) as (workers, copies, _):
+            one = registered(short, copies.command, "one")
+            judge = WorkerJudge(modules=workers)
+            await workers.open(one)
+            assert await judge.judged(one, "x") == "a answers x"
+            warm = running(workers, one)
+            await workers.close(one)
+            stopping = workers.processes(one.repository).stopping
+            assert stopping is not None
+            two = registered(short, copies.command, "two")
+            await workers.open(two)
+            await asyncio.wait([stopping], timeout=PATIENCE)
+            assert stopping.cancelled()
+            assert await judge.judged(two, "y") == "a answers y"
+            assert running(workers, two) is warm
+            assert warm.process.status is None
+
+    asyncio.run(exercised())
+
+
+def test_the_last_launch_ending_ends_its_processes_once_idle_a_replaced_one_holding_among_them(
+    short: Path, isolated: HostLayout
+) -> None:
+    async def exercised() -> None:
+        async with stand_ins(short, isolated, [], idle=timedelta(0)) as (
+            workers,
+            copies,
+            holds,
+        ):
             launch = registered(short, copies.command)
             judge = WorkerJudge(modules=workers)
+            await workers.open(launch)
             held = asyncio.create_task(judge.judged(launch, "hold"))
             assert await holds.next() == "a"
-            first = workers.running["one"]
+            first = running(workers, launch)
             copies.switch("b")
             assert await judge.judged(launch, "y") == "b answers y"
-            second = workers.running["one"]
+            second = running(workers, launch)
             await workers.close(launch)
+            stopping = workers.processes(launch.repository).stopping
+            assert stopping is not None
+            await asyncio.wait_for(stopping, PATIENCE)
             assert first.process.status is not None
             assert second.process.status is not None
             assert workers.commands() == []
-            assert not list(isolated.launches.glob("one.modules.*"))
+            assert not list(isolated.processes.iterdir())
             with pytest.raises(HostError):
                 await asyncio.wait_for(held, timeout=PATIENCE)
             # A hook still on its way as the launch ends starts no process.
             with pytest.raises(HostError, match="launch one has ended"):
                 await judge.judged(launch, "late")
             assert workers.commands() == []
+
+    asyncio.run(exercised())
+
+
+def test_stopping_ends_every_repository_s_process_whatever_holds_it(
+    short: Path, isolated: HostLayout
+) -> None:
+    async def exercised() -> None:
+        async with stand_ins(short, isolated, []) as (workers, copies, _):
+            one = registered(short, copies.command, "one")
+            other = registered(
+                short, copies.command, "two", repository=short / "other.git"
+            )
+            judge = WorkerJudge(modules=workers)
+            for each in [one, other]:
+                await workers.open(each)
+                await judge.judged(each, "x")
+            started = [running(workers, each) for each in [one, other]]
+            await workers.stop()
+            assert all(each.process.status is not None for each in started)
+            assert workers.commands() == []
+            assert not list(isolated.processes.iterdir())
+            with pytest.raises(HostError, match="launch one has ended"):
+                await judge.judged(one, "late")
 
     asyncio.run(exercised())

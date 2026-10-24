@@ -12,7 +12,7 @@ on. It holds three sockets:
 - `hook.sock` takes a runtime's raw payload, read to the end. The service reads
   it through the `Courier` (`host/courier.py`), which says whether the launch's
   judge reads it. One it reads is put to the launch's judge (`LaunchJudge`): its
-  repository's approved copy of `lup-dev`, in the launch's own process, which
+  repository's approved copy of `lup-dev`, in the repository's process, which
   stays running and answers each hook as `lup-dev hook <runtime>` would, so each
   session is judged by the code approved for its repository without paying a
   start of Python and an import of `lup-dev` at each hook (`host/workers.py`).
@@ -24,20 +24,20 @@ on. It holds three sockets:
   back where the hook was gone first. Hooks for
   parallel calls arrive at once and a hold waits for hours, so each is awaited
   on the event loop, which goes on serving meanwhile, and answered in a thread
-  of its own in the launch's process. Where the judge can't answer (its process
+  of its own in the repository's process. Where the judge can't answer (its process
   unable to start, ending as it answers, or failing on a payload it can't read),
   the service answers in the runtime's own terms through the `Answerer`, rather
   than closing empty, which the runtime would take as no decision.
 - `mcp.sock` serves lup's tools, and `request.sock` the room's requests, each
   routed to the core's own (`host/rooms.py`) or to the launch's modules, which
-  run in the same process of the launch's own, started when the launch opens
-  and stopped when it ends (`host/workers.py`). The control socket's kinds that
+  run in the same process of the repository's, held while the launch is open
+  (`host/workers.py`). The control socket's kinds that
   only read are routed there too, each answered for the launch's repository
   alone (`Reading`); those that write never are.
 
 Each launch is recorded beside its directory, so a service started after one
 stopped serves the same launches, in the directories their rooms mounted. The
-service stops without waiting for the answers in flight: the launches'
+service stops without waiting for the answers in flight: the repositories'
 processes are ended, and their hooks hear nothing, which the room's hook tells
 from an answer: it fails rather than letting the call go on unjudged (`lost`,
 `launch/session.py`), and a hold left with no call waiting on it is settled at a
@@ -370,7 +370,7 @@ class Dispatcher(Model, arbitrary_types_allowed=True):
 
 
 class ModuleTools(Model, RoomTools, arbitrary_types_allowed=True):
-    """A launch's modules' tools, as its session is served them: each call passed to the launch's modules' process."""
+    """A launch's modules' tools, as its session is served them: each call passed to its repository's process."""
 
     modules: LaunchModules
     offered: Offered
@@ -394,7 +394,8 @@ class ModuleTools(Model, RoomTools, arbitrary_types_allowed=True):
         """
         try:
             reply = await self.modules.ask(
-                launch, Calling(name=name, arguments=arguments, caller=caller)
+                launch,
+                Calling(launch=launch, name=name, arguments=arguments, caller=caller),
             )
         except HostError as failed:
             return Answer(text=f"`{name}` didn't run: {failed}", error=True)
@@ -413,7 +414,7 @@ def relayed(modules: LaunchModules, launch: Register, kind: str) -> Route:
 
     async def answered(raw: str) -> Reply:
         sent = Sent.model_validate_json(raw).model_dump()
-        reply = await modules.ask(launch, Relaying(request=sent))
+        reply = await modules.ask(launch, Relaying(launch=launch, request=sent))
         match reply:
             case Relayed(reply=passed):
                 return Passed.model_validate(passed)
@@ -570,7 +571,12 @@ class Served(Model, arbitrary_types_allowed=True):
     servers: list[asyncio.Server]
     """Its hook socket's, its tool server's and its requests' socket's."""
     offered: Offered = Offered()
-    """What the launch's modules serve, in its process."""
+    """What the launch's modules serve, in its repository's process, as they
+    did when it opened."""
+    ending: asyncio.Event = Field(default_factory=asyncio.Event)
+    """Set once the launch ends: a hook of its the judge is still answering is
+    marked ended then, as one its runtime ended is (`Launches.judgement`), since
+    the repository's process answering it outlives the launch."""
 
 
 async def closed(server: asyncio.Server) -> None:
@@ -641,7 +647,7 @@ async def unix_server(
     loop doesn't hold either, such as the reply on a connection it opened, whose
     reader asyncio holds weakly too, is a cycle of garbage, which Python's
     collector frees mid-wait: the connection closes unanswered. A hook held for
-    the operator in a launch's process would end so, at once and with no
+    the operator in a repository's process would end so, at once and with no
     decision, its call going on while the hold waits.
     """
     running: list[asyncio.Task[None]] = []
@@ -673,7 +679,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     room is served for its repository alone (`confined`): set once the
     service's own handlers are made, since they're made over these launches."""
     modules: LaunchModules | None
-    """Serves each launch's modules in a process of its own; none serves none."""
+    """Serves each launch's modules in its repository's process; none serves none."""
     line_limit: int
     """The longest line lup's tool server reads: one MCP message."""
     waker: Waker | None
@@ -805,7 +811,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             del self.opening[request.launch]
         self.layout.record(request.launch).write_text(request.model_dump_json(indent=2))
         if "launched" in offered.occasions:
-            self.background(self.happened(request, Happening(occasion="launched")))
+            launched = Happening(launch=request, occasion="launched")
+            self.background(self.happened(request, launched))
         self.say(
             f"{request.launch}: served as `{request.name}`, {request.runtime} in "
             f"{request.worktree}, judged by {request.judge}, its sockets in "
@@ -916,7 +923,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         return Named(name=name, told=told, title=gives)
 
     async def offered(self, request: Register) -> Offered:
-        """Start the launch's process, its judge and its modules, and return what the modules serve that the core doesn't.
+        """Hold the launch's repository's process, its judge and its modules, and return what the modules serve that the core doesn't.
 
         Where it can't start, it's said and the launch goes on with the core's
         tools alone, its judge's next hook starting the process again; a tool or
@@ -1084,6 +1091,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             return Spoken(answer="")
         if heard.event in self.served[request.launch].offered.occasions:
             happening = Happening(
+                launch=request,
                 occasion=heard.event,
                 conversation=conversation,
                 call=heard.call,
@@ -1146,23 +1154,33 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         What the judge said beside is the service's to tell, in full; the hook's
         answer points there. It waits for as long as judging does, a hold's wait
         for the operator included. Where the hook's runtime ends it meanwhile
-        (`hung_up`), as when the operator interrupts its call, the hook is
-        marked ended (`HostLayout.ended`), so a hold its call waits on gives up
-        as an interrupted call's (`docs/judging-writes.md`, *Asking the
-        operator*), and the judge's answer, which nothing hears, is awaited
-        still; the mark goes once it's given.
+        (`hung_up`), as when the operator interrupts its call, or the launch
+        ends (`Served.ending`), the hook is marked ended (`HostLayout.ended`),
+        so a hold its call waits on gives up as an interrupted call's
+        (`docs/judging-writes.md`, *Asking the operator*), and the judge's
+        answer, which nothing hears, is awaited still; the mark goes once it's
+        given.
         """
         judging = asyncio.ensure_future(self.judge.judged(request, payload))
         ended = self.layout.ended(payload)
+        served = self.served.get(request.launch)
+        ending = asyncio.Event() if served is None else served.ending
+        closing = asyncio.ensure_future(ending.wait())
         try:
             async with hung_up(writer) as gone:
-                await asyncio.wait([judging, gone], return_when=asyncio.FIRST_COMPLETED)
+                await asyncio.wait(
+                    [judging, gone, closing], return_when=asyncio.FIRST_COMPLETED
+                )
                 if not judging.done():
                     ended.parent.mkdir(parents=True, exist_ok=True)
                     ended.touch()
+                    why = (
+                        "it ended while its judge was answering a hook"
+                        if closing.done()
+                        else "its runtime ended a hook its judge was answering"
+                    )
                     self.say(
-                        f"{request.launch}: its runtime ended a hook its judge was "
-                        "answering, so a hold its call waits on gives up"
+                        f"{request.launch}: {why}, so a hold its call waits on gives up"
                     )
             return await judging
         except HostError as failed:
@@ -1173,6 +1191,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             return self.answerer.unanswered(request.runtime, payload, failure)
         finally:
+            closing.cancel()
             if not judging.done():
                 judging.cancel()
             ended.unlink(missing_ok=True)
@@ -1235,18 +1254,22 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         return [*self.tools, Naming(launches=self), *modules]
 
     async def close(self, launch: str) -> None:
-        """End a launch: its sockets closed, its record and directory removed.
+        """End a launch: its sockets closed, its hold on its repository's process let go, its record and directory removed.
 
-        The directory goes with whatever the room left in it.
+        A hook of its the judge is still answering is marked ended
+        (`judgement`), so a hold its call waits on gives up as an interrupted
+        call's. The directory goes with whatever the room left in it.
         """
         served = self.served.pop(launch, None)
         if served is None:
             message = f"no launch named `{launch}` is served"
             raise HostError(message)
+        served.ending.set()
         for server in served.servers:
             await closed(server)
         if "stopped" in served.offered.occasions:
-            await self.happened(served.launch, Happening(occasion="stopped"))
+            stopped = Happening(launch=served.launch, occasion="stopped")
+            await self.happened(served.launch, stopped)
         if self.modules is not None:
             await self.modules.close(served.launch)
         self.layout.record(launch).unlink(missing_ok=True)
@@ -1475,12 +1498,12 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                     self.say(f"{request.launch}: {refreshed} brought up to this copy's")
 
     async def shut(self) -> None:
-        """Close every launch's sockets and stop its modules, keeping its record and its directory."""
+        """Close every launch's sockets, keeping its record and its directory, and end every repository's process."""
         for served in self.served.values():
             for server in served.servers:
                 await closed(server)
-            if self.modules is not None:
-                await self.modules.close(served.launch)
+        if self.modules is not None:
+            await self.modules.stop()
         self.served = {}
 
 
@@ -1743,7 +1766,7 @@ class HostService(Model, arbitrary_types_allowed=True):
     say: Callable[[str], None]
     """Where the service tells what it does: the terminal, or its log."""
     judge: LaunchJudge
-    """Answers each launch's hooks its judge reads: in the launch's own process,
+    """Answers each launch's hooks its judge reads: in its repository's process,
     which serves its modules too (`WorkerJudge`); a test gives a stub."""
     routes: list[Route] = []
     """The handlers modules register on the control socket, beside the service's own."""
@@ -1754,7 +1777,7 @@ class HostService(Model, arbitrary_types_allowed=True):
     """The core's tools, served each launched session on its `mcp.sock`."""
     modules: LaunchModules | None = None
     """Serves each launch's modules, their tools and their answers to the room's
-    requests, in a process of its own; none serves the core's alone."""
+    requests, in its repository's process; none serves the core's alone."""
     line_limit: int = 16 * 1024 * 1024
     """The longest line lup's tool server reads, one MCP message: well above
     asyncio's 64 KiB, which a long message to the operator could pass."""

@@ -428,7 +428,7 @@ def hook(
         str, typer.Argument(help="The runtime whose hook this is, by its name.")
     ],
 ) -> None:
-    """Answer one of a runtime's hooks, its payload on stdin, as a launch's process answers each hook its judge reads."""
+    """Answer one of a runtime's hooks, its payload on stdin, as a repository's process answers each hook its judge reads."""
     known = Adapters(known=adapters())
     # An unknown runtime is refused before standard input is read.
     known.named(runtime)
@@ -487,7 +487,7 @@ def host_serve(context: typer.Context) -> None:
     """Run the host service in the foreground, until it's stopped.
 
     It answers each launch's hooks as `lup-dev hook` does, on the launch's own
-    socket, through the launch's own process of its repository's approved copy,
+    socket, through its repository's process of the repository's approved copy,
     and ends each launch whose launcher and container are both gone
     (`Sweeping`). `lup-dev host stop` or Ctrl-C stops it; the launches it serves
     stay recorded, and the next service serves them.
@@ -516,7 +516,11 @@ def host_serve(context: typer.Context) -> None:
     )
     types = TypeReader(delivery=delivery, read=typed_reading, say=typer.echo)
     podman = Podman()
-    workers = Workers(layout=layout.host, say=typer.echo)
+    workers = Workers(
+        layout=layout.host,
+        say=typer.echo,
+        approval=partial(approval_of, layout),
+    )
     sweeping = Sweeping(
         layout=layout,
         host=host_client(),
@@ -550,6 +554,12 @@ def host_serve(context: typer.Context) -> None:
         companions=[types, sweeping, *([] if dashboard is None else [dashboard])],
     )
     asyncio.run(service.serve())
+
+
+def approval_of(layout: Layout, repository: Path) -> str | None:
+    """Return what the operator approved last for the repository at `repository`, by its fingerprint; none before the first approval."""
+    approval = approved(layout, repository)
+    return None if approval is None else approval.fingerprint
 
 
 def typed_reading(
@@ -638,16 +648,19 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
 @app.command("worker", hidden=True)
 def worker(
     socket: Annotated[Path, typer.Argument(help="Where to answer the host service.")],
+    repository: Annotated[
+        Path, typer.Argument(help="The git directory of the repository served.")
+    ],
 ) -> None:
-    """Serve a launch's judge and modules on `socket`, its registration on standard input's first line: for the host service.
+    """Serve the judge and the modules of `repository`'s launches on `socket`, until standard input closes: for the host service.
 
-    Its hooks are answered as `hook` answers them, with this machine's services
+    Their hooks are answered as `hook` answers them, with this machine's services
     made once for the process: none of them keeps state of its own.
     """
     known = Adapters(known=adapters())
     records = {adapter.runtime.name(): adapter.records for adapter in known.known}
     made = services()
-    worked(socket, made, records, partial(known.answer, services=made))
+    worked(socket, repository, made, records, partial(known.answer, services=made))
 
 
 @host.command("stop")
@@ -1674,8 +1687,8 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
     It asks the service as a launch does, from a thread, so the service goes on
     answering meanwhile; its end waits for a sweep under way, so none outlives
     the service's socket. The copies to remove are chosen on the event loop,
-    beside the launches' processes starting, so none is chosen as one starts
-    from it, and removed from a thread.
+    beside the repositories' processes starting, so none is chosen as one
+    starts from it, and removed from a thread.
     """
 
     layout: Layout
@@ -1683,8 +1696,8 @@ class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
     podman: Podman
     say: Callable[[str], None]
     running: Callable[[], list[Path]]
-    """The commands of the launches' processes, running or starting, their links
-    followed: the copies in use."""
+    """The commands of the repositories' processes, running or starting, their
+    links followed: the copies in use."""
     every: timedelta = timedelta(seconds=30)
     pause: Callable[[float], Awaitable[None]] = asyncio.sleep
     """Waits the seconds between two sweeps; a test gives its own."""

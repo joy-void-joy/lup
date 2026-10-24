@@ -24,7 +24,7 @@ service's does, `awaited` waits for one without holding a thread, and kills it
 where the wait is cancelled, as by a timeout around it, so nothing runs on past
 the caller's interest in it. `started` starts one the caller talks to over its
 input and output for as long as it runs, as the service does with each
-launch's process and the dashboard, and `Running.ended` ends it by closing its
+repository's process and the dashboard, and `Running.ended` ends it by closing its
 input.
 """
 

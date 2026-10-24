@@ -1,7 +1,7 @@
 """The `Private` module's hook at `publishing`: refusing a push or a post that carries a value never published.
 
-`docs/private.md`, *The door*. It runs on the host, in the launch's own process
-(`lup_dev.worker`), and reads the list the launch built for the repository from
+`docs/private.md`, *The door*. It runs on the host, in the repository's process
+(`lup_dev.worker`), and reads the list a launch built for the repository from
 the module's own data directory. A push is read commit by commit
 (`lup_dev.private.history`), in the repository's own git directory, pinned
 there; a post part by part. Each value found is a refusal naming its kind and
@@ -9,7 +9,8 @@ place, never the value.
 
 Where no list is kept for the repository, as for a launch started before the
 module was approved, the hook builds it then, as a launch would, from its
-module and the related repositories the launch's process found, and keeps it.
+module and the related repositories the repository's process found, and keeps
+it.
 Where it can't be built, nothing it would check leaves, saying why.
 """
 

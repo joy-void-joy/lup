@@ -209,7 +209,7 @@ def waited_for(made: Callable[[], FileLock]) -> bool:
 def test_the_judge_s_locks_exclude_hooks_answered_in_threads_of_one_process(
     kit: Kit, repo: Path
 ) -> None:
-    # The launch's process answers each hook in a thread of its own, where each
+    # The repository's process answers each hook in a thread of its own, where each
     # was a process of its own: a lock one hook holds keeps every other out.
     start(kit, repo)
     opened = worktree(kit, repo)

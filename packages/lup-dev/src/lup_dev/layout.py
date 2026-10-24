@@ -12,7 +12,7 @@ The homes:
   each launch's compiled settings, its room's git configuration and lup's
   commands there, and the lock its launcher holds, under lup's state;
 - lup's data, under `$XDG_DATA_HOME/lup/`: each repository's approved copies of
-  `lup-dev`, which trust on launch installs and its launches' processes run;
+  `lup-dev`, which trust on launch installs and its process runs;
 - lup's cache, what can be fetched again, under `$XDG_CACHE_HOME/lup/`: pyright's
   source, kept for building the engine, the one part of the cache a room mounts;
   and each runtime's CLIs, as its release channel publishes them, under `clis/`
@@ -488,9 +488,14 @@ class HostLayout(Model):
         """Say where launch `launch`'s conversations are kept, their names, their parents and the spawns not yet linked, so a restarted service knows them."""
         return self.launches / f"{launch}.conversations.json"
 
-    def modules(self, launch: str, process: str) -> Path:
-        """Say where process `process` of launch `launch`'s answers, its judge and its modules: beside its record, outside the directory its room mounts, a socket for each process, so one ending removes no other's."""
-        return self.launches / f"{launch}.modules.{process}.sock"
+    @property
+    def processes(self) -> Path:
+        """Where each repository's processes answer, outside every directory a room mounts."""
+        return self.sockets / "processes"
+
+    def process(self, process: str) -> Path:
+        """Say where process `process` of a repository's answers, its judge and its modules: a socket for each process, so one ending removes no other's, named by the process alone, so its path stays short enough for a socket's."""
+        return self.processes / f"{process}.sock"
 
 
 class JudgeLayout(Model):

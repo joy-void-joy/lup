@@ -1055,7 +1055,7 @@ class StopFailure(Payload):
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
-        """Raise `failure`: no warning this hook answers is shown, so the launch's process and the host service say it in their output instead."""
+        """Raise `failure`: no warning this hook answers is shown, so the repository's process and the host service say it in their output instead."""
         raise failure
 
     @override

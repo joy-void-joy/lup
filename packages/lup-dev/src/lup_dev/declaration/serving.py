@@ -30,8 +30,10 @@ names, as the host finds them.
 A module's tool that would publish something puts it through the door first
 (`ModuleTools.publish`), which runs every module's hooks at `publishing`.
 
-Each runs on the host, in the launch's own process of the repository's approved
-copy (`lup_dev.worker`), never in the host service that serves every launch.
+Each runs on the host, in the repository's process of its approved copy
+(`lup_dev.worker`), which serves each of its launches, never in the host service
+that serves every repository. The launch each is made with is the one asking, as
+the request carries it.
 """
 
 from abc import ABC, abstractmethod
@@ -165,7 +167,7 @@ class ModuleHandler(Model, ABC):
 
     @abstractmethod
     async def answer(self) -> Reply:
-        """Answer the request, on the launch's process's event loop, off it where it blocks.
+        """Answer the request, on the repository's process's event loop, off it where it blocks.
 
         A `HostError` refuses the request with its message.
         """

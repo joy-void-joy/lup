@@ -12,11 +12,12 @@ the change is put back and saved, and the hold stays open.
 The call waiting holds a lock for as long as it waits (`Holds.waiting`), which
 the OS frees where its process ends, so a hold whose call is gone is told from
 one still waited on (`Holds.waited_on`). The host service stopping, or the
-launch's process ending, takes the call's wait with it: such a hold is settled
+repository's process ending, takes the call's wait with it: such a hold is settled
 at a later checkpoint in its worktree, as its call would have settled it, and
 its session told (`docs/judging-writes.md`, *Asking the operator*). A call its
-runtime ends while it waits, the operator interrupting it, gives up on the
-hold as on one unanswered in time, telling its conversation at its next call.
+runtime ends while it waits, the operator interrupting it, or whose launch ends
+meanwhile, gives up on the hold as on one unanswered in time, telling its
+conversation at its next call.
 
 What a move of `HEAD` asks is already committed, and isn't put back, so on every
 runtime it's kept as a hold no agent waits on, with the commit it came from

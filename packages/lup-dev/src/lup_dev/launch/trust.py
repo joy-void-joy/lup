@@ -51,9 +51,9 @@ zone at once wait on one approval. The answer:
   directory of its own under `Layout.judge`, never over the copy a process
   runs, and switched to in one rename once it's whole (`lup_dev/copies.py`;
   for the workspace's source, the engine built first through the declaration's
-  own step and runner, as the gate builds it): the host service starts each of
-  the repository's launches' processes from it at their next request, and the
-  approval is recorded. On
+  own step and runner, as the gate builds it): the host service starts the
+  repository's process from it at its next request, and the approval is
+  recorded. On
   lup's own repository, whose copy is lup's own command, it's installed as the
   user's `lup-dev` too, the one a person runs and the host service runs from, and
   the service is restarted on it where one runs;

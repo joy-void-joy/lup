@@ -753,47 +753,52 @@ class NoRecords(Records):
 
 
 class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
-    """A launch's modules served in the test's own process, from a declaration resolved here: the worker's answers, without its process."""
+    """A repository's modules served in the test's own process, from a declaration resolved here: the worker's answers, without its process."""
 
     resolved: Resolved
     records: Records = NoRecords()
+    """Where each launch's runtime keeps its records, whichever it is."""
     layout: Layout = Layout(state=Path("/nowhere"), data=Path("/nowhere"))
     """Where lup keeps its data, each module's own among it: a test that runs
     hooks gives its own."""
-    servings: dict[str, Serving] = {}
     closed: list[str] = []
     told: list[Happening] = []
+    stopped: bool = False
 
-    async def open(self, launch: Register) -> Offered:
-        serving = Serving(
-            launch=launch,
+    def serving(self, launch: Register) -> Serving:
+        """Return the modules of `launch`'s repository, as its process serves them."""
+        return Serving(
+            repository=launch.repository,
             resolved=self.resolved,
-            records=self.records,
+            records={launch.runtime: self.records},
             layout=self.layout,
         )
-        self.servings[launch.launch] = serving
-        return serving.offered()
+
+    async def open(self, launch: Register) -> Offered:
+        return self.serving(launch).offered()
 
     async def ask(self, launch: Register, request: Request) -> Reply:
-        serving = self.servings[launch.launch]
+        serving = self.serving(launch)
         match request:
             case Listing():
                 return serving.offered()
             case Calling():
                 return Called(answer=await serving.call(request))
-            case Relaying(request=sent):
-                reply = await serving.answer(Sent.model_validate(sent))
+            case Relaying(request=sent, launch=asking):
+                reply = await serving.answer(Sent.model_validate(sent), asking)
                 return Relayed(reply=reply.model_dump())
             case Happening():
                 self.told.append(request)
                 return await serving.happen(request)
             case _:
-                message = f"a launch's modules take no `{request.kind}`"
+                message = f"a repository's modules take no `{request.kind}`"
                 raise AssertionError(message)
 
     async def close(self, launch: Register) -> None:
-        self.servings.pop(launch.launch, None)
         self.closed.append(launch.launch)
+
+    async def stop(self) -> None:
+        self.stopped = True
 
 
 @pytest.fixture

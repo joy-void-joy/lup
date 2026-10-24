@@ -120,7 +120,7 @@ A `Module` subclass (`declaration/module.py`):
 
 Defining the class checks it, each failure naming the module and the field: a module with no `name` or docstring; a field with no default, since a module added with nothing set stands on its own defaults; a plain `list` or `dict`, which a layer would replace whole, so it takes a selection; a default starting from `Kind.default()`, which would start from itself. At load, every module a selected one `requires` must be selected too, with no cycle: lup never adds or drops a module behind the project's back.
 
-**What a module serves a launch** (`declaration/serving.py`). It runs on the host, in a process of the launch's own, from the repository's approved copy (`docs/host.md`, *Each launch's judge and modules*):
+**What a module serves a launch** (`declaration/serving.py`). It runs on the host, in the repository's process of its approved copy, which serves each of its launches, the launch travelling with each request (`docs/host.md`, *Each repository's judge and modules*):
 - **tools,** `ModuleTools` classes, each tool a method decorated with the library's `@lup_tool`, reading its module's settings through `self.module`;
 - **handlers,** `ModuleHandler`s, each answering one kind of the room's requests;
 - **hooks,** `ModuleHooks` classes, each method marked `@lup_hook` and run at a moment of lup's: `launched`, `stopped`, `publishing` (before anything leaves under the operator's name, the one moment a hook answers, with refusals), or the five each runtime's hooks are read as;

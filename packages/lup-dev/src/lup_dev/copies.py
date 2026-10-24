@@ -4,8 +4,8 @@ Trust on launch installs the copy the operator approves into a directory no
 process runs (`Copies.installing`), and once the install has finished points
 the repository's link at it in one rename (`Copies.switch`): the repository's
 command, found through the link, is always a whole copy, never one an install
-is still writing. The host service starts each launch's process from the copy
-the link names as it asks, and a process keeps the copy it started from
+is still writing. The host service starts each repository's process from the
+copy the link names as it asks, and a process keeps the copy it started from
 (`host/workers.py`); a copy the link doesn't name, which no process runs, is
 removed by the service's sweep (`removable`).
 
