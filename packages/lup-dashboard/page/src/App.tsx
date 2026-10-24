@@ -18,12 +18,13 @@
 // drawers*).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { doing, everyone, launches, ring, running, type Activity, type Running } from "./agents";
+import { doing, everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useWatched } from "./hooks";
 import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
+import { useNarrow } from "./Outline";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
 import { marked, sameShown, type Marking } from "./since";
@@ -88,6 +89,17 @@ export function App() {
     const minute = useNow(60_000);
     const soon = useNow(5000);
     const [palette, setPalette] = useState(false);
+    // Whether the overview pane is shown: beside the review, hidden by `\`; over it on a narrow screen, opened by `gO`.
+    const narrow = useNarrow();
+    const [overview, setOverview] = useState(() => !window.matchMedia("(max-width: 640px)").matches);
+    const was = useRef(narrow);
+    useEffect(() => {
+        // Going narrow, it's put away to be opened over the review; going wide, it's beside it again.
+        if (was.current !== narrow) {
+            was.current = narrow;
+            setOverview(!narrow);
+        }
+    }, [narrow]);
     const [draft, setDraft] = useState<Draft>(EMPTY);
     const [contexts, setContexts] = useState<Map<number, Answered<Context>>>(new Map());
     const [files, setFiles] = useState<Map<number, Answered<ChangedFile[]>>>(new Map());
@@ -173,6 +185,32 @@ export function App() {
                 return { launch, talker, conversation, key: whose(conversation) };
             }),
         [served],
+    );
+    // Each conversation's parent, by `whose` each is, as the host's tree has it: what nests a subagent's group under its parent's.
+    const parents = useSame(
+        useMemo(() => {
+            const found = new Map<string, string>();
+            for (const { launch, session } of served) {
+                const keyOf = (agent: Agent) =>
+                    whose({ party: "conversation", repository: launch.repository, runtime: launch.runtime, session: agent.talker.session, agent: agent.talker.agent ?? null });
+                const walk = (agent: Agent) => {
+                    for (const child of agent.children) {
+                        found.set(keyOf(child), keyOf(agent));
+                        walk(child);
+                    }
+                };
+                if (session !== null) {
+                    walk(session);
+                }
+            }
+            return found;
+        }, [served]),
+        (map) => JSON.stringify([...map]),
+    );
+    // What each conversation running is doing, by `whose` it is, for the overview's marks.
+    const states = useSame(
+        useMemo(() => new Map(live.map((each) => [each.key, each.talker.activity?.state ?? null])), [live]),
+        (map) => JSON.stringify([...map]),
     );
     const agentsRunning = useSame(
         useMemo(() => live.map((each) => each.conversation), [live]),
@@ -736,6 +774,9 @@ export function App() {
                 <span className="count">
                     {agents.length} {agents.length === 1 ? "agent" : "agents"} · {waiting.length} waiting on you
                 </span>
+                <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title="the overview of every agent and item">
+                    Overview <kbd>{"\\"}</kbd>
+                </button>
                 <button type="button" onClick={() => setPalette(true)}>
                     Go to <kbd>Ctrl</kbd> <kbd>K</kbd>
                 </button>
@@ -770,6 +811,10 @@ export function App() {
                         list={openList}
                         reviewed={inbox.reply?.kind === "inbox-items" ? (inbox.reply.reviewed ?? null) : null}
                         now={minute}
+                        parents={parents}
+                        states={states}
+                        overview={overview}
+                        setOverview={setOverview}
                     />
                     <div className="status">
                         {!replying ? (

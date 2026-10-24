@@ -38,7 +38,7 @@
 // transaction that lays the text out. Each view says what else its keys do, lays
 // its own text out and draws it, and may paint the lines in view as well, as the
 // review paints a changed file's, and draw its folds' marks and bars in the
-// margin (`margin.ts`; `Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
+// margin (`rails.ts`; `Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
 // A fold may be inside another, as an item's text is inside what came before the
 // operator's last words: the fold keys act on the innermost the cursor is in.
 import { foldEffect, foldedRanges, syntaxTree, unfoldEffect } from "@codemirror/language";
@@ -59,7 +59,7 @@ import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, aroundOf, foldEdge, levelled, nextFold } from "./folds";
 import { FOLD_KINDS, type FoldKind } from "./keys";
 import { continued, hiddenOn, markdown, openedLine } from "./markdown";
-import { margin, placeheld, type Margined } from "./margin";
+import { placeheld, type Margined } from "./margin";
 
 /** What the vim keys and the editor's own events do, as a view stands: replaced at each render. */
 interface Actions {
@@ -1158,8 +1158,6 @@ interface Config<D, C> {
     pending?: (keys: string) => void;
     /** Told each fold the operator opens, by its keys or a click, as a view reads what a drawer shows on opening it. */
     unfolded?: (fold: Folding) => void;
-    /** Whether the margin shows each fold's mark and the bars of those the cursor is in (`margin.ts`). */
-    margin?: boolean;
     /** Say something in the page's top line, as why a yank didn't reach the clipboard. */
     say?: (text: string) => void;
 }
@@ -1265,7 +1263,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
         if (host === null) {
             return;
         }
-        // What folds, for the margin and the placeholders: as this view last laid it out.
+        // What folds, for the placeholders: as this view last laid it out; a view draws its own margin (`rails.ts`).
         const margined: Margined = {
             folds: (state) => boundOf(state).actions?.folds() ?? [],
             redrawn: (update) => update.transactions.some((each) => each.annotation(rebuilt) === true || each.effects.some((effect) => effect.is(drawn))),
@@ -1285,7 +1283,6 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     offHidden,
                     EditorView.lineWrapping,
                     placeheld(margined),
-                    config.margin === true ? margin(margined) : [],
                     drawing,
                     painting,
                     markdown(),

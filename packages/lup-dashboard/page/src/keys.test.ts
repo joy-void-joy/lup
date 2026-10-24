@@ -9,10 +9,10 @@ describe("the line of keys", () => {
         expect(shown("insert")).toEqual(["^⏎", "Esc", "Esc u"]);
         expect(shown("change")).toEqual(["␣a", "␣x", "␣d", "o", "c…", "␣c", "]a [a", "]c [c", "]f [f", "]n [n", "za"]);
         expect(shown("item")).toEqual(["␣d", "␣p", "o", "c…", "C", "␣c", "]] [[", "]a [a", "]n [n", "za"]);
-        expect(shown("banner")).toEqual(["h", "o ␣c", "]] [[", "]a [a", "]n [n", "␣z"]);
+        expect(shown("banner")).toEqual(["h", "o ␣c", "]] [[", "]a [a", "]n [n", "]g [g", "]t [t ]s [s ]v [v", "\\", "␣z"]);
         expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]a [a", "]n [n"]);
         expect(shown("aside")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "zf", "␣z", "zj zk"]);
-        expect(shown("drawer")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
+        expect(shown("drawer")).toEqual(["]] [[", "]a [a", "]t [t ]s [s ]v [v", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
         expect(shown("words")).toEqual(["o", "c…", "C", "]n [n", "za"]);
     });
 
@@ -69,6 +69,7 @@ describe("what may follow a chord", () => {
     it("lists the keys after Space z, f opening by kind and F closing, then each kind of fold's letter, as vim's fold keys begin with z", () => {
         expect(following("␣z", "file")).toEqual(["f open by kind", "F close by kind"]);
         const kinds = [
+            "a agents' groups",
             "t the tasks",
             "s since you approved",
             "v the conversation",
@@ -89,6 +90,7 @@ describe("what may follow a chord", () => {
 
     it("lists the keys after z f, each kind of fold's letter closing the one the cursor is in, the item's own among them", () => {
         expect(following("zf", "file")).toEqual([
+            "a the agent's group",
             "i the item",
             "t the tasks",
             "s since you approved",
