@@ -1099,13 +1099,21 @@ def spawned(raw: str) -> Spawned | None:
     """Return how the subagent a Claude Code hook fires for was spawned, from its record beside the session's transcript; none for the session's own conversation.
 
     A subagent whose record isn't there is said by its type alone; one with
-    neither is Claude Code's own (`Spawned.internal`): its prompt suggestions
-    and `/btw` are heard only at `SubagentStop`, with no type and no record,
-    174 of them in one of lup's launches (`docs/field-notes.md`, *A subagent's
-    end*). Only a fork reads the session's guidance: every other subagent's
-    system prompt is "the agent's own prompt plus environment details that
-    Claude Code appends, not the Claude Code system prompt" (the `sub-agents`
-    docs, *What loads at startup*), which lup's guidance is appended to.
+    neither is Claude Code's own (`Spawned.internal`), which writes no record:
+    its prompt suggestions and `/btw`, heard only at `SubagentStop`, and the
+    fork of a background subagent's conversation that summarizes its progress
+    every 30 seconds, heard at that alone where it answers in words, and where
+    it calls a tool anyway, at that call's `PreToolUse` alone, Claude Code
+    denying the call and running no other hook for it, so nothing ends it
+    (measured on 2.1.309, `docs/field-notes.md`, *A runtime's own agents*).
+    A type is taken as a spawn's even without its record, which is written
+    only after `SubagentStart`: taking a spawn for Claude Code's own would
+    hide it and lose its end to its parent.
+
+    Only a fork reads the session's guidance: every other subagent's system
+    prompt is "the agent's own prompt plus environment details that Claude
+    Code appends, not the Claude Code system prompt" (the `sub-agents` docs,
+    *What loads at startup*), which lup's guidance is appended to.
 
     Claude Code hands every subagent's last message to its parent itself
     (`Spawned.handed`): the result of a foreground `Agent` call, or a

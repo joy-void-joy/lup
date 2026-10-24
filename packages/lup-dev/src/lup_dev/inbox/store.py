@@ -972,7 +972,7 @@ class Whereabouts(Model):
     parent: Conversation | None = None
     """The conversation that spawned it, for a subagent a conversation spawned,
     which hears of its end and of what it says of its work; none for a session's
-    own, and for the runtime's own agents."""
+    own. The runtime's own agents never reach the inbox (`Spawned.internal`)."""
     name: str | None = None
     """A subagent's own name as its latest hook was heard, kept once its launch
     has ended, so `inbox` reads it by its name then, and `send` reaches it by

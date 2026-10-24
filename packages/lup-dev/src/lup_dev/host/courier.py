@@ -212,9 +212,10 @@ class Post(ABC):
         """Note the hook `heard`, and return what `conversation` of `launch` is told in its answer, in `room` bytes at most.
 
         `parent` is the conversation that spawned it, for a subagent a
-        conversation spawned; none for a session's own, and for the runtime's
-        own agents (`Spawned.internal`). What's returned is counted told,
-        unless it's put back (`returned`).
+        conversation spawned; none for a session's own. The runtime's own
+        agents (`Spawned.internal`) are never told anything, so it isn't asked
+        of them. What's returned is counted told, unless it's put back
+        (`returned`).
         """
 
     @abstractmethod
@@ -244,9 +245,11 @@ class Spawned(Model):
     spawns, or it was spawned with its parent's own prompt."""
     internal: bool = False
     """Whether it's one of the runtime's own agents, run for its own features
-    (suggesting the operator's next prompt, answering a side question), which
-    no conversation spawned: no parent hears of its end. Each adapter says how
-    its runtime tells them apart."""
+    (suggesting the operator's next prompt, answering a side question,
+    summarizing a subagent's progress), which no spawn in the session's record
+    links to: no subagent of the operator's, so lup shows it nowhere, no parent
+    hears of its end, and its hooks are answered with nothing, judged by no
+    one. Each adapter says how its runtime tells them apart."""
     handed: bool = False
     """Whether its runtime hands its last message to the conversation that
     spawned it itself, so lup's word of its end leaves the message out rather
@@ -272,7 +275,8 @@ class Conversation(Model):
     """What kind of subagent it is (`Explore`)."""
     internal: bool = False
     """Whether it's one of the runtime's own agents, which no conversation
-    spawned (`Spawned.internal`)."""
+    spawned (`Spawned.internal`): kept so its later hooks find it linked, and
+    left out of what the operator is shown (`Launches.talkers`)."""
     handed: bool = False
     """Whether its runtime hands its last message to its parent itself
     (`Spawned.handed`)."""

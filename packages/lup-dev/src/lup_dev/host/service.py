@@ -1042,7 +1042,17 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         The conversation the hook names gets lup's id here the first time, and
         is told what the post says waits for it, in what room the judge's answer
         leaves; the post hears of the conversation that spawned it too, where a
-        conversation did (`Conversations.spawner`), which hears of its end. A session's own turn's end puts its last message, or the error from
+        conversation did (`Conversations.spawner`), which hears of its end. The
+        launch's conversations are kept, with what each is doing, so a service
+        started again knows them. One of the runtime's own agents
+        (`Conversation.internal`) is answered with nothing once it's linked: no
+        judge reads its hooks, so none of its calls counts as running or holds;
+        no module hears of it; nothing is told it, and what it's doing isn't
+        kept, since it's no conversation of the operator's: its runtime runs it
+        for its own features, each adapter saying how it's told apart
+        (`Spawned.internal`).
+
+        A session's own turn's end puts its last message, or the error from
         the model's API it ended on, before the operator (`Post.concluded`)
         before anything is told, so the note is theirs to read whether the end
         is held or let through. A session's own
@@ -1062,12 +1072,16 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             return Spoken(answer=await self.judgement(request, payload, writer))
         conversation = conversations.named(heard.session, heard.agent)
-        conversations.activities = {
-            **conversations.activities,
-            conversation.id: self.activity(heard),
-        }
         noted = self.spawning(request, conversations, conversation, heard, payload)
         conversation, said = noted.conversation, noted.said
+        if not conversation.internal:
+            conversations.activities = {
+                **conversations.activities,
+                conversation.id: self.activity(heard),
+            }
+        write_model(self.layout.conversations(request.launch), conversations)
+        if conversation.internal:
+            return Spoken(answer="")
         if heard.event in self.served[request.launch].offered.occasions:
             happening = Happening(
                 occasion=heard.event,
@@ -1252,32 +1266,35 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
         A subagent heard the first time is linked to its spawn as its runtime
         recorded it (`Spawns`, `Conversations.linked`): its parent, its kind,
-        the name its parent gave, and whether it reads its session's guidance;
-        one with no name is asked to name itself, beside a call, never as the
-        reason its turn's end is held.
+        the name its parent gave, whether it reads its session's guidance, and
+        whether it's one of the runtime's own agents, which no spawn links to
+        and which is told nothing (`Conversation.internal`); one with no name
+        is asked to name itself, beside a call, never as the reason its turn's
+        end is held.
         A subagent that doesn't read the guidance is told once, at its first
         hook that isn't its turn's end, the tools lup serves it, which the
         guidance lists (`introduction`). Not at its end, which would hold it to
-        read them: the internal agents a runtime runs for its own features are
-        heard only there.
+        read them.
         The conversation spawning one isn't asked to name it: the subagent
         knows its task, and what a spawning call is told comes beside its
-        result, once the subagent has started. Its launch's conversations are
-        kept, so a service started again knows them.
+        result, once the subagent has started.
         """
-        naming: list[str] = []
-        if heard.agent is not None and not conversation.linked:
+        first = heard.agent is not None and not conversation.linked
+        if first:
             spawned = (
                 None
                 if self.spawns is None
                 else self.spawns.spawned(request.runtime, payload)
             )
             conversation = conversations.linked(conversation, spawned)
-            calling = heard.event in ["call-started", "call-finished"]
-            if conversation.name is None and calling:
-                naming.append(
-                    unnamed(conversations.path(conversation, self.named(request)))
-                )
+        if conversation.internal:
+            return Noted(conversation=conversation)
+        calling = heard.event in ["call-started", "call-finished"]
+        naming = (
+            [unnamed(conversations.path(conversation, self.named(request)))]
+            if first and conversation.name is None and calling
+            else []
+        )
         introducing: list[str] = []
         ending = heard.event in ["turn-ended", "conversation-ended"]
         if heard.agent is not None and not conversation.introduced and not ending:
@@ -1286,7 +1303,6 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             tools = [spec for each in self.toolsets(request) for spec in each.specs()]
             introducing.append(introduction(tools))
-        write_model(self.layout.conversations(request.launch), conversations)
         return Noted(conversation=conversation, said=[*introducing, *naming])
 
     def subagent_renamed(self, launch: str, subagent: Conversation, name: str) -> str:
@@ -1359,7 +1375,12 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         )
 
     def talkers(self, served: Served) -> list[Talker]:
-        """Return a launch's conversations as the operator is shown them: its latest session's own, then each of its subagents under its parent, in the order heard; none before any hook named one."""
+        """Return a launch's conversations as the operator is shown them: its latest session's own, then each of its subagents under its parent, in the order heard; none before any hook named one.
+
+        The runtime's own agents (`Conversation.internal`) aren't among them:
+        no conversation spawned them, so they're no subagent of the operator's
+        to show, to count as running or ended, or to wait on.
+        """
         conversations = served.conversations
         launch = self.named(served.launch)
 
@@ -1381,7 +1402,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             children = [
                 each
                 for each in conversations.known
-                if each.parent == parent and each.agent is not None
+                if each.parent == parent
+                and each.agent is not None
+                and not each.internal
             ]
             return [
                 found
