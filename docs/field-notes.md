@@ -329,7 +329,7 @@ Behind `docs/judging-writes.md`, *Landing a branch*. On a scratch repository, `d
 
 ## A hook the judge doesn't read, and one it does (measured 2026-10-14 and 2026-10-21)
 
-Behind `docs/inbox.md`, *How an agent is told*, and `docs/host.md`, *Each launch's judge and modules*: the cost of a hook the host service answers itself, and of one the judge reads. On the operator's machine (32 cores, Linux 7.2.6, Python 3.14.0, socat 1.8.1.3, git 2.56.0), `lup-dev host` ran in the background with its XDG directories in a scratch directory, a launch registered per runtime, its judge the branch's own `lup-dev`. Each hook was the room's exact command (`launch/session.py`, `piped`: `sh -c 'socat -t 90000 - UNIX-CONNECT:<hook.sock> || …'`), its payload on standard input, timed from spawning `sh` to its exit, from a Python loop on the host. Scripts in the sessions' scratchpads.
+Behind `docs/inbox.md`, *How an agent is told*, and `docs/host.md`, *Each repository's judge and modules*: the cost of a hook the host service answers itself, and of one the judge reads. On the operator's machine (32 cores, Linux 7.2.6, Python 3.14.0, socat 1.8.1.3, git 2.56.0), `lup-dev host` ran in the background with its XDG directories in a scratch directory, a launch registered per runtime, its judge the branch's own `lup-dev`. Each hook was the room's exact command (`launch/session.py`, `piped`: `sh -c 'socat -t 90000 - UNIX-CONNECT:<hook.sock> || …'`), its payload on standard input, timed from spawning `sh` to its exit, from a Python loop on the host. Scripts in the sessions' scratchpads.
 
 On 2026-10-14, `feat-room-sockets`, one launch for Claude Code, 300 runs each:
 

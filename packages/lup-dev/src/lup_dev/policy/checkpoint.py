@@ -409,6 +409,22 @@ class Worktree(Model):
         judging = Judging(integration=services.integration, layout=services.layout)
         return cls(root=root, repository=repository, store=store, judging=judging)
 
+    @classmethod
+    def main(cls, repository: Path, services: Services) -> Worktree:
+        """Open the repository whose common git directory is `repository` at its main worktree, git pinned there, to read the declaration it's judged by.
+
+        That declaration is the repository's whichever of its worktrees asks
+        (`loaded`), so a repository's process makes its modules from it once
+        for every launch (`lup_dev.worker`). The main worktree is a clone's
+        root, or a bare repository's own directory.
+        """
+        root = Git.pinned(repository).main_worktree()
+        store = Store(
+            layout=services.layout.store(root), worktree=root, common=repository
+        )
+        judging = Judging(integration=services.integration, layout=services.layout)
+        return cls(root=root, repository=repository, store=store, judging=judging)
+
     @cached_property
     def loaded(self) -> Loaded:
         """The declaration it's judged by, loaded when first read.

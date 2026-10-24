@@ -4864,7 +4864,7 @@ def test_a_hold_is_an_inbox_item_and_its_answer_reaches_the_hold(
 
 
 # A hold on the room's path: each hook sent to the launch's socket, judged by this
-# `lup-dev` in the launch's own process, the hold put in the inbox and answered
+# `lup-dev` in its repository's process, the hold put in the inbox and answered
 # there. While it waits, the test collects Python's garbage in the service's
 # process, as a busy service does at any moment: a hook whose wait nothing held
 # was freed then, ending unanswered (#211, #213).
@@ -4883,8 +4883,10 @@ def judged_in_its_process(
     *,
     runtime: str,
 ) -> Generator[Watched]:
-    """The host service with lup's inbox, serving launch `one` of `runtime` in `repo`, judged by this `lup-dev` in the launch's own process; each held change answered in the inbox reaches its hold."""
-    workers = Workers(layout=machine.host, say=said.append)
+    """The host service with lup's inbox, serving launch `one` of `runtime` in `repo`, judged by this `lup-dev` in its repository's process; each held change answered in the inbox reaches its hold."""
+    workers = Workers(
+        layout=machine.host, say=said.append, approval=lambda repository: None
+    )
     with inboxed(
         machine,
         clock,

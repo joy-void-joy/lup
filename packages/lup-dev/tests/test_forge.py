@@ -198,7 +198,7 @@ def called(
     registered: Register,
     withheld: Withheld | None = PRIVATE,
 ) -> Answer:
-    """Call one of the GitHub module's tools as a launch's own process calls it, `Private`'s list for the launch's repository `withheld`, or none."""
+    """Call one of the GitHub module's tools as the launch's repository's process calls it, `Private`'s list for the repository `withheld`, or none."""
     declared = Project(modules=Modules.default().edit(GitHub()))
     layout = Layout(state=registered.worktree, data=registered.worktree)
     if withheld is not None:
@@ -206,12 +206,12 @@ def called(
             kept(layout.module_data("private", registered.repository)), withheld
         )
     serving = Serving(
-        launch=registered,
+        repository=registered.repository,
         resolved=resolve(declared),
-        records=Nothing(),
+        records={registered.runtime: Nothing()},
         layout=layout,
     )
-    calling = Calling(name=name, arguments=arguments, caller=CALLER)
+    calling = Calling(launch=registered, name=name, arguments=arguments, caller=CALLER)
     return asyncio.run(serving.call(calling))
 
 

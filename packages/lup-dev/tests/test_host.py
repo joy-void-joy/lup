@@ -134,7 +134,7 @@ class Judge(LaunchJudge):
     `hold` waits until released, `fail` can't answer, `boom` raises, and every
     answer waits at a barrier for `together` answers in all. The test's thread
     releases it, so each wait runs in a thread, leaving the service's event loop
-    free, as the launch's process does.
+    free, as the repository's process does.
     """
 
     def __init__(self, together: int = 1) -> None:
@@ -152,7 +152,7 @@ class Judge(LaunchJudge):
                 message = "the stub fails"
                 raise RuntimeError(message)
             case "fail":
-                message = "the launch's process ended before it answered"
+                message = "the repository's process ended before it answered"
                 raise HostError(message)
             case "hold":
                 await asyncio.to_thread(self.released.wait)
@@ -412,7 +412,7 @@ def test_a_service_started_again_serves_the_launches_where_their_rooms_mounted_t
 
 
 class Lingering(LaunchModules):
-    """A launch's modules slow to stop: closing them waits until the test lets them go, as a worker's process takes its time."""
+    """Modules slow to stop: stopping them waits until the test lets them go, as a repository's process takes its time."""
 
     def __init__(self) -> None:
         self.closing = threading.Event()
@@ -429,6 +429,10 @@ class Lingering(LaunchModules):
 
     @override
     async def close(self, launch: Register) -> None:
+        return None
+
+    @override
+    async def stop(self) -> None:
         self.closing.set()
         await asyncio.to_thread(self.go.wait, 60)
 
@@ -442,7 +446,7 @@ def test_stopping_waits_until_the_service_has_exited_so_a_restart_can_start(
         host.register(launch(tmp_path, "one", "first"))
         stopping = threading.Thread(target=host.stop)
         stopping.start()
-        # Its control socket closed, it still closes its launches, holding its lock.
+        # Its control socket closed, it still ends its processes, holding its lock.
         assert lingering.closing.wait(60)
         stopping.join(timeout=0.2)
         still_stopping = stopping.is_alive()
@@ -626,12 +630,12 @@ def test_a_hook_its_judge_cant_answer_is_answered_in_the_runtimes_terms(
         registered = host.register(launch(tmp_path, "one", "first"))
         heard = send(layout.launch("one").hook, "fail")
     assert heard == (
-        "first unanswered fail: the launch's process ended before it answered; the "
+        "first unanswered fail: the repository's process ended before it answered; the "
         f"host service's output says more, {layout.log} when it runs in the "
         "background\n"
     )
     assert (
-        "one: its judge couldn't answer a hook: the launch's process ended before "
+        "one: its judge couldn't answer a hook: the repository's process ended before "
         "it answered"
     ) in said
     assert registered.directory.is_dir()
@@ -746,6 +750,49 @@ def test_a_hook_its_runtime_ends_while_its_judge_answers_is_marked_ended(
     assert judge.marked == [True]
     assert not layout.ended("hold").exists()
     assert "one: the hook was gone before its answer" in "\n".join(said)
+
+
+class Outlived(LaunchJudge):
+    """A launch's judge whose answer, once its hook has arrived, waits until the service says it marked the hook ended as its launch ended, noting whether the mark is there."""
+
+    def __init__(self, layout: HostLayout, said: Saying) -> None:
+        self.layout = layout
+        self.said = said
+        self.arrived = threading.Event()
+        self.marked: list[bool] = []
+
+    async def judged(self, launch: Register, payload: str) -> str:
+        self.arrived.set()
+        await asyncio.to_thread(self.said.heard, "it ended while its judge")
+        self.marked.append(self.layout.ended(payload).exists())
+        return "given up\n"
+
+
+def test_a_hook_of_a_launch_ending_while_its_judge_answers_is_marked_ended(
+    layout: HostLayout, clock: FakeClock, tmp_path: Path
+) -> None:
+    """The repository's process answering a hold outlives the launch, which
+    nothing will hear again: the service marks the hook ended, so the hold gives
+    up as an interrupted call's rather than waiting for the operator."""
+    host = client(layout, clock)
+    said = Saying()
+    judge = Outlived(layout, said)
+    with (
+        served(service(layout, judge, said)),
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        host.register(launch(tmp_path, "one", "first"))
+        held = pool.submit(send, layout.launch("one").hook, "hold")
+        assert judge.arrived.wait(60)
+        host.unregister("one")
+        assert held.result(timeout=60) == ""
+        said.heard("the hook was gone before its answer")
+    assert judge.marked == [True]
+    assert not layout.ended("hold").exists()
+    assert (
+        "one: it ended while its judge was answering a hook, so a hold its call "
+        "waits on gives up"
+    ) in said
 
 
 class Echo(Request, reads=False):
@@ -1245,7 +1292,7 @@ PAYLOAD = {
 
 
 class Adapting(LaunchJudge):
-    """A launch's judge answering in this process, in a thread, as the launch's own process does: through each runtime's adapter, with the command line's services."""
+    """A launch's judge answering in this process, in a thread, as the repository's process does: through each runtime's adapter, with the command line's services."""
 
     async def judged(self, launch: Register, payload: str) -> str:
         known = cli.Adapters(known=cli.adapters())
@@ -1395,6 +1442,10 @@ class Broken(LaunchModules):
 
     @override
     async def close(self, launch: Register) -> None:
+        return None
+
+    @override
+    async def stop(self) -> None:
         return None
 
 
@@ -1727,6 +1778,10 @@ class Starting(LaunchModules):
 
     @override
     async def close(self, launch: Register) -> None:
+        return None
+
+    @override
+    async def stop(self) -> None:
         return None
 
 

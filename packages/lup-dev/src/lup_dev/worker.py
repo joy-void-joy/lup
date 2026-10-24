@@ -1,14 +1,16 @@
-"""A launch's own process: its judge, and its modules' tools, answers to its room's requests, and hooks.
+"""A repository's process: the judge, and the modules' tools, answers to the rooms' requests, and hooks, for each of its launches.
 
-The host service starts it from the launch's repository's approved copy,
-`<judge> worker <socket>` (`lup_dev.host.workers`), the launch's registration on
-its input's first line. It loads the declaration the launch's hooks are judged
-by, at the commit the operator approved with the person's own layer approved
-beside it, makes each module's tools, handlers and hooks from it, says it's ready
-on its output's first line, and answers one request per connection on `<socket>`
-until its input closes, which it does when the service ends it or dies. Where
-the modules can't be made, it says why and answers the judge's hooks alone, as
-the judge has a stand-in for a declaration that can't load.
+The host service starts it from the repository's approved copy,
+`<judge> worker <socket> <repository>` (`lup_dev.host.workers`). It loads the
+declaration the repository's launches are judged by, at the commit the operator
+approved with the person's own layer approved beside it, makes each module's
+tools, handlers and hooks from it, says it's ready on its output's first line,
+and answers one request per connection on `<socket>` until its input closes,
+which it does when the service ends it or dies. Each request carries the launch
+it's for, so one process serves every launch of the repository, whichever
+runtime runs it. Where the modules can't be made, it says why and answers the
+judge's hooks alone, as the judge has a stand-in for a declaration that can't
+load.
 
 Each hook the judge reads is answered as `lup-dev hook <runtime>` answers it,
 in a thread of its own (`threaded`), so hooks fired together are judged
@@ -18,16 +20,22 @@ under locks that exclude a thread as they do a process, and what it reaches
 (the engine, ruff, the clock, the inbox) is made once for the process and
 kept, since none of it holds state of its own.
 
-Each call makes the tools' class afresh, with its module, the launch, the
-conversation calling and the door what it would publish goes through (this
-process's own hooks at `publishing`), so a tool reads them through `self`. A tool
-that can't do its work raises a `LupDevError`, whose message is its answer;
-anything else that fails is told the host service's way, its traceback said.
+Each call makes the tools' class afresh, with its module, the launch calling,
+the conversation calling and the door what it would publish goes through (this
+process's own hooks at `publishing`, for that launch), so a tool reads them
+through `self`. A tool that can't do its work raises a `LupDevError`, whose
+message is its answer; anything else that fails is told the host service's way,
+its traceback said.
+
+Each room's request is answered by its handler made afresh, with its module,
+the launch whose room asked, the module's own data directory for the repository
+and the other repositories the declaration names.
 
 Each occasion makes each listening class of hooks afresh, with its module, the
-launch, where the launch's runtime keeps its records, the module's own data
-directory for the repository and the other repositories the declaration names, and runs its hooks at that moment in the order
-they're declared. A hook that fails is told back whole, and the others still run.
+launch it's of, where that launch's runtime keeps its records, the module's own
+data directory for the repository and the other repositories the declaration
+names, and runs its hooks at that moment in the order they're declared. A hook
+that fails is told back whole, and the others still run.
 At `publishing` each hook's refusals are gathered, and a hook that fails there,
 or answers anything but its refusals, refuses too: what a check couldn't look
 at doesn't leave.
@@ -40,6 +48,7 @@ import traceback
 from collections.abc import Callable
 from concurrent.futures import Future
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, get_args, override
 
 from pydantic import TypeAdapter, ValidationError
@@ -88,7 +97,6 @@ from lup_dev.private.withheld import related_of
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
-    from pathlib import Path
 
     from lup_dev.host.courier import Conversation
 
@@ -162,26 +170,29 @@ def failed(failure: str, now: Moment) -> Ran:
     return Ran(failure=failure, refusals=[refusal])
 
 
-class Serving(Model, Door, arbitrary_types_allowed=True):
-    """A launch's modules, as its declaration resolves them: what they serve, and each answer."""
+class Serving(Model, arbitrary_types_allowed=True):
+    """A repository's modules, as its declaration resolves them: what they serve, and each answer, for whichever of its launches asks."""
 
-    launch: Register
+    repository: Path
+    """The repository's git directory."""
     resolved: Resolved
-    records: Records
-    """Where the launch's runtime keeps its sessions' records."""
+    records: dict[str, Records]
+    """Where each runtime keeps its sessions' records, by the runtime's name: a
+    launch's hooks read its own runtime's."""
     layout: Layout
     """Where lup keeps its data, each module's own among it."""
 
     @classmethod
-    def loaded(cls, launch: Register, services: Services, records: Records) -> Serving:
-        """Load the declaration `launch`'s hooks are judged by, and resolve it whole.
+    def loaded(
+        cls, repository: Path, services: Services, records: dict[str, Records]
+    ) -> Serving:
+        """Load the declaration the launches of the repository at `repository` are judged by, and resolve it whole.
 
         Raise `ProjectError` where it doesn't load or resolve.
         """
-        worktree = Worktree.of(launch.worktree, launch.repository, services)
-        root = worktree.loaded.root
+        root = Worktree.main(repository, services).loaded.root
         return cls(
-            launch=launch,
+            repository=repository,
             resolved=resolve(load(root).project),
             records=records,
             layout=services.layout,
@@ -189,10 +200,10 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
 
     def related(self) -> list[Related]:
         """Find on the host the other repositories the declaration names, for a module's hooks and handlers."""
-        return related_of(self.resolved.repositories, self.launch.repository)
+        return related_of(self.resolved.repositories, self.repository)
 
     def offered(self) -> Offered:
-        """Return what the modules serve: each tool, each kind of request, and each occasion their hooks run at."""
+        """Return what the modules serve: each tool, each kind of the room's requests, and each occasion their hooks run at."""
         listened = [
             each for hooked in self.resolved.hooked for each in listening(hooked.hooks)
         ]
@@ -239,7 +250,10 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
         if owner is None:
             return Answer(text=f"no module of this launch serves `{name}`", error=True)
         made = owner.tools(
-            module=owner.module, launch=self.launch, caller=calling.caller, door=self
+            module=owner.module,
+            launch=calling.launch,
+            caller=calling.caller,
+            door=Doorway(serving=self, launch=calling.launch),
         )
         [tool] = [tool for tool in made.tools() if tool.spec().name == name]
         try:
@@ -254,8 +268,8 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
                     text=f"`{name}` refused the call: {rejection.reason}", error=True
                 )
 
-    async def answer(self, sent: Sent) -> Reply:
-        """Answer one room's request with the module's handler for its kind.
+    async def answer(self, sent: Sent, launch: Register) -> Reply:
+        """Answer one request of `launch`'s room with the module's handler for its kind.
 
         Raise `LupDevError` where no module answers its kind.
         """
@@ -265,10 +279,10 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
             raise LupDevError(message)
         model = answering(owner.handler)
         request = model.model_validate(sent.model_dump())
-        data = self.layout.module_data(owner.module.name, self.launch.repository)
+        data = self.layout.module_data(owner.module.name, self.repository)
         made = owner.handler(
             module=owner.module,
-            launch=self.launch,
+            launch=launch,
             request=request,
             data=data,
             related=self.related(),
@@ -276,7 +290,7 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
         return await made.answer()
 
     async def happen(self, happening: Happening) -> Happened:
-        """Run every hook at the moment `happening` tells, and return what failed among them, and what they refused."""
+        """Run every hook at the moment `happening` tells, for its launch, and return what failed among them, and what they refused."""
         name = moment(happening.occasion)
         if name is None:
             return Happened()
@@ -290,34 +304,44 @@ class Serving(Model, Door, arbitrary_types_allowed=True):
         ran = [
             each
             for hooked in self.resolved.hooked
-            for each in await self.ran(hooked, now)
+            for each in await self.ran(hooked, now, happening.launch)
         ]
         return Happened(
             failures=[each.failure for each in ran if each.failure is not None],
             refusals=[refusal for each in ran for refusal in each.refusals],
         )
 
-    async def ran(self, hooked: Hooked, now: Moment) -> list[Ran]:
-        """Run one class's hooks at `now`, made afresh with its module's data directory; return how each went."""
-        data = self.layout.module_data(hooked.module.name, self.launch.repository)
+    async def ran(self, hooked: Hooked, now: Moment, launch: Register) -> list[Ran]:
+        """Run one class's hooks at `now` for `launch`, made afresh with its module's data directory; return how each went."""
+        data = self.layout.module_data(hooked.module.name, self.repository)
         data.mkdir(parents=True, exist_ok=True)
         made = hooked.hooks(
             module=hooked.module,
-            launch=self.launch,
-            records=self.records,
+            launch=launch,
+            records=self.records[launch.runtime],
             data=data,
             related=self.related(),
         )
         return [await attempted(made, name, now) for name in at(made, now.name)]
+
+
+class Doorway(Model, Door):
+    """The door one launch's tools publish through: every module's hooks at `publishing`, run for that launch."""
+
+    serving: Serving
+    launch: Register
 
     @override
     async def refusals(
         self, published: Published, conversation: Conversation | None
     ) -> list[Refusal]:
         happening = Happening(
-            occasion="publishing", conversation=conversation, published=published
+            launch=self.launch,
+            occasion="publishing",
+            conversation=conversation,
+            published=published,
         )
-        happened = await self.happen(happening)
+        happened = await self.serving.happen(happening)
         for failure in happened.failures:
             sys.stderr.write(f"{failure}\n")
         return happened.refusals
@@ -338,7 +362,7 @@ class Listed(Model, Reading[Listing]):
 
     @override
     async def scoped(self, request: Listing, repository: Path) -> Reply:
-        message = "a launch's process answers the host service, never a room"
+        message = "a repository's process answers the host service, never a room"
         raise HostError(message)
 
 
@@ -368,7 +392,7 @@ class Relays(Model, Handler[Relaying]):
     @override
     async def answer(self, request: Relaying) -> Reply:
         sent = Sent.model_validate(request.request)
-        reply = await self.modules.answer(sent)
+        reply = await self.modules.answer(sent, request.launch)
         return Relayed(reply=reply.model_dump())
 
 
@@ -431,7 +455,7 @@ class Judges(Model, Handler[JudgeHook], arbitrary_types_allowed=True):
 
 
 def routes(modules: Serving | None, judge: Callable[[str, str], str]) -> list[Route]:
-    """Return what a launch's process answers: the judge's hooks, what its modules serve, and, where they were made, their tools, requests and hooks."""
+    """Return what a repository's process answers: the judge's hooks, what its modules serve, and, where they were made, their tools, requests and hooks."""
     listed = [Route.to(Judges(judge=judge)), Route.reading(Listed(modules=modules))]
     if modules is None:
         return listed
@@ -444,16 +468,16 @@ def routes(modules: Serving | None, judge: Callable[[str, str], str]) -> list[Ro
 
 
 async def serve(
-    handlers: list[Route], socket: Path, launch: Register, say: Callable[[str], None]
+    handlers: list[Route], socket: Path, repository: Path, say: Callable[[str], None]
 ) -> None:
-    """Answer `launch`'s requests on `socket` with `handlers` until standard input closes, having said on standard output that it's ready.
+    """Answer the requests of `repository`'s launches on `socket` with `handlers` until standard input closes, having said on standard output that it's ready.
 
     Its input closing ends it at once: the connections it's answering are
     closed, so a hold waiting in its thread doesn't keep it running.
     """
     dispatcher = Dispatcher(
         routes={route.kind: route for route in handlers},
-        answering=f"launch {launch.launch}'s process",
+        answering=f"{repository}'s process",
         say=say,
         changes=Changes(),
     )
@@ -470,30 +494,30 @@ async def serve(
 
 def worked(
     socket: Path,
+    repository: Path,
     services: Services,
     records: dict[str, Records],
     judge: Callable[[str, str], str],
 ) -> None:
-    """Serve the launch whose registration is standard input's first line, on `socket`: its judge's hooks with `judge`, and its modules.
+    """Serve the launches of the repository whose git directory is `repository`, on `socket`: their judge's hooks with `judge`, and the repository's modules.
 
-    `records` is where each runtime keeps its records, by the runtime's name: the
-    launch's is its runtime's. Where its modules can't be made, the judge's hooks
-    are answered alone, and why is said.
+    `records` is where each runtime keeps its records, by the runtime's name: a
+    launch's hooks read its runtime's. Where the modules can't be made, the
+    judge's hooks are answered alone, and why is said.
     """
 
     def said(line: str) -> None:
         sys.stderr.write(f"{line}\n")
 
-    launch = Register.model_validate_json(sys.stdin.readline())
     try:
-        serving = Serving.loaded(launch, services, records[launch.runtime])
+        serving = Serving.loaded(repository, services, records)
     except LupDevError as failed:
         said(
-            f"{launch.launch}: its modules aren't served, and its judge answers its "
-            f"hooks alone: {failed}"
+            f"{repository}: its modules aren't served, and its judge answers its "
+            f"launches' hooks alone: {failed}"
         )
         serving = None
     try:
-        asyncio.run(serve(routes(serving, judge), socket, launch, said))
+        asyncio.run(serve(routes(serving, judge), socket, repository, said))
     finally:
         socket.unlink(missing_ok=True)
