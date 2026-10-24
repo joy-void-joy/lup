@@ -1,76 +1,61 @@
-// The outline pane, a layout trial (`outline.ts`, `trials.ts`): beside the
-// review, each repository, agent, subagent, item, drawer and the files of what's
-// in view, each marked by how it stands; what's in view bracketed and the
-// cursor's entry highlighted as the view moves, the pane scrolling to keep them
-// shown. A click on an entry, or Enter on it, goes there in the review; `gO` in
-// the review, or a click, takes the keyboard to it, where `j` and `k` move and
-// Esc goes back. On a narrow screen it's an overlay `gO` or the bar's button
-// opens, closing as it goes somewhere.
+// The overview beside the review (`outline.ts`; `docs/dashboard.md`, *The
+// review*): every agent, a subagent under its parent, and its items, each
+// marked by how it stands and what the draft does with it, live; what's in
+// view bracketed and the cursor's entry highlighted as the view moves, the pane
+// scrolling to keep them shown, where the margin is the structure of what's in
+// view. A click on an entry, or Enter on it, goes there in the review; `gO`
+// takes the keyboard to it, where `j` and `k` move and Esc goes back; `\`
+// hides it or shows it again. On a narrow screen it's an overlay `gO`, `\` or
+// the bar's button opens, closing as it goes somewhere. Where the overview is
+// the review zoomed out to its headers instead (`trials.ts`), `\` and `gO`
+// zoom.
 import { EditorView } from "@codemirror/view";
 import { Vim } from "@replit/codemirror-vim";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import type { Following } from "./follow";
 import { measured } from "./timing";
-import { cursorRow, filedScopes, outlineOf, scopesSeen, type DraftMark, type OutlineMark, type OutlineRow, type Reading } from "./outline";
-import type { Part, ReviewPlace } from "./keys";
+import { cursorRow, outlineOf, type DraftMark, type OutlineMark, type OutlineRow, type Reading } from "./outline";
 import type { Laid } from "./review";
 
-/** What `gO` does in the review: take the keyboard to the outline, where it's shown; else say it's off. */
+/** What `gO` does in the review: take the keyboard to the overview; and what `\` does: hide it or show it, or zoom. */
 let outlineFocus: (() => void) | null = null;
-let outlineSay: ((text: string) => void) | null = null;
+let outlineToggle: (() => void) | null = null;
+let zoomToggle: (() => void) | null = null;
 let outlineMapped = false;
 
-/** Set what `gO` does, as the outline is shown or goes. */
+/** Set what `gO` does, as the overview is shown or goes. */
 export function setOutlineFocus(focus: (() => void) | null): void {
     outlineFocus = focus;
 }
 
-/** Map `gO`, Neovim's outline key, in the review's vim, once: it takes the keyboard to the outline. */
-export function mapOutlineKey(say: (text: string) => void): void {
-    outlineSay = say;
+/** Set what `\` does where the overview is a pane: hide it or show it. */
+export function setOutlineToggle(toggle: (() => void) | null): void {
+    outlineToggle = toggle;
+}
+
+/** Set what `\` and `gO` do where the overview is the review zoomed out: zoom out or back. */
+export function setZoom(toggle: (() => void) | null): void {
+    zoomToggle = toggle;
+}
+
+/** Map `gO`, Neovim's outline key, and `\` in the review's vim, once: into the overview, and the overview hidden or shown, or zoomed. */
+export function mapOutlineKey(): void {
     if (outlineMapped) {
         return;
     }
     outlineMapped = true;
-    Vim.defineAction("lupOutline", () => {
-        if (outlineFocus === null) {
-            outlineSay?.("The outline is off: Ctrl+K, then Layout: outline.");
-        } else {
-            outlineFocus();
-        }
-    });
+    Vim.defineAction("lupOutline", () => (zoomToggle ?? outlineFocus)?.());
     Vim.mapCommand("gO", "action", "lupOutline", {}, { context: "normal" });
+    Vim.defineAction("lupOverview", () => (zoomToggle ?? outlineToggle)?.());
+    Vim.mapCommand("\\", "action", "lupOverview", {}, { context: "normal" });
 }
 
-/** The outline's keys, a part of the list of keys while an outline is shown (`keys.ts`). */
-export const OUTLINE_KEYS: Part<ReviewPlace>[] = [
-    {
-        title: "The outline (a layout trial)",
-        keys: [
-            {
-                keys: "]g [g",
-                does: "next and previous agent's group, on its banner, a group's folds marked a in the margin",
-                short: "agents",
-                at: ["banner", "approvals", "item", "change", "drawer", "aside"],
-            },
-            { keys: "]i [i", does: "next and previous item, on its header", short: "items", at: [] },
-            {
-                keys: "]t [t ]s [s ]v [v",
-                does: "next and previous drawer of that kind, by its letter: tasks, since you approved, the conversation",
-                short: "drawers",
-                at: ["banner", "drawer"],
-            },
-            { keys: "gO", does: "take the keyboard to the outline's pane, or open it on a phone; j k move, ⏎ goes, Esc back", short: "outline", at: [] },
-        ],
-    },
-];
-
-/** What `]` or `[` and a scope's letter does in the review, where an outline is shown: go to the next or previous scope of that kind. */
+/** What `]` or `[` and a scope's letter does in the review: go to the next or previous scope of that kind. */
 let scopeJump: ((kind: ScopeKey, forward: boolean) => void) | null = null;
 let scopesMapped = false;
 
-/** The scopes the outline's keys go by, each by the fold letter it's marked with: an agent's group, an item, each kind of drawer. */
+/** The scopes `]` and `[` go by, each by the fold letter it's marked with: an agent's group, an item, each kind of drawer. */
 export type ScopeKey = "group" | "item" | "tasks" | "since" | "conversation";
 
 /** Each scope's key after `]` and `[`: its fold letter, but an agent's group's `g`, as `]a` goes to what's to answer. */
@@ -82,12 +67,12 @@ export const SCOPE_KEYS: readonly (readonly [letter: string, kind: ScopeKey])[] 
     ["v", "conversation"],
 ];
 
-/** Set what `]` or `[` and a scope's letter does, as an outline is shown or goes. */
+/** Set what `]` or `[` and a scope's letter does, with what's laid out now. */
 export function setScopeJump(jump: ((kind: ScopeKey, forward: boolean) => void) | null): void {
     scopeJump = jump;
 }
 
-/** Map `]` and `[` with each scope's letter in the review's vim, once: next or previous scope of that kind, where an outline is shown. */
+/** Map `]` and `[` with each scope's letter in the review's vim, once: next or previous scope of that kind. */
 export function mapScopeKeys(): void {
     if (scopesMapped) {
         return;
@@ -97,18 +82,14 @@ export function mapScopeKeys(): void {
         for (const forward of [true, false]) {
             const name = `lupScope-${kind}-${forward ? "next" : "previous"}`;
             Vim.defineAction(name, () => {
-                if (scopeJump === null) {
-                    outlineSay?.("Going by the outline's scopes is a layout trial: Ctrl+K, then Layout: outline.");
-                } else {
-                    scopeJump(kind, forward);
-                }
+                scopeJump?.(kind, forward);
             });
             Vim.mapCommand(`${forward ? "]" : "["}${letter}`, "action", name, {}, { context: "normal" });
         }
     }
 }
 
-/** The width under which the page is one column, as a phone's: the outline is an overlay there, and the stack two slots. */
+/** The width under which the page is one column, as a phone's: the overview is an overlay there, and the stack two slots. */
 const NARROW = "(max-width: 640px)";
 
 /** Whether the screen is narrow, as a phone's, kept as it changes. */
@@ -126,31 +107,30 @@ export function useNarrow(): boolean {
 interface Props {
     following: Following;
     laidOut: Laid;
-    reading: Omit<Reading, "open">;
+    reading: Reading;
     narrow: boolean;
-    /** Whether it's open as an overlay, on a narrow screen. */
+    /** Whether it's shown: beside the review, or over it on a narrow screen. */
     open: boolean;
     setOpen: (open: boolean) => void;
     jump: (position: number) => void;
     /** Give the keyboard back to the review. */
     back: () => void;
-    /** Set what `gO` in the review does: take the keyboard to the outline. */
+    /** Set what `gO` in the review does: take the keyboard to the overview. */
     focusing: (focus: (() => void) | null) => void;
 }
 
-/** Where the view is, as the outline reads it: the items and drawers whose files it lists, the entries in view, and the cursor's, each by its key; drawn again only where one of them changed. */
+/** Where the view is, as the overview reads it: the entries in view, and the cursor's, each by its key; drawn again only where one of them changed. */
 interface Viewed {
-    open: string[];
     seen: string[];
     cursor: string | null;
 }
 
 function sameViewed(a: Viewed, b: Viewed): boolean {
-    return a.cursor === b.cursor && a.open.join("\n") === b.open.join("\n") && a.seen.join("\n") === b.seen.join("\n");
+    return a.cursor === b.cursor && a.seen.join("\n") === b.seen.join("\n");
 }
 
 /** How an entry stands, a glyph each, in the state's own colour: what waits on the operator a diamond, solid for an item, hollow for a file. */
-const GLYPHS: Partial<Record<OutlineMark, string>> = {
+export const GLYPHS: Partial<Record<OutlineMark, string>> = {
     waiting: "◆",
     news: "•",
     parked: "‖",
@@ -171,10 +151,6 @@ export const DRAFTED: Record<DraftMark, { glyph: string; word: string }> = {
 
 /** Return the glyph an entry is marked with, by what it is and its first mark that has one. */
 function glyphOf(row: OutlineRow): { glyph: string; mark: string } {
-    if (row.kind === "drawer") {
-        const kind = row.of?.split(" ")[0] ?? "";
-        return { glyph: kind === "tasks" ? "t" : kind === "since" ? "s" : "v", mark: `drawer-${kind}${row.marks.includes("label") ? " is-label" : ""}` };
-    }
     if (row.kind === "repository") {
         return { glyph: "▪", mark: "repository" };
     }
@@ -186,23 +162,19 @@ function glyphOf(row: OutlineRow): { glyph: string; mark: string } {
 }
 
 export function Outline({ following, laidOut, reading, narrow, open, setOpen, jump, back, focusing }: Props) {
-    const [viewed, setViewed] = useState<Viewed>({ open: [], seen: [], cursor: null });
-    const filed = useMemo(() => filedScopes(laidOut), [laidOut]);
-    const openKey = viewed.open.join("\n");
-    const rows = useMemo(
-        () => {
-            const began = performance.now();
-            const made = outlineOf(laidOut, { ...reading, open: new Set(viewed.open) });
-            measured("lup-outline-rows", began);
-            return made;
-        },
-        // The scopes whose files are listed, by what names them, not by the list made anew each frame.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [laidOut, reading, openKey],
-    );
-    const now = useRef({ filed, rows });
-    now.current = { filed, rows };
+    const [viewed, setViewed] = useState<Viewed>({ seen: [], cursor: null });
+    const rows = useMemo(() => {
+        const began = performance.now();
+        const made = outlineOf(laidOut, reading);
+        measured("lup-outline-rows", began);
+        return made;
+    }, [laidOut, reading]);
+    const now = useRef(rows);
+    now.current = rows;
     useEffect(() => {
+        if (!open) {
+            return undefined;
+        }
         const measure = () => {
             const view = following.view;
             if (view === null) {
@@ -216,9 +188,8 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                     const top = scroller.top - read.documentTop;
                     const from = read.lineBlockAtHeight(Math.max(top, 0)).from;
                     const to = read.lineBlockAtHeight(Math.max(top + read.scrollDOM.clientHeight - 1, 0)).to;
-                    const { rows } = now.current;
+                    const rows = now.current;
                     const viewed = {
-                        open: scopesSeen(now.current.filed, from, to),
                         seen: rows.flatMap((row) => (row.kind !== "repository" && row.from <= to && row.to >= from ? [row.key] : [])),
                         cursor: cursorRow(rows, read.state.selection.main.head)?.key ?? null,
                     };
@@ -230,7 +201,7 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
         };
         measure();
         return following.listen(measure);
-    }, [following, filed, rows]);
+    }, [following, rows, open]);
 
     const cursor = rows.find((row) => row.key === viewed.cursor);
     const seen = new Set(viewed.seen);
@@ -302,7 +273,7 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
             back();
         }
     };
-    if (narrow && !open) {
+    if (!open) {
         return null;
     }
     return (
@@ -312,7 +283,7 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
             tabIndex={0}
             onKeyDown={pressed}
             onBlur={() => setSelected(null)}
-            aria-label="Outline of the review"
+            aria-label="Overview of every agent and item"
         >
             {rows.map((row, at) => {
                 const { glyph, mark } = glyphOf(row);
@@ -327,6 +298,11 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                     <div key={row.key} data-key={row.key} className={classes} style={{ paddingLeft: `calc(${row.depth * 2}ch + 1ch)` }} title={row.title} onClick={() => go(row)}>
                         <span className={`outline-glyph mark-${mark}`}>{glyph}</span>
                         <span className="outline-text">{row.text}</span>
+                        {row.tag === null ? null : (
+                            <span className="outline-tag mark-to-review" title="files to review in its since you approved">
+                                {row.tag}
+                            </span>
+                        )}
                         {row.fresh ? <span className="outline-tag outline-fresh" title="new since you last sent">new</span> : null}
                         {row.draft.length === 0 ? null : (
                             <span className="outline-tag outline-draft" title={`in your reply, with the next Ctrl+Enter: ${row.draft.map((each) => DRAFTED[each].word).join(", ")}`}>

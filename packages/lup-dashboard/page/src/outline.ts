@@ -1,36 +1,33 @@
-// The outline, a layout trial (`trials.ts`): a narrow pane beside the review
-// mirroring it, read from the review as it's laid out, never a second source:
-// each repository, its agents, each subagent under its parent, then each agent's
-// items and drawers, and the files of the items and drawers in view, each with a
-// mark of how it stands (new, waiting, commented, marked read, approved, parked;
-// a file reviewed or not). What's in view is bracketed and the cursor's entry
-// highlighted as the view moves (`Outline.tsx`). Pure.
+// The overview beside the review (`Outline.tsx`; `docs/dashboard.md`, *The
+// review*), read from the review as it's laid out, never a second source: each
+// repository, its agents, each subagent under its parent, and each agent's
+// items, each with a mark of how it stands (waiting on the operator, news,
+// parked) and apart, in the draft's colour, what the next Ctrl+Enter does with
+// it (a comment goes, it's read, it's approved); an agent's files to review in
+// its "since you approved" counted beside it. What's in view is bracketed and
+// the cursor's entry highlighted as the view moves. Pure.
 import type { Span } from "./comments";
 import {
     fresh,
-    isDrawer,
     news,
     toAnswer,
     whose,
     type Conversation,
     type Draft,
-    type Drawer,
     type Group,
     type Laid,
     type Region,
-    type Scope,
 } from "./review";
-import { foldedOf } from "./code";
 
 /** What an entry of the outline is. */
-export type OutlineKind = "repository" | "agent" | "approvals" | "item" | "drawer" | "file";
+export type OutlineKind = "repository" | "agent" | "approvals" | "item";
 
 /**
  * How an entry stands, the state it's in, each in its own colour: an item waiting on the operator, news to read, or
- * parked; a file to review, one with flagged writes waiting, or one folded whole as a test or data; an agent calling,
- * between calls or ended; a drawer only a label in its row. What's settled, a file reviewed, isn't listed at all.
+ * parked; a file to review, one with flagged writes waiting, or one folded whole as a test or data, in the margin; an
+ * agent calling, between calls or ended. What's settled, a file reviewed, isn't shown at all.
  */
-export type OutlineMark = "waiting" | "news" | "parked" | "to-review" | "flagged" | "folded" | "calling" | "idle" | "ended" | "label";
+export type OutlineMark = "waiting" | "news" | "parked" | "to-review" | "flagged" | "folded" | "calling" | "idle" | "ended";
 
 /**
  * What the draft does with an item on the next Ctrl+Enter, all in the draft's colour: comments on it go, it's marked
@@ -50,8 +47,8 @@ export interface OutlineRow extends Span {
     /** Whether it's new to the operator since they last sent. */
     fresh: boolean;
     at: number;
-    /** What names the item or drawer it's of, whose files the outline lists while it's in view. */
-    of: string | null;
+    /** What waits beside it: an agent's files to review in its "since you approved", `◇3`; none else. */
+    tag: string | null;
 }
 
 /** What the outline reads beside the review as laid out. */
@@ -63,8 +60,6 @@ export interface Reading {
     /** What each conversation running is doing, by `whose` it is. */
     states: ReadonlyMap<string, string | null>;
     called: (party: Conversation) => string;
-    /** The items and drawers in view, by what names each (`Scope.of`): their files are listed. */
-    open: ReadonlySet<string>;
 }
 
 /** Return the last part of a path: a repository's name without its `.git`. */
@@ -123,45 +118,23 @@ function ownEnds(laidOut: Laid): number[] {
     return laidOut.groups.map((_, at) => (laidOut.groups[at + 1]?.banner.from ?? laidOut.text.length + 1) - 1);
 }
 
-/** Return the entries of each file `scope` shows, set in at `depth`: a drawer's files in its order, those reviewed among them, an item's in its. */
-function filesOf(scope: Scope, depth: number, text: string): OutlineRow[] {
-    const rows: OutlineRow[] = [];
-    const drawer = isDrawer(scope) ? scope : null;
-    const flagged = (path: string) => (drawer?.files.find((each) => each.path === path)?.flags ?? []).length > 0;
-    for (const filed of scope.filed) {
-        const path = filed.file.path;
-        const stops = scope.stops.some((each) => each >= filed.from && each <= filed.to);
-        const folded = foldedOf(filed.file, false) !== null;
-        const marks: OutlineMark[] = drawer === null ? [stops ? "flagged" : folded ? "folded" : "to-review"] : [flagged(path) ? "flagged" : folded ? "folded" : "to-review"];
-        rows.push({ key: `${scope.of} file ${path}`, kind: "file", depth, text: last(path), title: path, marks, draft: [], fresh: false, from: filed.from, to: filed.to, at: filed.from, of: scope.of });
-    }
-    // A file standing as the operator saw it is listed only where flagged writes still wait on it: one settled isn't.
-    for (const line of drawer?.reviewed ?? []) {
-        const path = line.file.path;
-        if (flagged(path)) {
-            rows.push({ key: `${scope.of} file ${path}`, kind: "file", depth, text: last(path), title: text.slice(line.from, line.to), marks: ["flagged"], draft: [], fresh: false, from: line.from, to: line.to, at: line.from, of: scope.of });
-        }
-    }
-    return rows.sort((a, b) => a.from - b.from);
-}
-
-/** Return how a drawer stands in the outline: what waits in it, from its summary line. */
-function drawerMarks(text: string, drawer: Drawer): OutlineMark[] {
-    const said = text.slice(drawer.header.from, drawer.header.to);
-    return / to review| flagged/.test(said) ? ["waiting"] : [];
+/** Return how many files a group's "since you approved" has to review, as its summary line or its label says; none where it has none. */
+function toReview(text: string, group: Group): number {
+    const since = group.drawers.find((each) => each.kind === "since");
+    const said = since !== undefined ? text.slice(since.header.from, since.header.to) : text.slice(group.row?.labels.find((each) => each.kind === "since")?.from ?? 0, group.row?.labels.find((each) => each.kind === "since")?.to ?? 0);
+    return Number(/(\d+) to review/.exec(said)?.[1] ?? 0);
 }
 
 /**
- * Return the outline of `laidOut`: each repository in the order its first group is laid out, its agents in their
- * groups' order, each subagent under its nearest forebear with a group, whether or not the review nests them; under
- * each, its items and drawers in the review's order, a drawer only a label in its row as one, and under each item and
- * drawer in view (`Reading.open`), its files.
+ * Return the overview of `laidOut`: each repository in the order its first group is laid out, its agents in their
+ * groups' order, each subagent under its nearest forebear with a group, and under each its items, in the review's
+ * order; what's left for later last.
  */
 export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
-    const { draft, reviewed, parents, states, called, open } = reading;
+    const { draft, reviewed, parents, states, called } = reading;
     const text = laidOut.text;
     const ends = ownEnds(laidOut);
-    const scopes = [...laidOut.regions, ...laidOut.drawers].sort((a, b) => a.header.from - b.header.from);
+    const regions = laidOut.regions;
     const keyed = laidOut.groups.map((group) => (group.conversation === null ? null : whose(group.conversation)));
     const present = new Set(keyed.flatMap((each) => (each === null ? [] : [each])));
     const forebear = (key: string): string | undefined => {
@@ -199,6 +172,7 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
         const key = keyed[at] ?? null;
         const state = key === null ? null : (states.get(key) ?? null);
         const path = group.conversation === null ? "lup's approvals" : called(group.conversation);
+        const files = toReview(text, group);
         rows.push({
             key: `group ${group.place}`,
             kind: group.conversation === null ? "approvals" : "agent",
@@ -211,85 +185,43 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
             from,
             to,
             at: from,
-            of: null,
+            tag: files === 0 ? null : `◇${files}`,
         });
-        // Its drawers that are only a label in its row.
-        for (const label of group.row?.labels ?? []) {
-            if (!label.pulled) {
-                rows.push({
-                    key: `label ${label.of}`,
-                    kind: "drawer",
-                    depth: depth + 1,
-                    text: text.slice(label.from, label.to).replace(/^[▸▾] /, ""),
-                    title: "a label in the row under the banner",
-                    marks: label.waiting ? ["label", "waiting"] : ["label"],
-            draft: [],
-            fresh: false,
-                    from: label.from,
-                    to: label.to,
-                    at: label.from,
-                    of: label.of,
-                });
-            }
-        }
-        for (const scope of scopes) {
-            if (scope.header.from <= from || scope.header.from > to) {
-                continue;
-            }
-            if (isDrawer(scope)) {
-                rows.push({
-                    key: `drawer ${scope.of}`,
-                    kind: "drawer",
-                    depth: depth + 1,
-                    text: text.slice(scope.header.from, scope.header.to),
-                    title: text.slice(scope.header.from, scope.header.to),
-                    marks: drawerMarks(text, scope),
-            draft: [],
-            fresh: false,
-                    from: scope.header.from,
-                    to: scopeEnd(scope, scopes, to),
-                    at: scope.header.from,
-                    of: scope.of,
-                });
-            } else {
-                const region = scope as Region;
-                rows.push({
-                    key: `item ${region.item.number}`,
-                    kind: "item",
-                    depth: depth + 1,
-                    text: itemText(text, region),
-                    title: text.slice(region.header.from, region.header.to),
-                    ...itemStanding(region, draft, reviewed),
-                    from: region.header.from,
-                    to: scopeEnd(region, scopes, to),
-                    at: region.header.from,
-                    of: region.of,
-                });
-            }
-            if (open.has(scope.of)) {
-                rows.push(...filesOf(scope, depth + 2, text));
-            }
-        }
+        const own = regions.filter((each) => each.header.from > from && each.header.from <= to);
+        own.forEach((region, index) => {
+            rows.push({
+                key: `item ${region.item.number}`,
+                kind: "item",
+                depth: depth + 1,
+                text: itemText(text, region),
+                title: text.slice(region.header.from, region.header.to),
+                ...itemStanding(region, draft, reviewed),
+                from: region.header.from,
+                to: Math.min((own[index + 1]?.header.from ?? to + 1) - 1, to),
+                at: region.header.from,
+                tag: null,
+            });
+        });
         for (const child of under.get(at) ?? []) {
             laidGroup(child, depth + 1);
         }
     };
+    const heading = (key: string, said: string, title: string, at: number): OutlineRow => ({
+        key,
+        kind: "repository",
+        depth: 0,
+        text: said,
+        title,
+        marks: [],
+        draft: [],
+        fresh: false,
+        from: at,
+        to: at,
+        at,
+        tag: null,
+    });
     for (const [repository, groups] of tops) {
-        const first = laidOut.groups[groups[0] ?? 0];
-        rows.push({
-            key: `repository ${repository}`,
-            kind: "repository",
-            depth: 0,
-            text: last(repository),
-            title: repository,
-            marks: [],
-            from: first?.banner.from ?? 0,
-            draft: [],
-            fresh: false,
-            to: first?.banner.from ?? 0,
-            at: first?.banner.from ?? 0,
-            of: null,
-        });
+        rows.push(heading(`repository ${repository}`, last(repository), repository, laidOut.groups[groups[0] ?? 0]?.banner.from ?? 0));
         for (const at of groups) {
             laidGroup(at, 1);
         }
@@ -297,39 +229,12 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
     // What's left for later, last, as the review lays it out.
     const later = laidOut.groups.flatMap((group, at) => (group.later ? [at] : []));
     if (later.length > 0) {
-        const first = laidOut.groups[later[0] ?? 0];
-        rows.push({ key: "later", kind: "repository", depth: 0, text: "later", title: "left for later", marks: [], draft: [], fresh: false, from: first?.banner.from ?? 0, to: first?.banner.from ?? 0, at: first?.banner.from ?? 0, of: null });
+        rows.push(heading("later", "later", "left for later", laidOut.groups[later[0] ?? 0]?.banner.from ?? 0));
         for (const at of later) {
             laidGroup(at, 1);
         }
     }
     return rows;
-}
-
-/** Return where `scope` ends: before the next scope's header, or its group's end. */
-function scopeEnd(scope: Scope, scopes: Scope[], groupEnd: number): number {
-    const next = scopes.find((each) => each.header.from > scope.header.from);
-    return Math.min(next === undefined ? groupEnd : next.header.from - 1, groupEnd);
-}
-
-/** Where each item and drawer with files is, from its header to the next scope or group: those whose files the outline lists while they're in view. */
-export function filedScopes(laidOut: Laid): (Span & { of: string })[] {
-    const scopes = [...laidOut.regions, ...laidOut.drawers].sort((a, b) => a.header.from - b.header.from);
-    const banners = laidOut.groups.map((each) => each.banner.from);
-    let group = 0;
-    return scopes.flatMap((scope, at) => {
-        while (group < banners.length && (banners[group] ?? Infinity) <= scope.header.from) {
-            group += 1;
-        }
-        const next = Math.min(scopes[at + 1]?.header.from ?? Infinity, banners[group] ?? Infinity);
-        const end = next === Infinity ? laidOut.text.length : next - 1;
-        return scope.filed.length + (isDrawer(scope) ? scope.reviewed.length : 0) > 0 ? [{ of: scope.of, from: scope.header.from, to: end }] : [];
-    });
-}
-
-/** Return the items and drawers with files `from` to `to` holds some of, of `filed`. */
-export function scopesSeen(filed: readonly (Span & { of: string })[], from: number, to: number): string[] {
-    return filed.flatMap((each) => (each.from <= to && each.to >= from ? [each.of] : []));
 }
 
 /** Return the deepest entry holding `head`: the cursor's. */

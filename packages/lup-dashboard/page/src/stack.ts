@@ -9,21 +9,13 @@
 // and the innermost scope within it. Pure: the review measures and draws it
 // (`Stack.tsx`).
 import type { Span } from "./comments";
-import type { DrawerKind } from "./keys";
 import { codeFrom, isDrawer, type Laid, type Region } from "./review";
-
-/** A line pinned under a group's banner with it: the row of its drawers' labels, or one drawer's summary line, by its kind. */
-export interface Under extends Span {
-    drawer: DrawerKind | null;
-}
 
 /** One scope a header is pinned for: where its header line is, how far it reaches, what it is, and the scopes in it. */
 export interface Sticky {
     kind: "group" | "item" | "drawer" | "file";
     /** Its header line: a banner, an item's header, a drawer's summary line, a file's header. */
     header: Span;
-    /** The lines pinned under its header with it: a group's drawers, as a row of labels or a line each, where they're pinned too. */
-    under: Under[];
     /** From its header to its last position, the blank line after it among it. */
     from: number;
     to: number;
@@ -33,10 +25,9 @@ export interface Sticky {
 /**
  * Return the scopes of `laidOut` a header is pinned for, outermost first, each holding those in it: each group to the
  * next one as deep or shallower, a subagent's inside its parent's where they nest (`depth`); each item and drawer to
- * the next scope or group; each file of an item or a drawer over its lines. `pin` pins each group's drawers under its
- * banner: its row of labels, or each drawer's summary line, which then isn't pinned again as a scope of its own.
+ * the next scope or group; each file of an item or a drawer over its lines.
  */
-export function stickies(laidOut: Laid, depths: number[], pin: "row" | "lines" | null): Sticky[] {
+export function stickies(laidOut: Laid, depths: number[]): Sticky[] {
     const end = Math.max(laidOut.text.length - 1, 0);
     const scopes = [...laidOut.regions, ...laidOut.drawers].sort((a, b) => a.header.from - b.header.from);
     const banners = laidOut.groups.map((each) => each.banner.from);
@@ -47,12 +38,6 @@ export function stickies(laidOut: Laid, depths: number[], pin: "row" | "lines" |
         flat.push({
             kind: "group",
             header: group.banner,
-            under:
-                pin === "row" && group.row !== null
-                    ? [{ from: group.row.from, to: group.row.to, drawer: null }]
-                    : pin === "lines"
-                      ? group.drawers.map((each) => ({ from: each.header.from, to: each.header.to, drawer: each.kind }))
-                      : [],
             from: group.banner.from,
             to: next < 0 ? end : (laidOut.groups[next]?.banner.from ?? end + 1) - 1,
             children: [],
@@ -62,20 +47,16 @@ export function stickies(laidOut: Laid, depths: number[], pin: "row" | "lines" |
         const nextScope = scopes[at + 1]?.header.from ?? Infinity;
         const nextGroup = banners.find((each) => each > scope.header.from) ?? Infinity;
         const stop = Math.min(nextScope, nextGroup);
-        // A drawer pinned under its banner a line of its own isn't pinned again: its files are the group's next level.
-        if (!(pin === "lines" && isDrawer(scope))) {
-            flat.push({
-                kind: isDrawer(scope) ? "drawer" : "item",
-                header: scope.header,
-                under: [],
-                from: scope.header.from,
-                to: stop === Infinity ? end : stop - 1,
-                children: [],
-            });
-        }
+        flat.push({
+            kind: isDrawer(scope) ? "drawer" : "item",
+            header: scope.header,
+            from: scope.header.from,
+            to: stop === Infinity ? end : stop - 1,
+            children: [],
+        });
         for (const file of scope.filed) {
             const line = scope.code[codeFrom(scope.code, file.from)];
-            flat.push({ kind: "file", header: { from: file.from, to: line?.to ?? file.from }, under: [], from: file.from, to: file.to, children: [] });
+            flat.push({ kind: "file", header: { from: file.from, to: line?.to ?? file.from }, from: file.from, to: file.to, children: [] });
         }
     });
     flat.sort((a, b) => a.from - b.from || b.to - a.to);
@@ -126,11 +107,6 @@ export function around(stickies: readonly Sticky[], position: number): Sticky[] 
     }
 }
 
-/** How many lines a sticky's pinned header takes: its header, and the line under it where one's pinned with it (`under`), as the innermost group's row is. */
-export function linesOf(sticky: Sticky, under = true): number {
-    return under ? 1 + sticky.under.length : 1;
-}
-
 /** What the view says of where things are, in pixels from the document's top: where its top is, and each line's block. */
 export interface Geometry {
     top: number;
@@ -141,11 +117,10 @@ export interface Geometry {
     at: (height: number) => number;
 }
 
-/** One header in the stack: its scope, how far below the stack's top it's drawn, pushed up as its scope ends, and whether the line under its header is pinned with it. */
+/** One header in the stack: its scope, and how far below the stack's top it's drawn, pushed up as its scope ends. */
 export interface Pinned {
     sticky: Sticky;
     offset: number;
-    under: boolean;
 }
 
 /**
@@ -156,12 +131,11 @@ export interface Pinned {
  */
 export function pinned(roots: readonly Sticky[], geometry: Geometry, slot: (sticky: Sticky, depth: number) => number = (_, depth) => depth): Pinned[] {
     const { top, lineHeight } = geometry;
-    // Of the groups pinned, the innermost alone has the line under its banner pinned with it: a subagent's row, not its parent's too.
-    const stack: { sticky: Sticky; slot: number; under: boolean }[] = [];
+    const stack: { sticky: Sticky; slot: number }[] = [];
     let level = roots;
     let depth = 0;
     for (;;) {
-        const height = stackHeight(stack, lineHeight);
+        const height = stack.length * lineHeight;
         const position = geometry.at(top + height);
         const inside = holding(level, position);
         if (inside === undefined || geometry.block(inside.header.from).top >= top + height - 0.5) {
@@ -171,27 +145,19 @@ export function pinned(roots: readonly Sticky[], geometry: Geometry, slot: (stic
         while (stack.length > 0 && (stack.at(-1)?.slot ?? 0) >= at) {
             stack.pop();
         }
-        if (inside.kind === "group") {
-            stack.forEach((each) => (each.under = false));
-        }
-        stack.push({ sticky: inside, slot: at, under: true });
+        stack.push({ sticky: inside, slot: at });
         level = inside.children;
         depth += 1;
     }
     // Each drawn under the last, or pushed up so its bottom is where its scope ends.
     const placed: Pinned[] = [];
     let y = 0;
-    for (const { sticky, under } of stack) {
-        const tall = linesOf(sticky, under) * lineHeight;
-        const offset = Math.min(y, geometry.block(sticky.to).bottom - top - tall);
-        placed.push({ sticky, offset, under });
-        y = offset + tall;
+    for (const { sticky } of stack) {
+        const offset = Math.min(y, geometry.block(sticky.to).bottom - top - lineHeight);
+        placed.push({ sticky, offset });
+        y = offset + lineHeight;
     }
     return placed;
-}
-
-function stackHeight(stack: readonly { sticky: Sticky; under: boolean }[], lineHeight: number): number {
-    return stack.reduce((sum, each) => sum + linesOf(each.sticky, each.under) * lineHeight, 0);
 }
 
 /** On a narrow screen, two slots: the groups' and the rest's. */
@@ -207,10 +173,8 @@ export function regionOf(laidOut: Laid, sticky: Sticky): Region | undefined {
 /** Return how many lines of the stack are over the line `position` is on once it's the first line under the stack: the headers of the scopes it's inside, as a narrow screen's two slots keep them. */
 export function linesOver(roots: readonly Sticky[], position: number, narrow: boolean): number {
     const inside = around(roots, position);
-    const group = inside.findLast((each) => each.kind === "group");
     if (!narrow) {
-        return inside.reduce((sum, each) => sum + linesOf(each, each === group), 0);
+        return inside.length;
     }
-    const rest = inside.findLast((each) => each.kind !== "group");
-    return (group === undefined ? 0 : linesOf(group)) + (rest === undefined ? 0 : 1);
+    return (inside.some((each) => each.kind === "group") ? 1 : 0) + (inside.some((each) => each.kind !== "group") ? 1 : 0);
 }

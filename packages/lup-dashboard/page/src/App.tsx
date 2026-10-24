@@ -24,7 +24,7 @@ import { cited } from "./comments";
 import { useNow, useSame, useWatched } from "./hooks";
 import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
-import { OUTLINE_KEYS } from "./Outline";
+import { useNarrow } from "./Outline";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
 import { marked, sameShown, type Marking } from "./since";
@@ -101,7 +101,17 @@ export function App() {
     // What's typed in the palette as it opens: "Layout" where it's opened from the bar's line saying the trials.
     const [typed, setTyped] = useState("");
     // The outline on a narrow screen, where it's an overlay its key opens.
-    const [outlining, setOutlining] = useState(false);
+    // Whether the overview pane is shown: beside the review, hidden by `\`; over it on a narrow screen, opened by `gO`.
+    const narrow = useNarrow();
+    const [overview, setOverview] = useState(() => !window.matchMedia("(max-width: 640px)").matches);
+    const was = useRef(narrow);
+    useEffect(() => {
+        // Going narrow, it's put away to be opened over the review; going wide, it's beside it again.
+        if (was.current !== narrow) {
+            was.current = narrow;
+            setOverview(!narrow);
+        }
+    }, [narrow]);
     const [draft, setDraft] = useState<Draft>(EMPTY);
     const [contexts, setContexts] = useState<Map<number, Answered<Context>>>(new Map());
     const [files, setFiles] = useState<Map<number, Answered<ChangedFile[]>>>(new Map());
@@ -787,9 +797,9 @@ export function App() {
                 >
                     layout: {trialsSaid(trials)}
                 </button>
-                {trials.outline === "pane" ? (
-                    <button type="button" className="outline-button" onClick={() => setOutlining((before) => !before)}>
-                        Outline <kbd>gO</kbd>
+                {trials.overview === "pane" ? (
+                    <button type="button" className="overview-button" onClick={() => setOverview(!overview)} title="the overview of every agent and item">
+                        Overview <kbd>{"\\"}</kbd>
                     </button>
                 ) : null}
                 <button
@@ -835,8 +845,8 @@ export function App() {
                         trials={trials}
                         parents={parents}
                         states={states}
-                        outlining={outlining}
-                        setOutlining={setOutlining}
+                        overview={overview}
+                        setOverview={setOverview}
                     />
                     <div className="status">
                         {!replying ? (
@@ -856,7 +866,7 @@ export function App() {
                         )}
                     </div>
                     <Keys
-                        parts={trials.outline === "off" ? REVIEW_KEYS : [...REVIEW_KEYS, ...OUTLINE_KEYS]}
+                        parts={REVIEW_KEYS}
                         place={inserting ? "insert" : place}
                         places={REVIEW_PLACES}
                         open={listing}

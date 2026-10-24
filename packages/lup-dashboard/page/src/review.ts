@@ -318,10 +318,8 @@ export interface DrawerRow extends Span {
  */
 export interface Arranging {
     parents?: ReadonlyMap<string, string> | null;
-    /** The drawers under the banner: a row of labels, those `pulled` out laid below it; or, `lines`, each drawer laid there whole, a line each, folded. */
-    row?: { pulled: ReadonlySet<string>; lines?: boolean } | null;
-    /** Whether each group folds whole under its banner, as an item does under its header, its kind's letter in the margin. */
-    folds?: boolean;
+    /** How the drawers are said under the banner: each laid there whole, a line each, folded (`lines`, the default); or a row of labels, those `pulled` out laid below it. */
+    side?: { pulled: ReadonlySet<string> } | null;
 }
 
 /**
@@ -1033,7 +1031,7 @@ export function laid(
         layGroup(group, true, 0);
     }
     // Each group folds whole under its banner, up to the next as deep or shallower, a subagent's inside its parent's.
-    if (arranging.folds === true) {
+    {
         groups.forEach((group, at) => {
             const next = groups.findIndex((each, after) => after > at && each.depth <= group.depth);
             const end = (next < 0 ? w.text.length : (groups[next]?.banner.from ?? w.text.length)) - 1;
@@ -1065,9 +1063,9 @@ export function laid(
         const opening = w.line(said);
         const conversation = group.conversation;
         const data = conversation !== null && !isParked ? drawers.get(group.key) : undefined;
-        // Where the drawers are a row, it's right under the banner, each drawer's label on it; laid a line each, there's no row.
-        const lines = arranging.row?.lines === true;
-        const row = arranging.row != null && !lines && conversation !== null && data !== undefined ? layRow(conversation, data, arranging.row.pulled) : null;
+        // Side by side, the drawers are a row right under the banner, each drawer's label on it; a line each, there's no row.
+        const side = arranging.side ?? null;
+        const row = side !== null && conversation !== null && data !== undefined ? layRow(conversation, data, side.pulled) : null;
         const blocks: Block[] = [];
         if (!isParked) {
             letters.forEach((letter, at) => {
@@ -1089,7 +1087,7 @@ export function laid(
             fold: null,
         };
         groups.push(made);
-        const lay = (kinds: DrawerKind[], open: boolean | null) => {
+        const lay = (kinds: DrawerKind[], open: boolean) => {
             if (conversation === null || data === undefined) {
                 return;
             }
@@ -1101,17 +1099,14 @@ export function laid(
                 }
             }
         };
-        // The drawers pulled out of the row, below it, open, before the items; or each drawer there, a line each, folded.
+        // Under the banner, before the items: each drawer a line of its own, folded; or those pulled out of the row, open.
         if (row !== null) {
             lay(row.labels.filter((each) => each.pulled).map((each) => each.kind), true);
-        } else if (lines && !isParked) {
+        } else if (side === null) {
             lay(DRAWERS, false);
         }
         for (const item of group.items) {
             layItem(item, isParked);
-        }
-        if (arranging.row == null) {
-            lay(DRAWERS, null);
         }
         if (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0) {
             w.line("");
@@ -1280,10 +1275,9 @@ export function laid(
     /**
      * Lay one of `conversation`'s drawers of `kind` from `data`, and return it; none where it has nothing under its
      * summary line, as a task list none keeps, a branch with nothing since the operator approved it, or one not read yet.
-     * It's `open` or folded where that's said, as one pulled out of the row under the banner is open; else "since you
-     * approved" is open, the others folded.
+     * It's `open`, as one pulled out of the row under the banner is, or folded, until the operator opens it.
      */
-    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers, open: boolean | null = null): Drawer | null {
+    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers, open: boolean): Drawer | null {
         const of = ownerOf({ drawer: kind, conversation });
         const into = gathering();
         const key = whose(conversation);
@@ -1385,7 +1379,7 @@ export function laid(
             return null;
         }
         // "Since you approved" is open, as it's the code waiting on the operator; the others fold until opened.
-        into.folds.push({ of, kind, name: "", label, closed: open === null ? kind !== "since" : !open, summary, from: summary.to, to: last });
+        into.folds.push({ of, kind, name: "", label, closed: !open, summary, from: summary.to, to: last });
         w.line("");
         return { kind, conversation, talk, files, reviewed, settled, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
     }

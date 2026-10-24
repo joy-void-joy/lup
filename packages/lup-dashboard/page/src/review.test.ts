@@ -1324,7 +1324,7 @@ describe("waited and fresh", () => {
     });
 });
 
-describe("the drawers at the end of each agent's group", () => {
+describe("the drawers under each agent's banner", () => {
     const S1 = from("s1", "a1");
     const ENTRIES: Entry[] = [
         { kind: "said", by: "operator", text: "Build the reader.", at: "2026-10-17T11:50:00Z" },
@@ -1374,7 +1374,7 @@ describe("the drawers at the end of each agent's group", () => {
     const at = (text: string) => out.text.indexOf(text);
     const lines = (from: number, to: number) => out.text.slice(from, to).split("\n");
 
-    it("lays the drawers after the group's items, each its own fold, folded but \"since you approved\", a new module's bodies folded too", () => {
+    it("lays the drawers under the banner, before the items, each its own fold, folded, a new module's bodies folded too", () => {
         const [group] = out.groups;
         expect(group?.drawers.map((each) => each.kind)).toEqual(["tasks", "since", "conversation"]);
         expect(out.groups[1]?.drawers).toEqual([]);
@@ -1391,12 +1391,12 @@ describe("the drawers at the end of each agent's group", () => {
             "Twenty kinds of line.",
             "· Grep",
         ]);
-        // Each drawer is its own fold, folded but "since you approved", the code waiting on the operator; the new
-        // module's bodies fold until opened, its file open.
+        // Each drawer is its own fold, folded until opened, a line under the banner; the new module's bodies fold
+        // until opened, its file open.
         const own = out.drawers.map((each) => each.folds.at(-1)!);
         expect(own.map((each) => [each.kind, each.closed, each.of])).toEqual([
             ["tasks", true, `tasks ${whose(S1)}`],
-            ["since", false, `since ${whose(S1)}`],
+            ["since", true, `since ${whose(S1)}`],
             ["conversation", true, `conversation ${whose(S1)}`],
         ]);
         // In the conversation, each exchange before the operator's last words folds under their words.
@@ -1411,11 +1411,11 @@ describe("the drawers at the end of each agent's group", () => {
             ["body", "Reader", true],
             ["body", "turns", true],
             ["file", "reader.py", false],
-            ["since", "since you approved on feat · 1 to review · 1 flagged", false],
+            ["since", "since you approved on feat · 1 to review · 1 flagged", true],
         ]);
         expect(foldKey(since.folds[1]!)).toBe(`since ${whose(S1)} body reader.py ["Reader","turns"]`);
-        // The items came before the drawers, the group after them where it is.
-        expect(at("── #51")).toBeLessThan(at("tasks ·"));
+        // The drawers under the banner, before the items, the group after them where it is.
+        expect(at("tasks ·")).toBeLessThan(at("── #51"));
         expect(at("conversation · 7 steps")).toBeLessThan(at("━━ s2"));
         // An agent the host hasn't answered of has no drawers; nor is a drawer with nothing under its summary line shown,
         // which would say only that it's empty.
@@ -1426,7 +1426,8 @@ describe("the drawers at the end of each agent's group", () => {
         const empty = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, tasks: [], since: { ...SINCE, files: [] } }]]));
         expect(empty.drawers.map((each) => each.kind)).toEqual(["conversation"]);
         expect(empty.text).not.toContain("since you approved");
-        expect(empty.text.endsWith("· Grep\n\n")).toBe(true);
+        // The conversation under the banner, the item after it.
+        expect(empty.text.indexOf("· Grep\n\n")).toBeLessThan(empty.text.indexOf("── #51"));
         const without = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING);
         expect(bare.text).toBe(without.text);
     });
@@ -1556,7 +1557,7 @@ describe("the drawers at the end of each agent's group", () => {
             ["body", "turns", true],
             ["file", "reader.py", false],
             ["lines", "2 reviewed", true],
-            ["since", "since you approved on feat · 1 to review · 2 flagged · 2 reviewed", false],
+            ["since", "since you approved on feat · 1 to review · 2 flagged · 2 reviewed", true],
         ]);
         // None settled, no line for them.
         const none = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, since: { ...SINCE, files: [...SINCE.files, seen] } }]]));
