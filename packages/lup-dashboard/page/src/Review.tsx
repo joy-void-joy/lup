@@ -896,7 +896,11 @@ export function Review({
         scrollAfterKey(current, fits ? EditorView.scrollIntoView(region.header.from, { y: "start" }) : EditorView.scrollIntoView(at, { y: "center" }));
     }
 
-    /** Return where the line of the file Space `a` marked reviewed is, once its drawer is read anew and shows it so; none else, or before. */
+    /**
+     * Return where the cursor goes once the file Space `a` marked reviewed is, as its drawer is read anew and shows it
+     * so: onto what's left after it, the next file to review or one with flagged writes waiting, else the line its
+     * settled files fold under, where it went; none else, or before.
+     */
     function reviewedLine(laid: Laid): number | undefined {
         const asked = reviewing.current;
         const drawer = asked === null ? undefined : laid.drawers.find((each) => each.of === asked.of);
@@ -904,7 +908,17 @@ export function Review({
             return undefined;
         }
         reviewing.current = null;
-        return drawer.reviewed.find((each) => each.file.path === asked.path)?.from;
+        const settled = drawer.settled?.from ?? Infinity;
+        const at = (file: SinceFile): number | undefined =>
+            drawer.filed.find((each) => each.file === file.file)?.from ?? drawer.reviewed.find((each) => each.file === file && each.from < settled)?.from;
+        const after = drawer.files.slice(drawer.files.findIndex((each) => each.path === asked.path) + 1);
+        for (const file of after) {
+            const found = at(file);
+            if (found !== undefined) {
+                return found;
+            }
+        }
+        return drawer.settled?.from ?? drawer.header.from;
     }
 
     /** Return the "since you approved" drawer the cursor is in, where it's in one. */

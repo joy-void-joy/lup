@@ -1523,21 +1523,20 @@ describe("the drawers at the end of each agent's group", () => {
         expect(sinceSummary({ ...SINCE, files: tests.slice(0, 1) })).toBe("since you approved on feat · 1 test");
     });
 
-    it("lays each file standing as the operator last saw it in a line among the others, in their order, which Space a and A take", () => {
+    it("folds each file reviewed under one line at the drawer's end, one with flagged writes waiting staying a line in its place, which Space a and A take", () => {
         const kept = { path: "a.py", version: "a1b2c3d4e5f6", flags: [], reviewed: "2026-10-17T12:00:00Z" };
+        const also = { path: "b.py", version: null, flags: [], reviewed: "2026-10-17T12:00:00Z" };
         const seen = { path: "z.py", version: "f6e5", flags: [71], since: 12 };
-        const shown: Since = { ...SINCE, files: [kept, ...SINCE.files, seen] };
+        const shown: Since = { ...SINCE, files: [kept, ...SINCE.files, seen, also] };
         const laidOut = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, since: shown }]]));
         const [, since] = laidOut.drawers;
         const text = laidOut.text.slice(since!.header.from, since!.folds.at(-1)!.to).split("\n");
-        expect(text.slice(0, 3)).toEqual([
-            "since you approved on feat · 1 to review · 2 flagged · 2 reviewed",
-            "a.py · reviewed at a1b2c3d",
-            "reader.py · created · 8 lines · new file",
-        ]);
-        expect(text.at(-1)).toBe("z.py · as you saw it in @12 · flagged @71");
+        expect(text.slice(0, 2)).toEqual(["since you approved on feat · 1 to review · 2 flagged · 2 reviewed", "reader.py · created · 8 lines · new file"]);
+        expect(text.slice(-4)).toEqual(["z.py · as you saw it in @12 · flagged @71", "2 reviewed", "a.py · reviewed at a1b2c3d", "b.py · deleted · reviewed"]);
         const on = (line: string) => laidOut.text.indexOf(line);
-        expect(since!.reviewed.map((each) => each.file)).toEqual([kept, seen]);
+        expect(since!.reviewed.map((each) => each.file)).toEqual([seen, kept, also]);
+        const line = on("\n2 reviewed\n") + 1;
+        expect(since!.settled).toEqual({ from: line, to: line + "2 reviewed".length });
         expect(sinceFileAt(since!, on("a.py · reviewed"))).toBe(kept);
         expect(sinceFileAt(since!, on("        a = 1"))).toBe(shown.files[1]);
         expect(sinceFileAt(since!, on("z.py ·"))).toBe(seen);
@@ -1549,14 +1548,20 @@ describe("the drawers at the end of each agent's group", () => {
             "group: g",
             "since: since",
             "file: a.py",
+            "lines: 2 reviewed",
         ]);
-        // Nothing under a reviewed line folds: the reader's folds are as they were.
-        expect(since!.folds.map((each) => [each.kind, each.label])).toEqual([
-            ["body", "Reader"],
-            ["body", "turns"],
-            ["file", "reader.py"],
-            ["since", "since you approved on feat · 1 to review · 2 flagged · 2 reviewed"],
+        // The settled files fold under their line, folded; the reader's folds are as they were.
+        expect(since!.folds.map((each) => [each.kind, each.label, each.closed])).toEqual([
+            ["body", "Reader", true],
+            ["body", "turns", true],
+            ["file", "reader.py", false],
+            ["lines", "2 reviewed", true],
+            ["since", "since you approved on feat · 1 to review · 2 flagged · 2 reviewed", false],
         ]);
+        // None settled, no line for them.
+        const none = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, since: { ...SINCE, files: [...SINCE.files, seen] } }]]));
+        expect(none.drawers[1]?.settled).toBeNull();
+        expect(none.text).not.toContain("reviewed\n");
     });
 
     it("says where each file's header is, where ]f and [f go and a key held down stops: a test folded whole among them, never a reviewed file's line", () => {
