@@ -1,4 +1,4 @@
-// The header stack, a layout trial (`trials.ts`): over the review, the headers of
+// The header stack (`docs/dashboard.md`, *The review*): over the review, the headers of
 // the scopes the top of the view is inside, each pinned while its own line is
 // scrolled off, as VS Code's sticky scroll does: an agent's banner, a subagent's
 // under its parent's where groups nest, an item's header or a drawer's summary
@@ -9,7 +9,7 @@
 // and the innermost scope within it. Pure: the review measures and draws it
 // (`Stack.tsx`).
 import type { Span } from "./comments";
-import { codeFrom, isDrawer, type Laid, type Region } from "./review";
+import { codeFrom, isDrawer, type Laid } from "./review";
 
 /** One scope a header is pinned for: where its header line is, how far it reaches, what it is, and the scopes in it. */
 export interface Sticky {
@@ -165,10 +165,6 @@ export function narrowSlot(sticky: Sticky): number {
     return sticky.kind === "group" ? 0 : 1;
 }
 
-/** Return the region of `laidOut` an item's sticky is the header of; none for any other. */
-export function regionOf(laidOut: Laid, sticky: Sticky): Region | undefined {
-    return sticky.kind === "item" ? laidOut.regions.find((each) => each.header.from === sticky.header.from) : undefined;
-}
 
 /** Return how many lines of the stack are over the line `position` is on once it's the first line under the stack: the headers of the scopes it's inside, as a narrow screen's two slots keep them. */
 export function linesOver(roots: readonly Sticky[], position: number, narrow: boolean): number {

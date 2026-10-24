@@ -779,18 +779,26 @@ kbd {
     color: var(--fold-call);
 }
 
-/* The review's margin: a row a line, as tall as the line beside it, and a
-   column for each depth folds nest to, outermost leftmost, a fold deeper than
-   the last sharing it. In a fold's column, beside its summary line, the letter
-   of its kind, outlined where it's folded; under it, for each fold the cursor is
-   in, a thin bar down to the fold's last line, set in a little at its end so two
-   folds one after another show apart: each bar begins with its letter. */
+/* The review's margin, its structure (`rails.ts`): a row a line, as tall as
+   the line beside it, and a column for each depth folds nest to, outermost
+   leftmost. Each scope (an agent's group, an item, a drawer, a file) a bar its
+   full height in its kind's colour, starting with its fold's letter, outlined
+   where it's folded, then its label on the columns past its own, which no
+   deeper bar holds yet; the bars of the scopes the cursor is in bright, the
+   others dim. Each other fold's letter in its column, and a bar down it while
+   the cursor's in it, set in a little at its end so two folds one after
+   another show apart. */
 .buffer .cm-gutters {
     background: var(--bg);
     border: 0;
 }
 
 .buffer .fold-margin {
+    width: calc(2px + var(--columns) * var(--column) + 13ch);
+    border-right: 1px solid #1d3a44;
+}
+
+.buffer .fold-margin.is-bare {
     width: calc(2px + var(--columns) * var(--column));
 }
 
@@ -799,18 +807,19 @@ kbd {
     padding: 0;
 }
 
-.fold-cell {
+.rail-cell {
     position: absolute;
     inset: 0;
 }
 
 /* Where a bar's or a letter's column starts, by its fold's depth. */
-.fold-bar,
-.fold-mark {
+.rail,
+.fold-mark,
+.rail-label {
     --at: calc(1px + min(var(--depth), var(--columns) - 1) * var(--column));
 }
 
-.fold-bar {
+.rail {
     position: absolute;
     top: 0;
     bottom: 0;
@@ -819,13 +828,22 @@ kbd {
     background: currentColor;
 }
 
+/* A scope's bar dim but where the cursor is in it. */
+.rail.is-scope {
+    opacity: 0.4;
+}
+
+.rail.is-scope.is-bright {
+    opacity: 1;
+}
+
 /* On the summary line the letter stands for the bar, which goes on from under
    it where the line wraps. */
-.fold-bar.is-first {
+.rail.is-first {
     top: var(--lh);
 }
 
-.fold-bar.is-last {
+.rail.is-last {
     bottom: 3px;
 }
 
@@ -838,10 +856,44 @@ kbd {
     line-height: calc(var(--lh) - 2px);
     text-align: center;
     font-weight: 700;
+    cursor: pointer;
 }
 
 .fold-mark.is-folded {
     box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.rail-label {
+    position: absolute;
+    top: 0;
+    left: calc(var(--at) + var(--column) + 2px);
+    right: 0;
+    height: var(--lh);
+    line-height: var(--lh);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.rail-label:hover {
+    text-decoration: underline;
+}
+
+.rail-label.fold-group {
+    font-weight: 700;
+}
+
+.rail-state {
+    margin-right: 0.5ch;
+}
+
+.rail-draft {
+    color: var(--warn);
+}
+
+.rail-fresh {
+    color: var(--link);
 }
 
 /* A folded fold's placeholder: outlined in its kind's colour. */
@@ -1230,7 +1282,7 @@ kbd {
     color: var(--muted);
 }
 
-/* The layout trials (`trials.ts`): where things sit, switched from the palette. */
+/* The review beside its overview, the cursor's line over both, the stack pinned over the buffer's top. */
 .review-body {
     position: relative;
     display: flex;
@@ -1280,20 +1332,20 @@ kbd {
     position: absolute;
     left: 1ch;
     right: 1ch;
+    display: flex;
+    gap: 0 2ch;
     height: var(--lh);
     padding: 0 2px 0 6px;
     white-space: pre;
     overflow: hidden;
-    text-overflow: ellipsis;
     border-top: 0;
+    border-bottom: 0;
+    margin-top: 0;
+    padding-top: 0;
+    padding-bottom: 0;
     background: var(--bg);
     cursor: pointer;
     pointer-events: auto;
-}
-
-.buffer.stack .cm-line.stack-line {
-    display: flex;
-    gap: 0 2ch;
 }
 
 .buffer.stack .stack-text {
@@ -1315,43 +1367,107 @@ kbd {
     background: var(--float-bg);
 }
 
-.buffer.stack .cm-line.stack-line.review-banner.is-nested::before {
-    content: "↳ ";
-    color: var(--muted);
+/* The stack's margin: each pinned header's fold letter and label, in its column, as the margin has them. */
+.buffer.stack .stack-margin {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
 }
 
-/* A banner nested under its parent's, set in by how deep it is. */
+.buffer.stack .stack-mark {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: var(--lh);
+    background: var(--bg);
+    pointer-events: auto;
+}
+
+/* An agent's banner: a band of the agents' colour across, a bar at its start; a subagent's set in by how deep it's
+   nested and a lighter band, so it reads as inside its parent's, the ↳ before it saying so. */
+.buffer .cm-line.review-banner.frame-band {
+    background: #05262a;
+    border-top: 1px solid var(--cyan);
+    box-shadow: inset 4px 0 0 var(--cyan);
+    padding-top: 0.15em;
+    padding-bottom: 0.15em;
+}
+
+.buffer .cm-line.review-banner.frame-band.nest-1 {
+    margin-left: 2ch;
+    padding-left: 6px;
+    background: #0b3a40;
+}
+
+.buffer .cm-line.review-banner.frame-band.nest-2 {
+    margin-left: 4ch;
+    padding-left: 6px;
+    background: #104a51;
+}
+
+.buffer .cm-line.review-banner.frame-band.nest-3,
+.buffer .cm-line.review-banner.frame-band.nest-4 {
+    margin-left: 6ch;
+    padding-left: 6px;
+    background: #145860;
+}
+
 .buffer .cm-line.review-banner.is-nested::before {
     content: "↳ ";
     color: var(--muted);
 }
 
-.buffer .cm-line.review-banner.nest-1 {
+/* A subagent's own lines as a panel, where that's how it's set apart (`frame=panel`): tinted by how deep it is. */
+:where(.cm-line.panel-1) {
+    background-color: #0a222b;
+    border-left: 2px solid rgb(102 204 204 / 0.45);
+}
+
+:where(.cm-line.panel-2) {
+    background-color: #0f2e39;
+    border-left: 2px solid rgb(102 204 204 / 0.6);
+}
+
+:where(.cm-line.panel-3) {
+    background-color: #133a48;
+    border-left: 2px solid rgb(102 204 204 / 0.75);
+}
+
+/* Where each item ends, a faint rule; where a group does, a line saying whose, set in as its banner is. */
+.buffer .cm-line.item-end {
+    background: linear-gradient(to bottom, transparent 8px, rgb(255 153 51 / 0.45) 8px, rgb(255 153 51 / 0.45) 9px, transparent 9px) no-repeat;
+    background-size: min(72ch, 100%) 100%;
+}
+
+.buffer .cm-line.group-end::before {
+    content: "╰─ " attr(data-end) " ────";
+    color: var(--cyan);
+    opacity: 0.85;
+}
+
+.buffer .cm-line.group-end.nest-1 {
     padding-left: calc(6px + 2ch);
 }
 
-.buffer .cm-line.review-banner.nest-2 {
+.buffer .cm-line.group-end.nest-2 {
     padding-left: calc(6px + 4ch);
 }
 
-.buffer .cm-line.review-banner.nest-3 {
+.buffer .cm-line.group-end.nest-3,
+.buffer .cm-line.group-end.nest-4 {
     padding-left: calc(6px + 6ch);
 }
 
-.buffer .cm-line.review-banner.nest-4 {
-    padding-left: calc(6px + 8ch);
-}
-
-/* Whom a comment, a message or a remark reaches, said on its first line where the header doesn't say it. */
+/* Whom a comment, a message or a remark reaches, said on its first line, the header no longer saying it. */
 .buffer .cm-line.remark-to::after {
     content: "  " attr(data-to);
     color: var(--muted);
     font-style: italic;
 }
 
-/* The row of an agent's drawers under its banner: each a label in its kind's
-   colour, pulled out below the row where it's bold, and in the colour of what
-   waits where it holds files to review. */
+/* The row of an agent's drawers under its banner, side by side: each a label in its kind's colour, pulled out below
+   the row where it's bold, and bold too where it holds files to review. */
 .buffer .cm-line.drawer-row {
     color: var(--muted);
 }
@@ -1383,17 +1499,10 @@ kbd {
     font-weight: 700;
 }
 
-/* The status line at the bottom, where vim keeps its own: the cursor's place and what waits. */
-.status-line .where {
-    border-bottom: 0;
-    border-top: 1px solid var(--border);
-}
-
-/* The outline: a narrow pane beside the review, each entry a row, set in by how
-   deep it is; what's in view bracketed by a bar down its rows, the cursor's
-   entry highlighted. */
+/* The overview: a narrow pane beside the review, each entry a row, set in by how deep it is; what's in view
+   bracketed by a bar down its rows, the cursor's entry highlighted. */
 .outline {
-    flex: 0 0 32ch;
+    flex: 0 0 26ch;
     max-width: 40%;
     overflow: hidden auto;
     border-right: 1px solid var(--border);
@@ -1441,7 +1550,7 @@ kbd {
 
 .outline-text {
     flex: 1 1 auto;
-    min-width: 9ch;
+    min-width: 6ch;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -1462,24 +1571,17 @@ kbd {
     font-weight: 700;
 }
 
-.outline-drawer .outline-text {
-    color: var(--muted);
-}
-
-.outline-file .outline-text {
-    color: var(--info);
-}
-
-/* How each entry stands, in the state's own colour: what waits on the operator orange, an item solid and a file
-   hollow; news blue; what's set aside muted; an agent's activity in its banner's colour. What the draft does with an
-   item is apart, in the colour of what the operator writes (`.outline-draft`). */
+/* How each thing stands, in the state's own colour: what waits on the operator orange, an item solid and a file
+   hollow; news blue; what's set aside muted; an agent's activity in its banner's colour. What the draft does with
+   an item is apart, in the colour of what the operator writes. */
 .mark-waiting,
 .mark-to-review,
 .mark-flagged {
     color: var(--orange);
 }
 
-.mark-calling {
+.mark-calling,
+.mark-idle {
     color: var(--cyan);
 }
 
@@ -1494,36 +1596,12 @@ kbd {
     color: var(--muted);
 }
 
-/* What goes with the next Ctrl+Enter, in the draft's colour, as the comments written are; and what's new, blue. */
 .outline-draft {
     color: var(--warn);
 }
 
 .outline-fresh {
     color: var(--link);
-}
-
-.mark-idle {
-    color: var(--cyan);
-}
-
-.mark-drawer-tasks {
-    color: var(--fold-tasks);
-    font-weight: 700;
-}
-
-.mark-drawer-since {
-    color: var(--fold-since);
-    font-weight: 700;
-}
-
-.mark-drawer-conversation {
-    color: var(--fold-conversation);
-    font-weight: 700;
-}
-
-.outline-glyph.is-label {
-    font-weight: 400;
 }
 
 .outline-hint {
@@ -1537,22 +1615,17 @@ kbd {
     color: var(--fg);
 }
 
-/* The outline's button in the top line, for the narrow screen it's an overlay on. */
-.bar .outline-button {
-    display: none;
+/* The bar's line saying the layout's switches still open, which opens them in the palette. */
+.bar .trials {
+    color: var(--purple);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
 }
 
 @media (max-width: 640px) {
-    .bar .outline-button {
-        display: inline;
-    }
-
-    /* A phone's stack keeps its width for the headers. */
-    .buffer.stack .stack-hint {
-        display: none;
-    }
-
-    .outline.is-overlay {
+    .outline {
         position: absolute;
         z-index: 20;
         top: 0;
@@ -1564,239 +1637,17 @@ kbd {
         box-shadow: 4px 0 12px rgb(0 0 0 / 0.9);
     }
 
-    /* On a touch screen the stack lets a swipe through to the buffer under it; its labels still take a tap. */
-    .buffer.stack .cm-line.stack-line {
+    /* A phone's stack keeps its width for the headers, and lets a swipe through to the buffer under it. */
+    .buffer.stack .stack-hint {
+        display: none;
+    }
+
+    .buffer.stack .cm-line.stack-line,
+    .buffer.stack .stack-mark {
         pointer-events: none;
     }
 
-    .buffer.stack .row-label {
-        pointer-events: auto;
+    .bar .trials {
+        display: none;
     }
-}
-
-/* The stack's margin: each pinned header's fold letter, in its column, as the buffer's margin has it. */
-.buffer.stack .stack-margin {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-}
-
-/* The bar's line saying the layout trials, which opens them in the palette. */
-.bar .trials {
-    color: var(--purple);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-}
-
-/* Groups framed (`frame`): the banner a band of the agents' colour across, or a box around it, set in by how deep
-   it's nested so the frame steps in with it; the blank line after an item ruled; a group's end saying whose. */
-.buffer .cm-line.review-banner.frame-band {
-    background: #05262a;
-    border-top: 1px solid var(--cyan);
-    box-shadow: inset 4px 0 0 var(--cyan);
-    padding-top: 0.15em;
-    padding-bottom: 0.15em;
-}
-
-.buffer .cm-line.review-banner.frame-box {
-    border: 1px solid var(--cyan);
-    border-left-width: 4px;
-    padding-top: 0.1em;
-    padding-bottom: 0.1em;
-    margin-top: 0.3em;
-}
-
-.buffer .cm-line.review-banner.frame-band.nest-1,
-.buffer .cm-line.review-banner.frame-box.nest-1 {
-    margin-left: 2ch;
-    padding-left: 6px;
-}
-
-.buffer .cm-line.review-banner.frame-band.nest-2,
-.buffer .cm-line.review-banner.frame-box.nest-2 {
-    margin-left: 4ch;
-    padding-left: 6px;
-}
-
-.buffer .cm-line.review-banner.frame-band.nest-3,
-.buffer .cm-line.review-banner.frame-box.nest-3,
-.buffer .cm-line.review-banner.frame-band.nest-4,
-.buffer .cm-line.review-banner.frame-box.nest-4 {
-    margin-left: 6ch;
-    padding-left: 6px;
-}
-
-.buffer.stack .cm-line.stack-line.frame-band,
-.buffer.stack .cm-line.stack-line.frame-box {
-    margin: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    border-top: 0;
-    border-bottom: 0;
-}
-
-.buffer .cm-line.item-end {
-    background: linear-gradient(to bottom, transparent 8px, rgb(255 153 51 / 0.45) 8px, rgb(255 153 51 / 0.45) 9px, transparent 9px) no-repeat;
-    background-size: min(72ch, 100%) 100%;
-}
-
-.buffer .cm-line.group-end::before {
-    content: "╰─ " attr(data-end) " ────";
-    color: var(--cyan);
-    opacity: 0.85;
-}
-
-/* The rails down each group, where groups are framed without the outline in the margin; and the outline in the
-   margin: right of the fold letters, a column for each depth, each scope a bar in its kind's colour from its first
-   line to its last, its label where it starts, on the columns past its own, which no deeper bar holds yet. */
-.buffer .group-rails {
-    width: calc(3 * var(--column) + 2px);
-}
-
-.buffer .outline-margin {
-    width: 17ch;
-    border-right: 1px solid #1d3a44;
-}
-
-.buffer .outline-margin.is-bare {
-    width: calc(5 * var(--column) + 2px);
-}
-
-.buffer .group-rails .cm-gutterElement,
-.buffer .outline-margin .cm-gutterElement {
-    position: relative;
-    padding: 0;
-}
-
-.rail-cell {
-    position: absolute;
-    inset: 0;
-}
-
-.rail {
-    --at: calc(1px + var(--depth) * var(--column));
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: calc(var(--at) + var(--column) / 2 - 1px);
-    width: 2px;
-    background: currentColor;
-}
-
-.rail.is-first {
-    top: calc(var(--lh) / 2);
-    border-radius: 2px 2px 0 0;
-}
-
-.rail.is-last {
-    bottom: calc(var(--lh) / 2 - 2px);
-}
-
-.rail.is-first.is-last {
-    bottom: calc(var(--lh) / 2 - 3px);
-}
-
-/* A scope's start: a tick across to its label. */
-.rail.is-first::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: calc(var(--column) / 2 + 1px);
-    height: 2px;
-    background: currentColor;
-}
-
-.rail-label {
-    position: absolute;
-    top: 0;
-    left: calc(1px + (var(--depth) + 1) * var(--column));
-    right: 0;
-    height: var(--lh);
-    line-height: var(--lh);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    cursor: pointer;
-}
-
-.rail-label:hover {
-    text-decoration: underline;
-}
-
-.rail-state {
-    margin-right: 0.5ch;
-}
-
-.rail-draft {
-    margin-left: 0.5ch;
-    color: var(--warn);
-}
-
-.rail-fresh {
-    color: var(--link);
-}
-
-.rail-group {
-    color: var(--cyan);
-    font-weight: 700;
-}
-
-.rail-item {
-    color: var(--fold-item);
-}
-
-.rail-file {
-    color: var(--fold-file);
-}
-
-.rail-tasks {
-    color: var(--fold-tasks);
-}
-
-.rail-since {
-    color: var(--fold-since);
-}
-
-.rail-conversation {
-    color: var(--fold-conversation);
-}
-
-/* The drawers pinned below (`drawers=sticky`): over the buffer's bottom, a rule over them, as the stack's is under it. */
-.buffer.footer {
-    position: absolute;
-    left: 0;
-    bottom: 0;
-    flex: none;
-    z-index: 300;
-    overflow: hidden;
-    background: var(--bg);
-    box-shadow: 0 -1px 0 var(--cyan), 0 -4px 6px -2px rgb(0 0 0 / 0.9);
-}
-
-.buffer.footer .cm-editor {
-    height: auto;
-}
-
-.buffer.footer .cm-line.footer-line {
-    padding: 0 2px 0 6px;
-    height: var(--lh);
-    white-space: pre;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    cursor: pointer;
-    border-top: 0;
-}
-
-.buffer.footer .cm-line.footer-line.drawer-row {
-    display: flex;
-    gap: 0 3ch;
-    cursor: default;
-}
-
-.buffer.footer .cm-line.footer-line:hover {
-    background: var(--float-bg);
 }

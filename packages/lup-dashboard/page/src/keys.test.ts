@@ -9,10 +9,10 @@ describe("the line of keys", () => {
         expect(shown("insert")).toEqual(["^⏎", "Esc", "Esc u"]);
         expect(shown("change")).toEqual(["␣a", "␣x", "␣d", "o", "c…", "␣c", "]a [a", "]c [c", "]f [f", "]n [n", "za"]);
         expect(shown("item")).toEqual(["␣d", "␣p", "o", "c…", "C", "␣c", "]] [[", "]a [a", "]n [n", "za"]);
-        expect(shown("banner")).toEqual(["h", "o ␣c", "]] [[", "]a [a", "]n [n", "␣z"]);
+        expect(shown("banner")).toEqual(["h", "o ␣c", "]] [[", "]a [a", "]n [n", "]g [g", "]t [t ]s [s ]v [v", "\\", "␣z"]);
         expect(shown("written")).toEqual(["i a A", "u ^r", "]] [[", "]a [a", "]n [n"]);
         expect(shown("aside")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "zf", "␣z", "zj zk"]);
-        expect(shown("drawer")).toEqual(["]] [[", "]a [a", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
+        expect(shown("drawer")).toEqual(["]] [[", "]a [a", "]t [t ]s [s ]v [v", "za", "zr zm", "zR zM", "␣z", "zj zk"]);
         expect(shown("words")).toEqual(["o", "c…", "C", "]n [n", "za"]);
     });
 

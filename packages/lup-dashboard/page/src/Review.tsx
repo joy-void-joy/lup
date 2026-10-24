@@ -374,6 +374,9 @@ function citing(cited: Cited[]): { from: number; to: number; value: Decoration }
     });
 }
 
+/** The folds the review zoomed out folds: each item's and each drawer's, so each is its header. */
+const ZOOMED: ReadonlySet<FoldKind> = new Set<FoldKind>(["item", "tasks", "since", "conversation"]);
+
 /** Return the classes a group's banner is drawn with: set in by how deep it's nested, where it is. */
 function bannerClasses(depth: number): string {
     return ["review-banner", "frame-band", depth > 0 ? `is-nested nest-${Math.min(depth, 4)}` : ""].join(" ").trim();
@@ -1029,6 +1032,34 @@ export function Review({
             editor.enter();
         }
     }, [laidOut, draft, reviewed, trials.frame]);
+
+    // Zoomed out, where that's the overview, every item and drawer folds to its header, the groups open, so the review
+    // reads as every agent and its items, its margin the tree; zoomed back, each folds as the operator left it. What
+    // zooming folds isn't the operator's, so isn't kept; what they open meanwhile is.
+    const wasZoomed = useRef(false);
+    useEffect(() => {
+        const current = view.current;
+        if (current === null) {
+            return;
+        }
+        if (zoomed) {
+            const zooming = laidFor.folds.filter((each) => each.kind !== undefined && ZOOMED.has(each.kind) && !isFolded(current.state, each));
+            const head = current.state.selection.main.head;
+            const back = uncovered(zooming, head);
+            current.dispatch({
+                effects: zooming.map((each) => folding(each, true)),
+                selection: back === head ? undefined : { anchor: back },
+                annotations: rebuilt.of(true),
+            });
+            current.dispatch({ effects: EditorView.scrollIntoView(current.state.selection.main.head, { y: "center" }) });
+        } else if (wasZoomed.current) {
+            refold(current, laidFor.folds, kept.current);
+            current.dispatch({ effects: EditorView.scrollIntoView(current.state.selection.main.head, { y: "center" }) });
+        }
+        wasZoomed.current = zoomed;
+        // Zoomed anew as what's laid out changes, after it's folded as the operator left it.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [zoomed, laidFor]);
 
     // Asked to go to an agent's group, as from the palette: onto its banner.
     const jumped = useRef<number>(0);

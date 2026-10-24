@@ -149,6 +149,27 @@ const COPYING: Part<never>[] = [
     },
 ];
 
+/**
+ * What the margin's labels, the stack's and the overview's marks say: how a thing stands, each in the state's own
+ * colour; and apart, in the colour of what's written, what the next Ctrl+Enter does with it. Not keys: looked up here.
+ */
+const MARKS: Part<never>[] = [
+    {
+        title: "Marks in the margin and the overview",
+        keys: [
+            { keys: "◆", does: "an item waiting on you: a question, a held change, an approval, a hold at landing", short: "waiting", at: [] },
+            { keys: "◇", does: "a file to review; beside an agent in the overview, how many its \"since you approved\" has (◇3)", short: "to review", at: [] },
+            { keys: "⚑", does: "a file with a line that matters, held or flagged; lup's approvals in the overview", short: "flagged", at: [] },
+            { keys: "·", does: "a file folded whole: automatic, a test, data, a first approval's", short: "folded", at: [] },
+            { keys: "•", does: "news, to read rather than answer: a note, a turn's last words, a friction, how it went, a stop", short: "news", at: [] },
+            { keys: "‖", does: "an item left for later", short: "parked", at: [] },
+            { keys: "new", does: "an item that came after you last sent", short: "new", at: [] },
+            { keys: "▶ ○ ✕", does: "an agent calling a tool, between calls, ended", short: "agents", at: [] },
+            { keys: "» ✓ ✔", does: "in yellow, what your next Ctrl+Enter does with it: your comment on it goes, it's marked read, it's approved", short: "your reply", at: [] },
+        ],
+    },
+];
+
 /** The keys of this list, which the line of keys says at its end, wherever the cursor is. */
 const LIST: Part<never>[] = [{ title: "This list", keys: [{ keys: "?", does: "open it; Esc, q or ? closes it", short: "all keys", at: [] }] }];
 
@@ -264,7 +285,32 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 short: "search",
                 at: [],
             },
+            {
+                keys: "]g [g",
+                does: "next and previous agent's group, on its banner, its fold's letter a in the margin; the view stays where it's in view, else it comes in a third of the view from the edge",
+                short: "agents",
+                at: ["banner", "approvals"],
+            },
+            {
+                keys: "]i [i",
+                does: "next and previous item, on its header, its fold's letter i in the margin; the view stays where it's in view, else it comes in a third of the view from the edge",
+                short: "item headers",
+                at: [],
+            },
+            {
+                keys: "]t [t ]s [s ]v [v",
+                does: "next and previous drawer of a kind, by its letter: tasks, since you approved, the conversation; the view stays where it's in view, else it comes in a third of the view from the edge",
+                short: "drawers",
+                at: ["banner", "drawer"],
+            },
             { keys: "^k", does: "go to an agent's group", short: "go to", at: [] },
+        ],
+    },
+    {
+        title: "The overview",
+        keys: [
+            { keys: "\\", does: "hide the overview of every agent and item beside the review, or show it again; where it's the review zoomed out, zoom out to every header, or back", short: "overview", at: ["banner", "approvals"] },
+            { keys: "gO", does: "take the keyboard to the overview, opening it, on a phone over the review: j k move, ⏎ goes there, Esc or q back", short: "into it", at: [] },
         ],
     },
     {
@@ -329,6 +375,7 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
             },
         ],
     },
+    ...MARKS,
     ...COPYING,
     ...LIST,
 ];
