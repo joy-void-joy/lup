@@ -12,7 +12,7 @@
 // changes, whole, its lines numbered, marked and highlighted as they come into
 // view, each line that matters by the judge's reading barred and saying what it
 // triggered; the item's header counts its files by why each is open; under each
-// item, its context. At the end of each agent's group, its drawers
+// item, its context. Under each agent's banner, its drawers
 // (`review.ts`): its tasks, what its branch changed since the operator last saw
 // it, live, where Space `a` marks a file reviewed at the version shown and Space
 // `A` every file shown, each line changed since they last looked at its file
@@ -20,13 +20,15 @@
 // as its fold opens;
 // `h` on a banner turns the operator's switch to hold the agent's flagged
 // writes. Each fold has a kind, its letter in the margin beside its summary
-// line, in the column of its depth, a bar under it for each fold the cursor is
-// in (`margin.ts`); the context, each run of unchanged lines, each test, data
-// and first approval's file and each drawer but "since you approved", folded until opened, and `zr`, `zm`, `zR`, `zM` and
-// Space `z` act on the item or the drawer the cursor is in. The header over the
-// review says where the cursor is: the group, the item or the drawer, the file
-// and the folds it's in, and, while a comment is being written, whom it goes
-// to; at its end, how many items are to answer and how many are new. As what
+// line, in the column of its depth, each scope a bar its full height, labelled
+// (`rails.ts`); the context, each run of unchanged lines, each test, data and
+// first approval's file and each drawer, folded until opened, and `zr`, `zm`,
+// `zR`, `zM` and Space `z` act on the item or the drawer the cursor is in. The
+// header over the review says where the cursor is: the group, the item or the
+// drawer, the file and the folds it's in, and, while a comment is being
+// written, whom it goes to; at its end, how many items are to answer and how
+// many are new; under it, the stack pins the headers the top of the view is in
+// (`Stack.tsx`); beside the review, the overview (`Outline.tsx`). As what
 // it shows changes, the cursor's line stays where it is on screen, so nothing
 // arriving above moves what the operator reads. An agent's answer shows the
 // operator's words it answers above it, each of its citations of them as its

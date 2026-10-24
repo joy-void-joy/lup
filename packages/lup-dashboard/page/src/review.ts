@@ -4,14 +4,15 @@
 // messages to each agent under its banner. Under an approval or a held change,
 // each file it changes, whole (`code.ts`), its lines commented on as the item's
 // own are, the lines that matter in it, by the judge's reading, kept in order
-// for the keys to walk; under each item its context. At the end of each agent's
-// group, after its items, its drawers (`docs/dashboard.md`, *The drawers*): its
-// task list, what its branch changed since they approved it, each file laid out
-// as an item's, and its whole conversation (`conversation.ts`), its latest part
-// open, each a fold of its own kind, folded until opened but "since you
-// approved", which is open, as it's the code waiting on them; a comment in the
-// conversation or on the changed files is a remark to the agent, the one on code
-// recording the version it was written on.
+// for the keys to walk; under each item its context. Under each agent's
+// banner, before its items, its drawers (`docs/dashboard.md`, *The drawers*):
+// its task list, what its branch changed since they approved it, each file laid
+// out as an item's, and its whole conversation (`conversation.ts`), its latest
+// part open, each a fold of its own kind, a line folded until opened, or a
+// label side by side, pulled out below; a comment in the conversation or on the
+// changed files is a remark to the agent, the one on code recording the version
+// it was written on. A subagent's group under its parent's, each group folding
+// whole under its banner.
 // Its groups and items in the order they arrived, never sorted again, so what
 // the operator reads stays put as items come; their kind's rank, which the host
 // gives, says only which `]a` and `[a` stop at. Each fold has a kind: the item
