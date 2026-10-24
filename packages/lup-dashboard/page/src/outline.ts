@@ -26,28 +26,19 @@ import { foldedOf } from "./code";
 export type OutlineKind = "repository" | "agent" | "approvals" | "item" | "drawer" | "file";
 
 /**
- * How an entry stands, its mark: an item new to the operator, waiting on them, commented, marked read, approved by
- * the reply, parked, or news to read; a file to review, flagged, reviewed, or folded whole as a test or data; an agent
- * calling, between calls or ended; a drawer pulled out or only a label in its row.
+ * How an entry stands, the state it's in, each in its own colour: an item waiting on the operator, news to read, or
+ * parked; a file to review, one with flagged writes waiting, or one folded whole as a test or data; an agent calling,
+ * between calls or ended; a drawer only a label in its row. What's settled, a file reviewed, isn't listed at all.
  */
-export type OutlineMark =
-    | "new"
-    | "waiting"
-    | "commented"
-    | "read"
-    | "approved"
-    | "parked"
-    | "news"
-    | "to-review"
-    | "flagged"
-    | "reviewed"
-    | "folded"
-    | "calling"
-    | "idle"
-    | "ended"
-    | "label";
+export type OutlineMark = "waiting" | "news" | "parked" | "to-review" | "flagged" | "folded" | "calling" | "idle" | "ended" | "label";
 
-/** One entry: what it is, how deep it's set in, what it says, its marks, where it is in the review, and where going to it lands. */
+/**
+ * What the draft does with an item on the next Ctrl+Enter, all in the draft's colour: comments on it go, it's marked
+ * read, or it's approved, an approval marked read alone or a held change marked read or commented on.
+ */
+export type DraftMark = "comment" | "read" | "approve";
+
+/** One entry: what it is, how deep it's set in, what it says, how it stands, what the draft does with it, where it is in the review, and where going to it lands. */
 export interface OutlineRow extends Span {
     key: string;
     kind: OutlineKind;
@@ -55,6 +46,9 @@ export interface OutlineRow extends Span {
     text: string;
     title: string;
     marks: OutlineMark[];
+    draft: DraftMark[];
+    /** Whether it's new to the operator since they last sent. */
+    fresh: boolean;
     at: number;
     /** What names the item or drawer it's of, whose files the outline lists while it's in view. */
     of: string | null;
@@ -91,35 +85,30 @@ function repositoryOf(group: Group): string {
     return "lup";
 }
 
-/** Return how an item stands, by the draft: parked, approved by the reply or marked read, commented, waiting on the operator or news; and new. */
-export function itemMarks(region: Region, draft: Draft, reviewed: string | null): OutlineMark[] {
+/** How an item stands, apart from what the draft does with it, and what that is, and whether it's new to the operator. */
+export interface Standing {
+    marks: OutlineMark[];
+    draft: DraftMark[];
+    fresh: boolean;
+}
+
+/**
+ * Return how an item stands: parked, waiting on the operator or news, each but where the draft settles it; what the
+ * draft does with it on the next Ctrl+Enter, as the reply does: comments on it go, it's marked read, or approved, an
+ * approval marked read alone, one commented on left unanswered, a held change marked read or commented on approved;
+ * and whether it's new.
+ */
+export function itemStanding(region: Region, draft: Draft, reviewed: string | null): Standing {
     const item = region.item;
     const number = item.number;
-    const marks: OutlineMark[] = [];
     const commented = (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== "");
     const done = (draft.done ?? []).includes(number);
+    const parked = (draft.parked ?? []).includes(number);
     const reason = item.reason.reason;
-    // As the reply does: an approval marked read alone is approved, one commented on left unanswered; a held change
-    // marked read or commented on is approved, its comments going with the yes.
     const approved = (reason === "approval" && done && !commented) || (reason === "held" && (done || commented));
-    if ((draft.parked ?? []).includes(number)) {
-        marks.push("parked");
-    } else if (approved) {
-        marks.push("approved");
-    } else if (done && reason !== "approval") {
-        marks.push("read");
-    } else if (toAnswer(item, draft)) {
-        marks.push("waiting");
-    } else if (news(item)) {
-        marks.push("news");
-    }
-    if (commented) {
-        marks.push("commented");
-    }
-    if (fresh(item, reviewed)) {
-        marks.push("new");
-    }
-    return marks;
+    const drafted: DraftMark[] = parked ? [] : [...(commented ? ["comment" as const] : []), ...(approved ? ["approve" as const] : done && reason !== "approval" ? ["read" as const] : [])];
+    const marks: OutlineMark[] = parked ? ["parked"] : toAnswer(item, draft) ? ["waiting"] : news(item) && !done ? ["news"] : [];
+    return { marks, draft: drafted, fresh: fresh(item, reviewed) };
 }
 
 /** Return what names an item in the outline: its header's first part, `@51 question`. */
@@ -144,11 +133,14 @@ function filesOf(scope: Scope, depth: number, text: string): OutlineRow[] {
         const stops = scope.stops.some((each) => each >= filed.from && each <= filed.to);
         const folded = foldedOf(filed.file, false) !== null;
         const marks: OutlineMark[] = drawer === null ? [stops ? "flagged" : folded ? "folded" : "to-review"] : [flagged(path) ? "flagged" : folded ? "folded" : "to-review"];
-        rows.push({ key: `${scope.of} file ${path}`, kind: "file", depth, text: last(path), title: path, marks, from: filed.from, to: filed.to, at: filed.from, of: scope.of });
+        rows.push({ key: `${scope.of} file ${path}`, kind: "file", depth, text: last(path), title: path, marks, draft: [], fresh: false, from: filed.from, to: filed.to, at: filed.from, of: scope.of });
     }
+    // A file standing as the operator saw it is listed only where flagged writes still wait on it: one settled isn't.
     for (const line of drawer?.reviewed ?? []) {
         const path = line.file.path;
-        rows.push({ key: `${scope.of} file ${path}`, kind: "file", depth, text: last(path), title: text.slice(line.from, line.to), marks: [flagged(path) ? "flagged" : "reviewed"], from: line.from, to: line.to, at: line.from, of: scope.of });
+        if (flagged(path)) {
+            rows.push({ key: `${scope.of} file ${path}`, kind: "file", depth, text: last(path), title: text.slice(line.from, line.to), marks: ["flagged"], draft: [], fresh: false, from: line.from, to: line.to, at: line.from, of: scope.of });
+        }
     }
     return rows.sort((a, b) => a.from - b.from);
 }
@@ -214,6 +206,8 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
             text: depth > 1 ? (path.split("/").at(-1) ?? path) : path,
             title: text.slice(group.banner.from, group.banner.to),
             marks: state === "calling" ? ["calling"] : state === "idle" ? ["idle"] : state === "ended" || (state === null && group.conversation !== null) ? ["ended"] : [],
+            draft: [],
+            fresh: false,
             from,
             to,
             at: from,
@@ -229,6 +223,8 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                     text: text.slice(label.from, label.to).replace(/^[▸▾] /, ""),
                     title: "a label in the row under the banner",
                     marks: label.waiting ? ["label", "waiting"] : ["label"],
+            draft: [],
+            fresh: false,
                     from: label.from,
                     to: label.to,
                     at: label.from,
@@ -248,6 +244,8 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                     text: text.slice(scope.header.from, scope.header.to),
                     title: text.slice(scope.header.from, scope.header.to),
                     marks: drawerMarks(text, scope),
+            draft: [],
+            fresh: false,
                     from: scope.header.from,
                     to: scopeEnd(scope, scopes, to),
                     at: scope.header.from,
@@ -261,7 +259,7 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
                     depth: depth + 1,
                     text: itemText(text, region),
                     title: text.slice(region.header.from, region.header.to),
-                    marks: itemMarks(region, draft, reviewed),
+                    ...itemStanding(region, draft, reviewed),
                     from: region.header.from,
                     to: scopeEnd(region, scopes, to),
                     at: region.header.from,
@@ -286,6 +284,8 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
             title: repository,
             marks: [],
             from: first?.banner.from ?? 0,
+            draft: [],
+            fresh: false,
             to: first?.banner.from ?? 0,
             at: first?.banner.from ?? 0,
             of: null,
@@ -298,7 +298,7 @@ export function outlineOf(laidOut: Laid, reading: Reading): OutlineRow[] {
     const later = laidOut.groups.flatMap((group, at) => (group.later ? [at] : []));
     if (later.length > 0) {
         const first = laidOut.groups[later[0] ?? 0];
-        rows.push({ key: "later", kind: "repository", depth: 0, text: "later", title: "left for later", marks: [], from: first?.banner.from ?? 0, to: first?.banner.from ?? 0, at: first?.banner.from ?? 0, of: null });
+        rows.push({ key: "later", kind: "repository", depth: 0, text: "later", title: "left for later", marks: [], draft: [], fresh: false, from: first?.banner.from ?? 0, to: first?.banner.from ?? 0, at: first?.banner.from ?? 0, of: null });
         for (const at of later) {
             laidGroup(at, 1);
         }

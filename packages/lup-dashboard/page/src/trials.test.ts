@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cursorRow, itemMarks, outlineOf, type Reading } from "./outline";
+import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
 import { EMPTY, laid, nested, ownerOf, rowLabel, whose, UNREAD, type AgentDrawers, type Around, type Conversation, type Head, type Item } from "./review";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
 import { CHOICES, TODAY, searchOf, trialsOf } from "./trials";
@@ -60,8 +60,16 @@ const TASKED: AgentDrawers = {
 describe("the layout trials' switches", () => {
     it("reads them from the address's query, today's for any left out or said wrong, and writes them back keeping the rest", () => {
         expect(trialsOf("")).toEqual(TODAY);
-        expect(trialsOf("?header=stack&outline=on&drawers=row&nest=on")).toEqual({ header: "stack", outline: true, drawers: "row", nest: true });
-        expect(trialsOf("?header=sideways&outline=yes")).toEqual(TODAY);
+        expect(trialsOf("?header=stack&outline=on&drawers=row&nest=on")).toEqual({ ...TODAY, header: "stack", outline: "pane", drawers: "row", nest: true });
+        expect(trialsOf("?header=cursor-stack&outline=margin&drawers=sticky&labels=lines&frame=band")).toEqual({
+            header: "cursor-stack",
+            outline: "margin",
+            drawers: "sticky",
+            labels: "lines",
+            nest: false,
+            frame: "band",
+        });
+        expect(trialsOf("?header=sideways&outline=yes&frame=round")).toEqual(TODAY);
         expect(searchOf({ ...TODAY, header: "stack-status", nest: true }, "?timing=on")).toBe("?timing=on&header=stack-status&nest=on");
         expect(searchOf(TODAY, "?header=stack&nest=on")).toBe("");
     });
@@ -109,6 +117,25 @@ describe("subagents nested under their parent", () => {
     });
 });
 
+describe("groups folding whole", () => {
+    it("folds each group under its banner up to the next as deep or shallower, a subagent's inside its parent's", () => {
+        const items = [note(1, CHILD), note(4, PARENT), note(2, OTHER)];
+        const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], new Map(), undefined, { parents: PARENTS, folds: true });
+        const folds = out.groups.map((each) => each.fold);
+        expect(folds.map((each) => [each?.kind, each?.of, each?.closed])).toEqual([
+            ["group", `group now ${whose(OTHER)}`, false],
+            ["group", `group now ${whose(PARENT)}`, false],
+            ["group", `group now ${whose(CHILD)}`, false],
+        ]);
+        const [, parent, child] = folds;
+        // The parent's holds its subagent's, both ending where the text does.
+        expect(parent!.from).toBeLessThan(child!.from);
+        expect(parent!.to).toBe(child!.to);
+        expect(out.text.slice(folds[0]!.summary.from, folds[0]!.summary.to)).toBe("━━ s2 ━━");
+        expect(laid(items, [PARENT], banner, header, EMPTY, NOTHING).groups.map((each) => each.fold)).toEqual([null, null, null]);
+    });
+});
+
 describe("the drawers as a row under the banner", () => {
     const drawers = new Map([[whose(PARENT), TASKED]]);
     const tasks = ownerOf({ drawer: "tasks", conversation: PARENT });
@@ -126,6 +153,24 @@ describe("the drawers as a row under the banner", () => {
         const pulled = laid([note(4, PARENT)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { row: { pulled: new Set([tasks]) } });
         expect(pulled.text.split("\n").slice(0, 6)).toEqual(["━━ s1 ━━", "▾ tasks 1/2   ▸ conversation · 2 steps", "tasks · 2 entries, 1 done, 1 in progress", "✓ Read", "▶ Writing", ""]);
         expect(pulled.drawers.map((each) => [each.kind, each.folds.at(-1)?.closed])).toEqual([["tasks", false]]);
+    });
+
+    it("lays each drawer under the banner a line of its own, folded, where they're a line each, and pins those lines under the banner", () => {
+        const out = laid([note(4, PARENT)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { row: { pulled: new Set(), lines: true } });
+        expect(out.text.split("\n").slice(0, 2)).toEqual(["━━ s1 ━━", "tasks · 2 entries, 1 done, 1 in progress"]);
+        expect(out.groups[0]!.row).toBeNull();
+        expect(out.drawers.map((each) => [each.kind, each.folds.at(-1)?.closed])).toEqual([
+            ["tasks", true],
+            ["conversation", true],
+        ]);
+        expect(out.text.indexOf("conversation · 2 steps")).toBeLessThan(out.text.indexOf("── @4"));
+        const [group] = stickies(out, [0], "lines");
+        expect(group!.under.map((each) => [each.drawer, out.text.slice(each.from, each.to)])).toEqual([
+            ["tasks", "tasks · 2 entries, 1 done, 1 in progress"],
+            ["conversation", "conversation · 2 steps, 1 since your last words"],
+        ]);
+        // Pinned under the banner, a drawer isn't pinned again as a scope of its own.
+        expect(group!.children.map((each) => each.kind)).toEqual(["item"]);
     });
 
     it("says each label short, what waits in \"since you approved\" marking it, none for a drawer with nothing in it", () => {
@@ -165,7 +210,7 @@ function geometry(text: string, top: number): Geometry {
 describe("the header stack", () => {
     const items = [note(1, PARENT), note(2, PARENT), note(3, OTHER)];
     const out = laid(items, [], banner, header, EMPTY, NOTHING);
-    const roots = stickies(out, out.groups.map((each) => each.depth), false);
+    const roots = stickies(out, out.groups.map((each) => each.depth), null);
     const shown = (top: number) => pinned(roots, geometry(out.text, top)).map((each) => `${each.offset} ${out.text.slice(each.sticky.header.from, each.sticky.header.to)}`);
 
     it("pins the headers of the scopes the top of the view is inside once their own lines are scrolled off, the next pushing each up as its scope ends", () => {
@@ -194,7 +239,7 @@ describe("the header stack", () => {
             parents: PARENTS,
             row: { pulled: new Set() },
         });
-        const nestedRoots = stickies(nestedOut, nestedOut.groups.map((each) => each.depth), true);
+        const nestedRoots = stickies(nestedOut, nestedOut.groups.map((each) => each.depth), "row");
         const deep = nestedOut.text.indexOf("Second line.", nestedOut.text.indexOf("@1"));
         const lines = nestedOut.text.slice(0, deep).split("\n").length - 1;
         // The line under the stack is @1's second line: the parent's banner, the subagent's and its row, @1's header.
@@ -230,20 +275,21 @@ describe("the outline", () => {
 
     it("lists each repository, its agents with each subagent under its parent whatever the review's order, then their items and drawers, each marked", () => {
         const rows = outlineOf(out, reading);
-        expect(rows.map((each) => `${"  ".repeat(each.depth)}${each.text} [${each.marks.join(",")}]`)).toEqual([
+        // How each stands, then, apart, what the draft does with it on the next Ctrl+Enter.
+        expect(rows.map((each) => `${"  ".repeat(each.depth)}${each.text} [${each.marks.join(",")}]${each.draft.length === 0 ? "" : ` {${each.draft.join(",")}}`}`)).toEqual([
             "lup []",
             "  s2 [ended]",
-            "    @2 note [read]",
+            "    @2 note [] {read}",
             "  s1 [calling]",
             "    @4 note [news]",
             "    tasks · 2 entries, 1 done, 1 in progress []",
             "    conversation · 2 steps, 1 since your last words []",
             "    a1 [ended]",
-            "      @1 note [waiting,commented]",
+            "      @1 note [waiting] {comment}",
         ]);
         // The cursor's entry is the deepest holding it.
         expect(cursorRow(rows, out.text.indexOf("Note 1."))?.text).toBe("@1 note");
         expect(cursorRow(rows, out.text.indexOf("━━ s1"))?.text).toBe("s1");
-        expect(itemMarks(out.regions.find((each) => each.item.number === 1)!, { ...EMPTY, parked: [1] }, null)).toEqual(["parked"]);
+        expect(itemStanding(out.regions.find((each) => each.item.number === 1)!, { ...EMPTY, parked: [1], comments: [{ item: 1, text: "x" }] }, null)).toEqual({ marks: ["parked"], draft: [], fresh: false });
     });
 });

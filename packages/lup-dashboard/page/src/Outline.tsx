@@ -12,7 +12,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 
 import type { Following } from "./follow";
 import { measured } from "./timing";
-import { cursorRow, filedScopes, outlineOf, scopesSeen, type OutlineMark, type OutlineRow, type Reading } from "./outline";
+import { cursorRow, filedScopes, outlineOf, scopesSeen, type DraftMark, type OutlineMark, type OutlineRow, type Reading } from "./outline";
+import type { Part, ReviewPlace } from "./keys";
 import type { Laid } from "./review";
 
 /** What `gO` does in the review: take the keyboard to the outline, where it's shown; else say it's off. */
@@ -40,6 +41,71 @@ export function mapOutlineKey(say: (text: string) => void): void {
         }
     });
     Vim.mapCommand("gO", "action", "lupOutline", {}, { context: "normal" });
+}
+
+/** The outline's keys, a part of the list of keys while an outline is shown (`keys.ts`). */
+export const OUTLINE_KEYS: Part<ReviewPlace>[] = [
+    {
+        title: "The outline (a layout trial)",
+        keys: [
+            {
+                keys: "]g [g",
+                does: "next and previous agent's group, on its banner, a group's folds marked a in the margin",
+                short: "agents",
+                at: ["banner", "approvals", "item", "change", "drawer", "aside"],
+            },
+            { keys: "]i [i", does: "next and previous item, on its header", short: "items", at: [] },
+            {
+                keys: "]t [t ]s [s ]v [v",
+                does: "next and previous drawer of that kind, by its letter: tasks, since you approved, the conversation",
+                short: "drawers",
+                at: ["banner", "drawer"],
+            },
+            { keys: "gO", does: "take the keyboard to the outline's pane, or open it on a phone; j k move, ⏎ goes, Esc back", short: "outline", at: [] },
+        ],
+    },
+];
+
+/** What `]` or `[` and a scope's letter does in the review, where an outline is shown: go to the next or previous scope of that kind. */
+let scopeJump: ((kind: ScopeKey, forward: boolean) => void) | null = null;
+let scopesMapped = false;
+
+/** The scopes the outline's keys go by, each by the fold letter it's marked with: an agent's group, an item, each kind of drawer. */
+export type ScopeKey = "group" | "item" | "tasks" | "since" | "conversation";
+
+/** Each scope's key after `]` and `[`: its fold letter, but an agent's group's `g`, as `]a` goes to what's to answer. */
+export const SCOPE_KEYS: readonly (readonly [letter: string, kind: ScopeKey])[] = [
+    ["g", "group"],
+    ["i", "item"],
+    ["t", "tasks"],
+    ["s", "since"],
+    ["v", "conversation"],
+];
+
+/** Set what `]` or `[` and a scope's letter does, as an outline is shown or goes. */
+export function setScopeJump(jump: ((kind: ScopeKey, forward: boolean) => void) | null): void {
+    scopeJump = jump;
+}
+
+/** Map `]` and `[` with each scope's letter in the review's vim, once: next or previous scope of that kind, where an outline is shown. */
+export function mapScopeKeys(): void {
+    if (scopesMapped) {
+        return;
+    }
+    scopesMapped = true;
+    for (const [letter, kind] of SCOPE_KEYS) {
+        for (const forward of [true, false]) {
+            const name = `lupScope-${kind}-${forward ? "next" : "previous"}`;
+            Vim.defineAction(name, () => {
+                if (scopeJump === null) {
+                    outlineSay?.("Going by the outline's scopes is a layout trial: Ctrl+K, then Layout: outline.");
+                } else {
+                    scopeJump(kind, forward);
+                }
+            });
+            Vim.mapCommand(`${forward ? "]" : "["}${letter}`, "action", name, {}, { context: "normal" });
+        }
+    }
 }
 
 /** The width under which the page is one column, as a phone's: the outline is an overlay there, and the stack two slots. */
@@ -83,19 +149,24 @@ function sameViewed(a: Viewed, b: Viewed): boolean {
     return a.cursor === b.cursor && a.open.join("\n") === b.open.join("\n") && a.seen.join("\n") === b.seen.join("\n");
 }
 
+/** How an entry stands, a glyph each, in the state's own colour: what waits on the operator a diamond, solid for an item, hollow for a file. */
 const GLYPHS: Partial<Record<OutlineMark, string>> = {
     waiting: "◆",
     news: "•",
-    read: "✓",
-    approved: "✓",
     parked: "‖",
-    "to-review": "○",
+    "to-review": "◇",
     flagged: "⚑",
-    reviewed: "✓",
     folded: "·",
-    calling: "●",
+    calling: "▶",
     idle: "○",
     ended: "✕",
+};
+
+/** What the draft does with an item on the next Ctrl+Enter, said in the draft's colour. */
+export const DRAFTED: Record<DraftMark, { glyph: string; word: string }> = {
+    comment: { glyph: "»", word: "comment" },
+    read: { glyph: "✓", word: "read" },
+    approve: { glyph: "✓", word: "approve" },
 };
 
 /** Return the glyph an entry is marked with, by what it is and its first mark that has one. */
@@ -256,8 +327,12 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                     <div key={row.key} data-key={row.key} className={classes} style={{ paddingLeft: `calc(${row.depth * 2}ch + 1ch)` }} title={row.title} onClick={() => go(row)}>
                         <span className={`outline-glyph mark-${mark}`}>{glyph}</span>
                         <span className="outline-text">{row.text}</span>
-                        {row.marks.includes("commented") ? <span className="outline-tag mark-commented" title="commented">»</span> : null}
-                        {row.marks.includes("new") ? <span className="outline-tag mark-new">new</span> : null}
+                        {row.fresh ? <span className="outline-tag outline-fresh" title="new since you last sent">new</span> : null}
+                        {row.draft.map((each) => (
+                            <span key={each} className="outline-tag outline-draft" title="in your reply: goes with the next Ctrl+Enter">
+                                {DRAFTED[each].glyph} {DRAFTED[each].word}
+                            </span>
+                        ))}
                     </div>
                 );
             })}

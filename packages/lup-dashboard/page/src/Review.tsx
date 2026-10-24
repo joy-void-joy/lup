@@ -35,7 +35,7 @@
 // going to it (`exchange.ts`; `docs/dashboard.md`, *The review*, *The
 // drawers*).
 import { foldedRanges } from "@codemirror/language";
-import { RangeSetBuilder, StateEffect, type Range } from "@codemirror/state";
+import { Compartment, RangeSetBuilder, StateEffect, type Range } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -44,10 +44,14 @@ import { changes, cited, moved, shownIn, type Block, type Change, type Folding, 
 import { closedAs, folding, hiddenAt, isFolded, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, type Landing } from "./editor";
 import { Following } from "./follow";
 import { timed } from "./timing";
-import { mapOutlineKey, Outline, setOutlineFocus, useNarrow } from "./Outline";
+import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
+import { Footer } from "./Footer";
+import { groupRails, outlineMargin, redrawn, type Labelled, type Outlined, type Railed } from "./rails";
+import { itemStanding } from "./outline";
+import { DRAFTED } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
-import { rowed, stacked, type Trials } from "./trials";
+import { grouped, rowed, stacked, type FrameTrial, type Trials } from "./trials";
 import { levelled, ofKind } from "./folds";
 import { FOLD_KINDS, type DrawerKind, type ReviewPlace } from "./keys";
 import { markerEnd, outdated, unfound } from "./exchange";
@@ -372,8 +376,49 @@ function citing(cited: Cited[]): { from: number; to: number; value: Decoration }
 }
 
 /** Return the classes a group's banner is drawn with: set in by how deep it's nested, where it is. */
-function bannerClasses(depth: number): string {
-    return depth > 0 ? `review-banner is-nested nest-${Math.min(depth, 4)}` : "review-banner";
+function bannerClasses(depth: number, frame: FrameTrial = "off"): string {
+    return ["review-banner", frame === "off" ? "" : `frame-${frame}`, depth > 0 ? `is-nested nest-${Math.min(depth, 4)}` : ""].join(" ").trim();
+}
+
+/** How a group is framed, where the trials frame it: its banner's look, and what its end says, `end of lup-impl`. */
+interface Framing {
+    frame: FrameTrial;
+    ends: (group: Group) => string;
+}
+
+/**
+ * Mark where each item and each group ends, where groups are framed: the blank line after an item ruled, and a
+ * group's last line saying whose end it is, a subagent's with its parent's where they end together.
+ */
+function endings(laidOut: Laid, framing: Framing): { from: number; to: number; value: Decoration }[] {
+    if (framing.frame === "off") {
+        return [];
+    }
+    const text = laidOut.text;
+    const blank = (at: number) => at < text.length && text[at] === "\n" && (at === 0 || text[at - 1] === "\n");
+    const groupEnds = new Map<number, string[]>();
+    for (const group of laidOut.groups) {
+        const fold = group.fold;
+        if (fold === null) {
+            continue;
+        }
+        const line = text.lastIndexOf("\n", fold.to - 1) + 1;
+        if (blank(line)) {
+            groupEnds.set(line, [...(groupEnds.get(line) ?? []), framing.ends(group)]);
+        }
+    }
+    const marks: { from: number; to: number; value: Decoration }[] = [];
+    for (const [at, names] of groupEnds) {
+        marks.push({ from: at, to: at, value: Decoration.line({ class: "group-end", attributes: { "data-end": `end of ${names.join(", end of ")}` } }) });
+    }
+    for (const region of laidOut.regions) {
+        const own = region.folds.find((each) => each.kind === "item");
+        const after = own === undefined ? -1 : own.to + 1;
+        if (own !== undefined && blank(after) && !groupEnds.has(after)) {
+            marks.push({ from: after, to: after, value: Decoration.line({ class: "item-end" }) });
+        }
+    }
+    return marks;
 }
 
 /**
@@ -382,8 +427,14 @@ function bannerClasses(depth: number): string {
  * A banner nested under its parent's is set in; the row of a group's drawers has each label marked, pulling its drawer
  * out on a click; and where `to` says it, each comment, message and remark says whom it reaches on its first line.
  */
-function decorations(laidOut: Laid, draft: Draft, reviewed: string | null, to: ((written: Written) => string) | null = null): DecorationSet {
-    const marks: { from: number; to: number; value: Decoration }[] = [];
+function decorations(
+    laidOut: Laid,
+    draft: Draft,
+    reviewed: string | null,
+    to: ((written: Written) => string) | null = null,
+    framing: Framing = { frame: "off", ends: () => "" },
+): DecorationSet {
+    const marks: { from: number; to: number; value: Decoration }[] = [...endings(laidOut, framing)];
     const comments = written(draft);
     const reaching = (block: Block) => {
         const comment = comments[block.comment];
@@ -392,7 +443,7 @@ function decorations(laidOut: Laid, draft: Draft, reviewed: string | null, to: (
         }
     };
     for (const group of laidOut.groups) {
-        marks.push({ from: group.banner.from, to: group.banner.from, value: Decoration.line({ class: bannerClasses(group.depth) }) });
+        marks.push({ from: group.banner.from, to: group.banner.from, value: Decoration.line({ class: bannerClasses(group.depth, framing.frame) }) });
         marks.push(...group.blocks.flatMap((block) => remarks(laidOut, block)));
         group.blocks.forEach(reaching);
         if (group.row !== null) {
@@ -632,7 +683,7 @@ export function Review({
     const narrow = useNarrow();
     const stacking = stacked(trials);
     const arranging = useMemo(
-        () => ({ parents: trials.nest ? parents : null, row: rowed(trials) ? { pulled } : null }),
+        () => ({ parents: trials.nest ? parents : null, row: rowed(trials) ? { pulled, lines: trials.labels === "lines" } : null, folds: grouped(trials) }),
         [trials, parents, pulled],
     );
     const laidOut = useMemo(
@@ -668,8 +719,13 @@ export function Review({
     );
     // The scopes the header stack pins the headers of, where it's on.
     const roots = useMemo(
-        () => (stacking ? timed("lup-stickies", () => stickies(laidOut, laidOut.groups.map((each) => each.depth), trials.drawers === "stack")) : []),
-        [stacking, laidOut, trials.drawers],
+        () =>
+            stacking || trials.outline === "margin"
+                ? timed("lup-stickies", () =>
+                      stickies(laidOut, laidOut.groups.map((each) => each.depth), trials.drawers === "stack" ? (trials.labels === "lines" ? "lines" : "row") : null),
+                  )
+                : [],
+        [stacking, laidOut, trials.drawers, trials.labels, trials.outline],
     );
     const laidFor = useMemo(
         () => ({
@@ -677,8 +733,7 @@ export function Review({
             blocks: blocksOf(laidOut),
             // In the text's order, as CodeMirror takes the folds a transaction makes: a fold over others, as an
             // automatic file's or an item's marked read, is laid out after them.
-            folds: scopesOf(laidOut)
-                .flatMap((each) => each.folds)
+            folds: [...scopesOf(laidOut).flatMap((each) => each.folds), ...laidOut.groups.flatMap((each) => (each.fold === null ? [] : [each.fold]))]
                 .map((each) => ({ ...each, key: foldKey(each) }))
                 .sort((a, b) => a.from - b.from || b.to - a.to),
             sources: sourcesOf(laidOut),
@@ -731,6 +786,11 @@ export function Review({
     // clear, so the cursor's line never goes under the stack. Read as it scrolls, of what's laid out then.
     const over = useRef<(position: number) => number>(() => 0);
     over.current = (position) => (stacking ? linesOver(roots, position, narrow) * (view.current?.defaultLineHeight ?? 18) : 0);
+    // What the trials draw in the margin, right of the fold letters: the outline there, or the groups' rails.
+    const gutters = useMemo(() => new Compartment(), []);
+    // Where the scroll being made is to, which its margins are read for; and how tall the drawers pinned below are.
+    const scrollingTo = useRef<number | null>(null);
+    const under = useRef(0);
     // The pulled-out drawers and the folds, as they're laid out now, which the editor's listener reads.
     const pulledNow = useRef(pulled);
     pulledNow.current = pulled;
@@ -743,9 +803,20 @@ export function Review({
         }
         follower.attach(current);
         mapOutlineKey(say);
+        mapScopeKeys();
         current.dispatch({
             effects: StateEffect.appendConfig.of([
-                EditorView.scrollMargins.of((seen) => ({ top: over.current(seen.state.selection.main.head) })),
+                gutters.of([]),
+                // What a scroll is to: the stack pinned over its line is kept clear, and the drawers pinned below.
+                EditorView.scrollHandler.of((_, range) => {
+                    scrollingTo.current = range.head;
+                    return false;
+                }),
+                EditorView.scrollMargins.of((seen) => {
+                    const to = scrollingTo.current ?? seen.state.selection.main.head;
+                    scrollingTo.current = null;
+                    return { top: over.current(to), bottom: under.current };
+                }),
                 // A drawer pulled out of the row goes back into it once the operator closes it, by its keys or a click.
                 EditorView.updateListener.of((update) => {
                     if (pulledNow.current.size === 0 || foldedRanges(update.startState) === foldedRanges(update.state) || update.transactions.some((each) => each.annotation(rebuilt) === true)) {
@@ -811,6 +882,12 @@ export function Review({
     const freshOf: Freshness = (scope, file) =>
         isDrawer(scope) && scope.kind === "since" ? freshRows(looked.current.get(lookedAt(scope.of, file.path)) ?? null, file) : null;
 
+    // How groups are framed, where they are: each banner's look, and what each group's end says.
+    const framing: Framing = {
+        frame: trials.frame,
+        ends: (group) => (group.conversation === null ? "lup's approvals" : (called(group.conversation).split("/").at(-1) ?? "")),
+    };
+
     /** Say whom what's written reaches, on its first line, where the header no longer says it: the stack's. */
     const reachesOf = stacking
         ? (each: Written): string => {
@@ -864,7 +941,7 @@ export function Review({
         }
         looked.current.set(lookedAt(was.of, was.path), standing);
         // Drawn once the cursor's move is done, which this is told of while CodeMirror is still telling it.
-        queueMicrotask(() => editor.draw(decorations(laidOut, draft, reviewed, reachesOf)));
+        queueMicrotask(() => editor.draw(decorations(laidOut, draft, reviewed, reachesOf, framing)));
     }
     // What was written as it was last laid out.
     const wrote = useRef<Written[]>([]);
@@ -937,7 +1014,9 @@ export function Review({
         wrote.current = written(draft);
         places.current = items.length === 0 ? [] : laidOut.groups.map((each) => each.place);
         landing.current = null;
-        editor.draw(decorations(laidOut, draft, reviewed, reachesOf));
+        editor.draw(decorations(laidOut, draft, reviewed, reachesOf, framing));
+        // The outline or the rails in the margin say what's drawn now.
+        current.dispatch({ effects: redrawn.of(null) });
         // A drawer just pulled out of the row: the cursor goes onto its summary line, in view.
         const out = pulledTo.current === null ? undefined : laidOut.drawers.find((each) => each.of === pulledTo.current);
         if (out !== undefined) {
@@ -948,7 +1027,7 @@ export function Review({
         if (arriving !== null && "comment" in arriving) {
             editor.enter();
         }
-    }, [laidOut, draft, reviewed, stacking]);
+    }, [laidOut, draft, reviewed, stacking, trials.frame]);
 
     // Asked to go to an agent's group, as from the palette: onto its banner.
     const jumped = useRef<number>(0);
@@ -1103,6 +1182,113 @@ export function Review({
         [view],
     );
 
+    /** Open a drawer where it's laid out, at its group's end, and go to its summary line, as a click on it pinned below does. */
+    const openDrawer = (drawer: Drawer) => {
+        const current = view.current;
+        if (current === null) {
+            return;
+        }
+        const own = laidFor.folds.find((each) => each.of === drawer.of && each.kind === drawer.kind && each.name === "");
+        const effects = own !== undefined && isFolded(current.state, own) ? [folding(own, false)] : [];
+        current.dispatch({ effects, selection: { anchor: drawer.header.from } });
+        current.dispatch({ effects: EditorView.scrollIntoView(drawer.header.from, { y: "start" }) });
+        current.focus();
+    };
+
+    /** Return what the outline in the margin says of a scope: a short name in its kind's colour, how it stands, what the draft does with it. */
+    const labelOf = (sticky: Sticky): Labelled => {
+        const plain = (text: string, kind: string): Labelled => ({ text, kind, state: null, draft: null, fresh: false });
+        switch (sticky.kind) {
+            case "group": {
+                const group = laidOut.groups.find((each) => each.banner.from === sticky.header.from);
+                const conversation = group?.conversation ?? null;
+                if (conversation === null) {
+                    return plain("approvals", "group");
+                }
+                const state = states.get(whose(conversation)) ?? null;
+                const glyph = state === "calling" ? "▶" : state === "idle" ? "○" : "✕";
+                return { ...plain(called(conversation).split("/").at(-1) ?? "", "group"), state: { glyph, mark: state ?? "ended" } };
+            }
+            case "item": {
+                const region = laidOut.regions.find((each) => each.header.from === sticky.header.from);
+                if (region === undefined) {
+                    return plain("", "item");
+                }
+                const standing = itemStanding(region, draft, reviewed);
+                const mark = standing.marks[0];
+                const glyphs: Record<string, string> = { waiting: "◆", news: "•", parked: "‖" };
+                return {
+                    text: cited(region.item.number),
+                    kind: "item",
+                    state: mark === undefined ? null : { glyph: glyphs[mark] ?? " ", mark },
+                    draft: standing.draft.length === 0 ? null : standing.draft.map((each) => DRAFTED[each].glyph).join(""),
+                    fresh: standing.fresh,
+                };
+            }
+            case "drawer": {
+                const drawer = laidOut.drawers.find((each) => each.header.from === sticky.header.from);
+                const kind = drawer?.kind ?? "since";
+                const waiting = kind === "since" && / to review| flagged/.test(laidOut.text.slice(sticky.header.from, sticky.header.to));
+                return { ...plain(kind === "since" ? "since" : kind === "tasks" ? "tasks" : "talk", kind), state: waiting ? { glyph: "◆", mark: "waiting" } : null };
+            }
+            case "file": {
+                const path = laidOut.text.slice(sticky.header.from, sticky.header.to).split(" · ")[0] ?? "";
+                const scope = scopeAt(laidOut, sticky.header.from);
+                const matters = scope?.stops.some((each) => each >= sticky.from && each <= sticky.to) === true;
+                const automatic = /· (automatic|test|data|first approval)/.test(laidOut.text.slice(sticky.header.from, sticky.header.to));
+                const state = matters ? { glyph: "⚑", mark: "flagged" } : automatic ? { glyph: "·", mark: "folded" } : { glyph: "◇", mark: "to-review" };
+                return { ...plain(path.split("/").at(-1) ?? path, "file"), state };
+            }
+        }
+    };
+    /** Go to the next or previous scope of `kind`, as `]` or `[` and its letter does where an outline is shown: on its header, at the view's top, a closed fold hiding it counting as its summary line. */
+    function scopeAfter(kind: ScopeKey, forward: boolean) {
+        const current = view.current;
+        if (current === null) {
+            return;
+        }
+        const targets =
+            kind === "group"
+                ? laidOut.groups.map((each) => each.banner.from)
+                : kind === "item"
+                  ? laidOut.regions.map((each) => each.header.from)
+                  : [
+                        ...laidOut.drawers.filter((each) => each.kind === kind).map((each) => each.header.from),
+                        ...laidOut.groups.flatMap((each) => (each.row?.labels ?? []).filter((label) => label.kind === kind && !label.pulled).map((label) => label.from)),
+                    ];
+        const line = current.state.doc.lineAt(editor.head()).from;
+        const landings = [...new Set(targets.map((each) => seen(current, each)))].sort((a, b) => a - b);
+        const target = forward ? landings.find((each) => each > line) : landings.findLast((each) => each < line);
+        if (target === undefined) {
+            say(`No ${kind === "group" ? "agent's group" : kind === "item" ? "item" : `${kind} drawer`} ${forward ? "after" : "before"} this.`);
+            return;
+        }
+        current.dispatch({ selection: { anchor: target } });
+        scrollAfterKey(current, EditorView.scrollIntoView(target, { y: "start" }));
+    }
+    const scopeNow = useRef(scopeAfter);
+    scopeNow.current = scopeAfter;
+    useEffect(() => {
+        setScopeJump(trials.outline === "off" ? null : (kind, forward) => scopeNow.current(kind, forward));
+        // In the margin, gO says how to go by it, as there's no pane to take the keyboard to.
+        if (trials.outline === "margin") {
+            setOutlineFocus(() => say("The outline is in the margin: ]g [g agents, ]i [i items, ]f [f files, ]t ]s ]v drawers; a click on a label goes there."));
+        } else if (trials.outline === "off") {
+            setOutlineFocus(null);
+        }
+    }, [trials.outline, say]);
+    const outlinedNow = useRef<Outlined>({ roots: [], label: labelOf, jump: jumpTo });
+    outlinedNow.current = { roots, label: labelOf, jump: jumpTo };
+    const railsNow = useRef<Railed[]>([]);
+    railsNow.current = laidOut.groups.flatMap((each) => (each.fold === null ? [] : [{ from: each.banner.from, to: each.fold.to, depth: each.depth }]));
+    useEffect(() => {
+        view.current?.dispatch({
+            effects: gutters.reconfigure(
+                trials.outline === "margin" ? outlineMargin(() => outlinedNow.current, !narrow) : trials.frame !== "off" ? groupRails(() => railsNow.current) : [],
+            ),
+        });
+    }, [view, gutters, trials.outline, trials.frame, narrow]);
+
     editor.bind({
         whole: (position) => {
             // On a group, a message to its agent; on an item, a comment on it whole; in a drawer, a remark on its line.
@@ -1254,7 +1440,28 @@ export function Review({
         send,
         paint: (from, to) => painted(laidOut, from, to, freshOf),
         level: (position, opening, all, closed) => levelled(scopeFolds(position), closed, opening, all),
+        // On the row of a group's drawers, `za`, `zo` and `zc` pull out the drawer whose label the cursor is on, or the
+        // next one along, or put it back.
+        foldHere: (position, how) => {
+            const row = groupAt(laidOut, position)?.row;
+            if (row == null || position < row.from || position > row.to) {
+                return false;
+            }
+            const label = row.labels.find((each) => position >= each.from && position < each.to) ?? row.labels.find((each) => each.from > position) ?? row.labels.at(-1);
+            if (label === undefined) {
+                return false;
+            }
+            const opening = how === "toggle" ? !label.pulled : how === "open";
+            if (opening !== label.pulled) {
+                pull(label.of);
+            }
+            return true;
+        },
         kind: (position, kind, closing, closed) => {
+            // Space z f a opens every agent's group, Space z F a closes them, to their banners, wherever the cursor is.
+            if (kind === "group") {
+                return laidFor.folds.filter((each) => each.kind === "group" && closed(each) !== closing);
+            }
             // On a banner, Space z and a drawer's letter opens that drawer of the agent's.
             const group = groupAt(laidOut, position);
             // Where the drawers are a row, Space z f and a drawer's letter pulls it out below the row, Space z F puts it back.
@@ -1291,7 +1498,7 @@ export function Review({
     const classesOf = (sticky: Sticky): string => {
         switch (sticky.kind) {
             case "group": {
-                return bannerClasses(laidOut.groups.find((each) => each.banner.from === sticky.header.from)?.depth ?? 0);
+                return bannerClasses(laidOut.groups.find((each) => each.banner.from === sticky.header.from)?.depth ?? 0, trials.frame);
             }
             case "item": {
                 const region = laidOut.regions.find((each) => each.header.from === sticky.header.from);
@@ -1342,9 +1549,9 @@ export function Review({
     const labelsOf = (sticky: Sticky): RowLabel[] => laidOut.groups.find((each) => each.banner.from === sticky.header.from)?.row?.labels ?? [];
     return (
         <>
-            {stacking ? null : where}
-            <div className={`review-body${trials.outline ? " with-outline" : ""}`}>
-                {trials.outline ? (
+            {trials.header === "cursor" || trials.header === "cursor-stack" ? where : null}
+            <div className={`review-body${trials.outline === "pane" ? " with-outline" : ""}`}>
+                {trials.outline === "pane" ? (
                     <Outline
                         following={follower}
                         laidOut={laidOut}
@@ -1373,6 +1580,7 @@ export function Review({
                             pull={(label) => pull(label.of)}
                         />
                     ) : null}
+                    {trials.drawers === "sticky" ? <Footer following={follower} laidOut={laidOut} lines={trials.labels === "lines"} open={openDrawer} tall={under} /> : null}
                 </div>
             </div>
             {trials.header === "stack-status" ? <div className="status-line">{where}</div> : null}

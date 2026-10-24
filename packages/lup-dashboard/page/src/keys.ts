@@ -55,7 +55,7 @@ export type DrawerKind = "tasks" | "since" | "conversation";
  * item's context or an item's text in a conversation, one of an agent's drawers; and in a conversation, each exchange
  * before the operator's last words, a run of calls, and a call's input and output.
  */
-export type FoldKind = "item" | "file" | "body" | "lines" | "context" | "earlier" | "calls" | "call" | DrawerKind;
+export type FoldKind = "group" | "item" | "file" | "body" | "lines" | "context" | "earlier" | "calls" | "call" | DrawerKind;
 
 /**
  * One kind of fold: the letter naming it, what its folds are called together, and what the one the cursor is in is
@@ -84,6 +84,8 @@ export interface FoldKindKeys {
  * drawer, as after Space `z` `F` it closes them.
  */
 export const FOLD_KINDS: FoldKindKeys[] = [
+    // An agent's group whole under its banner, where the layout trials give it a fold (`trials.ts`, `frame` or `nest`).
+    { kind: "group", letter: "a", called: "agents' groups", one: "the agent's group", chord: true, level: 0, own: true },
     { kind: "item", letter: "i", called: "the item", one: "the item", chord: false, level: 0, own: true },
     { kind: "tasks", letter: "t", called: "the tasks", one: "the tasks", chord: true, level: 0, own: true },
     { kind: "since", letter: "s", called: "since you approved", one: "since you approved", chord: true, level: 0, own: true },

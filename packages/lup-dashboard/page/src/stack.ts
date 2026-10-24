@@ -9,15 +9,21 @@
 // and the innermost scope within it. Pure: the review measures and draws it
 // (`Stack.tsx`).
 import type { Span } from "./comments";
+import type { DrawerKind } from "./keys";
 import { codeFrom, isDrawer, type Laid, type Region } from "./review";
+
+/** A line pinned under a group's banner with it: the row of its drawers' labels, or one drawer's summary line, by its kind. */
+export interface Under extends Span {
+    drawer: DrawerKind | null;
+}
 
 /** One scope a header is pinned for: where its header line is, how far it reaches, what it is, and the scopes in it. */
 export interface Sticky {
     kind: "group" | "item" | "drawer" | "file";
     /** Its header line: a banner, an item's header, a drawer's summary line, a file's header. */
     header: Span;
-    /** The line pinned under its header with it: the row of a group's drawers, where it's pinned too. */
-    under: Span | null;
+    /** The lines pinned under its header with it: a group's drawers, as a row of labels or a line each, where they're pinned too. */
+    under: Under[];
     /** From its header to its last position, the blank line after it among it. */
     from: number;
     to: number;
@@ -27,10 +33,10 @@ export interface Sticky {
 /**
  * Return the scopes of `laidOut` a header is pinned for, outermost first, each holding those in it: each group to the
  * next one as deep or shallower, a subagent's inside its parent's where they nest (`depth`); each item and drawer to
- * the next scope or group; each file of an item or a drawer over its lines. `row` pins the row of each group's
- * drawers under its banner.
+ * the next scope or group; each file of an item or a drawer over its lines. `pin` pins each group's drawers under its
+ * banner: its row of labels, or each drawer's summary line, which then isn't pinned again as a scope of its own.
  */
-export function stickies(laidOut: Laid, depths: number[], row: boolean): Sticky[] {
+export function stickies(laidOut: Laid, depths: number[], pin: "row" | "lines" | null): Sticky[] {
     const end = Math.max(laidOut.text.length - 1, 0);
     const scopes = [...laidOut.regions, ...laidOut.drawers].sort((a, b) => a.header.from - b.header.from);
     const banners = laidOut.groups.map((each) => each.banner.from);
@@ -41,7 +47,12 @@ export function stickies(laidOut: Laid, depths: number[], row: boolean): Sticky[
         flat.push({
             kind: "group",
             header: group.banner,
-            under: row && group.row !== null ? { from: group.row.from, to: group.row.to } : null,
+            under:
+                pin === "row" && group.row !== null
+                    ? [{ from: group.row.from, to: group.row.to, drawer: null }]
+                    : pin === "lines"
+                      ? group.drawers.map((each) => ({ from: each.header.from, to: each.header.to, drawer: each.kind }))
+                      : [],
             from: group.banner.from,
             to: next < 0 ? end : (laidOut.groups[next]?.banner.from ?? end + 1) - 1,
             children: [],
@@ -51,17 +62,20 @@ export function stickies(laidOut: Laid, depths: number[], row: boolean): Sticky[
         const nextScope = scopes[at + 1]?.header.from ?? Infinity;
         const nextGroup = banners.find((each) => each > scope.header.from) ?? Infinity;
         const stop = Math.min(nextScope, nextGroup);
-        flat.push({
-            kind: isDrawer(scope) ? "drawer" : "item",
-            header: scope.header,
-            under: null,
-            from: scope.header.from,
-            to: stop === Infinity ? end : stop - 1,
-            children: [],
-        });
+        // A drawer pinned under its banner a line of its own isn't pinned again: its files are the group's next level.
+        if (!(pin === "lines" && isDrawer(scope))) {
+            flat.push({
+                kind: isDrawer(scope) ? "drawer" : "item",
+                header: scope.header,
+                under: [],
+                from: scope.header.from,
+                to: stop === Infinity ? end : stop - 1,
+                children: [],
+            });
+        }
         for (const file of scope.filed) {
             const line = scope.code[codeFrom(scope.code, file.from)];
-            flat.push({ kind: "file", header: { from: file.from, to: line?.to ?? file.from }, under: null, from: file.from, to: file.to, children: [] });
+            flat.push({ kind: "file", header: { from: file.from, to: line?.to ?? file.from }, under: [], from: file.from, to: file.to, children: [] });
         }
     });
     flat.sort((a, b) => a.from - b.from || b.to - a.to);
@@ -114,7 +128,7 @@ export function around(stickies: readonly Sticky[], position: number): Sticky[] 
 
 /** How many lines a sticky's pinned header takes: its header, and the line under it where one's pinned with it (`under`), as the innermost group's row is. */
 export function linesOf(sticky: Sticky, under = true): number {
-    return sticky.under === null || !under ? 1 : 2;
+    return under ? 1 + sticky.under.length : 1;
 }
 
 /** What the view says of where things are, in pixels from the document's top: where its top is, and each line's block. */

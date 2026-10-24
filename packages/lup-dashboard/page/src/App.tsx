@@ -24,6 +24,7 @@ import { cited } from "./comments";
 import { useNow, useSame, useWatched } from "./hooks";
 import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
+import { OUTLINE_KEYS } from "./Outline";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
 import { marked, sameShown, type Marking } from "./since";
@@ -786,7 +787,7 @@ export function App() {
                 >
                     layout: {trialsSaid(trials)}
                 </button>
-                {trials.outline ? (
+                {trials.outline === "pane" ? (
                     <button type="button" className="outline-button" onClick={() => setOutlining((before) => !before)}>
                         Outline <kbd>gO</kbd>
                     </button>
@@ -855,7 +856,7 @@ export function App() {
                         )}
                     </div>
                     <Keys
-                        parts={REVIEW_KEYS}
+                        parts={trials.outline === "off" ? REVIEW_KEYS : [...REVIEW_KEYS, ...OUTLINE_KEYS]}
                         place={inserting ? "insert" : place}
                         places={REVIEW_PLACES}
                         open={listing}

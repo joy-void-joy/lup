@@ -94,20 +94,22 @@ export function Stack({ following, roots, text, classesOf, labelsOf, markOf, hin
                             mark: markOf(sticky),
                             hint: hintOf(sticky),
                         };
-                        if (sticky.under === null || !withRow) {
+                        if (!withRow) {
                             return [header];
                         }
-                        const under: Drawn = {
-                            key: `row ${sticky.under.from}`,
-                            text: text.slice(sticky.under.from, sticky.under.to),
-                            classes: "drawer-row",
-                            offset: offset + lineHeight,
-                            at: sticky.under.from,
-                            labels: labelsOf(sticky),
-                            mark: null,
-                            hint: null,
-                        };
-                        return [header, under];
+                        const under = sticky.under.map(
+                            (line, at): Drawn => ({
+                                key: `under ${line.from}`,
+                                text: text.slice(line.from, line.to),
+                                classes: line.drawer === null ? "drawer-row" : `drawer-summary drawer-${line.drawer}`,
+                                offset: offset + (at + 1) * lineHeight,
+                                at: line.from,
+                                labels: line.drawer === null ? labelsOf(sticky) : null,
+                                mark: line.drawer === null ? null : markOf({ ...sticky, kind: "drawer", header: line }),
+                                hint: null,
+                            }),
+                        );
+                        return [header, ...under];
                     });
                     const bottom = lines.reduce((most, each) => Math.max(most, each.offset + lineHeight), 0);
                     // What following the view costs, for the trials' report: `performance.getEntriesByName("lup-stack")`.

@@ -294,6 +294,8 @@ export interface Group {
     depth: number;
     /** The row of its drawers under its banner, where they're a row (`Arranging.row`); none else, or where it has none. */
     row: DrawerRow | null;
+    /** Its fold whole, under its banner, where groups fold (`Arranging.folds`); none else, or where nothing's under its banner. */
+    fold: Fold | null;
 }
 
 /** One drawer's label in the row under a banner: which, whose (`ownerOf`), whether it's pulled out below the row, and whether it holds what waits on the operator. */
@@ -316,7 +318,10 @@ export interface DrawerRow extends Span {
  */
 export interface Arranging {
     parents?: ReadonlyMap<string, string> | null;
-    row?: { pulled: ReadonlySet<string> } | null;
+    /** The drawers under the banner: a row of labels, those `pulled` out laid below it; or, `lines`, each drawer laid there whole, a line each, folded. */
+    row?: { pulled: ReadonlySet<string>; lines?: boolean } | null;
+    /** Whether each group folds whole under its banner, as an item does under its header, its kind's letter in the margin. */
+    folds?: boolean;
 }
 
 /**
@@ -1027,6 +1032,17 @@ export function laid(
     for (const group of kept(later, true)) {
         layGroup(group, true, 0);
     }
+    // Each group folds whole under its banner, up to the next as deep or shallower, a subagent's inside its parent's.
+    if (arranging.folds === true) {
+        groups.forEach((group, at) => {
+            const next = groups.findIndex((each, after) => after > at && each.depth <= group.depth);
+            const end = (next < 0 ? w.text.length : (groups[next]?.banner.from ?? w.text.length)) - 1;
+            if (end > group.banner.to) {
+                const label = w.text.slice(group.banner.from, group.banner.to);
+                group.fold = { of: `group ${group.place}`, kind: "group", name: "", label, closed: false, summary: group.banner, from: group.banner.to, to: end };
+            }
+        });
+    }
     // A conversation laid in a drawer reads its lines from the whole text, once it's whole.
     for (const drawer of laidDrawers) {
         if (drawer.talk !== null) {
@@ -1049,8 +1065,9 @@ export function laid(
         const opening = w.line(said);
         const conversation = group.conversation;
         const data = conversation !== null && !isParked ? drawers.get(group.key) : undefined;
-        // Where the drawers are a row, it's right under the banner, each drawer's label on it.
-        const row = arranging.row != null && conversation !== null && data !== undefined ? layRow(conversation, data, arranging.row.pulled) : null;
+        // Where the drawers are a row, it's right under the banner, each drawer's label on it; laid a line each, there's no row.
+        const lines = arranging.row?.lines === true;
+        const row = arranging.row != null && !lines && conversation !== null && data !== undefined ? layRow(conversation, data, arranging.row.pulled) : null;
         const blocks: Block[] = [];
         if (!isParked) {
             letters.forEach((letter, at) => {
@@ -1069,29 +1086,32 @@ export function laid(
             drawers: [],
             depth,
             row,
+            fold: null,
         };
         groups.push(made);
-        const lay = (kinds: DrawerKind[], pulled: boolean) => {
+        const lay = (kinds: DrawerKind[], open: boolean | null) => {
             if (conversation === null || data === undefined) {
                 return;
             }
             for (const kind of kinds) {
-                const drawer = layDrawer(kind, conversation, data, pulled);
+                const drawer = layDrawer(kind, conversation, data, open);
                 if (drawer !== null) {
                     made.drawers.push(drawer);
                     laidDrawers.push(drawer);
                 }
             }
         };
-        // The drawers pulled out of the row, below it, before the items.
+        // The drawers pulled out of the row, below it, open, before the items; or each drawer there, a line each, folded.
         if (row !== null) {
             lay(row.labels.filter((each) => each.pulled).map((each) => each.kind), true);
+        } else if (lines && !isParked) {
+            lay(DRAWERS, false);
         }
         for (const item of group.items) {
             layItem(item, isParked);
         }
         if (arranging.row == null) {
-            lay(DRAWERS, false);
+            lay(DRAWERS, null);
         }
         if (group.items.length === 0 && made.drawers.length === 0 && blocks.length > 0) {
             w.line("");
@@ -1257,8 +1277,13 @@ export function laid(
         return { ...w.line(text), labels };
     }
 
-    /** Lay one of `conversation`'s drawers of `kind` from `data`, and return it; none where it has nothing under its summary line, as a task list none keeps, a branch with nothing since the operator approved it, or one not read yet. One `pulled` out of the row under the banner is open. */
-    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers, pulled = false): Drawer | null {
+    /**
+     * Lay one of `conversation`'s drawers of `kind` from `data`, and return it; none where it has nothing under its
+     * summary line, as a task list none keeps, a branch with nothing since the operator approved it, or one not read yet.
+     * It's `open` or folded where that's said, as one pulled out of the row under the banner is open; else "since you
+     * approved" is open, the others folded.
+     */
+    function layDrawer(kind: DrawerKind, conversation: Conversation, data: AgentDrawers, open: boolean | null = null): Drawer | null {
         const of = ownerOf({ drawer: kind, conversation });
         const into = gathering();
         const key = whose(conversation);
@@ -1360,7 +1385,7 @@ export function laid(
             return null;
         }
         // "Since you approved" is open, as it's the code waiting on the operator; the others fold until opened.
-        into.folds.push({ of, kind, name: "", label, closed: !pulled && kind !== "since", summary, from: summary.to, to: last });
+        into.folds.push({ of, kind, name: "", label, closed: open === null ? kind !== "since" : !open, summary, from: summary.to, to: last });
         w.line("");
         return { kind, conversation, talk, files, reviewed, settled, worktree: data.since?.worktree ?? null, of, header: summary, ...into };
     }

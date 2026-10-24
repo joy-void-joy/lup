@@ -32,6 +32,7 @@
     --told-bg: #191919;
 
     /* Each kind of fold's colour, in its mark, its bar, its placeholder and the header. */
+    --fold-group: var(--cyan);
     --fold-item: var(--orange);
     --fold-file: var(--info);
     --fold-body: var(--purple);
@@ -730,6 +731,10 @@ kbd {
 }
 
 /* Each kind of fold in its colour: its mark, its bar, its placeholder, its part of the header. */
+.fold-group {
+    color: var(--fold-group);
+}
+
 .fold-item {
     color: var(--fold-item);
 }
@@ -844,6 +849,10 @@ kbd {
     border: 1px solid currentColor;
     padding: 0 0.5ch;
     color: inherit;
+}
+
+.buffer .cm-editor .cm-foldPlaceholder.fold-group {
+    color: var(--fold-group);
 }
 
 .buffer .cm-editor .cm-foldPlaceholder.fold-item {
@@ -1458,32 +1467,37 @@ kbd {
     color: var(--info);
 }
 
+/* How each entry stands, in the state's own colour: what waits on the operator orange, an item solid and a file
+   hollow; news blue; what's set aside muted; an agent's activity in its banner's colour. What the draft does with an
+   item is apart, in the colour of what the operator writes (`.outline-draft`). */
 .mark-waiting,
-.mark-calling {
+.mark-to-review,
+.mark-flagged {
     color: var(--orange);
+}
+
+.mark-calling {
+    color: var(--cyan);
 }
 
 .mark-news {
     color: var(--info);
 }
 
-.mark-read,
 .mark-parked,
-.mark-reviewed,
 .mark-folded,
 .mark-ended,
 .mark-repository {
     color: var(--muted);
 }
 
-.mark-approved {
-    color: var(--ok);
+/* What goes with the next Ctrl+Enter, in the draft's colour, as the comments written are; and what's new, blue. */
+.outline-draft {
+    color: var(--warn);
 }
 
-.mark-flagged,
-.mark-new,
-.mark-commented {
-    color: var(--warn);
+.outline-fresh {
+    color: var(--link);
 }
 
 .mark-idle {
@@ -1572,4 +1586,214 @@ kbd {
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
+}
+
+/* Groups framed (`frame`): the banner a band of the agents' colour across, or a box around it, set in by how deep
+   it's nested so the frame steps in with it; the blank line after an item ruled; a group's end saying whose. */
+.buffer .cm-line.review-banner.frame-band {
+    background: #05262a;
+    border-top: 1px solid var(--cyan);
+    box-shadow: inset 4px 0 0 var(--cyan);
+    padding-top: 0.15em;
+    padding-bottom: 0.15em;
+}
+
+.buffer .cm-line.review-banner.frame-box {
+    border: 1px solid var(--cyan);
+    border-left-width: 4px;
+    padding-top: 0.1em;
+    padding-bottom: 0.1em;
+    margin-top: 0.3em;
+}
+
+.buffer .cm-line.review-banner.frame-band.nest-1,
+.buffer .cm-line.review-banner.frame-box.nest-1 {
+    margin-left: 2ch;
+    padding-left: 6px;
+}
+
+.buffer .cm-line.review-banner.frame-band.nest-2,
+.buffer .cm-line.review-banner.frame-box.nest-2 {
+    margin-left: 4ch;
+    padding-left: 6px;
+}
+
+.buffer .cm-line.review-banner.frame-band.nest-3,
+.buffer .cm-line.review-banner.frame-box.nest-3,
+.buffer .cm-line.review-banner.frame-band.nest-4,
+.buffer .cm-line.review-banner.frame-box.nest-4 {
+    margin-left: 6ch;
+    padding-left: 6px;
+}
+
+.buffer.stack .cm-line.stack-line.frame-band,
+.buffer.stack .cm-line.stack-line.frame-box {
+    margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-top: 0;
+    border-bottom: 0;
+}
+
+.buffer .cm-line.item-end {
+    background: linear-gradient(to bottom, transparent 8px, rgb(255 153 51 / 0.45) 8px, rgb(255 153 51 / 0.45) 9px, transparent 9px) no-repeat;
+    background-size: min(72ch, 100%) 100%;
+}
+
+.buffer .cm-line.group-end::before {
+    content: "╰─ " attr(data-end) " ────";
+    color: var(--cyan);
+    opacity: 0.85;
+}
+
+/* The rails down each group, where groups are framed without the outline in the margin; and the outline in the
+   margin: right of the fold letters, a column for each depth, each scope a bar in its kind's colour from its first
+   line to its last, its label where it starts, on the columns past its own, which no deeper bar holds yet. */
+.buffer .group-rails {
+    width: calc(3 * var(--column) + 2px);
+}
+
+.buffer .outline-margin {
+    width: 17ch;
+    border-right: 1px solid #1d3a44;
+}
+
+.buffer .outline-margin.is-bare {
+    width: calc(5 * var(--column) + 2px);
+}
+
+.buffer .group-rails .cm-gutterElement,
+.buffer .outline-margin .cm-gutterElement {
+    position: relative;
+    padding: 0;
+}
+
+.rail-cell {
+    position: absolute;
+    inset: 0;
+}
+
+.rail {
+    --at: calc(1px + var(--depth) * var(--column));
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--at) + var(--column) / 2 - 1px);
+    width: 2px;
+    background: currentColor;
+}
+
+.rail.is-first {
+    top: calc(var(--lh) / 2);
+    border-radius: 2px 2px 0 0;
+}
+
+.rail.is-last {
+    bottom: calc(var(--lh) / 2 - 2px);
+}
+
+.rail.is-first.is-last {
+    bottom: calc(var(--lh) / 2 - 3px);
+}
+
+/* A scope's start: a tick across to its label. */
+.rail.is-first::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: calc(var(--column) / 2 + 1px);
+    height: 2px;
+    background: currentColor;
+}
+
+.rail-label {
+    position: absolute;
+    top: 0;
+    left: calc(1px + (var(--depth) + 1) * var(--column));
+    right: 0;
+    height: var(--lh);
+    line-height: var(--lh);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.rail-label:hover {
+    text-decoration: underline;
+}
+
+.rail-state {
+    margin-right: 0.5ch;
+}
+
+.rail-draft {
+    margin-left: 0.5ch;
+    color: var(--warn);
+}
+
+.rail-fresh {
+    color: var(--link);
+}
+
+.rail-group {
+    color: var(--cyan);
+    font-weight: 700;
+}
+
+.rail-item {
+    color: var(--fold-item);
+}
+
+.rail-file {
+    color: var(--fold-file);
+}
+
+.rail-tasks {
+    color: var(--fold-tasks);
+}
+
+.rail-since {
+    color: var(--fold-since);
+}
+
+.rail-conversation {
+    color: var(--fold-conversation);
+}
+
+/* The drawers pinned below (`drawers=sticky`): over the buffer's bottom, a rule over them, as the stack's is under it. */
+.buffer.footer {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    flex: none;
+    z-index: 5;
+    overflow: hidden;
+    background: var(--bg);
+    box-shadow: 0 -1px 0 var(--cyan), 0 -4px 6px -2px rgb(0 0 0 / 0.9);
+}
+
+.buffer.footer .cm-editor {
+    height: auto;
+}
+
+.buffer.footer .cm-line.footer-line {
+    padding: 0 2px 0 6px;
+    height: var(--lh);
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    border-top: 0;
+}
+
+.buffer.footer .cm-line.footer-line.drawer-row {
+    display: flex;
+    gap: 0 3ch;
+    cursor: default;
+}
+
+.buffer.footer .cm-line.footer-line:hover {
+    background: var(--float-bg);
 }

@@ -69,6 +69,7 @@ describe("what may follow a chord", () => {
     it("lists the keys after Space z, f opening by kind and F closing, then each kind of fold's letter, as vim's fold keys begin with z", () => {
         expect(following("␣z", "file")).toEqual(["f open by kind", "F close by kind"]);
         const kinds = [
+            "a agents' groups",
             "t the tasks",
             "s since you approved",
             "v the conversation",
@@ -89,6 +90,7 @@ describe("what may follow a chord", () => {
 
     it("lists the keys after z f, each kind of fold's letter closing the one the cursor is in, the item's own among them", () => {
         expect(following("zf", "file")).toEqual([
+            "a the agent's group",
             "i the item",
             "t the tasks",
             "s since you approved",
