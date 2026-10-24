@@ -81,6 +81,7 @@ import {
     laid,
     news,
     opened,
+    ordered,
     placeAt,
     quoted,
     recipient,
@@ -93,6 +94,7 @@ import {
     stranded,
     tallied,
     toggled,
+    toKeep,
     waited,
     whose,
     withWritten,
@@ -107,6 +109,7 @@ import {
     type Group,
     type Head,
     type Item,
+    type Keeping,
     type Laid,
     type Region,
     type Scope,
@@ -172,6 +175,13 @@ interface Props {
     /** Whether the overview pane is shown: beside the review, or over it on a narrow screen. */
     overview: boolean;
     setOverview: (open: boolean) => void;
+    /**
+     * Where the groups go, as the host keeps it for every page and across reloads (`Group.place`, in order), once the
+     * page has what the review is laid out from, that order among it; none until then.
+     */
+    order: readonly string[] | null;
+    /** Tell the host where the groups go once the review is laid out: what's laid out, and what's gone from it; none where what the page shows isn't all the host's answers, as where it refused one. */
+    keepOrder: ((keeping: Keeping) => void) | null;
 }
 
 /** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it's set in under a summary or a file's header, as a file's reviewed line isn't. */
@@ -662,12 +672,17 @@ export function Review({
     states,
     overview,
     setOverview,
+    order,
+    keepOrder,
 }: Props) {
     // Where the cursor is, and whether a comment is being written: what the header says.
     const [head, setHead] = useState(0);
     const [commenting, setCommenting] = useState(false);
-    // Where the groups were laid out this sitting, which ends once nothing's left to read: each keeps its place.
+    // Where the groups go: as this page laid them out last, then as the host keeps them for those it didn't
+    // (`ordered`), so each keeps its place, across reloads and on each page; and as it last told the host it laid
+    // them out, none until it has, when what it doesn't lay out of the host's order is gone.
     const places = useRef<string[]>([]);
+    const toldOrder = useRef<string[] | null>(null);
     const narrow = useNarrow();
     const arranging = useMemo(() => ({ parents }), [parents]);
     const laidOut = useMemo(
@@ -694,12 +709,12 @@ export function Review({
                 },
                 draft,
                 around,
-                places.current,
+                ordered(places.current, order ?? []),
                 drawers,
                 called,
                 arranging,
             ),
-        [items, agents, banner, called, draft, around, drawers, reviewed, now, arranging],
+        [items, agents, banner, called, draft, around, drawers, reviewed, now, arranging, order],
     );
     // The scopes the header stack pins the headers of.
     const roots = useMemo(() => stickies(laidOut, laidOut.groups.map((each) => each.depth)), [laidOut]);
@@ -970,7 +985,19 @@ export function Review({
         read(laidOut);
         before.current = laidOut;
         wrote.current = written(draft);
-        places.current = items.length === 0 ? [] : laidOut.groups.map((each) => each.place);
+        // The host keeps where the groups go, once the page has what the review is laid out from: what's laid out,
+        // and what's gone from it since the page last told it, the host's places it doesn't lay out the first time.
+        if (order !== null) {
+            const shown = laidOut.groups.map((each) => each.place);
+            if (keepOrder !== null) {
+                const keeping = toKeep(shown, toldOrder.current ?? order, order);
+                toldOrder.current = shown;
+                if (keeping !== null) {
+                    keepOrder(keeping);
+                }
+            }
+            places.current = shown;
+        }
         landing.current = null;
         editor.draw(decorations(laidOut, draft, reviewed, reachesOf, ends));
         // The margin says what's drawn now.

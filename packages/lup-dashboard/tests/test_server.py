@@ -457,7 +457,9 @@ def test_the_demo_reads_a_conversations_calls_each_a_line_and_whole_on_asking(
     }
 
 
-def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) -> None:
+def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_but_whats_parked(
+    page: Path,
+) -> None:
     served = client(Demo(clock=Fixed()), page)
     draft = {
         "comments": [
@@ -477,7 +479,12 @@ def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) ->
     )
     sent = served.post("/api/ask", json={"kind": "inbox-send-draft"}, headers=bearing())
     left = served.post("/api/ask", json={"kind": "inbox-draft"}, headers=bearing())
+    waiting = served.post("/api/ask", json={"kind": "inbox-list"}, headers=bearing())
+    numbers = [each["number"] for each in waiting.json()["items"]]
     assert kept.json()["draft"]["comments"][1]["quote"]["text"] == "Fold"
+    assert 51 not in numbers
+    assert 52 not in numbers
+    assert 53 in numbers
     assert sent.json() == {
         "kind": "inbox-reviewed",
         "items": [],
@@ -492,6 +499,23 @@ def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) ->
         "done": [],
         "parked": [53],
     }
+
+
+def test_the_demo_keeps_one_order_of_the_reviews_groups_for_every_page(
+    page: Path,
+) -> None:
+    served = client(Demo(clock=Fixed()), page)
+
+    def keep(places: list[str], gone: list[str]) -> JsonValue:
+        asked = {"kind": "inbox-keep-order", "places": places, "gone": gone}
+        return served.post("/api/ask", json=asked, headers=bearing()).json()
+
+    one = keep(["now b", "now a"], [])
+    other = keep(["now a", "now c"], ["now b"])
+    shown = served.post("/api/ask", json={"kind": "inbox-order"}, headers=bearing())
+    assert one == {"kind": "inbox-ordered", "order": {"places": ["now b", "now a"]}}
+    assert other == {"kind": "inbox-ordered", "order": {"places": ["now a", "now c"]}}
+    assert shown.json() == other
 
 
 def settling(approved: bool, reason: Approval | Message) -> Settled:

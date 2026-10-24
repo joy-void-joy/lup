@@ -30,6 +30,7 @@ import {
     messages,
     news,
     opened,
+    ordered,
     placeAt,
     plain,
     pruned,
@@ -44,6 +45,7 @@ import {
     threadsOf,
     toAnswer,
     toggled,
+    toKeep,
     waited,
     whose,
     withWritten,
@@ -64,6 +66,7 @@ import {
     type Fold,
     type Head,
     type Item,
+    type Laid,
     type Naming,
     type Remark,
     type Since,
@@ -1046,6 +1049,52 @@ describe("every agent's group, and the messages under its banner", () => {
         // What's left for later has places of its own.
         const parked = laid([QUESTION, NOTE], [S1, S3], banner, header, { ...EMPTY, parked: [52] }, NOTHING, places);
         expect(heads(parked)).toEqual(["━━ s1 ━━", "━━ s3 ━━", "━━ s2 · later ━━"]);
+    });
+
+    it("keeps each group where the operator saw it across a reload, from the order the host keeps, telling it what's gone", () => {
+        const S1 = from("s1", "a1");
+        const heads = (out: Laid) => out.text.split("\n").filter((line) => line.startsWith("━━"));
+        const placesOf = (out: Laid) => out.groups.map((each) => each.place);
+        // The host keeps no order yet: the page tells it every place it laid out.
+        const first = laid([QUESTION, NOTE], [S1, S3], banner, header, EMPTY, NOTHING, ordered([], []));
+        expect(toKeep(placesOf(first), [], [])).toEqual({ places: placesOf(first), gone: [] });
+        const kept = placesOf(first);
+        // s2's note answered, its agent running, and an item for s4: s4's place told, after the others.
+        const newer: Item = { ...QUESTION, number: 60, made: "2026-10-17T13:00:00Z" };
+        const fourth: Item = { ...NOTE, number: 61, sender: S4 };
+        const now = [QUESTION, newer, fourth];
+        const running = [S1, S3, from("s2")];
+        const next = laid(now, running, banner, header, EMPTY, NOTHING, ordered(placesOf(first), kept));
+        expect(heads(next)).toEqual(["━━ s1 ━━", "━━ s2 ━━", "━━ s3 ━━", "━━ s4 ━━"]);
+        expect(toKeep(placesOf(next), placesOf(first), kept)).toEqual({ places: placesOf(next), gone: [] });
+        const host = placesOf(next);
+        // Reloaded, the page holding nothing: laid out from the host's order, the same, with nothing to tell; from the
+        // items alone it would differ.
+        const reloaded = laid(now, running, banner, header, EMPTY, NOTHING, ordered([], host));
+        expect(heads(reloaded)).toEqual(heads(next));
+        expect(heads(laid(now, running, banner, header, EMPTY, NOTHING))).toEqual(["━━ s1 ━━", "━━ s4 ━━", "━━ s3 ━━", "━━ s2 ━━"]);
+        expect(toKeep(placesOf(reloaded), host, host)).toBeNull();
+        // Nothing waiting, every agent running still: each keeps its place, not the agents' order.
+        const nothing = laid([], [S3, from("s2"), S1, S4], banner, header, EMPTY, NOTHING, ordered(placesOf(reloaded), host));
+        expect(heads(nothing)).toEqual(["━━ s1 ━━", "━━ s2 ━━", "━━ s3 ━━", "━━ s4 ━━"]);
+        // s3 gone, no item and not running: its place is told gone, and back, it comes after the others.
+        const without = laid([], [from("s2"), S1, S4], banner, header, EMPTY, NOTHING, ordered(placesOf(nothing), host));
+        const told = toKeep(placesOf(without), placesOf(nothing), host);
+        expect(told?.gone).toEqual([`now ${whose(S3)}`]);
+        const left = host.filter((each) => !(told?.gone ?? []).includes(each));
+        const back = laid([], [S3, from("s2"), S1, S4], banner, header, EMPTY, NOTHING, ordered(placesOf(without), left));
+        expect(heads(back)).toEqual(["━━ s1 ━━", "━━ s2 ━━", "━━ s4 ━━", "━━ s3 ━━"]);
+    });
+
+    it("lays out what this page laid out first, then what the host keeps of others, and leaves another page's places to it", () => {
+        // This page's order wins over the host's, which another page made, for what it lays out.
+        expect(ordered(["now a", "now b"], ["now b", "now x", "now a"])).toEqual(["now a", "now b", "now x"]);
+        // A place another page laid out and this one doesn't: told nothing of it, and nothing told at all.
+        expect(toKeep(["now a"], ["now a"], ["now a", "now x"])).toBeNull();
+        // As it first lays the review out from the host's order, every place it doesn't lay out is gone.
+        expect(toKeep(["now a"], ["now a", "now x"], ["now a", "now x"])).toEqual({ places: ["now a"], gone: ["now x"] });
+        // One it laid out that the host no longer keeps, gone already: nothing to tell.
+        expect(toKeep(["now a"], ["now a", "now y"], ["now a"])).toBeNull();
     });
 
     it("lands back on what was written about, once it's sent, and on the group's banner where that's gone too", () => {

@@ -50,6 +50,7 @@ import {
     type Drawers,
     type Head,
     type Item,
+    type Keeping,
     type Since,
     type Viewed,
 } from "./review";
@@ -71,6 +72,10 @@ const SAID = {
     refused: "this page's token is refused: open the dashboard again from `lup-dev dashboard`",
 };
 
+/** What the review is laid out from before it's all read: no item, and no conversation running. */
+const NONE: Item[] = [];
+const NO_ONE: InboxConversation[] = [];
+
 /** How long the page lets each agent's record and branch go unread with no hook heard, in milliseconds: a record written just after its hook, or a write no hook said, is read all the same. */
 const FALLBACK = 60_000;
 
@@ -83,6 +88,13 @@ interface Live extends Running {
 export function App() {
     const { reply, connection } = useWatched({ kind: "list" });
     const inbox = useWatched({ kind: "inbox-list" });
+    // Where the review's groups go, as the host keeps it for every page and across reloads: none until it's read, and
+    // none kept where the host doesn't answer it.
+    const order = useWatched({ kind: "inbox-order" });
+    const kept = useSame(
+        useMemo(() => (order.reply === null ? null : order.reply.kind === "inbox-ordered" ? (order.reply.order.places ?? []) : []), [order.reply]),
+        (places) => JSON.stringify(places),
+    );
     const now = useNow();
     // The review's ages are told to the minute, so it's laid out again once a minute, not every second; the banners'
     // durations every five seconds, which lays the whole review out again, its drawers among it.
@@ -101,6 +113,9 @@ export function App() {
         }
     }, [narrow]);
     const [draft, setDraft] = useState<Draft>(EMPTY);
+    // Whether the draft has been asked for, answered or not: with the inbox, the conversations running and the order,
+    // what the review is laid out from, none of which it's laid out without, lest it tell the host its groups are gone.
+    const [draftRead, setDraftRead] = useState(false);
     const [contexts, setContexts] = useState<Map<number, Answered<Context>>>(new Map());
     const [files, setFiles] = useState<Map<number, Answered<ChangedFile[]>>>(new Map());
     // The operator's own items about those waiting, and the agents' items those are on: what's shown above and under each.
@@ -282,12 +297,14 @@ export function App() {
     }
 
     useEffect(() => {
-        void ask({ kind: "inbox-draft" }).then((answer) => {
-            if (answer.kind === "inbox-drafted") {
-                setDraft(answer.draft);
-                setEpoch((before) => before + 1);
-            }
-        });
+        void ask({ kind: "inbox-draft" })
+            .then((answer) => {
+                if (answer.kind === "inbox-drafted") {
+                    setDraft(answer.draft);
+                    setEpoch((before) => before + 1);
+                }
+            })
+            .finally(() => setDraftRead(true));
         void fetch("/api/about").then(async (response) => {
             if (response.ok) {
                 setDemo(((await response.json()) as { demo: boolean }).demo);
@@ -316,6 +333,18 @@ export function App() {
     }, [connection]);
 
     const pending = useRef<Draft | null>(null);
+
+    // What the review is laid out from, all of it read: until then it's laid out empty, and the host told nothing; nor
+    // where the host refused one of them, the review showing what it can.
+    const ready = draftRead && kept !== null && inbox.reply !== null && reply !== null;
+    const whole = reply?.kind === "listed" && inbox.reply?.kind === "inbox-items" && order.reply?.kind === "inbox-ordered";
+    const keepOrder = useCallback((keeping: Keeping) => {
+        void ask({ kind: "inbox-keep-order", ...keeping }).then((answer) => {
+            if (answer.kind === "refused") {
+                setSaid(answer.error);
+            }
+        });
+    }, []);
 
     const change = useCallback((next: Draft) => {
         setDraft(next);
@@ -784,8 +813,8 @@ export function App() {
             <main className="win" ref={main}>
                 <div className="review">
                     <Review
-                        items={waiting}
-                        agents={agentsRunning}
+                        items={ready ? waiting : NONE}
+                        agents={ready ? agentsRunning : NO_ONE}
                         draft={draft}
                         change={change}
                         banner={banner}
@@ -815,6 +844,8 @@ export function App() {
                         states={states}
                         overview={overview}
                         setOverview={setOverview}
+                        order={ready ? kept : null}
+                        keepOrder={whole ? keepOrder : null}
                     />
                     <div className="status">
                         {!replying ? (

@@ -1056,6 +1056,28 @@ class Draft(Model):
         )
 
 
+class Order(Model):
+    """Where the dashboard's review lays out its groups, in order, as the operator has seen them: kept on the host, so a page reloaded, or the operator's other page, lays each where it was (`docs/dashboard.md`, *The review*)."""
+
+    places: list[str] = []
+    """Each group's place, as the page names it (`Group.place`, `page/src/review.ts`)."""
+
+    def laid(self, places: list[str], gone: list[str]) -> Order:
+        """Return the order once a page laid out the groups at `places`, in its order, those at `gone` gone from it.
+
+        Each place kept stays where it is, whatever order the page laid it
+        in, so a page that missed a moment, as a phone's asleep, never
+        reorders what the others laid out; those it didn't hold come after
+        them, in the page's order; and one another page laid out, which this
+        one doesn't, stays. Each gone is dropped, but where the page lays it
+        out too, so a group that comes back comes after the others, as a new
+        one does, and the order holds no more than the groups laid out.
+        """
+        laid = dict.fromkeys(places)
+        kept = [each for each in self.places if each in laid or each not in gone]
+        return Order(places=[*kept, *(each for each in laid if each not in kept)])
+
+
 class Inbox(MutableModel):
     """Every item and every conversation's whereabouts, as the host service holds them, each change written through to its file."""
 
@@ -1093,6 +1115,16 @@ class Inbox(MutableModel):
         if self.changes is not None:
             self.changes.changed()
         return draft
+
+    def order(self) -> Order:
+        """Return where the dashboard's review lays out its groups; none where no page has laid any out."""
+        return read_model(self.layout.order, Order) or Order()
+
+    def ordered(self, places: list[str], gone: list[str]) -> Order:
+        """Keep where the dashboard's review lays out its groups once a page laid them out at `places`, those at `gone` gone from it (`Order.laid`), and return it."""
+        order = self.order().laid(places, gone)
+        write_model(self.layout.order, order)
+        return order
 
     def talk(self, conversation: Conversation) -> Talk:
         """Return what the operator wrote on `conversation` where they read it; nothing where they've written nothing."""
