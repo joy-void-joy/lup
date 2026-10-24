@@ -559,8 +559,9 @@ function itemNamed(header: string): string {
 }
 
 /** The header over the review: where the cursor is, each part marked by its kind, and whom what's being written goes to; at its end, what waits below (`tallied`). */
-function Heading({ parts, tally }: { parts: Where[]; tally: string }) {
-    const letter = (kind: Where["kind"]) => FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? null;
+function Heading({ parts, tally, groups = false }: { parts: Where[]; tally: string; groups?: boolean }) {
+    // A group's letter only where groups fold, as the layout trials make them (`grouped`).
+    const letter = (kind: Where["kind"]) => (kind === "group" && !groups ? null : (FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? null));
     // A body around another, which a narrow screen leaves out for the innermost.
     const inner = parts.findLast((each) => each.kind === "body");
     const shown = (part: Where) => (
@@ -1493,7 +1494,7 @@ export function Review({
         item: (region: Region) => itemNamed(laidOut.text.slice(region.header.from, region.header.to)),
         party: called,
     };
-    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, written(draft), naming)} tally={tallied(items, draft, reviewed)} />;
+    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, written(draft), naming)} tally={tallied(items, draft, reviewed)} groups={grouped(trials)} />;
     // Each header pinned is drawn as the buffer draws its line.
     const classesOf = (sticky: Sticky): string => {
         switch (sticky.kind) {

@@ -10,6 +10,7 @@ import { StateEffect, type Extension } from "@codemirror/state";
 import { GutterMarker, gutter, type BlockInfo, type EditorView } from "@codemirror/view";
 
 import { holding, type Sticky } from "./stack";
+import { measured } from "./timing";
 
 /** One scope's label in the margin: what it says, its kind's class, and the marks before and after it. */
 export interface Labelled {
@@ -131,7 +132,12 @@ function barsOf(outlined: Outlined, line: BlockInfo, labels: boolean): Bars | nu
 export function outlineMargin(outlined: () => Outlined, labels: boolean): Extension {
     return gutter({
         class: labels ? "outline-margin" : "outline-margin is-bare",
-        lineMarker: (_, line) => barsOf(outlined(), line, labels),
+        lineMarker: (_, line) => {
+            const began = performance.now();
+            const bars = barsOf(outlined(), line, labels);
+            measured("lup-margin", began);
+            return bars;
+        },
         lineMarkerChange: (update) => update.docChanged || update.transactions.some((each) => each.effects.some((effect) => effect.is(redrawn))),
         initialSpacer: () => new Bars([]),
         domEventHandlers: {

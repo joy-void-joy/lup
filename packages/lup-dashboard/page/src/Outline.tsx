@@ -166,7 +166,7 @@ const GLYPHS: Partial<Record<OutlineMark, string>> = {
 export const DRAFTED: Record<DraftMark, { glyph: string; word: string }> = {
     comment: { glyph: "»", word: "comment" },
     read: { glyph: "✓", word: "read" },
-    approve: { glyph: "✓", word: "approve" },
+    approve: { glyph: "✔", word: "approve" },
 };
 
 /** Return the glyph an entry is marked with, by what it is and its first mark that has one. */
@@ -328,16 +328,20 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                         <span className={`outline-glyph mark-${mark}`}>{glyph}</span>
                         <span className="outline-text">{row.text}</span>
                         {row.fresh ? <span className="outline-tag outline-fresh" title="new since you last sent">new</span> : null}
-                        {row.draft.map((each) => (
-                            <span key={each} className="outline-tag outline-draft" title="in your reply: goes with the next Ctrl+Enter">
-                                {DRAFTED[each].glyph} {DRAFTED[each].word}
+                        {row.draft.length === 0 ? null : (
+                            <span className="outline-tag outline-draft" title={`in your reply, with the next Ctrl+Enter: ${row.draft.map((each) => DRAFTED[each].word).join(", ")}`}>
+                                {row.draft.map((each) => DRAFTED[each].glyph).join("")}
                             </span>
-                        ))}
+                        )}
                     </div>
                 );
             })}
             <div className="outline-hint">
                 <kbd>gO</kbd> here · <kbd>j</kbd> <kbd>k</kbd> · <kbd>⏎</kbd> go · <kbd>Esc</kbd> back
+                <br />
+                <span className="mark-waiting">◆</span> waiting on you · <span className="mark-to-review">◇</span> to review · <span className="mark-news">•</span> news
+                <br />
+                <span className="outline-draft">» ✓ ✔</span> in your next <kbd>^⏎</kbd>: comment, read, approve
             </div>
         </nav>
     );
