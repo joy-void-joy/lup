@@ -876,8 +876,8 @@ export function Review({
     }
 
     /**
-     * Go to `region`'s item, where there's one: onto where it lands (`arrival`), its header kept in view above the line
-     * where both fit; `reaching` it, as `]a` does, opening the folds over it, else, as `]]` does, on the summary line of
+     * Go to `region`'s item, where there's one: onto where it lands (`arrival`), brought into view where it isn't
+     * (`bring`); `reaching` it, as `]a` does, opening the folds over it, else, as `]]` does, on the summary line of
      * the closed fold hiding it, which a plain motion never opens.
      */
     function goTo(region: Region | undefined, reaches: boolean) {
@@ -889,11 +889,24 @@ export function Review({
         if (reaches) {
             opening(current, at);
         }
-        // Its header at the view's top, the line it lands on under it, where both fit; else that line in the middle.
-        const top = current.lineBlockAt(region.header.from).top;
-        const fits = at === region.header.from || current.lineBlockAt(at).bottom - top < current.scrollDOM.clientHeight * 0.8;
-        current.dispatch({ selection: { anchor: at } });
-        scrollAfterKey(current, fits ? EditorView.scrollIntoView(region.header.from, { y: "start" }) : EditorView.scrollIntoView(at, { y: "center" }));
+        bring(current, at);
+    }
+
+    /**
+     * Put the cursor on `target`, as a jump does (`]]`, `]a`, `]c`, `]f`): where its line is in view, the view stays;
+     * else it comes in a third of the view from the edge it came in at, so what's around it shows, never at the top nor
+     * at the very edge. Vim, ending its key, scrolls the cursor into view the nearest way, so the jump's own scroll is
+     * asked after it (`scrollAfterKey`).
+     */
+    function bring(current: EditorView, target: number) {
+        const line = current.lineBlockAt(target);
+        const scroller = current.scrollDOM.getBoundingClientRect();
+        const top = current.documentTop + line.top;
+        const shown = top >= scroller.top && top + line.height <= scroller.top + current.scrollDOM.clientHeight;
+        current.dispatch({ selection: { anchor: target } });
+        if (!shown) {
+            scrollAfterKey(current, EditorView.scrollIntoView(target, { y: "nearest", yMargin: current.scrollDOM.clientHeight / 3 }));
+        }
     }
 
     /**
@@ -976,9 +989,7 @@ export function Review({
                 return;
             }
             opening(current, target);
-            current.dispatch({ selection: { anchor: target } });
-            // A third of the view from its edges, so what's around it shows.
-            scrollAfterKey(current, EditorView.scrollIntoView(target, { y: "nearest", yMargin: current.scrollDOM.clientHeight / 3 }));
+            bring(current, target);
         },
         file: (forward) => {
             const current = view.current;
@@ -996,9 +1007,7 @@ export function Review({
             if (target === undefined) {
                 return;
             }
-            current.dispatch({ selection: { anchor: target } });
-            // Its header at the view's top, its lines under it.
-            scrollAfterKey(current, EditorView.scrollIntoView(target, { y: "start" }));
+            bring(current, target);
         },
         stops: () => heads,
         cite: (forward) => {
