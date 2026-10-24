@@ -682,6 +682,36 @@ function placeOf(key: string, later: boolean): string {
     return `${later ? "later" : "now"} ${key}`;
 }
 
+/**
+ * Return where the groups go, as `laid` takes them: `own`, this page's order, the groups it laid out last, as it laid
+ * them; then each place of `kept`, the order the host keeps for every page, it doesn't hold, in the host's order, as
+ * one another page laid out, or every one as the page first lays the review out, after a reload among others. So what
+ * this page shows never moves for what another did (`docs/dashboard.md`, *The review*).
+ */
+export function ordered(own: readonly string[], kept: readonly string[]): string[] {
+    const held = new Set(own);
+    return [...own, ...kept.filter((each) => !held.has(each))];
+}
+
+/** What the host is told of the order once the page laid the review out: the places laid out, in order, and those it no longer lays out. */
+export interface Keeping {
+    places: string[];
+    gone: string[];
+}
+
+/**
+ * Return what to tell the host of the order, `kept` as it keeps it, once the page laid out the groups at `shown`, in
+ * order, having laid out those at `before` (as it first lays the review out from the host's order, that order): what
+ * it lays out, and each kept it laid out before and no longer does, gone; nothing where the host keeps it so already,
+ * as it does a place another page laid out and this one doesn't, which this one leaves it to.
+ */
+export function toKeep(shown: readonly string[], before: readonly string[], kept: readonly string[]): Keeping | null {
+    const laidNow = new Set(shown);
+    const held = new Set(kept);
+    const gone = before.filter((each) => !laidNow.has(each) && held.has(each));
+    return gone.length === 0 && shown.every((each) => held.has(each)) ? null : { places: [...shown], gone };
+}
+
 /** Return a group for each of `conversations` with none among `groups`, in their order, once each. */
 function emptyGroups(conversations: Conversation[], groups: Grouping[]): Grouping[] {
     const keys = new Set(groups.map((each) => each.key));
@@ -951,11 +981,10 @@ export function rowLabel(kind: DrawerKind, data: AgentDrawers): { text: string; 
  * (`editedOf`). An item kept with replies from before shows, after its own words, each of the operator's comments on
  * it after `you`, and the agent's replies after its name (`threadsOf`).
  *
- * `places` are where the groups were laid out before in this sitting (`Group.place`, in order): each among them keeps
- * its place, items coming and going, and any other comes after them, in the order above. So a group appears where its
- * first item puts it, or after every group with items as its conversation is first seen, and stays there while
- * anything's waiting; laid out anew from the items alone, as on reload, the order is the same but for a group that
- * emptied meanwhile.
+ * `places` are where the groups go (`Group.place`, in order), as this page laid them out and the host keeps them for
+ * every page and across reloads (`ordered`): each among them keeps its place, items coming and going, and any other
+ * comes after them, in the order above. So a group appears where its first item puts it, or after every group with
+ * items as its conversation is first seen, and stays there for as long as it's laid out.
  */
 export function laid(
     items: Item[],
