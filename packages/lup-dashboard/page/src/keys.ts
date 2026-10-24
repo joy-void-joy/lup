@@ -210,13 +210,13 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
         keys: [
             {
                 keys: "]] [[",
-                does: "next and previous item, on its first line that matters, or on the summary line of the closed fold hiding it, which, as every motion of vim's, it doesn't open",
+                does: "next and previous item, on its first line that matters, its header at the view's top, or on the summary line of the closed fold hiding it, which, as every motion of vim's, it doesn't open",
                 short: "items",
                 at: ["banner", "approvals", "item", "aside", "written", "drawer"],
             },
             {
                 keys: "]a [a",
-                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing; news and what's marked read or left for later are passed over; the folds hiding where it lands open, said under the review",
+                does: "next and previous item to answer, in the order they came: a question, a held change, an approval, a hold at landing, its header at the view's top; news and what's marked read or left for later are passed over; the folds hiding where it lands open, said under the review",
                 short: "to answer",
                 at: ["banner", "approvals", "item", "change", "aside", "written", "drawer"],
             },
@@ -225,6 +225,18 @@ export const REVIEW_KEYS: Part<ReviewPlace>[] = [
                 does: "next and previous line that matters, in what an approval, a held change or a \"since you approved\" drawer changes, the folds hiding it opening, said under the review",
                 short: "what matters",
                 at: ["change", "file", "since", "reviewed"],
+            },
+            {
+                keys: "]f [f",
+                does: "next and previous file's header, in what an approval, a held change or a \"since you approved\" drawer changes: one folded whole on its header, which it doesn't open; one in a closed fold, or standing as you last saw it, a line with nothing under it, passed over",
+                short: "files",
+                at: ["change", "file", "since", "reviewed"],
+            },
+            {
+                keys: "^d ^u ^f ^b",
+                does: "half a page or a page down or up, as vim's, stopping on the next file's header it reaches, as a motion repeated by a key held down does, j among them; held there until a key is pressed afresh, which goes on",
+                short: "page",
+                at: [],
             },
             {
                 keys: "]n [n",

@@ -41,7 +41,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type Taken } from "./code";
 import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
-import { closedAs, folding, isFolded, reached, reaching, rebuilt, refold, uncovered, useEditor, type Landing } from "./editor";
+import { closedAs, folding, hiddenAt, isFolded, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, type Landing } from "./editor";
 import { Following } from "./follow";
 import { timed } from "./timing";
 import { mapOutlineKey, Outline, setOutlineFocus, useNarrow } from "./Outline";
@@ -64,6 +64,7 @@ import {
     codeAt,
     codeFrom,
     drawerAt,
+    fileHeads,
     firstApproval,
     foldKey,
     foldsOf,
@@ -684,6 +685,8 @@ export function Review({
         }),
         [laidOut],
     );
+    // The start of each file's header line: where `]f` and `[f` go, and where a key held down or a page scroll stops.
+    const heads = useMemo(() => fileHeads(laidOut), [laidOut]);
     const editor = useEditor<Draft, Written>({
         shown: laidFor,
         draft,
@@ -1012,17 +1015,11 @@ export function Review({
         if (reaches) {
             opening(current, at);
         }
-        if (at === region.header.from) {
-            current.dispatch({ selection: { anchor: at }, scrollIntoView: true });
-            return;
-        }
-        // Its header stays in view above the line it lands on, where both fit.
+        // Its header at the view's top, the line it lands on under it, where both fit; else that line in the middle.
         const top = current.lineBlockAt(region.header.from).top;
-        const fits = current.lineBlockAt(at).bottom - top < current.scrollDOM.clientHeight * 0.8;
-        current.dispatch({
-            selection: { anchor: at },
-            effects: fits ? EditorView.scrollIntoView(region.header.from, { y: "start" }) : EditorView.scrollIntoView(at, { y: "center" }),
-        });
+        const fits = at === region.header.from || current.lineBlockAt(at).bottom - top < current.scrollDOM.clientHeight * 0.8;
+        current.dispatch({ selection: { anchor: at } });
+        scrollAfterKey(current, fits ? EditorView.scrollIntoView(region.header.from, { y: "start" }) : EditorView.scrollIntoView(at, { y: "center" }));
     }
 
     /** Return where the line of the file Space `a` marked reviewed is, once its drawer is read anew and shows it so; none else, or before. */
@@ -1141,11 +1138,31 @@ export function Review({
                 return;
             }
             opening(current, target);
-            current.dispatch({
-                selection: { anchor: target },
-                effects: EditorView.scrollIntoView(target, { y: "nearest", yMargin: current.scrollDOM.clientHeight / 3 }),
-            });
+            current.dispatch({ selection: { anchor: target } });
+            // A third of the view from its edges, so what's around it shows.
+            scrollAfterKey(current, EditorView.scrollIntoView(target, { y: "nearest", yMargin: current.scrollDOM.clientHeight / 3 }));
         },
+        file: (forward) => {
+            const current = view.current;
+            if (current === null) {
+                return;
+            }
+            const line = current.state.doc.lineAt(editor.head()).from;
+            // A file a closed fold hides, in an item marked read or a drawer closed, is passed over, the fold counting as
+            // its summary line; one folded whole is gone to on its header, which it doesn't open.
+            const target = stepped(
+                heads.filter((each) => !hiddenAt(current.state, each)),
+                line,
+                forward,
+            );
+            if (target === undefined) {
+                return;
+            }
+            current.dispatch({ selection: { anchor: target } });
+            // Its header at the view's top, its lines under it.
+            scrollAfterKey(current, EditorView.scrollIntoView(target, { y: "start" }));
+        },
+        stops: () => heads,
         cite: (forward) => {
             const current = view.current;
             if (current === null) {

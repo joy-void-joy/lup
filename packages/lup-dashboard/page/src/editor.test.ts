@@ -1,5 +1,6 @@
 import { foldEffect, foldState, unfoldEffect } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import type { CodeMirrorV } from "@replit/codemirror-vim";
 import { describe, expect, it } from "vitest";
 
@@ -16,6 +17,8 @@ import {
     openedSaid,
     ownOf,
     pastFolds,
+    scrollAfterKey,
+    stopAt,
     pastHidden,
     reaching,
     rewritten,
@@ -294,6 +297,50 @@ describe("motions past a closed fold, which counts as its summary line", () => {
         // Selecting to the summary line's end, as `v$` does, stops on its last character, the line break being the fold's.
         expect(rests(state, outer.from + 1, at("ad"), 0)).toBe("head");
         expect(rests(state, at("h1"), at("after"), at("fter"))).toBe("d\nh1\nh2\na");
+    });
+});
+
+describe("a jump's own scroll", () => {
+    it("is asked once the key is done, after vim's scroll of the cursor into view, so it's the one CodeMirror takes", async () => {
+        const asked: unknown[] = [];
+        const view = { dispatch: (...specs: unknown[]) => void asked.push(...specs) };
+        const top = EditorView.scrollIntoView(0, { y: "start" });
+        scrollAfterKey(view, top);
+        expect(asked).toEqual([]);
+        // Vim ends its key by scrolling the cursor into view.
+        const vims = { scrollIntoView: true };
+        view.dispatch(vims);
+        await Promise.resolve();
+        expect(asked).toEqual([vims, { effects: top }]);
+    });
+});
+
+describe("a key held down, or a page scroll, stopping at each file", () => {
+    const text = ["a.py · changed", "a1", "a2", "b.py · created", "b1", "b2", "c.py · changed", "c1", ""].join("\n");
+    const at = (needle: string, offset = 0) => text.indexOf(needle) + offset;
+    const heads = [at("a.py"), at("b.py"), at("c.py")];
+    const state = EditorState.create({ doc: text, extensions: [foldState] });
+
+    it("stops on the first file's header after the line it left, up to where it lands, its own line passed", () => {
+        expect(stopAt(state, heads, at("a2"), at("b1"))).toBe(at("b.py"));
+        expect(stopAt(state, heads, at("a1", 1), at("c1"))).toBe(at("b.py"));
+        expect(stopAt(state, heads, at("a2"), at("b.py", 3))).toBe(at("b.py"));
+        // From a header, pressed afresh, it goes on to the next one.
+        expect(stopAt(state, heads, at("b.py", 2), at("b2"))).toBeUndefined();
+        expect(stopAt(state, heads, at("b1"), at("b2"))).toBeUndefined();
+    });
+
+    it("going back, stops at the top of the file it was in, then of the one before", () => {
+        expect(stopAt(state, heads, at("b1"), at("a2"))).toBe(at("b.py"));
+        expect(stopAt(state, heads, at("c1"), at("a1"))).toBe(at("c.py"));
+        // From a header, it goes on into the file before, and stops at its top.
+        expect(stopAt(state, heads, at("b.py", 4), at("a1"))).toBeUndefined();
+        expect(stopAt(state, heads, at("b.py", 4), at("a.py", 2))).toBe(at("a.py"));
+    });
+
+    it("passes over a header a closed fold hides, the fold counting as its summary line", () => {
+        const folded = state.update({ effects: foldEffect.of({ from: at("a2") - 1, to: at("b2") + 2 }) }).state;
+        expect(stopAt(folded, heads, at("a1"), at("c1"))).toBe(at("c.py"));
     });
 });
 
