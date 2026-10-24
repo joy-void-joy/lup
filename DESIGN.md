@@ -12,14 +12,14 @@ This document describes lup as it's meant to be. Parts of it aren't built yet; `
 
 ## Modules
 
-Everything lup does comes from a module, and a project declares which modules its sessions use. Nothing is built in: lup's own parts are modules declared the same way a project's are, so a project can replace any of them.
+Everything lup does comes from a module, and a project declares which modules its sessions use. lup's own parts are modules declared the same way a project's are, so a project can replace any of them. What's one per machine, shared by every repository, is the core instead: loading the declaration, the host service, launch and trust, the inbox's machinery and the dashboard's shell.
 
 A module can declare:
 - the tools, skills and subagents its sessions get;
 - the room its sessions run in: packages, GPU, caches, network, privileges;
-- helpers that run on the operator's machine during a launch, such as a preview server or a service holding an API key, with the secrets they get from the machine's secret store and the port they listen on;
+- helpers that run on the operator's machine, during a launch or always, such as a preview server or a service holding an API key, with the secrets they get from the machine's secret store and the port they listen on;
 - guidance, code rules, gate steps, path roles and requirements;
-- dashboard panels.
+- what it shows in the dashboard: kinds of item, a banner of its own, drawers, tabs and embeds.
 
 A module refers to its code by importing it, so pyright checks the reference and renames follow it. The declaration is loaded at every hook, so the gate checks that loading it imports nothing heavy, and names the import chain when it does.
 
@@ -46,9 +46,9 @@ lup must be able to express every project that used the first lup, and everythin
 
 ## The dashboard
 
-The dashboard is where the operator works: every agent, its batches, questions and messages, and each project's panels. Every view also has a CLI command, for the operator and for agents.
+The dashboard is where the operator works: every agent, its batches, questions and messages, and what each project's modules show. Every view also has a CLI command, for the operator and for agents.
 
-A panel is JavaScript a module ships. From a panel, sending to the inbox and working with lup's concepts (runs, reviews, agents) is easy. A project making an animation can preview it in its panel.
+Everything in it is read and commented on as the review is: the operator points at any part, says something, and it goes with the one draft to the agent concerned. A module's data is typed Python an agent reads too; it's drawn from lup's building blocks or TypeScript the module ships, each piece saying what in it can be pointed at: a line, a moment of a video, a region of a frame, an element of a page. A project making an animation is commented on frame by frame; a site being built is used as its end product, with an overlay to point at its parts.
 
 ## Defaults
 
