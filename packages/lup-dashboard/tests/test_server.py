@@ -457,7 +457,9 @@ def test_the_demo_reads_a_conversations_calls_each_a_line_and_whole_on_asking(
     }
 
 
-def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) -> None:
+def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_but_whats_parked(
+    page: Path,
+) -> None:
     served = client(Demo(clock=Fixed()), page)
     draft = {
         "comments": [
@@ -477,7 +479,12 @@ def test_the_demo_keeps_a_draft_and_sends_it_keeping_whats_parked(page: Path) ->
     )
     sent = served.post("/api/ask", json={"kind": "inbox-send-draft"}, headers=bearing())
     left = served.post("/api/ask", json={"kind": "inbox-draft"}, headers=bearing())
+    waiting = served.post("/api/ask", json={"kind": "inbox-list"}, headers=bearing())
+    numbers = [each["number"] for each in waiting.json()["items"]]
     assert kept.json()["draft"]["comments"][1]["quote"]["text"] == "Fold"
+    assert 51 not in numbers
+    assert 52 not in numbers
+    assert 53 in numbers
     assert sent.json() == {
         "kind": "inbox-reviewed",
         "items": [],

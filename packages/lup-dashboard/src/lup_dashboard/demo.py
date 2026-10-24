@@ -165,6 +165,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     sent: list[Item] = []
     """The items the operator's messages sent from the page made, kept in memory:
     they reach no agent, and are told at once."""
+    covered: list[int] = []
+    """The items each draft sent covered, by number, taken off the operator's
+    list as the host takes them, kept in memory: each done."""
     grown: int = 0
     """How many steps the parser subagent's conversation has taken since the demo began: one more each time it's asked, so a page following it sees it grow."""
     holding: list[SetHolding] = []
@@ -251,7 +254,10 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 self.draft = draft
                 return Drafted(draft=draft)
             case SendDraft():
+                self.covered = [*self.covered, *self.draft.covered()]
                 self.draft = self.draft.kept()
+                self.changed.set()
+                self.changed = asyncio.Event()
                 return Reviewed(items=[])
             case ShowTalk(conversation=conversation):
                 return Talked(talk=self.talks.get(conversation.key(), Talk()))
@@ -780,7 +786,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def every(self) -> list[Item]:
-        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to its session; the voice session's note the operator reviewed, edited since, and their review, which its turn's last words answer (`answer`); the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page."""
+        """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to its session; the voice session's note the operator reviewed, edited since, and their review, which its turn's last words answer (`answer`); the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page. Each a draft sent covered is done."""
         first, second = self.runtimes
         lup = Path("/home/op/lup.git")
         parser = Conversation(repository=lup, runtime=first, session="s1", agent="a02")
@@ -941,7 +947,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ],
             ),
         ]
-        return [
+        made = [
             *settled,
             *(
                 Item(
@@ -1103,6 +1109,12 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             ),
             *self.worked(),
             *self.sent,
+        ]
+        return [
+            each.model_copy(update={"state": Done(at=self.clock.now())})
+            if each.number in self.covered
+            else each
+            for each in made
         ]
 
     def reviewed_voice(self, voice: Conversation) -> Item:
