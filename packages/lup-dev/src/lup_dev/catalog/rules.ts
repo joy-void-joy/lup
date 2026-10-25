@@ -2339,8 +2339,10 @@ export const rules = {
         steer:
             'A number or a duration becomes a default a caller can override, a parameter\'s or a field\'s, and a ' +
             "list a caller might change a field's default on the model that uses it; a closed set of options " +
-            'becomes a `Literal` type, its members read with `typing.get_args`, and a fixed table from one ' +
-            "vocabulary to another a function that `match`es; a path goes in the package's `layout.py`, an " +
+            'becomes a `Literal` type, its members read with `typing.get_args`: ' +
+            '`name in get_args(Format.__value__)` to test one, `list(get_args(Format.__value__))` to keep them; ' +
+            'a fixed table from one vocabulary to another becomes a function that `match`es; ' +
+            "a path goes in the package's `layout.py`, an " +
             "environment variable's name in its `settings.py`, and a runtime's wire spelling in its adapter, as a " +
             "field of the adapter's model or a `Literal`.",
         check(file) {
@@ -2432,6 +2434,27 @@ export const rules = {
                         def known(name: str) -> bool:
                             """Say whether a configuration's format is one we read."""
                             return name in get_args(Format.__value__)
+                    `,
+                },
+                {
+                    code: python`
+                        SEVERITIES = ["low", "high", "critical"]
+
+
+                        def worst(found: list[str]) -> str:
+                            """Return the most severe of the severities found."""
+                            return max(found, key=SEVERITIES.index)
+                    `,
+                    rewritten: python`
+                        from typing import Literal, get_args
+
+                        type Severity = Literal["low", "high", "critical"]
+
+
+                        def worst(found: list[Severity]) -> Severity:
+                            """Return the most severe of the severities found."""
+                            order: list[Severity] = list(get_args(Severity.__value__))
+                            return max(found, key=order.index)
                     `,
                 },
                 {
