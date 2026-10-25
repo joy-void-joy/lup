@@ -2172,7 +2172,7 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
     sources = [Source(path=path) for path in files]
     declaration = worktree.declaration
     reports = engine().check(root, sources, declaration.rules, declaration.runner)
-    ruff = Ruff().findings(root, sources, declaration.runner)
+    ruff = Ruff().findings(root, sources)
     conditions = loaded(root, declaration.conditions)
     tracker: Issues | None = None
     unreachable: str | None = None

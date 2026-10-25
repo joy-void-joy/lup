@@ -2248,7 +2248,7 @@ project = Project(modules=Modules.default().edit(Python(runner=Poetry())))
 '''
 
 
-def test_the_engine_and_ruff_run_with_the_integration_branchs_runner(
+def test_the_engine_reads_with_the_integration_branchs_runner(
     kit: Kit, repo: Path, linked: Path, shell: Shell
 ) -> None:
     shell.git(repo, "switch", "-q", "-c", "dev")
@@ -2260,13 +2260,12 @@ def test_the_engine_and_ruff_run_with_the_integration_branchs_runner(
     (linked / CORE).write_text((linked / CORE).read_text() + "# TYPE\n")
     finish(kit, linked, "c1")
     end(kit, repo)
-    plain = Prefixed.of(Plain())
     assert kit.engine.runners
-    assert kit.linter.runners
-    assert all(each == plain for each in [*kit.engine.runners, *kit.linter.runners])
+    assert kit.linter.asked
+    assert all(each == Prefixed.of(Plain()) for each in kit.engine.runners)
 
 
-def test_a_stand_in_declaration_runs_the_tools_with_its_runners_commands(
+def test_a_stand_in_declaration_judges_with_its_runners_commands_and_environment(
     kit: Kit, repo: Path, linked: Path, shell: Shell
 ) -> None:
     shell.git(repo, "switch", "-q", "-c", "dev")
@@ -2277,13 +2276,12 @@ def test_a_stand_in_declaration_runs_the_tools_with_its_runners_commands(
     (repo / "lup_project.py").write_text("from lup_dev import Unheard\n" + POETRY)
     shell.commit(repo, "dev: a name the judge lacks")
     kit.engine.runners.clear()
-    kit.linter.runners.clear()
     before(kit.bench, core_edit(linked), SESSION, repo)
-    ran = [*kit.engine.runners, *kit.linter.runners]
-    assert ran
-    for runner in ran:
+    assert kit.engine.runners
+    for runner in kit.engine.runners:
         assert runner.judging(["ruff"]) == ["poetry", "run", "ruff"]
         assert runner.environment() == ["poetry.lock"]
+        assert runner.venv() == Path(".venv")
 
 
 def test_before_the_first_commit_the_defaults_rule_selection_judges(

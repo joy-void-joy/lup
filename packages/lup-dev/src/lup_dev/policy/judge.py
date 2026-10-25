@@ -362,9 +362,7 @@ class Judge(Model, arbitrary_types_allowed=True):
             ]
         )
         ruff = self.linter.findings(
-            self.root,
-            [Source(path=c.path, content=c.after) for c in checked],
-            self.roles.declaration.runner,
+            self.root, [Source(path=c.path, content=c.after) for c in checked]
         )
         return [
             self.with_private(

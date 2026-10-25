@@ -2016,8 +2016,8 @@ def standing(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Findin
     where its rules read, so a test's are pyright's and ruff's alone, and none
     the declaration exempts the file from or an `ignore` keeps. A finding ruff,
     or `lup-dev rules fix`, clears safely isn't one: the session landing the
-    work applies the fix. The engine and ruff are asked with the rule selection
-    and the runner of the declaration the worktree is judged by.
+    work applies the fix. The engine is asked with the rule selection and the
+    runner of the declaration the worktree is judged by; ruff is the judge's own.
     """
     services = bench.services
     sources = [
@@ -2031,7 +2031,7 @@ def standing(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Findin
     reports = services.checker.check(
         worktree.root, sources, declaration.rules, declaration.runner
     )
-    ruff = services.linter.findings(worktree.root, sources, declaration.runner)
+    ruff = services.linter.findings(worktree.root, sources)
     return [
         found
         for report in reports

@@ -156,16 +156,15 @@ PLAIN = (
 """A declaration whose tools run as the `PATH` finds them."""
 
 
-def test_rules_check_runs_the_engine_and_ruff_with_the_worktrees_runner(
+def test_rules_check_runs_the_engine_with_the_worktrees_runner_and_ruff(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (repo / "lup_project.py").write_text(PLAIN)
     monkeypatch.chdir(repo)
     result = runner.invoke(cli.app, ["rules", "check"])
     assert result.exit_code == 0, result.output
-    plain = Prefixed.of(Plain())
-    assert fakes.engine.runners == [plain]
-    assert fakes.linter.runners == [plain]
+    assert fakes.engine.runners == [Prefixed.of(Plain())]
+    assert fakes.linter.asked == [repo]
 
 
 def test_the_importers_pass_asks_with_the_runner_the_judge_reads(
