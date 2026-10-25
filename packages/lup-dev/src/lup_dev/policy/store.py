@@ -304,6 +304,30 @@ class Store(Model):
         )
         return [Path(path) for path in nul_separated(listed.output)]
 
+    def unlike(self, tree: str, commit: str) -> list[Path]:
+        """List the files where the snapshot `tree` differs from `commit`: changed, added, or deleted from the worktree.
+
+        A file of `commit` the snapshot lacks while the worktree holds it is one
+        the repository ignores, which no snapshot holds, so it isn't listed. Each
+        side is read from its own objects, so nothing is run in the worktree.
+        """
+        ours = {
+            each.path: (each.mode, each.object)
+            for each in self.snapshots().tracked(tree)
+            if each.kind == "blob"
+        }
+        theirs = {
+            each.path: (each.mode, each.object)
+            for each in self.repository().tracked(commit)
+            if each.kind == "blob"
+        }
+        return sorted(
+            Path(path)
+            for path in dict.fromkeys([*ours, *theirs])
+            if ours.get(path) != theirs.get(path)
+            and (path in ours or not (self.worktree / path).exists())
+        )
+
     def entry(self, commit: str | None, path: Path) -> Entry:
         """Return `path` as `commit` has it, its content copied into the store."""
         if commit is None:
