@@ -18,6 +18,8 @@ dependencies = [
     "pydantic>=2.12",
     # The gate runs a project's tests on several workers (`catalog/gate.py`).
     "pytest-xdist>=3.8.0",
+    # The judge's own ruff, held to the approved lock, so it never runs the worktree's (`codescan/ruff.py`).
+    "ruff>=0.16.10",
     "tenacity>=9.1.4",
     "typer>=0.27.2",
 ]
