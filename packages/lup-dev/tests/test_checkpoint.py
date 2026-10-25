@@ -2323,3 +2323,146 @@ def test_a_patch_carrying_a_private_value_lands_its_value_told_after_the_call(
         if each.path == Path("docs/notes.md")
     ]
     assert (verdict.outcome, verdict.reasons) == ("allow", ["private"])
+
+
+# Told once: each conversation hears a finding once while it stands.
+
+
+def with_a_type_error(repo: Path) -> str:
+    return (repo / CORE).read_text() + "z: str = 1  # TYPE\n"
+
+
+def test_a_standing_type_error_is_told_once_across_shell_writes(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    first = shell_write(kit, repo, "c1", CORE, with_a_type_error(repo)).context
+    assert f"{repo}/src/pkg/core.py:11:" in first
+    again = (repo / CORE).read_text().replace('"""Core."""', '"""Core, again."""')
+    assert shell_write(kit, repo, "c2", CORE, again).context == ""
+
+
+def test_a_type_error_moved_down_by_an_edit_above_is_not_told_again(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    above = '"""Core."""\n\nimport os\n' + (repo / CORE).read_text().removeprefix(
+        '"""Core."""\n'
+    )
+    assert shell_write(kit, repo, "c2", CORE, above).context == ""
+
+
+def test_a_fixed_type_error_that_comes_back_is_told_again(kit: Kit, repo: Path) -> None:
+    start(kit, repo)
+    broken = with_a_type_error(repo)
+    clean = (repo / CORE).read_text()
+    shell_write(kit, repo, "c1", CORE, broken)
+    assert shell_write(kit, repo, "c2", CORE, clean).context == ""
+    assert "core.py:11:" in shell_write(kit, repo, "c3", CORE, broken).context
+
+
+def test_the_importers_errors_are_told_once(kit: Kit, repo: Path) -> None:
+    user_with_an_error(kit, repo)
+    start(kit, repo)
+    changed = (repo / CORE).read_text().replace("return x", "return x + 1")
+    shell_write(kit, repo, "c1", CORE, changed)
+    worktree(kit, repo).importers().run(kit.engine, Plain())
+    told = shell_write(kit, repo, "c2", CORE, changed + "\n").context
+    assert f"{repo}/src/pkg/user.py:1:1 - reportCallIssue" in told
+    worktree(kit, repo).importers().run(kit.engine, Plain())
+    assert shell_write(kit, repo, "c3", CORE, changed + "\n\n").context == ""
+
+
+def test_the_turns_end_lists_what_stands_though_it_was_told(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    block = end(kit, repo).block
+    assert block.startswith("lup won't end the turn yet")
+    assert f"{repo}/src/pkg/core.py:11:" in block
+
+
+def test_a_compacted_conversation_is_told_again_what_stands(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    SessionStarted(session=SESSION, cwd=repo, forgotten=True).apply(kit.bench)
+    touched = (repo / CORE).read_text() + "\n"
+    assert "core.py:11:" in shell_write(kit, repo, "c2", CORE, touched).context
+
+
+def test_a_resumed_conversation_keeps_what_it_was_told(kit: Kit, repo: Path) -> None:
+    start(kit, repo)
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    start(kit, repo)
+    touched = (repo / CORE).read_text() + "\n"
+    assert shell_write(kit, repo, "c2", CORE, touched).context == ""
+
+
+def test_each_conversation_is_told_a_finding_once_for_itself(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    call(kit, repo, "w1", agent="worker")
+    (repo / CORE).write_text((repo / CORE).read_text() + "\n")
+    told = finish(kit, repo, "w1", agent="worker").context
+    assert f"{repo}/src/pkg/core.py:11:" in told
+    call(kit, repo, "w2", agent="worker")
+    (repo / CORE).write_text((repo / CORE).read_text() + "\n")
+    assert finish(kit, repo, "w2", agent="worker").context == ""
+
+
+def test_mail_to_another_conversation_holds_only_what_it_was_not_told(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    call(kit, repo, "c2")
+    call(kit, repo, "w1", agent="worker")
+    (repo / CORE).write_text((repo / CORE).read_text() + "\n")
+    finish(kit, repo, "c2")
+    told = finish(kit, repo, "w1", agent="worker").context
+    assert f"{repo}/src/pkg/core.py:11:" in told
+    call(kit, repo, "c3")
+    assert finish(kit, repo, "c3").context == ""
+
+
+def test_a_file_tools_write_is_told_only_what_its_conversation_was_not(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    edit = Replacement(
+        call="e1",
+        tool="Edit",
+        path=repo / CORE,
+        old="    return x\n",
+        new="    return x  # BAD regex\n",
+    )
+    decision = before(kit.bench, edit, SESSION, repo)
+    assert decision.told.startswith("lup's findings on the lines changed")
+    assert "core.py:11:" not in decision.told
+    call(kit, repo, "e1", tool="Edit")
+    (repo / CORE).write_text(edit.content((repo / CORE).read_text()) or "")
+    assert finish(kit, repo, "e1") == Reply()
+    again = Replacement(
+        call="e2", tool="Edit", path=repo / CORE, old='"""Core."""', new='"""Core!"""'
+    )
+    assert before(kit.bench, again, SESSION, repo).told == ""
+
+
+def test_a_report_past_what_a_hook_tells_whole_is_kept_and_told_short(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    many = "".join(f"z{each}: str = {each}  # TYPE\n" for each in range(400))
+    told = shell_write(kit, repo, "c1", CORE, (repo / CORE).read_text() + many).context
+    assert len(told.encode()) <= kit.bench.runtime.fits() - kit.bench.reserve
+    [kept] = (repo / ".git" / "lup" / "reports").iterdir()
+    assert f"kept whole at {kept}" in told
+    assert f"{repo}/src/pkg/core.py: 400 (reportGeneralTypeIssues 400)" in told
+    assert f"{repo}/src/pkg/core.py:12:" in kept.read_text()

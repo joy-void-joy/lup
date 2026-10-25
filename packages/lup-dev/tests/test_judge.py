@@ -24,7 +24,7 @@ from lup_dev.policy.judge import (
     Judgement,
     touched_lines,
 )
-from lup_dev.policy.report import information
+from lup_dev.policy.report import information, text
 from lup_dev.policy.roles import Roles
 from lup_dev.private.withheld import Held, Withheld
 
@@ -893,7 +893,7 @@ def test_the_review_reads_a_private_value_by_its_finding_flagged(
 def test_a_private_value_is_told_in_a_block_of_its_own(judge: Judging) -> None:
     change = edit("docs/notes.md", "Kestrel Labs\n", "Kestrel Labs\nsee /home/op\n")
     judgement = judge(change, project=Project(), withheld=WITHHELD)
-    told = information(judgement.findings, [], judgement.untouched, [])
+    told = text(information(judgement.findings, [], judgement.untouched, []))
     assert told == (
         "Values never published, on the lines changed (rewrite each before it's "
         "committed: the operator sees this write with them, the gate's `private` "

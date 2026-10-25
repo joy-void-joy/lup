@@ -71,9 +71,10 @@ the conversation calling, as `updatedInput` with no decision, so the call goes
 through the session's own permission mode as it would have; and what the
 conversation is told goes in as `additionalContext`, beside a call or a session's
 start, or holding a turn's end. What a hook
-tells whole is 10,000 bytes (`heard`'s `fits`): Claude Code caps a hook's
+tells whole is 10,000 bytes (`Claude.fits`): Claude Code caps a hook's
 `additionalContext` at 10,000 characters, which a text's UTF-8 bytes never
-undercount, and an item past it is announced instead. A turn's end following a
+undercount; an item past it is announced instead, and the judge's report is
+fitted to it (`policy/report.py`, `fitted`). A turn's end following a
 hold, the session's or a subagent's, carries `stop_hook_active`, so the next
 end is let through.
 
@@ -329,6 +330,12 @@ type FreshStart = Literal["startup", "clear"]
 session started, or cleared with `/clear`, which gives it an id of its own; a
 resume, a compaction or a fork carries a conversation on (`Heard.fresh`)."""
 
+type ForgettingStart = Literal["compact", "clear"]
+"""The starts (`SessionStart`'s `source`) after which the conversation holds
+none of what it was told: a compaction summarizes it, and `/clear` empties it,
+so the judge tells again the findings that still stand
+(`SessionStarted.forgotten`)."""
+
 type TitledStart = Literal["startup", "resume", "fork"]
 """The starts (`SessionStart`'s `source`) whose `sessionTitle` Claude Code applies
 (its `hooks` docs, *SessionStart decision control*): a compaction or a `/clear`
@@ -376,6 +383,11 @@ class Claude(Runtime):
     @override
     def inside(self) -> bool:
         return bool(Variables().claude_code_child_session)
+
+    @override
+    def fits(self) -> int:
+        """Return 10,000: Claude Code's cap on a hook's `additionalContext`, in characters, which a text's UTF-8 bytes never undercount (see the module's docstring)."""
+        return 10_000
 
     @override
     def settings(self) -> PurePosixPath:
@@ -560,7 +572,10 @@ class SessionStart(Payload):
     def answer(self, bench: Bench) -> Output | None:
         """Begin the session again in each worktree it holds, and tell its conversation what came due as it starts; the service adds its items and title after (`told`)."""
         reply = SessionStarted(
-            session=self.session_id, agent=self.agent_id, cwd=self.cwd
+            session=self.session_id,
+            agent=self.agent_id,
+            cwd=self.cwd,
+            forgotten=self.source in get_args(ForgettingStart.__value__),
         ).apply(bench)
         if not reply.context:
             return None
@@ -1189,14 +1204,14 @@ def unanswered(raw: str, failure: str) -> str:
     return output.model_dump_json(by_alias=True, exclude_none=True)
 
 
-def heard(raw: str, fits: int = 10_000) -> Heard:
+def heard(raw: str) -> Heard:
     """Read one Claude Code hook as the host service does: who's speaking, about which call, and whether the judge reads it.
 
-    Each hook's answer tells `fits` bytes whole: Claude Code's cap on a hook's
-    `additionalContext`, in characters, which UTF-8 bytes never undercount. Raise
-    `ValidationError` where the payload isn't one of the hooks this adapter reads.
+    Each hook's answer tells what Claude Code's cap allows whole (`Claude.fits`).
+    Raise `ValidationError` where the payload isn't one of the hooks this
+    adapter reads.
     """
-    return TypeAdapter[Received](Received).validate_json(raw).heard(fits)
+    return TypeAdapter[Received](Received).validate_json(raw).heard(Claude().fits())
 
 
 def told(raw: str, answer: str, telling: Telling) -> str | None:

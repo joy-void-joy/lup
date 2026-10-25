@@ -42,7 +42,7 @@ import secrets
 import shutil
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from functools import cached_property
+from functools import cached_property, reduce
 from pathlib import Path
 from typing import Literal, override
 
@@ -53,7 +53,7 @@ from lup.types import Model, MutableModel
 from lup_dev.approval import approved
 from lup_dev.clock import Clock
 from lup_dev.codescan.conditions import declared
-from lup_dev.codescan.contract import Checker, Due, Finding, Source
+from lup_dev.codescan.contract import Checker, Due, Finding, Owner, Source
 from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.load import load
@@ -76,16 +76,22 @@ from lup_dev.policy.holds import (
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
 from lup_dev.policy.judge import Change, Judge, Judgement, RemovedNote
 from lup_dev.policy.report import (
+    Known,
+    Look,
     Moved,
     MovedFile,
+    Part,
     Refused,
+    Reports,
     approval,
+    fitted,
     information,
     moved,
+    news,
     placed,
     refusal,
     removed_notes,
-    sections,
+    text,
     turn_end,
 )
 from lup_dev.policy.roles import Roles
@@ -130,9 +136,20 @@ class Bench(Model, arbitrary_types_allowed=True):
     before its answer, as when the operator interrupts its call
     (`HostLayout.ended`); none where nothing marks it, as for `lup-dev hook`."""
 
+    reserve: int = 2_500
+    """What the judge's answer leaves of what a hook tells whole, for the
+    inbox's items told beside it: a message or a short review."""
+
     def interrupted(self) -> bool:
         """Say whether the hook's runtime ended it before its answer, as the host service marks it: a hold its call waits on gives up."""
         return self.ended is not None and self.ended.exists()
+
+    def said(self, repository: Path, parts: list[Part]) -> str:
+        """Say `parts` in what the judge's answer may take of a hook (`fitted`), a report too long kept whole in `repository`'s git directory."""
+        reports = Reports(
+            layout=GitDirectoryLayout(common=repository), clock=self.services.clock
+        )
+        return fitted(parts, self.runtime.fits() - self.reserve, reports)
 
 
 class Reply(Model):
@@ -246,11 +263,62 @@ class Judged(Model):
     approved is told there, since its hold told only the answer."""
 
 
+class Checked(Model):
+    """What a checkpoint did, for the agent to hear, every file named in full.
+
+    Its findings are those the conversation it's for wasn't told yet
+    (`Session.news`).
+    """
+
+    refused: list[Refused] = []
+    moves: list[Moved] = []
+    findings: list[Finding] = []
+    """lup's findings on the lines the calls changed."""
+    information: list[Finding] = []
+    untouched: list[Finding] = []
+    importers: list[Finding] = []
+    removed: list[RemovedNote] = []
+    notices: list[str] = []
+    """What else the agent hears: holds approved, late answers."""
+
+    def parts(self) -> list[Part]:
+        """Say everything the checkpoint did that the agent should hear, a part per section: what was refused, what a move brought, the notices and the notes removed, each always whole, and the findings, which a long report tells short (`fitted`)."""
+        return [
+            *(
+                Part(whole=said)
+                for said in [refusal(self.refused), moved(self.moves), *self.notices]
+                if said
+            ),
+            *information(
+                self.findings, self.information, self.untouched, self.importers
+            ),
+            *([Part(whole=removed_notes(self.removed))] if self.removed else []),
+        ]
+
+    def then(self, later: Checked) -> Checked:
+        """Return this report followed by a later one."""
+        return Checked(
+            refused=[*self.refused, *later.refused],
+            moves=[*self.moves, *later.moves],
+            findings=[*self.findings, *later.findings],
+            information=[*self.information, *later.information],
+            untouched=[*self.untouched, *later.untouched],
+            importers=[*self.importers, *later.importers],
+            removed=[*self.removed, *later.removed],
+            notices=[*self.notices, *later.notices],
+        )
+
+    @staticmethod
+    def together(reports: list[Checked]) -> Checked:
+        """Return `reports` as one, in order: each section gathers theirs, whichever worktree each is of."""
+        return reduce(Checked.then, reports, Checked())
+
+
 class Mail(Model):
-    """A report waiting for a conversation other than the one a checkpoint ran for."""
+    """A report waiting for a conversation other than the one a checkpoint ran for, its findings those it wasn't told."""
 
     agent: str
-    text: str
+    checked: Checked = Checked()
 
 
 type ByConversation[T] = dict[str, list[T]]
@@ -284,6 +352,16 @@ class Session(MutableModel):
     inbox may still gather its writes to them: a later write to one refreshes
     that item, whatever it flags, until the inbox says none gathers them
     (`policy/flags.py`). A write to any other file asks the inbox nothing."""
+    known: ByConversation[Known] = {}
+    """The findings in this worktree's files each conversation was told and
+    that still stand, so it isn't told them again (`news`); forgotten when its
+    conversation is compacted or cleared."""
+
+    def news(self, agent: str, looks: list[Look]) -> list[Finding]:
+        """Return what of `looks` conversation `agent` wasn't told, and remember it told."""
+        heard = news(self.known.get(agent, []), looks)
+        self.known = {**self.known, agent: heard.known}
+        return heard.findings
 
     def waiting(self, now: datetime) -> None:
         """Forget each pending write whose call must be over by `now`, no end having confirmed it."""
@@ -583,6 +661,17 @@ class Worktree(Model):
         """Store what to remember about a session."""
         write_model(self.store.layout.session(session.key), session)
 
+    def forget(self, key: str, agent: str) -> None:
+        """Forget the findings session `key`'s conversation `agent` was told here (`Session.known`), so what still stands is told again."""
+        with self.lock():
+            session = self.recorded(key)
+            if session is None or agent not in session.known:
+                return
+            session.known = {
+                each: known for each, known in session.known.items() if each != agent
+            }
+            self.keep(session)
+
     def judge(
         self, services: Services, approved: list[Path], *, holding: bool = False
     ) -> Judge:
@@ -792,48 +881,6 @@ class Planned(Model):
     base: Entry | None = None
     """The file as `HEAD` has it, where a move changed it: the move is accepted,
     and a refused change goes back to it."""
-
-
-class Checked(Model):
-    """What a checkpoint did, for the agent to hear, every file named in full."""
-
-    refused: list[Refused] = []
-    moves: list[Moved] = []
-    findings: list[Finding] = []
-    """lup's findings on the lines the calls changed."""
-    information: list[Finding] = []
-    untouched: list[Finding] = []
-    importers: list[Finding] = []
-    removed: list[RemovedNote] = []
-    notices: list[str] = []
-    """What else the agent hears: holds approved, late answers."""
-
-    def text(self) -> str:
-        """Say everything the checkpoint did that the agent should hear."""
-        return sections(
-            [
-                refusal(self.refused),
-                moved(self.moves),
-                *self.notices,
-                information(
-                    self.findings, self.information, self.untouched, self.importers
-                ),
-                removed_notes(self.removed),
-            ]
-        )
-
-    def then(self, later: Checked) -> Checked:
-        """Return this report followed by a later one."""
-        return Checked(
-            refused=[*self.refused, *later.refused],
-            moves=[*self.moves, *later.moves],
-            findings=[*self.findings, *later.findings],
-            information=[*self.information, *later.information],
-            untouched=[*self.untouched, *later.untouched],
-            importers=[*self.importers, *later.importers],
-            removed=[*self.removed, *later.removed],
-            notices=[*self.notices, *later.notices],
-        )
 
 
 def noted(root: Path, notes: list[RemovedNote]) -> list[RemovedNote]:
@@ -1111,7 +1158,10 @@ class Brought(Model):
     """What a move of `HEAD` brought, judged once: what to tell, what landed, and what landed flagged, to put before the operator."""
 
     told: Checked = Checked()
+    """The move, and lup's findings on the lines its commits touched."""
     landed: list[Judgement] = []
+    """Each file it brought, judged: their type errors and ruff's findings are
+    told as a checkpoint's are, each once (`remember`)."""
     flagged: list[Landed] = []
 
 
@@ -1189,8 +1239,7 @@ def brought(
         ],
         hold=key,
     )
-    information = [found for judgement in judgements for found in judgement.information]
-    told = Checked(moves=[report], information=placed(root, information))
+    told = Checked(moves=[report])
     landed = [
         Landed(
             change=change,
@@ -1326,8 +1375,14 @@ def checkpoint(
             agent,
             acted,
             told=told,
+            moved=commits.landed,
             wrote=wrote,
             heard=[plan.path for plan in plans if plan.told],
+            unjudged=[
+                plan.path
+                for plan in plans
+                if plan.change is None and plan.moved is None
+            ],
         )
     runtime = bench.runtime.name()
     wrote_flagged = (
@@ -1412,21 +1467,37 @@ def writers(
     return {plan.path: wrote(plan) for plan in plans}
 
 
-def watch(worktree: Worktree, session: Session, found: Found) -> list[Finding]:
+def on_disk(root: Path, path: Path) -> str | None:
+    """Read the file at `path` in the worktree at `root` as text, or none where there's no file."""
+    whole = root / path
+    return decoded(whole.read_bytes()) if whole.is_file() else None
+
+
+def watch(worktree: Worktree, session: Session, found: Found) -> list[Look]:
     """Watch the files the importers pass found errors in; hold the lock.
 
     Each is watched for the conversations that wrote what the pass re-checked, in
     their own session's record: the pass is the worktree's, so `session`, whose
-    hook collected what it found, may not be theirs. Return the errors, each file
-    named relative to the worktree.
+    hook collected what it found, may not be theirs. Return what the pass read
+    of each file, its latest reading of one it read more than once: pyright's
+    errors there, as the roles keep them, each file named relative to the
+    worktree.
     """
-    importing = [
-        each
-        for report in found.reports
-        for each in worktree.roles.kept(report, report.findings)
-        if each.owner != "lup"
+    latest = {report.path: report for report in found.reports}
+    looks = [
+        Look(
+            path=path,
+            owners=["pyright"],
+            findings=[
+                each
+                for each in worktree.roles.kept(report, report.findings)
+                if each.owner != "lup"
+            ],
+            content=on_disk(worktree.root, path),
+        )
+        for path, report in latest.items()
     ]
-    paths = list(dict.fromkeys(each.path for each in importing))
+    paths = [look.path for look in looks if look.findings]
     for key in dict.fromkeys(writer.session for writer in found.writers):
         record = session if key == session.key else worktree.recorded(key)
         if record is None:
@@ -1435,7 +1506,7 @@ def watch(worktree: Worktree, session: Session, found: Found) -> list[Finding]:
         record.watched = kept_by(record.watched, dict.fromkeys(paths, agents))
         if record is not session:
             worktree.keep(record)
-    return importing
+    return looks
 
 
 def remember(
@@ -1445,32 +1516,74 @@ def remember(
     acted: Acted,
     *,
     told: Checked,
+    moved: list[Judgement],
     wrote: dict[Path, list[str]],
     heard: list[Path],
+    unjudged: list[Path],
 ) -> Checked:
     """Note in the session what a checkpoint did, and report it; hold the lock.
 
     The report goes to the conversation the checkpoint ran for, and waits as mail
     for the others whose calls finished since the last one: the checkpoint sees
-    files, not who wrote them. Each file landed is touched by the conversations
+    files, not who wrote them. Each is told only the findings it wasn't told
+    yet (`Session.news`). Each file landed is touched by the conversations
     `wrote` names for it. `told` is what a move of `HEAD` brought, which is no
-    session's. The files in `heard` were told what was found in them as they
-    were judged, so only the notes their writes removed are reported.
+    session's, and `moved` the files it brought, judged. The files in `heard`
+    were told what was found in them as they were judged, so only the notes
+    their writes removed are reported. The files in `unjudged` changed to
+    content committed elsewhere, set aside unjudged: what was known of them is
+    forgotten, so a finding they hold again is told again.
     """
     root = worktree.root
     landed = acted.landed
     fresh = [j for j in landed if j.path not in heard]
     importing = watch(worktree, session, worktree.importers().collect())
-    checked = Checked(
-        findings=placed(root, [found for j in fresh for found in j.findings]),
-        information=placed(root, [found for j in fresh for found in j.information]),
-        untouched=placed(root, [found for j in fresh for found in j.untouched]),
-        importers=placed(root, importing),
+    every: list[Owner] = ["lup", "pyright", "ruff"]
+    looks = [
+        *(
+            Look(
+                path=j.path,
+                owners=every,
+                findings=[*j.findings, *j.information, *j.untouched],
+                content=on_disk(root, j.path),
+            )
+            for j in fresh
+        ),
+        *(
+            Look(
+                path=j.path,
+                owners=["pyright", "ruff"],
+                findings=j.information,
+                content=on_disk(root, j.path),
+            )
+            for j in moved
+        ),
+        *(Look(path=path, owners=every) for path in unjudged),
+        *importing,
+    ]
+    said = Checked(
         removed=noted(root, [note for j in landed for note in j.removed]),
         notices=late_answers(worktree, session),
     ).then(told)
-    report = checked.text()
+
+    def report(conversation: str) -> Checked:
+        new = dict.fromkeys(session.news(conversation, looks))
+
+        def kept(found: list[Finding]) -> list[Finding]:
+            return placed(root, [each for each in found if each in new])
+
+        return Checked(
+            findings=kept([found for j in fresh for found in j.findings]),
+            information=kept(
+                [found for j in [*fresh, *moved] for found in j.information]
+            ),
+            untouched=kept([found for j in fresh for found in j.untouched]),
+            importers=kept([found for look in importing for found in look.findings]),
+        ).then(said)
+
     others = [other for other in session.participants if other != agent]
+    checked = report(agent)
+    mailed = [Mail(agent=other, checked=report(other)) for other in others]
     session.touched = kept_by(session.touched, {j.path: wrote[j.path] for j in landed})
     session.removed = {
         **session.removed,
@@ -1478,10 +1591,7 @@ def remember(
     }
     session.judged = []
     session.participants = []
-    session.mail = [
-        *session.mail,
-        *(Mail(agent=other, text=report) for other in others if report),
-    ]
+    session.mail = [*session.mail, *(mail for mail in mailed if mail.checked.parts())]
     worktree.keep(session)
     return checked
 
@@ -1605,8 +1715,8 @@ def settle(
                     holds.mark(hold.key, abandoned=True, interrupted=interrupted)
                 if interrupted:
                     session = worktree.session(key, bench.runtime)
-                    told = Checked(refused=refused).text()
-                    session.mail = [*session.mail, Mail(agent=agent, text=told)]
+                    told = Mail(agent=agent, checked=Checked(refused=refused))
+                    session.mail = [*session.mail, told]
                     worktree.keep(session)
                 log.append(answered(hold, outcome(holds, hold.key, answer)))
                 return Checked(refused=refused)
@@ -1804,18 +1914,18 @@ class ConversationRecord(Model):
             self.keep(Conversations(passed=self.read().passed))
 
 
-def mail_for(worktree: Worktree, key: str, agent: str, runtime: Runtime) -> str:
-    """Take the reports waiting for conversation `agent`.
+def mail_for(worktree: Worktree, key: str, agent: str, runtime: Runtime) -> Checked:
+    """Take the reports waiting for conversation `agent`, as one.
 
     A hook its runtime ended takes none (`Bench.interrupted`): nothing hears its
     answer, so they wait for the next.
     """
     with worktree.lock():
         session = worktree.session(key, runtime)
-        waiting = [mail.text for mail in session.mail if mail.agent == agent]
+        waiting = [mail.checked for mail in session.mail if mail.agent == agent]
         session.mail = [mail for mail in session.mail if mail.agent != agent]
         worktree.keep(session)
-    return sections(waiting)
+    return Checked.together(waiting)
 
 
 def confirm(bench: Bench, worktree: Worktree, key: str, agent: str, call: str) -> None:
@@ -1959,6 +2069,7 @@ def end_turn(
     opened: list[Worktree],
     judging: list[Path],
     *,
+    repository: Path,
     after_block: bool,
     listing: bool,
 ) -> Reply:
@@ -1975,7 +2086,9 @@ def end_turn(
     agent heard each finding as its write was judged, and an end held on it
     just before told it again. What a turn's end must tell still blocks, at
     either end: each is told once. With `listing`, the notes present at the
-    session's start and removed since are listed, once.
+    session's start and removed since are listed, once. A block too long for
+    a hook is fitted to it, kept whole in `repository`'s git directory
+    (`Bench.said`).
     """
     session, agent = event.session, event.agent
     record = ConversationRecord(layout=bench.services.layout, session=session)
@@ -2003,13 +2116,16 @@ def end_turn(
         if not bench.interrupted()
     ]
     left = [found for end in endings for found in end.remaining]
-    told = [
-        refusal([found for end in endings for found in end.checked.refused]),
-        moved([move for end in endings for move in end.checked.moves]),
-        *(notice for end in endings for notice in end.checked.notices),
+    told = Checked(
+        refused=[found for end in endings for found in end.checked.refused],
+        moves=[move for end in endings for move in end.checked.moves],
+        notices=[notice for end in endings for notice in end.checked.notices],
+    ).parts()
+    listed = [
+        *([Part(whole=removed_notes(notes))] if notes else []),
+        *Checked.together(waiting).parts(),
     ]
-    listed = [removed_notes(notes), *waiting]
-    telling = bool(sections([*told, *listed]))
+    telling = bool(text([*told, *listed]))
     with record.lock():
         kept = record.read()
         passed = kept.passed.get(agent, [])
@@ -2017,7 +2133,8 @@ def end_turn(
         if not (holds or telling):
             kept.passed = {**kept.passed, agent: left}
             record.keep(kept)
-    return Reply(block=sections([*told, turn_end(left) if holds else "", *listed]))
+    parts = [*told, *(turn_end(left) if holds else []), *listed]
+    return Reply(block=bench.said(repository, parts))
 
 
 class Reported(Model, ABC):
@@ -2042,13 +2159,24 @@ class SessionStarted(Reported, events.SessionStarted):
 
     Its record of the subagents at work starts again too, and its main
     conversation is told the deferred work its repository's gate last found due
-    (`Due`), once at each start, since the gate doesn't fail on it.
+    (`Due`), once at each start, since the gate doesn't fail on it. A
+    conversation whose runtime compacted or cleared it forgets the findings it
+    knew, so what still stands is told again at its next call.
     """
+
+    forgotten: bool = False
+    """Whether the conversation holds none of what it was told before: its
+    runtime compacted it, or cleared it."""
 
     @override
     def apply(self, bench: Bench) -> Reply:
         held = holding(bench, self.session, self.cwd, agent=self.agent, starts=True)
-        if held is None or self.agent:
+        if held is None:
+            return Reply()
+        if self.forgotten:
+            for worktree in worktrees(bench, held):
+                worktree.forget(self.session, self.agent)
+        if self.agent:
             return Reply()
         record = ConversationRecord(layout=bench.services.layout, session=self.session)
         record.restarted()
@@ -2206,7 +2334,8 @@ class CallFinished(Reported, events.CallFinished):
             for worktree in opened
             if not bench.interrupted()
         ]
-        return Reply(context=sections([*(each.text() for each in checked), *waiting]))
+        told = Checked.together([*checked, *waiting])
+        return Reply(context=bench.said(held.repository, told.parts()))
 
 
 class TurnEnded(Reported, events.TurnEnded):
@@ -2238,7 +2367,13 @@ class TurnEnded(Reported, events.TurnEnded):
             if not worktree.busy(self.session, self.agent)
         ]
         return end_turn(
-            bench, self, opened, judging, after_block=self.after_block, listing=True
+            bench,
+            self,
+            opened,
+            judging,
+            repository=held.repository,
+            after_block=self.after_block,
+            listing=True,
         )
 
 
@@ -2280,7 +2415,15 @@ class ConversationEnded(Reported, events.ConversationEnded):
             for root, each in left.items()
             if each.idle and (each.counted or root in works)
         ]
-        reply = end_turn(bench, self, opened, idle, after_block=False, listing=False)
+        reply = end_turn(
+            bench,
+            self,
+            opened,
+            idle,
+            repository=held.repository,
+            after_block=False,
+            listing=False,
+        )
         if self.agent and (self.final or not reply.block):
             record = ConversationRecord(
                 layout=bench.services.layout, session=self.session

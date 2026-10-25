@@ -95,7 +95,7 @@ end is held (`decision: "block"`). From the source at `rust-v0.162.1`:
   carrying `hookSpecificOutput` fails as "hook returned invalid stop hook JSON
   output" (`hooks/src/events/stop.rs`) and holds nothing. So a turn's end is
   held with a block here, a gap read again at `rust-v0.163.0`;
-- what a hook tells whole is 10,000 bytes (`heard`'s `fits`): an
+- what a hook tells whole is 10,000 bytes (`Codex.fits`): an
   `additionalContext` past its handler's `additionalContextLimit`, 2,500 tokens
   by default, and a turn's end's continuation past the same default, are kept
   in a file with a preview (`hooks/src/output_spill.rs`, `engine/mod.rs`'s
@@ -299,6 +299,11 @@ class Codex(Runtime):
         return bool(Variables().codex_thread_id)
 
     @override
+    def fits(self) -> int:
+        """Return 10,000: Codex's default limit on a hook's context, 2,500 tokens of 4 bytes (see the module's docstring)."""
+        return 10_000
+
+    @override
     def settings(self) -> PurePosixPath:
         """Return `.codex`: a project's own layer of Codex's configuration."""
         return PurePosixPath(".codex")
@@ -428,6 +433,11 @@ type FreshStart = Literal["startup", "clear"]
 """The starts (`SessionStart`'s `source`) whose thread begins empty: started, or
 cleared; a resume, a compaction or a fork carries one on (`Heard.fresh`)."""
 
+type ForgettingStart = Literal["compact", "clear"]
+"""The starts (`SessionStart`'s `source`) after which the thread holds none of
+what it was told: a compaction summarizes it, and clearing empties it, so the
+judge tells again the findings that still stand (`SessionStarted.forgotten`)."""
+
 
 class SessionStart(Payload):
     """`SessionStart`: a session starts, resumes, or is cleared or compacted."""
@@ -455,7 +465,10 @@ class SessionStart(Payload):
     def answer(self, bench: Bench) -> Output | None:
         """Begin the session again in the worktree it holds, and tell its conversation what came due as it starts; the service adds its items after (`told`)."""
         reply = SessionStarted(
-            session=self.session_id, agent=self.agent_id or "", cwd=self.cwd
+            session=self.session_id,
+            agent=self.agent_id or "",
+            cwd=self.cwd,
+            forgotten=self.source in get_args(ForgettingStart.__value__),
         ).apply(bench)
         if not reply.context:
             return None
@@ -891,14 +904,14 @@ def spawned(raw: str) -> Spawned | None:
     )
 
 
-def heard(raw: str, fits: int = 10_000) -> Heard:
+def heard(raw: str) -> Heard:
     """Read one Codex hook as the host service does: who's speaking, about which call, and that the judge reads it.
 
-    Each hook's answer tells `fits` bytes whole: Codex's default limit on a
-    hook's context, 2,500 tokens of 4 bytes. Raise `ValidationError` where the
-    payload isn't one of the hooks this adapter reads.
+    Each hook's answer tells what Codex's limit allows whole (`Codex.fits`).
+    Raise `ValidationError` where the payload isn't one of the hooks this
+    adapter reads.
     """
-    return TypeAdapter[Received](Received).validate_json(raw).heard(fits)
+    return TypeAdapter[Received](Received).validate_json(raw).heard(Codex().fits())
 
 
 def told(raw: str, answer: str, telling: Telling) -> str | None:
