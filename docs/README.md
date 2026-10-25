@@ -14,3 +14,6 @@ Each describes a piece as it's built: what it's for, how to use it, and the reas
 - `library.md`: asking an agent from code.
 - `dashboard.md`: where the operator works.
 - `field-notes.md`: what was measured or read from a runtime's source, with its version and date.
+
+A module in a distribution of its own has its doc in its directory:
+- `packages/lup-transcripts/README.md`: `Transcripts`, every session's record kept, and read with `lup-dev transcripts`.

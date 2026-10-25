@@ -606,7 +606,7 @@ For `docs/declaration.md`: what its code and its next pieces (a project's own ru
 
 ## Where each runtime keeps its sessions' records (2026-10-17)
 
-Read on the operator's machine for the `Transcripts` module (`lup/transcripts/`), and from the first lup's own reading of Codex's rollouts (its `test_native_transcripts.py`). This machine has no live Codex home, so Codex's was measured on 2026-10-23 on the copies lup keeps of this repository's rollouts, which keep its layout: 148 rollouts, Codex 0.128.0 to 0.163.0.
+Read on the operator's machine for the `Transcripts` module (`packages/lup-transcripts/`), and from the first lup's own reading of Codex's rollouts (its `test_native_transcripts.py`). This machine has no live Codex home, so Codex's was measured on 2026-10-23 on the copies lup keeps of this repository's rollouts, which keep its layout: 148 rollouts, Codex 0.128.0 to 0.163.0.
 - **Claude Code** (its directory, `~/.claude` or `CLAUDE_CONFIG_DIR`): `projects/<folder>/<session>.jsonl` per session, the folder one per directory sessions ran in; beside a session's record, `projects/<folder>/<session>/subagents/` and `tool-results/`; and `file-history/<session>/`. A record's lines carry `cwd`, the first ones (`mode`, `permission-mode`, `file-history-snapshot`) without it, so the directory a folder's sessions ran in is read off its first line naming one. A launched room writes into the operator's own directory, mounted read-write at its path.
 - **Codex** (`~/.codex` or `CODEX_HOME`): `sessions/YYYY/MM/DD/rollout-*.jsonl`, whose first line is `{"type": "session_meta", "payload": {"cwd": …}}`.
 
