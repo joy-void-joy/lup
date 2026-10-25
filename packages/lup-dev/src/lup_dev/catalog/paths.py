@@ -17,7 +17,12 @@ class CorePaths(Model):
 
     protected: list[str] = [
         "**/package.json",
+        "**/package-lock.json",
+        "**/npm-shrinkwrap.json",
         "**/bun.lock",
+        "**/yarn.lock",
+        "**/pnpm-lock.yaml",
+        "**/.npmrc",
         ".github/**",
         ".git/**",
         ".githooks/**",
@@ -38,7 +43,9 @@ class CorePaths(Model):
     ]
     """Every write to these asks the operator.
 
-    - Node's manifest and lockfile, which choose what runs;
+    - Node's manifest and lockfiles, which choose what runs, and `.npmrc`, whose
+      `min-release-age` outranks the package age a room's user-level `~/.npmrc`
+      keeps (`docs/launch.md`, *The package age gate*);
     - what runs outside the agent's reach: CI, git's own directory and hooks,
       pre-commit, editor and container configurations, the runtimes' settings;
     - what widens a later launch, `sync.json` and `sync.json.local`;
