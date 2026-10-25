@@ -226,23 +226,25 @@ A module's commands come under its name on the command line, `lup-dev transcript
 
 ## The runner
 
-`Python.runner` says how the project runs its tools (`declaration/runner.py`), so uv is spelled once, in `Uv`, for everything run in the project's environment; `Uv` lives beside the rest of what lup knows of uv, the package age its user-level settings keep (`declaration/package_managers/uv.py`; `docs/launch.md`, *The package age gate*). A deferral's conditions asking uv for Pythons, and trust installing lup itself, ask uv for themselves:
+`Python.runner` says how the project runs its tools and where its environment is (`declaration/runner.py`), so uv is spelled once, in `Uv`, for everything run in the project's environment; `Uv` lives beside the rest of what lup knows of uv, the package age its user-level settings keep (`declaration/package_managers/uv.py`; `docs/launch.md`, *The package age gate*). A deferral's conditions asking uv for Pythons, and trust installing lup itself, ask uv for themselves:
 
 ```python
 class Runner(Model, ABC):
     def command(self, tool: list[str]) -> list[str]: ...   # the gate's: it may make or sync the environment
-    def judging(self, tool: list[str]) -> list[str]: ...   # the judge's: it never writes the project's files
+    def judging(self, tool: list[str]) -> list[str]: ...   # a gate run on a commit's: it never writes the project's files
     def environment(self) -> list[str]: ...                # the files whose change means another environment
+    def venv(self) -> Path | None: ...                     # the environment's directory, which the judge reads as files
     def room(self, root: Path, tools: Tools) -> RoomNeeds: ...  # what a room mounts and sets for it
 ```
 
-- **`Uv()`,** the default: `uv run …` for the gate, and `env -u VIRTUAL_ENV uv run --frozen --quiet …` for the judge, which never relocks, so the judge never writes `uv.lock`, a protected path the checkpoint would judge as the agent's. Its environment files are `pyproject.toml`, `uv.toml`, `uv.lock` and `.python-version`.
-- **`Plain()`:** each tool as the `PATH` finds it, for a project with no environment manager; the runner wherever no module holds one.
-- **A project's own runner** is a subclass of a few lines: `poetry run`, `conda run -n …`.
-- **Its contract:** a runner puts its own command before the tool, so `command(tool)` is `command([])` and the tool. That's what lets the judge keep any project's runner as plain commands (`Prefixed`).
-- **What a room needs** (`room()`): a launched session works in the worktree's own environment, shared with the host (`docs/launch.md`, *The project's environment, shared with the host*), so the runner says what the room mounts and sets: for `Uv`, uv's interpreters read-only and its cache read-write, at their host paths, with `UV_PYTHON_DOWNLOADS=never`, and the interpreter, which a launch refuses where it resolves outside every mount. Four abstract methods put `Runner` past what `interface-shape` allows, which its `ignore` names.
+- **`Uv()`,** the default: `uv run …` for the gate, and `env -u VIRTUAL_ENV uv run --frozen --quiet …` for the gate run on a commit (`lup-dev check --at`, in the room, for a push and for `land`'s merge), which never relocks, so it never writes `uv.lock`, a protected path. Its environment is `.venv`, and its environment files are `pyproject.toml`, `uv.toml`, `uv.lock` and `.python-version`.
+- **`Plain()`:** each tool as the `PATH` finds it, for a project with no environment manager; the runner wherever no module holds one. It names no environment.
+- **A project's own runner** is a subclass of a few lines: `poetry run`, `conda run -n …`, and its environment's directory.
+- **Its contract:** a runner puts its own command before the tool, so `command(tool)` is `command([])` and the tool, and names its environment as data, from the worktree's root or absolute. That's what lets the judge keep any project's runner as plain commands, a directory and files (`Prefixed`).
+- **Where its environment is** (`venv()`): the directory holding the virtual environment's `pyvenv.cfg` and `site-packages`, as `python -m venv`, uv and poetry's in-project environments make one, or none. The host never runs a project's environment: the judge reads that directory as files, the engine giving pyright its `site-packages`, the paths its `.pth` files list and the Python its `pyvenv.cfg` records, and runs its own ruff (`docs/judging-writes.md`, *The engine: one typed tree*). It's the host's answer; a room's own environment would be said by what `room()` returns.
+- **What a room needs** (`room()`): a launched session works in the worktree's own environment, shared with the host (`docs/launch.md`, *The project's environment, shared with the host*), so the runner says what the room mounts and sets: for `Uv`, uv's interpreters read-only and its cache read-write, at their host paths, with `UV_PYTHON_DOWNLOADS=never`, and the directory of the environment's interpreter, read from its `pyvenv.cfg` without running anything, which a launch refuses where it resolves outside every mount. Five abstract methods put `Runner` past what `interface-shape` allows, which its `ignore` names.
 
-The gate's steps, ruff in the judge and the engine all take their commands from the runner, the engine stamped with its environment files so a lock arriving with a merge is synced before the next check.
+The gate's steps take their commands from the runner. The engine reads the environment it names, stamped with its environment files and its `pyvenv.cfg`, so an environment made again, or a configuration arriving with a merge, builds another program at the next check.
 
 ## Requirements
 

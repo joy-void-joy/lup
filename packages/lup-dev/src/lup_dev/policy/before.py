@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
 
 from lup.types import Model
+from lup_dev.confined import Confined
 from lup_dev.git import Git
 from lup_dev.inbox.store import ChangedFile
 from lup_dev.policy.checkpoint import (
@@ -199,14 +200,32 @@ def before(
     """Judge a file tool's proposed write before it lands; `agent` is the runtime's id for the subagent writing, none for the session's own conversation.
 
     A file outside the session's repository isn't judged: edits in another
-    repository come with launch and spawn.
+    repository come with launch and spawn. The file as it stands is read only
+    where it resolves inside its worktree, or the git directory it's in
+    (`lup_dev.confined`): a worktree's file resolving elsewhere is one lup
+    doesn't read, so the write isn't judged, and the agent is told; one of the
+    git directory's is refused, since its hold couldn't show what it changes.
     """
     here = place(proposal.path)
     held = holding(bench, session, cwd, here, agent=agent or "")
     if here is None or held is None or here.repository != held.repository:
         return Decision(outcome=None)
     disk = proposal.path
-    after = proposal.content(disk.read_text() if disk.is_file() else None)
+    standing = Confined(root=here.worktree or here.repository)
+    if standing.outside(here.path) and here.worktree is None:
+        reason = (
+            f"lup didn't read {disk}: it resolves outside the repository's git "
+            "directory, so a write to it can't be held for the operator"
+        )
+        return Decision(outcome="deny", reason=reason)
+    if standing.outside(here.path):
+        unread = (
+            f"lup didn't read {disk}: it resolves outside the worktree, so this "
+            "write isn't judged."
+        )
+        return Decision(outcome="allow", told=unread)
+    current = standing.text(here.path)
+    after = proposal.content(current)
     if after is None:
         return Decision(outcome="allow")
     services = bench.services
@@ -232,13 +251,12 @@ def before(
                 ),
             )
         keeping = Worktree.of(home.worktree, held.repository, services)
-        earlier = disk.read_text() if disk.is_file() else None
         return held_write(
             bench,
             keeping,
             session=session,
             proposal=proposal,
-            earlier=earlier,
+            earlier=current,
             after=after,
             judgement=judgement,
             agent=agent,
@@ -262,7 +280,7 @@ def before(
             before=decoded(earlier),
             after=after,
             baseline=decoded(store.content(store.started(session), path)),
-            whole=proposal.whole() and (earlier is not None or disk.is_file()),
+            whole=proposal.whole() and (earlier is not None or current is not None),
             published=not Git(cwd=worktree.root).ignored(path),
         )
         each_held = services.announcing.holding(bench.runtime.name(), session, agent)

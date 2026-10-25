@@ -1,6 +1,12 @@
 // One warm pyright program for a worktree, loaded the way the pyright CLI loads it,
 // kept in step with the disk without a file watcher, and analysed only when asked.
 //
+// The host never runs a project's environment: the program reads it as files, the
+// directory the project's runner names (`Runner.venv`), and starts no process
+// (`NoAccessHost`), whatever pyright's configuration says. Everything it reads is
+// confined to the worktree, that environment and its own standard-library stubs
+// (`confined.ts`).
+//
 // Keeping in step, at the start of each request (`sync`):
 // - a file checked with would-be content holds it until the next request, which
 //   puts the disk's content back unless the edit landed, so a landed edit costs no
@@ -10,74 +16,118 @@
 // - a changed directory in the project's tree means files may have come or gone,
 //   which re-enumerates the tracked files;
 // - a changed directory on the import search path means packages were installed or
-//   removed, which drops pyright's import cache;
+//   removed, which drops pyright's import cache and reads the search path again;
 // - a changed configuration (pyright's, or the files the project's runner says decide
-//   its environment), or the interpreter the runner named going or replaced, needs a
-//   new program, which the engine builds, asking the runner again.
+//   its environment), or the environment's `pyvenv.cfg` made, removed or replaced,
+//   needs a new program, which the engine builds.
 
-import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
 import { InvalidatedReason } from 'pyright/analyzer/backgroundAnalysisProgram';
+import { ImportLogger } from 'pyright/analyzer/importLogger';
+import { ImportResolver } from 'pyright/analyzer/importResolver';
 import { Program } from 'pyright/analyzer/program';
+import { findPythonSearchPaths, getTypeShedFallbackPath } from 'pyright/analyzer/pythonPathUtils';
 import { AnalyzerService } from 'pyright/analyzer/service';
 import { IPythonMode } from 'pyright/analyzer/sourceFile';
 import { SourceEnumerator } from 'pyright/analyzer/sourceEnumerator';
 import { isUserCode } from 'pyright/analyzer/sourceFileInfoUtils';
 import { CommandLineOptions } from 'pyright/common/commandLineOptions';
+import { ConfigOptions } from 'pyright/common/configOptions';
 import { LogLevel, StderrConsole } from 'pyright/common/console';
 import { Diagnostic } from 'pyright/common/diagnostic';
-import { FullAccessHost } from 'pyright/common/fullAccessHost';
+import { Host, NoAccessHost } from 'pyright/common/host';
+import { PythonVersion } from 'pyright/common/pythonVersion';
 import { createFromRealFileSystem, RealTempFile } from 'pyright/common/realFileSystem';
+import { ServiceProvider } from 'pyright/common/serviceProvider';
 import { createServiceProvider } from 'pyright/common/serviceProviderExtensions';
 import { Uri } from 'pyright/common/uri/uri';
 import { ParseFileResults } from 'pyright/parser/parser';
 import { PyrightFileSystem } from 'pyright/pyrightFileSystem';
 
+import { ConfinedFileSystem, named, Places, resolved } from './confined';
 import { Environment } from './protocol';
 
 // pyright's own configuration. A program is set up from these, from the files the
 // project's runner says decide its environment (for uv, `pyproject.toml` again,
-// `uv.toml`, `uv.lock`, `.python-version`), and from that environment's interpreter,
-// which decides where imports resolve, the project's own packages among them when
-// they're installed editable; a change to any of them needs a new program.
+// `uv.toml`, `uv.lock`, `.python-version`), and from that environment's
+// `pyvenv.cfg`, which says its Python; a change to any of them needs a new program.
 const pyrightConfigurations = ['pyproject.toml', 'pyrightconfig.json'];
 
-// Run in the worktree's environment, it names that environment's interpreter, as JSON.
-const nameInterpreter = 'import json, sys; print(json.dumps(sys.executable))';
+// The Python a virtual environment's `pyvenv.cfg` records, read as data: its
+// `version_info` (`3.14`, `3.14.0`), as uv and virtualenv write it, else its
+// `version`, as `python -m venv` does; undefined where it records neither.
+function recordedVersion(places: Places, configuration: string): PythonVersion | undefined {
+    const lines = places.read(configuration)?.toString('utf8').split(/\r?\n/) ?? [];
+    const pairs = lines.map((line): [string, string] => {
+        const [key, ...value] = line.split('=');
+        return [key.trim(), value.join('=').trim()];
+    });
+    const recorded = new Map(pairs);
+    const version = recorded.get('version_info') ?? recorded.get('version');
+    return version === undefined ? undefined : PythonVersion.fromString(version);
+}
 
-// The interpreter of the worktree's environment, named by running the project's
-// runner's command for Python from the root, the command the judge runs tools with.
-// With uv, that's the environment the gate's `uv run` finds (`UV_PROJECT_ENVIRONMENT`,
-// else `.venv`), made if it's missing and synced to `uv.lock` without relocking, the
-// session's `VIRTUAL_ENV` left out (`Uv.judging` in `lup_dev/declaration/runner.py`).
-function interpreterOf(root: string, command: string[]): string {
-    const [program, ...rest] = command;
-    if (program === undefined) {
-        throw new Error(`the runner gave ${root} no command to run Python with`);
+// The platform the engine runs on, the host's, which its environments are made for,
+// as pyright names it.
+function hostPlatform(): 'Linux' | 'Darwin' | 'Windows' | undefined {
+    switch (process.platform) {
+        case 'linux':
+            return 'Linux';
+        case 'darwin':
+            return 'Darwin';
+        case 'win32':
+            return 'Windows';
+        default:
+            return undefined;
     }
-    const shown = command.join(' ');
-    const asked = spawnSync(program, [...rest, '-c', nameInterpreter], { cwd: root, encoding: 'utf8' });
-    if (asked.error) {
-        throw new Error(`\`${program}\` couldn't be run to name ${root}'s interpreter: ${asked.error.message}`);
+}
+
+// pyright's import resolver, reading the environment the runner names, whatever
+// pyright's configuration names (its `venvPath` and `venv`): its `site-packages`, and
+// the paths its `.pth` files list, as pyright reads a virtual environment's own. An
+// `import` line of a `.pth` file is code, which pyright skips; no interpreter runs.
+class EnvironmentResolver extends ImportResolver {
+    private searchPaths: Uri[] | undefined;
+
+    constructor(
+        serviceProvider: ServiceProvider,
+        private configured: ConfigOptions,
+        host: Host,
+        private readonly venv: string | undefined
+    ) {
+        super(serviceProvider, configured, host);
     }
-    if (asked.status !== 0) {
-        const ended = asked.status === null ? `was killed by ${asked.signal}` : `exited with ${asked.status}`;
-        throw new Error(`the runner gave ${root} no environment: \`${shown}\` ${ended}: ${asked.stderr.trim()}`);
+
+    override setConfigOptions(configOptions: ConfigOptions): void {
+        this.configured = configOptions;
+        super.setConfigOptions(configOptions);
     }
-    const unnamed = () =>
-        new Error(`\`${shown}\` printed ${JSON.stringify(asked.stdout)} in ${root}, not its interpreter's path as JSON`);
-    let named: unknown;
-    try {
-        named = JSON.parse(asked.stdout);
-    } catch {
-        throw unnamed();
+
+    // Packages installed or removed may change the search path itself: an editable
+    // install adds a `.pth` file.
+    override invalidateCache(): void {
+        this.searchPaths = undefined;
+        super.invalidateCache();
     }
-    if (typeof named !== 'string') {
-        throw unnamed();
+
+    override getPythonSearchPaths(importLogger?: ImportLogger): Uri[] {
+        if (this.searchPaths === undefined) {
+            this.searchPaths = this.venv === undefined ? [] : this.found(this.venv, importLogger);
+        }
+        return this.searchPaths;
     }
-    return named;
+
+    private found(venv: string, importLogger?: ImportLogger): Uri[] {
+        const named = new ConfigOptions(this.configured.projectRoot);
+        named.venvPath = Uri.file(path.dirname(venv), this.serviceProvider);
+        named.venv = path.basename(venv);
+        named.defaultPythonVersion = this.configured.defaultPythonVersion;
+        const found = findPythonSearchPaths(this.fileSystem, named, this.host, importLogger) ?? [];
+        const cased = found.map((each) => this.fileSystem.realCasePath(each));
+        return [...new Map(cased.map((each) => [each.key, each])).values()];
+    }
 }
 
 interface Opened {
@@ -94,14 +144,11 @@ function stampOf(file: string): string | undefined {
     return stat ? `${stat.mtimeNs}:${stat.size}:${stat.ino}` : undefined;
 }
 
-function readIfThere(file: string): string | undefined {
-    return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined;
-}
-
 export class WarmProgram {
     readonly root: string;
     readonly service: AnalyzerService;
     readonly program: Program;
+    private readonly places: Places;
     private readonly setupStamps: Map<string, string | undefined>;
     private searchPathStamps = new Map<string, string | undefined>();
     private directoryStamps = new Map<string, string | undefined>();
@@ -112,34 +159,44 @@ export class WarmProgram {
 
     constructor(root: string, environment: Environment) {
         this.root = path.resolve(root);
-        // The configuration is stamped before the runner is asked, so a change while it
-        // runs builds another program at the next request.
+        const venv = environment.venv === null ? undefined : path.resolve(this.root, environment.venv);
+        const recorded = venv === undefined ? undefined : path.join(venv, 'pyvenv.cfg');
+        // The configuration is stamped before it's read, so a change while the program
+        // is set up builds another at the next request.
         const configured = [...new Set([...pyrightConfigurations, ...environment.files])].map((name) =>
             path.join(this.root, name)
         );
-        const stamps = configured.map((file): [string, string | undefined] => [file, stampOf(file)]);
-        const interpreter = interpreterOf(this.root, environment.interpreter);
-        this.setupStamps = new Map([...stamps, [interpreter, stampOf(interpreter)]]);
+        const stamped = recorded === undefined ? configured : [...configured, recorded];
+        this.setupStamps = new Map(stamped.map((file): [string, string | undefined] => [file, stampOf(file)]));
         const output = new StderrConsole(LogLevel.Error);
         const tempFile = new RealTempFile();
-        const fileSystem = new PyrightFileSystem(createFromRealFileSystem(tempFile, output));
+        const real = createFromRealFileSystem(tempFile, output);
+        const typeshed = getTypeShedFallbackPath(real)?.getFilePath();
+        this.places = new Places([
+            resolved(this.root) ?? this.root,
+            ...(venv === undefined ? [] : [named(venv)]),
+            ...(typeshed === undefined ? [] : [resolved(typeshed) ?? typeshed]),
+        ]);
+        const fileSystem = new PyrightFileSystem(new ConfinedFileSystem(real, this.places));
         const serviceProvider = createServiceProvider(fileSystem, output, tempFile);
-        // As if the gate's pyright step ran from the worktree, through the project's
-        // runner. The judge runs from its own installed copy, so the worktree's
-        // interpreter is named rather than found on the path, which the engine
-        // inherited from the hook that started it and may lead to another worktree's
-        // environment.
+        // As if the gate's pyright step ran from the worktree, its Python the one the
+        // environment records, unless pyright's configuration names one, and its
+        // platform the host's.
         const commandLine = new CommandLineOptions(this.root, /* fromLanguageServer */ false);
-        commandLine.configSettings.pythonPath = interpreter;
+        const version = recorded === undefined ? undefined : recordedVersion(this.places, recorded);
+        commandLine.configSettings.pythonVersion = version;
+        commandLine.configSettings.pythonPlatform = hostPlatform();
         // Which environment this program reads goes to the engine's log, since it decides
         // where the project's own imports resolve and nothing else shows it.
-        const named = environment.interpreter.join(' ');
-        process.stderr.write(`program for ${this.root} reads ${interpreter}, which \`${named}\` named\n`);
+        const python = version === undefined ? 'no Python its `pyvenv.cfg` records' : PythonVersion.toString(version);
+        const read = venv === undefined ? 'no environment' : `the environment at ${venv}, on ${python}`;
+        process.stderr.write(`program for ${this.root} reads ${read}, as the runner names it\n`);
         // Analysis runs when asked, never on pyright's own timers.
         commandLine.languageServerSettings.enableAmbientAnalysis = false;
         this.service = new AnalyzerService('lup-engine', serviceProvider, {
             console: output,
-            hostFactory: () => new FullAccessHost(serviceProvider),
+            hostFactory: () => new NoAccessHost(),
+            importResolverFactory: (provider, options, host) => new EnvironmentResolver(provider, options, host, venv),
             shouldRunAnalysis: () => false,
         });
         this.service.setOptions(commandLine);
@@ -155,10 +212,8 @@ export class WarmProgram {
         return Uri.file(path.resolve(this.root, file), this.service.serviceProvider);
     }
 
-    // Whether the configuration, or the interpreter the runner named, changed since
-    // this program was set up: a new `uv.lock` to sync to, say, the environment
-    // removed, or its Python replaced. An environment made again on the same Python is
-    // the import search path changing, which `sync` sees.
+    // Whether the configuration, or the environment's `pyvenv.cfg`, changed since this
+    // program was set up: the environment made, removed, or made again.
     setupChanged(): boolean {
         return [...this.setupStamps].some(([file, stamp]) => stampOf(file) !== stamp);
     }
@@ -182,7 +237,7 @@ export class WarmProgram {
             if (!entry.overlay && stamp === entry.stamp) {
                 continue;
             }
-            const content = readIfThere(entry.uri.getFilePath());
+            const content = this.readIfThere(entry.uri.getFilePath());
             if (content === undefined) {
                 this.opened.delete(key);
                 this.service.backgroundAnalysisProgram.setFileClosed(entry.uri);
@@ -237,7 +292,7 @@ export class WarmProgram {
             this.opened.set(uri.key, { ...known, overlay, stamp: stamp ?? known.stamp });
             return;
         }
-        const before = known?.content ?? readIfThere(uri.getFilePath());
+        const before = known?.content ?? this.readIfThere(uri.getFilePath());
         this.version += 1;
         this.service.backgroundAnalysisProgram.setFileOpened(uri, this.version, content, {
             ipythonMode: IPythonMode.None,
@@ -252,9 +307,11 @@ export class WarmProgram {
 
     // Open a file as it stands on disk, so its checks read what's there.
     openFromDisk(uri: Uri) {
-        const content = readIfThere(uri.getFilePath());
+        const content = this.readIfThere(uri.getFilePath());
         if (content === undefined) {
-            throw new Error(`${uri.getFilePath()} doesn't exist`);
+            throw new Error(
+                `${uri.getFilePath()} doesn't exist, or resolves outside the worktree and its environment`
+            );
         }
         this.setContents(uri, content, /* overlay */ false, stampOf(uri.getFilePath()));
     }
@@ -284,6 +341,11 @@ export class WarmProgram {
         }
         this.parses.set(uri.key, parse);
         return parse;
+    }
+
+    // A file's content, where it's there and inside the places the program reads.
+    private readIfThere(file: string): string | undefined {
+        return this.places.read(file)?.toString('utf8');
     }
 
     // Bind every tracked file, so each file's importers are known.

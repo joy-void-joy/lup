@@ -7,10 +7,11 @@ answers, asks one question, and leaves it running for the next. An engine stops 
 its own once unasked for a while, and stops at once for a client that expects
 another build, so a rebuilt engine replaces the old one at the next request.
 
-An engine is started with the project's runner's command for Python, which it runs
-to name the worktree's interpreter, and the files deciding the environment, which
-it watches (`EngineEnvironment`). Every request carries them too, so an engine
-started with another runner is replaced as one from another build is.
+An engine is started with the directory of the worktree's environment, as the
+project's runner names it, which it reads as files and never runs, and the files
+deciding the environment, which it watches (`EngineEnvironment`). Every request
+carries them too, so an engine started with another runner is replaced as one
+from another build is.
 """
 
 import json
@@ -25,6 +26,7 @@ from tenacity import Retrying, retry_if_exception_type, stop_after_attempt
 from lup.programs import ProgramError, run
 from lup.types import Model
 from lup_dev.codescan.contract import Checker, FileReport, Parser, Rule, Source
+from lup_dev.confined import Confined
 from lup_dev.declaration.resolve import Selected
 from lup_dev.errors import LupDevError
 from lup_dev.layout import Bundle, Layout
@@ -49,11 +51,12 @@ class EngineGoneError(EngineError):
 
 
 class EngineEnvironment(Model):
-    """How the engine finds the worktree's environment, from the project's runner."""
+    """Where the engine reads the worktree's environment, from the project's runner."""
 
-    interpreter: list[str]
-    """The command running the environment's Python, `Runner.judging(["python"])`:
-    the engine runs it to name the interpreter."""
+    venv: str | None
+    """The environment's directory, `Runner.venv()`, from the root or absolute;
+    none for none. The engine reads its `site-packages` and its `pyvenv.cfg` as
+    files, and stamps the `pyvenv.cfg`."""
     files: list[str]
     """The files, from the root, whose change means another environment: the
     engine stamps them with pyright's own configuration, and builds another
@@ -62,7 +65,8 @@ class EngineEnvironment(Model):
     @classmethod
     def of(cls, runner: Runner) -> EngineEnvironment:
         """Return the environment `runner` gives the engine."""
-        return cls(interpreter=runner.judging(["python"]), files=runner.environment())
+        venv = runner.venv()
+        return cls(venv=None if venv is None else str(venv), files=runner.environment())
 
 
 class EngineSource(Model):
@@ -277,8 +281,8 @@ class EngineChecker(Model, Checker):
         """Start the worktree's engine, unless another client just did.
 
         Starting is done under a lock, so hooks running at once start one engine.
-        The runner's command for Python and its environment's files go as JSON
-        lists.
+        The environment's directory goes as JSON, a string or `null`, and its
+        files as a JSON list.
         """
         path = self.layout.engine_socket(root)
         store = self.layout.store(root)
@@ -294,8 +298,8 @@ class EngineChecker(Model, Checker):
                 str(path),
                 "--idle-seconds",
                 str(self.idle.total_seconds()),
-                "--interpreter",
-                json.dumps(environment.interpreter),
+                "--venv",
+                json.dumps(environment.venv),
                 "--environment-files",
                 json.dumps(environment.files),
                 "--log",
@@ -349,7 +353,9 @@ class EngineParser(Model, Parser):
     It loads no project and reads no environment, so it costs Node's start and
     a parse, whichever worktree it's for and whatever its engine is doing,
     where a check pays the program's load and a type check (`docs/field-notes.md`,
-    *Judging writes*).
+    *Judging writes*). A file on disk is read only where it resolves inside the
+    worktree (`lup_dev.confined`): one that doesn't is left out, its report
+    empty, so a link there can't have the host read a file elsewhere.
     """
 
     bundle: Bundle = Bundle()
@@ -358,26 +364,32 @@ class EngineParser(Model, Parser):
 
     @override
     def parsed(self, root: Path, sources: list[Source]) -> list[FileReport]:
-        given = [
-            ParsedSource(
-                path=str(source.path),
-                content=(
-                    (root / source.path).read_text()
-                    if source.content is None
-                    else source.content
-                ),
+        worktree = Confined(root=root)
+
+        def content(source: Source) -> str | None:
+            return (
+                worktree.text(source.path) if source.content is None else source.content
             )
-            for source in sources
+
+        read = [(source, content(source)) for source in sources]
+        given = [
+            ParsedSource(path=str(source.path), content=text)
+            for source, text in read
+            if text is not None
         ]
         output = printed(self.node, self.bundle, "parse", stdin=PARSED.dump_json(given))
         reports = REPORTS.validate_json(output)
-        if len(reports) != len(sources):
+        if len(reports) != len(given):
             message = (
                 f"the engine's `parse` read {len(reports)} files of the "
-                f"{len(sources)} it was given"
+                f"{len(given)} it was given"
             )
             raise EngineError(message)
-        return reports
+        found = iter(reports)
+        return [
+            next(found) if text is not None else FileReport(path=source.path)
+            for source, text in read
+        ]
 
 
 PARSED = TypeAdapter(list[ParsedSource])

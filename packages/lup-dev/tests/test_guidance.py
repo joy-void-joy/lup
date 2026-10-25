@@ -49,6 +49,10 @@ class Stub(Runner):
         return []
 
     @override
+    def venv(self) -> Path | None:
+        return None
+
+    @override
     def room(self, root: Path, tools: Tools) -> RoomNeeds:
         return RoomNeeds()
 

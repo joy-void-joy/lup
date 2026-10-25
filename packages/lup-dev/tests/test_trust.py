@@ -876,7 +876,7 @@ def test_an_approval_is_asked_with_each_files_parse_read_and_its_types_read_afte
     [asking] = trust.approvals.asking
     assert asking.typing
     assert kit.engine.checked == []
-    assert kit.linter.runners == []
+    assert kit.linter.asked == []
     [core] = asking.files
     assert core.reading == Reading(role="production", asks=CORE_ASKS)
     [typed] = trust.typed(Path(trust.repository()), asking.files)
@@ -1593,6 +1593,48 @@ def test_a_lock_that_doesnt_pin_lup_dev_or_pins_it_from_elsewhere_refuses() -> N
         Lock.parse(git).tool("lup-dev")
 
 
+RUFF_LOCK = """\
+[[package]]
+name = "audiobook"
+version = "0.1.0"
+source = {{ editable = "." }}
+
+[package.dev-dependencies]
+dev = [
+    {{ name = "lup-dev" }},
+    {{ name = "ruff" }},
+]
+
+[[package]]
+name = "lup-dev"
+version = "0.5.0"
+source = {{ registry = "https://pypi.org/simple" }}
+dependencies = [
+    {{ name = "ruff" }},
+]
+
+[[package]]
+name = "ruff"
+version = "{ruff}"
+source = {{ registry = "https://pypi.org/simple" }}
+"""
+"""A project's lock pinning ruff, its own and `lup-dev`'s, at `{ruff}`."""
+
+
+def test_a_release_holds_the_judges_ruff_to_the_projects_own_pin() -> None:
+    release = Lock.parse(RUFF_LOCK.format(ruff="0.16.10")).tool("lup-dev")
+    assert isinstance(release, ReleaseTool)
+    assert release.pins == {"ruff": "0.16.10"}
+    assert release.constraints() == "ruff==0.16.10\n"
+    # The project moving its ruff moves the judge's, which its approval shows.
+    moved = Lock.parse(RUFF_LOCK.format(ruff="0.17.0")).tool("lup-dev")
+    assert isinstance(moved, ReleaseTool)
+    assert moved.said(release) == [
+        "`lup-dev` 0.5.0 from https://pypi.org/simple, as before:",
+        "  ruff 0.16.10 becomes 0.17.0",
+    ]
+
+
 def test_a_package_lup_dev_needs_pinned_twice_refuses() -> None:
     forked = (
         "[[package]]\n"
@@ -1656,6 +1698,9 @@ class Marking(Runner):
 
     def environment(self) -> list[str]:
         return []
+
+    def venv(self) -> Path | None:
+        return None
 
     def room(self, root: Path, tools: Tools) -> RoomNeeds:
         return RoomNeeds()

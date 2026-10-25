@@ -487,8 +487,8 @@ def at_commit(
     The worktree at `root` asks: `revision` is read there, and its person's own
     layer joins the commit's files, as it would checked out there. The gate run
     is the commit's own `lup-dev check`, through `runner`, the asking
-    worktree's, as the judge runs a tool (`Runner.judging`), so it never
-    relocks; what it prints is returned whole. Before the worktree made goes,
+    worktree's, with its command that never writes the project's files
+    (`Runner.judging`), so it never relocks; what it prints is returned whole. Before the worktree made goes,
     `stop` ends what the run left behind for it, its engine. A pass the run
     doesn't record itself, as a commit's `lup-dev` from before passes were kept
     doesn't, is recorded here, without its steps.

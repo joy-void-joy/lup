@@ -663,9 +663,8 @@ class Declaration(Model):
     rules: list[Selected]
     """Each module's rule selection, as recorded, for the engine to resolve."""
     runner: Prefixed
-    """The project's runner, kept as the commands it puts before a tool and its
-    environment's files: the judge runs ruff, and names the engine's interpreter,
-    with them."""
+    """The project's runner, kept as the commands it puts before a tool, its
+    environment's directory and its files: the engine reads that environment."""
     held: list[str] = Project().held
     """What a change waits for the operator's answer on, by name."""
     flagged: list[str] = Project().flagged

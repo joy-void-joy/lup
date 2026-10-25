@@ -743,7 +743,7 @@ def test_from_the_parse_alone_a_change_asks_what_the_whole_judgement_asks_but_ru
     ]
     parsed = judging.parsed(changes, kit.parser)
     assert kit.engine.checked == []
-    assert kit.linter.runners == []
+    assert kit.linter.asked == []
     # One request, each version once: a file's start and the content before its
     # change are one here.
     assert [

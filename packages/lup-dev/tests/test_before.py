@@ -64,6 +64,44 @@ def test_a_replacement_applies_as_the_tool_does() -> None:
     )
 
 
+def test_a_write_to_a_file_linking_out_of_the_worktree_is_let_through_unread(
+    kit: Kit, repo: Path, tmp_path: Path
+) -> None:
+    host = tmp_path / "host.py"
+    host.write_text('SECRET = "s3cret"  # BAD regex\nz: int = "a"  # TYPE\n')
+    linked = repo / "src" / "pkg" / "linked.py"
+    linked.symlink_to(host)
+    SessionStarted(session="s1", cwd=repo).apply(kit.bench)
+    unread = (
+        f"lup didn't read {linked}: it resolves outside the worktree, so this "
+        "write isn't judged."
+    )
+    for write in [
+        Replacement(call="e1", tool="Edit", path=linked, old="1", new="2"),
+        Overwrite(call="w1", tool="Write", path=linked, text="x = 1  # BAD regex\n"),
+    ]:
+        assert before(kit.bench, write, "s1", repo) == Decision(
+            outcome="allow", told=unread
+        )
+    assert kit.engine.checked == []
+
+
+def test_a_write_to_a_git_directorys_file_linking_out_of_it_is_refused(
+    kit: Kit, bare: Path, tmp_path: Path
+) -> None:
+    main = bare / "tree" / "main"
+    SessionStarted(session="s1", cwd=main).apply(kit.bench)
+    (tmp_path / "host-hook").write_text("#!/bin/sh\necho s3cret\n")
+    (bare / "hooks" / "pre-commit").symlink_to(tmp_path / "host-hook")
+    hook = Overwrite(
+        call="w1", tool="Write", path=bare / "hooks" / "pre-commit", text="#!/bin/sh\n"
+    )
+    decision = before(kit.bench, hook, "s1", main)
+    assert decision.outcome == "deny"
+    assert "it resolves outside the repository's git directory" in decision.reason
+    assert kit.announced.holds == []
+
+
 def test_an_allowed_edit_is_remembered_until_its_call_finishes(
     kit: Kit, repo: Path
 ) -> None:

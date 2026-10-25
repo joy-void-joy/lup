@@ -55,7 +55,7 @@ from lup_dev.declaration.kinds import lup_actions
 from lup_dev.declaration.load import load
 from lup_dev.declaration.module import Origin
 from lup_dev.declaration.modules.code_rules import lup_default
-from lup_dev.declaration.requirements import Printed, Tools
+from lup_dev.declaration.requirements import Machine, Printed, Tools
 from lup_dev.declaration.resolve import Resolved, SessionChoices, resolve
 from lup_dev.declaration.runner import (
     Interpreter,
@@ -765,7 +765,7 @@ def test_a_runner_brings_its_requirements() -> None:
 
 
 class AskedUv(Tools):
-    """uv's answers by the words after `--directory <root>`, each command kept."""
+    """uv's answers by the words after `uv --no-config`, each command kept."""
 
     def __init__(self, answers: dict[str, Printed]) -> None:
         self.answers = answers
@@ -776,22 +776,41 @@ class AskedUv(Tools):
 
     def run(self, command: list[str]) -> Printed:
         self.asked.append(command)
-        return self.answers[" ".join(command[6:])]
+        return self.answers[" ".join(command[2:])]
 
 
-def test_uv_mounts_its_interpreters_and_cache_where_uv_keeps_them(
+FIND = "python find --managed-python --system --no-project"
+"""How the launch asks uv for the store's interpreter, before the request."""
+
+
+def uv_places(tmp_path: Path) -> tuple[Path, Path, dict[str, Printed]]:
+    """uv's store and cache, and its answers naming them."""
+    store = tmp_path / "data" / "uv" / "python"
+    cache = tmp_path / "cache" / "uv"
+    answers = {
+        "python dir": Printed(code=0, output=f"{store}\n"),
+        "cache dir": Printed(code=0, output=f"{cache}\n"),
+    }
+    return store, cache, answers
+
+
+REMEDY = (
+    "run `uv sync --managed-python` in the project, which remakes "
+    "`.venv` on a Python uv manages, installing one if there's none"
+)
+
+
+def test_uv_mounts_its_interpreters_and_cache_and_reads_the_environments_interpreter(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "work" / "tree"
-    store = tmp_path / "data" / "uv" / "python"
-    cache = tmp_path / "cache" / "uv"
-    tools = AskedUv(
-        {
-            "python dir": Printed(code=0, output=f"{store}\n"),
-            "cache dir": Printed(code=0, output=f"{cache}\n"),
-            "python find": Printed(code=0, output=f"{root}/.venv/bin/python\n"),
-        }
+    store, cache, answers = uv_places(tmp_path)
+    home = store / "cpython-3.14-linux-x86_64-gnu" / "bin"
+    (root / ".venv").mkdir(parents=True)
+    (root / ".venv" / "pyvenv.cfg").write_text(
+        f"home = {home}\nimplementation = CPython\nversion_info = 3.14.0\n"
     )
+    tools = AskedUv(answers)
 
     needs = Uv().room(root, tools)
 
@@ -802,26 +821,128 @@ def test_uv_mounts_its_interpreters_and_cache_where_uv_keeps_them(
             "UV_PYTHON_INSTALL_DIR": str(store),
             "UV_PYTHON_DOWNLOADS": "never",
         },
-        interpreter=Interpreter(
-            path=root / ".venv" / "bin" / "python",
-            remedy=(
-                "run `uv sync --managed-python` in the project, which remakes "
-                "`.venv` on a Python uv manages, installing one if there's none"
-            ),
-        ),
+        interpreter=Interpreter(home=home, remedy=REMEDY),
     )
     assert cache.is_dir()
+    # Asked from no project, no settings file read, and nothing found by running
+    # the environment's interpreter.
     assert tools.asked == [
-        ["env", "-u", "VIRTUAL_ENV", "uv", "--directory", str(root), *words]
-        for words in [["python", "dir"], ["cache", "dir"], ["python", "find"]]
+        ["uv", "--no-config", "python", "dir"],
+        ["uv", "--no-config", "cache", "dir"],
     ]
+
+
+def test_without_an_environment_the_interpreter_is_the_stores_for_the_projects_python(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "work" / "tree"
+    root.mkdir(parents=True)
+    (root / ".python-version").write_text("3.14\n")
+    store, _, answers = uv_places(tmp_path)
+    home = store / "cpython-3.14.0-linux-x86_64-gnu" / "bin"
+    answers[f"{FIND} 3.14"] = Printed(code=0, output=f"{home / 'python3.14'}\n")
+    tools = AskedUv(answers)
+    needs = Uv().room(root, tools)
+    assert needs.interpreter == Interpreter(home=home, remedy=REMEDY)
+    assert tools.asked[-1] == ["uv", "--no-config", *FIND.split(), "3.14"]
+
+
+@pytest.mark.parametrize(
+    ("files", "asked"),
+    [
+        (
+            {"pyproject.toml": '[project]\nname = "p"\nrequires-python = ">=3.14"\n'},
+            [">=3.14"],
+        ),
+        ({"pyproject.toml": '[project]\nname = "p"\n'}, []),
+        ({".python-version": "# pinned\n3.14.1\n", "pyproject.toml": ""}, ["3.14.1"]),
+    ],
+)
+def test_the_projects_python_is_its_python_version_else_what_it_requires(
+    tmp_path: Path, files: dict[str, str], asked: list[str]
+) -> None:
+    for name, content in files.items():
+        (tmp_path / name).write_text(content)
+    _, _, answers = uv_places(tmp_path)
+    answers[" ".join([FIND, *asked])] = Printed(code=0, output="/store/bin/python\n")
+    tools = AskedUv(answers)
+    Uv().room(tmp_path, tools)
+    assert tools.asked[-1] == ["uv", "--no-config", *FIND.split(), *asked]
+
+
+@pytest.mark.parametrize(
+    "pinned", ["/planted/bin/python3", "python3.14", "cpython@3.14"]
+)
+def test_a_python_request_that_isnt_a_version_is_refused_before_uv_is_asked_for_it(
+    tmp_path: Path, pinned: str
+) -> None:
+    (tmp_path / ".python-version").write_text(f"{pinned}\n")
+    _, _, answers = uv_places(tmp_path)
+    tools = AskedUv(answers)
+    with pytest.raises(RunnerError, match=r"isn't a version or a version specifier"):
+        Uv().room(tmp_path, tools)
+    assert all("find" not in command for command in tools.asked)
+
+
+def test_a_pyvenv_cfg_linking_out_of_the_worktree_isnt_read(tmp_path: Path) -> None:
+    root = tmp_path / "tree"
+    (root / ".venv").mkdir(parents=True)
+    planted = tmp_path / "host.cfg"
+    planted.write_text("home = /host/bin\n")
+    (root / ".venv" / "pyvenv.cfg").symlink_to(planted)
+    store, _, answers = uv_places(tmp_path)
+    answers[FIND] = Printed(code=0, output=f"{store}/cpython/bin/python3\n")
+    needs = Uv().room(root, AskedUv(answers))
+    assert needs.interpreter is not None
+    assert needs.interpreter.home == store / "cpython" / "bin"
+
+
+class Recorded(Tools):
+    """This machine's programs, each command and what it printed kept."""
+
+    def __init__(self) -> None:
+        self.printed: dict[str, str] = {}
+
+    def found(self, program: str) -> bool:
+        return Machine().found(program)
+
+    def run(self, command: list[str]) -> Printed:
+        ran = Machine().run(command)
+        self.printed[" ".join(command[2:])] = ran.output
+        return ran
+
+
+def test_the_launch_runs_nothing_of_the_worktrees_and_reads_none_of_its_uv_settings(
+    tmp_path: Path, offline_uv: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "tree"
+    ran = tmp_path / "ran"
+    planted = root / ".venv" / "bin"
+    planted.mkdir(parents=True)
+    # An environment whose interpreter says when it runs, as uv's `python find`
+    # ran one asked from the worktree, and settings moving uv's cache.
+    for name in ["python", "python3"]:
+        (planted / name).write_text(f"#!/bin/sh\necho ran >> {ran}\nexit 1\n")
+        (planted / name).chmod(0o755)
+    (root / "uv.toml").write_text(f'cache-dir = "{tmp_path / "planted-cache"}"\n')
+    (root / ".python-version").write_text("3.14\n")
+    monkeypatch.delenv("UV_CACHE_DIR")
+    monkeypatch.delenv("UV_NO_CONFIG")
+    monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", str(tmp_path / "store"))
+    monkeypatch.setenv("VIRTUAL_ENV", str(root / ".venv"))
+    monkeypatch.chdir(root)
+    tools = Recorded()
+    # The store holds no Python, so uv finds none, and says so.
+    with pytest.raises(RunnerError, match="python find"):
+        Uv().room(root, tools)
+    assert not ran.exists()
+    assert str(tmp_path / "planted-cache") not in tools.printed["cache dir"]
 
 
 def test_uv_failing_to_answer_is_said(tmp_path: Path) -> None:
     tools = AskedUv({"python dir": Printed(code=2, output="")})
     with pytest.raises(
-        RunnerError,
-        match=r"`env -u VIRTUAL_ENV uv --directory .* python dir` failed with status 2",
+        RunnerError, match=r"`uv --no-config python dir` failed with status 2"
     ):
         Uv().room(tmp_path, tools)
 

@@ -29,10 +29,9 @@ export class Engine {
     }
 
     // Bring the program in line with the disk, with a new one if the configuration or
-    // the interpreter the runner named changed, but for the files about to be given
-    // would-be content. A new program that fails (the runner gives no environment)
-    // leaves the old stamps in place, so each request tries again, failing with the
-    // runner's message.
+    // the environment's `pyvenv.cfg` changed, but for the files about to be given
+    // would-be content. A new program that fails leaves the old stamps in place, so
+    // each request tries again.
     fresh(keep: Set<string> = new Set()) {
         if (this.warm.setupChanged()) {
             this.warm.service.dispose();

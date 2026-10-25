@@ -325,13 +325,11 @@ class FakeLinter(Linter):
     """
 
     def __init__(self) -> None:
-        self.runners: list[Runner] = []
-        """The runner each run was sent, in order."""
+        self.asked: list[Path] = []
+        """The root each run was asked about, in order."""
 
-    def findings(
-        self, root: Path, sources: list[Source], runner: Runner
-    ) -> list[Finding]:
-        self.runners.append(runner)
+    def findings(self, root: Path, sources: list[Source]) -> list[Finding]:
+        self.asked.append(root)
 
         def content(source: Source) -> str:
             return (

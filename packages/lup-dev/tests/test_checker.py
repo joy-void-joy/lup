@@ -123,7 +123,7 @@ def test_a_check_request_carries_each_modules_selection_as_recorded() -> None:
     )
     request = CheckRequest(
         build="1-2",
-        environment=EngineEnvironment(interpreter=["python"], files=[]),
+        environment=EngineEnvironment(venv=None, files=[]),
         root="/work",
         rules=resolve(project).rules,
         sources=[],

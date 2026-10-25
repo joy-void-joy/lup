@@ -55,6 +55,7 @@ from lup_dev.clock import Clock
 from lup_dev.codescan.conditions import declared
 from lup_dev.codescan.contract import Checker, Due, Finding, Owner, Source
 from lup_dev.codescan.ruff import Linter
+from lup_dev.confined import Confined
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.load import load
 from lup_dev.declaration.project import Project
@@ -1506,9 +1507,8 @@ def writers(
 
 
 def on_disk(root: Path, path: Path) -> str | None:
-    """Read the file at `path` in the worktree at `root` as text, or none where there's no file."""
-    whole = root / path
-    return decoded(whole.read_bytes()) if whole.is_file() else None
+    """Read the file at `path` in the worktree at `root` as text, or none where there's no file, or it resolves outside the worktree (`lup_dev.confined`), a file lup doesn't read."""
+    return decoded(Confined(root=root).read(path))
 
 
 def watch(worktree: Worktree, session: Session, found: Found) -> list[Look]:
@@ -2044,14 +2044,21 @@ def standing(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Findin
     where its rules read, so a test's are pyright's and ruff's alone, and none
     the declaration exempts the file from or an `ignore` keeps. A finding ruff,
     or `lup-dev rules fix`, clears safely isn't one: the session landing the
-    work applies the fix. The engine and ruff are asked with the rule selection
-    and the runner of the declaration the worktree is judged by.
+    work applies the fix. The engine is asked with the rule selection and the
+    runner of the declaration the worktree is judged by; ruff is the judge's own.
+    Each file goes to them as read inside the worktree (`on_disk`): one that
+    resolves outside it is left out, unread, as one that's gone is.
     """
     services = bench.services
-    sources = [
-        Source(path=path)
+    read = {
+        path: on_disk(worktree.root, path)
         for path in paths
-        if (worktree.root / path).is_file() and worktree.roles.checked(path)
+        if worktree.roles.checked(path)
+    }
+    sources = [
+        Source(path=path, content=content)
+        for path, content in read.items()
+        if content is not None
     ]
     if not sources:
         return []
@@ -2059,7 +2066,7 @@ def standing(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Findin
     reports = services.checker.check(
         worktree.root, sources, declaration.rules, declaration.runner
     )
-    ruff = services.linter.findings(worktree.root, sources, declaration.runner)
+    ruff = services.linter.findings(worktree.root, sources)
     return [
         found
         for report in reports

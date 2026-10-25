@@ -29,7 +29,7 @@ function sameList(left: unknown, right: string[]): boolean {
 // Whether a request was told of the environment this engine was started with. One
 // sent by a client with another runner, or with none, is another environment.
 function sameEnvironment(asked: Environment | undefined, own: Environment): boolean {
-    return asked !== undefined && sameList(asked.interpreter, own.interpreter) && sameList(asked.files, own.files);
+    return asked !== undefined && asked.venv === own.venv && sameList(asked.files, own.files);
 }
 
 type Reply = (answer: Answer) => void;
