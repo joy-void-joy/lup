@@ -66,6 +66,7 @@ from lup_dev.launch.session import (
 )
 from lup_dev.launch.trust import Outcome, Unchanged
 from lup_dev.layout import Layout
+from lup_dev.policy.worktrees import Making
 from lup_dev.private.withheld import Facts, Withheld
 from lup_dev.private.withheld import Machine as PrivateMachine
 from lup_dev.private.withheld import kept as withheld_kept
@@ -1329,6 +1330,7 @@ HELD = (
         ),
         (events.SessionStarted, 1, f"{GONE} so its answer was lost."),
         (events.TurnStarted, 1, f"{GONE} so its answer was lost."),
+        (events.WorktreeAsked, 1, f"{GONE} so its answer was lost."),
     ],
 )
 def test_a_hook_whose_connection_ends_unanswered_fails_saying_why(
@@ -1346,6 +1348,55 @@ def test_a_hook_whose_connection_ends_unanswered_fails_saying_why(
     assert ran.status == status
     assert ran.output.decode() == ""
     assert ran.error.decode().splitlines() == [said]
+
+
+@pytest.fixture
+def origin(tmp_path: Path) -> Path:
+    """A repository with a commit, a worktree is made from."""
+    root = tmp_path / "work"
+    root.mkdir()
+    named = ["-c", "user.name=t", "-c", "user.email=t@t"]
+    run("git", "init", "--quiet", "-b", "main", cwd=root)
+    run("git", *named, "commit", "--quiet", "--allow-empty", "-m", "first", cwd=root)
+    return root
+
+
+def answering(tmp_path: Path, answer: str) -> Path:
+    """A stand-in `socat` answering `answer`, whatever it's sent."""
+    return socat(tmp_path, f"cat > /dev/null\nprintf '%s' {shlex.quote(answer)}")
+
+
+def test_the_hook_makes_the_worktree_the_judge_names_and_prints_its_root(
+    tmp_path: Path, origin: Path
+) -> None:
+    commit = run("git", "rev-parse", "HEAD", cwd=origin).text().strip()
+    root = origin / ".git" / "tree" / "agent-a1"
+    making = Making(root=root, origin=origin, branch="agent-a1", commit=commit)
+    ran = hook(answering(tmp_path, making.lines()), "{}", events.WorktreeAsked)
+
+    assert (ran.status, ran.output.decode(), ran.error.decode()) == (0, f"{root}\n", "")
+    branch = run("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=root).text().strip()
+    assert branch == "agent-a1"
+    assert run("git", "rev-parse", "HEAD", cwd=root).text().strip() == commit
+
+
+def test_the_hook_fails_the_making_saying_why_the_judge_made_none(
+    tmp_path: Path,
+) -> None:
+    refused = "lup made no worktree: a branch `dev` is there already\n"
+    ran = hook(answering(tmp_path, refused), "{}", events.WorktreeAsked)
+
+    assert (ran.status, ran.output.decode(), ran.error.decode()) == (1, "", refused)
+
+
+def test_the_hook_fails_the_making_where_git_does(tmp_path: Path, origin: Path) -> None:
+    root = tmp_path / "made"
+    making = Making(root=root, origin=origin, branch="main", commit="HEAD")
+    ran = hook(answering(tmp_path, making.lines()), "{}", events.WorktreeAsked)
+
+    assert (ran.status, ran.output.decode()) == (1, "")
+    assert "'main' already exists" in ran.error.decode()
+    assert not root.exists()
 
 
 SERVICE = """
