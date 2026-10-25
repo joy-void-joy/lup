@@ -51,7 +51,7 @@ Every concern has one owner, so two tools never report the same thing in two way
 |---|---|
 | A number or a duration: a retry count, a timeout, a size limit | an overridable default: a parameter's or a field's |
 | A list a caller might change: the statuses retried, the editors tried | a field's default, on the model that uses it |
-| A closed set of options | a `Literal` type, its members read with `typing.get_args` |
+| A closed set of options | a `Literal` type, its members read with `typing.get_args`: inline to test one, `name in get_args(Format.__value__)`, and as a list to keep them, `list(get_args(Format.__value__))`, since `tuple-shape` refuses the tuple type a kept one would be written with |
 | A fixed table from one vocabulary to another | a function that `match`es, its key a `Literal` |
 | An environment variable's name | the package's `settings.py`, whose pydantic-settings model's fields are the variables |
 | A path or a file name | the package's `layout.py`, which says where everything is stored |
