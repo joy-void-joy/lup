@@ -955,6 +955,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             self.launch,
             "rev-list",
             "--parents",
+            # lup: ignore("fixed-tool-limit", why="one commit's own parents are read, the one line `rev-list` gives for it: no list an agent asked for is cut short")
             "--max-count=1",
             commit,
             own_parents=True,

@@ -1150,7 +1150,8 @@ export class File {
     }
 
     // The functions serving a tool of lup's library (`lup.tools`), each with the name of
-    // the tool's own: a function decorated `@lup_tool` or handed to `lup_tool(…)`; a
+    // the tool's own: a function decorated `@lup_tool`, marked or not
+    // (`@lup_tool(reads=True)`), or handed to `lup_tool(…)`; a
     // `Tool`'s `function`; the `call` of a class implementing `AgentTool` or `Toolset`;
     // and each function of this file one of them names, which serves the same tool.
     private serving(): Map<ParseNode, string> {
@@ -1180,7 +1181,11 @@ export class File {
         const decorated = this.nodes.scopes.filter(
             (node): node is FunctionNode =>
                 node.nodeType === ParseNodeType.Function &&
-                node.d.decorators.some((decorator) => this.namesOf(decorator.d.expr).includes(toolMaker))
+                node.d.decorators.some((decorator) => {
+                    const written = decorator.d.expr;
+                    const maker = written.nodeType === ParseNodeType.Call ? written.d.leftExpr : written;
+                    return this.namesOf(maker).includes(toolMaker);
+                })
         );
         const handed = this.callsTo([toolMaker]).flatMap((call) => named(call.argument('function', 0)));
         const functionOfTool = this.nodes.calls
