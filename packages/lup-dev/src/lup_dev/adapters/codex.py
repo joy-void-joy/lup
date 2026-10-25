@@ -145,7 +145,9 @@ worktree only for a whole session (`--worktree`,
 `utils/cli/src/shared_options.rs`, and the TUI's `/worktree`), with its own
 `git worktree add` (`worktree/src/lib.rs`), which no hook replaces. A Codex
 subagent works in its parent's directory, and lup holds it in the session's one
-worktree as every conversation of the session (above).
+worktree as every conversation of the session (above). So no spawn of Codex's
+asks to work apart, and lup isolates none (`given`, `policy/checkpoint.py`): its
+events never name the call that spawned a conversation (`spawned_by`).
 
 What its judging relies on, from Codex's hooks documentation and its source at
 `rust-v0.162.1` (paths under `codex-rs/`), whose hook schemas
