@@ -14,6 +14,9 @@ The texts name no runtime: each adapter carries them as its runtime hears them.
 
 **Told once** (`docs/judging-writes.md`, *Told once*): a conversation is told a
 finding when it first appears, and not again while it stands (`Known`, `news`).
+**Quiet** (*Quiet*): a conversation can ask not to be told some kinds of
+findings for a while (`Kind`, `Quiet`); what a quiet holds back isn't told, and
+isn't remembered as told, so it's told once the quiet lifts (`summary`).
 **Fitted:** a report past what a hook tells whole is kept whole in a file
 (`Reports`), and told with each section that doesn't fit shortened to a line
 per file (`fitted`), so the runtime never moves it out of the agent's sight.
@@ -22,6 +25,7 @@ per file (`fitted`), so the runtime never moves it out of the agent's sight.
 import hashlib
 from collections import Counter
 from pathlib import Path
+from typing import Literal, get_args
 
 from lup.types import Model
 from lup_dev.clock import Clock
@@ -71,7 +75,11 @@ class Look(Model):
     """Whose findings it read in full: every owner for a file judged, pyright's
     alone for one the importers pass re-checked."""
     findings: list[Finding] = []
-    """What it found, each file named as `path` is."""
+    """What it found that's told, each file named as `path` is."""
+    held: list[Finding] = []
+    """What it found that the conversation's quiet holds back (`Quiet`): not
+    told, and not remembered as told, though what was told of it before stays
+    known while it stands."""
     content: str | None = None
     """The content they were found in; none where there's none to read."""
 
@@ -114,13 +122,15 @@ def news(told: list[Known], looks: list[Look]) -> News:
 
     What each look found replaces what was known of its file and owners, so a
     finding that's gone is forgotten, and told again if it comes back; what no
-    look read stays known.
+    look read stays known. What a quiet held back (`Look.held`) is neither told
+    nor learned: it stays known where it was told before, and is forgotten
+    where it wasn't, so it's told once the quiet lifts.
 
     >>> from lup_dev.codescan.contract import Position, Span
-    >>> def at(line: int) -> Finding:
+    >>> def at(line: int, rule: str = "reportCallIssue") -> Finding:
     ...     where = Position(line=line, column=1)
     ...     return Finding(path=Path("a.py"), span=Span(start=where, end=where),
-    ...         owner="pyright", rule="reportCallIssue", message="bad call")
+    ...         owner="pyright", rule=rule, message="bad call")
     >>> first = Look(path=Path("a.py"), owners=["pyright"], findings=[at(1)],
     ...     content="call()\n")
     >>> heard = news([], [first])
@@ -130,17 +140,128 @@ def news(told: list[Known], looks: list[Look]) -> News:
     ...     content="# added above\ncall()\n")
     >>> news(heard.known, [moved]).findings
     []
+    >>> quiet = Look(path=Path("a.py"), owners=["pyright"],
+    ...     held=[at(1), at(1, "reportArgumentType")], content="call()\n")
+    >>> still = news(heard.known, [quiet])
+    >>> (still.findings, [known.rule for known in still.known])
+    ([], ['reportCallIssue'])
     """
     # lup: ignore("set-shape", why="membership alone: what the conversation was told, looked up for each finding of a report that can hold thousands")
     already = set(told)
     found = [
         (finding, look.known(finding)) for look in looks for finding in look.findings
     ]
+    kept = [
+        known
+        for look in looks
+        for finding in look.held
+        if (known := look.known(finding)) in already
+    ]
     unread = [known for known in told if not any(look.covers(known) for look in looks)]
     return News(
         findings=[finding for finding, known in found if known not in already],
-        known=[*unread, *dict.fromkeys(known for _, known in found)],
+        known=[*unread, *dict.fromkeys([*(known for _, known in found), *kept])],
     )
+
+
+type Kind = Literal["rules", "changed", "untouched", "importers"]
+"""A kind of finding a conversation can quiet, as a report's sections tell them
+(`information`): lup's findings on the lines changed (`rules`); type errors and
+ruff's findings in the files changed (`changed`); lup's findings on lines no
+change touched, in those files (`untouched`); and type errors in the files
+importing what changed (`importers`)."""
+
+
+class Quiet(Model):
+    """What a conversation asked not to be told after its calls, for now (`docs/judging-writes.md`, *Quiet*).
+
+    A value never published is a finding of lup's, but no quiet holds it: no
+    `ignore` keeps it either, and a push carrying it is refused. Nor does one
+    hold anything but findings: a refusal, a hold's answer, a move of `HEAD`,
+    a notice, a removed note, or the turn's end's list.
+    """
+
+    kinds: list[Kind] = []
+    """The kinds held; none where the conversation isn't quiet."""
+
+    def told(self, kind: Kind, found: list[Finding]) -> list[Finding]:
+        """Return what of `found`, findings of `kind`, is told: each one where `kind` isn't held; else the values never published alone."""
+        if kind not in self.kinds:
+            return found
+        return [each for each in found if each.rule == PRIVATE]
+
+    def look(self, kind: Kind, look: Look) -> Look:
+        """Return `look`, whose findings are of `kind`, with what this holds of them moved to `held`.
+
+        >>> from lup_dev.codescan.contract import Position, Span
+        >>> at = Position(line=1, column=1)
+        >>> def found(rule: str) -> Finding:
+        ...     return Finding(path=Path("a.py"), span=Span(start=at, end=at),
+        ...         owner="lup", rule=rule, message="m")
+        >>> seen = Look(path=Path("a.py"), owners=["lup"],
+        ...     findings=[found("regex"), found("private")])
+        >>> quiet = Quiet(kinds=["rules"]).look("rules", seen)
+        >>> ([each.rule for each in quiet.findings], [each.rule for each in quiet.held])
+        (['private'], ['regex'])
+        >>> Quiet(kinds=["rules"]).look("untouched", seen) == seen
+        True
+        """
+        if kind not in self.kinds:
+            return look
+        return look.model_copy(
+            update={
+                "findings": self.told(kind, look.findings),
+                "held": [
+                    *look.held,
+                    *(each for each in look.findings if each.rule != PRIVATE),
+                ],
+            }
+        )
+
+    def said(self) -> str:
+        """Say what this holds, in words, the kinds in the order a report tells them.
+
+        >>> Quiet(kinds=["importers", "changed"]).said()
+        "type errors and ruff's findings in the files changed, and type errors in the files importing what changed"
+        """
+        order: list[Kind] = list(get_args(Kind.__value__))
+        named = [described(kind) for kind in order if kind in self.kinds]
+        if len(named) < 2:
+            return "".join(named)
+        return f"{', '.join(named[:-1])}, and {named[-1]}"
+
+    def reminder(self) -> str:
+        """Tell a conversation starting again, compacted or resumed, that it's still quiet; nothing where it isn't.
+
+        >>> Quiet().reminder()
+        ''
+        >>> print(Quiet(kinds=["rules"]).reminder())
+        This conversation is still quiet: lup doesn't tell it lup's findings on the lines changed after its calls. `quiet` with no kinds lifts it, and tells what stands that it wasn't told.
+        """
+        if not self.kinds:
+            return ""
+        return (
+            f"This conversation is still quiet: lup doesn't tell it {self.said()} "
+            "after its calls. `quiet` with no kinds lifts it, and tells what stands "
+            "that it wasn't told."
+        )
+
+
+def described(kind: Kind) -> str:
+    """Say what findings of `kind` are, in words.
+
+    >>> described("untouched")
+    "lup's findings on lines no change touched"
+    """
+    match kind:
+        case "rules":
+            return "lup's findings on the lines changed"
+        case "changed":
+            return "type errors and ruff's findings in the files changed"
+        case "untouched":
+            return "lup's findings on lines no change touched"
+        case "importers":
+            return "type errors in the files importing what changed"
 
 
 class Part(Model):
@@ -359,20 +480,8 @@ def information(
     `ignore` keeps it: each names its kind, never the value, and its section is
     always told whole. The others can be told short (`fitted`).
     """
-
-    def part(header: str, found: list[Finding], *, short: bool = True) -> list[Part]:
-        if not found:
-            return []
-        lines = [line for each in found for line in finding_lines(each)]
-        return [
-            Part(
-                whole="\n".join([header, *lines]),
-                short=counted(header, found) if short else None,
-            )
-        ]
-
     return [
-        *part(
+        *section(
             (
                 "Values never published, on the lines changed (rewrite each before "
                 "it's committed: the operator sees this write with them, the gate's "
@@ -382,7 +491,7 @@ def information(
             [found for found in reported if found.rule == PRIVATE],
             short=False,
         ),
-        *part(
+        *section(
             (
                 "lup's findings on the lines changed (clear each, or keep it with "
                 '`# lup: ignore("<rule>", why="<reason>")` on its line or the line '
@@ -390,18 +499,18 @@ def information(
             ),
             [found for found in reported if found.rule != PRIVATE],
         ),
-        *part(
+        *section(
             (
                 "Type errors and ruff's findings in the files changed "
                 "(clean them before the turn ends):"
             ),
             findings,
         ),
-        *part(
+        *section(
             "lup's findings on lines no change touched (they fail the gate too):",
             [found for found in untouched if found.rule != PRIVATE],
         ),
-        *part(
+        *section(
             (
                 "Values never published, on lines no change touched (the gate's "
                 "`private` step fails on them too):"
@@ -409,13 +518,81 @@ def information(
             [found for found in untouched if found.rule == PRIVATE],
             short=False,
         ),
-        *part(
+        *section(IMPORTERS, importers),
+    ]
+
+
+IMPORTERS = (
+    "Type errors in files that import what changed (clean them before the turn ends):"
+)
+"""The header of the type errors in the files importing what changed, after a call
+and as a quiet lifts."""
+
+
+def section(header: str, found: list[Finding], *, short: bool = True) -> list[Part]:
+    """Say a section of findings under its header, each as pyright does, with its line per file where `short` lets it be told short (`fitted`); nothing where there's none."""
+    if not found:
+        return []
+    lines = [line for each in found for line in finding_lines(each)]
+    return [
+        Part(
+            whole="\n".join([header, *lines]),
+            short=counted(header, found) if short else None,
+        )
+    ]
+
+
+def summary(touched: list[Finding], importers: list[Finding]) -> list[Part]:
+    """Say what stands that a conversation wasn't told, as its quiet lifts: in the files it touched, values never published, lup's findings, type errors and ruff's; then type errors in the files importing them.
+
+    Which of lup's findings are on lines a change touched isn't said: that's
+    what a change's judgement reads, and the files are read as they stand.
+
+    >>> from lup_dev.codescan.contract import Position, Span
+    >>> at = Position(line=3, column=1)
+    >>> def found(path: str, owner: Owner, rule: str) -> Finding:
+    ...     return Finding(path=Path(path), span=Span(start=at, end=at), owner=owner,
+    ...         rule=rule, message="m")
+    >>> told = summary([found("/w/a.py", "lup", "regex"), found("/w/a.py", "ruff", "E501")],
+    ...     [found("/w/b.py", "pyright", "reportCallIssue")])
+    >>> print(text(told))
+    lup's findings in the files this conversation touched (clear each, or keep it with `# lup: ignore("<rule>", why="<reason>")` on its line or the line above, which the operator is asked about; they fail the gate):
+      /w/a.py:3:1 - regex: m
+    <BLANKLINE>
+    Type errors and ruff's findings in the files this conversation touched (clean them before the turn ends):
+      /w/a.py:3:1 - E501: m
+    <BLANKLINE>
+    Type errors in files that import what changed (clean them before the turn ends):
+      /w/b.py:3:1 - reportCallIssue: m
+    """
+    lup = [each for each in touched if each.owner == "lup"]
+    return [
+        *section(
             (
-                "Type errors in files that import what changed "
-                "(clean them before the turn ends):"
+                "Values never published, in the files this conversation touched "
+                "(rewrite each before it's committed: the gate's `private` step "
+                "fails on them, and a push or a post carrying one is refused):"
             ),
-            importers,
+            [each for each in lup if each.rule == PRIVATE],
+            short=False,
         ),
+        *section(
+            (
+                "lup's findings in the files this conversation touched (clear each, "
+                'or keep it with `# lup: ignore("<rule>", why="<reason>")` on its '
+                "line or the line above, which the operator is asked about; they "
+                "fail the gate):"
+            ),
+            [each for each in lup if each.rule != PRIVATE],
+        ),
+        *section(
+            (
+                "Type errors and ruff's findings in the files this conversation "
+                "touched (clean them before the turn ends):"
+            ),
+            [each for each in touched if each.owner != "lup"],
+        ),
+        *section(IMPORTERS, importers),
     ]
 
 

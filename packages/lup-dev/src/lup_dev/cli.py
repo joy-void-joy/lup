@@ -217,7 +217,7 @@ from lup_dev.policy.judge import finding
 from lup_dev.policy.landing import LandingTools
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.since import routes as since_routes
-from lup_dev.policy.tools import JudgeTools
+from lup_dev.policy.tools import JudgeTools, judge_call
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.private.building import listed
 from lup_dev.private.module import Private
@@ -236,12 +236,14 @@ from lup_transcripts.environment import views
 from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
+    from lup.tools import serving
     from lup.tools.serving import Notice
     from lup.tools.tool import ToolSpec
     from lup_dev.declaration.resolve import Resolved
     from lup_dev.declaration.runner import Runner
     from lup_dev.host.records import Transcript
     from lup_dev.host.rooms import RoomTools
+    from lup_dev.host.workers import JudgeCalling, LaunchModules
     from lup_dev.policy.runtime import Runtime
 
 # lup: defer(issue=114, why="`lup-dev` stands in for the `lup` command tree until the declaration and command line piece builds it, which names its commands")
@@ -328,6 +330,13 @@ class Adapters(Model, Answerer):
         bench = Bench(runtime=adapter.runtime, services=services, ended=ended)
         output = adapter.hook(payload, bench)
         return f"{output}\n" if output else ""
+
+    async def called(self, calling: JudgeCalling, services: Services) -> serving.Answer:
+        """Run a call to one of the judge's own tools that asks the engine, for a conversation of `calling`'s launch, judging with `services` as that launch's runtime's hooks are."""
+        bench = Bench(
+            runtime=self.named(calling.launch.runtime).runtime, services=services
+        )
+        return await judge_call(bench, calling)
 
     @override
     def unanswered(self, runtime: str, payload: str, failure: str) -> str:
@@ -543,7 +552,7 @@ def host_serve(context: typer.Context) -> None:
             delivery=delivery, integration=settings.lup_integration_branch
         ),
         routes=control_routes(delivery, recorded(), dashboard, layout),
-        tools=room_tools(delivery, layout, remotes),
+        tools=room_tools(delivery, layout, remotes, workers),
         room_routes=[*remote_routes(remotes), *clipboard_routes(Desktop.of(settings))],
         modules=workers,
         say=typer.echo,
@@ -610,11 +619,13 @@ async def proposed_after(delivery: Delivery, launch: Register, refs: list[str]) 
         )
 
 
-def room_tools(delivery: Delivery, layout: Layout, remotes: Remotes) -> list[RoomTools]:
-    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock; and `land`, pushing through `remotes` onto the integration branch the settings name."""
+def room_tools(
+    delivery: Delivery, layout: Layout, remotes: Remotes, modules: LaunchModules
+) -> list[RoomTools]:
+    """List the core's tools the host service serves each launched session: the inbox's; the judge's, reading lup's state at `layout` by the delivery's clock, and running `quiet` in each launch's repository's process (`modules`); and `land`, pushing through `remotes` onto the integration branch the settings name."""
     return [
         InboxTools(delivery=delivery),
-        JudgeTools(layout=layout, clock=delivery.clock),
+        JudgeTools(layout=layout, clock=delivery.clock, modules=modules),
         LandingTools(
             delivery=delivery,
             remotes=remotes,
@@ -628,16 +639,19 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
     """List what a launched session is told of each of lup's tools, which its guidance lists: the core's, then its modules'.
 
     The core's are read from the tools the service is handed, made over a
-    delivery with nothing but its clock, and a layout and remotes without their
-    fields: what a tool is doesn't depend on whom it delivers to, where lup's
-    state is, or how it pushes. The
+    delivery with nothing but its clock, and a layout, remotes and repositories'
+    processes without their fields: what a tool is doesn't depend on whom it
+    delivers to, where lup's state is, how it pushes, or where it runs. The
     modules' are read from their classes, with no instance.
     """
     unread = Delivery.model_construct(clock=SystemClock())
     core = [
         spec
         for tools in room_tools(
-            unread, Layout.model_construct(), Remotes.model_construct()
+            unread,
+            Layout.model_construct(),
+            Remotes.model_construct(),
+            Workers.model_construct(),
         )
         for spec in tools.specs()
     ]
@@ -655,13 +669,21 @@ def worker(
 ) -> None:
     """Serve the judge and the modules of `repository`'s launches on `socket`, until standard input closes: for the host service.
 
-    Their hooks are answered as `hook` answers them, with this machine's services
-    made once for the process: none of them keeps state of its own.
+    Their hooks are answered as `hook` answers them, and the judge's own tools
+    that ask the engine run, with this machine's services made once for the
+    process: none of them keeps state of its own.
     """
     known = Adapters(known=adapters())
     records = {adapter.runtime.name(): adapter.records for adapter in known.known}
     made = services()
-    worked(socket, repository, made, records, partial(known.answer, services=made))
+    worked(
+        socket,
+        repository,
+        made,
+        records,
+        judge=partial(known.answer, services=made),
+        called=partial(known.called, services=made),
+    )
 
 
 @host.command("stop")

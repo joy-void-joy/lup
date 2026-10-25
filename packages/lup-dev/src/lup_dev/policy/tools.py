@@ -1,13 +1,19 @@
-"""The judge's tool in a launched session: `judged`, what lup's judge made of the writes in the session's repository.
+"""The judge's tools in a launched session: `judged`, what lup's judge made of the writes in the session's repository; `quiet`, which findings it holds back after the conversation's calls.
 
 `docs/inbox.md`, *lup's tools*. The judge runs on the host, and keeps its
 verdict log and its holds in lup's state there, which no room mounts
 (`docs/judging-writes.md`, *The verdict log*, *Asking the operator*), so a
 session can't see from its room whether a write landed, was flagged, or waited
 for the operator. `judged` reads them for the conversation calling, changing
-nothing. The host service serves it as a `RoomTools` beside the inbox's, with
-lup's state (`Layout`) and its clock; the inbox sits below the judge in
-`lup_dev`'s layers, so its tools don't read the judge's stores.
+nothing. The host service serves the judge's tools as a `RoomTools` beside the
+inbox's, with lup's state (`Layout`) and its clock; the inbox sits below the
+judge in `lup_dev`'s layers, so its tools don't read the judge's stores.
+
+`quiet` (`Quieter`; `docs/judging-writes.md`, *Quiet*) is served beside it and
+run in the repository's process (`JudgeCalling`), as a module's tool is: lifting
+a quiet tells what stands in the conversation's files, which the engine the
+judge keeps warm there reads (`policy/quiet.py`). Its approved copy answers it,
+so a copy that predates it refuses the call, which says so.
 
 - **Whose verdicts:** the calling session's, by default: the log records each
   verdict's runtime and session, not which of the session's conversations
@@ -53,12 +59,16 @@ from lup.tools.tool import Accepted, Refused, ToolSpec
 from lup.types import Model
 from lup_dev.clock import Clock
 from lup_dev.host.courier import Conversation
-from lup_dev.host.protocol import Register
+from lup_dev.host.protocol import HostError, Register
 from lup_dev.host.rooms import RoomTools
+from lup_dev.host.workers import Called, JudgeCalling, LaunchModules
 from lup_dev.inbox.delivery import clocked
 from lup_dev.layout import Layout
 from lup_dev.listing import Span, latest, many, unlisted
+from lup_dev.policy.checkpoint import Bench
 from lup_dev.policy.holds import Hold, Holds, logged
+from lup_dev.policy.quiet import quieted
+from lup_dev.policy.report import Kind
 from lup_dev.policy.verdicts import Verdict, VerdictLog, tallied
 
 
@@ -371,6 +381,75 @@ def stands(hold: Hold, *, waited: bool) -> str:
     )
 
 
+class Quieting(Model):
+    """Which findings to hold back after the conversation's calls."""
+
+    kinds: list[Kind] = Field(
+        description=(
+            "The kinds of findings lup holds back after your calls: `rules`, lup's "
+            "findings on the lines you changed; `changed`, type errors and ruff's "
+            "findings in the files changed; `untouched`, lup's findings on lines "
+            "no change touched; `importers`, type errors in files importing what "
+            "changed. Empty lifts the quiet, and the answer tells what stands "
+            "that you weren't told."
+        )
+    )
+
+
+class Quieter(Model, arbitrary_types_allowed=True):
+    """One conversation of a launch, asking lup to hold some findings back after its calls: the tool's function, bound to it, in the repository's process."""
+
+    bench: Bench
+    """The judge's bench, with the launch's runtime, made once for the process."""
+    caller: Conversation
+
+    @lup.tool
+    async def quiet(self, quieting: Quieting) -> str:
+        """Hold back some findings until you lift it.
+
+        In a wide change, a refactor across many files or several edits in a
+        row to one, you know the work is broken and will fix it later, so
+        being told each finding after each call is noise. lup holds back the
+        `kinds` of findings named, after every call of yours from then on:
+        they aren't told, and aren't counted told. A call naming other kinds
+        holds those instead. `kinds` empty lifts the quiet, and the answer
+        tells once what stands then that you weren't told, in the files you
+        touched and those importing them, as they stand rather than each
+        state in between. Refusals, held writes and the operator's answers,
+        moves of `HEAD`, values never published, and the list your turn's end
+        is held on still come through. The quiet is yours alone, not your
+        subagents' or your parent's, and lasts across turns until you lift it
+        or your conversation ends.
+        """
+        return await asyncio.to_thread(
+            quieted,
+            self.bench,
+            self.caller.session,
+            self.caller.agent or "",
+            quieting.kinds,
+        )
+
+
+async def judge_call(bench: Bench, calling: JudgeCalling) -> Answer:
+    """Run, in the repository's process, a call to one of the judge's tools served there (`Quieter`), for the conversation calling: its arguments validated, its answer in words.
+
+    Arguments that don't validate are refused, saying why, as the library's
+    tools refuse them.
+    """
+    quieter = Quieter(bench=bench, caller=calling.caller)
+    found = [tool for tool in bound(quieter) if tool.spec().name == calling.name]
+    if not found:
+        return Answer(
+            text=f"lup's judge runs no tool named `{calling.name}` here", error=True
+        )
+    [tool] = found
+    match await tool.call(calling.arguments):
+        case Accepted(answer=said):
+            return Answer(text=said)
+        case Refused(rejection=rejection):
+            return Answer(text=f"Refused: {rejection.reason}", error=True)
+
+
 class JudgeTools(Model, RoomTools, arbitrary_types_allowed=True):
     """The judge's tools, as the host service serves them to each launched session, beside the inbox's."""
 
@@ -378,10 +457,12 @@ class JudgeTools(Model, RoomTools, arbitrary_types_allowed=True):
     """lup's state on the host, where the verdict logs and the stores are."""
     clock: Clock
     """The host service's clock."""
+    modules: LaunchModules
+    """Each launch's repository's process, which runs `quiet` (`Quieter`)."""
 
     @override
     def specs(self) -> list[ToolSpec]:
-        return list(declared(Onlooker).values())
+        return [*declared(Onlooker).values(), *declared(Quieter).values()]
 
     @override
     async def call(
@@ -394,9 +475,12 @@ class JudgeTools(Model, RoomTools, arbitrary_types_allowed=True):
     ) -> Answer:
         """Run the tool `name` for `caller`, a conversation of `launch`: its arguments validated, its answer in words.
 
-        Arguments that don't validate are refused, saying why, as the library's
-        tools refuse them.
+        `judged` runs here; `quiet` in the launch's repository's process, which
+        says why where it couldn't. Arguments that don't validate are refused,
+        saying why, as the library's tools refuse them.
         """
+        if name in declared(Quieter):
+            return await self.relayed(name, arguments, launch, caller)
         onlooker = Onlooker(
             layout=self.layout, launch=launch, caller=caller, clock=self.clock
         )
@@ -406,3 +490,30 @@ class JudgeTools(Model, RoomTools, arbitrary_types_allowed=True):
                 return Answer(text=said)
             case Refused(rejection=rejection):
                 return Answer(text=f"Refused: {rejection.reason}", error=True)
+
+    async def relayed(
+        self, name: str, arguments: JsonValue, launch: Register, caller: Conversation
+    ) -> Answer:
+        """Pass a call to `name` to `launch`'s repository's process, and return what it answered; where it couldn't, say why, a copy that predates the tool among it."""
+        calling = JudgeCalling(
+            launch=launch, name=name, arguments=arguments, caller=caller
+        )
+        try:
+            reply = await self.modules.ask(launch, calling)
+        except HostError as failed:
+            return Answer(
+                text=(
+                    f"`{name}` didn't run: {failed}. Where the repository's process "
+                    "answers no `judge-call`, its approved copy of lup predates "
+                    f"`{name}`, which runs once the operator approves one that has it."
+                ),
+                error=True,
+            )
+        match reply:
+            case Called(answer=answer):
+                return answer
+            case _:
+                return Answer(
+                    text=f"`{name}` didn't run: the repository's process replied {reply.kind}",
+                    error=True,
+                )

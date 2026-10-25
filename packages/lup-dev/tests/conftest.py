@@ -59,6 +59,7 @@ from lup_dev.host.workers import (
     Called,
     Calling,
     Happening,
+    JudgeCalling,
     LaunchModules,
     Listing,
     Offered,
@@ -73,6 +74,7 @@ from lup_dev.policy.flags import Flagging
 from lup_dev.policy.holds import Announcing, Hold, Response, answer
 from lup_dev.policy.importers import Spawner
 from lup_dev.policy.runtime import Runtime
+from lup_dev.policy.tools import judge_call
 from lup_dev.private.withheld import Facts, Machine
 from lup_dev.worker import RepositoryModules
 
@@ -805,6 +807,37 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
 
     async def stop(self) -> None:
         self.stopped = True
+
+
+class JudgingInProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
+    """A repository's process running the judge's own tools in the test's own process, on the bench it's given: the worker's answer to `JudgeCalling`, without its process."""
+
+    bench: Bench
+    asked: list[JudgeCalling] = []
+
+    async def open(self, launch: Register) -> Offered:
+        return Offered()
+
+    async def ask(self, launch: Register, request: Request) -> Reply:
+        match request:
+            case JudgeCalling():
+                self.asked.append(request)
+                return Called(answer=await judge_call(self.bench, request))
+            case _:
+                message = f"the judge's tools take no `{request.kind}`"
+                raise AssertionError(message)
+
+    async def close(self, launch: Register) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
+
+
+@pytest.fixture
+def judging(kit: Kit) -> JudgingInProcess:
+    """The judge's own tools run in the test's own process, on the kit's bench, as a repository's process runs them."""
+    return JudgingInProcess(bench=kit.bench)
 
 
 @pytest.fixture

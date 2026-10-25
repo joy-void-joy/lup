@@ -38,6 +38,7 @@ from lup_dev.policy.checkpoint import (
     Attributed,
     Bench,
     Checked,
+    ConversationRecord,
     Mail,
     Pending,
     Session,
@@ -51,8 +52,10 @@ from lup_dev.policy.flags import Landed, Put, flagged
 from lup_dev.policy.holds import HeldFile, Hold, answered, outcome, unified
 from lup_dev.policy.judge import Ask, Change, Judgement
 from lup_dev.policy.report import (
+    Kind,
     Look,
     Part,
+    Quiet,
     Refused,
     approval,
     information,
@@ -142,30 +145,46 @@ class Decision(Model):
     told: str = ""
     """What the agent is told beside a write let through: lup's findings in it,
     its type errors and ruff's, as a checkpoint reports them, those its
-    conversation wasn't told yet. They're told with the call, as it's judged,
+    conversation wasn't told yet and doesn't hold back while quiet
+    (`report.Quiet`). They're told with the call, as it's judged,
     since the checkpoint after it waits while another call of the session runs
     (#86); that checkpoint tells them no more."""
 
 
 def told(
-    record: Session, agent: str, root: Path, judgement: Judgement, content: str
+    record: Session,
+    agent: str,
+    root: Path,
+    judgement: Judgement,
+    content: str,
+    *,
+    quiet: Quiet,
 ) -> list[Part]:
-    """Say what a write's judgement found in `content`, its files named from `root`, as a checkpoint reports it: what conversation `agent` wasn't told yet, which `record` remembers it told (`Session.news`); nothing where that's nothing."""
-    look = Look(
-        path=judgement.path,
-        owners=["lup", "pyright", "ruff"],
-        findings=[*judgement.findings, *judgement.information, *judgement.untouched],
-        content=content,
-    )
-    new = dict.fromkeys(record.news(agent, [look]))
+    """Say what a write's judgement found in `content`, its files named from `root`, as a checkpoint reports it: what conversation `agent` wasn't told yet, which `record` remembers it told (`Session.news`), and its `quiet` doesn't hold; nothing where that's nothing."""
 
-    def kept(found: list[Finding]) -> list[Finding]:
-        return placed(root, [each for each in found if each in new])
+    def seen(kind: Kind, found: list[Finding]) -> Look:
+        look = Look(
+            path=judgement.path,
+            owners=["lup", "pyright", "ruff"],
+            findings=found,
+            content=content,
+        )
+        return quiet.look(kind, look)
+
+    looks = [
+        seen("rules", judgement.findings),
+        seen("changed", judgement.information),
+        seen("untouched", judgement.untouched),
+    ]
+    new = dict.fromkeys(record.news(agent, looks))
+
+    def kept(kind: Kind, found: list[Finding]) -> list[Finding]:
+        return placed(root, [each for each in quiet.told(kind, found) if each in new])
 
     return information(
-        kept(judgement.findings),
-        kept(judgement.information),
-        kept(judgement.untouched),
+        kept("rules", judgement.findings),
+        kept("changed", judgement.information),
+        kept("untouched", judgement.untouched),
         [],
     )
 
@@ -228,6 +247,8 @@ def before(
     worktree = Worktree.of(here.worktree, held.repository, services)
     path = here.path
     store = worktree.store
+    writer = agent or ""
+    quiet = ConversationRecord(layout=services.layout, session=session).quiet(writer)
     with worktree.lock():
         under = [each.hold for each in store.state().holding if each.path == path]
         if under:
@@ -249,7 +270,6 @@ def before(
         judgement = judge.judge([change])[0]
         to = Attributed(worktree=worktree.root, session=session, tool=proposal.tool)
         logged = None if judgement.outcome == "ask" else verdict(bench, to, judgement)
-        writer = agent or ""
         gathering = path in record.flagging.get(writer, [])
         found: list[Part] = []
         if logged is not None:
@@ -263,7 +283,7 @@ def before(
             record.pending = [*record.pending, pending]
             record.waiting(services.clock.now())
             record.flagged(writer, [path] if judgement.flags else [])
-            found = told(record, writer, worktree.root, judgement, after)
+            found = told(record, writer, worktree.root, judgement, after, quiet=quiet)
             worktree.keep(record)
     if logged is None:
         return held_write(
@@ -394,6 +414,8 @@ def held_write(
     with holds.waiting(key):
         answer = holds.wait(key, services.clock, ended=bench.interrupted)
         interrupted = answer is None and bench.interrupted()
+        conversations = ConversationRecord(layout=services.layout, session=session)
+        quiet = conversations.quiet(agent or "")
         with worktree.lock():
             state = store.state()
             if outside is None and all(each.hold != key for each in state.holding):
@@ -418,7 +440,7 @@ def held_write(
                     record.waiting(services.clock.now())
                     record.approved = list(dict.fromkeys([*record.approved, path]))
                 said = approval([where / path], answer.comment)
-                found = told(record, agent or "", where, judgement, after)
+                found = told(record, agent or "", where, judgement, after, quiet=quiet)
                 decision = Decision(
                     outcome="allow",
                     reason=said,
