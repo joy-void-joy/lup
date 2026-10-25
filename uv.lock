@@ -11,6 +11,7 @@ members = [
     "lup",
     "lup-dashboard",
     "lup-dev",
+    "lup-transcripts",
 ]
 
 [manifest.dependency-groups]
@@ -532,6 +533,7 @@ dependencies = [
     { name = "httpx" },
     { name = "jinja2" },
     { name = "lup" },
+    { name = "lup-transcripts" },
     { name = "markdown-it-py" },
     { name = "packaging" },
     { name = "pydantic" },
@@ -546,6 +548,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "lup", editable = "packages/lup" },
+    { name = "lup-transcripts", editable = "packages/lup-transcripts" },
     { name = "markdown-it-py", specifier = ">=4.2.0" },
     { name = "packaging", specifier = ">=26.3" },
     { name = "pydantic", specifier = ">=2.12" },
@@ -553,6 +556,26 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "typer", specifier = ">=0.27.2" },
 ]
+
+[[package]]
+name = "lup-transcripts"
+version = "0.1.0"
+source = { editable = "packages/lup-transcripts" }
+dependencies = [
+    { name = "lup" },
+]
+
+[package.optional-dependencies]
+environment = [
+    { name = "lup-dev" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "lup", editable = "packages/lup" },
+    { name = "lup-dev", marker = "extra == 'environment'", editable = "packages/lup-dev" },
+]
+provides-extras = ["environment"]
 
 [[package]]
 name = "markdown-it-py"

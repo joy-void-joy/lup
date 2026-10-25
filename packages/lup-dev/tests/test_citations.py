@@ -1,7 +1,8 @@
 """Every citation of a document names a document the repository has, and headings it has.
 
-A citation is a document's path in a code span, `docs/launch.md` or `DESIGN.md`,
-and the sections it names follow in italics: "(`docs/launch.md`, *Guidance*)",
+A citation is a document's path in a code span, `docs/launch.md`, `DESIGN.md` or
+a module's own, `packages/lup-transcripts/README.md`, and the sections it names
+follow in italics: "(`docs/launch.md`, *Guidance*)",
 "`docs/host-tools.md`, *The server* and *The room's requests*",
 "`docs/declaration.md`'s (*What a launch reads*, *The runner*)". Docstrings and
 comments wrap a citation across lines, so each file is read with its lines
@@ -32,7 +33,7 @@ SKIPPED = ["packages/*/tests/**", "packages/lup-dev/src/lup_dev/codescan/bundle/
 ELSEWHERE = ["lup-legacy", "first lup"]
 """Words that, just after a citation, say its document is another repository's."""
 
-DOCUMENT = r"`((?:docs/[a-z-]+|DESIGN|AGENTS)\.md)`"
+DOCUMENT = r"`((?:docs/[a-z-]+|DESIGN|AGENTS|packages/[a-z-]+/README)\.md)`"
 SECTIONS = r"(?:'s)?,? \(?(\*[^*]+\*(?:[,;]? (?:and |or )?\*[^*]+\*)*)"
 CITATION = re.compile(DOCUMENT + f"(?:{SECTIONS})?")
 JOINED = re.compile(r"\n[ \t]*(?:#|//)?[ \t]*")
@@ -57,6 +58,8 @@ def cited(text: str) -> list[tuple[str, list[str]]]:
     [('docs/declaration.md', ['What a launch reads', 'The runner', 'Requirements'])]
     >>> cited(joined("its engine (`docs/judging-writes.md`,\\n    # *The engine: one typed tree*)"))
     [('docs/judging-writes.md', ['The engine: one typed tree'])]
+    >>> cited("kept so (`packages/lup-transcripts/README.md`, *Keeping*)")
+    [('packages/lup-transcripts/README.md', ['Keeping'])]
     >>> cited("`DESIGN.md` describes it; `docs/rules.md` in `lup-legacy` too")
     [('DESIGN.md', [])]
     """

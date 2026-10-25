@@ -23,8 +23,8 @@ from lup_dev.git import Git
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from lup.transcripts.module import Transcripts
     from lup_dev.host.records import Record
+    from lup_transcripts.environment.module import Transcripts
 
 
 def stale(source: Path, copy: Path) -> bool:

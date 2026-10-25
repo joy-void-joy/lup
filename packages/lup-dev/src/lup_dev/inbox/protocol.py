@@ -909,7 +909,7 @@ class ConversationShowing(
 
     @override
     async def scoped(self, request: ShowConversation, repository: Path) -> Reply:
-        """Answer only where the record says it ran in the repository's git directory or one of its worktrees, as lup keeps a repository's sessions (`lup.transcripts`)."""
+        """Answer only where the record says it ran in the repository's git directory or one of its worktrees, as lup keeps a repository's sessions (`lup_transcripts`)."""
         read = await self.read(request)
         under = await asyncio.to_thread(
             lambda: [repository, *Git.pinned(repository).worktrees()]

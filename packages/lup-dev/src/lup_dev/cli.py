@@ -33,8 +33,6 @@ from pydantic import Field, TypeAdapter, ValidationError
 
 from lup.errors import LupError
 from lup.rooms import ContainerError, Mount, Podman, Room
-from lup.transcripts import views
-from lup.transcripts.module import Transcripts
 from lup.types import JsonObject, Model, MutableModel
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
@@ -234,6 +232,8 @@ from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
 from lup_dev.stored import read_model, write_model
 from lup_dev.worker import worked
+from lup_transcripts.environment import views
+from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
     from lup.tools.serving import Notice

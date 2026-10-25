@@ -1,38 +1,16 @@
-"""Each runtime's records of a repository's sessions, and keeping a copy of them.
+"""Each runtime's records of a repository's sessions: which of them are the repository's.
 
 The runtimes' homes here are directories the tests write, laid out as Claude Code
-and Codex lay out their own: no test reads the operator's.
+and Codex lay out their own: no test reads the operator's. Keeping a copy of them
+is `Transcripts`' (`packages/lup-transcripts/tests/`).
 """
 
-import asyncio
 import json
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
 
-import lup
-from lup.transcripts.module import Transcripts
-from lup.transcripts.serving import TranscriptsServing, copied
 from lup_dev.adapters.claude import ClaudeRecords
 from lup_dev.adapters.codex import CodexRecords
-from lup_dev.declaration.serving import Lup, Publisher
-from lup_dev.host.protocol import Limits, Register
-from lup_dev.host.records import Record, Records
-
-if TYPE_CHECKING:
-    from lup.publishing import Published, Refusal
-    from lup_dev.host.courier import Conversation
-
-
-class Unpublished(Publisher):
-    """A publishing door nothing goes through."""
-
-    async def refusals(
-        self,
-        published: Published,
-        launch: Register,
-        conversation: Conversation | None,
-    ) -> list[Refusal]:
-        raise AssertionError
+from lup_dev.host.records import Record
 
 
 def lines(path: Path, *records: dict[str, object]) -> None:
@@ -88,67 +66,3 @@ def test_codex_s_records_are_the_rollouts_whose_first_line_ran_under_the_reposit
             place=PurePosixPath("sessions", "2026", "10", "17", "rollout-a.jsonl"),
         )
     ]
-
-
-def test_a_copy_takes_what_s_missing_or_grown_and_leaves_what_s_unchanged(
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / "home" / "projects" / "p"
-    lines(source / "s1.jsonl", {"n": 1})
-    lines(source / "s1" / "tool-results" / "r.txt", {"n": 2})
-    records = [Record(source=source, place=PurePosixPath("projects", "p"))]
-    target = tmp_path / "copy"
-    assert copied(records, target) == 2
-    assert copied(records, target) == 0
-    with (source / "s1.jsonl").open("a", encoding="utf-8") as grown:
-        grown.write('{"n": 3}\n')
-    assert copied(records, target) == 1
-    assert (target / "projects" / "p" / "s1.jsonl").read_text() == (
-        source / "s1.jsonl"
-    ).read_text()
-
-
-class Held(Records):
-    """A runtime keeping one record, and noting what it was asked for."""
-
-    def __init__(self, record: Record) -> None:
-        self.record = record
-        self.asked: list[list[Path]] = []
-
-    def conversation(self, session: str, agent: str | None) -> Path | None:
-        return None
-
-    def kept(self, under: list[Path]) -> list[Record]:
-        self.asked.append(under)
-        return [self.record]
-
-
-def test_transcripts_copy_the_repository_s_records_at_its_moments(
-    repo: Path, tmp_path: Path
-) -> None:
-    source = tmp_path / "home" / "projects" / "p"
-    lines(source / "s1.jsonl", {"n": 1})
-    held = Held(Record(source=source, place=PurePosixPath("projects", "p")))
-    data = tmp_path / "data"
-    registered = Register(
-        launch="one",
-        runtime="claude",
-        worktree=repo,
-        repository=repo / ".git",
-        judge=tmp_path / "judge",
-        container="lup-one",
-        limits=Limits(actions=[], protected=[]),
-        github=None,
-    )
-    serving = TranscriptsServing(
-        module=Transcripts(),
-        records={"claude": held},
-        data=data,
-        related=[],
-        publisher=Unpublished(),
-    )
-    asyncio.run(serving.keep(lup.Stopped(), by=Lup(launch=registered)))
-    assert (data / "claude" / "projects" / "p" / "s1.jsonl").is_file()
-    [under] = held.asked
-    assert under[0] == repo / ".git"
-    assert repo in under

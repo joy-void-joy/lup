@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
-from lup.transcripts.serving import TranscriptsServing
 from lup_dev.declaration.kinds import Guidance, Mounted, Section, Serving
 from lup_dev.declaration.module import Module
+from lup_transcripts.environment.serving import TranscriptsServing
 
 
 class Transcripts(Module):
@@ -21,6 +21,10 @@ class Transcripts(Module):
     `Transcripts(data=Mounted(always=False))`, and a launch then lends them
     with `--mount transcripts`."""
     guidance: Guidance = Guidance.of(
-        Section(name="transcripts", package="lup.transcripts", path=Path("guidance.md"))
+        Section(
+            name="transcripts",
+            package="lup_transcripts.environment",
+            path=Path("guidance.md"),
+        )
     )
     """Where the copies are, and what they're for."""

@@ -9,6 +9,9 @@ dependencies = [
     # Renders a launched session's guidance from the modules' sections.
     "jinja2>=3.1",
     "lup",
+    # `Transcripts`, among lup's default modules: its base alone, since `lup-dev`
+    # is the environment its `environment` extra brings.
+    "lup-transcripts",
     # Reads an item's text into its Markdown blocks, the parts an id names (`inbox/parts.py`).
     "markdown-it-py>=4.2.0",
     "packaging>=26.3",
@@ -28,3 +31,4 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 lup = { workspace = true }
+lup-transcripts = { workspace = true }
