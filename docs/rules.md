@@ -1852,6 +1852,12 @@ def tools(names: list[str]) -> list[str]:
     return sorted(names)
 ```
 
+```python
+def lifted(held: list[str]) -> list[str]:
+    """Lift a hold, returning the findings it kept back until now."""
+    return held
+```
+
 
 ## `docstring-code`
 

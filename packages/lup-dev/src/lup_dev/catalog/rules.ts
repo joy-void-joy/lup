@@ -2082,7 +2082,7 @@ export const rules = {
             // "fixed for its life" tell nothing of the code's past.
             const always = ['previously', 'formerly', 'anymore'];
             // `now` names a moment of the running code after these, or before `that` or `on`.
-            const moment = ['for', 'right', 'from', 'just', 'by'];
+            const moment = ['for', 'right', 'from', 'just', 'by', 'until'];
             // `new` and `newly` set a thing against what it replaced after these; after
             // `a` they name an instance the code makes.
             const against = ['the', 'this', 'these', 'our'];
@@ -2179,6 +2179,11 @@ export const rules = {
                     def tools(names: list[str]) -> list[str]:
                         """List a thread's tools, fixed for its life: a fixed set, since right now the lock is held, and now that it is, nothing changes them."""
                         return sorted(names)
+                `,
+                python`
+                    def lifted(held: list[str]) -> list[str]:
+                        """Lift a hold, returning the findings it kept back until now."""
+                        return held
                 `,
             ],
         },
