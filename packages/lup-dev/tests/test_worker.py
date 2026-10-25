@@ -17,7 +17,7 @@ import threading
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 from typer.testing import CliRunner
@@ -25,7 +25,14 @@ from typer.testing import CliRunner
 from lup.tools.serving import Answer
 from lup_dev import cli
 from lup_dev.host.courier import Conversation
-from lup_dev.host.protocol import HostError, Limits, Refused, Register
+from lup_dev.host.protocol import (
+    HostError,
+    Limits,
+    Refused,
+    Register,
+    Reply,
+    Request,
+)
 from lup_dev.host.service import Dispatcher
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
@@ -33,6 +40,8 @@ from lup_dev.host.workers import (
     HookJudged,
     JudgeCalling,
     JudgeHook,
+    LaunchModules,
+    Offered,
     Worker,
     WorkerJudge,
     Workers,
@@ -67,7 +76,7 @@ async def named(calling: JudgeCalling) -> Answer:
 
 
 async def served(
-    judge: Callable[[str, str], str], at: Path, said: list[str]
+    judge: Callable[[str, str, Path | None], str], at: Path, said: list[str]
 ) -> asyncio.Server:
     """Serve the routes a repository's process serves, its modules unmade, judging with `judge` and running the judge's own tools with `named`, on `at`."""
     dispatcher = Dispatcher(
@@ -90,7 +99,9 @@ def test_a_repository_s_process_runs_the_judge_s_own_tools_for_the_conversation_
     )
 
     async def exercised() -> str:
-        server = await served(lambda runtime, payload: "", short / "p.sock", [])
+        server = await served(
+            lambda runtime, payload, environments: "", short / "p.sock", []
+        )
         try:
             return await exchanged(short / "p.sock", calling)
         finally:
@@ -105,7 +116,7 @@ def test_each_hook_is_judged_at_once_in_a_thread_of_its_own(short: Path) -> None
     together = threading.Barrier(2, timeout=PATIENCE)
     released = threading.Event()
 
-    def judge(runtime: str, payload: str) -> str:
+    def judge(runtime: str, payload: str, environments: Path | None) -> str:
         # Two hooks meet at the barrier while a third waits as a hold does: a
         # hook queued behind another would never reach it.
         if payload == "hold":
@@ -142,7 +153,7 @@ def test_each_hook_is_judged_at_once_in_a_thread_of_its_own(short: Path) -> None
 def test_judging_that_ends_its_thread_fails_its_hook_and_no_other(
     short: Path,
 ) -> None:
-    def judge(runtime: str, payload: str) -> str:
+    def judge(runtime: str, payload: str, environments: Path | None) -> str:
         if payload == "exit":
             raise SystemExit(3)
         return f"{runtime} judged {payload}"
@@ -165,6 +176,75 @@ def test_judging_that_ends_its_thread_fails_its_hook_and_no_other(
     assert "judging ended its thread: SystemExit(3)" in refused.error
     assert HookJudged.model_validate_json(after).printed == "r judged after"
     assert any("LupDevError: judging ended its thread" in line for line in said)
+
+
+def test_a_hook_reaches_the_judge_with_the_environments_of_its_launch(
+    short: Path,
+) -> None:
+    heard: list[Path | None] = []
+
+    def judge(runtime: str, payload: str, environments: Path | None) -> str:
+        heard.append(environments)
+        return f"{runtime} judged {payload}"
+
+    own = short / "rooms" / "environments" / "one"
+
+    async def exercised() -> list[str]:
+        server = await served(judge, short / "p.sock", [])
+        try:
+            return [
+                await exchanged(
+                    short / "p.sock",
+                    JudgeHook(runtime="r", payload=each, environments=environments),
+                )
+                for each, environments in [("a", own), ("b", None)]
+            ]
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    answered = asyncio.run(exercised())
+    assert [HookJudged.model_validate_json(each).printed for each in answered] == [
+        "r judged a",
+        "r judged b",
+    ]
+    assert heard == [own, None]
+
+
+class Recording(LaunchModules):
+    """A launch's modules that answer every request as a judged hook, each request kept."""
+
+    def __init__(self) -> None:
+        self.asked: list[Request] = []
+
+    @override
+    async def open(self, launch: Register) -> Offered:
+        raise NotImplementedError
+
+    @override
+    async def ask(self, launch: Register, request: Request) -> Reply:
+        self.asked.append(request)
+        return HookJudged(printed="judged")
+
+    @override
+    async def close(self, launch: Register) -> None:
+        return
+
+    @override
+    async def stop(self) -> None:
+        return
+
+
+def test_the_launch_s_judge_puts_its_hooks_with_the_launch_s_environments(
+    short: Path,
+) -> None:
+    own = short / "rooms" / "environments" / "one"
+    launch = registered(short, short / "lup-dev").model_copy(
+        update={"environments": own}
+    )
+    modules = Recording()
+    assert asyncio.run(WorkerJudge(modules=modules).judged(launch, "p")) == "judged"
+    assert modules.asked == [JudgeHook(runtime="claude", payload="p", environments=own)]
 
 
 def registered(
@@ -310,7 +390,7 @@ async def called(calling: object) -> Answer:
     return Answer(text=f"{{here.name}} runs no tool")
 
 
-def judge(runtime: str, payload: str) -> str:
+def judge(runtime: str, payload: str, environments: object) -> str:
     if payload == "hold":
         with socket.socket(socket.AF_UNIX) as told:
             told.connect({holds!r})

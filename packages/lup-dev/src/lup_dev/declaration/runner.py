@@ -8,9 +8,10 @@ and sync the environment, while a gate run on a commit must never write the
 project's files, `uv.lock` among them. The host never runs a project's
 environment: the judge reads it as files, from the directory the runner names
 (`venv`). A runner brings its own requirements, so a project whose runner is
-`Plain()` needs no uv. It also says what a room mounts so the environment works
-inside it, the one environment shared with the host (`docs/launch.md`, *The
-project's environment, shared with the host*).
+`Plain()` needs no uv. It also says what a room needs for an environment of its
+own, made outside the repository in the launch's own directory, each
+worktree's fresh at each launch, while the host's is hidden from the room
+(`docs/launch.md`, *The project's environment, the room's own*).
 """
 
 from abc import ABC, abstractmethod
@@ -31,12 +32,41 @@ class Interpreter(Model):
     """The interpreter a project's environment runs on, which a room must reach."""
 
     home: Path
-    """The directory holding it, as the runner finds it without running anything:
-    the `home` the environment's `pyvenv.cfg` records, or where there's no
-    environment yet, that of the interpreter it would be made from."""
+    """The directory holding it, as the runner finds it on the host without
+    running anything of the project's: that of the interpreter the room's
+    environment is made from."""
     remedy: str
-    """How to move the environment onto an interpreter a room mounts, said when
-    this one resolves outside every mount."""
+    """How to give the room an interpreter it mounts, said when this one
+    resolves outside every mount."""
+
+
+class RoomPlaces(Model):
+    """Where a launch keeps what its room's environments need, outside the repository: in the project's rooms' own directory, which the room mounts read-write at its host path (`lup_dev.layout.RoomsLayout`)."""
+
+    cache: Path
+    """The runner's package cache, which the project's rooms share: in the one
+    mount with the environments, so an environment made there links into it."""
+
+
+class RoomEnvironment(Model):
+    """How the runner's tools in a room are told the environment of the worktree they run in, which the launch makes in its own directory rather than in the worktree.
+
+    lup's program, first on the room's `PATH` under each of `programs`' names,
+    sets `variable` to that worktree's environment, then runs the real program
+    (`lup_dev/environments.py`); the host's judge reads the same environment,
+    for a hook of the room.
+    """
+
+    variable: str
+    """The variable naming the environment's directory to the runner's tools,
+    as an absolute path: uv's `UV_PROJECT_ENVIRONMENT`."""
+    programs: list[str]
+    """The programs that read it, each wrapped: `uv`."""
+    making: list[str] = []
+    """The command making the launch's worktree's environment, which the room
+    runs in the background at its start, through the wrapped programs, so the
+    judge reads it from the session's first write; none where there's nothing to
+    make."""
 
 
 class RoomNeeds(Model):
@@ -48,6 +78,9 @@ class RoomNeeds(Model):
     interpreter: Interpreter | None = None
     """The environment's interpreter, which must resolve under the room's mounts;
     none for a runner with no environment of its own."""
+    environment: RoomEnvironment | None = None
+    """How the room's tools find each worktree's environment, the launch's own;
+    none where the room has no environment of its own."""
 
 
 # lup: ignore("interface-shape", why="`docs/declaration.md` puts `venv()` and `room()` on the runner beside its commands and files, so a project's own runner must say where the judge reads its environment and what a room mounts for it")
@@ -92,13 +125,14 @@ class Runner(Model, ABC):
         `python -m venv`, uv and poetry's in-project environments do. The judge
         reads it as files, on the host, and never runs anything in it: the engine
         gives pyright its `site-packages`, the paths its `.pth` files list, and the
-        Python its `pyvenv.cfg` records. This is the host's answer; a room's own
-        environment would be said by what `room()` returns.
+        Python its `pyvenv.cfg` records. This is the host's: a room hides it where
+        it's inside the worktree, and has an environment of its own where `room()`
+        names one, which the judge reads for the room's hooks.
         """
 
     @abstractmethod
-    def room(self, root: Path, tools: Tools) -> RoomNeeds:
-        """Say what a room mounts and sets for the environment of the worktree at `root`.
+    def room(self, root: Path, tools: Tools, places: RoomPlaces) -> RoomNeeds:
+        """Say what a room mounts and sets for the environment of the worktree at `root`, its own kept in `places`.
 
         Asked on the host as a launch builds the room, through `tools`, which a
         test stubs.
@@ -132,7 +166,7 @@ class Plain(Runner):
         return None
 
     @override
-    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+    def room(self, root: Path, tools: Tools, places: RoomPlaces) -> RoomNeeds:
         """Mount nothing: the tools on the room's `PATH` are the image's own."""
         return RoomNeeds()
 
@@ -192,7 +226,7 @@ class Prefixed(Runner):
         return self.directory
 
     @override
-    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+    def room(self, root: Path, tools: Tools, places: RoomPlaces) -> RoomNeeds:
         """Refuse: a runner kept for judging holds its commands, not what a room mounts.
 
         A launch builds its room from a declaration that loaded, whose runner is

@@ -238,6 +238,25 @@ ignore_imports = [
     "lup_dev.clipboard.shim -> sys",
 ]
 
+# The room's `uv`, and the start making a launch's environment before its CLI, run on
+# a room's Python too (`docs/launch.md`, *The project's environment, the room's own*):
+# the standard library's modules alone.
+[[tool.importlinter.contracts]]
+name = "lup_dev.environments imports the standard library alone"
+type = "forbidden"
+source_modules = ["lup_dev.environments"]
+forbidden_modules = ["*", "lup.**", "lup_dev.**"]
+as_packages = false
+ignore_imports = [
+    "lup_dev.environments -> hashlib",
+    "lup_dev.environments -> json",
+    "lup_dev.environments -> os",
+    "lup_dev.environments -> pathlib",
+    "lup_dev.environments -> subprocess",
+    "lup_dev.environments -> sys",
+    "lup_dev.environments -> typing",
+]
+
 # lup's MCP bridge runs on a room's Python too, as each runtime's stdio server for
 # lup's tools (`lup/sessions/bridge.py`): the standard library's modules alone.
 [[tool.importlinter.contracts]]

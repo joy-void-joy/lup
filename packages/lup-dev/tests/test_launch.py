@@ -514,6 +514,11 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
     machine = Machine(tmp_path, clock)
     machine.host.served.extend([dead(project), live(project)])
     (machine.layout.launch("dead").directory).mkdir(parents=True)
+    # Environments the dead launch and one that crashed unregistered left, and
+    # the live launch's own.
+    rooms = machine.layout.rooms(project / ".git")
+    for each in ["dead", "crashed", "live"]:
+        (rooms.launch(each) / "dev-0123").mkdir(parents=True)
     (project / "AGENTS.md").write_text("# The project\n\nUncommitted.\n")
     (project / "AGENTS.local.md").write_text("Mine.\n")
     (project / "lup_project.py").write_text(
@@ -555,6 +560,10 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
         (
             f"Ended launch dead, claude in {project}: its launcher and its "
             "container, lup-dead, are gone."
+        ),
+        (
+            f"Removed {rooms.launch('crashed')}, the environments of a launch that "
+            "ended without removing them."
         ),
         f"register claude {container}",
         "This launch is `dev`.",
@@ -616,6 +625,11 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
     ]
     assert not lent.exists()
     assert not stage.exists()
+    # The project's rooms' own directory, read-write at its host path; a `Plain`
+    # runner gives the room no environment of its own, so nothing names one.
+    assert f"--mount=type=bind,source={rooms.home},destination={rooms.home}" in run
+    assert not any(each.startswith("--env=LUP_") for each in run)
+    assert [each.name for each in rooms.environments.iterdir()] == ["live"]
     assert f"--env=GIT_CONFIG_GLOBAL={directory / 'gitconfig'}" in run
     assert (
         f"--env=PATH={directory / 'bin'}:/usr/local/sbin:/usr/local/bin:/usr/sbin:"

@@ -13,7 +13,7 @@ from filelock import FileLock
 from pydantic import TypeAdapter
 from typer.testing import CliRunner
 
-from lup_dev import Requirement, cli
+from lup_dev import Requirement, cli, environments
 from lup_dev.catalog.gate import Gate, Step
 from lup_dev.declaration.package_managers.uv import Uv
 from lup_dev.declaration.requirements import (
@@ -23,6 +23,7 @@ from lup_dev.declaration.requirements import (
     Tools,
 )
 from lup_dev.declaration.runner import Plain
+from lup_dev.environments import environment
 from lup_dev.gate import (
     Amended,
     Check,
@@ -1193,3 +1194,25 @@ def test_lup_dev_check_at_a_commit_with_fix_runs_its_gate_with_the_fixes(
     [ran, _] = scripted.ran
     assert ran == Uv().judging(["lup-dev", "check", "--fix"])
     assert result.output.endswith("env ok\n")
+
+
+def test_in_a_room_the_worktree_a_gate_run_made_takes_its_environment_with_it(
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch = tmp_path / "rooms" / "environments" / "0f3a"
+    made = tmp_path / "lup-gate-1"
+    other = tmp_path / "tree" / "dev"
+    for each in [made, other]:
+        (environment(launch, each) / "bin").mkdir(parents=True)
+    monkeypatch.setenv(environments.ENVIRONMENTS, str(launch))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    # A socket's path is limited in length, so the engine's is looked for in a
+    # short directory.
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path_factory.mktemp("r")))
+
+    cli.scrapped(made, Plain())
+
+    assert not environment(launch, made).exists()
+    assert environment(launch, other).is_dir()

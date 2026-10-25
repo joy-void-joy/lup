@@ -44,11 +44,26 @@ class BackgroundSpawner(Spawner, Model):
 
     command: list[str] = ["importers"]
     """The hidden `lup-dev` command that runs the pass, given the worktree."""
+    environments: Path | None = None
+    """The launch's own environments, where the hook asking for the pass is of
+    a room that has them: the pass reads the worktree's there, as the hook's
+    judge does, so the two share one engine."""
 
     @override
     def spawn(self, worktree: Path, log: Path) -> None:
+        reading = (
+            []
+            if self.environments is None
+            else ["--environments", str(self.environments)]
+        )
         detached(
-            sys.executable, "-m", "lup_dev.cli", *self.command, str(worktree), log=log
+            sys.executable,
+            "-m",
+            "lup_dev.cli",
+            *self.command,
+            str(worktree),
+            *reading,
+            log=log,
         )
 
 

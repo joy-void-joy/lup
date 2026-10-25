@@ -44,7 +44,7 @@ Everything between you and the operator goes through lup's inbox; *lup's tools* 
 
 **What's here:**
 - the repository at the same path as on the host: its git directory and every worktree, read and written as there;
-- the project's environment, the same one the host uses;
+- the project's environment, the room's own for each worktree, outside it: made as the room starts or at the worktree's first `uv`, and gone when the session ends. The host's `.venv` reads as an empty directory you can't write;
 - the same standard machine in every room: bash and the usual tools, without the operator's own shell setup;
 - your runtime's login and history, which are the operator's own.
 

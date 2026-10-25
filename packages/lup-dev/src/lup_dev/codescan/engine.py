@@ -11,12 +11,18 @@ An engine is started with the directory of the worktree's environment, as the
 project's runner names it, which it reads as files and never runs, and the files
 deciding the environment, which it watches (`EngineEnvironment`). Every request
 carries them too, so an engine started with another runner is replaced as one
-from another build is.
+from another build is. A room's worktree has an environment of its launch's own,
+outside the repository (`docs/launch.md`, *The project's environment, the room's
+own*): a client given that launch's environments reads each worktree's there,
+as the room's own tools do (`lup_dev.environments.environment`). So two launches
+working in one worktree each replace the engine the other's hook started, at
+the cost of loading the project again.
 """
 
 import json
 import socket
 from datetime import timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
 
 from filelock import FileLock
@@ -28,12 +34,11 @@ from lup.types import Model
 from lup_dev.codescan.contract import Checker, FileReport, Parser, Rule, Source
 from lup_dev.confined import Confined
 from lup_dev.declaration.resolve import Selected
+from lup_dev.environments import environment
 from lup_dev.errors import LupDevError
 from lup_dev.layout import Bundle, Layout
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from lup_dev.declaration.runner import Runner
     from lup_dev.settings import LupDevSettings
 
@@ -63,9 +68,13 @@ class EngineEnvironment(Model):
     program when one changes."""
 
     @classmethod
-    def of(cls, runner: Runner) -> EngineEnvironment:
-        """Return the environment `runner` gives the engine."""
+    def of(
+        cls, runner: Runner, root: Path, environments: Path | None = None
+    ) -> EngineEnvironment:
+        """Return the environment `runner` gives the engine for the worktree at `root`: among a launch's own `environments` where they're given and the runner names one, else the runner's own."""
         venv = runner.venv()
+        if venv is not None and environments is not None:
+            venv = environment(environments, root)
         return cls(venv=None if venv is None else str(venv), files=runner.environment())
 
 
@@ -144,11 +153,21 @@ class EngineChecker(Model, Checker):
     """The Node executable that runs the engine."""
     timeout: timedelta = timedelta(minutes=10)
     """How long to wait for one answer, a whole project's first check included."""
+    environments: Path | None = None
+    """A launch's own environments, one per worktree, where the worktrees
+    checked are its room's: each worktree's environment is read there rather
+    than where the runner names the host's. None for the host's own."""
 
     @classmethod
-    def configured(cls, settings: LupDevSettings) -> EngineChecker:
-        """Return the engine as this machine's settings place it."""
-        return cls(layout=Layout.of(settings), idle=settings.lup_engine_idle)
+    def configured(
+        cls, settings: LupDevSettings, environments: Path | None = None
+    ) -> EngineChecker:
+        """Return the engine as this machine's settings place it, reading the environments of a launch's room: `environments`, else those the room names (`LUP_ENVIRONMENTS`), else the host's own."""
+        return cls(
+            layout=Layout.of(settings),
+            idle=settings.lup_engine_idle,
+            environments=environments or settings.lup_environments,
+        )
 
     def script(self) -> Path:
         """Return the built engine's script, or say how to build it."""
@@ -191,7 +210,7 @@ class EngineChecker(Model, Checker):
         """
         request = CheckRequest(
             build=self.build,
-            environment=EngineEnvironment.of(runner),
+            environment=EngineEnvironment.of(runner, root, self.environments),
             root=str(root),
             rules=selected,
             sources=[
@@ -207,25 +226,29 @@ class EngineChecker(Model, Checker):
         """Re-check, for type errors, the files importing any of `changed`."""
         request = ImportersRequest(
             build=self.build,
-            environment=EngineEnvironment.of(runner),
+            environment=EngineEnvironment.of(runner, root, self.environments),
             root=str(root),
             changed=[str(path) for path in changed],
         )
         return self.reports(self.ask(root, request))
 
-    def plain(self, op: Literal["status", "stop"], runner: Runner) -> PlainRequest:
-        """Return a request asking `op` and nothing more, with `runner`'s environment.
+    def plain(
+        self, op: Literal["status", "stop"], root: Path, runner: Runner
+    ) -> PlainRequest:
+        """Return a request asking `op` and nothing more, with the environment `runner` gives the worktree at `root`.
 
         An engine started with another runner is told apart and replaced, as one
         from another build is.
         """
         return PlainRequest(
-            op=op, build=self.build, environment=EngineEnvironment.of(runner)
+            op=op,
+            build=self.build,
+            environment=EngineEnvironment.of(runner, root, self.environments),
         )
 
     def status(self, root: Path, runner: Runner) -> EngineStatus:
         """Ask the worktree's engine about itself, starting it if none runs."""
-        answer = self.ask(root, self.plain("status", runner))
+        answer = self.ask(root, self.plain("status", root, runner))
         if answer.status is None:
             message = "the engine answered `status` without one"
             raise EngineError(message)
@@ -239,7 +262,7 @@ class EngineChecker(Model, Checker):
         """
         path = self.layout.engine_socket(root)
         try:
-            self.exchange(path, self.plain("stop", runner))
+            self.exchange(path, self.plain("stop", root, runner))
         except FileNotFoundError, ConnectionRefusedError, EngineGoneError:
             return
 

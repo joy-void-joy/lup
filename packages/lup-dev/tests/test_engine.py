@@ -33,7 +33,7 @@ from lup_dev.codescan.engine import (
 )
 from lup_dev.declaration.package_managers.uv import Uv as UvRunner
 from lup_dev.declaration.resolve import Selected, resolve
-from lup_dev.declaration.runner import Plain, RoomNeeds, Runner
+from lup_dev.declaration.runner import Plain, RoomNeeds, RoomPlaces, Runner
 from lup_dev.layout import Bundle, Layout
 
 if TYPE_CHECKING:
@@ -942,7 +942,7 @@ class Chosen(Runner):
         return self.directory
 
     @override
-    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+    def room(self, root: Path, tools: Tools, places: RoomPlaces) -> RoomNeeds:
         return RoomNeeds()
 
 

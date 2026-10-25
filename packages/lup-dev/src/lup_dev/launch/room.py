@@ -18,7 +18,13 @@ each at its host path (`docs/launch.md`, *The mounts*):
   in its place for the host's git to read (measured: `mv .git .git-real`
   succeeded under the mounts alone, and failed with "Device or resource busy"
   once `.git` was mounted on its own);
-- what the project's runner needs for its environment (`Runner.room`);
+- what the project's runner needs for its environment (`Runner.room`), and the
+  project's rooms' own directory, read-write: their package cache and each
+  launch's environments, so the room's environment of each worktree is its own,
+  fresh at each launch, outside the repository (`RoomEnvironments`);
+- over each worktree's own environment, the host's (`Runner.venv`), where it's
+  there as the room starts, an empty directory read-only, so the room neither
+  reads nor writes what the operator's own `uv run` runs (`launch/hidden.py`);
 - pyright's source in lup's cache, read-write, which the gate builds the engine
   from. Only that part: the cache holds the CLIs rooms run, which a room
   mustn't rewrite;
@@ -48,11 +54,12 @@ The operator's editor is the one `$VISUAL` names, else `$EDITOR`, which Ctrl+G
 opens (`OperatorsEditor`): where lup knows it (`Editors`), the room installs its
 package, unless the declaration has it already, and mounts its configuration.
 
-The directory of the environment's interpreter, which the runner reads without
-running anything (`Interpreter`), must resolve under the room's mounts, or the
-room refuses with the runner's remedy: without it, `uv run` in the room set about
-remaking the shared `.venv` (`docs/launch.md`, *The project's environment,
-shared with the host*). A system interpreter's is outside every mount.
+The directory of the interpreter the room's environment is made from, which the
+runner finds without running anything of the project's (`Interpreter`), must
+resolve under the room's mounts, or the room refuses with the runner's remedy:
+without it, the room's tools would have no interpreter to make an environment
+from (`docs/launch.md`, *The project's environment, the room's own*). A system
+interpreter's is outside every mount.
 
 The room's git (`room_git`, `docs/credentials.md`, *git through a remote
 helper*): its own configuration in place of the operator's (`GIT_CONFIG_GLOBAL`,
@@ -76,6 +83,7 @@ was published within `Core`'s `package_age`.
 """
 
 import inspect
+import json
 import shutil
 import tomllib
 from itertools import chain, count
@@ -83,11 +91,14 @@ from pathlib import Path
 from shlex import split
 from typing import TYPE_CHECKING
 
+from filelock import FileLock, Timeout
+
 from lup.programs import ProgramMissingError, run
 from lup.rooms.container import Container, Image, Mask, Mount
 from lup.sessions import bridge
 from lup.sessions.terminal import TerminalSettings
 from lup.types import Model
+from lup_dev import environments
 from lup_dev.catalog.room import Editor, Editors, RoomBase
 from lup_dev.clipboard import shim
 from lup_dev.declaration.kinds import Package
@@ -98,9 +109,11 @@ from lup_dev.declaration.package_managers.manager import (
     Ungated,
 )
 from lup_dev.declaration.requirements import Needed, Requirement
+from lup_dev.declaration.runner import RoomNeeds, RoomPlaces
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM
 from lup_dev.git import Git, nul_separated
+from lup_dev.launch.hidden import Hidden, removed
 from lup_dev.launch.images import definition
 from lup_dev.layout import (
     LOCALTIME,
@@ -109,16 +122,19 @@ from lup_dev.layout import (
     ROOM_SOCKETS,
     LaunchLayout,
     LaunchSockets,
+    RoomsLayout,
 )
 from lup_dev.remote import helper
 from lup_dev.remote.config import Gating, room_config
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from lup.rooms.engine import Podman
     from lup_dev.declaration import kinds
     from lup_dev.declaration.requirements import Tools
     from lup_dev.declaration.resolve import Resolved
-    from lup_dev.declaration.runner import Interpreter
+    from lup_dev.declaration.runner import Interpreter, Runner
     from lup_dev.layout import Layout
     from lup_dev.settings import TerminalVariables
 
@@ -229,12 +245,7 @@ def repository(worktree: Path) -> Repository:
     """
     git = Git(cwd=worktree)
     common = Path(git.text("rev-parse", "--path-format=absolute", "--git-common-dir"))
-    listed = git.run("worktree", "list", "--porcelain", "-z").output
-    roots = [
-        Path(field.removeprefix("worktree "))
-        for field in nul_separated(listed)
-        if field.startswith("worktree ")
-    ]
+    roots = worktrees(git)
     present = [root for root in roots if root.exists()]
     tree = next(
         each
@@ -254,6 +265,16 @@ def repository(worktree: Path) -> Repository:
         raise RoomError(message)
     [main, *_] = roots
     return Repository(git=common, worktrees=present, main=main, tree=tree)
+
+
+def worktrees(git: Git) -> list[Path]:
+    """Return the root of each of the repository's worktrees, as `git worktree list` gives them, the main one first, whether or not it's on disk."""
+    listed = git.run("worktree", "list", "--porcelain", "-z").output
+    return [
+        Path(field.removeprefix("worktree "))
+        for field in nul_separated(listed)
+        if field.startswith("worktree ")
+    ]
 
 
 class Described(Model):
@@ -424,7 +445,7 @@ def maintaining_room(
     worktree: Path,
     layout: Layout,
     terminal: TerminalVariables,
-    tools: Tools,
+    environments: RoomEnvironments,
     *,
     neighbours: list[RelatedRepository],
     shared: dict[str, Path] | None = None,
@@ -432,8 +453,8 @@ def maintaining_room(
 ) -> Container:
     """Return the maintaining session's room for the worktree at `worktree`.
 
-    `tools` is how the runner asks the host where its environment's parts are;
-    a test stubs it. `neighbours` are the other repositories named for the
+    `environments` is what the room gets for its environments, as the runner
+    said (`RoomEnvironments.of`). `neighbours` are the other repositories named for the
     project's sessions, as the launch found them (`related`): each mounted one
     is mounted read-only after the project's own. `shared` is where each module
     whose data the room mounts keeps it, by the module's name: each mounted at
@@ -448,7 +469,7 @@ def maintaining_room(
     editor = OperatorsEditor.of(terminal).known
     held = repository(worktree)
     git = Git(cwd=worktree)
-    needs = resolved.runner.room(worktree, tools)
+    needs = environments.needs
 
     def configured(key: str) -> str | None:
         found = git.run("config", "--get", key, ok=[0, 1])
@@ -485,6 +506,7 @@ def maintaining_room(
         Mount(source=held.git / "config", read_only=True),
         Mount(source=hooks, read_only=True),
         *needs.mounts,
+        *environments.mounts,
         Mount(source=pyright),
         *(
             Mount(source=home / path, read_only=True)
@@ -532,12 +554,167 @@ def maintaining_room(
         ],
         env={
             **needs.env,
+            **environments.env,
             **identity,
             **terminal.passed(),
             "XDG_CACHE_HOME": str(layout.cache.parent),
         },
         network="host",
     )
+
+
+class RoomEnvironments(Model):
+    """What a room gets for an environment of its own in each worktree, the launch's, and what's hidden of the host's (`docs/launch.md`, *The project's environment, the room's own*).
+
+    - **The project's rooms' own directory** (`RoomsLayout`), mounted read-write
+      at its host path: the package cache their runner shares, and each
+      launch's environments, one per worktree (`lup_dev/environments.py`), in
+      one mount so an environment's files are links into the cache.
+    - **lup's program first on the room's `PATH`,** under the name of each of
+      the runner's programs (`RoomEnvironment.programs`), which tells it the
+      environment of the worktree it runs in; the room's variables name the
+      launch's environments, the variable the runner reads, and the repository.
+    - **The start** (`before`): the runtime's CLI runs behind it, so the
+      launch's worktree's environment is made in the background as the session
+      starts (`RoomEnvironment.making`).
+    - **The host's environment hidden** in each worktree (`Hidden`), the
+      runner's own where it's inside the worktree (`Runner.venv`), whatever it
+      gives the room: what the room writes there would run on the host at the
+      operator's next `uv run`.
+    - **At the launch's end** (`end`), its environments are removed, and each
+      of the host's that appeared in a worktree while it ran, which only the
+      room would have made: the operator's own made meanwhile goes too, to be
+      made again.
+    """
+
+    rooms: RoomsLayout
+    launch: LaunchLayout
+    repository: Path
+    """The repository's git directory, whose worktrees get environments of the
+    launch's own, and whose worktrees are listed again at the end."""
+    directory: Path
+    """The launch's own environments, one per worktree: `rooms.launch(…)`."""
+    needs: RoomNeeds
+    """What the runner said the room needs for its environment."""
+    hidden: Hidden
+
+    @classmethod
+    def of(
+        cls,
+        runner: Runner,
+        worktree: Path,
+        layout: Layout,
+        launch: str,
+        tools: Tools,
+    ) -> RoomEnvironments:
+        """Ask `runner`, through `tools`, what a room needs for the environment of the worktree at `worktree`, and find what it hides, for the launch `launch`.
+
+        Raise `RoomError` where the repository's tree would hold the operator's
+        home, and `RunnerError` where the runner can't say.
+        """
+        held = repository(worktree)
+        rooms = layout.rooms(held.git)
+        needs = runner.room(worktree, tools, RoomPlaces(cache=rooms.cache))
+        venv = runner.venv()
+        hidden = [] if venv is None or venv.is_absolute() else [venv]
+        return cls(
+            rooms=rooms,
+            launch=layout.launch(launch),
+            repository=held.git,
+            directory=rooms.launch(launch),
+            needs=needs,
+            hidden=Hidden.of(held.tree, held.worktrees, hidden),
+        )
+
+    @property
+    def own(self) -> Path | None:
+        """The launch's environments, where its room has environments of its own: what the judge reads each worktree's from, for its hooks; none otherwise."""
+        return None if self.needs.environment is None else self.directory
+
+    @property
+    def mounts(self) -> list[Mount]:
+        """The project's rooms' directory, read-write, and what's hidden, read-only, each at its host path."""
+        return [Mount(source=self.rooms.home), *self.hidden.mounts(self.launch)]
+
+    @property
+    def env(self) -> dict[str, str]:
+        """The room's variables naming the launch's environments, the variable the runner reads, and the repository, where the room has environments of its own."""
+        environment = self.needs.environment
+        if environment is None:
+            return {}
+        return {
+            environments.ENVIRONMENTS: str(self.directory),
+            environments.VARIABLE: environment.variable,
+            environments.REPOSITORY: str(self.repository),
+        }
+
+    @property
+    def before(self) -> list[str]:
+        """What the runtime's CLI runs behind: `lup-environment` and the command making the launch's worktree's environment, as a JSON list; nothing where there's none to make."""
+        environment = self.needs.environment
+        if environment is None or not environment.making:
+            return []
+        return [str(self.launch.wrapper), json.dumps(environment.making)]
+
+    def write(self) -> None:
+        """Make the project's rooms' cache and the launch's environments, write lup's program among the launch's commands, executable, link each of the runner's programs to it, and make what the hidden paths are mounted from."""
+        self.rooms.cache.mkdir(parents=True, exist_ok=True)
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.hidden.write(self.launch)
+        environment = self.needs.environment
+        if environment is None:
+            return
+        self.launch.bin.mkdir(parents=True, exist_ok=True)
+        program = self.launch.wrapper
+        program.write_text(programs(self.launch)[program])
+        program.chmod(0o755)
+        for name in environment.programs:
+            self.launch.wrapping(name).symlink_to(program.name)
+
+    def end(self) -> list[str]:
+        """Remove the launch's environments, and each of the host's environments that appeared in a worktree while the room ran, and say each of those removed.
+
+        The repository's worktrees are listed again, since the room may have
+        added some; only those inside its tree are looked in.
+        """
+        removed(self.rooms.home, self.directory)
+        appeared = self.hidden.appeared(worktrees(Git.pinned(self.repository)))
+        return [
+            (
+                f"Removed {each}, an environment that appeared in a worktree while "
+                "the room ran, which the room may have made: where it was your "
+                "own, make it again."
+            )
+            for each in appeared
+            if removed(self.hidden.tree, each)
+        ]
+
+
+def unclaimed(rooms: RoomsLayout, served: list[str], layout: Layout) -> list[Path]:
+    """Remove each launch's environments in `rooms` that no launch among `served` holds and no launcher runs for, as a launch that crashed leaves them, and return those removed.
+
+    A launcher holds its launch's lock for its whole life (`LaunchLayout.lock`),
+    so one whose lock can be taken has none left.
+    """
+
+    def gone() -> Iterator[Path]:
+        for each in sorted(rooms.environments.iterdir()):
+            if each.name in served:
+                continue
+            held = layout.launch(each.name).lock
+            lock = FileLock(held, timeout=0)
+            try:
+                lock.acquire()
+            except Timeout:
+                continue
+            try:
+                if removed(rooms.home, each):
+                    yield each
+            finally:
+                lock.release()
+                held.unlink(missing_ok=True)
+
+    return list(gone()) if rooms.environments.is_dir() else []
 
 
 class RoomGit(Model):
@@ -717,12 +894,13 @@ def unlent(podman: Podman, launch: LaunchLayout) -> None:
 
 
 def programs(launch: LaunchLayout) -> dict[Path, str]:
-    """Return the programs a launch writes for its room to run, by where they go: git's remote helper, the clipboard's `wl-paste` and `wl-copy`, and lup's MCP bridge for its tool servers."""
+    """Return the programs a launch writes for its room to run, by where they go: git's remote helper, the clipboard's `wl-paste` and `wl-copy`, `lup-environment`, which the runner's programs link to, and lup's MCP bridge for its tool servers."""
     clipboard = inspect.getsource(shim)
     return {
         launch.helper: inspect.getsource(helper),
         launch.pasting: clipboard,
         launch.copying: clipboard,
+        launch.wrapper: inspect.getsource(environments),
         TerminalSettings(directory=launch.directory).bridge: inspect.getsource(bridge),
     }
 

@@ -575,9 +575,10 @@ async def threaded[T](work: Callable[[], T]) -> T:
 class Judges(Model, Handler[JudgeHook], arbitrary_types_allowed=True):
     """Answers `JudgeHook`: one hook put to the judge, in a thread of its own."""
 
-    judge: Callable[[str, str], str]
+    judge: Callable[[str, str, Path | None], str]
     """Answers one of a runtime's hooks as `lup-dev hook` does: the runtime's
-    name and the payload in, what the hook prints out."""
+    name, the payload and the launch's own environments, where its room has
+    them, in; what the hook prints out."""
 
     @override
     def request(self) -> type[JudgeHook]:
@@ -585,13 +586,15 @@ class Judges(Model, Handler[JudgeHook], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: JudgeHook) -> Reply:
-        printed = await threaded(partial(self.judge, request.runtime, request.payload))
+        printed = await threaded(
+            partial(self.judge, request.runtime, request.payload, request.environments)
+        )
         return HookJudged(printed=printed)
 
 
 def routes(
     modules: RepositoryModules | None,
-    judge: Callable[[str, str], str],
+    judge: Callable[[str, str, Path | None], str],
     called: Callable[[JudgeCalling], Awaitable[Answer]],
 ) -> list[Route]:
     """Return what a repository's process answers: the judge's hooks and its own tools that ask the engine, what its modules serve, and, where they were made, their tools, requests and hooks."""
@@ -642,7 +645,7 @@ def worked(
     services: Services,
     recorded: dict[str, Recorded],
     *,
-    judge: Callable[[str, str], str],
+    judge: Callable[[str, str, Path | None], str],
     called: Callable[[JudgeCalling], Awaitable[Answer]],
 ) -> None:
     """Serve the launches of the repository whose git directory is `repository`, on `socket`: their judge's hooks with `judge`, the judge's own tools that ask the engine with `called`, and the repository's modules.

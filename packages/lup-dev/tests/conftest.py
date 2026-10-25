@@ -25,7 +25,7 @@ import pytest
 
 from lup.programs import run
 from lup.types import MutableModel
-from lup_dev import Project, cli
+from lup_dev import Project, cli, environments
 from lup_dev.clock import Clock
 from lup_dev.codescan.contract import (
     Checker,
@@ -431,6 +431,23 @@ def outside_a_room(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_room_environments(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Judge as on the host, where no room names its launch's environments.
+
+    Where the suite runs in a room, the room names them (`lup_dev.environments`)
+    and lup's `uv` names its worktree's to uv: left in, a test's judge would read
+    each scratch worktree's environment among the room's own.
+    """
+    for name in [
+        environments.ENVIRONMENTS,
+        environments.VARIABLE,
+        environments.REPOSITORY,
+        "UV_PROJECT_ENVIRONMENT",
+    ]:
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def utc() -> Iterator[None]:
     """Read local times as UTC, so what's said of a moment is the same on every machine."""
     before = os.environ.get("TZ")
@@ -733,13 +750,13 @@ def fakes(kit: Kit, state: Layout, monkeypatch: pytest.MonkeyPatch) -> Kit:
     """The `lup-dev` command, its engine, ruff and services the kit's fakes."""
     services = kit.bench.services.model_copy(update={"layout": state})
 
-    def engine() -> Checker:
+    def engine(environments: Path | None = None) -> Checker:
         return kit.engine
 
     def linter() -> Linter:
         return kit.linter
 
-    def configured() -> Services:
+    def configured(environments: Path | None = None) -> Services:
         return services
 
     monkeypatch.setattr(cli, "engine", engine)

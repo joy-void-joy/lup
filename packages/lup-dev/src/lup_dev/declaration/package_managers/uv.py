@@ -4,7 +4,6 @@ Everything lup asks of uv is spelled here (`docs/declaration.md`, *The runner*;
 `docs/launch.md`, *The package age gate*).
 """
 
-import configparser
 import tomllib
 from datetime import timedelta
 from pathlib import Path
@@ -23,8 +22,15 @@ from lup_dev.declaration.package_managers.manager import (
     PackageManager,
     Ungated,
 )
-from lup_dev.declaration.requirements import Requirement, Tools
-from lup_dev.declaration.runner import Interpreter, RoomNeeds, Runner, RunnerError
+from lup_dev.declaration.requirements import Printed, Requirement, Tools
+from lup_dev.declaration.runner import (
+    Interpreter,
+    RoomEnvironment,
+    RoomNeeds,
+    RoomPlaces,
+    Runner,
+    RunnerError,
+)
 
 
 class UvSettings(Model):
@@ -49,12 +55,6 @@ class UvProject(Model):
 
     tool: Tool = Tool()
     project: Project = Project()
-
-
-class Pyvenv(Model):
-    """What lup reads of a virtual environment's `pyvenv.cfg`: the directory of the interpreter it runs on."""
-
-    home: Path | None = None
 
 
 class UvManager(PackageManager):
@@ -155,105 +155,99 @@ class Uv(Runner):
 
     @override
     def venv(self) -> Path | None:
-        """Return `.venv`, where `uv run` makes the project's environment.
+        """Return `.venv`, where `uv run` makes the project's environment on the host.
 
         A `UV_PROJECT_ENVIRONMENT` in the host's variables, which moves it for the
-        host's own `uv run`, isn't read: the judge reads `.venv`.
+        host's own `uv run`, isn't read: the judge reads `.venv`, or for a room's
+        hook the room's own environment (`room`).
         """
         return Path(".venv")
 
     @override
-    def room(self, root: Path, tools: Tools) -> RoomNeeds:
-        """Mount uv's interpreters read-only and its cache read-write, where uv keeps them on the host.
+    def room(self, root: Path, tools: Tools, places: RoomPlaces) -> RoomNeeds:
+        """Give the room an environment of its own for each worktree, its files links into the cache in `places`, and mount uv's interpreters read-only where uv keeps them on the host.
+
+        In the room:
+        - lup's `uv` sets `UV_PROJECT_ENVIRONMENT` to the launch's environment
+          of the worktree it runs in, an absolute path, which uv uses as it is;
+          where the project has a `uv.lock`, `uv sync --frozen` makes the
+          launch's worktree's at the room's start;
+        - `UV_CACHE_DIR` is the cache in `places`, which the room mounts with the
+          launch's environments, so an environment links into it rather than
+          copying it: a project's own `cache-dir` doesn't apply in a room
+          (`docs/launch.md`, *The project's environment, the room's own*);
+        - `UV_PYTHON_INSTALL_DIR` names uv's store, mounted read-only at its host
+          path, and `UV_PYTHON_DOWNLOADS=never` stops uv from fetching an
+          interpreter into it.
 
         uv is asked from outside any project, with no settings file read
         (`--no-config`), so nothing of the worktree's decides what the room
-        mounts and nothing in it runs: a project's own `cache-dir` doesn't apply
-        in a room (`docs/launch.md`, *The project's environment, shared with the
-        host*). The worktree's `.venv` links to an interpreter in uv's store, so
-        mounting the store at its path makes the one environment valid in the
-        room as on the host. In the room, `UV_CACHE_DIR` and
-        `UV_PYTHON_INSTALL_DIR` name the same two places, and
-        `UV_PYTHON_DOWNLOADS=never` stops uv from fetching an interpreter: with
-        the environment's interpreter missing, `uv run` set about remaking the
-        shared `.venv` (`docs/field-notes.md`, *Rooms*). The cache is made if
-        it's missing, since a mount needs its source.
-
-        The interpreter is the `home` the environment's `pyvenv.cfg` records,
-        read as data (`recorded_home`); where there's no environment yet, the
-        directory of the interpreter uv's store holds for the project's Python
-        (`requested`), found among uv's managed interpreters alone, no virtual
-        environment and no project consulted.
+        mounts and nothing in it runs. The interpreter is the one uv's store
+        holds for the project's Python (`requested`), found among uv's managed
+        interpreters alone, no virtual environment and no project consulted: the
+        room's uv makes its environments from the store. Raise `RunnerError`
+        where uv can't say, or its store holds no interpreter for the project.
         """
 
-        def asked(*command: str) -> str:
+        def asked(*command: str) -> Printed:
             asking = ["uv", "--no-config", *command]
-            ran = tools.run(asking)
-            if ran.code != 0:
-                message = (
-                    f"`{join(asking)}` failed with status {ran.code}, so lup can't "
-                    "say what the room mounts for the project's environment"
-                )
-                raise RunnerError(message)
-            return ran.output.strip()
+            return tools.run(asking)
 
-        store = Path(asked("python", "dir"))
-        cache = Path(asked("cache", "dir"))
-        home = recorded_home(root, root / ".venv")
-        if home is None:
-            found = asked(
-                "python",
-                "find",
-                "--managed-python",
-                "--system",
-                "--no-project",
-                *requested(root),
+        def failure(command: list[str], ran: Printed, *, why: str) -> RunnerError:
+            message = (
+                f"`{join(['uv', '--no-config', *command])}` failed with status "
+                f"{ran.code}, so {why}"
             )
-            home = Path(found).parent
-        cache.mkdir(parents=True, exist_ok=True)
+            return RunnerError(message)
+
+        directory = ["python", "dir"]
+        listed = asked(*directory)
+        if listed.code != 0:
+            raise failure(
+                directory,
+                listed,
+                why="lup can't say what the room mounts for the project's environment",
+            )
+        store = Path(listed.output.strip())
+        request = requested(root)
+        finding = [
+            "python",
+            "find",
+            "--managed-python",
+            "--system",
+            "--no-project",
+            *request,
+        ]
+        found = asked(*finding)
+        install = join(["uv", "python", "install", *request])
+        if found.code != 0:
+            raise failure(
+                finding,
+                found,
+                why=(
+                    "uv's store holds no Python for the project, which the room "
+                    f"makes its environment from: `{install}` on the host puts one "
+                    "there"
+                ),
+            )
+        lock = root / "uv.lock"
         return RoomNeeds(
-            mounts=[Mount(source=store, read_only=True), Mount(source=cache)],
+            mounts=[Mount(source=store, read_only=True)],
             env={
-                "UV_CACHE_DIR": str(cache),
+                "UV_CACHE_DIR": str(places.cache),
                 "UV_PYTHON_INSTALL_DIR": str(store),
                 "UV_PYTHON_DOWNLOADS": "never",
             },
             interpreter=Interpreter(
-                home=home,
-                remedy=(
-                    "run `uv sync --managed-python` in the project, which remakes "
-                    "`.venv` on a Python uv manages, installing one if there's none"
-                ),
+                home=Path(found.output.strip()).parent,
+                remedy=f"run `{install}` on the host, which puts one in uv's store",
+            ),
+            environment=RoomEnvironment(
+                variable="UV_PROJECT_ENVIRONMENT",
+                programs=["uv"],
+                making=["uv", "sync", "--frozen"] if lock.is_file() else [],
             ),
         )
-
-
-def recorded_home(root: Path, venv: Path) -> Path | None:
-    r"""Return the `home` the environment at `venv` records in its `pyvenv.cfg`, the directory of the interpreter it runs on; none where there's no such file inside `root`, or it records none.
-
-    It's read as data, as Python reads it at its start, never run.
-
-    >>> import tempfile
-    >>> with tempfile.TemporaryDirectory() as scratch:
-    ...     root = Path(scratch)
-    ...     (root / ".venv").mkdir()
-    ...     _ = (root / ".venv" / "pyvenv.cfg").write_text(
-    ...         "home = /store/cpython-3.14/bin\nversion_info = 3.14.0\n"
-    ...     )
-    ...     recorded_home(root, root / ".venv"), recorded_home(root, root / "missing")
-    (PosixPath('/store/cpython-3.14/bin'), None)
-    """
-    content = Confined(root=root).text(venv / "pyvenv.cfg")
-    if content is None:
-        return None
-    # `key = value` lines, as an INI file holds them, under no section's header:
-    # read as the defaults every section shares.
-    parser = configparser.ConfigParser(interpolation=None)
-    try:
-        parser.read_string(f"[{parser.default_section}]\n{content}")
-    except configparser.Error:
-        return None
-    return Pyvenv.model_validate(dict(parser.defaults())).home
 
 
 def requested(root: Path) -> list[str]:

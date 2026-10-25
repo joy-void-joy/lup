@@ -5,16 +5,28 @@ configuration kept out; uv is stubbed through the runner's `Tools`, and no test
 runs podman.
 """
 
+import inspect
 import tomllib
 from datetime import timedelta
 from pathlib import Path
 from typing import override
 
 import pytest
+from filelock import FileLock
 
 from lup.programs import run
 from lup.rooms.container import Container, Image, Mount
-from lup_dev import Core, Modules, Package, Packages, Plain, Project, Python, Repository
+from lup_dev import (
+    Core,
+    Modules,
+    Package,
+    Packages,
+    Plain,
+    Project,
+    Python,
+    Repository,
+    environments,
+)
 from lup_dev.catalog.room import Editors, RoomBase
 from lup_dev.declaration.package_managers.manager import (
     HomeSettings,
@@ -28,17 +40,21 @@ from lup_dev.launch.room import (
     Lent,
     OperatorsEditor,
     RelatedRepository,
+    RoomEnvironments,
     RoomError,
     RoomPackageAge,
     lent,
     maintaining_room,
     related,
     repository,
+    unclaimed,
 )
 from lup_dev.layout import LOCALTIME, LaunchLayout, Layout
 from lup_dev.settings import TerminalVariables
 
-REMEDY = "uv sync --managed-python"
+REMEDY = "uv python install"
+LAUNCH = "0f3a"
+"""The launch's id, as the launch makes one."""
 
 
 def naming(*paths: Path) -> list[Repository]:
@@ -77,12 +93,8 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 class AskedUv(Tools):
     """uv's answers by the two words after `uv --no-config`."""
 
-    def __init__(self, store: Path, cache: Path, interpreter: Path) -> None:
-        self.answers = {
-            "python dir": store,
-            "cache dir": cache,
-            "python find": interpreter,
-        }
+    def __init__(self, store: Path, interpreter: Path) -> None:
+        self.answers = {"python dir": store, "python find": interpreter}
 
     def found(self, program: str) -> bool:
         return True
@@ -92,28 +104,53 @@ class AskedUv(Tools):
 
 
 class Machine:
-    """The host as a room sees it: uv's store and cache, and a worktree's environment."""
+    """The host as a room sees it: uv's store, its interpreter, lup's places, and the worktree's own environment."""
 
     def __init__(self, tmp_path: Path, worktree: Path) -> None:
         self.store = tmp_path / "data" / "uv" / "python"
-        self.cache = tmp_path / "cache" / "uv"
-        self.layout = Layout(state=tmp_path / "state", cache=tmp_path / "cache" / "lup")
-        python = self.store / "cpython-3.14-linux" / "bin" / "python3.14"
-        python.parent.mkdir(parents=True)
-        python.write_text("")
+        self.layout = scratch(tmp_path)
+        self.python = self.store / "cpython-3.14-linux" / "bin" / "python3.14"
+        self.python.parent.mkdir(parents=True)
+        self.python.write_text("")
         self.environment = worktree / ".venv"
         (self.environment / "bin").mkdir(parents=True)
-        (self.environment / "bin" / "python").symlink_to(python)
-        self.runs_on(python.parent)
+        (self.environment / "bin" / "python").symlink_to(self.python)
 
-    def runs_on(self, home: Path) -> None:
-        """Record `home` as the directory of the environment's interpreter."""
-        (self.environment / "pyvenv.cfg").write_text(
-            f"home = {home}\nversion_info = 3.14.0\n"
-        )
+    def tools(self, interpreter: Path | None = None) -> AskedUv:
+        return AskedUv(self.store, interpreter or self.python)
 
-    def tools(self) -> AskedUv:
-        return AskedUv(self.store, self.cache, self.store / "none" / "python")
+
+def scratch(tmp_path: Path) -> Layout:
+    """lup's places, under the test's own directory."""
+    return Layout(
+        state=tmp_path / "state",
+        cache=tmp_path / "cache" / "lup",
+        data=tmp_path / "data" / "lup",
+    )
+
+
+def room_for(
+    resolved: Resolved,
+    worktree: Path,
+    layout: Layout,
+    terminal: TerminalVariables,
+    tools: Tools,
+    *,
+    neighbours: list[RelatedRepository],
+    shared: dict[str, Path] | None = None,
+    lent: list[Lent] | None = None,
+) -> Container:
+    """The maintaining room, with what the runner gives it for its environments, as a launch makes both."""
+    return maintaining_room(
+        resolved,
+        worktree,
+        layout,
+        terminal,
+        RoomEnvironments.of(resolved.runner, worktree, layout, LAUNCH, tools),
+        neighbours=neighbours,
+        shared=shared,
+        lent=lent,
+    )
 
 
 def terminal(**variables: str) -> TerminalVariables:
@@ -184,7 +221,7 @@ def test_the_maintaining_room_mounts_and_sets_what_the_note_lists(
     (home / ".nanorc").write_text("")
     resolved = resolve(Project())
 
-    room = maintaining_room(
+    room = room_for(
         resolved,
         worktree,
         machine.layout,
@@ -202,6 +239,7 @@ def test_the_maintaining_room_mounts_and_sets_what_the_note_lists(
     localtime = [Mount(source=LOCALTIME, read_only=True)] if LOCALTIME.exists() else []
     [vim] = [each for each in Editors().editors if each.package == "vim"]
     packages = [*resolved.packages, Package(name="vim", why=vim.why)]
+    rooms = machine.layout.rooms(bare)
     assert room == Container(
         image=Image(definition=definition(packages, RoomBase()), project=str(bare)),
         mounts=[
@@ -209,15 +247,23 @@ def test_the_maintaining_room_mounts_and_sets_what_the_note_lists(
             Mount(source=bare / "config", read_only=True),
             Mount(source=bare / "hooks", read_only=True),
             Mount(source=machine.store, read_only=True),
-            Mount(source=machine.cache),
+            Mount(source=rooms.home),
+            Mount(
+                source=machine.layout.launch(LAUNCH).empty_directory,
+                target=worktree / ".venv",
+                read_only=True,
+            ),
             Mount(source=tmp_path / "cache" / "lup" / "pyright"),
             Mount(source=home / ".vim", read_only=True),
             *localtime,
         ],
         env={
-            "UV_CACHE_DIR": str(machine.cache),
+            "UV_CACHE_DIR": str(rooms.cache),
             "UV_PYTHON_INSTALL_DIR": str(machine.store),
             "UV_PYTHON_DOWNLOADS": "never",
+            environments.ENVIRONMENTS: str(rooms.launch(LAUNCH)),
+            environments.VARIABLE: "UV_PROJECT_ENVIRONMENT",
+            environments.REPOSITORY: str(bare),
             "GIT_AUTHOR_NAME": "Test",
             "GIT_COMMITTER_NAME": "Test",
             "GIT_AUTHOR_EMAIL": "test@example.com",
@@ -232,7 +278,6 @@ def test_the_maintaining_room_mounts_and_sets_what_the_note_lists(
         network="host",
     )
     assert (tmp_path / "cache" / "lup" / "pyright").is_dir()
-    assert machine.cache.is_dir()
 
 
 def test_the_room_makes_the_hooks_directory_it_holds_read_only(
@@ -244,7 +289,7 @@ def test_the_room_makes_the_hooks_directory_it_holds_read_only(
         each.unlink()
     (bare / "hooks").rmdir()
 
-    room = maintaining_room(
+    room = room_for(
         resolve(Project()),
         worktree,
         machine.layout,
@@ -265,7 +310,7 @@ def test_without_a_git_identity_none_is_passed(
     worktree = bare / "tree" / "main"
     machine = Machine(tmp_path, worktree)
 
-    room = maintaining_room(
+    room = room_for(
         resolve(Project()),
         worktree,
         machine.layout,
@@ -283,7 +328,7 @@ def test_a_module_s_data_is_mounted_read_only_where_the_launch_places_it(
     worktree = bare / "tree" / "main"
     machine = Machine(tmp_path, worktree)
     kept = tmp_path / "data" / "modules" / "transcripts" / "digest"
-    room = maintaining_room(
+    room = room_for(
         resolve(Project()),
         worktree,
         machine.layout,
@@ -299,23 +344,24 @@ def test_a_plain_runner_mounts_and_checks_nothing_of_uv(
     bare: Path, tmp_path: Path, home: Path
 ) -> None:
     worktree = bare / "tree" / "main"
-    layout = Layout(state=tmp_path / "state", cache=tmp_path / "cache" / "lup")
+    layout = scratch(tmp_path)
     resolved = resolve(Project(modules=Modules.default().edit(Python(runner=Plain()))))
 
-    room = maintaining_room(
+    room = room_for(
         resolved,
         worktree,
         layout,
         terminal(),
-        AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+        AskedUv(tmp_path / "none", tmp_path / "none"),
         neighbours=[],
     )
 
-    assert not any(name.startswith("UV_") for name in room.env)
-    assert [each.source for each in room.mounts if isinstance(each, Mount)][:4] == [
+    assert not any(name.startswith(("UV_", "LUP_")) for name in room.env)
+    assert [each.source for each in room.mounts if isinstance(each, Mount)][:5] == [
         bare,
         bare / "config",
         bare / "hooks",
+        layout.rooms(bare).home,
         tmp_path / "cache" / "lup" / "pyright",
     ]
 
@@ -323,15 +369,15 @@ def test_a_plain_runner_mounts_and_checks_nothing_of_uv(
 def test_a_clone_s_git_directory_is_mounted_on_its_own_so_the_room_cant_move_it(
     repo: Path, tmp_path: Path, home: Path
 ) -> None:
-    layout = Layout(state=tmp_path / "state", cache=tmp_path / "cache" / "lup")
+    layout = scratch(tmp_path)
     resolved = resolve(Project(modules=Modules.default().edit(Python(runner=Plain()))))
 
-    room = maintaining_room(
+    room = room_for(
         resolved,
         repo,
         layout,
         terminal(),
-        AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+        AskedUv(tmp_path / "none", tmp_path / "none"),
         neighbours=[],
     )
 
@@ -346,7 +392,7 @@ def test_a_clone_s_git_directory_is_mounted_on_its_own_so_the_room_cant_move_it(
 # Refusals
 
 
-def test_an_environment_on_a_system_interpreter_is_refused(
+def test_an_interpreter_outside_the_store_is_refused(
     bare: Path, tmp_path: Path, home: Path
 ) -> None:
     worktree = bare / "tree" / "main"
@@ -354,41 +400,123 @@ def test_an_environment_on_a_system_interpreter_is_refused(
     system = tmp_path / "usr" / "bin" / "python3.14"
     system.parent.mkdir(parents=True)
     system.write_text("")
-    machine.runs_on(system.parent)
 
     with pytest.raises(
         RoomError,
         match=r"outside every mount of the room, as a system interpreter's is",
     ) as refused:
-        maintaining_room(
+        room_for(
             resolve(Project()),
             worktree,
             machine.layout,
             terminal(),
-            machine.tools(),
+            machine.tools(system),
             neighbours=[],
         )
     assert str(system.parent) in str(refused.value)
     assert REMEDY in str(refused.value)
 
 
-def test_an_environment_whose_interpreter_is_gone_is_refused(
+def test_an_interpreter_thats_gone_is_refused(
     bare: Path, tmp_path: Path, home: Path
 ) -> None:
     worktree = bare / "tree" / "main"
     machine = Machine(tmp_path, worktree)
-    machine.runs_on(tmp_path / "gone" / "bin")
 
     with pytest.raises(RoomError, match=r"and isn't there") as refused:
-        maintaining_room(
+        room_for(
             resolve(Project()),
             worktree,
             machine.layout,
             terminal(),
-            machine.tools(),
+            machine.tools(tmp_path / "gone" / "bin" / "python3"),
             neighbours=[],
         )
     assert REMEDY in str(refused.value)
+
+
+# The room's environments
+
+
+def test_a_launch_s_environments_are_its_own_and_go_with_it(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    machine = Machine(tmp_path, worktree)
+    (worktree / "uv.lock").write_text("")
+    rooms = machine.layout.rooms(bare)
+    launch = machine.layout.launch(LAUNCH)
+
+    made = RoomEnvironments.of(
+        resolve(Project()).runner, worktree, machine.layout, LAUNCH, machine.tools()
+    )
+    made.write()
+
+    assert made.own == rooms.launch(LAUNCH)
+    assert made.before == [str(launch.wrapper), '["uv", "sync", "--frozen"]']
+    assert launch.wrapper.read_text() == inspect.getsource(environments)
+    assert launch.wrapper.stat().st_mode & 0o111
+    assert launch.wrapping("uv").readlink() == Path(environments.STARTER)
+    assert rooms.cache.is_dir()
+    assert made.directory.is_dir()
+    # The room makes environments of its own, a worktree, and one in it the
+    # host's tools would run.
+    (environments.environment(made.directory, worktree) / "bin").mkdir(parents=True)
+    git(bare, "worktree", "add", "-q", "tree/new", "-b", "new")
+    (bare / "tree" / "new" / ".venv").mkdir()
+
+    said = made.end()
+
+    assert not made.directory.exists()
+    assert rooms.cache.is_dir()
+    assert not (bare / "tree" / "new" / ".venv").exists()
+    assert (worktree / ".venv" / "bin" / "python").is_symlink()
+    assert said == [
+        (
+            f"Removed {bare / 'tree' / 'new' / '.venv'}, an environment that "
+            "appeared in a worktree while the room ran, which the room may have "
+            "made: where it was your own, make it again."
+        )
+    ]
+
+
+def test_a_plain_runner_s_room_has_no_environments_of_its_own(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    layout = scratch(tmp_path)
+    made = RoomEnvironments.of(
+        resolve(plain()).runner,
+        worktree,
+        layout,
+        LAUNCH,
+        AskedUv(tmp_path / "none", tmp_path / "none"),
+    )
+    made.write()
+    assert made.own is None
+    assert made.env == {}
+    assert made.before == []
+    assert made.hidden.found == []
+    assert not layout.launch(LAUNCH).wrapper.exists()
+
+
+def test_the_environments_a_crashed_launch_left_are_removed_and_no_others(
+    tmp_path: Path,
+) -> None:
+    layout = scratch(tmp_path)
+    rooms = layout.rooms(tmp_path / "repo.git")
+    for each in ["crashed", "served", "running"]:
+        (rooms.launch(each) / "dev-0123").mkdir(parents=True)
+    layout.launches.mkdir(parents=True)
+
+    with FileLock(layout.launch("running").lock):
+        gone = unclaimed(rooms, ["served"], layout)
+
+    assert gone == [rooms.launch("crashed")]
+    assert sorted(each.name for each in rooms.environments.iterdir()) == [
+        "running",
+        "served",
+    ]
 
 
 def test_an_editor_that_isnt_a_command_line_is_refused(
@@ -398,7 +526,7 @@ def test_an_editor_that_isnt_a_command_line_is_refused(
     machine = Machine(tmp_path, worktree)
 
     with pytest.raises(RoomError, match=r"`\$EDITOR` isn't a command line"):
-        maintaining_room(
+        room_for(
             resolve(Project()),
             worktree,
             machine.layout,
@@ -434,7 +562,7 @@ def test_the_room_installs_the_editor_visual_names_else_editor(
     worktree = bare / "tree" / "main"
     machine = Machine(tmp_path, worktree)
 
-    room = maintaining_room(
+    room = room_for(
         resolve(Project()),
         worktree,
         machine.layout,
@@ -455,7 +583,7 @@ def test_an_editor_lup_doesnt_know_adds_nothing_beside_nano(
     (home / ".config" / "kak").mkdir(parents=True)
     resolved = resolve(Project())
 
-    room = maintaining_room(
+    room = room_for(
         resolved,
         worktree,
         machine.layout,
@@ -481,7 +609,7 @@ def test_an_editor_the_declaration_installs_already_is_installed_once(
     resolved = resolve(Project(modules=Modules.default().edit(layer)))
 
     for named in ["nano", "vim"]:
-        room = maintaining_room(
+        room = room_for(
             resolved,
             worktree,
             machine.layout,
@@ -571,15 +699,15 @@ def test_each_repository_there_is_mounted_read_only_at_its_host_path_after_the_p
     bare: Path, tmp_path: Path, home: Path
 ) -> None:
     worktree = bare / "tree" / "main"
-    layout = Layout(state=tmp_path / "state", cache=tmp_path / "cache" / "lup")
+    layout = scratch(tmp_path)
     neighbours = related(naming(Path("work"), Path("gone.git")), worktree)
 
-    room = maintaining_room(
+    room = room_for(
         resolve(plain()),
         worktree,
         layout,
         terminal(),
-        AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+        AskedUv(tmp_path / "none", tmp_path / "none"),
         neighbours=neighbours,
     )
 
@@ -588,6 +716,7 @@ def test_each_repository_there_is_mounted_read_only_at_its_host_path_after_the_p
         Mount(source=bare),
         Mount(source=bare / "config", read_only=True),
         Mount(source=bare / "hooks", read_only=True),
+        Mount(source=layout.rooms(bare).home),
         Mount(source=tmp_path / "cache" / "lup" / "pyright"),
         *localtime,
         Mount(source=(tmp_path / "work").resolve(), read_only=True),
@@ -598,7 +727,7 @@ def test_each_directory_lent_is_mounted_at_its_path_last_read_only_or_writable(
     bare: Path, tmp_path: Path, home: Path
 ) -> None:
     worktree = bare / "tree" / "main"
-    layout = Layout(state=tmp_path / "state", cache=tmp_path / "cache" / "lup")
+    layout = scratch(tmp_path)
     reading = tmp_path / "reading"
     writing = tmp_path / "writing"
     reading.mkdir()
@@ -608,12 +737,12 @@ def test_each_directory_lent_is_mounted_at_its_path_last_read_only_or_writable(
         *lent([writing], read_only=False),
     ]
 
-    room = maintaining_room(
+    room = room_for(
         resolve(plain()),
         worktree,
         layout,
         terminal(),
-        AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+        AskedUv(tmp_path / "none", tmp_path / "none"),
         neighbours=[],
         lent=lending,
     )
@@ -653,7 +782,7 @@ def test_a_repository_overlapping_the_room_s_own_mounts_is_refused(
     bare: Path, tmp_path: Path, home: Path, named: Path
 ) -> None:
     worktree = bare / "tree" / "main"
-    layout = Layout(state=tmp_path / "state", cache=tmp_path / "cache" / "lup")
+    layout = scratch(tmp_path)
 
     with pytest.raises(
         RoomError,
@@ -662,12 +791,12 @@ def test_a_repository_overlapping_the_room_s_own_mounts_is_refused(
             r" the room's own mount of "
         ),
     ) as refused:
-        maintaining_room(
+        room_for(
             resolve(plain()),
             worktree,
             layout,
             terminal(),
-            AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+            AskedUv(tmp_path / "none", tmp_path / "none"),
             neighbours=related(naming(named), worktree),
         )
     assert str((tmp_path / named).resolve()) in str(refused.value)

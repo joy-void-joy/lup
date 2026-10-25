@@ -53,6 +53,10 @@ class LupDevSettings(Settings):
     As ISO 8601 (`PT30M`) or `HH:MM:SS`. A stopped engine starts again when asked,
     reloading the project; a running one holds pyright's whole program in memory.
     """
+    lup_environments: Path | None = None
+    """`LUP_ENVIRONMENTS`: in a room, its launch's own environments, one per
+    worktree, which lup's `uv` names to uv there and the room's engine reads
+    (`lup_dev/environments.py`); unset on the host."""
     lup_integration_branch: str = "dev"
     """`LUP_INTEGRATION_BRANCH`: the branch whose tip holds what the host runs, and the declaration judged by.
 
