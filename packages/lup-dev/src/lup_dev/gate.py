@@ -259,7 +259,7 @@ def invoked(step: Step, runner: Runner) -> list[str]:
 
     The gate runs each step so, and the installer the step building lup's engine.
 
-    >>> from lup_dev.declaration.runner import Uv
+    >>> from lup_dev.declaration.package_managers.uv import Uv
     >>> invoked(Step(name="ruff", command=["ruff", "check"]), Uv())
     ['uv', 'run', 'ruff', 'check']
     >>> invoked(Step(name="make", command=["make"], in_environment=False), Uv())

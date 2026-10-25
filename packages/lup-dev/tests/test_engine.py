@@ -31,9 +31,9 @@ from lup_dev.codescan.engine import (
     EngineStatus,
     printed,
 )
+from lup_dev.declaration.package_managers.uv import Uv as UvRunner
 from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.declaration.runner import Plain, RoomNeeds, Runner
-from lup_dev.declaration.runner import Uv as UvRunner
 from lup_dev.layout import Bundle, Layout
 
 if TYPE_CHECKING:

@@ -15,13 +15,14 @@ from typer.testing import CliRunner
 
 from lup_dev import Requirement, cli
 from lup_dev.catalog.gate import Gate, Step
+from lup_dev.declaration.package_managers.uv import Uv
 from lup_dev.declaration.requirements import (
     Needed,
     Printed,
     RequirementError,
     Tools,
 )
-from lup_dev.declaration.runner import Plain, Uv
+from lup_dev.declaration.runner import Plain
 from lup_dev.gate import (
     Amended,
     Check,

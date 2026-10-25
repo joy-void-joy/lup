@@ -12,7 +12,7 @@ import pytest
 
 from lup_dev.codescan.contract import Source
 from lup_dev.codescan.ruff import Ruff, RuffError
-from lup_dev.declaration import runner
+from lup_dev.declaration.package_managers import uv
 from lup_dev.declaration.runner import Plain, RoomNeeds, Runner
 
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from lup_dev.declaration.requirements import Tools
 
-UV = runner.Uv()
+UV = uv.Uv()
 """lup's default runner."""
 
 CODE = "import os\n\nx = 1\nif x == None:\n    print(undefined)\n"

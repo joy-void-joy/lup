@@ -226,7 +226,7 @@ A module's commands come under its name on the command line, `lup-dev transcript
 
 ## The runner
 
-`Python.runner` says how the project runs its tools (`declaration/runner.py`), so uv is spelled once, in `Uv`, for everything run in the project's environment; a deferral's conditions asking uv for Pythons, and trust installing lup itself, ask uv for themselves:
+`Python.runner` says how the project runs its tools (`declaration/runner.py`), so uv is spelled once, in `Uv` (`declaration/package_managers/uv.py`), for everything run in the project's environment; a deferral's conditions asking uv for Pythons, and trust installing lup itself, ask uv for themselves:
 
 ```python
 class Runner(Model, ABC):
