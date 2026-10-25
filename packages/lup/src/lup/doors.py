@@ -37,10 +37,11 @@ A plain function given to an agent from code is a tool too: `@lup.tool` on
 """
 
 import inspect
+from annotationlib import type_repr
 from collections.abc import Awaitable, Callable
 from functools import partial
 from types import GenericAlias, UnionType
-from typing import Concatenate, Self, get_args, get_origin, overload
+from typing import Concatenate, Self, get_args, overload
 
 from pydantic import BaseModel
 
@@ -60,27 +61,12 @@ a union, or `None`."""
 
 
 def spelled(annotation: Annotation) -> str:
-    """Say a type as a signature writes it.
+    """Say a type as a signature writes it, its classes by their modules, for a door's refusal.
 
     >>> spelled(Publishing | None), spelled(list[Refusal])
-    ('`Publishing | None`', '`list[Refusal]`')
+    ('`lup.events.Publishing | None`', '`list[lup.publishing.Refusal]`')
     """
-
-    def bare(each: Annotation) -> str:
-        match each:
-            case GenericAlias():
-                arguments = ", ".join(bare(argument) for argument in get_args(each))
-                return f"{bare(get_origin(each))}[{arguments}]"
-            case UnionType():
-                return " | ".join(bare(arm) for arm in get_args(each))
-            case None:
-                return "None"
-            case type() if each is type(None):
-                return "None"
-            case type():
-                return each.__name__
-
-    return f"`{bare(annotation)}`"
+    return f"`{type_repr(annotation)}`"
 
 
 class DoorError(LupError):
