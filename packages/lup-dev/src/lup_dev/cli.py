@@ -30,10 +30,13 @@ import typer
 from filelock import FileLock
 from filelock import Timeout as Held
 from pydantic import Field, TypeAdapter, ValidationError
+from typer.core import TyperGroup
 
+from lup.doors import served as methods
 from lup.errors import LupError
 from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.types import JsonObject, Model, MutableModel
+from lup_dev import commanding
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import Adapter, claude, codex
@@ -55,11 +58,14 @@ from lup_dev.codescan.directives import (
 from lup_dev.codescan.engine import EngineChecker, EngineError
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
+from lup_dev.commanding import RoomExchanges
 from lup_dev.copies import removable
 from lup_dev.declaration.load import load, person_layer
 from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
 from lup_dev.declaration.resolve import Declaration, Selected, resolve
+from lup_dev.declaration.serving import Operator
+from lup_dev.declaration.serving import Room as RoomAsker
 from lup_dev.declaration.serving import tools as module_tools
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM, GitHubError, named
@@ -103,6 +109,7 @@ from lup_dev.host.protocol import (
 )
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
+from lup_dev.host.rooms import OwnLaunch, OwnLaunches, RoomRoute, ShowOwnLaunch
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import WorkerJudge, Workers
@@ -231,9 +238,8 @@ from lup_dev.remote.protocol import Remotes
 from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
 from lup_dev.stored import read_model, write_model
-from lup_dev.worker import worked
+from lup_dev.worker import RepositoryModules, worked
 from lup_transcripts.environment import views
-from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
     from lup.tools import serving
@@ -241,7 +247,6 @@ if TYPE_CHECKING:
     from lup.tools.tool import ToolSpec
     from lup_dev.declaration.resolve import Resolved
     from lup_dev.declaration.runner import Runner
-    from lup_dev.host.records import Transcript
     from lup_dev.host.rooms import RoomTools
     from lup_dev.host.workers import JudgeCalling, LaunchModules
     from lup_dev.policy.runtime import Runtime
@@ -251,13 +256,6 @@ app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 host = typer.Typer(help="lup's host service, which rooms call.")
 inbox = typer.Typer(help="What your agents tell and ask you, and your answers.")
-transcripts = typer.Typer(
-    no_args_is_help=True,
-    help=(
-        "This repository's past sessions, as lup keeps them: your words first, "
-        "each with what it answered."
-    ),
-)
 private = typer.Typer(
     no_args_is_help=True,
     help="What never leaves under your name: the `Private` module's values.",
@@ -265,7 +263,6 @@ private = typer.Typer(
 app.add_typer(rules, name="rules")
 app.add_typer(host, name="host")
 app.add_typer(inbox, name="inbox")
-app.add_typer(transcripts, name="transcripts")
 app.add_typer(private, name="private")
 
 
@@ -530,6 +527,7 @@ def host_serve(context: typer.Context) -> None:
         layout=layout.host,
         say=typer.echo,
         approval=partial(approval_of, layout),
+        approved=partial(approved_command, layout),
     )
     sweeping = Sweeping(
         layout=layout,
@@ -553,7 +551,11 @@ def host_serve(context: typer.Context) -> None:
         ),
         routes=control_routes(delivery, recorded(), dashboard, layout),
         tools=room_tools(delivery, layout, remotes, workers),
-        room_routes=[*remote_routes(remotes), *clipboard_routes(Desktop.of(settings))],
+        room_routes=[
+            *remote_routes(remotes),
+            *clipboard_routes(Desktop.of(settings)),
+            RoomRoute.to(OwnLaunches()),
+        ],
         modules=workers,
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
@@ -570,6 +572,14 @@ def approval_of(layout: Layout, repository: Path) -> str | None:
     """Return what the operator approved last for the repository at `repository`, by its fingerprint; none before the first approval."""
     approval = approved(layout, repository)
     return None if approval is None else approval.fingerprint
+
+
+def approved_command(layout: Layout, repository: Path) -> Path | None:
+    """Return the command of the copy approved for the repository at `repository`, which a request put with no launch starts its process from; none before the first approval."""
+    approval = approved(layout, repository)
+    if approval is None:
+        return None
+    return layout.judge(repository).command(approval.tool.name)
 
 
 def typed_reading(
@@ -674,13 +684,12 @@ def worker(
     process: none of them keeps state of its own.
     """
     known = Adapters(known=adapters())
-    records = {adapter.runtime.name(): adapter.records for adapter in known.known}
     made = services()
     worked(
         socket,
         repository,
         made,
-        records,
+        recorded(),
         judge=partial(known.answer, services=made),
         called=partial(known.called, services=made),
     )
@@ -927,100 +936,6 @@ def prompted(item: Item) -> AnswerItem:
         case _:
             message = f"{cited(item.number)} is {what(item)}: nothing to answer"
             raise InboxError(message)
-
-
-def kept_sessions(directory: Path) -> list[Transcript]:
-    """Read every session lup keeps of the repository `directory` is in, of every runtime it knows."""
-    repository = Path(
-        Git(cwd=directory).text(
-            "rev-parse", "--path-format=absolute", "--git-common-dir"
-        )
-    )
-    data = Layout.of(LupDevSettings()).module_data(Transcripts.name, repository)
-    return [
-        each.reader.read(record)
-        for each in adapters()
-        for record in each.reader.sessions(data / each.runtime.name())
-    ]
-
-
-@transcripts.command("list")
-def transcripts_list() -> None:
-    """List this repository's kept sessions, newest first: when each started, its name and id, how often you spoke, where it ran."""
-    lines = views.listed(kept_sessions(Path.cwd()))
-    typer.echo(
-        "\n".join(lines) if lines else "No session of this repository is kept yet."
-    )
-
-
-@transcripts.command("show")
-def transcripts_show(
-    session: Annotated[
-        str,
-        typer.Argument(help="The session: its id, the start of its id, or its name."),
-    ],
-    *,
-    everything: Annotated[
-        bool,
-        typer.Option(
-            "--all",
-            help="Everything said, the agent's words too, each run of tool calls a line.",
-        ),
-    ] = False,
-) -> None:
-    """Show what you said in a session, each time after what the agent last said before it; or, with `--all`, the whole conversation.
-
-    What you typed in its terminal is its record's alone. What reached a
-    session through lup, your reviews and answers among it, and what it said
-    to you, is its exchange in lup's inbox, which this leaves out: where the
-    inbox holds some, the last line says how many items, and the `lup-dev
-    inbox --conversation` that reads them.
-    """
-    chosen = views.chosen(kept_sessions(Path.cwd()), session)
-    typer.echo(views.whole(chosen) if everything else views.answered(chosen), nl=False)
-    for line in exchanged_through_lup(chosen.session):
-        typer.echo(f"\n{line}")
-
-
-def exchanged_through_lup(session: str) -> list[str]:
-    """Say how many items lup's inbox holds of `session`'s exchange, and the command that reads them; nothing where it holds none, or no host service answers, since this starts none. A service that can't answer is said."""
-    room = RoomClient()
-    asker: HostClient | FromRoom
-    if room.socket.exists():
-        asker = FromRoom(room=room)
-    else:
-        asker = host_client()
-        if not asker.answers():
-            return []
-    try:
-        read = asker.ask(ReadInbox(conversation=session, every=True, limit=1), Readout)
-    except HostError as unanswered:
-        return [f"lup's inbox wasn't asked for this session's exchange: {unanswered}"]
-    if not read.found:
-        return []
-    items = many(read.found, "item")
-    command = f"lup-dev inbox --conversation {session} --every --whole"
-    return [
-        (
-            f"Its exchange with you through lup, which this leaves out, is {items} "
-            f"in lup's inbox: `{command}` reads it."
-        )
-    ]
-
-
-@transcripts.command("search")
-def transcripts_search(
-    words: Annotated[list[str], typer.Argument(help="Words you said, all of them.")],
-    *,
-    whole: Annotated[
-        bool,
-        typer.Option(
-            "--whole", help="What each time answered whole, rather than its first line."
-        ),
-    ] = False,
-) -> None:
-    """Find each time you said all of `words`, in any kept session: when, your words, and the first line of what they answered, or with `--whole` all of it."""
-    typer.echo(views.found(kept_sessions(Path.cwd()), words, whole=whole), nl=False)
 
 
 @app.command("sessions")
@@ -2650,13 +2565,110 @@ def importers(worktree: Path) -> None:
     judged.importers().run(judging.checker, judged.declaration.runner)
 
 
+def built_in() -> list[str]:
+    """Return the commands `lup-dev` holds itself, by name: a first word that's none of them names a module, whose commands come under it."""
+    group = typer.main.get_command(app)
+    return list(group.commands) if isinstance(group, TyperGroup) else []
+
+
+def module_command(words: list[str]) -> bool:
+    """Say whether `words`, the command line after `lup-dev`, name one of the repository's modules' commands rather than one of `lup-dev`'s own."""
+    return bool(words) and not words[0].startswith("-") and words[0] not in built_in()
+
+
+def module_ran(words: list[str]) -> None:
+    """Run the module command `words` names, in this process (`commanding.py`).
+
+    In a room, from the worktree's own declaration, as the room. On the host,
+    as the operator, by the repository's approved copy: any other `lup-dev`
+    hands it over to that copy, becoming it.
+    """
+    git = Git(cwd=Path.cwd())
+    repository = Path(
+        git.text("rev-parse", "--path-format=absolute", "--git-common-dir")
+    )
+    layout = Layout.of(LupDevSettings())
+    room = RoomClient()
+    if room.socket.exists():
+        root = Path(git.text("rev-parse", "--show-toplevel"))
+        exchanges = RoomExchanges(room=room, repository=repository)
+        modules = RepositoryModules.of_worktree(
+            root, repository, recorded(), layout, exchanges
+        )
+
+        def asker() -> RoomAsker:
+            shown = FromRoom(room=room).ask(ShowOwnLaunch(), OwnLaunch)
+            return RoomAsker(launch=shown.launch)
+
+        commanding.run(words, modules.resolved.served, modules.made, asker)
+        return
+    command = approved_command(layout, repository)
+    if not commanding.approved(Path(sys.argv[0]), command):
+        commanding.handed_over(words, command, repository)
+    modules = RepositoryModules.loaded(repository, services(), recorded())
+    commanding.run(words, modules.resolved.served, modules.made, Operator)
+
+
+def module_commands_said() -> str:
+    """Say which of the repository's modules have commands, for `lup-dev --help`: from the worktree's declaration in a room, from the one the operator approved on the host, whose code alone the host runs; why not, where it can't be read."""
+    try:
+        git = Git(cwd=Path.cwd())
+        root = Path(git.text("rev-parse", "--show-toplevel"))
+        if RoomClient().socket.exists():
+            served = resolve(load(root).project).served
+        else:
+            repository = Path(
+                git.text("rev-parse", "--path-format=absolute", "--git-common-dir")
+            )
+            approval = approved(Layout.of(LupDevSettings()), repository)
+            if approval is None:
+                return "Nothing is approved for this repository, so its modules' commands don't run here."
+            with approved_declaration(
+                root, approval.commit, local=approval.local
+            ) as declared:
+                served = declared.resolved.served
+    except (LupDevError, LupError) as unread:
+        return f"This repository's modules' commands couldn't be listed: {unread}"
+    named = list(
+        dict.fromkeys(
+            owner.module.name
+            for owner in served
+            for method in methods(owner.serving).values()
+            if method.commanded() or method.viewing() is not None
+        )
+    )
+    if not named:
+        return ""
+    listed = ", ".join(f"`lup-dev {name}`" for name in named)
+    return f"This repository's modules' commands come under their names: {listed}."
+
+
+def helped() -> None:
+    """Show `lup-dev`'s help, then which of the repository's modules have commands."""
+    try:
+        app()
+    finally:
+        said = module_commands_said()
+        if said:
+            typer.echo(said)
+
+
 def main() -> None:
     """Run the command line, reporting lup's own errors without a traceback.
 
     The library's own (`LupError`) among them: a launch's room, and its runtime's
-    declaration, are the library's.
+    declaration, are the library's. A first word that isn't one of `lup-dev`'s
+    own commands names a module, whose commands it runs (`module_ran`); its
+    help names the modules that have commands (`module_commands_said`).
     """
     try:
+        words = sys.argv[1:]
+        if module_command(words):
+            module_ran(words)
+            return
+        if words in ([], ["--help"]):
+            helped()
+            return
         app()
     except (LupDevError, LupError) as failure:
         typer.echo(f"lup-dev: {failure}", err=True)

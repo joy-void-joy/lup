@@ -31,7 +31,7 @@ Both open and close with the launch, and are served again after a restart, as
 import traceback
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Literal, override
 
 from pydantic import JsonValue, ValidationError
 
@@ -111,6 +111,32 @@ class RoomRoute(Model, arbitrary_types_allowed=True):
             return await handler.answer(model.model_validate_json(raw), launch)
 
         return cls(kind=model.named(), answer=answered)
+
+
+class ShowOwnLaunch(Request, reads=True):
+    """Ask, from a room, for its own launch as the host service recorded it: what a module's command run in the room is asked by (`Room`)."""
+
+    kind: Literal["room-launch"] = "room-launch"
+
+
+class OwnLaunch(Reply):
+    """A room's own launch, as the host service recorded it."""
+
+    kind: Literal["room-launch-shown"] = "room-launch-shown"
+    launch: Register
+
+
+class OwnLaunches(Model, RoomHandler[ShowOwnLaunch]):
+    """Answers `ShowOwnLaunch`: the launch the room's socket belongs to, never one the room names."""
+
+    @override
+    def request(self) -> type[ShowOwnLaunch]:
+        return ShowOwnLaunch
+
+    @override
+    async def answer(self, request: ShowOwnLaunch, launch: Register) -> Reply:
+        del request
+        return OwnLaunch(launch=launch)
 
 
 class Stamped(Model, extra="allow"):

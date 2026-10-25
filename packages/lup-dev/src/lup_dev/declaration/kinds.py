@@ -14,6 +14,7 @@ from typing import Self, override
 
 from pydantic import model_validator
 
+from lup.blocks import FoldKind, Tone
 from lup.types import Model
 from lup_dev.catalog.credentials import CredentialDefaults, Withheld
 from lup_dev.catalog.gate import Step
@@ -550,6 +551,30 @@ class Serving(Named[type[ModuleServing]]):
     @override
     def named(self, entry: type[ModuleServing]) -> str:
         return entry.__name__
+
+
+class Folds(Named[FoldKind]):
+    """The kinds of fold a module's views lay out (`lup.FoldKind`), each named by its name.
+
+    Each letter is one fold kind's or drawer's across the repository's modules:
+    two taking one fail the load (`resolve`).
+    """
+
+    @override
+    def named(self, entry: FoldKind) -> str:
+        return entry.name
+
+
+class Tones(Named[Tone]):
+    """The tones a module's views' spans name beside the shell's (`lup.Tone`), each named by its name.
+
+    Each takes the look of a shell's tone or another module tone (`like`), or a
+    colour of the shell's palette; one taking an unknown tone's fails the load.
+    """
+
+    @override
+    def named(self, entry: Tone) -> str:
+        return entry.name
 
 
 class Mounted(Model, extra="forbid"):

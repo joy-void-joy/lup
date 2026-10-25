@@ -44,9 +44,13 @@ from lup_dev.host.protocol import (
     Stop,
     actions,
 )
-from lup_dev.host.records import Record, Records
+from lup_dev.host.records import Call as RecordedCall
+from lup_dev.host.records import Reader as RecordsReader
+from lup_dev.host.records import Record, Recorded, Records, Transcript
 from lup_dev.host.service import Answerer, HostService
 from lup_dev.host.workers import Calling, LaunchJudge
+from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.private import serving as private_serving
 from lup_dev.private.withheld import Held, Withheld, kept
@@ -59,6 +63,7 @@ if TYPE_CHECKING:
     from conftest import InProcess, StubFacts
     from pydantic import JsonValue
 
+    from lup.blocks import OfAgent
     from lup_dev.host.workers import LaunchModules
 
 RECORDED = Path(__file__).parent / "payloads" / "gh-2.102.0"
@@ -76,6 +81,30 @@ class Nothing(Records):
 
     def conversation(self, session: str, agent: str | None) -> Path | None:
         return None
+
+
+class Unread(RecordsReader):
+    """A runtime whose copies hold no session to read."""
+
+    def sessions(self, copies: Path) -> list[Path]:
+        del copies
+        return []
+
+    def read(self, record: Path) -> Transcript:
+        message = f"no session is kept at {record}"
+        raise FileNotFoundError(message)
+
+    def calls(self, record: Path, ids: list[str]) -> list[RecordedCall]:
+        del record, ids
+        return []
+
+
+class Unexchanged(Exchanges):
+    """An inbox where no conversation exchanged any item."""
+
+    async def exchanged(self, viewed: OfAgent) -> Exchanged:
+        del viewed
+        return Exchanged(sent=[], received=[])
 
 
 STAND_IN = """#!{python}
@@ -210,8 +239,9 @@ def called(
     serving = RepositoryModules(
         repository=registered.repository,
         resolved=resolve(declared),
-        records={registered.runtime: Nothing()},
+        recorded={registered.runtime: Recorded(records=Nothing(), reader=Unread())},
         layout=layout,
+        exchanges=Unexchanged(),
     )
     calling = Calling(launch=registered, name=name, arguments=arguments, caller=CALLER)
     return asyncio.run(serving.call(calling))

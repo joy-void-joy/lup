@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import pytest
+from pydantic import Field
+from typer.testing import CliRunner
 
 import lup
 from lup.programs import run
@@ -29,21 +31,30 @@ from lup_dev import (
     ProjectError,
     Room,
     Serving,
+    commanding,
 )
 from lup_dev.approval import Approval, ReleaseTool
-from lup_dev.declaration.kinds import Mounted
+from lup_dev.cli import module_command
+from lup_dev.declaration.kinds import Folds, Mounted, Tones
 from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.serving import Operator
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Limits, Register, Reply, Request
-from lup_dev.host.records import Record, Records
-from lup_dev.host.workers import Called, Calling, Happening, Sent, Workers
+from lup_dev.host.records import Call as RecordedCall
+from lup_dev.host.records import Reader as RecordsReader
+from lup_dev.host.records import Record, Recorded, Records, Transcript
+from lup_dev.host.workers import Called, Calling, Happening, Sent, Viewing, Workers
+from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.stored import write_model
 from lup_dev.worker import RepositoryModules
 
 if TYPE_CHECKING:
     from conftest import Kit
+
+    from lup.blocks import OfAgent
 
 CALLER = Conversation(id="c1", session="s1")
 
@@ -56,6 +67,30 @@ class Nothing(Records):
 
     def conversation(self, session: str, agent: str | None) -> Path | None:
         return None
+
+
+class Unread(RecordsReader):
+    """A runtime whose copies hold no session to read."""
+
+    def sessions(self, copies: Path) -> list[Path]:
+        del copies
+        return []
+
+    def read(self, record: Path) -> Transcript:
+        message = f"no session is kept at {record}"
+        raise FileNotFoundError(message)
+
+    def calls(self, record: Path, ids: list[str]) -> list[RecordedCall]:
+        del record, ids
+        return []
+
+
+class Unexchanged(Exchanges):
+    """An inbox where no conversation exchanged any item."""
+
+    async def exchanged(self, viewed: OfAgent) -> Exchanged:
+        del viewed
+        return Exchanged(sent=[], received=[])
 
 
 class Said(Model):
@@ -189,8 +224,9 @@ def serving(tmp_path: Path, volume: int = 1) -> RepositoryModules:
     return RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
-        records={"claude": Nothing()},
+        recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path),
+        exchanges=Unexchanged(),
     )
 
 
@@ -411,7 +447,10 @@ def test_a_repository_s_process_serves_its_committed_declaration_s_modules(
 
     async def exercised() -> tuple[list[str], Called, Called, bool]:
         workers = Workers(
-            layout=host, say=said.append, approval=lambda repository: None
+            layout=host,
+            say=said.append,
+            approval=lambda repository: None,
+            approved=lambda repository: None,
         )
         offered = await workers.open(registered)
         calling = Calling(
@@ -500,7 +539,11 @@ def test_a_bare_repository_s_modules_are_made_from_its_approved_declaration(
         local=LOCAL,
     )
     write_model(kit.layout.approved(bare), approval)
-    served = RepositoryModules.loaded(bare, kit.bench.services, {"claude": Nothing()})
+    served = RepositoryModules.loaded(
+        bare,
+        kit.bench.services,
+        {"claude": Recorded(records=Nothing(), reader=Unread())},
+    )
     names = [spec.name for spec in served.offered().tools]
     assert {"shout", "whisper"} <= set(names)
 
@@ -546,8 +589,9 @@ def listening(tmp_path: Path) -> RepositoryModules:
     return RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
-        records={"claude": Nothing()},
+        recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
+        exchanges=Unexchanged(),
     )
 
 
@@ -593,7 +637,7 @@ class ReadingServing(ModuleServing):
     async def read(self, event: lup.Launched, by: Lup) -> None:
         """Note the launch, and its runtime's records."""
         del event
-        records = type(self.records[by.launch.runtime]).__name__
+        records = type(self.recorded[by.launch.runtime].records).__name__
         with (self.data / "read").open("a", encoding="utf-8") as notes:
             notes.write(f"{by.launch.launch} {records}\n")
 
@@ -611,8 +655,12 @@ def test_each_launch_s_hooks_read_its_own_runtime_s_records(tmp_path: Path) -> N
     serving = RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
-        records={"claude": Nothing(), "codex": Elsewhere()},
+        recorded={
+            "claude": Recorded(records=Nothing(), reader=Unread()),
+            "codex": Recorded(records=Elsewhere(), reader=Unread()),
+        },
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
+        exchanges=Unexchanged(),
     )
     one = launch(tmp_path)
     two = one.model_copy(update={"launch": "two", "runtime": "codex"})
@@ -692,8 +740,9 @@ def guarding(tmp_path: Path) -> RepositoryModules:
     return RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
-        records={"claude": Nothing()},
+        recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
+        exchanges=Unexchanged(),
     )
 
 
@@ -767,3 +816,172 @@ def test_a_tool_publishes_through_every_module_s_hooks_first(tmp_path: Path) -> 
         caller=CALLER,
     )
     assert asyncio.run(guarding(tmp_path).call(fine)).text == "announced: hello"
+
+
+# Views and commands: a module's views answered by its repository's process, and
+# its commands on the command line.
+
+
+class Greeting(Model):
+    """Whom to greet, and how."""
+
+    name: str = Field(description="Whom to greet.")
+    loud: bool = Field(default=False, alias="shout", description="Shout it.")
+
+
+class Shown(Model):
+    """A view's own argument."""
+
+    what: str
+
+
+class ViewerServing(ModuleServing):
+    """A view placed in a drawer, one a fold reads, and a command."""
+
+    module: Viewer
+
+    @lup.view(place=lup.Drawer(letter="w", called="the greeting", colour="cyan"))
+    async def greeting(self, viewed: lup.OfAgent) -> lup.Blocks:
+        """Greet the agent."""
+        line = lup.Line.of("1", f"hello {viewed.session}", "warm")
+        return lup.Blocks(summary=[lup.Span(text="greeting")], blocks=[line])
+
+    @lup.view
+    async def wrong(self, viewed: Shown) -> lup.Blocks:
+        """Name a tone nobody declares."""
+        return lup.Blocks(blocks=[lup.Line.of("1", viewed.what, "nobody's")])
+
+    @lup.command
+    async def greet(self, asked: Greeting, by: Operator) -> str:
+        """Greet someone, as the operator."""
+        del by
+        said = f"hello {asked.name}"
+        return said.upper() if asked.loud else said
+
+
+class Viewer(Module):
+    """Greeting, as views and a command."""
+
+    name = "viewer"
+
+    serving: Serving = Serving.of(ViewerServing)
+    tones: Tones = Tones.of(lup.Tone(name="warm", colour="orange"))
+    folds: Folds = Folds()
+
+
+def viewing(tmp_path: Path) -> RepositoryModules:
+    resolved = resolve(Project(modules=Modules.only(Core(), Viewer())))
+    return RepositoryModules(
+        repository=tmp_path / ".git",
+        resolved=resolved,
+        recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
+        layout=Layout(state=tmp_path, data=tmp_path),
+        exchanges=Unexchanged(),
+    )
+
+
+def test_a_view_placed_in_a_drawer_resolves_with_its_letter(tmp_path: Path) -> None:
+    looks = viewing(tmp_path).resolved.looks
+    assert [(each.view, each.place.letter) for each in looks.drawers] == [
+        ("greeting", "w")
+    ]
+    assert [tone.name for tone in looks.tones] == ["warm"]
+
+
+def test_the_repository_s_process_answers_a_view_for_the_operator(
+    tmp_path: Path,
+) -> None:
+    asked = Viewing(
+        module="viewer", view="greeting", argument={"runtime": "r", "session": "s1"}
+    )
+    blocks = asyncio.run(viewing(tmp_path).view(asked))
+    assert blocks.text() == "greeting\nhello s1"
+
+
+def test_a_view_naming_a_tone_nobody_declares_is_refused(tmp_path: Path) -> None:
+    asked = Viewing(module="viewer", view="wrong", argument={"what": "hi"})
+    with pytest.raises(LupDevError, match="names tones no module declares: nobody's"):
+        asyncio.run(viewing(tmp_path).view(asked))
+
+
+def test_a_view_given_what_it_doesn_t_take_is_refused(tmp_path: Path) -> None:
+    asked = Viewing(module="viewer", view="greeting", argument={"what": "hi"})
+    with pytest.raises(LupDevError, match="doesn't take what it was given"):
+        asyncio.run(viewing(tmp_path).view(asked))
+
+
+def test_two_modules_taking_one_fold_letter_fail_the_load() -> None:
+    clashing = Viewer(
+        folds=Folds.of(
+            lup.FoldKind(
+                name="mine", letter="w", called="mine", one="mine", level=1, colour="ok"
+            )
+        )
+    )
+    with pytest.raises(ProjectError, match="Fold keys"):
+        resolve(Project(modules=Modules.only(Core(), clashing)))
+
+
+def test_a_tone_taking_an_unknown_tone_s_look_fails_the_load() -> None:
+    odd = Viewer(tones=Tones.of(lup.Tone(name="odd", like="nowhere")))
+    with pytest.raises(ProjectError, match="takes the look of `nowhere`"):
+        resolve(Project(modules=Modules.only(Core(), odd)))
+
+
+def test_a_module_s_commands_and_views_run_on_the_command_line(
+    tmp_path: Path,
+) -> None:
+    modules = viewing(tmp_path)
+    app = commanding.commands("viewer", modules.resolved.served, modules.made, Operator)
+    runner = CliRunner()
+    greeted = runner.invoke(app, ["greet", "you", "--shout"])
+    assert greeted.output == "HELLO YOU\n"
+    shown = runner.invoke(app, ["greeting", "claude", "s1"])
+    assert shown.output == "greeting\nhello s1\n"
+    helped = runner.invoke(app, ["greet", "--help"])
+    assert "Greet someone, as the operator." in helped.output
+    assert "--shout" in helped.output
+
+
+def test_a_command_its_runner_may_not_run_is_refused_as_it_runs(
+    tmp_path: Path,
+) -> None:
+    modules = viewing(tmp_path)
+    room = Room(launch=launch(tmp_path))
+    app = commanding.commands(
+        "viewer", modules.resolved.served, modules.made, lambda: room
+    )
+    ran = CliRunner().invoke(app, ["greet", "you"])
+    assert isinstance(ran.exception, LupDevError)
+    assert "never by `Room`" in str(ran.exception)
+
+
+def test_a_module_command_names_one_of_the_repository_s_modules(
+    tmp_path: Path,
+) -> None:
+    modules = viewing(tmp_path)
+    with pytest.raises(commanding.CommandError, match="its modules are viewer"):
+        commanding.commands("nobody", modules.resolved.served, modules.made, Operator)
+
+
+def test_the_approved_copy_runs_a_module_s_command_itself(tmp_path: Path) -> None:
+    copy = tmp_path / "copy" / "bin" / "lup-dev"
+    copy.parent.mkdir(parents=True)
+    copy.touch()
+    link = tmp_path / "lup-dev"
+    link.symlink_to(copy)
+    assert commanding.approved(link, copy)
+    assert not commanding.approved(tmp_path / "installed", copy)
+    assert not commanding.approved(link, None)
+
+
+def test_nothing_approved_hands_no_command_over(tmp_path: Path) -> None:
+    with pytest.raises(commanding.CommandError, match="`lup-dev trust` approves it"):
+        commanding.handed_over(["transcripts", "list"], None, tmp_path)
+
+
+def test_a_first_word_that_isn_t_lup_dev_s_own_names_a_module() -> None:
+    assert module_command(["transcripts", "list"])
+    assert not module_command(["inbox"])
+    assert not module_command(["--help"])
+    assert not module_command([])

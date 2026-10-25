@@ -54,7 +54,7 @@ from lup_dev.declaration.serving import Room
 from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import RoomClient
 from lup_dev.host.protocol import HostError
-from lup_dev.host.records import Record, Records
+from lup_dev.host.records import Call, Reader, Record, Recorded, Records, Transcript
 from lup_dev.host.workers import (
     Called,
     Calling,
@@ -67,7 +67,8 @@ from lup_dev.host.workers import (
     Relaying,
     Sent,
 )
-from lup_dev.inbox.protocol import AskFlag, Gathering, ShowGathering
+from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.protocol import AskFlag, Exchanged, Gathering, ShowGathering
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench, Services
 from lup_dev.policy.flags import Flagging
@@ -81,6 +82,7 @@ from lup_dev.worker import RepositoryModules
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+    from lup.blocks import OfAgent
     from lup_dev.declaration.resolve import Selected
     from lup_dev.declaration.runner import Runner
     from lup_dev.forge.github import Visibility
@@ -748,6 +750,33 @@ def fakes(kit: Kit, state: Layout, monkeypatch: pytest.MonkeyPatch) -> Kit:
     return kit
 
 
+class Unread(Reader):
+    """A runtime whose copies hold no session to read."""
+
+    def sessions(self, copies: Path) -> list[Path]:
+        del copies
+        return []
+
+    def read(self, record: Path) -> Transcript:
+        message = f"no session is kept at {record}"
+        raise FileNotFoundError(message)
+
+    def calls(self, record: Path, ids: list[str]) -> list[Call]:
+        del record, ids
+        return []
+
+
+class Exchanging(Exchanges):
+    """The inbox's items as a test sets them: each conversation exchanges the same, none by default."""
+
+    def __init__(self, items: Exchanged | None = None) -> None:
+        self.items = items or Exchanged(sent=[], received=[])
+
+    async def exchanged(self, viewed: OfAgent) -> Exchanged:
+        del viewed
+        return self.items
+
+
 class NoRecords(Records):
     """A runtime that keeps no records."""
 
@@ -764,6 +793,8 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     resolved: Resolved
     records: Records = NoRecords()
     """Where each launch's runtime keeps its records, whichever it is."""
+    reader: Reader = Unread()
+    """How each launch's runtime's records are read, whichever it is."""
     layout: Layout = Layout(state=Path("/nowhere"), data=Path("/nowhere"))
     """Where lup keeps its data, each module's own among it, made as a module's
     method runs: a test that runs one gives its own."""
@@ -776,8 +807,11 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
         return RepositoryModules(
             repository=launch.repository,
             resolved=self.resolved,
-            records={launch.runtime: self.records},
+            recorded={
+                launch.runtime: Recorded(records=self.records, reader=self.reader)
+            },
             layout=self.layout,
+            exchanges=Exchanging(),
         )
 
     async def open(self, launch: Register) -> Offered:

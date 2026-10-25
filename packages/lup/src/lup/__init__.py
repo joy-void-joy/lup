@@ -24,9 +24,10 @@ terminal too, and a room opens that terminal in a container (`lup.rooms`,
 
 It holds, too, the doors a module's methods are reached through, each a
 decorator (`lup.doors`): `lup.tool`, which a plain function given to an ask is
-made a tool with too, `lup.request` and `lup.on`; lup's events, one class each
-(`lup.events`); and what a hook at `Publishing` reads and refuses
-(`lup.publishing`). `lup_dev` serves them.
+made a tool with too, `lup.request`, `lup.on`, `lup.view` and `lup.command`; lup's events, one
+class each (`lup.events`); what a hook at `Publishing` reads and refuses
+(`lup.publishing`); and the building blocks a view is laid out from
+(`lup.blocks`). `lup_dev` serves them.
 
     translator = Claude(model="opus", system_prompt=PROMPT)
     result = await translator.ask(segment.model_dump_json(), Translations)
@@ -40,7 +41,20 @@ and a project installs only the extra it asks through (`lup[claude]`,
 
 from lup.adapters.claude import Claude
 from lup.adapters.codex import Codex
-from lup.doors import on, request, tool
+from lup.blocks import (
+    Blocks,
+    Drawer,
+    Fold,
+    FoldKind,
+    Line,
+    Load,
+    Markdown,
+    OfAgent,
+    Span,
+    Tone,
+    Watch,
+)
+from lup.doors import command, on, request, tool, view
 from lup.errors import LupError
 from lup.events import (
     CallFinished,
@@ -76,16 +90,24 @@ __all__ = [
     "AgentUnavailableError",
     "AuthMissingError",
     "BlockedError",
+    "Blocks",
     "CallFinished",
     "CallStarted",
     "Claude",
     "Codex",
     "ConversationEnded",
+    "Drawer",
     "Event",
+    "Fold",
+    "FoldKind",
     "Friction",
     "HowItWent",
     "Launched",
+    "Line",
+    "Load",
     "LupError",
+    "Markdown",
+    "OfAgent",
     "OutputMissingError",
     "Part",
     "Place",
@@ -99,9 +121,11 @@ __all__ = [
     "RuntimeMissingError",
     "SessionLayers",
     "SessionStarted",
+    "Span",
     "Stopped",
     "StoppedError",
     "Submission",
+    "Tone",
     "ToolsPresentError",
     "TurnEnded",
     "TurnError",
@@ -110,7 +134,10 @@ __all__ = [
     "TurnTimeoutError",
     "Usage",
     "UsageLimitReachedError",
+    "Watch",
+    "command",
     "on",
     "request",
     "tool",
+    "view",
 ]

@@ -9,9 +9,10 @@ process serving another's. The service asks it, on a socket of its own under
 the host's sockets that no room mounts, what its modules serve, then passes it
 each hook the judge reads, each call to one of their tools or to one of the
 judge's own that asks the engine, each room's request of a kind they answer,
-and each event their hooks run at, one typed request per connection, one reply,
+each view the operator or a room asks of them, and each event their hooks run
+at, one typed request per connection, one reply,
 each answered at once whatever the others wait on. The launch travels with each
-request (`Calling`, `JudgeCalling`, `Relaying`, `Happening`), never with the
+request (`Calling`, `JudgeCalling`, `Relaying`, `Viewing`, `Happening`), never with the
 process, which serves each launch of its repository alike.
 
 The process stays running, so a hook costs the judgement alone, not a start of
@@ -39,6 +40,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
+from lup.blocks import Blocks
 from lup.events import EventName, Publishing, Told
 from lup.programs import ProgramError, Running, started
 from lup.publishing import Published, Refusal
@@ -153,6 +155,27 @@ class Relayed(Reply):
     reply: JsonObject
 
 
+class Viewing(Request, reads=True):
+    """Answer one of the repository's modules' views, for the operator, or for a room of one of its launches."""
+
+    kind: Literal["module-view"] = "module-view"
+    module: str
+    """The module's name."""
+    view: str
+    """The view's name: its method's."""
+    argument: JsonValue
+    """What it's given, as the asker sent it: the view's model validates it."""
+    launch: Register | None = None
+    """The launch whose room asks; none where the operator does."""
+
+
+class Viewed(Reply):
+    """A view's answer: its blocks."""
+
+    kind: Literal["module-viewed"] = "module-viewed"
+    blocks: Blocks
+
+
 class JudgeHook(Request, reads=False):
     """Put one of a launch's hooks the judge reads to its judge."""
 
@@ -172,12 +195,13 @@ class HookJudged(Reply):
 
 
 type Answered = Annotated[
-    Offered | Called | Relayed | Happened | HookJudged, Field(discriminator="kind")
+    Offered | Called | Relayed | Happened | HookJudged | Viewed,
+    Field(discriminator="kind"),
 ]
 """Whatever a repository's process replies, told apart by its `kind`."""
 
 type Replied = Annotated[
-    Refused | Offered | Called | Relayed | Happened | HookJudged,
+    Refused | Offered | Called | Relayed | Happened | HookJudged | Viewed,
     Field(discriminator="kind"),
 ]
 """A repository's process's reply, or its refusal, told apart by its `kind`."""
@@ -271,19 +295,36 @@ async def refusals(
 class Holder(Model):
     """Something that needs a repository's process running, by what it is and which: while any holds it, it runs, or starts at the next request.
 
-    One of the repository's launches holds it while it's open (`launched`);
-    whatever else needs the process with no launch open holds it the same way,
-    under a kind of its own (#113).
+    One of the repository's launches holds it while it's open (`launched`); a
+    request the operator puts to it with no launch, a view or a command, while
+    it's answered (`asking`).
     """
 
-    what: Literal["launch"]
+    what: Literal["launch", "asking"]
     which: str
-    """Which one of its kind: a launch's id."""
+    """Which one of its kind: a launch's id, or a request's own."""
 
     @classmethod
     def launched(cls, launch: Register) -> Holder:
         """Return the hold `launch` has on its repository's process while it's open."""
         return cls(what="launch", which=launch.launch)
+
+    @classmethod
+    def asking(cls) -> Holder:
+        """Return a hold of its own for one request put with no launch, while it's answered."""
+        return cls(what="asking", which=secrets.token_hex(8))
+
+
+class RepositoryAsking(ABC):
+    """Answers a request the operator puts to a repository's process, with no launch: a view the dashboard shows, a command run on the host."""
+
+    @abstractmethod
+    async def asked(self, repository: Path, request: Request) -> Reply:
+        """Put `request` to the process of the repository whose git directory is `repository`, holding it while it's answered, and return its reply.
+
+        Raise `HostError` where nothing is approved for the repository, or its
+        process couldn't answer, saying why.
+        """
 
 
 class Worker(MutableModel, arbitrary_types_allowed=True):
@@ -347,6 +388,10 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     """What the operator approved last for a repository, by its git directory:
     the approval's fingerprint, which a person's layer approved alone changes
     without installing a copy; none before any approval."""
+    approved: Callable[[Path], Path | None]
+    """The command of the copy approved for a repository, by its git directory,
+    which a request put with no launch starts its process from; none before
+    any approval."""
     ending: timedelta = timedelta(seconds=5)
     """How long a process told to end has before it's killed."""
     idle: timedelta = timedelta(minutes=5)
@@ -372,6 +417,23 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     @override
     async def close(self, launch: Register) -> None:
         await self.release(launch.repository, Holder.launched(launch))
+
+    async def asked(self, repository: Path, request: Request) -> Reply:
+        """Put `request` to `repository`'s process with no launch, held while it's answered (`Holder.asking`), and started from the copy approved for it where it's gone.
+
+        Raise `HostError` where nothing is approved for it, or it couldn't answer.
+        """
+        command = self.approved(repository)
+        if command is None:
+            message = f"nothing is approved for {repository}, so no process of it runs"
+            raise HostError(message)
+        holder = Holder.asking()
+        await self.hold(repository, holder)
+        try:
+            async with self.held(repository, command, holder) as worker:
+                return await self.exchange(worker, request)
+        finally:
+            await self.release(repository, holder)
 
     @override
     async def stop(self) -> None:
@@ -438,7 +500,16 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     @asynccontextmanager
     async def answering(self, launch: Register) -> AsyncGenerator[Worker]:
         """Hold the process answering `launch`, counted as answering one more request while the context is open (`current`)."""
-        worker = await self.current(launch)
+        held = self.held(launch.repository, launch.judge, Holder.launched(launch))
+        async with held as worker:
+            yield worker
+
+    @asynccontextmanager
+    async def held(
+        self, repository: Path, command: Path, holder: Holder
+    ) -> AsyncGenerator[Worker]:
+        """Hold the process of `repository` running `command`, which `holder` holds, counted as answering one more request while the context is open (`current`)."""
+        worker = await self.current(repository, command, holder)
         try:
             yield worker
         finally:
@@ -446,24 +517,27 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
             if not worker.answering:
                 worker.idle.set()
 
-    async def current(self, launch: Register) -> Worker:
-        """Return the process answering `launch`'s repository's requests, counted as answering one more.
+    async def current(self, repository: Path, command: Path, holder: Holder) -> Worker:
+        """Return the process answering `repository`'s requests, which `holder` holds, counted as answering one more.
 
-        It's the one running the copy the launch's approved command names as
-        it's asked, its links followed, of what the operator approved last for
-        the repository. Where none runs it, because none was started, the one
-        started died, or the repository's approved copy or approval changed, one
-        is started; a process of the approval replaced goes on answering what it
-        was asked, then ends (`retired`). Raise `HostError` where none can
-        start, or the launch doesn't hold it: it has ended.
+        It's the one running the copy `command` names as it's asked, its links
+        followed, of what the operator approved last for the repository. Where
+        none runs it, because none was started, the one started died, or the
+        repository's approved copy or approval changed, one is started; a
+        process of the approval replaced goes on answering what it was asked,
+        then ends (`retired`). Raise `HostError` where none can start, or
+        `holder` doesn't hold it: a launch that has ended.
         """
-        repository = launch.repository
         processes = self.processes(repository)
         async with processes.turn:
-            if Holder.launched(launch) not in processes.holders:
-                message = f"launch {launch.launch} has ended"
+            if holder not in processes.holders:
+                message = (
+                    f"launch {holder.which} has ended"
+                    if holder.what == "launch"
+                    else f"the {holder.what} {holder.which} holds no process"
+                )
                 raise HostError(message)
-            command = launch.judge.resolve()
+            command = await asyncio.to_thread(command.resolve)
             approval = self.approval(repository)
             found = processes.running
             if found is not None and found.process.status is not None:
@@ -623,3 +697,13 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
                 raise HostError(error)
             case _:
                 return reply
+
+
+class WorkersAsking(Model, RepositoryAsking, arbitrary_types_allowed=True):
+    """Each repository's process asked with no launch, as `Workers` runs them."""
+
+    workers: Workers
+
+    @override
+    async def asked(self, repository: Path, request: Request) -> Reply:
+        return await self.workers.asked(repository, request)

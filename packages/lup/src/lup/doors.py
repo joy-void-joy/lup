@@ -1,4 +1,4 @@
-"""The doors a module's method is reached through, each a decorator in `lup`'s namespace: `lup.tool`, `lup.request` and `lup.on`.
+"""The doors a module's method is reached through, each a decorator in `lup`'s namespace: `lup.tool`, `lup.request`, `lup.on`, `lup.view` and `lup.command`.
 
 A door exists only where the contract differs: who calls a method, what it
 takes, what it returns. Each is a decorator, typed with its contract, so pyright
@@ -13,6 +13,14 @@ holds the method behind it to what the door takes and returns:
   `Publishing`, the one event a hook answers, it returns its refusals
   (`lup.publishing`). One taking `Publishing` beside another event is refused,
   since nothing at the others is refused.
+- `@lup.view`, or `@lup.view(place=Drawer(…), watch=Watch(…))`: the dashboard
+  shows it, kept live, and its command prints it as text. It takes what's
+  viewed and returns `Blocks` (`lup.blocks`). Placed in a drawer under an
+  agent, it takes the agent it's of (`OfAgent`); with no place, a fold reads
+  it as it opens (`Load`), or its command prints it (`ViewDoor`).
+- `@lup.command`: whoever runs the command line calls it, under its module's
+  command. The fields of the model it takes are its arguments and options; it
+  returns the text it prints (`CommandDoor`).
 
 A method takes one model, its docstring describing it, and its name, with its
 module's, routing it: a tool's name is the method's. Where it needs whoever asks
@@ -45,6 +53,7 @@ from typing import Concatenate, Self, get_args, overload
 
 from pydantic import BaseModel
 
+from lup.blocks import Blocks, Drawer, OfAgent, Watch
 from lup.errors import LupError
 from lup.events import Event, Observed, Publishing, events
 from lup.publishing import Refusal
@@ -308,7 +317,101 @@ class Refusing(OnDoor):
         return opened(method, self)
 
 
-type Door = ToolDoor | RequestDoor | OnDoor
+class ViewDoor(Model):
+    """A view's door: the dashboard shows the method's answer, kept live, and its command prints it; where it's placed, and when it's answered again.
+
+    `@lup.view(place=Drawer(…), watch=Watch(…))` is this door, put on the
+    method it decorates.
+    """
+
+    place: Drawer | None = None
+    """Where the dashboard shows it; none for a view a fold reads as it opens
+    (`Load`), or only its command prints."""
+    watch: Watch = Watch()
+    """When a view the page shows is answered again."""
+
+    def says(self) -> str:
+        """Say the door, as an error names it."""
+        return "a view"
+
+    def checked(self, taken: Taken) -> None:
+        """Raise `DoorError` where `taken` isn't a view's: a method of a class, taking one model, what's viewed, an agent's (`OfAgent`) where it's placed under one, returning `Blocks`, and described by a docstring, its command's help."""
+        if not taken.method:
+            message = f"the view `{taken.name}` is a method of a class of a module's"
+            raise DoorError(message)
+        model = taken.model.annotation
+        if not is_model(model):
+            message = (
+                f"the view `{taken.name}` takes `{taken.model.name}` typed "
+                f"{spelled(model)}: a view takes one pydantic model, what's viewed"
+            )
+            raise DoorError(message)
+        if self.place is not None and not issubclass(model, OfAgent):
+            message = (
+                f"the view `{taken.name}` is placed in a drawer under an agent, so "
+                f"it takes the agent it's of, an `OfAgent`, not `{model.__name__}`"
+            )
+            raise DoorError(message)
+        returned = taken.returned
+        if not (isinstance(returned, type) and issubclass(returned, Blocks)):
+            message = (
+                f"the view `{taken.name}` returns {spelled(taken.returned)}: a "
+                "view returns `Blocks`"
+            )
+            raise DoorError(message)
+        if taken.description is None:
+            message = (
+                f"the view `{taken.name}` needs a docstring: it's its command's help"
+            )
+            raise DoorError(message)
+
+    def __call__[S, I: BaseModel, **P](
+        self, method: Callable[Concatenate[S, I, P], Awaitable[Blocks]], /
+    ) -> Served[S, Concatenate[I, P], Awaitable[Blocks]]:
+        """Return `method` served through this door."""
+        return Served(method, [self], first(method, self))
+
+
+class CommandDoor(Model):
+    """A command's door: whoever runs the command line calls the method, the fields of the model it takes its arguments and options, and prints the text it returns.
+
+    `@lup.command` is this door, put on the method it decorates.
+    """
+
+    def says(self) -> str:
+        """Say the door, as an error names it."""
+        return "a command"
+
+    def checked(self, taken: Taken) -> None:
+        """Raise `DoorError` where `taken` isn't a command's: a method of a class, taking one model, returning `str`, and described by a docstring, its help."""
+        if not taken.method:
+            message = f"the command `{taken.name}` is a method of a class of a module's"
+            raise DoorError(message)
+        if not is_model(taken.model.annotation):
+            message = (
+                f"the command `{taken.name}` takes `{taken.model.name}` typed "
+                f"{spelled(taken.model.annotation)}: a command takes one pydantic "
+                "model, whose fields are its arguments and options"
+            )
+            raise DoorError(message)
+        if taken.returned is not str:
+            message = (
+                f"the command `{taken.name}` returns {spelled(taken.returned)}: a "
+                "command returns the text it prints, `str`"
+            )
+            raise DoorError(message)
+        if taken.description is None:
+            message = f"the command `{taken.name}` needs a docstring: it's its help"
+            raise DoorError(message)
+
+    def __call__[S, I: BaseModel, **P](
+        self, method: Callable[Concatenate[S, I, P], Awaitable[str]], /
+    ) -> Served[S, Concatenate[I, P], Awaitable[str]]:
+        """Return `method` served through this door."""
+        return Served(method, [self], first(method, self))
+
+
+type Door = ToolDoor | RequestDoor | OnDoor | ViewDoor | CommandDoor
 """A door a method is reached through."""
 
 
@@ -381,6 +484,14 @@ class Method(property):
     def requested(self) -> bool:
         """Say whether it's a request."""
         return any(isinstance(each, RequestDoor) for each in self.doors)
+
+    def viewing(self) -> ViewDoor | None:
+        """Return its view's door; none where it isn't a view."""
+        return next((each for each in self.doors if isinstance(each, ViewDoor)), None)
+
+    def commanded(self) -> bool:
+        """Say whether it's a command."""
+        return any(isinstance(each, CommandDoor) for each in self.doors)
 
     def spec(self) -> ToolSpec | None:
         """Return what a session is told about it as a tool, with no instance; none where it isn't one."""
@@ -544,6 +655,43 @@ def tool(
     """
     door = ToolDoor(reads=reads, idempotent=idempotent)
     return door if function is None else tooled(function, door)
+
+
+@overload
+def view[S, I: BaseModel, **P](
+    method: Callable[Concatenate[S, I, P], Awaitable[Blocks]], /
+) -> Served[S, Concatenate[I, P], Awaitable[Blocks]]: ...
+@overload
+def view(*, place: Drawer | None = None, watch: Watch | None = None) -> ViewDoor: ...
+def view(
+    method: Callable[..., Awaitable[Blocks]] | None = None,
+    /,
+    *,
+    place: Drawer | None = None,
+    watch: Watch | None = None,
+) -> Method | ViewDoor:
+    """Make a method a view: the dashboard shows what it answers, kept live, and its command prints it as text; given no method, the door, placed and watched, to put on one.
+
+    It takes one model, what's viewed, and returns `Blocks`; its docstring is
+    its command's help. Placed in a drawer under an agent (`Drawer`), it takes
+    the agent it's of (`OfAgent`), and the page answers it again at the events
+    of that agent `watch` names, and that long apart at most (`Watch`). With no
+    place, a fold reads it as it opens (`Load`), or its command prints it.
+    """
+    door = ViewDoor(place=place, watch=watch or Watch())
+    return door if method is None else door(method)
+
+
+def command[S, I: BaseModel, **P](
+    method: Callable[Concatenate[S, I, P], Awaitable[str]], /
+) -> Served[S, Concatenate[I, P], Awaitable[str]]:
+    """Make a method a command, under its module's command on the command line: the fields of the model it takes are its arguments and options, its docstring its help, and the text it returns what it prints.
+
+    It says who may run it, `by: Operator | Room`: on the host a command
+    carries the operator's authority, in a room the room's. A view needs none
+    of its own: its command prints its text form.
+    """
+    return CommandDoor()(method)
 
 
 def request[S, I: BaseModel, O: BaseModel, **P](

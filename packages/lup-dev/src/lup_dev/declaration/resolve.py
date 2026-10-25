@@ -34,6 +34,8 @@ from typing import Self
 
 from pydantic import model_validator
 
+from lup.blocks import SHELL_TONES, Drawer, FoldKind, Tone
+from lup.doors import served as methods
 from lup.types import Model
 from lup_dev.catalog.gate import Step
 from lup_dev.catalog.room import CacheLifetime
@@ -43,6 +45,7 @@ from lup_dev.declaration.kinds import (
     Credentials,
     Exemption,
     Exemptions,
+    Folds,
     Gate,
     Guidance,
     Mounted,
@@ -58,6 +61,7 @@ from lup_dev.declaration.kinds import (
     Serving,
     Session,
     TestRoots,
+    Tones,
 )
 from lup_dev.declaration.load import load
 from lup_dev.declaration.module import Module
@@ -171,6 +175,24 @@ class Served(Model):
     serving: type[ModuleServing]
 
 
+class Drawn(Model):
+    """A view a module places in a drawer, with its module: what the page lists under each agent's banner."""
+
+    module: str
+    """The module's name."""
+    view: str
+    """The view's name: its method's, which the drawer's fold kind is named for."""
+    place: Drawer
+
+
+class Looks(Model):
+    """How a repository's modules' views look: their fold kinds, their tones, and the drawers they place."""
+
+    folds: list[FoldKind] = []
+    tones: list[Tone] = []
+    drawers: list[Drawn] = []
+
+
 class Shared(Model):
     """A module whose own data directory for the repository a room mounts: every room, or a launch lending it."""
 
@@ -225,6 +247,8 @@ class Resolved(Model):
     requests and its hooks."""
     shared: list[Shared] = []
     """The modules whose own data directory each room mounts."""
+    looks: Looks = Looks()
+    """The fold kinds, tones and drawers the modules' views declare."""
 
 
 def parts[K](modules: list[Module], kind: type[K]) -> list[Part[K]]:
@@ -318,6 +342,47 @@ def served(modules: list[Module]) -> list[Served]:
         ],
     )
     return found
+
+
+def looked(modules: list[Module], found: list[Served]) -> Looks:
+    """Return how the modules' views look: each module's fold kinds and tones, and the drawers its views are placed in.
+
+    Raise `ProjectError` where two take one letter, a fold kind's or a drawer's;
+    where a tone takes a shell tone's name, takes the look of a tone that's
+    none of the shell's or the modules', or takes no look at all.
+    """
+    folds = held(Folds(), parts(modules, Folds), "Fold kinds")
+    tones = held(Tones(), parts(modules, Tones), "Tones")
+    drawers = [
+        Drawn(module=each.module.name, view=name, place=door.place)
+        for each in found
+        for name, method in methods(each.serving).items()
+        if (door := method.viewing()) is not None and door.place is not None
+    ]
+    distinct(
+        "Fold keys",
+        [
+            *(Owned(module="its fold kinds", name=fold.letter) for fold in folds),
+            *(Owned(module=each.module, name=each.place.letter) for each in drawers),
+        ],
+    )
+    shell = [tone.name for tone in SHELL_TONES]
+    known = [*shell, *(tone.name for tone in tones)]
+    wrong = [
+        f"`{tone.name}` takes a name of the shell's tones, {', '.join(shell)}"
+        if tone.name in shell
+        else f"`{tone.name}` takes the look of `{tone.like}`, which is no tone"
+        if tone.like is not None and tone.like not in known
+        else f"`{tone.name}` takes no look: give it `like=` or `colour=`"
+        for tone in tones
+        if tone.name in shell
+        or (tone.like is not None and tone.like not in known)
+        or (tone.like is None and tone.colour is None)
+    ]
+    if wrong:
+        message = f"Tones: {'; '.join(wrong)}"
+        raise ProjectError(message)
+    return Looks(folds=folds, tones=tones, drawers=drawers)
 
 
 def held[E](
@@ -523,6 +588,7 @@ def resolve(project: Project) -> Resolved:
         for requirement in part.value.requirements
     ]
     requirements = [*needed, *brought]
+    found = served(modules)
     return Resolved(
         modules=modules,
         paths=PathRoles.model_validate({name: role(name) for name in Paths.roles()}),
@@ -551,7 +617,8 @@ def resolve(project: Project) -> Resolved:
         repositories=neighbours(modules),
         held=project.held,
         flagged=project.flagged,
-        served=served(modules),
+        served=found,
+        looks=looked(modules, found),
         shared=[
             Shared(
                 module=part.module,

@@ -1,6 +1,7 @@
 """The doors a module's method is reached through: what each puts on the method, and what each refuses as it's put on."""
 
 import asyncio
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,6 +15,7 @@ from lup.doors import (
     Refusing,
     RequestDoor,
     ToolDoor,
+    ViewDoor,
     declared,
     opened,
     refuse_taken,
@@ -239,3 +241,45 @@ def test_a_method_isn_t_named_as_a_field() -> None:
 
     with pytest.raises(DoorError, match="`Shadowing`'s method `seen` takes the name"):
         refuse_taken(Shadowing, "seen")
+
+
+def test_a_view_says_where_its_placed_and_when_its_answered_again() -> None:
+    class Views(BaseModel):
+        @lup.view(
+            place=lup.Drawer(letter="v", called="the conversation", colour="cyan"),
+            watch=lup.Watch(on=[TurnEnded], longest=timedelta(minutes=1)),
+        )
+        async def conversation(self, viewed: lup.OfAgent) -> lup.Blocks:
+            """The whole conversation."""
+            return lup.Blocks(blocks=[lup.Line.of("1", viewed.session)])
+
+    door = Views.conversation.viewing()
+    assert door is not None
+    assert door.place is not None
+    assert door.place.letter == "v"
+    assert door.watch.on == [TurnEnded]
+    answer = asyncio.run(
+        Views().conversation(lup.OfAgent(runtime="claude", session="s1"))
+    )
+    assert answer.text() == "s1"
+
+
+def test_a_view_takes_what_its_viewed_and_answers_blocks() -> None:
+    async def said(self: Serving, viewed: Asked) -> str:
+        """Words, not blocks."""
+        return viewed.city
+
+    async def shown(self: Serving, viewed: Asked) -> lup.Blocks:
+        """Placed under an agent, but taking a city."""
+        return lup.Blocks()
+
+    async def bare(self: Serving, viewed: Asked) -> lup.Blocks:
+        return lup.Blocks()
+
+    with pytest.raises(DoorError, match="returns `str`"):
+        opened(said, ViewDoor())
+    placed = ViewDoor(place=lup.Drawer(letter="v", called="it", colour="cyan"))
+    with pytest.raises(DoorError, match="takes the agent it's of"):
+        opened(shown, placed)
+    with pytest.raises(DoorError, match="needs a docstring"):
+        opened(bare, ViewDoor())
