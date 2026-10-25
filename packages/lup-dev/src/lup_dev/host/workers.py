@@ -7,11 +7,12 @@ repository's approved copy (`Register.judge`): so it's the code the operator
 approved for that repository, and one project's module never runs inside the
 process serving another's. The service asks it, on a socket of its own under
 the host's sockets that no room mounts, what its modules serve, then passes it
-each hook the judge reads, each call to one of their tools, each room's request
-of a kind they answer, and each event their hooks run at, one typed request per
-connection, one reply, each answered at once whatever the others wait on. The
-launch travels with each request (`Calling`, `Relaying`, `Happening`), never
-with the process, which serves each launch of its repository alike.
+each hook the judge reads, each call to one of their tools or to one of the
+judge's own that asks the engine, each room's request of a kind they answer,
+and each event their hooks run at, one typed request per connection, one reply,
+each answered at once whatever the others wait on. The launch travels with each
+request (`Calling`, `JudgeCalling`, `Relaying`, `Happening`), never with the
+process, which serves each launch of its repository alike.
 
 The process stays running, so a hook costs the judgement alone, not a start of
 Python and an import of `lup-dev`. It runs while something holds it (`Holder`):
@@ -115,8 +116,20 @@ class Calling(Request, reads=False):
     caller: Conversation
 
 
+class JudgeCalling(Request, reads=False):
+    """Call one of the judge's own tools that asks the engine, for a conversation of one of the repository's launches: the host service serves it, and the repository's process, whose engine is warm, runs it (`policy/tools.py`)."""
+
+    kind: Literal["judge-call"] = "judge-call"
+    launch: Register
+    """The launch whose session calls."""
+    name: str
+    arguments: JsonValue
+    """The model's arguments, as it sent them: the tool validates them."""
+    caller: Conversation
+
+
 class Called(Reply):
-    """What a module's tool answered."""
+    """What a module's tool, or one of the judge's own, answered."""
 
     kind: Literal["module-called"] = "module-called"
     answer: Answer

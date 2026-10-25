@@ -14,7 +14,9 @@ load.
 
 Each hook the judge reads is answered as `lup-dev hook <runtime>` answers it,
 in a thread of its own (`threaded`), so hooks fired together are judged
-together, and a hold waiting a day for the operator delays no other. Judging
+together, and a hold waiting a day for the operator delays no other. A call to
+the judge's own tools that ask the engine (`JudgeCalling`: `quiet`) runs on the
+same services, with the runtime of the launch it's for. Judging
 holds up in threads of one process: what it keeps between hooks is on disk,
 under locks that exclude a thread as they do a process, and what it reaches
 (the engine, ruff, the clock, the inbox) is made once for the process and
@@ -42,7 +44,7 @@ import asyncio
 import sys
 import threading
 import traceback
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from concurrent.futures import Future
 from functools import partial
 from pathlib import Path
@@ -84,6 +86,7 @@ from lup_dev.host.workers import (
     Happened,
     Happening,
     HookJudged,
+    JudgeCalling,
     JudgeHook,
     Listing,
     Offered,
@@ -364,6 +367,22 @@ class Calls(Model, Handler[Calling]):
         return Called(answer=await self.modules.call(request))
 
 
+class JudgeCalls(Model, Handler[JudgeCalling], arbitrary_types_allowed=True):
+    """Answers `JudgeCalling`: one call to the judge's own tools that asks the engine (`policy/tools.py`)."""
+
+    call: Callable[[JudgeCalling], Awaitable[Answer]]
+    """Runs it for the conversation calling, with the services judging makes
+    once for the process and the runtime of the launch it's for (`cli.py`)."""
+
+    @override
+    def request(self) -> type[JudgeCalling]:
+        return JudgeCalling
+
+    @override
+    async def answer(self, request: JudgeCalling) -> Reply:
+        return Called(answer=await self.call(request))
+
+
 class Relays(Model, Handler[Relaying]):
     """Answers `Relaying`: one room's request, passed to the module answering its kind."""
 
@@ -439,10 +458,16 @@ class Judges(Model, Handler[JudgeHook], arbitrary_types_allowed=True):
 
 
 def routes(
-    modules: RepositoryModules | None, judge: Callable[[str, str], str]
+    modules: RepositoryModules | None,
+    judge: Callable[[str, str], str],
+    called: Callable[[JudgeCalling], Awaitable[Answer]],
 ) -> list[Route]:
-    """Return what a repository's process answers: the judge's hooks, what its modules serve, and, where they were made, their tools, requests and hooks."""
-    listed = [Route.to(Judges(judge=judge)), Route.reading(Listed(modules=modules))]
+    """Return what a repository's process answers: the judge's hooks and its own tools that ask the engine, what its modules serve, and, where they were made, their tools, requests and hooks."""
+    listed = [
+        Route.to(Judges(judge=judge)),
+        Route.to(JudgeCalls(call=called)),
+        Route.reading(Listed(modules=modules)),
+    ]
     if modules is None:
         return listed
     return [
@@ -483,9 +508,11 @@ def worked(
     repository: Path,
     services: Services,
     records: dict[str, Records],
+    *,
     judge: Callable[[str, str], str],
+    called: Callable[[JudgeCalling], Awaitable[Answer]],
 ) -> None:
-    """Serve the launches of the repository whose git directory is `repository`, on `socket`: their judge's hooks with `judge`, and the repository's modules.
+    """Serve the launches of the repository whose git directory is `repository`, on `socket`: their judge's hooks with `judge`, the judge's own tools that ask the engine with `called`, and the repository's modules.
 
     `records` is where each runtime keeps its records, by the runtime's name: a
     launch's hooks read its runtime's. Where the modules can't be made, the
@@ -504,6 +531,6 @@ def worked(
         )
         serving = None
     try:
-        asyncio.run(serve(routes(serving, judge), socket, repository, said))
+        asyncio.run(serve(routes(serving, judge, called), socket, repository, said))
     finally:
         socket.unlink(missing_ok=True)

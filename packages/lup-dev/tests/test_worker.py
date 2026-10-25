@@ -22,12 +22,16 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner
 
+from lup.tools.serving import Answer
 from lup_dev import cli
+from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import HostError, Limits, Refused, Register
 from lup_dev.host.service import Dispatcher
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
+    Called,
     HookJudged,
+    JudgeCalling,
     JudgeHook,
     Worker,
     WorkerJudge,
@@ -35,11 +39,14 @@ from lup_dev.host.workers import (
     exchanged,
 )
 from lup_dev.layout import HostLayout
+from lup_dev.policy.checkpoint import ConversationRecord
+from lup_dev.policy.report import Quiet
 from lup_dev.worker import routes
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
+    from lup_dev.host.protocol import Reply
     from lup_dev.layout import Layout
 
 PATIENCE = 60
@@ -52,17 +59,46 @@ def short(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("w")
 
 
+async def named(calling: JudgeCalling) -> Answer:
+    """Run a call to the judge's own tools as a test does: by saying which tool, for which conversation and with what."""
+    return Answer(
+        text=f"{calling.name} for {calling.caller.id}: {json.dumps(calling.arguments)}"
+    )
+
+
 async def served(
     judge: Callable[[str, str], str], at: Path, said: list[str]
 ) -> asyncio.Server:
-    """Serve the routes a repository's process serves, its modules unmade, judging with `judge`, on `at`."""
+    """Serve the routes a repository's process serves, its modules unmade, judging with `judge` and running the judge's own tools with `named`, on `at`."""
     dispatcher = Dispatcher(
-        routes={route.kind: route for route in routes(None, judge)},
+        routes={route.kind: route for route in routes(None, judge, named)},
         answering="a repository's process",
         say=said.append,
         changes=Changes(),
     )
     return await asyncio.start_unix_server(dispatcher.connection, path=at)
+
+
+def test_a_repository_s_process_runs_the_judge_s_own_tools_for_the_conversation_calling(
+    short: Path,
+) -> None:
+    calling = JudgeCalling(
+        launch=registered(short, short / "lup-dev"),
+        name="quiet",
+        arguments={"kinds": ["importers"]},
+        caller=Conversation(id="c1", session="s1", agent="a1"),
+    )
+
+    async def exercised() -> str:
+        server = await served(lambda runtime, payload: "", short / "p.sock", [])
+        try:
+            return await exchanged(short / "p.sock", calling)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    reply = Called.model_validate_json(asyncio.run(exercised()))
+    assert reply.answer == Answer(text='quiet for c1: {"kinds": ["importers"]}')
 
 
 def test_each_hook_is_judged_at_once_in_a_thread_of_its_own(short: Path) -> None:
@@ -204,6 +240,49 @@ def test_a_repository_s_process_answers_a_hook_as_the_hook_command_does(
     assert json.loads(wrote)["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+def test_a_repository_s_process_runs_quiet_for_the_conversation_calling(
+    repo: Path, isolated: HostLayout, state: Layout
+) -> None:
+    launch = registered(repo, Path(sys.executable).parent / "lup-dev")
+    caller = Conversation(id="c1", session="s1", agent="a1")
+    record = ConversationRecord(layout=state, session="s1")
+
+    def quieting(*kinds: str) -> JudgeCalling:
+        return JudgeCalling(
+            launch=launch, name="quiet", arguments={"kinds": list(kinds)}, caller=caller
+        )
+
+    async def exercised() -> list[Reply]:
+        workers = Workers(
+            layout=isolated, say=lambda line: None, approval=lambda repository: None
+        )
+        try:
+            await workers.open(launch)
+            held = await workers.ask(launch, quieting("importers"))
+            assert record.quiet("a1") == Quiet(kinds=["importers"])
+            lifted = await workers.ask(launch, quieting())
+            return [held, lifted]
+        finally:
+            await workers.stop()
+
+    held, lifted = asyncio.run(exercised())
+    assert isinstance(held, Called)
+    assert held.answer.text.startswith(
+        "This conversation is quiet: lup doesn't tell it type errors in the files "
+        "importing what changed after its calls"
+    )
+    assert lifted == Called(
+        answer=Answer(
+            text=(
+                "lup's quiet is lifted: it tells this conversation every finding "
+                "after its calls again. Nothing stands in the files it touched that "
+                "it wasn't told."
+            )
+        )
+    )
+    assert record.quiet("a1") == Quiet()
+
+
 # A stand-in copy: its process answers through the routes `lup-dev worker`
 # serves, each hook with its copy's name; `hold` tells the test it has arrived
 # on the test's socket and waits there until the test answers, and `die` ends
@@ -215,9 +294,14 @@ import socket
 import sys
 from pathlib import Path
 
+from lup.tools.serving import Answer
 from lup_dev.worker import routes, serve
 
 here = Path(__file__).parent
+
+
+async def called(calling: object) -> Answer:
+    return Answer(text=f"{{here.name}} runs no tool")
 
 
 def judge(runtime: str, payload: str) -> str:
@@ -235,7 +319,9 @@ def said(line: str) -> None:
     sys.stderr.write(f"{{line}}\\n")
 
 
-asyncio.run(serve(routes(None, judge), Path(sys.argv[2]), Path(sys.argv[3]), said))
+asyncio.run(
+    serve(routes(None, judge, called), Path(sys.argv[2]), Path(sys.argv[3]), said)
+)
 """
 
 

@@ -39,6 +39,7 @@ from lup import events
 from lup.github.serving import GitHubServing
 from lup.programs import Ran, run
 from lup.rooms import Podman
+from lup.tools.serving import Answer as ToolAnswer
 from lup.tools.speaking import SPEAKING
 from lup_dev import Modules, Project, cli
 from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
@@ -66,7 +67,13 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Call, Called, Recorded, Said
 from lup_dev.host.service import UNDECIDED, HostService, Naming, Program, executed
 from lup_dev.host.watch import Changes
-from lup_dev.host.workers import LaunchJudge, LaunchModules, WorkerJudge, Workers
+from lup_dev.host.workers import (
+    LaunchJudge,
+    LaunchModules,
+    Offered,
+    WorkerJudge,
+    Workers,
+)
 from lup_dev.inbox.bearings import Repository, RepositoryBearings, Unlanded
 from lup_dev.inbox.delivery import Delivery, clocked, opening
 from lup_dev.inbox.notices import Notices, NotifySend
@@ -159,8 +166,14 @@ from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import GitDirectoryLayout, InboxLayout, Layout
 from lup_dev.merging import Merging, merged
+from lup_dev.policy import report
 from lup_dev.policy.before import Overwrite, Replacement, before
-from lup_dev.policy.checkpoint import Bench, CallFinished, CallStarted
+from lup_dev.policy.checkpoint import (
+    Bench,
+    CallFinished,
+    CallStarted,
+    ConversationRecord,
+)
 from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import Answer as HoldAnswer
 from lup_dev.policy.holds import (
@@ -183,7 +196,7 @@ from lup_transcripts.environment.module import Transcripts
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
 
-    from conftest import FakeClock, InProcess, Kit, Shell
+    from conftest import FakeClock, InProcess, JudgingInProcess, Kit, Shell
     from mcp.client._transport import TransportStreams
     from pydantic import JsonValue
 
@@ -202,6 +215,26 @@ class Quiet(LaunchJudge):
 
     async def judged(self, launch: Register, payload: str) -> str:
         return ""
+
+
+class Predating(LaunchModules):
+    """A repository's process of an approved copy that predates the judge's own tools there: it answers no `judge-call`, refusing it as the dispatcher refuses a kind it has no handler for."""
+
+    async def open(self, launch: Register) -> Offered:
+        return Offered()
+
+    async def ask(self, launch: Register, request: Request) -> Reply:
+        message = (
+            f"no handler for `{request.kind}`; the repository's process answers "
+            "judge-hook, module-listing"
+        )
+        raise HostError(message)
+
+    async def close(self, launch: Register) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
 
 
 class Background:
@@ -438,6 +471,7 @@ def inboxed(
                 delivery,
                 judging or machine,
                 Remotes(say=said.append) if remotes is None else remotes(delivery),
+                Predating() if modules is None else modules,
             )
         ],
         judge=judge or Quiet(),
@@ -3712,7 +3746,8 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
     github = module_tools(GitHubServing)
     judging = JudgeTools.model_construct().specs()
     assert [(spec.name, spec.summary) for spec in judging] == [
-        ("judged", "Read the judge's verdicts and holds.")
+        ("judged", "Read the judge's verdicts and holds."),
+        ("quiet", "Hold back some findings until you lift it."),
     ]
     landing = LandingTools.model_construct().specs()
     assert [(spec.name, spec.summary) for spec in landing] == [
@@ -6475,7 +6510,7 @@ def test_judged_answers_a_large_log_in_pages_an_agent_reads_whole(
                 answer=answer,
             )
         )
-    tools = JudgeTools(layout=layout, clock=clock)
+    tools = JudgeTools(layout=layout, clock=clock, modules=Predating())
     launch = Register.model_construct(
         launch="one", runtime="claude", repository=repository
     )
@@ -6562,6 +6597,56 @@ def test_judged_answers_a_large_log_in_pages_an_agent_reads_whole(
     ] == [f"k{n}" for n in range(25)]
     assert whole.split("\n\n")[1].splitlines()[0] == "Each, oldest first:"
     assert "Not listed: " not in whole.split("\n\n")[1]
+
+
+def test_quiet_runs_in_the_repositorys_process_for_the_conversation_calling(
+    judging: JudgingInProcess, kit: Kit, repo: Path
+) -> None:
+    tools = JudgeTools(layout=kit.layout, clock=kit.clock, modules=judging)
+    launch = Register.model_construct(
+        launch="one", runtime="claude", repository=repo / ".git"
+    )
+    caller = Caller(id="c", session="s1", agent="a1")
+
+    def quiet(arguments: JsonValue) -> ToolAnswer:
+        return asyncio.run(tools.call("quiet", arguments, launch, caller, "t1"))
+
+    held = quiet({"kinds": ["importers", "rules", "importers"]})
+    assert not held.error, held.text
+    assert held.text.startswith(
+        "This conversation is quiet: lup doesn't tell it lup's findings on the lines "
+        "changed, and type errors in the files importing what changed after its calls"
+    )
+    [asked] = judging.asked
+    assert (asked.name, asked.caller) == ("quiet", caller)
+    record = ConversationRecord(layout=kit.layout, session="s1")
+    assert record.quiet("a1") == report.Quiet(kinds=["importers", "rules"])
+    assert record.quiet("") == report.Quiet()
+    refused = quiet({"kinds": ["everything"]})
+    assert refused.error
+    assert refused.text.startswith("Refused: ")
+    assert record.quiet("a1") == report.Quiet(kinds=["importers", "rules"])
+
+
+def test_quiet_says_so_where_the_repositorys_approved_copy_predates_it(
+    kit: Kit, repo: Path
+) -> None:
+    tools = JudgeTools(layout=kit.layout, clock=kit.clock, modules=Predating())
+    launch = Register.model_construct(
+        launch="one", runtime="codex", repository=repo / ".git"
+    )
+    said = asyncio.run(
+        tools.call("quiet", {"kinds": []}, launch, Caller(id="c", session="s1"), None)
+    )
+    assert said == ToolAnswer(
+        text=(
+            "`quiet` didn't run: no handler for `judge-call`; the repository's "
+            "process answers judge-hook, module-listing. Where the repository's "
+            "process answers no `judge-call`, its approved copy of lup predates "
+            "`quiet`, which runs once the operator approves one that has it."
+        ),
+        error=True,
+    )
 
 
 def test_the_operators_list_says_when_they_last_settled_an_item(

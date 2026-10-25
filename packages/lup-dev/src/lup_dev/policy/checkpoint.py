@@ -44,7 +44,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from functools import cached_property, reduce
 from pathlib import Path
-from typing import Literal, override
+from typing import TYPE_CHECKING, Literal, override
 
 from filelock import FileLock
 
@@ -76,11 +76,13 @@ from lup_dev.policy.holds import (
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
 from lup_dev.policy.judge import Change, Judge, Judgement, RemovedNote
 from lup_dev.policy.report import (
+    Kind,
     Known,
     Look,
     Moved,
     MovedFile,
     Part,
+    Quiet,
     Refused,
     Reports,
     approval,
@@ -91,6 +93,7 @@ from lup_dev.policy.report import (
     placed,
     refusal,
     removed_notes,
+    sections,
     text,
     turn_end,
 )
@@ -104,6 +107,9 @@ from lup_dev.private.module import Private
 from lup_dev.private.withheld import Facts, Withheld
 from lup_dev.private.withheld import kept as listed_at
 from lup_dev.stored import read_model, write_model
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class Services(Model, arbitrary_types_allowed=True):
@@ -1369,11 +1375,15 @@ def checkpoint(
             worktree.record(services.layout, head)
         notice = worktree.told() if plans else ""
         told = commits.told.then(Checked(notices=[notice] if notice else []))
+        record = ConversationRecord(layout=services.layout, session=key)
+        with record.lock():
+            conversations = record.read()
         checked = remember(
             worktree,
             session,
             agent,
             acted,
+            quiet=conversations.quieted,
             told=told,
             moved=commits.landed,
             wrote=wrote,
@@ -1515,6 +1525,7 @@ def remember(
     agent: str,
     acted: Acted,
     *,
+    quiet: Callable[[str], Quiet],
     told: Checked,
     moved: list[Judgement],
     wrote: dict[Path, list[str]],
@@ -1526,59 +1537,64 @@ def remember(
     The report goes to the conversation the checkpoint ran for, and waits as mail
     for the others whose calls finished since the last one: the checkpoint sees
     files, not who wrote them. Each is told only the findings it wasn't told
-    yet (`Session.news`). Each file landed is touched by the conversations
-    `wrote` names for it. `told` is what a move of `HEAD` brought, which is no
-    session's, and `moved` the files it brought, judged. The files in `heard`
-    were told what was found in them as they were judged, so only the notes
-    their writes removed are reported. The files in `unjudged` changed to
-    content committed elsewhere, set aside unjudged: what was known of them is
-    forgotten, so a finding they hold again is told again.
+    yet (`Session.news`), and none of a kind its quiet holds (`quiet`, by
+    conversation): those it isn't told, it doesn't learn. Each file landed is
+    touched by the conversations `wrote` names for it. `told` is what a move of
+    `HEAD` brought, which is no session's, and `moved` the files it brought,
+    judged: their type errors are the files changed's, which a quiet may hold.
+    The files in `heard` were told what was found in them as they were judged,
+    so only the notes their writes removed are reported. The files in
+    `unjudged` changed to content committed elsewhere, set aside unjudged: what
+    was known of them is forgotten, so a finding they hold again is told again.
     """
     root = worktree.root
     landed = acted.landed
     fresh = [j for j in landed if j.path not in heard]
     importing = watch(worktree, session, worktree.importers().collect())
     every: list[Owner] = ["lup", "pyright", "ruff"]
-    looks = [
-        *(
-            Look(
-                path=j.path,
-                owners=every,
-                findings=[*j.findings, *j.information, *j.untouched],
-                content=on_disk(root, j.path),
-            )
-            for j in fresh
-        ),
-        *(
-            Look(
-                path=j.path,
-                owners=["pyright", "ruff"],
-                findings=j.information,
-                content=on_disk(root, j.path),
-            )
-            for j in moved
-        ),
-        *(Look(path=path, owners=every) for path in unjudged),
-        *importing,
-    ]
+    contents = {j.path: on_disk(root, j.path) for j in [*fresh, *moved]}
+
+    def seen(j: Judgement, found: list[Finding], owners: list[Owner]) -> Look:
+        return Look(
+            path=j.path, owners=owners, findings=found, content=contents[j.path]
+        )
+
     said = Checked(
         removed=noted(root, [note for j in landed for note in j.removed]),
         notices=late_answers(worktree, session),
     ).then(told)
 
     def report(conversation: str) -> Checked:
+        held = quiet(conversation)
+        looks = [
+            *(held.look("rules", seen(j, j.findings, every)) for j in fresh),
+            *(held.look("changed", seen(j, j.information, every)) for j in fresh),
+            *(held.look("untouched", seen(j, j.untouched, every)) for j in fresh),
+            *(
+                held.look("changed", seen(j, j.information, ["pyright", "ruff"]))
+                for j in moved
+            ),
+            *(Look(path=path, owners=every) for path in unjudged),
+            *(held.look("importers", look) for look in importing),
+        ]
         new = dict.fromkeys(session.news(conversation, looks))
 
-        def kept(found: list[Finding]) -> list[Finding]:
-            return placed(root, [each for each in found if each in new])
+        def kept(kind: Kind, found: list[Finding]) -> list[Finding]:
+            return placed(
+                root, [each for each in held.told(kind, found) if each in new]
+            )
 
         return Checked(
-            findings=kept([found for j in fresh for found in j.findings]),
+            findings=kept("rules", [found for j in fresh for found in j.findings]),
             information=kept(
-                [found for j in [*fresh, *moved] for found in j.information]
+                "changed", [found for j in [*fresh, *moved] for found in j.information]
             ),
-            untouched=kept([found for j in fresh for found in j.untouched]),
-            importers=kept([found for look in importing for found in look.findings]),
+            untouched=kept(
+                "untouched", [found for j in fresh for found in j.untouched]
+            ),
+            importers=kept(
+                "importers", [found for look in importing for found in look.findings]
+            ),
         ).then(said)
 
     others = [other for other in session.participants if other != agent]
@@ -1850,13 +1866,20 @@ def first_warning(layout: Layout, session: str, failure: str) -> bool:
 
 
 class Conversations(MutableModel):
-    """What a conversation's turn's end needs to know of the others (#32, #41), and of its own ends before."""
+    """What a conversation's turn's end needs to know of the others (#32, #41), and of its own ends before; and what each asked not to be told."""
 
     working: list[str] = []
     """The subagents at work, each from its first call to its conversation's end."""
     passed: ByConversation[Finding] = {}
     """What each conversation's turn last ended past: findings that hold none of
     its later ends (`inbox/ends.py`)."""
+    quiet: ByConversation[Kind] = {}
+    """The kinds of findings each quiet conversation isn't told after its calls
+    (`Quiet`), until it lifts the quiet or its conversation ends."""
+
+    def quieted(self, agent: str) -> Quiet:
+        """Return what conversation `agent` asked not to be told; nothing where it isn't quiet."""
+        return Quiet(kinds=self.quiet.get(agent, []))
 
 
 class ConversationRecord(Model):
@@ -1865,7 +1888,10 @@ class ConversationRecord(Model):
     A subagent shares its session's id, and may touch a file another conversation
     of the session touched too (#32). It's known to be at work from its first call
     to the end of its conversation, on every runtime: a runtime that reported no
-    end for it leaves it at work until the session starts again.
+    end for it leaves it at work until the session starts again. A conversation's
+    quiet lasts across its session's starts again, a compaction or a resume, and
+    ends with a subagent's conversation: the session's own has no end its
+    runtime reports, and a cleared one starts under an id of its own.
     """
 
     layout: Layout
@@ -1896,22 +1922,42 @@ class ConversationRecord(Model):
             self.keep(kept)
 
     def closed(self, agent: str) -> None:
-        """Note that subagent `agent`'s conversation ended."""
+        """Note that subagent `agent`'s conversation ended, and its quiet with it."""
         with self.lock():
             kept = self.read()
-            if agent not in kept.working:
+            if agent not in kept.working and agent not in kept.quiet:
                 return
             kept.working = [each for each in kept.working if each != agent]
+            kept.quiet = {
+                each: kinds for each, kinds in kept.quiet.items() if each != agent
+            }
             self.keep(kept)
 
     def restarted(self) -> None:
         """Forget the subagents at work: the session starts, or starts again.
 
         A subagent still at work is noted again at its next call. What its turns
-        ended past is kept, so a resumed session isn't held again on it.
+        ended past is kept, so a resumed session isn't held again on it, and so
+        is each conversation's quiet.
         """
         with self.lock():
-            self.keep(Conversations(passed=self.read().passed))
+            kept = self.read()
+            self.keep(Conversations(passed=kept.passed, quiet=kept.quiet))
+
+    def quiet(self, agent: str) -> Quiet:
+        """Return what conversation `agent` asked not to be told; nothing where it isn't quiet."""
+        with self.lock():
+            return self.read().quieted(agent)
+
+    def quieting(self, agent: str, kinds: list[Kind]) -> Quiet:
+        """Hold `kinds` back from conversation `agent` from now on, none lifting its quiet, and return what it held before."""
+        with self.lock():
+            kept = self.read()
+            before = kept.quieted(agent)
+            others = {each: held for each, held in kept.quiet.items() if each != agent}
+            kept.quiet = {**others, agent: kinds} if kinds else others
+            self.keep(kept)
+        return before
 
 
 def mail_for(worktree: Worktree, key: str, agent: str, runtime: Runtime) -> Checked:
@@ -1959,15 +2005,19 @@ def confirm(bench: Bench, worktree: Worktree, key: str, agent: str, call: str) -
 
 
 def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding]:
-    """Return lup's findings, the type errors and ruff's findings left in `paths`.
+    """Return lup's findings, the type errors and ruff's findings left in `paths` (`standing`), each named by its absolute path."""
+    return placed(worktree.root, standing(bench, worktree, paths))
+
+
+def standing(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding]:
+    """Return lup's findings, the type errors and ruff's findings left in `paths`, each named from the worktree's root.
 
     As the files stand on disk, those that hold there (`Roles.kept`): lup's only
     where its rules read, so a test's are pyright's and ruff's alone, and none
-    the declaration exempts the file from or an `ignore` keeps; each named by
-    its absolute path. A finding ruff, or `lup-dev rules fix`, clears safely
-    isn't one: the session landing the work applies the fix. The engine and
-    ruff are asked with the rule selection and the runner of the declaration the
-    worktree is judged by.
+    the declaration exempts the file from or an `ignore` keeps. A finding ruff,
+    or `lup-dev rules fix`, clears safely isn't one: the session landing the
+    work applies the fix. The engine and ruff are asked with the rule selection
+    and the runner of the declaration the worktree is judged by.
     """
     services = bench.services
     sources = [
@@ -1982,7 +2032,7 @@ def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding
         worktree.root, sources, declaration.rules, declaration.runner
     )
     ruff = services.linter.findings(worktree.root, sources, declaration.runner)
-    found = [
+    return [
         found
         for report in reports
         for found in worktree.roles.kept(
@@ -1991,7 +2041,6 @@ def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding
         )
         if not found.fixable
     ]
-    return placed(worktree.root, found)
 
 
 class Ended(Model):
@@ -2161,7 +2210,8 @@ class SessionStarted(Reported, events.SessionStarted):
     conversation is told the deferred work its repository's gate last found due
     (`Due`), once at each start, since the gate doesn't fail on it. A
     conversation whose runtime compacted or cleared it forgets the findings it
-    knew, so what still stands is told again at its next call.
+    knew, so what still stands is told again at its next call. One still quiet
+    is told so, since what a compaction keeps may leave out that it asked.
     """
 
     forgotten: bool = False
@@ -2176,12 +2226,13 @@ class SessionStarted(Reported, events.SessionStarted):
         if self.forgotten:
             for worktree in worktrees(bench, held):
                 worktree.forget(self.session, self.agent)
-        if self.agent:
-            return Reply()
         record = ConversationRecord(layout=bench.services.layout, session=self.session)
+        quiet = record.quiet(self.agent).reminder()
+        if self.agent:
+            return Reply(context=quiet)
         record.restarted()
         due = read_model(GitDirectoryLayout(common=held.repository).due, Due)
-        return Reply(context="" if due is None else due.told())
+        return Reply(context=sections(["" if due is None else due.told(), quiet]))
 
 
 def counted(bench: Bench, session: str) -> list[Call]:

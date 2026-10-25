@@ -27,6 +27,7 @@ from lup_dev.policy.checkpoint import (
     CallFinished,
     CallStarted,
     ConversationEnded,
+    ConversationRecord,
     Pending,
     Reply,
     Running,
@@ -39,6 +40,8 @@ from lup_dev.policy.checkpoint import (
 )
 from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
+from lup_dev.policy.quiet import quieted
+from lup_dev.policy.report import Kind, Quiet
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.private.withheld import Held, Withheld, kept
@@ -2466,3 +2469,235 @@ def test_a_report_past_what_a_hook_tells_whole_is_kept_and_told_short(
     assert f"kept whole at {kept}" in told
     assert f"{repo}/src/pkg/core.py: 400 (reportGeneralTypeIssues 400)" in told
     assert f"{repo}/src/pkg/core.py:12:" in kept.read_text()
+
+
+# Quiet: a conversation asks not to be told some kinds of findings, and is told
+# once, as it lifts the quiet, what stands that it wasn't told.
+
+
+def quiet(kit: Kit, *kinds: Kind, agent: str = "") -> str:
+    """Hold `kinds` back from conversation `agent`, none lifting its quiet, as `quiet` does in the repository's process."""
+    return quieted(kit.bench, SESSION, agent, list(kinds))
+
+
+def with_old_and_new_findings(repo: Path, shell: Shell) -> str:
+    """Commit a lup finding on line 11 of `CORE`, and return its content with another on line 12, which a write changes."""
+    (repo / CORE).write_text((repo / CORE).read_text() + "old = 1  # BAD regex\n")
+    shell.commit(repo, "an old finding")
+    return (repo / CORE).read_text() + "new = 2  # BAD regex\n"
+
+
+def test_a_quiet_conversation_isnt_told_what_it_holds_and_is_told_it_as_it_lifts(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    held = quiet(kit, "changed")
+    assert held.startswith(
+        "This conversation is quiet: lup doesn't tell it type errors and ruff's "
+        "findings in the files changed after its calls"
+    )
+    assert shell_write(kit, repo, "c1", CORE, with_a_type_error(repo)).context == ""
+    lifted = quiet(kit)
+    assert lifted.startswith(
+        "lup's quiet is lifted: it tells this conversation every finding after its "
+        "calls again. What stands in the files it touched that it wasn't told:"
+    )
+    assert f"{repo}/src/pkg/core.py:11:" in lifted
+    touched = (repo / CORE).read_text() + "\n"
+    assert shell_write(kit, repo, "c2", CORE, touched).context == ""
+
+
+def test_quieting_rules_holds_lups_findings_on_the_lines_changed_not_on_the_others(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    changed = with_old_and_new_findings(repo, shell)
+    start(kit, repo)
+    quiet(kit, "rules")
+    told = shell_write(kit, repo, "c1", CORE, changed).context
+    assert told.startswith("lup's findings on lines no change touched")
+    assert f"{repo}/src/pkg/core.py:11:" in told
+    assert "core.py:12:" not in told
+    lifted = quiet(kit)
+    assert f"{repo}/src/pkg/core.py:12:" in lifted
+    assert "core.py:11:" not in lifted
+
+
+def test_quieting_untouched_holds_lups_findings_on_lines_no_change_touched(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    changed = with_old_and_new_findings(repo, shell)
+    start(kit, repo)
+    quiet(kit, "untouched")
+    told = shell_write(kit, repo, "c1", CORE, changed).context
+    assert told.startswith("lup's findings on the lines changed")
+    assert f"{repo}/src/pkg/core.py:12:" in told
+    assert "core.py:11:" not in told
+    lifted = quiet(kit)
+    assert f"{repo}/src/pkg/core.py:11:" in lifted
+    assert "core.py:12:" not in lifted
+
+
+def test_quieting_importers_holds_the_type_errors_in_the_files_importing_a_change(
+    kit: Kit, repo: Path
+) -> None:
+    user_with_an_error(kit, repo)
+    start(kit, repo)
+    quiet(kit, "importers")
+    changed = (repo / CORE).read_text().replace("return x", "return x + 1")
+    shell_write(kit, repo, "c1", CORE, changed)
+    worktree(kit, repo).importers().run(kit.engine, Plain())
+    assert shell_write(kit, repo, "c2", CORE, changed + "\n").context == ""
+    lifted = quiet(kit)
+    assert lifted.endswith(
+        "Type errors in files that import what changed (clean them before the turn "
+        f"ends):\n  {repo}/src/pkg/user.py:2:14 - reportGeneralTypeIssues: "
+        "reportGeneralTypeIssues fires here"
+    )
+
+
+def test_a_value_never_published_comes_through_a_quiet(
+    holding_kit: Kit, repo: Path
+) -> None:
+    withheld = Withheld(held=[Held(kind="value", text="Kestrel Labs")])
+    repository = worktree(holding_kit, repo).repository
+    write_model(kept(holding_kit.layout.module_data("private", repository)), withheld)
+    holding_kit.announced.holding_all = False
+    start(holding_kit, repo)
+    quiet(holding_kit, "rules", "untouched")
+    call(holding_kit, repo, "p1", tool="apply_patch")
+    notes = repo / "docs" / "notes.md"
+    notes.parent.mkdir()
+    notes.write_text("# Notes\n\nFor Kestrel Labs.\n")
+    told = finish(holding_kit, repo, "p1").context
+    assert told.startswith("Values never published, on the lines changed")
+    assert f"{repo}/docs/notes.md:3:5 - private:" in told
+
+
+def test_a_finding_told_before_a_quiet_isnt_told_again_as_it_lifts(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    first = shell_write(kit, repo, "c1", CORE, with_a_type_error(repo)).context
+    assert f"{repo}/src/pkg/core.py:11:" in first
+    quiet(kit, "changed")
+    touched = (repo / CORE).read_text() + "\n"
+    assert shell_write(kit, repo, "c2", CORE, touched).context == ""
+    assert quiet(kit) == (
+        "lup's quiet is lifted: it tells this conversation every finding after its "
+        "calls again. Nothing stands in the files it touched that it wasn't told."
+    )
+
+
+def test_a_finding_fixed_while_quiet_isnt_told_as_it_lifts(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    clean = (repo / CORE).read_text()
+    quiet(kit, "changed")
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    shell_write(kit, repo, "c2", CORE, clean)
+    assert quiet(kit).endswith(
+        "Nothing stands in the files it touched that it wasn't told."
+    )
+
+
+def test_lifting_a_quiet_that_wasnt_tells_what_stands_unheard(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    SessionStarted(session=SESSION, cwd=repo, forgotten=True).apply(kit.bench)
+    lifted = quiet(kit)
+    assert lifted.startswith(
+        "This conversation wasn't quiet: lup tells it every finding after its calls."
+    )
+    assert f"{repo}/src/pkg/core.py:11:" in lifted
+
+
+def test_the_turns_end_lists_what_a_quiet_holds_and_the_quiet_lasts_past_it(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    quiet(kit, "changed")
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    block = end(kit, repo).block
+    assert block.startswith("lup won't end the turn yet")
+    assert f"{repo}/src/pkg/core.py:11:" in block
+    assert end(kit, repo, after_block=True) == Reply()
+    TurnStarted(session=SESSION, cwd=repo).apply(kit.bench)
+    more = (repo / CORE).read_text() + "w: str = 2  # TYPE\n"
+    assert shell_write(kit, repo, "c2", CORE, more).context == ""
+    lifted = quiet(kit)
+    assert f"{repo}/src/pkg/core.py:11:" in lifted
+    assert f"{repo}/src/pkg/core.py:12:" in lifted
+
+
+def test_a_file_tools_write_while_quiet_isnt_told_what_it_holds(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    quiet(kit, "rules")
+    edit = Replacement(
+        call="e1",
+        tool="Edit",
+        path=repo / CORE,
+        old="    return x\n",
+        new="    return x  # BAD regex\n",
+    )
+    assert before(kit.bench, edit, SESSION, repo).told == ""
+    call(kit, repo, "e1", tool="Edit")
+    (repo / CORE).write_text(edit.content((repo / CORE).read_text()) or "")
+    assert finish(kit, repo, "e1") == Reply()
+    assert f"{repo}/src/pkg/core.py:10:" in quiet(kit)
+
+
+def test_each_conversations_quiet_is_its_own_and_ends_with_a_subagents_conversation(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    quiet(kit, "changed", agent="worker")
+    call(kit, repo, "c1")
+    call(kit, repo, "w1", agent="worker")
+    (repo / CORE).write_text(with_a_type_error(repo))
+    finish(kit, repo, "c1")
+    assert finish(kit, repo, "w1", agent="worker").context == ""
+    call(kit, repo, "c2")
+    assert f"{repo}/src/pkg/core.py:11:" in finish(kit, repo, "c2").context
+    record = ConversationRecord(layout=kit.layout, session=SESSION)
+    assert record.quiet("worker") == Quiet(kinds=["changed"])
+    subagent_ends(kit, repo, "worker")
+    assert record.quiet("worker") == Quiet()
+
+
+def test_a_quiet_conversation_compacted_stays_quiet_and_is_told_so_as_it_starts(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    quiet(kit, "changed", "importers")
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    started = SessionStarted(session=SESSION, cwd=repo, forgotten=True).apply(kit.bench)
+    assert started.context == (
+        "This conversation is still quiet: lup doesn't tell it type errors and "
+        "ruff's findings in the files changed, and type errors in the files "
+        "importing what changed after its calls. `quiet` with no kinds lifts it, "
+        "and tells what stands that it wasn't told."
+    )
+    touched = (repo / CORE).read_text() + "\n"
+    assert shell_write(kit, repo, "c2", CORE, touched).context == ""
+    assert f"{repo}/src/pkg/core.py:11:" in quiet(kit)
+
+
+def test_narrowing_a_quiet_tells_what_it_released_as_its_files_are_read_again(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    quiet(kit, "changed", "importers")
+    shell_write(kit, repo, "c1", CORE, with_a_type_error(repo))
+    narrowed = quiet(kit, "importers")
+    assert (
+        "What it held of type errors and ruff's findings in the files changed is "
+        "told as those files are read again, or when the quiet lifts."
+    ) in narrowed
+    touched = (repo / CORE).read_text() + "\n"
+    again = shell_write(kit, repo, "c2", CORE, touched).context
+    assert f"{repo}/src/pkg/core.py:11:" in again

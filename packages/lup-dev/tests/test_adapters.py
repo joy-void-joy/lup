@@ -1,5 +1,6 @@
 """Each runtime's payloads in, its outputs out."""
 
+import asyncio
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -11,6 +12,7 @@ from pydantic import TypeAdapter
 from lup import events
 from lup.adapters.claude.terminal import spelled
 from lup.sessions.terminal import Hook
+from lup_dev import cli
 from lup_dev.adapters import claude, codex
 from lup_dev.codescan.contract import (
     Checker,
@@ -22,7 +24,16 @@ from lup_dev.codescan.contract import (
     Source,
     Span,
 )
-from lup_dev.host.courier import Conversations, Failure, Heard, Spawned, Telling
+from lup_dev.host.courier import (
+    Conversation,
+    Conversations,
+    Failure,
+    Heard,
+    Spawned,
+    Telling,
+)
+from lup_dev.host.protocol import Register
+from lup_dev.host.workers import JudgeCalling
 from lup_dev.inbox.store import Text
 from lup_dev.policy.checkpoint import Bench, Running, Services, Worktree
 from lup_dev.policy.holds import Response
@@ -2414,3 +2425,58 @@ def test_each_runtime_hears_whether_a_sessions_own_conversation_starts_empty(
     assert codex.heard(from_codex).fresh is fresh
     subagent = json.dumps({**json.loads(from_claude), "agent_id": "a1"})
     assert not claude.heard(subagent).fresh
+
+
+# Quiet on each runtime: `quiet` runs as a repository's process runs it, with
+# the launch's runtime, and each runtime's hooks tell what it doesn't hold.
+
+
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_each_runtime_tells_nothing_a_quiet_holds_and_tells_it_as_it_lifts(
+    kit: Kit, repo: Path, runtime: str
+) -> None:
+    known = cli.Adapters(known=cli.adapters())
+    adapter = known.named(runtime)
+    bench = Bench(runtime=adapter.runtime, services=kit.bench.services)
+    launch = Register.model_construct(
+        launch="one", runtime=runtime, repository=repo / ".git"
+    )
+
+    def quiet(*kinds: str) -> str:
+        calling = JudgeCalling(
+            launch=launch,
+            name="quiet",
+            arguments={"kinds": list(kinds)},
+            caller=Conversation(id="c", session="s1"),
+        )
+        answer = asyncio.run(known.called(calling, kit.bench.services))
+        assert not answer.error, answer.text
+        return answer.text
+
+    def shell(call: str, write: str) -> str:
+        """A shell call that writes `CORE`, as the runtime's hooks report it: what its finish prints."""
+        fields: dict[str, object] = {
+            "turn_id": "u1",
+            "tool_name": "Bash",
+            "tool_input": {"command": "sed"},
+            "tool_use_id": call,
+        }
+        adapter.hook(payload(repo, "PreToolUse", **fields), bench)
+        (repo / CORE).write_text(write)
+        finished = payload(repo, "PostToolUse", **fields, tool_response={})
+        return adapter.hook(finished, bench)
+
+    adapter.hook(payload(repo, "SessionStart", source="startup"), bench)
+    quiet("changed")
+    broken = (repo / CORE).read_text() + "z: str = 1  # TYPE\n"
+    assert shell("t1", broken) == ""
+    compacted = adapter.hook(payload(repo, "SessionStart", source="compact"), bench)
+    reminded = json.loads(compacted)["hookSpecificOutput"]["additionalContext"]
+    assert reminded.startswith("This conversation is still quiet: lup doesn't tell it")
+    assert shell("t2", broken + "\n") == ""
+    lifted = quiet()
+    assert f"{repo}/src/pkg/core.py:11:" in lifted
+    told = shell("t3", broken + "\nw: str = 2  # TYPE\n")
+    said = json.loads(told)["hookSpecificOutput"]["additionalContext"]
+    assert f"{repo}/src/pkg/core.py:13:" in said
+    assert "core.py:11:" not in said
