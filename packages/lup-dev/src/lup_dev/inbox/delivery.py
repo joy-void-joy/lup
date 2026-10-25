@@ -121,6 +121,14 @@ from collections.abc import Callable, Generator
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal, override
 
+from lup.events import (
+    CallFinished,
+    CallStarted,
+    ConversationEnded,
+    SessionStarted,
+    TurnEnded,
+    TurnStarted,
+)
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
 from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
@@ -867,10 +875,11 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         presence = self.presence(party)
         presence.woken = False
         match heard.event:
-            case "turn-ended" | "conversation-ended":
+            case TurnEnded() | ConversationEnded():
+                ended = isinstance(heard.event, ConversationEnded)
                 for each in presence.held:
                     each.ended = True
-                if heard.event == "conversation-ended":
+                if ended:
                     await self.subagent_answered(party, launch, heard)
                 fresh = [
                     item
@@ -883,22 +892,22 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                     if posted.items:
                         return posted
                 presence.turning = False
-                if heard.event == "conversation-ended" and party.agent is not None:
+                if ended and party.agent is not None:
                     await self.ended(party, launch, conversation, heard)
                 return Posted()
-            case "session-started":
+            case SessionStarted():
                 presence.turning = False
                 return self.told(party, room, heard.fits, "start")
-            case "turn-started":
+            case TurnStarted():
                 presence.turning = True
                 taken = presence.pushed
                 if taken is not None and taken.token in (heard.prompt or ""):
                     self.taken(party, taken)
                 return self.told(party, room, heard.fits, "turn's start")
-            case "call-started" if heard.served:
+            case CallStarted() if heard.served:
                 presence.turning = True
                 return Posted()
-            case "call-started" | "call-finished":
+            case CallStarted() | CallFinished():
                 presence.turning = True
                 return self.told(party, room, heard.fits, "call")
 

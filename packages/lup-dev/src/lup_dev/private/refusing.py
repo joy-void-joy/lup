@@ -1,34 +1,25 @@
-"""The `Private` module's hook at `publishing`: refusing a push or a post that carries a value never published.
+"""What `Private` refuses at `Publishing`: a push or a post that carries a value never published.
 
-`docs/private.md`, *The door*. It runs on the host, in the repository's process
-(`lup_dev.worker`), and reads the list a launch built for the repository from
-the module's own data directory. A push is read commit by commit
-(`lup_dev.private.history`), in the repository's own git directory, pinned
-there; a post part by part. Each value found is a refusal naming its kind and
-place, never the value.
-
-Where no list is kept for the repository, as for a launch started before the
-module was approved, the hook builds it then, as a launch would, from its
-module and the related repositories the repository's process found, and keeps
-it.
-Where it can't be built, nothing it would check leaves, saying why.
+`docs/private.md`, *The door*. `PrivateServing.refuse` runs it on the host, in
+the repository's process (`lup_dev.worker`), against the list a launch built for
+the repository. A push is read commit by commit (`lup_dev.private.history`), in
+the repository's own git directory, pinned there; a post part by part. Each
+value found is a refusal naming its kind and place, never the value.
 """
 
 import asyncio
 from typing import TYPE_CHECKING
 
-from lup.tools.hook import lup_hook
-from lup_dev.declaration.serving import ModuleHooks, Moment
-from lup_dev.errors import LupDevError
+from lup.publishing import Part, Place, Post, Published, Push, Refusal
 from lup_dev.git import Git
-from lup_dev.host.publishing import Part, Place, Post, Push, Refusal
 from lup_dev.private.found import found
 from lup_dev.private.history import Spot, pushed
-from lup_dev.private.withheld import HostFacts, Withheld, kept, prepared, said
-from lup_dev.stored import read_model
+from lup_dev.private.withheld import said
 
 if TYPE_CHECKING:
-    from lup_dev.private.module import Private
+    from pathlib import Path
+
+    from lup_dev.private.withheld import Withheld
 
 
 def posted(parts: list[Part], held: Withheld) -> list[Spot]:
@@ -64,34 +55,14 @@ def unbuilt(failed: Exception) -> Refusal:
     )
 
 
-class PrivateHooks(ModuleHooks):
-    """Refusing what would publish a value never published."""
-
-    module: Private
-
-    @lup_hook
-    async def publishing(self, moment: Moment) -> list[Refusal]:
-        """Refuse each value never published in a push or a post, by its kind and place."""
-        held = read_model(kept(self.data), Withheld)
-        if held is None:
-            try:
-                made = await prepared(
-                    HostFacts(),
-                    self.launch.repository,
-                    related=self.related,
-                    details=self.module.chosen_details(),
-                    values=self.module.chosen_values(),
-                    data=self.data,
-                )
-            except (LupDevError, OSError) as failed:
-                return [unbuilt(failed)]
-            held = made.withheld
-        match moment.published:
-            case Push(updates=updates, has=has):
-                repository = Git.pinned(self.launch.repository)
-                spots = await asyncio.to_thread(pushed, repository, updates, has, held)
-                return refused(spots)
-            case Post(parts=parts):
-                return refused(posted(parts, held))
-            case None:
-                return []
+async def refusals(
+    published: Published, held: Withheld, repository: Path
+) -> list[Refusal]:
+    """Refuse each value of `held` in `published`, a push of the repository whose git directory is `repository`, or a post, by its kind and place."""
+    match published:
+        case Push(updates=updates, has=has):
+            git = Git.pinned(repository)
+            spots = await asyncio.to_thread(pushed, git, updates, has, held)
+            return refused(spots)
+        case Post(parts=parts):
+            return refused(posted(parts, held))

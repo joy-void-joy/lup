@@ -21,12 +21,12 @@ from filelock import FileLock
 from typer.testing import CliRunner
 
 import lup
+from lup import events
 from lup.programs import Ran, run
 from lup.rooms.engine import Podman, Process
 from lup.sessions.bridge import Bridge
 from lup.sessions.terminal import (
     Cli,
-    Event,
     SessionSettings,
     TerminalError,
     TerminalSettings,
@@ -76,6 +76,8 @@ if TYPE_CHECKING:
 
     import httpx
     from conftest import FakeClock, Shell
+
+    from lup.events import SessionEvent
 
 DECLARED = '''"""A project's declaration, with a guidance section and limits of its own."""
 
@@ -1103,7 +1105,7 @@ def test_the_command_names_the_runtimes_it_knows(
 
 
 def test_the_hook_pipes_the_payload_to_the_launchs_socket() -> None:
-    program, flag, script = piped("call-started", timedelta(hours=25))
+    program, flag, script = piped(events.CallStarted, timedelta(hours=25))
 
     assert [program, flag] == ["sh", "-c"]
     piping, *_ = script.splitlines()
@@ -1119,7 +1121,7 @@ def test_the_hook_pipes_the_payload_to_the_launchs_socket() -> None:
 
 
 def test_the_hook_waits_for_the_service_as_long_as_lups_bridge_does() -> None:
-    _, _, script = piped("call-started")
+    _, _, script = piped(events.CallStarted)
     _, options = shlex.split(script.splitlines()[0])[4].split(",", 1)
     bridge = Bridge(Path("/run/lup/mcp.sock"), io.StringIO())
 
@@ -1138,7 +1140,9 @@ def socat(tmp_path: Path, script: str) -> Path:
     return bin_dir
 
 
-def hook(path: Path, payload: str, event: Event = "call-started") -> Ran:
+def hook(
+    path: Path, payload: str, event: type[SessionEvent] = events.CallStarted
+) -> Ran:
     program, *arguments = piped(event)
     return run(
         program,
@@ -1195,28 +1199,32 @@ HELD = (
 @pytest.mark.parametrize(
     ("event", "status", "said"),
     [
-        ("call-started", 2, f"{GONE} so this call didn't run: make it again. {HELD}"),
         (
-            "call-finished",
+            events.CallStarted,
+            2,
+            f"{GONE} so this call didn't run: make it again. {HELD}",
+        ),
+        (
+            events.CallFinished,
             2,
             f"{GONE} so what was written is judged at your next call. {HELD}",
         ),
         (
-            "turn-ended",
+            events.TurnEnded,
             2,
             f"{GONE} so what was written is judged at your next call. {HELD}",
         ),
         (
-            "conversation-ended",
+            events.ConversationEnded,
             2,
             f"{GONE} so what was written is judged at your next call. {HELD}",
         ),
-        ("session-started", 1, f"{GONE} so its answer was lost."),
-        ("turn-started", 1, f"{GONE} so its answer was lost."),
+        (events.SessionStarted, 1, f"{GONE} so its answer was lost."),
+        (events.TurnStarted, 1, f"{GONE} so its answer was lost."),
     ],
 )
 def test_a_hook_whose_connection_ends_unanswered_fails_saying_why(
-    tmp_path: Path, event: Event, status: int, said: str
+    tmp_path: Path, event: type[SessionEvent], status: int, said: str
 ) -> None:
     """`socat` ends with status 0 and nothing printed where the service closes the
     connection, exits or is killed while the hook waits (`docs/field-notes.md`,
@@ -1296,7 +1304,7 @@ def test_a_hook_the_service_leaves_unanswered_mid_wait_fails_closed(
     try:
         assert service.stdout is not None
         assert service.stdout.readline() == "listening\n"
-        program, *arguments = piped("call-started")
+        program, *arguments = piped(events.CallStarted)
         room = subprocess.Popen(
             [program, *arguments],
             stdin=subprocess.PIPE,

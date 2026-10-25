@@ -47,6 +47,15 @@ from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
+from lup.events import (
+    CallFinished,
+    CallStarted,
+    ConversationEnded,
+    SessionEvent,
+    SessionStarted,
+    TurnEnded,
+    TurnStarted,
+)
 from lup.sessions.bridge import Bridge
 from lup.sessions.terminal import (
     Cli,
@@ -68,7 +77,6 @@ from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, LaunchSockets
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
-    from lup.sessions.terminal import Event
     from lup.tools.tool import ToolSpec
     from lup_dev.codescan.contract import Rule
     from lup_dev.launch.room import Lent, RelatedRepository
@@ -128,7 +136,7 @@ class Lost(Model):
     said: str
 
 
-def lost(event: Event) -> Lost:
+def lost(event: type[SessionEvent]) -> Lost:
     """Return what the room's hook at `event` does where the host service goes away after the payload is sent, before it answers.
 
     Status 2, at a call's start, its finish and a conversation's turn's end, does
@@ -147,21 +155,27 @@ def lost(event: Event) -> Lost:
         "A write lup held for the operator's review stays held, and their answer "
         "reaches you at a later call."
     )
-    match event:
-        case "session-started" | "turn-started":
-            return Lost(status=1, said=f"{gone} so its answer was lost.")
-        case "call-started":
-            return Lost(
-                status=2, said=f"{gone} so this call didn't run: make it again. {held}"
-            )
-        case "call-finished" | "turn-ended" | "conversation-ended":
-            return Lost(
-                status=2,
-                said=f"{gone} so what was written is judged at your next call. {held}",
-            )
+    dropped = Lost(status=1, said=f"{gone} so its answer was lost.")
+    unjudged = Lost(
+        status=2,
+        said=f"{gone} so what was written is judged at your next call. {held}",
+    )
+    losses: dict[type[SessionEvent], Lost] = {
+        SessionStarted: dropped,
+        TurnStarted: dropped,
+        CallStarted: Lost(
+            status=2, said=f"{gone} so this call didn't run: make it again. {held}"
+        ),
+        CallFinished: unjudged,
+        TurnEnded: unjudged,
+        ConversationEnded: unjudged,
+    }
+    return losses[event]
 
 
-def piped(event: Event, timeout: timedelta = timedelta(hours=25)) -> list[str]:
+def piped(
+    event: type[SessionEvent], timeout: timedelta = timedelta(hours=25)
+) -> list[str]:
     """Return the command a room's hook at `event` runs: the payload piped to the host service, its answer printed.
 
     Where the service is away, as while it restarts, `socat` waits for it as
@@ -208,7 +222,9 @@ def piped(event: Event, timeout: timedelta = timedelta(hours=25)) -> list[str]:
 
 
 def hooked(
-    spelled: Callable[[Callable[[Event], list[str]], timedelta], list[Hook]],
+    spelled: Callable[
+        [Callable[[type[SessionEvent]], list[str]], timedelta], list[Hook]
+    ],
     hold: timedelta = timedelta(hours=25),
 ) -> list[Hook]:
     """Return a runtime's hooks, as its adapter spells them (`spelled`), each running the room's pipe for its event.

@@ -1927,7 +1927,7 @@ export const rules = {
                     code: python`
                         from pydantic import Field
 
-                        from lup.tools import lup_tool
+                        import lup
                         from lup.types import Model
 
 
@@ -1943,7 +1943,7 @@ export const rules = {
                             notes: list[str]
                             shown: int = 50
 
-                            @lup_tool
+                            @lup.tool
                             async def find_notes(self, query: Query) -> str:
                                 """Find the notes holding some words."""
                                 found = [note for note in self.notes if query.words in note]
@@ -1952,7 +1952,7 @@ export const rules = {
                     rewritten: python`
                         from pydantic import Field, PositiveInt
 
-                        from lup.tools import lup_tool
+                        import lup
                         from lup.types import Model
 
 
@@ -1968,7 +1968,7 @@ export const rules = {
 
                             notes: list[str]
 
-                            @lup_tool
+                            @lup.tool
                             async def find_notes(self, query: Query) -> str:
                                 """Find the notes holding some words."""
                                 found = [note for note in self.notes if query.words in note]
@@ -1982,8 +1982,8 @@ export const rules = {
                     code: python`
                         from pydantic import Field
 
+                        import lup
                         from lup.programs import run
-                        from lup.tools import lup_tool
                         from lup.types import Model
 
 
@@ -1993,7 +1993,7 @@ export const rules = {
                             words: str = Field(description="What to search for, in GitHub's search syntax.")
 
 
-                        @lup_tool
+                        @lup.tool
                         async def find_issues(query: Query) -> str:
                             """Search the repository's issues."""
                             return run("gh", "search", "issues", "--limit=100", "--", query.words).text()
@@ -2001,8 +2001,8 @@ export const rules = {
                     rewritten: python`
                         from pydantic import Field, PositiveInt
 
+                        import lup
                         from lup.programs import run
-                        from lup.tools import lup_tool
                         from lup.types import Model
 
 
@@ -2013,7 +2013,7 @@ export const rules = {
                             limit: PositiveInt = Field(default=100, description="How many issues to list at most.")
 
 
-                        @lup_tool
+                        @lup.tool
                         async def find_issues(query: Query) -> str:
                             """Search the repository's issues."""
                             ran = run("gh", "search", "issues", f"--limit={query.limit}", "--", query.words)
@@ -2041,7 +2041,7 @@ export const rules = {
                 python`
                     from pydantic import Field, PositiveInt
 
-                    from lup.tools import lup_tool
+                    import lup
                     from lup.types import Model
 
 
@@ -2062,7 +2062,7 @@ export const rules = {
 
                         notes: list[str]
 
-                        @lup_tool
+                        @lup.tool
                         async def find_notes(self, query: Query) -> str:
                             """Find the notes holding some words, \`limit\` at most."""
                             return "\\n".join(search(self.notes, query.words, query.limit))

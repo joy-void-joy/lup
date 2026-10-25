@@ -174,6 +174,14 @@ from pydantic import JsonValue, ValidationError
 from pydantic.alias_generators import to_camel
 
 from lup.adapters.claude.layout import ClaudeLaunch, ClaudeLayout
+from lup.events import (
+    CallFinished,
+    CallStarted,
+    ConversationEnded,
+    SessionStarted,
+    TurnEnded,
+    TurnStarted,
+)
 from lup.rooms.container import Mount
 from lup.sessions.terminal import Cli, Terminal, TerminalError
 from lup.types import Model
@@ -182,7 +190,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup.adapters.claude import Effort
-    from lup.sessions.terminal import Event, Hook, TerminalSettings, ToolServer
+    from lup.events import SessionEvent
+    from lup.sessions.terminal import Hook, TerminalSettings, ToolServer
 
 # lup: defer(issue=52, why="Claude Code's variable, shared with an ask, a module constant until a `Spellings` each adapter implements gives it its home")
 AUTO_MEMORY_OFF = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
@@ -349,21 +358,17 @@ def own_settings(settings: Path) -> OwnSettings:
         raise TerminalError(message) from failed
 
 
-def spelled(event: Event) -> list[str]:
+def spelled(event: type[SessionEvent]) -> list[str]:
     """Return Claude Code's hook events for one of lup's."""
-    match event:
-        case "session-started":
-            return ["SessionStart"]
-        case "turn-started":
-            return ["UserPromptSubmit"]
-        case "call-started":
-            return ["PreToolUse"]
-        case "call-finished":
-            return ["PostToolUse", "PostToolUseFailure"]
-        case "turn-ended":
-            return ["Stop", "StopFailure"]
-        case "conversation-ended":
-            return ["SubagentStop"]
+    spellings: dict[type[SessionEvent], list[str]] = {
+        SessionStarted: ["SessionStart"],
+        TurnStarted: ["UserPromptSubmit"],
+        CallStarted: ["PreToolUse"],
+        CallFinished: ["PostToolUse", "PostToolUseFailure"],
+        TurnEnded: ["Stop", "StopFailure"],
+        ConversationEnded: ["SubagentStop"],
+    }
+    return spellings[event]
 
 
 def compiled(

@@ -1150,8 +1150,8 @@ export class File {
     }
 
     // The functions serving a tool of lup's library (`lup.tools`), each with the name of
-    // the tool's own: a function decorated `@lup_tool`, marked or not
-    // (`@lup_tool(reads=True)`), or handed to `lup_tool(…)`; a
+    // the tool's own: a function decorated `@lup.tool`, marked or not
+    // (`@lup.tool(reads=True)`), or handed to `lup.tool(…)`; a
     // `Tool`'s `function`; the `call` of a class implementing `AgentTool` or `Toolset`;
     // and each function of this file one of them names, which serves the same tool.
     private serving(): Map<ParseNode, string> {
@@ -1286,10 +1286,10 @@ export class File {
 
 const emptyBuilders = ['builtins.list', 'builtins.dict', 'builtins.set'];
 
-// What marks a function as a tool in lup's library (`lup.tools`): the decorator, which
+// What marks a function as a tool in lup's library (`lup.doors`): the decorator, which
 // also takes a function as its argument; and the interfaces a class serving tools
 // implements, whose `call` serves one.
-const toolMaker = 'lup.tools.tool.lup_tool';
+const toolMaker = 'lup.doors.tool';
 const toolInterfaces = ['lup.tools.tool.AgentTool', 'lup.tools.serving.Toolset'];
 
 // What follows `max_` in a parameter's or an option's name saying how many of something

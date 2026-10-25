@@ -185,7 +185,9 @@ def landed(kit: Kit, repo: Path, proposal: Proposal, agent: str = "") -> Decisio
     path.write_text(
         proposal.content(path.read_text() if path.is_file() else None) or ""
     )
-    CallFinished(session="s1", agent=agent, cwd=repo, call=call).apply(kit.bench)
+    CallFinished(
+        session="s1", agent=agent, cwd=repo, call=call, tool=proposal.tool
+    ).apply(kit.bench)
     return decision
 
 
@@ -429,7 +431,8 @@ def rewrite(repo: Path, call: str = "w1") -> Overwrite:
 def ran(kit: Kit, repo: Path, call: str) -> str:
     """A shell call of the session's that writes nothing: what its finish tells."""
     CallStarted(session="s1", cwd=repo, call=call, tool="Bash").apply(kit.bench)
-    return CallFinished(session="s1", cwd=repo, call=call).apply(kit.bench).context
+    finished = CallFinished(session="s1", cwd=repo, call=call, tool="Bash")
+    return finished.apply(kit.bench).context
 
 
 def test_a_held_write_holds_its_file_as_a_checkpoints_change_does_while_it_waits(

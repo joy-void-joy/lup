@@ -17,10 +17,11 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner
 
+from lup import events
 from lup_dev import Modules, Private, Project, ProjectError, Values, cli
 from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.declaration.resolve import resolve
-from lup_dev.declaration.serving import Related, answering
+from lup_dev.declaration.serving import Related, listening, requests
 from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import RoomClient, asked
 from lup_dev.host.courier import Courier, Heard, Telling
@@ -28,9 +29,10 @@ from lup_dev.host.protocol import Action, Done, Limits, Register, Registered, St
 from lup_dev.host.service import Answerer, HostService
 from lup_dev.host.workers import LaunchJudge
 from lup_dev.layout import HostLayout, Layout
-from lup_dev.private import scanning
+from lup_dev.private import serving as private_serving
 from lup_dev.private.found import added_lines, counted, found, textual
 from lup_dev.private.module import Details
+from lup_dev.private.serving import PrivateServing
 from lup_dev.private.withheld import (
     Held,
     Seen,
@@ -478,7 +480,12 @@ class Nobody(Answerer):
 
 class Deaf(Courier):
     def heard(self, runtime: str, payload: str) -> Heard:
-        return Heard(event="call-started", session="s1", judged=False, fits=10_000)
+        return Heard(
+            event=events.CallStarted(call="u1", tool="Bash"),
+            session="s1",
+            judged=False,
+            fits=10_000,
+        )
 
     def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
         return answer
@@ -551,7 +558,7 @@ def test_the_gate_in_a_room_whose_launch_has_no_list_has_the_host_build_it(
     declared = Modules.default().edit(Private(values=Values().add("Kestrel Labs")))
     modules = in_process(resolved=resolve(Project(modules=declared)), layout=layout)
     monkeypatch.setattr(
-        scanning, "HostFacts", lambda: stub_facts(home=Path("/home/op"))
+        private_serving, "HostFacts", lambda: stub_facts(home=Path("/home/op"))
     )
     with hosted(tmp_path_factory, registered(forged), modules) as socket:
         in_the_room(socket, monkeypatch)
@@ -602,13 +609,12 @@ def test_a_launch_whose_limits_leave_out_fetching_reads_the_files_alone(
     )
 
 
-def test_private_brings_its_gate_step_its_handler_and_its_hook() -> None:
+def test_private_brings_its_gate_step_its_request_and_its_hook() -> None:
     resolved = resolve(Project())
     assert [each.name for each in resolved.gate][-1] == "private"
     assert [each.command for each in resolved.gate if each.name == "private"] == [
         ["lup-dev", "private", "check"]
     ]
-    assert "private-scan" in [
-        answering(each.handler).named() for each in resolved.handled
-    ]
-    assert "PrivateHooks" in [each.hooks.__name__ for each in resolved.hooked]
+    [private] = [each for each in resolved.served if each.serving is PrivateServing]
+    assert requests(private.serving) == {"private-scan": "scan"}
+    assert listening(private.serving) == [events.Publishing]

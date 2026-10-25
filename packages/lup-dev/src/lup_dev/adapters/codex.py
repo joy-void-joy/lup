@@ -215,6 +215,7 @@ from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
 
 import lup
+from lup import events
 from lup.adapters.codex.layout import CodexLayout
 from lup.adapters.codex.settings import CodexSettings
 from lup.sessions.terminal import Cli, Hook
@@ -265,8 +266,8 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from lup.events import SessionEvent
     from lup.sessions.declaration import Declaration
-    from lup.sessions.terminal import Event
 
 
 # lup: defer(issue=52, why="Codex's spelling of a tool's name in a hook, a module constant until a `Spellings` each adapter implements gives it its home")
@@ -438,7 +439,7 @@ class SessionStart(Payload):
     def heard(self, fits: int) -> Heard:
         """Read the session's start, and whether its thread begins empty (`FreshStart`): the judge reads it."""
         return Heard(
-            event="session-started",
+            event=events.SessionStarted(),
             session=self.session_id,
             agent=self.agent_id,
             judged=True,
@@ -491,7 +492,7 @@ class UserPromptSubmit(Payload):
     def heard(self, fits: int) -> Heard:
         """Read the turn's start, and the prompt it starts on: the judge reads it."""
         return Heard(
-            event="turn-started",
+            event=events.TurnStarted(),
             session=self.session_id,
             agent=self.agent_id,
             judged=True,
@@ -542,11 +543,9 @@ class PreToolUse(Payload):
     def heard(self, fits: int) -> Heard:
         """Read the call's start: the judge reads every one."""
         return Heard(
-            event="call-started",
+            event=events.CallStarted(call=self.tool_use_id, tool=self.tool_name),
             session=self.session_id,
             agent=self.agent_id,
-            call=self.tool_use_id,
-            tool=self.tool_name,
             served=self.tool_name.startswith(TOOL_PREFIX),
             judged=True,
             fits=fits,
@@ -614,11 +613,9 @@ class PostToolUse(Payload):
     def heard(self, fits: int) -> Heard:
         """Read the call's finish: the judge reads every one."""
         return Heard(
-            event="call-finished",
+            event=events.CallFinished(call=self.tool_use_id, tool=self.tool_name),
             session=self.session_id,
             agent=self.agent_id,
-            call=self.tool_use_id,
-            tool=self.tool_name,
             judged=True,
             fits=fits,
         )
@@ -634,6 +631,7 @@ class PostToolUse(Payload):
             agent=self.agent_id or "",
             cwd=self.cwd,
             call=self.tool_use_id,
+            tool=self.tool_name,
         )
         reply = finished.apply(bench)
         if not reply.context:
@@ -671,7 +669,7 @@ class Stop(Payload):
     def heard(self, fits: int) -> Heard:
         """Read the turn's end: the judge reads it."""
         return Heard(
-            event="turn-ended",
+            event=events.TurnEnded(),
             session=self.session_id,
             agent=self.agent_id,
             judged=True,
@@ -730,7 +728,7 @@ class SubagentStop(Payload):
     def heard(self, fits: int) -> Heard:
         """Read a subagent's turn's end: the judge reads it."""
         return Heard(
-            event="conversation-ended",
+            event=events.ConversationEnded(),
             session=self.session_id,
             agent=self.agent_id,
             judged=True,
@@ -917,7 +915,9 @@ def told(raw: str, answer: str, telling: Telling) -> str | None:
     return added.model_dump_json(by_alias=True, exclude_none=True)
 
 
-def hooks(command: Callable[[Event], list[str]], timeout: timedelta) -> list[Hook]:
+def hooks(
+    command: Callable[[type[SessionEvent]], list[str]], timeout: timedelta
+) -> list[Hook]:
     """Return the hooks a launched Codex session runs at the events the host service hears, each running the command `command` gives for its event.
 
     `SessionStart`; `UserPromptSubmit`, each turn's start, which clears the
@@ -927,16 +927,16 @@ def hooks(command: Callable[[Event], list[str]], timeout: timedelta) -> list[Hoo
     that failed to apply, a call interrupted), and judges what the turn left.
     Each waits up to `timeout`, which a hold's wait for the operator needs.
     """
-    events: list[Event] = [
-        "session-started",
-        "turn-started",
-        "call-started",
-        "call-finished",
-        "turn-ended",
-        "conversation-ended",
+    heard: list[type[SessionEvent]] = [
+        events.SessionStarted,
+        events.TurnStarted,
+        events.CallStarted,
+        events.CallFinished,
+        events.TurnEnded,
+        events.ConversationEnded,
     ]
     return [
-        Hook(event=event, command=command(event), timeout=timeout) for event in events
+        Hook(event=event, command=command(event), timeout=timeout) for event in heard
     ]
 
 

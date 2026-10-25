@@ -26,8 +26,8 @@ name, which git's own line for it gives.
 
 from typing import TYPE_CHECKING
 
+from lup.publishing import Place, Updating
 from lup.types import Model
-from lup_dev.host.publishing import Place, Updating
 from lup_dev.private.found import added_lines, counted, found, masked, textual
 from lup_dev.private.withheld import Held, Withheld
 

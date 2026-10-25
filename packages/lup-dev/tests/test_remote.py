@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from lup import events
 from lup.rooms.container import Mask, Mount
 from lup.types import Model
 from lup_dev import Project
@@ -43,7 +44,7 @@ from lup_dev.host.service import Answerer, HostService, Program, executed
 from lup_dev.host.workers import LaunchJudge
 from lup_dev.launch.room import RoomError, RoomGit, programs, refreshed, room_git
 from lup_dev.layout import ROOM_PATH, HostLayout, LaunchLayout, LaunchSockets, Layout
-from lup_dev.private import hooks
+from lup_dev.private import serving as private_serving
 from lup_dev.private.withheld import Facts, Held, Machine, Withheld, kept
 from lup_dev.remote.config import Gating, room_config
 from lup_dev.remote.protocol import (
@@ -1548,7 +1549,7 @@ def test_the_room_s_git_is_written_from_the_repository_s_own_config_past_a_plant
     )
 
 
-# The door: what a push would publish, put to the modules' hooks at `publishing`
+# The door: what a push would publish, put to the modules' hooks at `Publishing`
 
 
 PRIVATE = Withheld(
@@ -1591,7 +1592,7 @@ def test_a_push_carrying_a_value_is_refused_naming_commit_file_and_line(
     said = told(pushed)
     assert (
         "lup refused to publish this push to `refs/heads/feat`: a module's check at "
-        "the `publishing` moment found what isn't published, at each place below.\n"
+        "`Publishing` found what isn't published, at each place below.\n"
         f"  {short} docs/notes.md:2:5 - the operator's home path\n"
         "      steer: write it as `~`, or a path in the repository from its root\n"
         "A push sends every commit the remote lacks, so rewrite the commit that "
@@ -1603,7 +1604,9 @@ def test_a_push_carrying_a_value_is_refused_naming_commit_file_and_line(
         "listed above"
     ) in said
     assert not [line for line in world.said if "/home/op" in line]
-    [publishing] = [each for each in guarded.told if each.occasion == "publishing"]
+    [publishing] = [
+        each for each in guarded.told if isinstance(each.event, events.Publishing)
+    ]
     assert publishing.conversation is None
 
 
@@ -1750,7 +1753,9 @@ def test_a_launch_without_a_list_gets_one_at_its_first_push(
     layout = Layout(state=tmp_path / "state-none", data=tmp_path / "data-none")
     unlisted = in_process(resolved=resolve(Project()), layout=layout)
     place = kept(layout.module_data("private", world.project))
-    monkeypatch.setattr(hooks, "HostFacts", lambda: stub_facts(home=Path("/home/op")))
+    monkeypatch.setattr(
+        private_serving, "HostFacts", lambda: stub_facts(home=Path("/home/op"))
+    )
     clean = world.wrote("docs/clean.md", "Nothing here.\n", "clean")
     carrying = world.wrote("docs/notes.md", "See /home/op/x.\n", "notes")
 
@@ -1792,7 +1797,7 @@ def test_a_push_whose_list_can_t_be_built_is_refused_saying_why(
         resolved=resolve(Project()),
         layout=Layout(state=tmp_path / "state-none", data=tmp_path / "data-none"),
     )
-    monkeypatch.setattr(hooks, "HostFacts", Gone)
+    monkeypatch.setattr(private_serving, "HostFacts", Gone)
     world.wrote("docs/clean.md", "Nothing here.\n", "clean")
 
     with world.served(clock, modules=unlisted):
@@ -1818,5 +1823,5 @@ def test_a_deletion_and_a_push_with_no_modules_ask_nothing(
 
     assert deleted.exit_code == 0, stderr(deleted)
     assert guarded.told == [
-        each for each in guarded.told if each.occasion != "publishing"
+        each for each in guarded.told if not isinstance(each.event, events.Publishing)
     ]

@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING, get_args
 import pytest
 from pydantic import TypeAdapter
 
+from lup import events
 from lup.adapters.claude.terminal import spelled
-from lup.sessions.terminal import Event, Hook
+from lup.sessions.terminal import Hook
 from lup_dev.adapters import claude, codex
 from lup_dev.codescan.contract import (
     Checker,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 
     from conftest import Kit
 
+    from lup.events import SessionEvent
     from lup_dev.declaration.resolve import Selected
     from lup_dev.declaration.runner import Runner
 
@@ -1171,9 +1173,9 @@ def test_codex_a_subagents_call_holds_back_the_main_conversations_checkpoint(
 # In a launched room
 
 
-def hook_at(event: Event) -> list[str]:
+def hook_at(event: type[SessionEvent]) -> list[str]:
     """The room's hook at `event`, as `piped` gives one for each."""
-    return ["sh", "-c", f"socat … {event}"]
+    return ["sh", "-c", f"socat … {event.named()}"]
 
 
 HOLD = timedelta(hours=25)
@@ -1494,14 +1496,26 @@ def test_claude_hooks_every_call_and_each_turns_start_and_end_in_a_room() -> Non
     """Every hook waits as long as a hold may: a call's start for a file tool's
     write, its finish for the checkpoint's, a turn's end for its last checkpoint's."""
     assert claude.hooks(hook_at, HOLD) == [
-        Hook(event="session-started", command=hook_at("session-started"), timeout=HOLD),
-        Hook(event="turn-started", command=hook_at("turn-started"), timeout=HOLD),
-        Hook(event="call-started", command=hook_at("call-started"), timeout=HOLD),
-        Hook(event="call-finished", command=hook_at("call-finished"), timeout=HOLD),
-        Hook(event="turn-ended", command=hook_at("turn-ended"), timeout=HOLD),
         Hook(
-            event="conversation-ended",
-            command=hook_at("conversation-ended"),
+            event=events.SessionStarted,
+            command=hook_at(events.SessionStarted),
+            timeout=HOLD,
+        ),
+        Hook(
+            event=events.TurnStarted, command=hook_at(events.TurnStarted), timeout=HOLD
+        ),
+        Hook(
+            event=events.CallStarted, command=hook_at(events.CallStarted), timeout=HOLD
+        ),
+        Hook(
+            event=events.CallFinished,
+            command=hook_at(events.CallFinished),
+            timeout=HOLD,
+        ),
+        Hook(event=events.TurnEnded, command=hook_at(events.TurnEnded), timeout=HOLD),
+        Hook(
+            event=events.ConversationEnded,
+            command=hook_at(events.ConversationEnded),
             timeout=HOLD,
         ),
     ]
@@ -1538,14 +1552,26 @@ def test_claudes_judge_reads_no_call_to_a_tool_that_only_reads_nor_to_lups(
 
 def test_codex_hooks_each_turns_start_and_the_judges_events_in_a_room() -> None:
     assert codex.hooks(hook_at, HOLD) == [
-        Hook(event="session-started", command=hook_at("session-started"), timeout=HOLD),
-        Hook(event="turn-started", command=hook_at("turn-started"), timeout=HOLD),
-        Hook(event="call-started", command=hook_at("call-started"), timeout=HOLD),
-        Hook(event="call-finished", command=hook_at("call-finished"), timeout=HOLD),
-        Hook(event="turn-ended", command=hook_at("turn-ended"), timeout=HOLD),
         Hook(
-            event="conversation-ended",
-            command=hook_at("conversation-ended"),
+            event=events.SessionStarted,
+            command=hook_at(events.SessionStarted),
+            timeout=HOLD,
+        ),
+        Hook(
+            event=events.TurnStarted, command=hook_at(events.TurnStarted), timeout=HOLD
+        ),
+        Hook(
+            event=events.CallStarted, command=hook_at(events.CallStarted), timeout=HOLD
+        ),
+        Hook(
+            event=events.CallFinished,
+            command=hook_at(events.CallFinished),
+            timeout=HOLD,
+        ),
+        Hook(event=events.TurnEnded, command=hook_at(events.TurnEnded), timeout=HOLD),
+        Hook(
+            event=events.ConversationEnded,
+            command=hook_at(events.ConversationEnded),
             timeout=HOLD,
         ),
     ]
@@ -1652,16 +1678,16 @@ BOTH = "The operator answered.\n\nAnd again."
     [
         (
             '{"session_id": "s1", "cwd": "/w", "hook_event_name": "SessionStart"}',
-            Heard(fits=10_000, event="session-started", session="s1", judged=True),
+            Heard(
+                fits=10_000, event=events.SessionStarted(), session="s1", judged=True
+            ),
         ),
         (
             pre_tool_use(Path("/w"), "Write", {"file_path": "a", "content": "b"}),
             Heard(
                 fits=10_000,
-                event="call-started",
+                event=events.CallStarted(call="t1", tool="Write"),
                 session="s1",
-                call="t1",
-                tool="Write",
                 judged=True,
             ),
         ),
@@ -1676,11 +1702,9 @@ BOTH = "The operator answered.\n\nAnd again."
             ),
             Heard(
                 fits=10_000,
-                event="call-started",
+                event=events.CallStarted(call="t2", tool="Bash"),
                 session="s1",
                 agent="a1",
-                call="t2",
-                tool="Bash",
                 judged=True,
             ),
         ),
@@ -1688,10 +1712,8 @@ BOTH = "The operator answered.\n\nAnd again."
             pre_tool_use(Path("/w"), "Read", {"file_path": "/w/a.py"}, "t4"),
             Heard(
                 fits=10_000,
-                event="call-started",
+                event=events.CallStarted(call="t4", tool="Read"),
                 session="s1",
-                call="t4",
-                tool="Read",
                 judged=False,
             ),
         ),
@@ -1699,10 +1721,8 @@ BOTH = "The operator answered.\n\nAnd again."
             pre_tool_use(Path("/w"), "mcp__lup__blocked", {"problem": "x"}, "t3"),
             Heard(
                 fits=10_000,
-                event="call-started",
+                event=events.CallStarted(call="t3", tool="mcp__lup__blocked"),
                 session="s1",
-                call="t3",
-                tool="mcp__lup__blocked",
                 served=True,
                 judged=False,
             ),
@@ -1711,10 +1731,8 @@ BOTH = "The operator answered.\n\nAnd again."
             payload(Path("/w"), "PostToolUse", tool_name="Bash", tool_use_id="t2"),
             Heard(
                 fits=10_000,
-                event="call-finished",
+                event=events.CallFinished(call="t2", tool="Bash"),
                 session="s1",
-                call="t2",
-                tool="Bash",
                 judged=True,
             ),
         ),
@@ -1724,16 +1742,14 @@ BOTH = "The operator answered.\n\nAnd again."
             ),
             Heard(
                 fits=10_000,
-                event="call-finished",
+                event=events.CallFinished(call="t3", tool="mcp__lup__ask"),
                 session="s1",
-                call="t3",
-                tool="mcp__lup__ask",
                 judged=False,
             ),
         ),
         (
             payload(Path("/w"), "Stop", stop_hook_active=False),
-            Heard(fits=10_000, event="turn-ended", session="s1", judged=True),
+            Heard(fits=10_000, event=events.TurnEnded(), session="s1", judged=True),
         ),
         (
             payload(
@@ -1744,7 +1760,7 @@ BOTH = "The operator answered.\n\nAnd again."
             ),
             Heard(
                 fits=10_000,
-                event="conversation-ended",
+                event=events.ConversationEnded(),
                 session="s1",
                 agent="a1",
                 judged=True,
@@ -1755,7 +1771,7 @@ BOTH = "The operator answered.\n\nAnd again."
             payload(Path("/w"), "SubagentStop", agent_id="a1"),
             Heard(
                 fits=10_000,
-                event="conversation-ended",
+                event=events.ConversationEnded(),
                 session="s1",
                 agent="a1",
                 judged=True,
@@ -1776,7 +1792,7 @@ BOTH = "The operator answered.\n\nAnd again."
             ),
             Heard(
                 fits=10_000,
-                event="conversation-ended",
+                event=events.ConversationEnded(),
                 session="s1",
                 agent="a1",
                 judged=True,
@@ -1795,7 +1811,7 @@ BOTH = "The operator answered.\n\nAnd again."
             ),
             Heard(
                 fits=10_000,
-                event="turn-ended",
+                event=events.TurnEnded(),
                 session="s1",
                 judged=False,
                 failed=Failure(kind="server_error", said="API Error: 500"),
@@ -1873,7 +1889,7 @@ def test_each_runtime_hears_a_turns_start_with_its_prompt_and_tells_beside_it() 
     ]:
         assert adapter.heard(raw) == Heard(
             fits=10_000,
-            event="turn-started",
+            event=events.TurnStarted(),
             session=session,
             judged=True,
             prompt=prompt,
@@ -2047,31 +2063,27 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
     assert [codex.heard(raw) for raw in sent.values()] == [
         Heard(
             fits=10_000,
-            event="session-started",
+            event=events.SessionStarted(),
             session=session,
             judged=True,
             fresh=True,
         ),
         Heard(
             fits=10_000,
-            event="call-started",
+            event=events.CallStarted(call=patch, tool="apply_patch"),
             session=session,
-            call=patch,
-            tool="apply_patch",
             judged=True,
         ),
         Heard(
             fits=10_000,
-            event="call-finished",
+            event=events.CallFinished(call=patch, tool="apply_patch"),
             session=session,
-            call=patch,
-            tool="apply_patch",
             judged=True,
         ),
     ]
     stop = codex.heard((CAPTURED / "9-stop.json").read_text())
     assert stop == Heard(
-        fits=10_000, event="turn-ended", session=session, judged=True, said="done"
+        fits=10_000, event=events.TurnEnded(), session=session, judged=True, said="done"
     )
     subagent = codex.heard(
         json.dumps(
@@ -2086,7 +2098,7 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
     )
     assert subagent == Heard(
         fits=10_000,
-        event="conversation-ended",
+        event=events.ConversationEnded(),
         session=session,
         agent="a1",
         judged=True,

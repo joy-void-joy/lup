@@ -1,4 +1,4 @@
-"""Copying each session's record of the repository when a launch opens and when it stops.
+"""What `Transcripts` serves: copying each session's record of the repository when a launch opens and when it stops.
 
 The launch's runtime says which of its records are the repository's sessions'
 (`Records.kept`), from the directories they ran in: the repository's git
@@ -15,8 +15,9 @@ import asyncio
 import shutil
 from typing import TYPE_CHECKING
 
-from lup.tools.hook import lup_hook
-from lup_dev.declaration.serving import ModuleHooks, Moment
+from lup import doors
+from lup.events import Launched, Stopped
+from lup_dev.declaration.serving import Lup, ModuleServing
 from lup_dev.git import Git
 
 if TYPE_CHECKING:
@@ -52,16 +53,18 @@ def copied(records: list[Record], target: Path) -> int:
     return len(stale_pairs)
 
 
-class TranscriptsHooks(ModuleHooks):
+class TranscriptsServing(ModuleServing):
     """Keeping the repository's sessions' records: what the runtime added or grew, when a launch opens and when it stops."""
 
     module: Transcripts
 
-    @lup_hook(on=["launched", "stopped"])
-    async def keep(self, _moment: Moment) -> None:
-        """Copy every record of the repository's sessions the runtime added or grew since the last copy."""
-        repository = self.launch.repository
-        under = [repository, *Git.pinned(repository).worktrees()]
-        records = self.records.kept(under)
-        target = self.data / self.launch.runtime
+    @doors.on(Launched)
+    @doors.on(Stopped)
+    async def keep(self, event: Launched | Stopped, by: Lup) -> None:
+        """Copy every record of the repository's sessions the launch's runtime added or grew since the last copy."""
+        del event
+        launch = by.launch
+        under = [launch.repository, *Git.pinned(launch.repository).worktrees()]
+        records = self.records[launch.runtime].kept(under)
+        target = self.data / launch.runtime
         await asyncio.to_thread(copied, records, target)

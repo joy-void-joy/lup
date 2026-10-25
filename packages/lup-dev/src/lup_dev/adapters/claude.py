@@ -231,6 +231,7 @@ from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
 
 import lup
+from lup import events
 from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.adapters.claude.terminal import own_settings
@@ -288,8 +289,8 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from lup.events import SessionEvent
     from lup.sessions.declaration import Declaration
-    from lup.sessions.terminal import Event
 
 type Writing = Literal["Edit", "Write"]
 """The file tools whose writes are judged before they land: `PreToolUse.proposal`
@@ -539,7 +540,7 @@ class SessionStart(Payload):
     def heard(self, fits: int) -> Heard:
         """Read the session's start and its title in Claude Code, a start `sessionTitle` applies at (`TitledStart`) taking a new one, and whether its conversation begins empty (`FreshStart`): the judge reads it."""
         return Heard(
-            event="session-started",
+            event=events.SessionStarted(),
             session=self.session_id,
             agent=self.agent_id or None,
             judged=True,
@@ -593,7 +594,7 @@ class UserPromptSubmit(Payload):
     def heard(self, fits: int) -> Heard:
         """Read the turn's start, the prompt it starts on and the session's title in Claude Code, a prompt of the session's own conversation taking a new one: the judge reads it."""
         return Heard(
-            event="turn-started",
+            event=events.TurnStarted(),
             session=self.session_id,
             agent=self.agent_id or None,
             judged=True,
@@ -699,11 +700,9 @@ class PreToolUse(Payload):
     def heard(self, fits: int) -> Heard:
         """Read the call's start: the judge reads it unless it's to lup's tools or one that only reads (`judging`)."""
         return Heard(
-            event="call-started",
+            event=events.CallStarted(call=self.tool_use_id, tool=self.tool_name),
             session=self.session_id,
             agent=self.agent_id or None,
-            call=self.tool_use_id,
-            tool=self.tool_name,
             served=self.tool_name.startswith(TOOL_PREFIX),
             judged=judging(self.tool_name),
             fits=fits,
@@ -819,11 +818,9 @@ class PostToolUse(Payload):
     def heard(self, fits: int) -> Heard:
         """Read the call's finish: the judge reads it where it read the call's start (`judging`)."""
         return Heard(
-            event="call-finished",
+            event=events.CallFinished(call=self.tool_use_id, tool=self.tool_name),
             session=self.session_id,
             agent=self.agent_id or None,
-            call=self.tool_use_id,
-            tool=self.tool_name,
             judged=judging(self.tool_name),
             fits=fits,
         )
@@ -839,6 +836,7 @@ class PostToolUse(Payload):
             agent=self.agent_id,
             cwd=self.cwd,
             call=self.tool_use_id,
+            tool=self.tool_name,
         )
         reply = finished.apply(bench)
         if not reply.context:
@@ -885,7 +883,7 @@ class Stop(Payload):
     def heard(self, fits: int) -> Heard:
         """Read the turn's end: the judge reads it."""
         return Heard(
-            event="turn-ended",
+            event=events.TurnEnded(),
             session=self.session_id,
             agent=self.agent_id or None,
             judged=True,
@@ -957,7 +955,7 @@ class SubagentStop(Payload):
     def heard(self, fits: int) -> Heard:
         """Read a subagent's turn's end, or its stop where it carries no message: the judge reads it."""
         return Heard(
-            event="conversation-ended",
+            event=events.ConversationEnded(),
             session=self.session_id,
             agent=self.agent_id or None,
             judged=True,
@@ -1031,7 +1029,7 @@ class StopFailure(Payload):
     def heard(self, fits: int) -> Heard:
         """Read a subagent's end, or the session's turn's end, failed: the judge reads a subagent's alone."""
         return Heard(
-            event="conversation-ended" if self.agent_id else "turn-ended",
+            event=events.ConversationEnded() if self.agent_id else events.TurnEnded(),
             session=self.session_id,
             agent=self.agent_id or None,
             judged=bool(self.agent_id),
@@ -1265,7 +1263,9 @@ def pushed(text: str, token: str) -> Notice:
     return Notice(method=f"notifications/{CHANNEL}", params=message.model_dump())
 
 
-def hooks(command: Callable[[Event], list[str]], timeout: timedelta) -> list[Hook]:
+def hooks(
+    command: Callable[[type[SessionEvent]], list[str]], timeout: timedelta
+) -> list[Hook]:
     """Return the hooks a launched Claude Code session runs at the events the host service hears, each running the command `command` gives for its event.
 
     `SessionStart`; `UserPromptSubmit`, each turn's start, a channel's message
@@ -1281,16 +1281,16 @@ def hooks(command: Callable[[Event], list[str]], timeout: timedelta) -> list[Hoo
     conversation and leaves the session's idle. Each waits up to `timeout`, which a hold's wait for the operator
     needs, at a call's start, its finish or a turn's end.
     """
-    events: list[Event] = [
-        "session-started",
-        "turn-started",
-        "call-started",
-        "call-finished",
-        "turn-ended",
-        "conversation-ended",
+    heard: list[type[SessionEvent]] = [
+        events.SessionStarted,
+        events.TurnStarted,
+        events.CallStarted,
+        events.CallFinished,
+        events.TurnEnded,
+        events.ConversationEnded,
     ]
     return [
-        Hook(event=event, command=command(event), timeout=timeout) for event in events
+        Hook(event=event, command=command(event), timeout=timeout) for event in heard
     ]
 
 

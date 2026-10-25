@@ -155,6 +155,14 @@ from pydantic import JsonValue, ValidationError
 from tomlkit.exceptions import ConvertError
 
 from lup.adapters.codex.layout import MANAGED_REQUIREMENTS, CodexLaunch, CodexLayout
+from lup.events import (
+    CallFinished,
+    CallStarted,
+    ConversationEnded,
+    SessionStarted,
+    TurnEnded,
+    TurnStarted,
+)
 from lup.rooms.container import Mount
 from lup.sessions.terminal import Cli, Terminal, TerminalError
 from lup.types import JsonObject, Model
@@ -163,7 +171,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup.adapters.codex import Effort
-    from lup.sessions.terminal import Event, Hook, TerminalSettings, ToolServer
+    from lup.events import SessionEvent
+    from lup.sessions.terminal import Hook, TerminalSettings, ToolServer
 
 
 def toml(value: JsonValue) -> str:
@@ -371,21 +380,17 @@ def served(
     return {**off, **lups}
 
 
-def spelled(event: Event) -> str:
+def spelled(event: type[SessionEvent]) -> str:
     """Return Codex's hook event for one of lup's."""
-    match event:
-        case "session-started":
-            return "SessionStart"
-        case "turn-started":
-            return "UserPromptSubmit"
-        case "call-started":
-            return "PreToolUse"
-        case "call-finished":
-            return "PostToolUse"
-        case "turn-ended":
-            return "Stop"
-        case "conversation-ended":
-            return "SubagentStop"
+    spellings: dict[type[SessionEvent], str] = {
+        SessionStarted: "SessionStart",
+        TurnStarted: "UserPromptSubmit",
+        CallStarted: "PreToolUse",
+        CallFinished: "PostToolUse",
+        TurnEnded: "Stop",
+        ConversationEnded: "SubagentStop",
+    }
+    return spellings[event]
 
 
 def compiled(

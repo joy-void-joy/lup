@@ -16,6 +16,13 @@ from pydantic import JsonValue, ValidationError
 from lup.adapters.claude import Claude
 from lup.adapters.codex import Codex
 from lup.adapters.codex.terminal import toml
+from lup.events import (
+    CallFinished,
+    CallStarted,
+    ConversationEnded,
+    SessionStarted,
+    TurnEnded,
+)
 from lup.rooms.container import Mount
 from lup.sessions import bridge
 from lup.sessions.errors import RuntimeMissingError
@@ -61,14 +68,14 @@ def settings(directory: Path, cli: Cli | None, **changes: object) -> TerminalSet
         directory=directory,
         cli=cli,
         hooks=[
-            Hook(event="session-started", command=HOOK, timeout=timedelta(hours=10)),
+            Hook(event=SessionStarted, command=HOOK, timeout=timedelta(hours=10)),
             Hook(
-                event="call-started",
+                event=CallStarted,
                 matcher="Edit|Write",
                 command=HOOK,
                 timeout=timedelta(hours=10),
             ),
-            Hook(event="call-finished", command=HOOK),
+            Hook(event=CallFinished, command=HOOK),
         ],
         servers=[SERVER],
         messages=MESSAGES,
@@ -206,8 +213,8 @@ def test_claude_runs_a_turns_end_hook_at_stopfailure_too_once_whoever_failed(
     """`StopFailure` runs in place of `Stop` or `SubagentStop` where a turn ends on an error from the model's API, its matcher filtering by the error's kind alone: registered with both ends it would run twice."""
     launch = tmp_path / "launch"
     ends = [
-        Hook(event="turn-ended", command=HOOK),
-        Hook(event="conversation-ended", command=HOOK),
+        Hook(event=TurnEnded, command=HOOK),
+        Hook(event=ConversationEnded, command=HOOK),
     ]
     terminal = Claude().terminal(settings(launch, CLAUDE_CLI, hooks=ends))
     command = {"type": "command", "command": HOOK_LINE}
@@ -974,9 +981,9 @@ def test_toml_refuses_what_it_cant_write() -> None:
 
 def test_a_hook_times_out_after_whole_seconds() -> None:
     with pytest.raises(ValidationError, match="whole seconds"):
-        Hook(event="call-started", command=HOOK, timeout=timedelta(seconds=1.5))
+        Hook(event=CallStarted, command=HOOK, timeout=timedelta(seconds=1.5))
     with pytest.raises(ValidationError, match="whole seconds"):
-        Hook(event="call-started", command=HOOK, timeout=timedelta(0))
+        Hook(event=CallStarted, command=HOOK, timeout=timedelta(0))
 
 
 def test_a_tool_server_is_on_an_absolute_socket_and_times_out_after_whole_seconds() -> (

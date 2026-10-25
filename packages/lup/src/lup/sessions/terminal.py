@@ -12,11 +12,12 @@ import inspect
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Self
 
 from pydantic import AfterValidator, model_validator
 
 from lup.errors import LupError
+from lup.events import SessionEvent
 from lup.rooms.container import AbsolutePath, Mount
 from lup.sessions import bridge
 from lup.types import Model
@@ -62,23 +63,6 @@ class Cli(Model):
         )
 
 
-type Event = Literal[
-    "session-started",
-    "turn-started",
-    "call-started",
-    "call-finished",
-    "turn-ended",
-    "conversation-ended",
-]
-"""When a hook runs, in lup's own words, which each adapter spells as its runtime's events.
-
-A session started, resumed or cleared; a turn starting on a prompt, the
-operator's or one a tool server pushed; a tool call about to run; a tool call
-finished, whether it succeeded or failed; the session's turn ending; a subagent's
-conversation ending.
-"""
-
-
 def whole_seconds(timeout: timedelta) -> timedelta:
     """Return `timeout`, refusing one that isn't a positive number of whole seconds, which is how hooks and tool servers are timed."""
     if timeout <= timedelta(0) or timeout.microseconds:
@@ -90,7 +74,9 @@ def whole_seconds(timeout: timedelta) -> timedelta:
 class Hook(Model):
     """A command the runtime runs at an event, with the event's payload on its input."""
 
-    event: Event
+    event: type[SessionEvent]
+    """The event, one of a session's (`lup.events`), which each adapter spells as
+    its runtime's own."""
     matcher: str | None = None
     """Which calls or sources it runs for, as the runtime matches them; none for all."""
     command: list[str]

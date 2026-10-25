@@ -1,60 +1,178 @@
-"""What a module serves a launched session: tools its agent calls, and answers to its room's requests.
+"""What a module serves: its methods, each reached through one of the library's doors, grouped in `ModuleServing` classes, and who may ask each.
 
-A module's tools are methods of a `ModuleTools` class, each decorated with the
-library's `@lup_tool`, as a tool for an ask from code is a function. lup makes an
-instance for each call, so a tool reaches through `self` what the call is about:
-its module's settings (`self.module`, which the class narrows to its own module,
-`module: GitHub`), the launch (`self.launch`) and the conversation calling
-(`self.caller`). A module lists its classes in its `tools`,
-`Toolsets.of(GitHubTools)`.
+A module's methods are those of its `ModuleServing` classes, each behind one of
+the library's doors (`lup.doors`): `@lup.tool`, an agent's call through MCP;
+`@lup.request`, a room's request, routed by the `kind` of the model it takes;
+`@lup.on(Event)`, run at one of lup's events. A module lists its classes in its
+`serving`, `Serving.of(GitHubServing)`. A class only groups methods: it narrows
+`module` to its own module's class (`module: GitHub`), so they read its settings
+with their types, and gives them the module's own context through `self`: its
+data directory for the repository (`data`), the other repositories the
+declaration names (`related`), where each runtime keeps its records
+(`records`), and the publishing door (`publish`).
 
-A room's request is answered the same way: a `ModuleHandler` names the request
-it answers by narrowing its `request` field to that request's model, and
-`answer` replies, the module, the launch, the module's own data directory for
-the repository and the other repositories the declaration names (`Related`)
-through `self`.
+**Who asks is the method's** (`Asker`), by its `by` parameter, which hands it its
+caller: `Agent`, a conversation of a launch's session calling a tool; `Room`,
+code in one of the repository's rooms, untrusted, its launch with it; `Lup`,
+lup itself running a hook at an event of a launch, its conversation with it for
+a session's events. Each door has those who come through it (`askers`), and
+those a method leaving `by` out is for: a tool's are `Agent`, a hook's `Lup`; a
+request has none, so it says (`by: Room`). Defining a class checks each of its
+methods: a `by` naming someone its door never brings, or a request without one,
+fails the class's definition, naming the method (`checked`). Who actually asked
+is checked again before each call (`ask`), so a room never reaches a method
+meant for someone else.
 
-What a module does at lup's moments is a `ModuleHooks` class, each method run at
-a moment marked with the library's `@lup_hook`: at the one its name names, or
-those its `on` names. lup's moments are its own three, a launch opening, a launch
-ending once its session has fully stopped, and `publishing`, before anything
-leaves under the operator's name; and the five each runtime's hooks are read as
-(`lup.sessions.terminal.Event`). A hook observes, but at a moment that's
-answered (`Answered`: `publishing`) it may refuse, returning its refusals
-(`lup_dev.host.publishing`), each naming what it found and where; one refusal
-keeps what would leave from leaving. Through `self` it reaches its module, the
-launch, where the launch's runtime keeps its sessions' records, the module's own
-data directory for the repository, and the other repositories the declaration
-names, as the host finds them.
+**What leaves under the operator's name** goes through the publishing door first
+(`ModuleServing.publish`): every module's hooks at `Publishing`, any refusal
+keeping it from leaving.
 
-A module's tool that would publish something puts it through the door first
-(`ModuleTools.publish`), which runs every module's hooks at `publishing`.
-
-Each runs on the host, in the repository's process of its approved copy
-(`lup_dev.worker`), which serves each of its launches, never in the host service
-that serves every repository. The launch each is made with is the one asking, as
-the request carries it.
+Each method runs on the host, in the repository's process of its approved copy
+(`lup_dev.worker`), which makes its class afresh for each call; never in the
+host service that serves every repository. The launch it's for travels with who
+asks, as each request carries it.
 """
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, get_args
+from types import UnionType
+from typing import TYPE_CHECKING, get_args
 
 from pydantic import BaseModel, PydanticUndefinedAnnotation
 
-from lup.tools.hook import hooks
-from lup.tools.tool import AgentTool, ToolSpec, bound, declared
+from lup.doors import Door, Method, OnDoor, RequestDoor, ToolDoor, served
+from lup.events import Event, events
+from lup.publishing import Published, Refusal, told
 from lup.types import Model
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.module import Module
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Register, Reply, Request
-from lup_dev.host.publishing import Published, Refusal, told
 from lup_dev.host.records import Records
 
 if TYPE_CHECKING:
-    from lup.sessions.terminal import Event
+    from lup.tools.tool import ToolSpec
+
+
+class Asker(Model):
+    """Who asks a module's method: each a class of its own, which a method's `by` is typed as."""
+
+
+class Agent(Asker):
+    """A conversation of a launch's session, calling one of its tools: the session's own, or one of its subagents'."""
+
+    launch: Register
+    """The launch whose session calls, as the host service recorded it."""
+    conversation: Conversation
+    """The conversation calling."""
+
+
+class Room(Asker):
+    """Code in one of the repository's rooms, untrusted: whatever the room runs can send its requests, so a method answers it within its launch's limits."""
+
+    launch: Register
+    """The launch whose room asks, as the host service recorded it, never as the
+    room says."""
+
+
+class Lup(Asker):
+    """lup itself, running a hook at one of its events of a launch."""
+
+    launch: Register
+    """The launch the event is of."""
+    conversation: Conversation | None = None
+    """The conversation it's of: for a session's events, and something a
+    conversation would publish; none for a launch's own, and for a push."""
+
+
+class Askers(Model):
+    """Who comes through a door, and those a method that leaves out `by` is for."""
+
+    through: list[type[Asker]]
+    default: list[type[Asker]]
+    """None where a method says who may ask it, as a request does."""
+
+
+def askers(door: Door) -> Askers:
+    """Return who comes through `door`: an agent through a tool's, a room through a request's, lup through a hook's."""
+    match door:
+        case ToolDoor():
+            return Askers(through=[Agent], default=[Agent])
+        case RequestDoor():
+            return Askers(through=[Room], default=[])
+        case OnDoor():
+            return Askers(through=[Lup], default=[Lup])
+
+
+def said(askers: list[type[Asker]]) -> str:
+    """Name a list of askers as a type does, a union for several.
+
+    >>> said([Agent, Room])
+    '`Agent | Room`'
+    """
+    return f"`{' | '.join(each.__name__ for each in askers)}`"
+
+
+def named(owner: type, name: str, method: Method) -> list[type[Asker]]:
+    """Return who `method`, `owner`'s `name`, may be asked by: its `by`'s type, one asker or a union of them; its doors' default askers where it leaves `by` out.
+
+    Raise `ProjectError` naming it where `by` is typed as other than askers'
+    own classes, names one its doors never bring, or is left out where a door
+    has no default.
+    """
+    who = f"`{owner.__name__}.{name}`"
+    doors = [askers(door) for door in method.doors]
+    if method.taken.by is None:
+        default = [each for door in doors for each in door.default]
+        if not default:
+            message = (
+                f"{who} is {method.doors[0].says()}, which says who may ask it: "
+                "`by: Room` for one of the repository's rooms"
+            )
+            raise ProjectError(message)
+        return list(dict.fromkeys(default))
+    annotation = method.taken.by.annotation
+    typed = get_args(annotation) if isinstance(annotation, UnionType) else [annotation]
+    found = [
+        each
+        for each in typed
+        if isinstance(each, type) and issubclass(each, Asker) and each is not Asker
+    ]
+    if len(found) != len(typed):
+        message = (
+            f"{who} takes `by` typed {annotation!r}: who asks is one of lup's "
+            f"askers, {said([Agent, Room, Lup])}, or a union of them"
+        )
+        raise ProjectError(message)
+    through = [each for door in doors for each in door.through]
+    never = [each for each in found if each not in through]
+    if never:
+        message = (
+            f"{who} takes `by: {' | '.join(each.__name__ for each in found)}`, but "
+            f"{method.doors[0].says()} is asked by {said(through)} alone, never by "
+            f"{said(never)}"
+        )
+        raise ProjectError(message)
+    return found
+
+
+def checked(owner: type, name: str, method: Method) -> None:
+    """Raise `ProjectError` naming `owner`'s method `name` where it can't be served: who may ask it isn't among who its doors bring (`named`), or, a request, its model isn't a request's with a kind of its own, or what it returns isn't a reply."""
+    named(owner, name, method)
+    if not method.requested():
+        return
+    model = method.taken.model.annotation
+    if not (issubclass(model, Request) and model is not Request):
+        message = (
+            f"`{owner.__name__}.{name}` is a request, so it takes the model of the "
+            "requests it answers, a `Request` whose `kind` routes them"
+        )
+        raise ProjectError(message)
+    returned = method.taken.returned
+    if not (isinstance(returned, type) and issubclass(returned, Reply)):
+        message = f"`{owner.__name__}.{name}` is a request, so it returns a `Reply`"
+        raise ProjectError(message)
 
 
 def narrowed(owner: type[BaseModel], field: str) -> type:
@@ -84,58 +202,25 @@ def narrowed(owner: type[BaseModel], field: str) -> type:
 
 
 def made_with(owner: type[BaseModel], module: Module) -> bool:
-    """Say whether `owner`, a class of tools or a handler, is made with `module`, its own module's class."""
+    """Say whether `owner`, a class of a module's methods, is made with `module`, its own module's class."""
     return isinstance(module, narrowed(owner, "module"))
 
 
-class Door(ABC):
-    """Where what a module's tool would publish under the operator's name is put to every module's hooks at `publishing` first."""
+class Publisher(ABC):
+    """Where what a module would publish under the operator's name is put to every module's hooks at `Publishing` first."""
 
     @abstractmethod
     async def refusals(
-        self, published: Published, conversation: Conversation | None
+        self,
+        published: Published,
+        launch: Register,
+        conversation: Conversation | None,
     ) -> list[Refusal]:
-        """Run every module's hooks at `publishing` on `published`, for `conversation`, and return their refusals: none lets it leave."""
+        """Run every module's hooks at `Publishing` on `published`, for `launch` and `conversation`, and return their refusals: none lets it leave."""
 
 
 class UnpublishedError(LupDevError):
-    """What a tool would publish was refused at the `publishing` moment; its message lists each refusal."""
-
-
-class ModuleTools(Model, arbitrary_types_allowed=True):
-    """A module's tools in a launched session: each a method decorated with `@lup_tool`.
-
-    A subclass narrows `module` to its own module's class, so its tools read
-    that module's settings with their types.
-    """
-
-    module: Module
-    launch: Register
-    """The launch whose session calls."""
-    caller: Conversation
-    """The conversation calling: the session's own, or one of its subagents'."""
-    door: Door
-    """Where what a tool would publish is checked first (`publish`)."""
-
-    @classmethod
-    def specs(cls) -> list[ToolSpec]:
-        """Return what a session is told about each tool, with no instance."""
-        return list(declared(cls).values())
-
-    def tools(self) -> list[AgentTool]:
-        """Return each tool, bound to this call."""
-        return bound(self)
-
-    async def publish(self, published: Published, naming: str) -> None:
-        """Put what a tool would publish under the operator's name to every module's hooks at `publishing`, before it leaves.
-
-        `naming` names it in a refusal (`this issue`). Raise `UnpublishedError`,
-        listing each refusal, where any hook refuses; the tool then publishes
-        nothing.
-        """
-        refused = await self.door.refusals(published, self.caller)
-        if refused:
-            raise UnpublishedError(told(refused, naming))
+    """What a method would publish was refused at `Publishing`; its message lists each refusal."""
 
 
 class Related(Model):
@@ -148,143 +233,87 @@ class Related(Model):
     """Its `owner/name` on GitHub, where its entry gives one."""
 
 
-class ModuleHandler(Model, ABC):
-    """A module's answer to one kind of request from a launch's room.
+class ModuleServing(Model, arbitrary_types_allowed=True):
+    """A class of a module's methods, each behind one of the library's doors: `@lup.tool`, `@lup.request`, `@lup.on(Event)`.
 
-    A subclass narrows `request` to the model of the requests it answers, whose
-    `kind` routes them here (`answering`), and `module` to its own module's class.
+    A subclass narrows `module` to its own module's class, so its methods read
+    that module's settings with their types. Defining one checks each of its
+    methods (`checked`), refusing one whose `by` names someone its door never
+    brings, or a request that doesn't say who may ask it.
     """
 
     module: Module
-    launch: Register
-    """The launch whose room asks."""
-    request: Request
     data: Path
     """The module's own directory for the repository, under lup's data."""
     related: list[Related]
-    """The other repositories the launch's declaration names, as the host finds
-    them."""
-
-    @abstractmethod
-    async def answer(self) -> Reply:
-        """Answer the request, on the repository's process's event loop, off it where it blocks.
-
-        A `HostError` refuses the request with its message.
-        """
-
-
-def answering(handler: type[ModuleHandler]) -> type[Request]:
-    """Return the model of the requests `handler` answers, read off its narrowed `request`.
-
-    Raise `ProjectError` where `request` isn't narrowed to a request's model.
-    """
-    model = narrowed(handler, "request")
-    if not issubclass(model, Request) or model is Request:
-        message = (
-            f"`{handler.__name__}` answers no request: narrow its `request` to the "
-            "model of the requests it answers"
-        )
-        raise ProjectError(message)
-    return model
-
-
-type MomentName = Literal[
-    "launched",
-    "stopped",
-    "publishing",
-    "session_started",
-    "call_started",
-    "call_finished",
-    "turn_ended",
-    "conversation_ended",
-]
-"""lup's moments, which a module's hooks run at: a launch opening; a launch ending,
-its session fully stopped; something about to leave under the operator's name;
-and the five each runtime's hooks are read as."""
-
-type Answered = Literal["publishing"]
-"""The moments a hook may answer: at `publishing` it returns its refusals. At
-every other one it observes, returning nothing."""
-
-
-def heard(event: Event) -> MomentName | None:
-    """Return the moment of lup's that an event a runtime's hooks are read as is; none for a turn's start, which no module's hook runs at."""
-    match event:
-        case "session-started":
-            return "session_started"
-        case "call-started":
-            return "call_started"
-        case "call-finished":
-            return "call_finished"
-        case "turn-ended":
-            return "turn_ended"
-        case "conversation-ended":
-            return "conversation_ended"
-        case "turn-started":
-            return None
-
-
-class Moment(Model):
-    """What's known of a moment a module's hook runs at."""
-
-    name: MomentName
-    conversation: Conversation | None = None
-    """The conversation it's of, for a session's moments and a post; none for a
-    launch's and a push."""
-    call: str | None = None
-    """The call's id, at a call's start or finish."""
-    tool: str | None = None
-    """The tool called, by the runtime's name for it."""
-    published: Published | None = None
-    """What would leave, at `publishing`: a push, or a post."""
-
-
-class ModuleHooks(Model, arbitrary_types_allowed=True):
-    """What a module does at lup's moments: each method marked with `@lup_hook`.
-
-    A subclass narrows `module` to its own module's class, as a class of tools
-    does. A hook naming no moment of lup's fails the class's definition. A hook
-    at `publishing` returns its refusals, `list[Refusal]`, an empty list letting
-    what would leave go; at every other moment it returns nothing.
-    """
-
-    module: Module
-    launch: Register
-    records: Records
-    """Where the launch's runtime keeps its sessions' records on this machine."""
-    data: Path
-    """The module's own directory for the repository, under lup's data."""
-    related: list[Related]
-    """The other repositories the launch's declaration names, as the host finds
-    them."""
+    """The other repositories the declaration names, as the host finds them."""
+    records: dict[str, Records]
+    """Where each runtime keeps its sessions' records on this machine, by the
+    runtime's name: a launch's are its runtime's."""
+    publisher: Publisher
+    """Where what a method would publish is checked first (`publish`)."""
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:
-        """Refuse a hook naming a moment that isn't lup's."""
+        """Refuse a method that can't be served: who may ask it isn't among who its doors bring, or it's a request that doesn't take a request and return a reply."""
         super().__pydantic_init_subclass__(**kwargs)
-        known = get_args(MomentName.__value__)
-        unknown = [
-            f"`{name}` at `{moment}`"
-            for name, moments in hooks(cls).items()
-            for moment in moments
-            if moment not in known
-        ]
-        if unknown:
-            message = (
-                f"`{cls.__name__}` runs {', '.join(unknown)}, which isn't one of "
-                f"lup's moments: {', '.join(known)}"
-            )
-            raise ProjectError(message)
+        for name, method in served(cls).items():
+            checked(cls, name, method)
+
+    async def publish(
+        self, published: Published, naming: str, by: Agent | Room
+    ) -> None:
+        """Put what `by` would publish under the operator's name to every module's hooks at `Publishing`, before it leaves.
+
+        `naming` names it in a refusal (`this issue`). Raise `UnpublishedError`,
+        listing each refusal, where any hook refuses; the method then publishes
+        nothing.
+        """
+        conversation = by.conversation if isinstance(by, Agent) else None
+        refused = await self.publisher.refusals(published, by.launch, conversation)
+        if refused:
+            raise UnpublishedError(told(refused, naming))
 
 
-def listening(hooked: type[ModuleHooks]) -> list[MomentName]:
-    """Return the moments a class of hooks runs at, in lup's order."""
-    marked = [moment for moments in hooks(hooked).values() for moment in moments]
-    return [moment for moment in get_args(MomentName.__value__) if moment in marked]
+def ask(owner: type[ModuleServing], name: str, asker: Asker) -> None:
+    """Raise `LupDevError` where `asker` isn't one `owner`'s method `name` may be asked by: its `by`'s type, or its doors' default askers where it leaves `by` out."""
+    method = served(owner)[name]
+    allowed = named(owner, name, method)
+    if not isinstance(asker, tuple(allowed)):
+        message = (
+            f"`{owner.__name__}.{name}` of `{narrowed(owner, 'module').__name__}` "
+            f"is asked by {said(allowed)}, never by `{type(asker).__name__}`"
+        )
+        raise LupDevError(message)
 
 
-def at(instance: ModuleHooks, moment: MomentName) -> list[str]:
-    """Return the names of `instance`'s hooks that run at `moment`, in the order declared."""
+def tools(owner: type[ModuleServing]) -> list[ToolSpec]:
+    """Return what a session is told about each tool `owner` serves, with no instance."""
     return [
-        name for name, moments in hooks(type(instance)).items() if moment in moments
+        spec for method in served(owner).values() if (spec := method.spec()) is not None
     ]
+
+
+def requests(owner: type[ModuleServing]) -> dict[str, str]:
+    """Return each kind of request `owner` answers, with the name of the method answering it."""
+    return {
+        method.taken.model.annotation.named(): name
+        for name, method in served(owner).items()
+        if method.requested()
+    }
+
+
+def asked_by_room(owner: type[ModuleServing], name: str) -> bool:
+    """Say whether a room may ask `owner`'s method `name`."""
+    return Room in named(owner, name, served(owner)[name])
+
+
+def listening(owner: type[ModuleServing]) -> list[type[Event]]:
+    """Return the events `owner`'s hooks run at, in lup's order."""
+    hooked = [event for method in served(owner).values() for event in method.events()]
+    return [event for event in events() if event in hooked]
+
+
+def at(owner: type[ModuleServing], event: type[Event]) -> list[str]:
+    """Return the names of `owner`'s hooks that run at `event`, in the order declared."""
+    return [name for name, method in served(owner).items() if event in method.events()]

@@ -23,12 +23,14 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import BaseModel
 
+from lup import events
 from lup.github.module import GitHub
-from lup.github.tools import GitHubTools
+from lup.github.serving import GitHubServing
 from lup.tools.serving import Answer
 from lup_dev import Modules, Project
 from lup_dev.codescan.directives import HostIssues, IssueRef
 from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.serving import tools
 from lup_dev.forge.github import GitHubError, named
 from lup_dev.host.client import RoomClient, asked
 from lup_dev.host.courier import Conversation, Courier, Heard, Telling
@@ -46,10 +48,10 @@ from lup_dev.host.records import Record, Records
 from lup_dev.host.service import Answerer, HostService
 from lup_dev.host.workers import Calling, LaunchJudge
 from lup_dev.layout import HostLayout, Layout
-from lup_dev.private import hooks
+from lup_dev.private import serving as private_serving
 from lup_dev.private.withheld import Held, Withheld, kept
 from lup_dev.stored import read_model, write_model
-from lup_dev.worker import Serving
+from lup_dev.worker import RepositoryModules
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -205,7 +207,7 @@ def called(
         write_model(
             kept(layout.module_data("private", registered.repository)), withheld
         )
-    serving = Serving(
+    serving = RepositoryModules(
         repository=registered.repository,
         resolved=resolve(declared),
         records={registered.runtime: Nothing()},
@@ -216,7 +218,7 @@ def called(
 
 
 def test_each_tool_is_summarized_in_fifty_characters_at_most() -> None:
-    specs = GitHubTools.specs()
+    specs = tools(GitHubServing)
     assert {spec.name: spec.summary for spec in specs} == {
         "read_issue": "Read an issue or pull request, with its comments.",
         "find_issues": "Search a repository's issues and pull requests.",
@@ -470,7 +472,7 @@ def test_only_the_tools_that_read_offer_another_repository() -> None:
         assert isinstance(properties, dict)
         return "repository" in properties
 
-    specs = GitHubTools.specs()
+    specs = tools(GitHubServing)
     offered = {spec.name: offers(spec.input_schema) for spec in specs}
     assert offered == {
         "read_issue": True,
@@ -1081,7 +1083,12 @@ class Deaf(Courier):
     """No hook reaches these tests' service: what a courier says is never read."""
 
     def heard(self, runtime: str, payload: str) -> Heard:
-        return Heard(event="call-started", session="s1", judged=False, fits=10_000)
+        return Heard(
+            event=events.CallStarted(call="u1", tool="Bash"),
+            session="s1",
+            judged=False,
+            fits=10_000,
+        )
 
     def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
         return answer
@@ -1210,7 +1217,7 @@ def test_a_room_without_its_request_socket_is_unreachable(tmp_path: Path) -> Non
     )
 
 
-# The door: what a tool would post, put to the modules' hooks at `publishing`
+# The door: what a tool would post, put to the modules' hooks at `Publishing`
 
 
 def test_an_issue_carrying_a_value_is_refused_before_gh_runs(
@@ -1224,8 +1231,7 @@ def test_an_issue_carrying_a_value_is_refused_before_gh_runs(
     assert answer.error
     assert answer.text == (
         "`file_issue` didn't run: lup refused to publish this issue: a module's "
-        "check at the `publishing` moment found what isn't published, at each "
-        "place below.\n"
+        "check at `Publishing` found what isn't published, at each place below.\n"
         "  the title:1:1 - one of the operator's private values\n"
         "      steer: leave it out of what's published; the operator, who listed "
         "it, knows which it is\n"
@@ -1296,7 +1302,9 @@ def test_a_post_with_no_list_kept_builds_it_first_and_goes(
     subprocess.run(
         ["git", "init", "-q", "--bare", str(registered.repository)], check=True
     )
-    monkeypatch.setattr(hooks, "HostFacts", lambda: stub_facts(home=Path("/home/op")))
+    monkeypatch.setattr(
+        private_serving, "HostFacts", lambda: stub_facts(home=Path("/home/op"))
+    )
     link = "https://github.com/joy-void-joy/lup/issues/66#issuecomment-1"
     gh.answer("issue comment", f"{link}\n")
     answer = called(

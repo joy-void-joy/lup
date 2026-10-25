@@ -3,8 +3,8 @@
 The host service starts it from the repository's approved copy,
 `<judge> worker <socket> <repository>` (`lup_dev.host.workers`). It loads the
 declaration the repository's launches are judged by, at the commit the operator
-approved with the person's own layer approved beside it, makes each module's
-tools, handlers and hooks from it, says it's ready on its output's first line,
+approved with the person's own layer approved beside it, resolves each module's
+classes of methods from it, says it's ready on its output's first line,
 and answers one request per connection on `<socket>` until its input closes,
 which it does when the service ends it or dies. Each request carries the launch
 it's for, so one process serves every launch of the repository, whichever
@@ -20,25 +20,22 @@ under locks that exclude a thread as they do a process, and what it reaches
 (the engine, ruff, the clock, the inbox) is made once for the process and
 kept, since none of it holds state of its own.
 
-Each call makes the tools' class afresh, with its module, the launch calling,
-the conversation calling and the door what it would publish goes through (this
-process's own hooks at `publishing`, for that launch), so a tool reads them
-through `self`. A tool that can't do its work raises a `LupDevError`, whose
-message is its answer; anything else that fails is told the host service's way,
-its traceback said.
+Each of a module's methods runs on its class made afresh, with its module, the
+module's own data directory for the repository, the other repositories the
+declaration names, where each runtime keeps its records, and the publishing door
+(this process's own hooks at `Publishing`), and is handed who asks it where it
+takes `by`: an `Agent` for a tool, the launch and the conversation calling; a
+`Room` for a request, the launch whose room sent it; `Lup` for a hook, the
+launch the event is of and its conversation. Who asks is checked against who
+the method may be asked by first (`ask`). A tool that can't do its work raises
+a `LupDevError`, whose message is its answer; anything else that fails is told
+the host service's way, its traceback said.
 
-Each room's request is answered by its handler made afresh, with its module,
-the launch whose room asked, the module's own data directory for the repository
-and the other repositories the declaration names.
-
-Each occasion makes each listening class of hooks afresh, with its module, the
-launch it's of, where that launch's runtime keeps its records, the module's own
-data directory for the repository and the other repositories the declaration
-names, and runs its hooks at that moment in the order they're declared. A hook
-that fails is told back whole, and the others still run.
-At `publishing` each hook's refusals are gathered, and a hook that fails there,
-or answers anything but its refusals, refuses too: what a check couldn't look
-at doesn't leave.
+Each event runs every hook at it, of every class, in the order they're declared.
+A hook that fails is told back whole, and the others still run. At `Publishing`
+each hook's refusals are gathered, and a hook that fails there, or answers
+anything but its refusals, refuses too: what a check couldn't look at doesn't
+leave.
 """
 
 import asyncio
@@ -49,31 +46,35 @@ from collections.abc import Callable
 from concurrent.futures import Future
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, get_args, override
+from typing import TYPE_CHECKING, override
 
 from pydantic import TypeAdapter, ValidationError
 
-from lup.sessions.terminal import Event
+from lup.doors import served
+from lup.events import Event, Publishing, events
+from lup.publishing import Place, Published, Refusal
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused
 from lup.types import Model
 from lup_dev.declaration.load import load
-from lup_dev.declaration.resolve import Handled, Hooked, Resolved, Served, resolve
+from lup_dev.declaration.resolve import Resolved, Served, resolve
 from lup_dev.declaration.serving import (
-    Answered,
-    Door,
-    ModuleHooks,
-    Moment,
-    MomentName,
+    Agent,
+    Asker,
+    Lup,
+    ModuleServing,
+    Publisher,
     Related,
-    answering,
+    Room,
+    ask,
+    asked_by_room,
     at,
-    heard,
     listening,
+    requests,
+    tools,
 )
 from lup_dev.errors import LupDevError
 from lup_dev.host.protocol import HostError, Register, Reply
-from lup_dev.host.publishing import Place, Published, Refusal
 from lup_dev.host.records import Records
 from lup_dev.host.service import Dispatcher, Handler, Reading, Route, unix_server
 from lup_dev.host.watch import Changes
@@ -85,7 +86,6 @@ from lup_dev.host.workers import (
     HookJudged,
     JudgeHook,
     Listing,
-    Occasion,
     Offered,
     Relayed,
     Relaying,
@@ -96,22 +96,11 @@ from lup_dev.policy.checkpoint import Services, Worktree
 from lup_dev.private.withheld import related_of
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
-
     from lup_dev.host.courier import Conversation
 
 
-def moment(occasion: Occasion) -> MomentName | None:
-    """Return the moment of lup's that an occasion the service tells is; none for a turn's start, which no module's hook runs at."""
-    match occasion:
-        case "launched" | "stopped" | "publishing":
-            return occasion
-        case _:
-            return heard(occasion)
-
-
 class Ran(Model):
-    """One hook run at a moment: why it failed, where it did, and what it refused."""
+    """One hook run at an event: why it failed, where it did, and what it refused."""
 
     failure: str | None = None
     """Why it failed, its traceback with it; none where it didn't."""
@@ -119,43 +108,44 @@ class Ran(Model):
 
 
 ANSWER = TypeAdapter[list[Refusal] | None](list[Refusal] | None)
-"""What a hook may return: its refusals at a moment that's answered, nothing at
-any other."""
+"""What a hook may return: its refusals at `Publishing`, nothing at any other
+event."""
 
 
-async def attempted(made: ModuleHooks, name: str, now: Moment) -> Ran:
-    """Run the hook `name` of `made` at `now`, and return how it went.
+async def attempted(made: ModuleServing, name: str, now: Event, asker: Lup) -> Ran:
+    """Run the hook `name` of `made` at `now`, asked by `asker`, and return how it went.
 
     A hook's failure is told back whole, its traceback with it, and doesn't keep
-    the next from running. At a moment that's answered (`Answered`), a hook that
-    fails, or returns anything but its refusals, refuses what would leave; at
-    any other, a hook returning refusals has failed, since nothing there can be
-    refused.
+    the next from running. At `Publishing`, a hook that fails, or returns
+    anything but its refusals, refuses what would leave; at any other event, a
+    hook returning refusals has failed, since nothing there can be refused.
     """
-    hook: Callable[[Moment], Awaitable[list[Refusal] | None]] = getattr(made, name)
-    who = f"`{type(made).__name__}.{name}`"
+    owner = type(made)
+    method = served(owner)[name]
+    who = f"`{owner.__name__}.{name}`"
     try:
-        answered = ANSWER.validate_python(await hook(now))
+        ask(owner, name, asker)
+        answered = ANSWER.validate_python(await method.called(made, now, asker))
     except ValidationError as unread:
-        failure = f"{who} answered {now.name} with what isn't its refusals: {unread}"
+        failure = f"{who} answered {now.named()} with what isn't its refusals: {unread}"
         return failed(failure, now)
     except Exception:
-        failure = f"{who} failed at {now.name}:\n{traceback.format_exc()}"
+        failure = f"{who} failed at {now.named()}:\n{traceback.format_exc()}"
         return failed(failure, now)
     refused = answered or []
-    if refused and now.name not in get_args(Answered.__value__):
+    if refused and not isinstance(now, Publishing):
         return Ran(
             failure=(
-                f"{who} refused at {now.name}, where a hook only observes: only "
-                f"{', '.join(get_args(Answered.__value__))} can be refused"
+                f"{who} refused at {now.named()}, where a hook only observes: only "
+                "`Publishing` can be refused"
             )
         )
     return Ran(refusals=refused)
 
 
-def failed(failure: str, now: Moment) -> Ran:
-    """Return a hook's failure at `now`: at a moment that's answered, a refusal too, since what it couldn't check doesn't leave."""
-    if now.name not in get_args(Answered.__value__):
+def failed(failure: str, now: Event) -> Ran:
+    """Return a hook's failure at `now`: at `Publishing`, a refusal too, since what it couldn't check doesn't leave."""
+    if not isinstance(now, Publishing):
         return Ran(failure=failure)
     [first, *_] = failure.splitlines()
     refusal = Refusal(
@@ -170,7 +160,14 @@ def failed(failure: str, now: Moment) -> Ran:
     return Ran(failure=failure, refusals=[refusal])
 
 
-class Serving(Model, arbitrary_types_allowed=True):
+class Answering(Model):
+    """A module's method answering one kind of request: its class, with its module, and its name."""
+
+    owner: Served
+    name: str
+
+
+class RepositoryModules(Model, arbitrary_types_allowed=True):
     """A repository's modules, as its declaration resolves them: what they serve, and each answer, for whichever of its launches asks."""
 
     repository: Path
@@ -185,7 +182,7 @@ class Serving(Model, arbitrary_types_allowed=True):
     @classmethod
     def loaded(
         cls, repository: Path, services: Services, records: dict[str, Records]
-    ) -> Serving:
+    ) -> RepositoryModules:
         """Load the declaration the launches of the repository at `repository` are judged by, and resolve it whole.
 
         Raise `ProjectError` where it doesn't load or resolve.
@@ -199,64 +196,72 @@ class Serving(Model, arbitrary_types_allowed=True):
         )
 
     def related(self) -> list[Related]:
-        """Find on the host the other repositories the declaration names, for a module's hooks and handlers."""
+        """Find on the host the other repositories the declaration names, for a module's methods."""
         return related_of(self.resolved.repositories, self.repository)
 
     def offered(self) -> Offered:
-        """Return what the modules serve: each tool, each kind of the room's requests, and each occasion their hooks run at."""
+        """Return what the modules serve: each tool, each kind of request a room may send them, and each event their hooks run at."""
         listened = [
-            each for hooked in self.resolved.hooked for each in listening(hooked.hooks)
-        ]
-        told: list[Occasion] = [
-            "launched",
-            "stopped",
-            "publishing",
-            *get_args(Event.__value__),
+            event for each in self.resolved.served for event in listening(each.serving)
         ]
         return Offered(
             tools=[
-                spec for each in self.resolved.served for spec in each.tools.specs()
+                spec for each in self.resolved.served for spec in tools(each.serving)
             ],
-            kinds=[answering(each.handler).named() for each in self.resolved.handled],
-            occasions=[each for each in told if moment(each) in listened],
+            kinds=[
+                kind
+                for each in self.resolved.served
+                for kind, name in requests(each.serving).items()
+                if asked_by_room(each.serving, name)
+            ],
+            events=[event.named() for event in events() if event in listened],
+        )
+
+    def made(self, owner: Served) -> ModuleServing:
+        """Make `owner`'s class afresh, with its module and the module's own context: what each of its methods runs on."""
+        data = self.layout.module_data(owner.module.name, self.repository)
+        data.mkdir(parents=True, exist_ok=True)
+        return owner.serving(
+            module=owner.module,
+            data=data,
+            related=self.related(),
+            records=self.records,
+            publisher=Hooks(modules=self),
         )
 
     def serving(self, name: str) -> Served | None:
-        """Return the class of tools serving the tool `name`, with its module; none where none does."""
+        """Return the class serving the tool `name`, with its module; none where none does."""
         return next(
             (
                 each
                 for each in self.resolved.served
-                if any(spec.name == name for spec in each.tools.specs())
+                if any(spec.name == name for spec in tools(each.serving))
             ),
             None,
         )
 
-    def answering(self, kind: str) -> Handled | None:
-        """Return the handler answering requests of `kind`, with its module; none where none does."""
+    def answering(self, kind: str) -> Answering | None:
+        """Return the method answering requests of `kind`, with its class and module; none where none does."""
         return next(
             (
-                each
-                for each in self.resolved.handled
-                if answering(each.handler).named() == kind
+                Answering(owner=each, name=name)
+                for each in self.resolved.served
+                for answered, name in requests(each.serving).items()
+                if answered == kind
             ),
             None,
         )
 
     async def call(self, calling: Calling) -> Answer:
-        """Run one call to a module's tool, and return what the agent reads."""
+        """Run one call to a module's tool, asked by the conversation calling, and return what the agent reads."""
         name = calling.name
         owner = self.serving(name)
         if owner is None:
             return Answer(text=f"no module of this launch serves `{name}`", error=True)
-        made = owner.tools(
-            module=owner.module,
-            launch=calling.launch,
-            caller=calling.caller,
-            door=Doorway(serving=self, launch=calling.launch),
-        )
-        [tool] = [tool for tool in made.tools() if tool.spec().name == name]
+        asker = Agent(launch=calling.launch, conversation=calling.caller)
         try:
+            ask(owner.serving, name, asker)
+            tool = served(owner.serving)[name].tool(self.made(owner), asker)
             result = await tool.call(calling.arguments)
         except LupDevError as failed:
             return Answer(text=f"`{name}` didn't run: {failed}", error=True)
@@ -268,80 +273,59 @@ class Serving(Model, arbitrary_types_allowed=True):
                     text=f"`{name}` refused the call: {rejection.reason}", error=True
                 )
 
-    async def answer(self, sent: Sent, launch: Register) -> Reply:
-        """Answer one request of `launch`'s room with the module's handler for its kind.
+    async def answer(self, sent: Sent, asker: Asker) -> Reply:
+        """Answer one request, sent by `asker`, with the module's method for its kind.
 
-        Raise `LupDevError` where no module answers its kind.
+        Raise `LupDevError` where no module answers its kind, where its method
+        isn't asked by such an asker, or where it doesn't reply.
         """
-        owner = self.answering(sent.kind)
-        if owner is None:
+        found = self.answering(sent.kind)
+        if found is None:
             message = f"no module of this launch answers `{sent.kind}`"
             raise LupDevError(message)
-        model = answering(owner.handler)
-        request = model.model_validate(sent.model_dump())
-        data = self.layout.module_data(owner.module.name, self.repository)
-        made = owner.handler(
-            module=owner.module,
-            launch=launch,
-            request=request,
-            data=data,
-            related=self.related(),
-        )
-        return await made.answer()
+        owner, name = found.owner, found.name
+        ask(owner.serving, name, asker)
+        method = served(owner.serving)[name]
+        request = method.taken.model.annotation.model_validate(sent.model_dump())
+        reply = await method.called(self.made(owner), request, asker)
+        if not isinstance(reply, Reply):
+            message = f"`{owner.serving.__name__}.{name}` replied {reply!r}"
+            raise LupDevError(message)
+        return reply
 
     async def happen(self, happening: Happening) -> Happened:
-        """Run every hook at the moment `happening` tells, for its launch, and return what failed among them, and what they refused."""
-        name = moment(happening.occasion)
-        if name is None:
-            return Happened()
-        now = Moment(
-            name=name,
-            conversation=happening.conversation,
-            call=happening.call,
-            tool=happening.tool,
-            published=happening.published,
-        )
+        """Run every hook at the event `happening` tells, for its launch, and return what failed among them, and what they refused."""
+        asker = Lup(launch=happening.launch, conversation=happening.conversation)
+        now = happening.event
         ran = [
-            each
-            for hooked in self.resolved.hooked
-            for each in await self.ran(hooked, now, happening.launch)
+            await attempted(self.made(each), name, now, asker)
+            for each in self.resolved.served
+            for name in at(each.serving, type(now))
         ]
         return Happened(
             failures=[each.failure for each in ran if each.failure is not None],
             refusals=[refusal for each in ran for refusal in each.refusals],
         )
 
-    async def ran(self, hooked: Hooked, now: Moment, launch: Register) -> list[Ran]:
-        """Run one class's hooks at `now` for `launch`, made afresh with its module's data directory; return how each went."""
-        data = self.layout.module_data(hooked.module.name, self.repository)
-        data.mkdir(parents=True, exist_ok=True)
-        made = hooked.hooks(
-            module=hooked.module,
-            launch=launch,
-            records=self.records[launch.runtime],
-            data=data,
-            related=self.related(),
-        )
-        return [await attempted(made, name, now) for name in at(made, now.name)]
 
+class Hooks(Model, Publisher):
+    """The publishing door of a repository's modules: every one of their hooks at `Publishing`, run for the launch publishing."""
 
-class Doorway(Model, Door):
-    """The door one launch's tools publish through: every module's hooks at `publishing`, run for that launch."""
-
-    serving: Serving
-    launch: Register
+    modules: RepositoryModules
 
     @override
     async def refusals(
-        self, published: Published, conversation: Conversation | None
+        self,
+        published: Published,
+        launch: Register,
+        conversation: Conversation | None,
     ) -> list[Refusal]:
         happening = Happening(
-            launch=self.launch,
-            occasion="publishing",
+            launch=launch,
+            event=Publishing(published=published),
             conversation=conversation,
-            published=published,
         )
-        happened = await self.serving.happen(happening)
+        happened = await self.modules.happen(happening)
         for failure in happened.failures:
             sys.stderr.write(f"{failure}\n")
         return happened.refusals
@@ -350,7 +334,7 @@ class Doorway(Model, Door):
 class Listed(Model, Reading[Listing]):
     """Answers `Listing`: what the modules serve, nothing where they couldn't be made."""
 
-    modules: Serving | None
+    modules: RepositoryModules | None
 
     @override
     def request(self) -> type[Listing]:
@@ -369,7 +353,7 @@ class Listed(Model, Reading[Listing]):
 class Calls(Model, Handler[Calling]):
     """Answers `Calling`: one call to a module's tool."""
 
-    modules: Serving
+    modules: RepositoryModules
 
     @override
     def request(self) -> type[Calling]:
@@ -383,7 +367,7 @@ class Calls(Model, Handler[Calling]):
 class Relays(Model, Handler[Relaying]):
     """Answers `Relaying`: one room's request, passed to the module answering its kind."""
 
-    modules: Serving
+    modules: RepositoryModules
 
     @override
     def request(self) -> type[Relaying]:
@@ -392,14 +376,14 @@ class Relays(Model, Handler[Relaying]):
     @override
     async def answer(self, request: Relaying) -> Reply:
         sent = Sent.model_validate(request.request)
-        reply = await self.modules.answer(sent, request.launch)
+        reply = await self.modules.answer(sent, Room(launch=request.launch))
         return Relayed(reply=reply.model_dump())
 
 
 class Happens(Model, Handler[Happening]):
-    """Answers `Happening`: the modules' hooks run at its moment."""
+    """Answers `Happening`: the modules' hooks run at its event."""
 
-    modules: Serving
+    modules: RepositoryModules
 
     @override
     def request(self) -> type[Happening]:
@@ -454,7 +438,9 @@ class Judges(Model, Handler[JudgeHook], arbitrary_types_allowed=True):
         return HookJudged(printed=printed)
 
 
-def routes(modules: Serving | None, judge: Callable[[str, str], str]) -> list[Route]:
+def routes(
+    modules: RepositoryModules | None, judge: Callable[[str, str], str]
+) -> list[Route]:
     """Return what a repository's process answers: the judge's hooks, what its modules serve, and, where they were made, their tools, requests and hooks."""
     listed = [Route.to(Judges(judge=judge)), Route.reading(Listed(modules=modules))]
     if modules is None:
@@ -510,7 +496,7 @@ def worked(
         sys.stderr.write(f"{line}\n")
 
     try:
-        serving = Serving.loaded(repository, services, records)
+        serving = RepositoryModules.loaded(repository, services, records)
     except LupDevError as failed:
         said(
             f"{repository}: its modules aren't served, and its judge answers its "

@@ -46,8 +46,10 @@ from typing import override
 
 from pydantic import Field, JsonValue, PositiveInt
 
+import lup
+from lup.doors import bound, declared
 from lup.tools.serving import Answer
-from lup.tools.tool import Accepted, Refused, ToolSpec, bound, declared, lup_tool
+from lup.tools.tool import Accepted, Refused, ToolSpec
 from lup.types import Model
 from lup_dev.clock import Clock
 from lup_dev.host.courier import Conversation
@@ -130,7 +132,7 @@ class Onlooker(Model, arbitrary_types_allowed=True):
     """The host service's clock, which a duration in `since` or `until` counts
     back from."""
 
-    @lup_tool(reads=True)
+    @lup.tool(reads=True)
     async def judged(self, scope: Scope) -> str:
         """Read the judge's verdicts and holds.
 

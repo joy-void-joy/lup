@@ -44,9 +44,11 @@ from typing import TYPE_CHECKING, override
 
 from pydantic import Field, JsonValue
 
+import lup
+from lup.doors import bound
 from lup.tools import speaking
 from lup.tools.serving import Answer
-from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec, bound, lup_tool
+from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec
 from lup.types import Model
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import Register
@@ -330,7 +332,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             None,
         )
 
-    @lup_tool(idempotent=True)
+    @lup.tool(idempotent=True)
     async def ask(self, asked: Asking) -> Said:
         """Ask the operator, with numbered decisions.
 
@@ -377,7 +379,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             item,
         )
 
-    @lup_tool
+    @lup.tool
     async def send(self, sending: Sending) -> Said:
         """Send a message to a party's inbox.
 
@@ -527,7 +529,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             "runtime can't be woken"
         )
 
-    @lup_tool(idempotent=True)
+    @lup.tool(idempotent=True)
     async def wait_inbox(self, nothing: Nothing) -> Said:
         """Wait until something reaches your inbox.
 
@@ -554,7 +556,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
 
         return Said(text=await self.delivery.held(self.party, arrived))
 
-    @lup_tool(reads=True)
+    @lup.tool(reads=True)
     async def inbox(self, reading: Reading) -> Said:
         """Read this repository's inbox, changing nothing.
 
@@ -595,7 +597,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
         return Said(text=reader.read(items, reading).text)
 
-    @lup_tool
+    @lup.tool
     async def withdraw(self, withdrawing: Withdrawing) -> Said:
         """Take back an item the operator needn't see.
 
@@ -683,7 +685,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             ).written()
         return f"{cited(wanted.item)} has no part {wanted.cited()}."
 
-    @lup_tool
+    @lup.tool
     async def edit(self, editing: Editing) -> Said:
         """Edit what you sent the operator.
 
