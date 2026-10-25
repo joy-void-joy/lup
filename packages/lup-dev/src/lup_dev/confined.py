@@ -67,3 +67,24 @@ class Confined(Model):
         """Return the file at `path`, as `read` reads it, as text; a byte that isn't UTF-8 is replaced."""
         content = self.read(path)
         return None if content is None else content.decode(errors="replace")
+
+    def outside(self, path: Path) -> bool:
+        r"""Say whether `path`, from the root, resolves outside the root, its links followed: a file the host doesn't read, there or not.
+
+        A path that isn't there resolves as its nearest parent that is, so a new
+        file is inside; a link looping is outside, since nothing reads it.
+
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as scratch:
+        ...     root = Path(scratch) / "worktree"
+        ...     root.mkdir()
+        ...     (root / "out.py").symlink_to(Path(scratch) / "missing.py")
+        ...     (root / "in.py").symlink_to(root / "new.py")
+        ...     worktree = Confined(root=root)
+        ...     [worktree.outside(Path(each)) for each in ["out.py", "in.py", "new.py"]]
+        [True, False, False]
+        """
+        try:
+            return not (self.root / path).resolve().is_relative_to(self.root.resolve())
+        except OSError, RuntimeError:
+            return True

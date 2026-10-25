@@ -59,6 +59,7 @@ from lup_dev.codescan.engine import EngineChecker, EngineError
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
 from lup_dev.commanding import RoomExchanges
+from lup_dev.confined import Confined
 from lup_dev.copies import removable
 from lup_dev.declaration.load import load, person_layer
 from lup_dev.declaration.requirements import Machine, Report, Tools
@@ -2139,22 +2140,30 @@ class Scanned(Model):
     findings: list[Finding]
     unreachable: str | None = None
     """Why deferrals' issues weren't checked, where they weren't."""
+    unread: list[Path] = []
+    """The files left out, which resolve outside the worktree, its links
+    followed: lup doesn't read them (`lup_dev.confined`)."""
 
 
 def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
     """Check `paths`, or every file the worktree's roles check, as the gate does.
 
     lup's rules are those the worktree's declaration selects, sent to the engine
-    as the judge sends them, and pyright and ruff run through its runner as the
-    judge runs them. `# lup: ignore` applies to every owner's findings. With
-    `issues`, the issue a deferral or an `ignore` waits on is checked: on
-    GitHub, or in a room through the host service; without, it goes unchecked.
+    as the judge sends them, pyright reading the environment the declaration's
+    runner names, and ruff is lup's own, as the judge's are. `# lup: ignore`
+    applies to every owner's findings. With `issues`, the issue a deferral or an
+    `ignore` waits on is checked: on GitHub, or in a room through the host
+    service; without, it goes unchecked. Each file is read only where it
+    resolves inside the worktree (`lup_dev.confined`): one that doesn't is left
+    out, unread, and named.
     """
     root = toplevel(Path.cwd())
     layout = Layout.of(LupDevSettings())
     worktree = Worktree.at(root, layout)
     chosen = [
-        path.resolve().relative_to(root) if path.is_absolute() else path
+        path.parent.resolve().relative_to(root) / path.name
+        if path.is_absolute()
+        else path
         for path in paths or []
     ]
     listed = chosen or [
@@ -2166,10 +2175,14 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
         )
         if (root / name).is_file()
     ]
-    files = [path for path in listed if worktree.roles.checked(path)]
+    checked = [path for path in listed if worktree.roles.checked(path)]
+    within = Confined(root=root)
+    unread = [path for path in checked if within.outside(path)]
+    read = {path: within.text(path) for path in checked if path not in unread}
+    files = [path for path, content in read.items() if content is not None]
     if not files:
-        return Scanned(files=[], findings=[])
-    sources = [Source(path=path) for path in files]
+        return Scanned(files=[], findings=[], unread=unread)
+    sources = [Source(path=path, content=read[path]) for path in files]
     declaration = worktree.declaration
     reports = engine().check(root, sources, declaration.rules, declaration.runner)
     ruff = Ruff().findings(root, sources)
@@ -2205,7 +2218,9 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
         return [*kept, *problems]
 
     findings = [each for path in files for each in found(path)]
-    return Scanned(files=files, findings=findings, unreachable=unreachable)
+    return Scanned(
+        files=files, findings=findings, unreachable=unreachable, unread=unread
+    )
 
 
 @rules.command("check")
@@ -2235,6 +2250,9 @@ def rules_check(
     issue was asked, for a session to be told at its start.
     """
     found = scanned(paths, issues=True)
+    if found.unread:
+        named = ", ".join(str(each) for each in found.unread)
+        typer.echo(f"lup didn't read {named}: each resolves outside the worktree.")
     if not found.files:
         typer.echo("lup checked no files.")
         return

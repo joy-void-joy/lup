@@ -36,6 +36,7 @@ from lup_dev.policy.checkpoint import (
     TurnEnded,
     TurnStarted,
     Worktree,
+    on_disk,
     over,
 )
 from lup_dev.policy.holds import Holds, Response, answer, waiting
@@ -1046,6 +1047,31 @@ def test_a_tests_turns_end_holds_on_pyrights_and_ruffs_findings_alone(
     assert f"{repo}/tests/test_core.py:3:" in block
     assert f"{repo}/tests/test_core.py:4:" in block
     assert f"{repo}/tests/test_core.py:2:" not in block
+
+
+def test_a_turns_end_leaves_out_a_file_linking_out_of_the_worktree_unread(
+    kit: Kit, repo: Path, tmp_path: Path
+) -> None:
+    host = tmp_path / "host.py"
+    host.write_text('SECRET = "s3cret"  # BAD regex\nz: int = "a"  # TYPE\n')
+    start(kit, repo)
+    call(kit, repo, "c1")
+    (repo / "src" / "pkg" / "linked.py").symlink_to(host)
+    finish(kit, repo, "c1")
+    assert end(kit, repo) == Reply()
+    sent = [source for batch in kit.engine.checked for source in batch]
+    assert not any("s3cret" in (source.content or "") for source in sent)
+
+
+def test_a_file_on_disk_linking_out_of_the_worktree_is_one_lup_doesnt_read(
+    repo: Path, tmp_path: Path
+) -> None:
+    host = tmp_path / "host.py"
+    host.write_text('SECRET = "s3cret"\n')
+    (repo / "src" / "pkg" / "linked.py").symlink_to(host)
+    (repo / "src" / "pkg" / "near.py").symlink_to(repo / CORE)
+    assert on_disk(repo, Path("src/pkg/linked.py")) is None
+    assert on_disk(repo, Path("src/pkg/near.py")) == (repo / CORE).read_text()
 
 
 EXEMPTING_REGEX = (

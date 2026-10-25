@@ -225,6 +225,25 @@ def test_rules_check_lists_every_file_on_disk_its_names_kept_whole(
     assert result.output.splitlines()[-1] == "lup checked 3 files: 1 findings."
 
 
+def test_rules_check_leaves_out_a_file_linking_out_of_the_worktree_and_names_it(
+    fakes: Kit, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host = tmp_path / "host.py"
+    host.write_text('SECRET = "s3cret"  # BAD regex\nz: int = "a"  # TYPE\n')
+    (repo / "src" / "pkg" / "linked.py").symlink_to(host)
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check"])
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert lines[0] == (
+        "lup didn't read src/pkg/linked.py: each resolves outside the worktree."
+    )
+    assert lines[-1] == "lup checked 3 files: 0 findings."
+    sent = [source for batch in fakes.engine.checked for source in batch]
+    assert Path("src/pkg/linked.py") not in [source.path for source in sent]
+    assert not any("s3cret" in (source.content or "") for source in sent)
+
+
 def test_rules_check_lifts_an_exempt_rule_from_its_paths(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
