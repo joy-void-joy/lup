@@ -220,7 +220,10 @@ def test_a_repository_s_process_answers_a_hook_as_the_hook_command_does(
 
     async def exercised() -> list[str]:
         workers = Workers(
-            layout=isolated, say=lambda line: None, approval=lambda repository: None
+            layout=isolated,
+            say=lambda line: None,
+            approval=lambda repository: None,
+            approved=lambda repository: None,
         )
         judge = WorkerJudge(modules=workers)
         try:
@@ -254,7 +257,10 @@ def test_a_repository_s_process_runs_quiet_for_the_conversation_calling(
 
     async def exercised() -> list[Reply]:
         workers = Workers(
-            layout=isolated, say=lambda line: None, approval=lambda repository: None
+            layout=isolated,
+            say=lambda line: None,
+            approval=lambda repository: None,
+            approved=lambda repository: None,
         )
         try:
             await workers.open(launch)
@@ -406,6 +412,7 @@ async def stand_ins(
         layout=isolated,
         say=said.append,
         approval=(approvals or Approvals()).of,
+        approved=lambda repository: None,
         idle=idle,
     )
     server = await asyncio.start_unix_server(holds.heard, path=short / "h.sock")

@@ -23,6 +23,9 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import BaseModel
 
+from lup_dev.host.records import Call as RecordedCall
+from lup_dev.host.records import Reader as RecordsReader
+from lup_dev.host.records import Recorded, Transcript
 from lup import events
 from lup.blocks import OfAgent
 from lup.github.module import GitHub
@@ -79,6 +82,22 @@ class Nothing(Records):
 
     def conversation(self, session: str, agent: str | None) -> Path | None:
         return None
+
+
+class Unread(RecordsReader):
+    """A runtime whose copies hold no session to read."""
+
+    def sessions(self, copies: Path) -> list[Path]:
+        del copies
+        return []
+
+    def read(self, record: Path) -> Transcript:
+        message = f"no session is kept at {record}"
+        raise FileNotFoundError(message)
+
+    def calls(self, record: Path, ids: list[str]) -> list[RecordedCall]:
+        del record, ids
+        return []
 
 
 class Unexchanged(Exchanges):
@@ -221,7 +240,7 @@ def called(
     serving = RepositoryModules(
         repository=registered.repository,
         resolved=resolve(declared),
-        records={registered.runtime: Nothing()},
+        recorded={registered.runtime: Recorded(records=Nothing(), reader=Unread())},
         layout=layout,
         exchanges=Unexchanged(),
     )

@@ -60,7 +60,7 @@ def test_a_fold_loads_another_view_with_what_it_takes() -> None:
     load = Load.of(Viewing.call, Called(call="c1"))
     assert load == Load(view="call", argument={"call": "c1"})
     opened = Fold(id="c1", kind="call", open=True, summary=[Span(text="Bash: ls")], content=load)
-    assert Blocks(blocks=[opened]).text() == "▾ Bash: ls"
+    assert Blocks(blocks=[opened]).text() == "▾ Bash: ls  [call call=c1]"
 
 
 def test_a_fold_loads_only_a_view_and_what_it_takes() -> None:

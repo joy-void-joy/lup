@@ -55,7 +55,7 @@ from lup_dev.declaration.serving import Room
 from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import RoomClient
 from lup_dev.host.protocol import HostError
-from lup_dev.host.records import Record, Records
+from lup_dev.host.records import Call, Reader, Record, Recorded, Records, Transcript
 from lup_dev.host.workers import (
     Called,
     Calling,
@@ -750,6 +750,22 @@ def fakes(kit: Kit, state: Layout, monkeypatch: pytest.MonkeyPatch) -> Kit:
     return kit
 
 
+class Unread(Reader):
+    """A runtime whose copies hold no session to read."""
+
+    def sessions(self, copies: Path) -> list[Path]:
+        del copies
+        return []
+
+    def read(self, record: Path) -> Transcript:
+        message = f"no session is kept at {record}"
+        raise FileNotFoundError(message)
+
+    def calls(self, record: Path, ids: list[str]) -> list[Call]:
+        del record, ids
+        return []
+
+
 class Exchanging(Exchanges):
     """The inbox's items as a test sets them: each conversation exchanges the same, none by default."""
 
@@ -777,6 +793,8 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     resolved: Resolved
     records: Records = NoRecords()
     """Where each launch's runtime keeps its records, whichever it is."""
+    reader: Reader = Unread()
+    """How each launch's runtime's records are read, whichever it is."""
     layout: Layout = Layout(state=Path("/nowhere"), data=Path("/nowhere"))
     """Where lup keeps its data, each module's own among it, made as a module's
     method runs: a test that runs one gives its own."""
@@ -789,7 +807,9 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
         return RepositoryModules(
             repository=launch.repository,
             resolved=self.resolved,
-            records={launch.runtime: self.records},
+            recorded={
+                launch.runtime: Recorded(records=self.records, reader=self.reader)
+            },
             layout=self.layout,
             exchanges=Exchanging(),
         )

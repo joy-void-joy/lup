@@ -81,7 +81,7 @@ from lup_dev.declaration.serving import (
 from lup_dev.errors import LupDevError
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.host.protocol import HostError, Register, Reply
-from lup_dev.host.records import Records
+from lup_dev.host.records import Recorded
 from lup_dev.host.service import Dispatcher, Handler, Reading, Route, unix_server
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
@@ -211,9 +211,9 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
     repository: Path
     """The repository's git directory."""
     resolved: Resolved
-    records: dict[str, Records]
-    """Where each runtime keeps its sessions' records, by the runtime's name: a
-    launch's hooks read its own runtime's."""
+    recorded: dict[str, Recorded]
+    """Where each runtime keeps its sessions' records, and how they're read, by
+    the runtime's name: a launch's hooks read its own runtime's."""
     layout: Layout
     """Where lup keeps its data, each module's own among it."""
     exchanges: Exchanges
@@ -221,7 +221,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
 
     @classmethod
     def loaded(
-        cls, repository: Path, services: Services, records: dict[str, Records]
+        cls, repository: Path, services: Services, recorded: dict[str, Recorded]
     ) -> RepositoryModules:
         """Load the declaration the launches of the repository at `repository` are judged by, and resolve it whole.
 
@@ -231,7 +231,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
         return cls(
             repository=repository,
             resolved=resolve(load(root).project),
-            records=records,
+            recorded=recorded,
             layout=services.layout,
             exchanges=HostExchanges(
                 repository=repository,
@@ -270,7 +270,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             module=owner.module,
             data=data,
             related=self.related(),
-            records=self.records,
+            recorded=self.recorded,
             publisher=Hooks(modules=self),
             exchanges=self.exchanges,
         )
@@ -620,15 +620,15 @@ def worked(
     socket: Path,
     repository: Path,
     services: Services,
-    records: dict[str, Records],
+    recorded: dict[str, Recorded],
     *,
     judge: Callable[[str, str], str],
     called: Callable[[JudgeCalling], Awaitable[Answer]],
 ) -> None:
     """Serve the launches of the repository whose git directory is `repository`, on `socket`: their judge's hooks with `judge`, the judge's own tools that ask the engine with `called`, and the repository's modules.
 
-    `records` is where each runtime keeps its records, by the runtime's name: a
-    launch's hooks read its runtime's. Where the modules can't be made, the
+    `recorded` is where each runtime keeps its records, and how they're read, by
+    the runtime's name: a launch's hooks read its runtime's. Where the modules can't be made, the
     judge's hooks are answered alone, and why is said.
     """
 
@@ -636,7 +636,7 @@ def worked(
         sys.stderr.write(f"{line}\n")
 
     try:
-        serving = RepositoryModules.loaded(repository, services, records)
+        serving = RepositoryModules.loaded(repository, services, recorded)
     except LupDevError as failed:
         said(
             f"{repository}: its modules aren't served, and its judge answers its "

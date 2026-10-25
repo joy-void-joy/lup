@@ -530,6 +530,7 @@ def host_serve(context: typer.Context) -> None:
         layout=layout.host,
         say=typer.echo,
         approval=partial(approval_of, layout),
+        approved=partial(approved_command, layout),
     )
     sweeping = Sweeping(
         layout=layout,
@@ -570,6 +571,14 @@ def approval_of(layout: Layout, repository: Path) -> str | None:
     """Return what the operator approved last for the repository at `repository`, by its fingerprint; none before the first approval."""
     approval = approved(layout, repository)
     return None if approval is None else approval.fingerprint
+
+
+def approved_command(layout: Layout, repository: Path) -> Path | None:
+    """Return the command of the copy approved for the repository at `repository`, which a request put with no launch starts its process from; none before the first approval."""
+    approval = approved(layout, repository)
+    if approval is None:
+        return None
+    return layout.judge(repository).command(approval.tool.name)
 
 
 def typed_reading(
@@ -674,13 +683,12 @@ def worker(
     process: none of them keeps state of its own.
     """
     known = Adapters(known=adapters())
-    records = {adapter.runtime.name(): adapter.records for adapter in known.known}
     made = services()
     worked(
         socket,
         repository,
         made,
-        records,
+        recorded(),
         judge=partial(known.answer, services=made),
         called=partial(known.called, services=made),
     )

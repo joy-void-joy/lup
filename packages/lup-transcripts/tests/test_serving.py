@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 import lup
+from lup_dev.host.records import Call as RecordedCall
+from lup_dev.host.records import Reader as RecordsReader
+from lup_dev.host.records import Recorded, Transcript
 from lup.blocks import OfAgent
 from lup.programs import run
 from lup_dev.declaration.serving import Lup, Publisher
@@ -25,6 +28,22 @@ from lup_transcripts.environment.serving import TranscriptsServing, copied
 if TYPE_CHECKING:
     from lup.publishing import Published, Refusal
     from lup_dev.host.courier import Conversation
+
+
+class Unread(RecordsReader):
+    """A runtime whose copies hold no session to read."""
+
+    def sessions(self, copies: Path) -> list[Path]:
+        del copies
+        return []
+
+    def read(self, record: Path) -> Transcript:
+        message = f"no session is kept at {record}"
+        raise FileNotFoundError(message)
+
+    def calls(self, record: Path, ids: list[str]) -> list[RecordedCall]:
+        del record, ids
+        return []
 
 
 class Unexchanged(Exchanges):
@@ -113,7 +132,7 @@ def test_transcripts_copy_the_repository_s_records_at_its_moments(
     )
     serving = TranscriptsServing(
         module=Transcripts(),
-        records={"claude": held},
+        recorded={"claude": Recorded(records=held, reader=Unread())},
         data=data,
         related=[],
         publisher=Unpublished(),

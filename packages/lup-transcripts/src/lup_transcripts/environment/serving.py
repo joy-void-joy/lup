@@ -65,6 +65,6 @@ class TranscriptsServing(ModuleServing):
         del event
         launch = by.launch
         under = [launch.repository, *Git.pinned(launch.repository).worktrees()]
-        records = self.records[launch.runtime].kept(under)
+        records = self.recorded[launch.runtime].records.kept(under)
         target = self.data / launch.runtime
         await asyncio.to_thread(copied, records, target)

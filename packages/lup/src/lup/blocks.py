@@ -147,12 +147,28 @@ class Fold(Model):
     def said(self, indent: str = "") -> list[str]:
         """Say the fold as text, each line after `indent`: its summary, marked open or closed, then, open, its content, indented further.
 
-        Content read as it opens isn't said: its summary is.
+        Content read as it opens isn't said: its summary is, with the view it
+        reads and what it gives it beyond the agent it's of, so a reader knows
+        which view's command reads it (`[exchange step=12]`).
+
+        >>> loaded = Load(view="call", argument={"runtime": "r", "session": "s",
+        ...     "call": "c1"})
+        >>> Fold(id="1", kind="call", summary=[Span(text="Bash: ls")], content=loaded).said()
+        ['▸ Bash: ls  [call call=c1]']
         """
         summary = "".join(span.text for span in self.summary)
         mark = "▾" if self.open else "▸"
+        if isinstance(self.content, Load):
+            own = OfAgent.model_fields
+            given = " ".join(
+                f"{key}={value}"
+                for key, value in self.content.argument.items()
+                if key not in own
+            )
+            reads = " ".join(part for part in [self.content.view, given] if part)
+            return [f"{indent}{mark} {summary}  [{reads}]"]
         head = [f"{indent}{mark} {summary}"]
-        if not self.open or isinstance(self.content, Load):
+        if not self.open:
             return head
         return [*head, *lines(self.content, f"{indent}  ")]
 

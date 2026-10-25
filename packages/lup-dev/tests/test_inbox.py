@@ -4927,7 +4927,10 @@ def judged_in_its_process(
 ) -> Generator[Watched]:
     """The host service with lup's inbox, serving launch `one` of `runtime` in `repo`, judged by this `lup-dev` in its repository's process; each held change answered in the inbox reaches its hold."""
     workers = Workers(
-        layout=machine.host, say=said.append, approval=lambda repository: None
+        layout=machine.host,
+        say=said.append,
+        approval=lambda repository: None,
+        approved=lambda repository: None,
     )
     with inboxed(
         machine,

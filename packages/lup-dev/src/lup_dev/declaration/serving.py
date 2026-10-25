@@ -4,14 +4,15 @@ A module's methods are those of its `ModuleServing` classes, each behind one of
 the library's doors (`lup.doors`): `@lup.tool`, an agent's call through MCP;
 `@lup.request`, a room's request, routed by the `kind` of the model it takes;
 `@lup.on(Event)`, run at one of lup's events; `@lup.view`, what the dashboard
-shows and its command prints, laid out from lup's blocks (`lup.blocks`). A
+shows and its command prints, laid out from lup's blocks (`lup.blocks`);
+`@lup.command`, a command under the module's on the command line. A
 module lists its classes in its
 `serving`, `Serving.of(GitHubServing)`. A class only groups methods: it narrows
 `module` to its own module's class (`module: GitHub`), so they read its settings
 with their types, and gives them the module's own context through `self`: its
 data directory for the repository (`data`), the other repositories the
-declaration names (`related`), where each runtime keeps its records
-(`records`), the items of lup's inbox a conversation exchanged, which the core
+declaration names (`related`), where each runtime keeps its records and how
+they're read (`recorded`), the items of lup's inbox a conversation exchanged, which the core
 keeps (`exchanges`), and the publishing door (`publish`).
 
 **Who asks is the method's** (`Asker`), by its `by` parameter, which hands it its
@@ -21,7 +22,8 @@ lup itself running a hook at an event of a launch, its conversation with it for
 a session's events; `Operator`, the operator, from the dashboard or a terminal
 on the host. Each door has those who come through it (`askers`), and those a
 method leaving `by` out is for: a tool's are `Agent`, a hook's `Lup`, a view's
-`Operator | Room`; a request has none, so it says (`by: Room`). Defining a class checks each of its
+`Operator | Room`; a request and a command have none, so each says (`by: Room`,
+`by: Operator | Room`). Defining a class checks each of its
 methods: a `by` naming someone its door never brings, or a request without one,
 fails the class's definition, naming the method (`checked`). Who actually asked
 is checked again before each call (`ask`), so a room never reaches a method
@@ -44,7 +46,16 @@ from typing import TYPE_CHECKING, get_args
 
 from pydantic import BaseModel, PydanticUndefinedAnnotation
 
-from lup.doors import Door, Method, OnDoor, RequestDoor, ToolDoor, ViewDoor, served
+from lup.doors import (
+    CommandDoor,
+    Door,
+    Method,
+    OnDoor,
+    RequestDoor,
+    ToolDoor,
+    ViewDoor,
+    served,
+)
 from lup.events import Event, events
 from lup.publishing import Published, Refusal, told
 from lup.types import Model
@@ -53,7 +64,7 @@ from lup_dev.declaration.module import Module
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Register, Reply, Request
-from lup_dev.host.records import Records
+from lup_dev.host.records import Recorded
 from lup_dev.inbox.exchanges import Exchanges
 
 if TYPE_CHECKING:
@@ -114,6 +125,8 @@ def askers(door: Door) -> Askers:
             return Askers(through=[Lup], default=[Lup])
         case ViewDoor():
             return Askers(through=[Operator, Room], default=[Operator, Room])
+        case CommandDoor():
+            return Askers(through=[Operator, Room], default=[])
 
 
 def said(askers: list[type[Asker]]) -> str:
@@ -137,9 +150,10 @@ def named(owner: type, name: str, method: Method) -> list[type[Asker]]:
     if method.taken.by is None:
         default = [each for door in doors for each in door.default]
         if not default:
+            through = [each for door in doors for each in door.through]
             message = (
                 f"{who} is {method.doors[0].says()}, which says who may ask it: "
-                "`by: Room` for one of the repository's rooms"
+                f"`by` typed as one of {said(through)}, or a union of them"
             )
             raise ProjectError(message)
         return list(dict.fromkeys(default))
@@ -258,9 +272,9 @@ class ModuleServing(Model, arbitrary_types_allowed=True):
     """The module's own directory for the repository, under lup's data."""
     related: list[Related]
     """The other repositories the declaration names, as the host finds them."""
-    records: dict[str, Records]
-    """Where each runtime keeps its sessions' records on this machine, by the
-    runtime's name: a launch's are its runtime's."""
+    recorded: dict[str, Recorded]
+    """Where each runtime keeps its sessions' records on this machine, and how
+    they're read, by the runtime's name: a launch's are its runtime's."""
     publisher: Publisher
     """Where what a method would publish is checked first (`publish`)."""
     exchanges: Exchanges

@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 import lup
+from lup_dev.host.records import Call as RecordedCall
+from lup_dev.host.records import Reader as RecordsReader
+from lup_dev.host.records import Recorded, Transcript
 from lup.blocks import OfAgent
 from lup.programs import run
 from lup.publishing import Part, Place, Post, Refusal
@@ -59,6 +62,22 @@ class Nothing(Records):
 
     def conversation(self, session: str, agent: str | None) -> Path | None:
         return None
+
+
+class Unread(RecordsReader):
+    """A runtime whose copies hold no session to read."""
+
+    def sessions(self, copies: Path) -> list[Path]:
+        del copies
+        return []
+
+    def read(self, record: Path) -> Transcript:
+        message = f"no session is kept at {record}"
+        raise FileNotFoundError(message)
+
+    def calls(self, record: Path, ids: list[str]) -> list[RecordedCall]:
+        del record, ids
+        return []
 
 
 class Unexchanged(Exchanges):
@@ -200,7 +219,7 @@ def serving(tmp_path: Path, volume: int = 1) -> RepositoryModules:
     return RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
-        records={"claude": Nothing()},
+        recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path),
         exchanges=Unexchanged(),
     )
@@ -423,7 +442,10 @@ def test_a_repository_s_process_serves_its_committed_declaration_s_modules(
 
     async def exercised() -> tuple[list[str], Called, Called, bool]:
         workers = Workers(
-            layout=host, say=said.append, approval=lambda repository: None
+            layout=host,
+            say=said.append,
+            approval=lambda repository: None,
+            approved=lambda repository: None,
         )
         offered = await workers.open(registered)
         calling = Calling(
@@ -512,7 +534,11 @@ def test_a_bare_repository_s_modules_are_made_from_its_approved_declaration(
         local=LOCAL,
     )
     write_model(kit.layout.approved(bare), approval)
-    served = RepositoryModules.loaded(bare, kit.bench.services, {"claude": Nothing()})
+    served = RepositoryModules.loaded(
+        bare,
+        kit.bench.services,
+        {"claude": Recorded(records=Nothing(), reader=Unread())},
+    )
     names = [spec.name for spec in served.offered().tools]
     assert {"shout", "whisper"} <= set(names)
 
@@ -558,7 +584,7 @@ def listening(tmp_path: Path) -> RepositoryModules:
     return RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
-        records={"claude": Nothing()},
+        recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
     )
@@ -606,7 +632,7 @@ class ReadingServing(ModuleServing):
     async def read(self, event: lup.Launched, by: Lup) -> None:
         """Note the launch, and its runtime's records."""
         del event
-        records = type(self.records[by.launch.runtime]).__name__
+        records = type(self.recorded[by.launch.runtime].records).__name__
         with (self.data / "read").open("a", encoding="utf-8") as notes:
             notes.write(f"{by.launch.launch} {records}\n")
 
@@ -624,7 +650,10 @@ def test_each_launch_s_hooks_read_its_own_runtime_s_records(tmp_path: Path) -> N
     serving = RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
-        records={"claude": Nothing(), "codex": Elsewhere()},
+        recorded={
+            "claude": Recorded(records=Nothing(), reader=Unread()),
+            "codex": Recorded(records=Elsewhere(), reader=Unread()),
+        },
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
     )
@@ -706,7 +735,7 @@ def guarding(tmp_path: Path) -> RepositoryModules:
     return RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
-        records={"claude": Nothing()},
+        recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
     )

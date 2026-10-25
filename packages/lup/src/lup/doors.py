@@ -1,4 +1,4 @@
-"""The doors a module's method is reached through, each a decorator in `lup`'s namespace: `lup.tool`, `lup.request`, `lup.on` and `lup.view`.
+"""The doors a module's method is reached through, each a decorator in `lup`'s namespace: `lup.tool`, `lup.request`, `lup.on`, `lup.view` and `lup.command`.
 
 A door exists only where the contract differs: who calls a method, what it
 takes, what it returns. Each is a decorator, typed with its contract, so pyright
@@ -18,6 +18,9 @@ holds the method behind it to what the door takes and returns:
   viewed and returns `Blocks` (`lup.blocks`). Placed in a drawer under an
   agent, it takes the agent it's of (`OfAgent`); with no place, a fold reads
   it as it opens (`Load`), or its command prints it (`ViewDoor`).
+- `@lup.command`: whoever runs the command line calls it, under its module's
+  command. The fields of the model it takes are its arguments and options; it
+  returns the text it prints (`CommandDoor`).
 
 A method takes one model, its docstring describing it, and its name, with its
 module's, routing it: a tool's name is the method's. Where it needs whoever asks
@@ -369,7 +372,46 @@ class ViewDoor(Model):
         return Served(method, [self], first(method, self))
 
 
-type Door = ToolDoor | RequestDoor | OnDoor | ViewDoor
+class CommandDoor(Model):
+    """A command's door: whoever runs the command line calls the method, the fields of the model it takes its arguments and options, and prints the text it returns.
+
+    `@lup.command` is this door, put on the method it decorates.
+    """
+
+    def says(self) -> str:
+        """Say the door, as an error names it."""
+        return "a command"
+
+    def checked(self, taken: Taken) -> None:
+        """Raise `DoorError` where `taken` isn't a command's: a method of a class, taking one model, returning `str`, and described by a docstring, its help."""
+        if not taken.method:
+            message = f"the command `{taken.name}` is a method of a class of a module's"
+            raise DoorError(message)
+        if not is_model(taken.model.annotation):
+            message = (
+                f"the command `{taken.name}` takes `{taken.model.name}` typed "
+                f"{spelled(taken.model.annotation)}: a command takes one pydantic "
+                "model, whose fields are its arguments and options"
+            )
+            raise DoorError(message)
+        if taken.returned is not str:
+            message = (
+                f"the command `{taken.name}` returns {spelled(taken.returned)}: a "
+                "command returns the text it prints, `str`"
+            )
+            raise DoorError(message)
+        if taken.description is None:
+            message = f"the command `{taken.name}` needs a docstring: it's its help"
+            raise DoorError(message)
+
+    def __call__[S, I: BaseModel, **P](
+        self, method: Callable[Concatenate[S, I, P], Awaitable[str]], /
+    ) -> Served[S, Concatenate[I, P], Awaitable[str]]:
+        """Return `method` served through this door."""
+        return Served(method, [self], first(method, self))
+
+
+type Door = ToolDoor | RequestDoor | OnDoor | ViewDoor | CommandDoor
 """A door a method is reached through."""
 
 
@@ -446,6 +488,10 @@ class Method(property):
     def viewing(self) -> ViewDoor | None:
         """Return its view's door; none where it isn't a view."""
         return next((each for each in self.doors if isinstance(each, ViewDoor)), None)
+
+    def commanded(self) -> bool:
+        """Say whether it's a command."""
+        return any(isinstance(each, CommandDoor) for each in self.doors)
 
     def spec(self) -> ToolSpec | None:
         """Return what a session is told about it as a tool, with no instance; none where it isn't one."""
@@ -634,6 +680,18 @@ def view(
     """
     door = ViewDoor(place=place, watch=watch or Watch())
     return door if method is None else door(method)
+
+
+def command[S, I: BaseModel, **P](
+    method: Callable[Concatenate[S, I, P], Awaitable[str]], /
+) -> Served[S, Concatenate[I, P], Awaitable[str]]:
+    """Make a method a command, under its module's command on the command line: the fields of the model it takes are its arguments and options, its docstring its help, and the text it returns what it prints.
+
+    It says who may run it, `by: Operator | Room`: on the host a command
+    carries the operator's authority, in a room the room's. A view needs none
+    of its own: its command prints its text form.
+    """
+    return CommandDoor()(method)
 
 
 def request[S, I: BaseModel, O: BaseModel, **P](
