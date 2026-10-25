@@ -185,6 +185,9 @@ class JudgeHook(Request, reads=False):
     the worktree the judge reads among it."""
     payload: str
     """The hook's payload, as the room's hook sent it."""
+    environments: Path | None = None
+    """The launch's own environments, where its room has them
+    (`Register.environments`): the judge reads each worktree's there."""
 
 
 class HookJudged(Reply):
@@ -263,7 +266,11 @@ class WorkerJudge(Model, LaunchJudge, arbitrary_types_allowed=True):
 
     @override
     async def judged(self, launch: Register, payload: str) -> str:
-        hook = JudgeHook(runtime=launch.runtime, payload=payload)
+        hook = JudgeHook(
+            runtime=launch.runtime,
+            payload=payload,
+            environments=launch.environments,
+        )
         reply = await self.modules.ask(launch, hook)
         match reply:
             case HookJudged(printed=printed):

@@ -271,9 +271,9 @@ app.add_typer(inbox, name="inbox")
 app.add_typer(private, name="private")
 
 
-def engine() -> Checker:
-    """Return the typed engine the judge asks about files, as this machine sets it."""
-    return EngineChecker.configured(LupDevSettings())
+def engine(environments: Path | None = None) -> Checker:
+    """Return the typed engine the judge asks about files, as this machine sets it, reading each worktree's environment among a launch's own `environments` where they're given."""
+    return EngineChecker.configured(LupDevSettings(), environments)
 
 
 def adapters() -> list[Adapter]:
@@ -393,16 +393,22 @@ class Wakers(Model, Waker):
         return {} if pushing is None else pushing.capabilities
 
 
-def services() -> Services:
-    """Return what judging reaches, as configured on this machine."""
+def services(environments: Path | None = None) -> Services:
+    """Return what judging reaches, as configured on this machine.
+
+    `environments` are a launch's own, where the hooks judged are of a room that
+    has them: the engine reads each worktree's environment there, and so does
+    the importers pass a checkpoint starts (`docs/launch.md`, *The project's
+    environment, the room's own*).
+    """
     settings = LupDevSettings()
     host = Layout.of(settings).host
     return Services(
-        checker=engine(),
+        checker=engine(environments),
         linter=Ruff(),
         clock=SystemClock(),
         layout=Layout.of(settings),
-        spawner=BackgroundSpawner(),
+        spawner=BackgroundSpawner(environments=environments),
         integration=settings.lup_integration_branch,
         announcing=InboxAnnouncing(layout=host, clock=SystemClock()),
         flagging=InboxFlagging(layout=host, clock=SystemClock()),
@@ -685,18 +691,25 @@ def worker(
     """Serve the judge and the modules of `repository`'s launches on `socket`, until standard input closes: for the host service.
 
     Their hooks are answered as `hook` answers them, and the judge's own tools
-    that ask the engine run, with this machine's services made once for the
-    process: none of them keeps state of its own.
+    that ask the engine run, with this machine's services made for each: none of
+    them keeps state of its own, and each reads the environments of the launch
+    asking, where its room has its own.
     """
     known = Adapters(known=adapters())
-    made = services()
+
+    def judged(runtime: str, payload: str, environments: Path | None) -> str:
+        return known.answer(runtime, payload, services(environments))
+
+    async def called(calling: JudgeCalling) -> serving.Answer:
+        return await known.called(calling, services(calling.launch.environments))
+
     worked(
         socket,
         repository,
-        made,
+        services(),
         recorded(),
-        judge=partial(known.answer, services=made),
-        called=partial(known.called, services=made),
+        judge=judged,
+        called=called,
     )
 
 
@@ -2609,13 +2622,22 @@ def verdicts(
 
 
 @app.command("importers", hidden=True)
-def importers(worktree: Path) -> None:
+def importers(
+    worktree: Path,
+    environments: Annotated[
+        Path | None,
+        typer.Option(
+            help="The launch's own environments, where the hook was a room's."
+        ),
+    ] = None,
+) -> None:
     """Run a worktree's background importers pass; the checkpoint starts it.
 
     The engine is asked with the runner of the declaration the judge reads there,
-    the approved commit's, so the pass and the judge share one engine.
+    the approved commit's, and the environments of the launch whose hook started
+    it, so the pass and the judge share one engine.
     """
-    judging = services()
+    judging = services(environments)
     repository = Worktree.at(worktree, judging.layout).repository
     judged = Worktree.of(worktree, repository, judging)
     judged.importers().run(judging.checker, judged.declaration.runner)

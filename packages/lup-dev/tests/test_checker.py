@@ -7,12 +7,16 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lup_dev import CodeRules, Modules, Project, Rules
+from lup_dev import CodeRules, Modules, Plain, Project, Rules, Uv, environments
 from lup_dev.catalog.rules import DefaultRules
 from lup_dev.codescan.contract import FileReport
 from lup_dev.codescan.directives import Defer, Ignore, Malformed, Note
-from lup_dev.codescan.engine import CheckRequest, EngineEnvironment
+from lup_dev.codescan.engine import CheckRequest, EngineChecker, EngineEnvironment
 from lup_dev.declaration.resolve import resolve
+from lup_dev.environments import environment
+from lup_dev.policy import importers
+from lup_dev.policy.importers import BackgroundSpawner
+from lup_dev.settings import LupDevSettings
 
 PATH = "packages/lup/src/lup/claude.py"
 REPORT = {
@@ -146,3 +150,55 @@ def test_a_check_request_carries_each_modules_selection_as_recorded() -> None:
         },
         "default": {"start": {"kind": "all"}, "operations": [left_out]},
     }
+
+
+def test_a_rooms_worktree_is_read_in_its_launchs_environment_as_the_room_places_it() -> (
+    None
+):
+    launch = Path("/rooms/lup/environments/0f3a")
+    root = Path("/srv/lup.git/tree/dev")
+    assert EngineEnvironment.of(Uv(), root) == EngineEnvironment(
+        venv=".venv", files=Uv().environment()
+    )
+    assert EngineEnvironment.of(Uv(), root, launch) == EngineEnvironment(
+        venv=str(environment(launch, root)), files=Uv().environment()
+    )
+    # A runner naming no environment reads none, wherever the room keeps them.
+    assert EngineEnvironment.of(Plain(), root, launch).venv is None
+
+
+def test_the_engine_reads_the_launchs_environments_given_else_those_the_room_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    given = tmp_path / "given"
+    named = tmp_path / "named"
+    assert EngineChecker.configured(LupDevSettings()).environments is None
+    monkeypatch.setenv(environments.ENVIRONMENTS, str(named))
+    assert EngineChecker.configured(LupDevSettings()).environments == named
+    assert EngineChecker.configured(LupDevSettings(), given).environments == given
+
+
+def test_the_importers_pass_is_started_reading_the_launchs_environments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[list[str]] = []
+
+    def detached(program: str, *arguments: str, log: Path) -> None:
+        started.append(list(arguments))
+
+    monkeypatch.setattr(importers, "detached", detached)
+    worktree = tmp_path / "tree"
+    log = tmp_path / "log"
+    BackgroundSpawner().spawn(worktree, log)
+    BackgroundSpawner(environments=tmp_path / "launch").spawn(worktree, log)
+    assert started == [
+        ["-m", "lup_dev.cli", "importers", str(worktree)],
+        [
+            "-m",
+            "lup_dev.cli",
+            "importers",
+            str(worktree),
+            "--environments",
+            str(tmp_path / "launch"),
+        ],
+    ]
