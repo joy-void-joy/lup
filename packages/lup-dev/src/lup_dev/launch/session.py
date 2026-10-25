@@ -36,6 +36,10 @@ connection ended before an answer, it fails as its event needs (`lost`): status
 2, which on both runtimes blocks the call, tells the agent beside its result or
 holds a turn's end, and 1 at a session's or a turn's start (each adapter says
 what its runtime does).
+
+At a worktree asked for, the answer is the worktree the judge names, which the
+room's hook makes with the room's own git and names to the runtime, or why the
+judge makes none, which fails the making (`MAKING`).
 """
 
 import io
@@ -55,6 +59,7 @@ from lup.events import (
     SessionStarted,
     TurnEnded,
     TurnStarted,
+    WorktreeAsked,
 )
 from lup.sessions.bridge import Bridge
 from lup.sessions.terminal import (
@@ -145,7 +150,8 @@ def lost(event: type[SessionEvent]) -> Lost:
     result, or holds the turn's end once (`docs/host.md`, *The one hook*). At a
     session's start or a turn's start, status 2 would drop the operator's
     prompt, and no write is judged there, so the hook ends with status 1, an
-    error each runtime shows the operator.
+    error each runtime shows the operator. At a worktree asked for, any status
+    but 0 fails the making, so it's 1 too.
     """
     gone = (
         "lup: the host service went away before it answered this hook, as it does "
@@ -166,11 +172,27 @@ def lost(event: type[SessionEvent]) -> Lost:
         CallStarted: Lost(
             status=2, said=f"{gone} so this call didn't run: make it again. {held}"
         ),
+        WorktreeAsked: dropped,
         CallFinished: unjudged,
         TurnEnded: unjudged,
         ConversationEnded: unjudged,
     }
     return losses[event]
+
+
+MAKING = """answer=${answer%.}
+case $answer in /*) ;; *) printf '%s' "$answer" >&2; exit 1 ;; esac
+{ read -r root; read -r origin; read -r branch; read -r commit; } <<EOF
+$answer
+EOF
+git -C "$origin" worktree add --quiet -b "$branch" "$root" "$commit" >&2 || exit 1
+printf '%s\\n' "$root\""""
+"""What the room's hook at a worktree asked for does with the judge's answer
+(`Making.lines`, `policy/worktrees.py`): an answer that isn't a path is why the
+judge makes no worktree, said on standard error, and the hook ends with status
+1, which fails the making; else it makes the worktree the answer names with the
+room's own git, which writes to standard error alone, and prints its root, which
+the runtime reads as the last line of standard output."""
 
 
 def piped(
@@ -195,7 +217,9 @@ def piped(
     The command then does what `lost` says for `event`, never ending as the
     no decision the runtime would read in silence. The answer is kept whole,
     trailing newlines too, with a mark after it that the shell's capture can't
-    strip.
+    strip. At a worktree asked for, the hook makes the worktree the answer
+    names (`MAKING`), in the room, so its checkout runs the room's own git,
+    never the host's.
     """
     socket = LaunchSockets(directory=ROOM_SOCKETS).hook
     seconds = str(int(timeout.total_seconds()))
@@ -215,7 +239,7 @@ def piped(
                 f'[ "$answer" != . ] || {{ echo {shlex.quote(gone.said)} >&2; '
                 f"exit {gone.status}; }}"
             ),
-            'printf %s "${answer%.}"',
+            MAKING if event is WorktreeAsked else 'printf %s "${answer%.}"',
         ]
     )
     return ["sh", "-c", script]

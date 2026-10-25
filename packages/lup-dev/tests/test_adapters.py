@@ -24,6 +24,7 @@ from lup_dev.codescan.contract import (
     Source,
     Span,
 )
+from lup_dev.git import Git
 from lup_dev.host.courier import (
     Conversation,
     Conversations,
@@ -37,6 +38,7 @@ from lup_dev.host.workers import JudgeCalling
 from lup_dev.inbox.store import Text
 from lup_dev.policy.checkpoint import Bench, Running, Services, Worktree
 from lup_dev.policy.holds import Response
+from lup_dev.policy.worktrees import SessionIndex
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
@@ -1505,7 +1507,8 @@ def test_claude_a_worker_busy_in_its_worktree_holds_back_checkpoints_there_alone
 
 def test_claude_hooks_every_call_and_each_turns_start_and_end_in_a_room() -> None:
     """Every hook waits as long as a hold may: a call's start for a file tool's
-    write, its finish for the checkpoint's, a turn's end for its last checkpoint's."""
+    write, its finish for the checkpoint's, a turn's end for its last checkpoint's.
+    A worktree asked for, which lup makes, waits as every other does."""
     assert claude.hooks(hook_at, HOLD) == [
         Hook(
             event=events.SessionStarted,
@@ -1517,6 +1520,11 @@ def test_claude_hooks_every_call_and_each_turns_start_and_end_in_a_room() -> Non
         ),
         Hook(
             event=events.CallStarted, command=hook_at(events.CallStarted), timeout=HOLD
+        ),
+        Hook(
+            event=events.WorktreeAsked,
+            command=hook_at(events.WorktreeAsked),
+            timeout=HOLD,
         ),
         Hook(
             event=events.CallFinished,
@@ -2480,3 +2488,155 @@ def test_each_runtime_tells_nothing_a_quiet_holds_and_tells_it_as_it_lifts(
     said = json.loads(told)["hookSpecificOutput"]["additionalContext"]
     assert f"{repo}/src/pkg/core.py:13:" in said
     assert "core.py:11:" not in said
+
+
+# A worktree Claude Code asks for (`WorktreeCreate`), which lup makes. Codex asks
+# for none: a gap its adapter declares.
+
+
+def worktree_create(cwd: Path, name: str = "agent-a1") -> str:
+    """`WorktreeCreate` as 2.1.310 sent it for a subagent: the session's, naming no conversation."""
+    return payload(cwd, "WorktreeCreate", name=name, prompt_id="p1")
+
+
+@pytest.fixture
+def dev(bare: Path) -> Path:
+    """`dev` in lup's own layout, a commit ahead of `main`, which the bare repository's `HEAD` names."""
+    root = bare / "tree" / "dev"
+    Git(cwd=bare).run("worktree", "add", "--quiet", "-b", "dev", str(root), "main")
+    (root / "src" / "pkg" / "later.py").write_text('"""Later."""\n')
+    Git(cwd=root).run("add", "--all")
+    Git(cwd=root).run("commit", "--quiet", "-m", "dev: later")
+    return root
+
+
+def made_in_room(printed: str) -> Path:
+    """Make the worktree a hook's answer names, as the room's hook does with the room's git (`MAKING`); return its root."""
+    root, origin, branch, commit = printed.splitlines()
+    Git(cwd=Path(origin)).run("worktree", "add", "--quiet", "-b", branch, root, commit)
+    return Path(root)
+
+
+def test_claude_has_lup_make_a_subagents_worktree_from_its_parents_commit(
+    on_claude: Bench, bare: Path, dev: Path, kit: Kit
+) -> None:
+    """From the worktree the hook's working directory is in, the asking
+    conversation's, not from the repository's `HEAD`; on a branch of Claude
+    Code's name for it, beside the others."""
+    in_room(payload(dev, "SessionStart", source="startup"), on_claude)
+    printed = in_room(worktree_create(dev), on_claude)
+    head = Git(cwd=dev).commit("HEAD")
+    assert head is not None
+    assert head != Git(cwd=bare).commit("HEAD")
+    root = bare / "tree" / "agent-a1"
+    assert printed == f"{root}\n{dev}\nagent-a1\n{head}\n"
+    assert made_in_room(printed) == root
+    assert Git(cwd=root).text("rev-parse", "--abbrev-ref", "HEAD") == "agent-a1"
+    assert Git(cwd=root).commit("HEAD") == head
+    held = SessionIndex(layout=kit.layout).read("s1")
+    assert held is not None
+    assert held.made == {root: head}
+    assert held.works("") == [dev]
+
+
+@pytest.mark.parametrize("asked", [True, False], ids=["made-by-lup", "made-by-hand"])
+def test_claude_judges_a_worktree_lup_made_from_its_commit_where_its_subagent_first_calls(
+    on_claude: Bench, bare: Path, dev: Path, kit: Kit, *, asked: bool
+) -> None:
+    """#240, for the worktrees lup makes: a shell write into one before its
+    subagent's first call there is held at that call's end, where a worktree
+    made otherwise is accepted as it stood when the session first reached it.
+    The subagent works there from its first call, and the session's own
+    conversation doesn't."""
+    in_room(payload(dev, "SessionStart", source="startup"), on_claude)
+    if asked:
+        root = made_in_room(in_room(worktree_create(dev), on_claude))
+    else:
+        root = bare / "tree" / "agent-a1"
+        Git(cwd=dev).run("worktree", "add", "--quiet", "-b", "agent-a1", str(root))
+    was = (root / MANIFEST).read_text()
+    (root / MANIFEST).write_text(was + ADDED)
+    command: dict[str, object] = {"command": "ls"}
+    started = with_fields(pre_tool_use(root, "Bash", command, "b1"), agent_id="a1")
+    assert in_room(started, on_claude) == ""
+    finish = with_fields(finished(root, "Bash", command, "b1"), agent_id="a1")
+    told = in_room(finish, on_claude)
+    held = [[each.path for each in hold.files] for hold in kit.announced.holds]
+    assert held == ([[MANIFEST]] if asked else [])
+    assert ("lup held the write to" in told) is asked
+    index = SessionIndex(layout=kit.layout).read("s1")
+    assert index is not None
+    assert (index.works("a1"), index.works(""), index.made) == ([root], [dev], {})
+
+
+@pytest.mark.parametrize(
+    ("name", "why"),
+    [
+        ("dev", "a branch `dev` is there already"),
+        ("bad..name", "`bad..name` can't name a branch"),
+        ("-x", "`-x` can't name a branch"),
+        ("taken", "where lup would make the worktree, is there already"),
+    ],
+)
+def test_claude_fails_the_making_saying_why_where_lup_makes_no_worktree(
+    on_claude: Bench, bare: Path, dev: Path, kit: Kit, *, name: str, why: str
+) -> None:
+    (bare / "tree" / "taken").mkdir()
+    printed = in_room(worktree_create(dev, name), on_claude)
+    assert printed.startswith("lup made no worktree: ")
+    assert why in printed
+    assert printed.endswith("\n")
+    assert printed.count("\n") == 1
+    held = SessionIndex(layout=kit.layout).read("s1")
+    assert held is None or held.made == {}
+
+
+def test_claude_makes_no_worktree_for_a_conversation_in_none(
+    on_claude: Bench, tmp_path: Path
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    printed = in_room(worktree_create(elsewhere), on_claude)
+    assert printed == (
+        "lup made no worktree: lup makes a worktree from the commit of the one its "
+        f"conversation works in, and {elsewhere} is in none\n"
+    )
+
+
+def test_claude_reads_a_worktree_asked_for_as_the_sessions_and_adds_nothing_to_it() -> (
+    None
+):
+    raw = worktree_create(Path("/w/dev"))
+    heard = claude.heard(raw)
+    assert (heard.event, heard.session, heard.agent, heard.judged, heard.fits) == (
+        events.WorktreeAsked(name="agent-a1"),
+        "s1",
+        None,
+        True,
+        0,
+    )
+    made = "/w.git/tree/agent-a1\n/w/dev\nagent-a1\nc0\n"
+    assert claude.told(raw, made, Telling(caller="c1")) is None
+    assert claude.unanswered(raw, "it ended") == (
+        "lup's judge couldn't answer this hook, so it wasn't judged: it ended, so lup "
+        "made no worktree\n"
+    )
+
+
+def test_claude_wont_add_to_an_answer_it_reads_as_text_so_what_it_tells_is_put_back(
+    repo: Path,
+) -> None:
+    raw = pre_tool_use(repo, "Bash", {"command": "ls"})
+    assert claude.told(raw, "plain\n", Telling(caller="c1")) is None
+    with pytest.raises(ValueError, match="reads as text"):
+        claude.told(raw, "plain\n", Telling(caller="c1", items=["a message"]))
+
+
+def test_codex_runs_no_hook_at_a_worktree_asked_for() -> None:
+    """Codex never isolates a subagent in a worktree: a gap its adapter declares."""
+    assert events.WorktreeAsked in [each.event for each in claude.hooks(hook_at, HOLD)]
+    assert events.WorktreeAsked not in [
+        each.event for each in codex.hooks(hook_at, HOLD)
+    ]
+    with pytest.raises(ValueError, match="WorktreeCreate"):
+        codex.heard(worktree_create(Path("/w/dev")))

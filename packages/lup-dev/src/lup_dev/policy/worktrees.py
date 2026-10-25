@@ -13,7 +13,10 @@ where it started, where its file tools wrote, and where its hooks reported its
 working directory. It keeps, too, the worktrees each of its conversations works
 in (`Holding.works`), which a call of that conversation holds checkpoints back
 in while it runs (`docs/judging-writes.md`, *Which calls hold a checkpoint
-back*).
+back*); and those lup made for the session at its runtime's asking, each with
+the commit it was made at, which the session is judged from where it first
+reaches one (`Holding.made`; `docs/judging-writes.md`, *A worktree the runtime
+asks for*).
 """
 
 from pathlib import Path
@@ -70,6 +73,48 @@ def place(path: Path) -> Place | None:
     )
 
 
+class Making(Model):
+    """A worktree lup makes at its runtime's asking: its root, the worktree git makes it from, its new branch, and the commit it starts at.
+
+    The judge decides it and the room's hook makes it, with the room's own git
+    (`MAKING`, `launch/session.py`): the hook reads `lines`, a field a line.
+    """
+
+    root: Path
+    origin: Path
+    """The root of the worktree it's made from, which git runs in."""
+    branch: str
+    commit: str
+
+    def lines(self) -> str:
+        """Return it as the room's hook reads it: the root, the origin, the branch and the commit, each on a line, the root first, so a refusal, which never starts with `/`, is told from it.
+
+        >>> print(Making(root=Path("/r.git/tree/w"), origin=Path("/r.git/tree/dev"), branch="w", commit="c0").lines(), end="")
+        /r.git/tree/w
+        /r.git/tree/dev
+        w
+        c0
+        """
+        return "".join(
+            f"{field}\n" for field in [self.root, self.origin, self.branch, self.commit]
+        )
+
+
+def made_root(repository: Path, name: str) -> Path:
+    """Return where a worktree named `name` of the repository whose common git directory is `repository` is made: `tree/<name>` in that directory.
+
+    A room mounts the git directory read-write whatever the layout, as the root
+    of the tree it mounts, inside it, or on its own (`launch/room.py`), so the
+    worktree is inside the room's mounts: for a bare repository it's beside
+    the others, `lup.git/tree/<name>`, and for a clone `.git/tree/<name>`, which
+    the clone's own worktree never lists.
+
+    >>> made_root(Path("/srv/lup.git"), "agent-a1")
+    PosixPath('/srv/lup.git/tree/agent-a1')
+    """
+    return repository / "tree" / name
+
+
 class Holding(MutableModel):
     """A session's repository, the worktrees of it the session holds, and those each of its conversations works in."""
 
@@ -81,6 +126,22 @@ class Holding(MutableModel):
     worktrees its hooks reported its working directory in."""
     wrote: dict[str, list[Path]] = {}
     """By conversation: the worktrees its file tools wrote in."""
+    made: dict[Path, str] = {}
+    """By root, the worktrees lup made at its runtime's asking that the session
+    hasn't reached yet, each with the commit it was made at: where the session
+    first reaches one, it's judged from that commit rather than as it stands."""
+
+    def make(self, root: Path, commit: str) -> None:
+        """Note that a worktree is made at `root` from `commit`, for the session to be judged from that commit where it first reaches it."""
+        self.made = {**self.made, root: commit}
+
+    def first_reached(self, roots: list[Path]) -> dict[Path, str]:
+        """Return each of `roots` made at the runtime's asking, with its commit, and forget it: it's judged from that commit once, as the session first reaches it."""
+        found = {root: self.made[root] for root in roots if root in self.made}
+        self.made = {
+            root: commit for root, commit in self.made.items() if root not in found
+        }
+        return found
 
     def reach(self, root: Path) -> bool:
         """Hold the worktree at `root`; say whether the session hadn't reached it."""

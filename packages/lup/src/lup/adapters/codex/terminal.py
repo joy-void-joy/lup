@@ -34,9 +34,13 @@ each runtime*):
 | `session-started` | `SessionStart` |
 | `turn-started` | `UserPromptSubmit` |
 | `call-started` | `PreToolUse` |
+| `worktree-asked` | none: Codex never isolates a subagent in a worktree |
 | `call-finished` | `PostToolUse` |
 | `turn-ended` | `Stop` |
 | `conversation-ended` | `SubagentStop` |
+
+An event Codex has no hook for registers none, and its adapter declares the gap
+(`lup_dev.adapters.codex`).
 
 **The session settings** are `-c` overrides, which outrank the operator's
 `config.toml`: each one the settings impose (`TerminalSettings.session`), and
@@ -162,6 +166,7 @@ from lup.events import (
     SessionStarted,
     TurnEnded,
     TurnStarted,
+    WorktreeAsked,
 )
 from lup.rooms.container import Mount
 from lup.sessions.terminal import Cli, Terminal, TerminalError
@@ -380,12 +385,13 @@ def served(
     return {**off, **lups}
 
 
-def spelled(event: type[SessionEvent]) -> str:
-    """Return Codex's hook event for one of lup's."""
-    spellings: dict[type[SessionEvent], str] = {
+def spelled(event: type[SessionEvent]) -> str | None:
+    """Return Codex's hook event for one of lup's; none where Codex has none."""
+    spellings: dict[type[SessionEvent], str | None] = {
         SessionStarted: "SessionStart",
         TurnStarted: "UserPromptSubmit",
         CallStarted: "PreToolUse",
+        WorktreeAsked: None,
         CallFinished: "PostToolUse",
         TurnEnded: "Stop",
         ConversationEnded: "SubagentStop",
@@ -416,7 +422,9 @@ def compiled(
         command = CommandHook(command=join(hook.command), timeout=timeout)
         return HookGroup(matcher=hook.matcher, hooks=[command])
 
-    events = dict.fromkeys(spelled(hook.event) for hook in settings.hooks)
+    events = dict.fromkeys(
+        name for hook in settings.hooks if (name := spelled(hook.event)) is not None
+    )
     requirements = Requirements(
         additional_developer_instructions=None
         if settings.guidance is None

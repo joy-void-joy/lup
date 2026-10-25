@@ -101,7 +101,14 @@ from lup_dev.policy.roles import Roles
 from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.store import Elsewhere, Entry, Heads, Held, Store, WorktreeState
 from lup_dev.policy.verdicts import Verdict, VerdictLog
-from lup_dev.policy.worktrees import Holding, Place, SessionIndex, place
+from lup_dev.policy.worktrees import (
+    Holding,
+    Making,
+    Place,
+    SessionIndex,
+    made_root,
+    place,
+)
 from lup_dev.private.building import listed
 from lup_dev.private.module import Private
 from lup_dev.private.withheld import Facts, Withheld
@@ -165,6 +172,9 @@ class Reply(Model):
     """Told beside the call's result."""
     block: str = ""
     """Why the conversation can't end yet; empty lets it end."""
+    made: Making | None = None
+    """Where a worktree is asked for, the one lup makes, which the room's hook
+    makes and names to the runtime (`WorktreeAsked`)."""
 
 
 def over(
@@ -771,7 +781,7 @@ class Worktree(Model):
             )
 
 
-def begin(bench: Bench, worktree: Worktree, key: str) -> None:
+def begin(bench: Bench, worktree: Worktree, key: str, made: str | None = None) -> None:
     """Start, or resume, a session in a worktree: accept the worktree as it is.
 
     What changed while the session made no call there is the operator's work, a
@@ -781,6 +791,14 @@ def begin(bench: Bench, worktree: Worktree, key: str) -> None:
     call of the session runs there (one left running as it resumes), the accepted
     tree stays, and that call's checkpoint judges what it writes. A resumed
     session keeps the tree it started from.
+
+    A worktree lup made for the session at its runtime's asking is new, so
+    nothing in it is the operator's: it's accepted as `made`, the commit it was
+    made at, has it, and that commit is recorded as its `HEAD`, so what was
+    written there before the session reached it is judged at its next
+    checkpoint, and what was committed there, as a move (#240). Its own `HEAD`
+    isn't among the commits whose content is set aside, where it moved on from
+    `made`.
     """
     store = worktree.store
     with worktree.lock():
@@ -797,9 +815,15 @@ def begin(bench: Bench, worktree: Worktree, key: str) -> None:
                 if accepted is not None and held
                 else taken
             )
+            now = store.head()
+            head = now if made is None else made
+            if made is not None:
+                entries = [
+                    store.entry(made, path) for path in store.unlike(taken, made)
+                ]
+                start = store.unstage(start, [], entries) if entries else start
             store.accept(start)
-            head = store.head()
-            state.tips = store.tips(head)
+            state.tips = [tip for tip in store.tips(head) if tip == head or tip != now]
             store.remember(state)
             worktree.record(bench.services.layout, head)
         if store.started(key) is None:
@@ -821,9 +845,11 @@ def holding(
     The worktree its working directory is in is reached, since a hook's working
     directory follows the session, and so is `written`'s, where a file tool
     writes; conversation `agent` is noted to work in each (`Holding.works`).
-    Reaching a worktree begins the session there; a session that `starts`, or
-    resumes, begins again in every worktree it holds. A worktree whose root is
-    gone isn't held. A session first seen outside every repository isn't judged.
+    Reaching a worktree begins the session there, from the commit it was made
+    at where lup made it at the runtime's asking (`Holding.made`); a session
+    that `starts`, or resumes, begins again in every worktree it holds. A
+    worktree whose root is gone isn't held. A session first seen outside every
+    repository isn't judged.
     """
     index = SessionIndex(layout=bench.services.layout)
     here = place(cwd) if cwd.is_dir() else None
@@ -846,6 +872,7 @@ def holding(
             each for each in [within(here), within(written)] if each is not None
         ]
         reached = [each for each in reaching if held.reach(each)]
+        made = held.first_reached(reached)
         noted = held.note(agent, started=within(here), wrote=within(written))
         if recorded is None or reached or released or noted:
             index.write(session, held)
@@ -854,6 +881,7 @@ def holding(
                 bench,
                 Worktree.of(root, held.repository, bench.services),
                 session,
+                made.get(root),
             )
     return held
 
@@ -2342,6 +2370,71 @@ class CallStarted(Reported, events.CallStarted):
                 running.calls = [*running.calls, call]
                 worktree.ran(running, now)
         return Reply()
+
+
+class WorktreeRefusedError(LupDevError):
+    """A worktree the runtime asked for that lup doesn't make, saying why."""
+
+
+class WorktreeAsked(Reported, events.WorktreeAsked):
+    """The runtime asks for a worktree for a conversation to work in apart: lup makes it from the commit the asking conversation's worktree is at, on a new branch of the runtime's name for it (`docs/judging-writes.md`, *A worktree the runtime asks for*).
+
+    The hook's working directory is the asking conversation's, so the worktree
+    starts where that conversation's work stands, a branch not landed yet
+    included, rather than at the repository's `HEAD`. It's made at
+    `tree/<name>` in the repository's git directory (`made_root`), inside the
+    room's mounts in every layout. The judge names it, and the room's hook
+    makes it with the room's own git (`Making`): made on the host, its checkout
+    would run the operator's git configuration on what the room committed. The
+    session is judged there from that commit where it first reaches it
+    (`Holding.made`, `begin`). The hook names the session alone, never the
+    conversation asking, so no conversation is noted to work anywhere here:
+    the one given the worktree is, at its own first call there.
+
+    Raise `WorktreeRefusedError` where lup doesn't make it: the asking
+    conversation works in no worktree, its worktree has no commit, the name
+    can't name a new branch, or something is at the worktree's root already.
+    """
+
+    @override
+    def apply(self, bench: Bench) -> Reply:
+        here = place(self.cwd) if self.cwd.is_dir() else None
+        if here is None or here.worktree is None:
+            message = (
+                "lup makes a worktree from the commit of the one its conversation "
+                f"works in, and {self.cwd} is in none"
+            )
+            raise WorktreeRefusedError(message)
+        origin = Git(cwd=here.worktree)
+        commit = origin.commit("HEAD")
+        if commit is None:
+            message = (
+                f"{here.worktree}, which lup would make the worktree from, has no "
+                "commit yet"
+            )
+            raise WorktreeRefusedError(message)
+        ref = f"refs/heads/{self.name}"
+        formed = origin.run("check-ref-format", ref, ok=[0, 1])
+        if formed.status != 0 or self.name.startswith("-"):
+            message = f"`{self.name}` can't name a branch"
+            raise WorktreeRefusedError(message)
+        if origin.commit(ref) is not None:
+            message = f"a branch `{self.name}` is there already"
+            raise WorktreeRefusedError(message)
+        root = made_root(here.repository, self.name)
+        if root.exists() or root.is_symlink():
+            message = f"{root}, where lup would make the worktree, is there already"
+            raise WorktreeRefusedError(message)
+        index = SessionIndex(layout=bench.services.layout)
+        with index.lock(self.session):
+            held = index.read(self.session) or Holding(repository=here.repository)
+            if held.repository == here.repository:
+                held.make(root, commit)
+                index.write(self.session, held)
+        making = Making(
+            root=root, origin=here.worktree, branch=self.name, commit=commit
+        )
+        return Reply(made=making)
 
 
 class CallFinished(Reported, events.CallFinished):

@@ -84,9 +84,10 @@ that isn't there is said once, with its name, and each worktree named as left.
 Left alone, and said: the repository's main worktree, one where the conversation
 landing works, and one where a conversation of a launch still served works, as
 the judge's session index has it (`Holding.works`); the local branch it has
-checked out stays with it. The index places a subagent in a worktree only once
-its file tools wrote there (#240), so a worker's fresh worktree is kept by which
-branches count as landed, not by this check.
+checked out stays with it. The index places a subagent in a worktree once its
+file tools wrote there, or, in one lup made for it at its runtime's asking, from
+its first call, so a fresh worktree a worker made itself is kept by which
+branches count as landed, not by this check (#240).
 
 The tool's docstring's first line is its summary, 50 characters at most, which
 the guidance lists (`launch/guidance.py`); the rest is its description. It

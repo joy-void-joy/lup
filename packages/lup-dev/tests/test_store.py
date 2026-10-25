@@ -53,6 +53,26 @@ def test_changes_between_trees(repo: Path, store: Store) -> None:
     ]
 
 
+def test_a_snapshot_unlike_a_commit_lists_each_file_changed_but_one_ignored(
+    repo: Path, store: Store, shell: Shell
+) -> None:
+    """A file the commit tracks that the repository ignores is in no snapshot, so
+    it isn't taken for deleted."""
+    (repo / ".venv").mkdir()
+    (repo / ".venv" / "kept.py").write_text("x = 1\n")
+    shell.git(repo, "add", "--force", ".venv/kept.py")
+    shell.commit(repo, "tracks an ignored file")
+    commit = shell.git(repo, "rev-parse", "HEAD")
+    (repo / CORE).write_text("changed\n")
+    (repo / "README.md").unlink()
+    (repo / "src" / "pkg" / "new.py").write_text("new\n")
+    assert store.unlike(store.snapshot(), commit) == [
+        Path("README.md"),
+        CORE,
+        Path("src/pkg/new.py"),
+    ]
+
+
 def test_restore_puts_files_back_and_removes_new_ones(repo: Path, store: Store) -> None:
     accepted = store.snapshot()
     original = (repo / CORE).read_text()

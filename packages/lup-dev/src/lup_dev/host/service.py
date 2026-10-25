@@ -68,6 +68,7 @@ from lup.events import (
     Stopped,
     TurnEnded,
     TurnStarted,
+    WorktreeAsked,
 )
 from lup.programs import ProgramMissingError, Ran, awaited
 from lup.rooms.engine import ContainerError, Podman
@@ -1090,10 +1091,11 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         conversation = conversations.named(heard.session, heard.agent)
         noted = self.spawning(request, conversations, conversation, heard, payload)
         conversation, said = noted.conversation, noted.said
-        if not conversation.internal:
+        doing = self.activity(heard)
+        if not conversation.internal and doing is not None:
             conversations.activities = {
                 **conversations.activities,
-                conversation.id: self.activity(heard),
+                conversation.id: doing,
             }
         write_model(self.layout.conversations(request.launch), conversations)
         if conversation.internal:
@@ -1443,14 +1445,21 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         main = conversations.main()
         return [] if main is None else [talker(main, 0), *under(main.id, 1)]
 
-    def activity(self, heard: Heard) -> Activity:
-        """Return what a hook says its conversation is doing, from the hook on: running the call it starts, between calls, or ended."""
+    def activity(self, heard: Heard) -> Activity | None:
+        """Return what a hook says its conversation is doing, from the hook on: running the call it starts, between calls, or ended; none where it says nothing of it.
+
+        A worktree asked for names the session alone, whichever conversation
+        asks, and comes while that conversation's call runs, so it leaves each
+        as it was.
+        """
         at = self.clock.now()
         match heard.event:
             case CallStarted(tool=tool):
                 return Activity(state="calling", since=at, tool=tool, lups=heard.served)
             case ConversationEnded():
                 return Activity(state="ended", since=at)
+            case WorktreeAsked():
+                return None
             case _:
                 return Activity(state="idle", since=at)
 

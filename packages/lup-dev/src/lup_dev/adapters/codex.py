@@ -5,6 +5,7 @@
 | `SessionStart` | `SessionStarted` |
 | `UserPromptSubmit` | `TurnStarted` |
 | `PreToolUse` | `CallStarted` |
+| none, a gap (below) | `WorktreeAsked` |
 | `PostToolUse` | `CallFinished` |
 | `Stop` | `TurnEnded` |
 | `SubagentStop` | `ConversationEnded` |
@@ -130,6 +131,21 @@ takes the universal fields, `decision`, `reason` and a `hookSpecificOutput` of
 universal fields and the same `hookSpecificOutput`, each refusing a field it
 doesn't name (`deny_unknown_fields`). lup's names work on Codex everywhere in
 lup; the title is Codex's own.
+
+Nor does Codex isolate a subagent in a worktree of its own, so a worktree asked
+for (`WorktreeAsked`) has no hook here, and lup makes none for a Codex worker:
+a gap declared with its evidence, read at `rust-v0.164.0`, the latest release
+on 2026-10-25. `spawn_agent` takes no working directory and no isolation
+(`SpawnAgentArgs`, `core/src/tools/handlers/multi_agents/spawn.rs` and
+`multi_agents_v2/spawn.rs`); a child's `cwd` is set to its parent turn's
+(`apply_spawn_agent_runtime_overrides`, `core/src/agent/child_config.rs`); and
+none of its 14 hook events makes a worktree (`HOOK_EVENT_NAMES`,
+`hooks/src/lib.rs`), `SubagentStart` adding context alone. Codex makes a
+worktree only for a whole session (`--worktree`,
+`utils/cli/src/shared_options.rs`, and the TUI's `/worktree`), with its own
+`git worktree add` (`worktree/src/lib.rs`), which no hook replaces. A Codex
+subagent works in its parent's directory, and lup holds it in the session's one
+worktree as every conversation of the session (above).
 
 What its judging relies on, from Codex's hooks documentation and its source at
 `rust-v0.162.1` (paths under `codex-rs/`), whose hook schemas
@@ -938,7 +954,9 @@ def hooks(
     `PostToolUse` on every tool: Codex is judged after each call. `Stop` and `SubagentStop`: a conversation's
     turn's end clears the calls it left that no `PostToolUse` finishes (a patch
     that failed to apply, a call interrupted), and judges what the turn left.
-    Each waits up to `timeout`, which a hold's wait for the operator needs.
+    None at a worktree asked for, which Codex has no hook for (see the module's
+    docstring). Each waits up to `timeout`, which a hold's wait for the
+    operator needs.
     """
     heard: list[type[SessionEvent]] = [
         events.SessionStarted,
