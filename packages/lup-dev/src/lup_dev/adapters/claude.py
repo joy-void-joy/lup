@@ -4,7 +4,7 @@
 |---|---|
 | `SessionStart` | `SessionStarted` |
 | `UserPromptSubmit` | `TurnStarted` |
-| `PreToolUse` | `CallStarted`; for `Edit` and `Write`, judged before it lands first |
+| `PreToolUse` | `CallStarted`; for `Edit` and `Write`, judged before it lands first; for `Agent` asking `isolation: "worktree"`, lup's own isolation |
 | `WorktreeCreate` | `WorktreeAsked`: lup makes the worktree |
 | `PostToolUse`, `PostToolUseFailure` | `CallFinished`: the checkpoint |
 | `Stop` | `TurnEnded` |
@@ -25,12 +25,21 @@ hold tells nothing: `systemMessage` would reach the operator, not the agent.
 When judging itself fails at a turn's end, the turn ends, and the operator is
 warned once in `systemMessage`.
 
-A worktree Claude Code would make, for a subagent it isolates (`isolation:
-"worktree"`) or a session entering one (`EnterWorktree`), lup makes instead
-(`WorktreeCreate`; `docs/judging-writes.md`, *A worktree the runtime asks
-for*): Claude Code's own starts from the repository's `HEAD`, a bare
-repository's default branch however far the work is from it, and a worker
-switching to its branch there had the judge read the switch as its writes.
+A worktree Claude Code would make, for a session entering one
+(`EnterWorktree`), lup makes instead (`WorktreeCreate`; `docs/judging-writes.md`,
+*A worktree the runtime asks for*): Claude Code's own starts from the
+repository's `HEAD`, a bare repository's default branch however far the work is
+from it, and a worker switching to its branch there had the judge read the
+switch as its writes. A subagent asked to work apart (`isolation: "worktree"`)
+lup isolates itself, where Claude Code's isolation would guard its shell,
+refusing git aimed at another worktree and every compound command (`PreToolUse.spawn`;
+*A subagent lup isolates*): the `Agent` call goes on without `isolation`, lup
+makes the subagent's worktree and tells it so in its prompt, its shell's
+commands start there (`PreToolUse.commanded`), and a write of its file tools
+in the worktree Claude Code names as its working directory, another
+conversation's, is refused (`apart`, `policy/checkpoint.py`). A subagent's hooks
+carry nothing linking it to its spawn but its record, written before its first
+call (`spawned_by`), and a spawn's result, which names it (`PostToolUse`).
 
 In a launched room (`docs/host.md`, *The one hook*), Claude Code runs the room's
 hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and
@@ -232,6 +241,8 @@ Its release channel (`ClaudeChannel`) is the one its native installer reads
   signing*), which lup doesn't check.
 """
 
+import io
+import shlex
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -289,12 +300,13 @@ from lup_dev.policy.checkpoint import (
     TurnStarted,
     WorktreeAsked,
     WorktreeRefusedError,
+    apart,
     counted,
     first_warning,
 )
 from lup_dev.policy.report import judge_failed, sections
 from lup_dev.policy.runtime import Runtime
-from lup_dev.policy.worktrees import Making
+from lup_dev.policy.worktrees import Apart, Making
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -308,6 +320,17 @@ if TYPE_CHECKING:
 type Writing = Literal["Edit", "Write"]
 """The file tools whose writes are judged before they land: `PreToolUse.proposal`
 reads each."""
+
+type Spawning = Literal["Agent", "Task"]
+"""The tool that spawns a subagent, by both its names: `Agent`, as Claude Code's
+hooks name it, and `Task`, as 2.1.310's own list of its tools does (its
+`init` message)."""
+
+type Commanding = Literal["Bash", "Monitor"]
+"""The tools that run a shell command, which starts in the session's working
+directory whoever calls it: one of a conversation working apart is rewritten to
+start in its worktree. Measured on 2.1.310 (`docs/field-notes.md`, *lup's own
+isolation*): each takes the command as `command`."""
 
 type Reading = Literal[
     "Read",  # reads a file, an image, a PDF or a notebook into the model's context
@@ -429,6 +452,9 @@ class PreToolUseAnswer(Output):
     permission_decision: Literal["allow", "ask", "deny"] | None = None
     permission_decision_reason: str | None = None
     additional_context: str | None = None
+    updated_input: JsonObject | None = None
+    """The call's input in place of its own, whole: with no decision, the call
+    goes through the session's own permission mode."""
 
 
 class PostToolUseAnswer(Output):
@@ -466,6 +492,31 @@ class Placed(Output):
     @override
     def printed(self) -> str:
         return f"{self.refused}\n" if self.made is None else self.made.lines()
+
+
+class Isolating(Output):
+    """What `PreToolUse` prints for a call spawning a conversation lup isolates in a worktree it makes: the worktree, a field a line (`Making.lines`), which the room's hook makes before printing the rest, the call's answer (`launch/worktree.sh`)."""
+
+    made: Making
+    answer: Specific
+
+    @override
+    def printed(self) -> str:
+        return f"{self.made.lines()}{self.answer.printed()}"
+
+
+def making(answer: str) -> str:
+    r"""Return what of a hook's `answer` names a worktree for the room's hook to make (`Making.lines`), its first four lines, or nothing where it names none: JSON starts with `{`, and a refusal with neither.
+
+    >>> making("/r.git/tree/w\n/r.git/tree/dev\nw\nc0\n{}")
+    '/r.git/tree/w\n/r.git/tree/dev\nw\nc0\n'
+    >>> making("{}")
+    ''
+    """
+    if not answer.startswith("/"):
+        return ""
+    lines = io.StringIO(answer)
+    return "".join(lines.readline() for _ in Making.model_fields)
 
 
 class OperatorWarning(Output):
@@ -602,6 +653,7 @@ class SessionStart(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
+            spawned_by=spawned_by(self),
             forgotten=self.source in get_args(ForgettingStart.__value__),
         ).apply(bench)
         if not reply.context:
@@ -674,7 +726,11 @@ class UserPromptSubmit(Payload):
             ]
         )
         TurnStarted(
-            session=self.session_id, agent=self.agent_id, cwd=self.cwd, over=over
+            session=self.session_id,
+            agent=self.agent_id,
+            cwd=self.cwd,
+            spawned_by=spawned_by(self),
+            over=over,
         ).apply(bench)
         return None
 
@@ -705,6 +761,29 @@ class Write(Model):
 
     file_path: Path
     content: str
+
+
+class Written(Model, extra="ignore"):
+    """A file tool's input, as far as where it writes: `Edit`'s and `Write`'s `file_path`, `NotebookEdit`'s `notebook_path`."""
+
+    file_path: Path | None = None
+    notebook_path: Path | None = None
+
+
+class Spawn(Model, extra="allow"):
+    """The `Agent` tool's input, as far as lup reads it, every other field kept as given."""
+
+    description: str = ""
+    """What the subagent is for, in a few words."""
+    prompt: str = ""
+    isolation: str | None = None
+    """`worktree` to have it work apart, in a worktree of its own."""
+
+
+class Command(Model, extra="allow"):
+    """`Bash`'s or `Monitor`'s input, as far as lup reads it, every other field kept as given."""
+
+    command: str
 
 
 class PreToolUse(Payload):
@@ -775,23 +854,108 @@ class PreToolUse(Payload):
         )
         return told.model_copy(update={"hook_specific_output": stamped})
 
+    def writes(self) -> Path | None:
+        """Return where a file tool's call writes; none for other calls."""
+        if self.tool_name not in ["Edit", "Write", "NotebookEdit"]:
+            return None
+        written = Written.model_validate(self.tool_input)
+        path = written.file_path or written.notebook_path
+        return None if path is None else self.cwd / path
+
     def started(self) -> CallStarted:
         """Return the event of this call starting.
 
         A call running a subagent (`Agent`) isn't counted: its own calls are.
+        One asking `isolation: "worktree"` asks for its conversation to work
+        apart, in a worktree named after its `description`.
         """
+        spawns = self.tool_name in get_args(Spawning.__value__)
+        spawn = Spawn.model_validate(self.tool_input) if spawns else Spawn()
         return CallStarted(
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
+            spawned_by=spawned_by(self),
             call=self.tool_use_id,
             tool=self.tool_name,
-            spawns=self.tool_name in ["Agent", "Task"],
+            spawns=spawns,
+            apart=spawn.isolation == "worktree",
+            purpose=spawn.description,
         )
+
+    def spawn(self, bench: Bench, started: CallStarted) -> Output | None:
+        """Give the conversation this call spawns the worktree it works apart in, where it does, in lup's place: Claude Code's own isolation is dropped, and the conversation is told where it works before its first move (`docs/judging-writes.md`, *A subagent lup isolates*).
+
+        Measured on 2.1.310 (`docs/field-notes.md`, *lup's own isolation*): an
+        `updatedInput` without `isolation`, with no decision, has Claude Code
+        make no worktree and run no `WorktreeCreate`, and its guard on an
+        isolated agent's shell, which refuses git aimed at another worktree and
+        every compound command, applies nowhere; the subagent's first message
+        is the prompt given. A worktree lup makes is printed before the answer
+        for the room's hook to make (`Isolating`). Where lup can't make it, the
+        call is refused, saying why.
+        """
+        try:
+            reply = started.apply(bench)
+        except WorktreeRefusedError as refused:
+            said = (
+                "lup made no worktree for the subagent this call spawns, so it "
+                f"didn't run: {refused}"
+            )
+            answer = PreToolUseAnswer(
+                permission_decision="deny", permission_decision_reason=said
+            )
+            return Specific(hook_specific_output=answer)
+        if reply.given is None:
+            return None
+        spawn = Spawn.model_validate(self.tool_input)
+        told = spawn.model_copy(
+            update={"prompt": f"{reply.given.told()}\n\n{spawn.prompt}"}
+        )
+        updated = told.model_dump(exclude={"isolation": True}, exclude_unset=True)
+        answer = Specific(hook_specific_output=PreToolUseAnswer(updated_input=updated))
+        return (
+            answer if reply.made is None else Isolating(made=reply.made, answer=answer)
+        )
+
+    def commanded(self, away: Apart | None) -> Output | None:
+        """Return this call rewritten to start in the worktree its conversation works apart in, where it runs a shell command (`Commanding`); none otherwise.
+
+        Measured on 2.1.310 (`docs/field-notes.md`, *lup's own isolation*): a
+        subagent's shell starts in the session's working directory at each
+        call, and a command rewritten as `cd -- <root> || exit 1`, a newline,
+        then the command, runs whole in that one shell, compound commands,
+        redirects, pipes, heredocs and a background command among them; the
+        transcript keeps the model's own, and it's told only the output.
+        """
+        if away is None or self.tool_name not in get_args(Commanding.__value__):
+            return None
+        command = Command.model_validate(self.tool_input)
+        start = f"cd -- {shlex.quote(str(away.root))} || exit 1"
+        updated = command.model_copy(
+            update={"command": f"{start}\n{command.command}"}
+        ).model_dump(exclude_unset=True)
+        return Specific(hook_specific_output=PreToolUseAnswer(updated_input=updated))
 
     @override
     def answer(self, bench: Bench) -> Output | None:
-        """Judge a file tool's write before it lands, and count the call as running; a write held and declined never runs, so it isn't counted."""
+        """Judge a file tool's write before it lands, and count the call as running; a write held and declined never runs, so it isn't counted.
+
+        A call spawning a subagent gives it the worktree it works apart in,
+        where it does (`spawn`). A conversation working apart has its shell's
+        commands start in its worktree (`commanded`), and a write of its in the
+        worktree Claude Code names as its working directory, another
+        conversation's, refused, saying the path in its own (`apart`).
+        """
+        started = self.started()
+        if started.spawns:
+            return self.spawn(bench, started)
+        away = apart(bench, started, self.writes())
+        if away is not None and away.refused is not None:
+            refused = PreToolUseAnswer(
+                permission_decision="deny", permission_decision_reason=away.refused
+            )
+            return Specific(hook_specific_output=refused)
         proposed = self.proposal()
         decision = (
             Decision(outcome=None)
@@ -802,8 +966,8 @@ class PreToolUse(Payload):
         )
         match decision.outcome:
             case None:
-                self.started().apply(bench)
-                return None
+                started.apply(bench)
+                return self.commanded(away)
             case "deny":
                 answer = PreToolUseAnswer(
                     permission_decision="deny",
@@ -811,7 +975,7 @@ class PreToolUse(Payload):
                 )
                 return Specific(hook_specific_output=answer)
             case "allow":
-                self.started().apply(bench)
+                started.apply(bench)
                 told = sections([decision.reason, decision.told])
                 answer = PreToolUseAnswer(
                     permission_decision="allow", additional_context=told or None
@@ -850,12 +1014,28 @@ class PreToolUse(Payload):
         return Specific(hook_specific_output=refused)
 
 
+class AgentResult(Model, extra="ignore", alias_generator=to_camel):
+    """An `Agent` call's result, as far as the subagent it names: `agentId`, at its launch in the background as at its end (measured on 2.1.310, `docs/field-notes.md`, *lup's own isolation*)."""
+
+    agent_id: str | None = None
+
+
 class PostToolUse(Payload):
     """`PostToolUse` or `PostToolUseFailure`: a tool call finished, or failed."""
 
     hook_event_name: Literal["PostToolUse", "PostToolUseFailure"]
     tool_name: str
     tool_use_id: str
+    tool_response: JsonValue = None
+    """What the call answered; `PostToolUseFailure` carries none."""
+
+    def spawned(self) -> str | None:
+        """Return the subagent a call spawning one names in its result; none for other calls, or one that failed."""
+        if self.tool_name not in get_args(Spawning.__value__) or not isinstance(
+            self.tool_response, dict
+        ):
+            return None
+        return AgentResult.model_validate(self.tool_response).agent_id
 
     def heard(self, fits: int) -> Heard:
         """Read the call's finish: the judge reads it where it read the call's start (`judging`)."""
@@ -877,8 +1057,11 @@ class PostToolUse(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
+            spawned_by=spawned_by(self),
             call=self.tool_use_id,
             tool=self.tool_name,
+            spawns=self.tool_name in get_args(Spawning.__value__),
+            spawned=self.spawned(),
         )
         reply = finished.apply(bench)
         if not reply.context:
@@ -944,6 +1127,7 @@ class Stop(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
+            spawned_by=spawned_by(self),
             after_block=self.stop_hook_active,
         )
         reply = ended.apply(bench)
@@ -1017,6 +1201,7 @@ class SubagentStop(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
+            spawned_by=spawned_by(self),
             final=self.stopped,
         )
         reply = ended.apply(bench)
@@ -1089,7 +1274,11 @@ class StopFailure(Payload):
         """End the subagent's conversation as `SubagentStop` does, whatever its end would tell; for the session's own, nothing, which its next turn's end judges."""
         if self.agent_id:
             ConversationEnded(
-                session=self.session_id, agent=self.agent_id, cwd=self.cwd, final=True
+                session=self.session_id,
+                agent=self.agent_id,
+                cwd=self.cwd,
+                spawned_by=spawned_by(self),
+                final=True,
             ).apply(bench)
         return None
 
@@ -1175,12 +1364,16 @@ class SubagentRecord(Model, extra="ignore", alias_generator=to_camel):
 
     Undocumented, read as measured on 2.1.301 and 2.1.302
     (`docs/field-notes.md`, *Subagents' records*): the subagent's type, the
-    name its parent gave it, and the subagent that spawned it, where one did.
+    name its parent gave it, and the subagent that spawned it, where one did;
+    and, measured on 2.1.310 (*lup's own isolation*), the id of the `Agent`
+    call that spawned it, written after `SubagentStart` and before its first
+    call.
     """
 
     agent_type: str | None = None
     name: str | None = None
     parent_agent_id: str | None = None
+    tool_use_id: str | None = None
 
 
 class Subagented(Model, extra="ignore"):
@@ -1199,6 +1392,22 @@ FORK = "fork"
 A fork "sees the same system prompt, tools, model, and message history as the
 main session" (the `sub-agents` docs, *Fork the current conversation*), so it
 reads the session's guidance, which the system prompt carries."""
+
+
+def subagent_record(transcript: Path | None, agent: str) -> SubagentRecord | None:
+    """Return what Claude Code records of subagent `agent` beside the session's `transcript`; none where it records nothing, or not yet."""
+    if transcript is None or not agent:
+        return None
+    record = transcript.with_suffix("") / "subagents" / f"agent-{agent}.meta.json"
+    if not record.is_file():
+        return None
+    return SubagentRecord.model_validate_json(record.read_text())
+
+
+def spawned_by(payload: Payload) -> str | None:
+    """Return the id of the call that spawned the subagent `payload` is of, as its record says; none for the session's own conversation, or before the record is written, at `SubagentStart`."""
+    record = subagent_record(payload.transcript_path, payload.agent_id)
+    return None if record is None else record.tool_use_id
 
 
 def spawned(raw: str) -> Spawned | None:
@@ -1231,17 +1440,11 @@ def spawned(raw: str) -> Spawned | None:
     if not payload.agent_id:
         return None
     kind = payload.agent_type or None
-    folder = (
-        None
-        if payload.transcript_path is None
-        else payload.transcript_path.with_suffix("") / "subagents"
-    )
-    record = None if folder is None else folder / f"agent-{payload.agent_id}.meta.json"
-    if record is None or not record.is_file():
+    kept = subagent_record(payload.transcript_path, payload.agent_id)
+    if kept is None:
         return Spawned(
             kind=kind, guided=kind == FORK, internal=kind is None, handed=True
         )
-    kept = SubagentRecord.model_validate_json(record.read_text())
     kind = kept.agent_type or kind
     return Spawned(
         name=kept.name,
@@ -1312,23 +1515,26 @@ def told(raw: str, answer: str, telling: Telling) -> str | None:
     """Return what a Claude Code hook prints: `answer`, the judge's or none, with `telling` added; none where nothing is.
 
     Claude Code reads an answer starting with `{` as JSON, and any other as
-    text, as `WorktreeCreate`'s path (`Placed`), which nothing is added to.
-    Raise `ValidationError` where the payload isn't one of the hooks this
-    adapter reads, or the answer isn't a hook's; and `ValueError` where
-    `telling` would add to an answer read as text, so what it tells is put
-    back.
+    text, as `WorktreeCreate`'s path (`Placed`), which nothing is added to. A
+    worktree the room's hook makes before printing the rest (`Isolating`)
+    stays before it. Raise `ValidationError` where the payload isn't one of
+    the hooks this adapter reads, or the answer isn't a hook's; and
+    `ValueError` where `telling` would add to an answer read as text, so what
+    it tells is put back.
     """
     received = TypeAdapter[Received](Received).validate_json(raw)
-    text = answer.strip()
+    made = making(answer)
+    rest = answer.removeprefix(made)
+    text = rest.strip()
     read = not text or text.startswith("{")
-    said = Said.model_validate_json(answer) if text and read else Said()
+    said = Said.model_validate_json(rest) if text and read else Said()
     added = received.told(said, telling)
     if added == said:
         return None
     if not read:
         message = "lup can't add to an answer Claude Code reads as text"
         raise ValueError(message)
-    return added.printed()
+    return f"{made}{added.printed()}"
 
 
 class UserTurn(Model):
