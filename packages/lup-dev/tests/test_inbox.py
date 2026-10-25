@@ -40,7 +40,6 @@ from lup.github.serving import GitHubServing
 from lup.programs import Ran, run
 from lup.rooms import Podman
 from lup.tools.speaking import SPEAKING
-from lup.transcripts.module import Transcripts
 from lup_dev import Modules, Project, cli
 from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
 from lup_dev.codescan.engine import EngineError
@@ -179,6 +178,7 @@ from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.remote.protocol import Remotes
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
+from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Generator

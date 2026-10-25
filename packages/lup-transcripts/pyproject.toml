@@ -1,0 +1,20 @@
+[project]
+name = "lup-transcripts"
+version = "0.1.0"
+description = "Every session's record of a repository kept, out of reach of the runtime's cleanup, and readable by later sessions."
+requires-python = ">=3.14"
+dependencies = ["lup"]
+
+# The environment side, `lup_transcripts.environment`, runs in lup's environment,
+# which this extra brings, so code importing the library side alone doesn't pull it
+# in (`packages/lup-transcripts/README.md`, *Layout*).
+[project.optional-dependencies]
+environment = ["lup-dev"]
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+lup = { workspace = true }
+lup-dev = { workspace = true }

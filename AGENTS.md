@@ -25,7 +25,7 @@ To change what sessions are told, propose an edit to the file it belongs in, wit
 
 Beside the code rules every project gets (`docs/conventions.md` has the reasons behind each):
 - **Say it once, where it's looked up.** A message lup sends at an event (a hook's reason, a finding, a refusal) says only what its reader needs next; what they'd need again goes where it can be looked up, a command or a doc. A line repeated at every event stops being read.
-- **A library side never imports an environment side.** What code calling agents imports, wherever it runs, is a module's library side; what only a project's sessions get is an environment side. As built, `lup`'s library code never imports `lup_dev`; the environment sides of modules that live in `lup`'s directory (`lup.github`, `lup.transcripts`) do, and the import contract in `pyproject.toml` lists each.
+- **A library side never imports an environment side.** What code calling agents imports, wherever it runs, is a module's library side; what only a project's sessions get is an environment side. As built, `lup`'s library code never imports `lup_dev`; the environment side of a module that lives in `lup`'s directory (`lup.github`) does, and the import contract in `pyproject.toml` lists it. A module in a distribution of its own keeps its environment side in a subpackage, held apart by contracts of its own (`packages/lup-transcripts/README.md`, *Layout*).
 - **Both runtimes.** A shared construct is done when it works on Claude Code and on Codex, shown by their tests, or when the runtime that can't do it declares the gap with evidence. Codex rotted in the first lup because features were built per runtime above the adapter.
 
 ## docs/

@@ -1,19 +1,20 @@
 """The kept sessions as text, for `lup-dev transcripts`: listed, the operator's words each with what it answered, whole, and searched.
 
-`docs/declaration.md`, *lup's modules*. The operator's words come first: a past
-session is read for what they said and what they were answering, which is where
-a design's reasons are; the whole conversation, the agent's text with each run
-of tool calls folded to a line, is there for what happened between.
+`packages/lup-transcripts/README.md`, *Reading them*. The operator's words
+come first: a past session is read for what they said and what they were
+answering, which is where a design's reasons are; the whole conversation, the
+agent's text with each run of tool calls folded to a line, is there for what
+happened between.
 """
 
 from datetime import UTC, datetime
 from itertools import groupby
 
-from lup.errors import LupError
 from lup_dev.host.records import Called, Entry, Said, Transcript
+from lup_transcripts.errors import LupTranscriptsError
 
 
-class TranscriptError(LupError):
+class TranscriptError(LupTranscriptsError):
     """A session asked for isn't among those kept, or more than one answers to it."""
 
 

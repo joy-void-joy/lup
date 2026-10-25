@@ -1322,7 +1322,7 @@ def test_lup_s_modules_each_bring_a_section_their_package_ships() -> None:
         ("core", "lup_dev.declaration.modules", Path("guidance/core.md")),
         ("python", "lup_dev.declaration.modules", Path("guidance/python.md")),
         ("code-rules", "lup_dev.declaration.modules", Path("guidance/code_rules.md")),
-        ("transcripts", "lup.transcripts", Path("guidance.md")),
+        ("transcripts", "lup_transcripts.environment", Path("guidance.md")),
         ("private", "lup_dev.private", Path("guidance.md")),
     ]
 

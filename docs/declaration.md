@@ -35,7 +35,7 @@ project = Project(
 )
 ```
 
-- **Every name comes from `lup_dev`,** the front door (`lup_dev/__init__.py`), but the library's own modules: `GitHub` and `Transcripts` are imported from `lup.github.module` and `lup.transcripts.module`.
+- **Every name comes from `lup_dev`,** the front door (`lup_dev/__init__.py`), but the modules living outside `lup_dev`: `GitHub` is imported from `lup.github.module`, and `Transcripts` from `lup_transcripts.environment.module`.
 - **`Modules.default()` is lup's default modules** (*lup's modules*). `.edit` puts a layer on one of them naming only what it changes: `Python(tests=…)` changes `Python`'s test roots and leaves the rest. `.add` brings in a module that isn't there yet.
 - **A collection changes by operations on what's below it:** `Rules().add("runtime-mention")` is `CodeRules`' rules as they stand, plus one. The second `.edit(CodeRules(…))` sets only `exempt`, so the rules the first set stay, and no layer restates another.
 - **`why`** is optional on `.edit`, `.drop` and `.replace`, and is kept with the change for whoever reads the project later. An `Exemption` always carries its own.
@@ -183,11 +183,11 @@ A tool's name and a request's kind are shared across modules, so the same one fr
 | `Python` | the Python tools' files (protected), source trees, Python files and `conftest.py`; the runner, `Uv()`; the test roots, `tests/`; the gate's `rules`, `format`, `pytest` and `lint-imports`; guidance `python` |
 | `CodeRules` | every rule but those `catalog/rules.py` leaves out, each with its reason (`runtime-mention` alone today); no exemptions; guidance `code-rules`. Requires Node `>=22.18` for the engine |
 | `GitHub` | the GitHub tools; the answer to a room's gate asking an issue's state |
-| `Transcripts` | copying the runtime's session records when a launch opens and stops; its data, mounted in every room; guidance `transcripts` |
+| `Transcripts` | copying the runtime's session records when a launch opens and stops; its data, mounted in every room; guidance `transcripts` (`packages/lup-transcripts/README.md`) |
 | `Private` | what lup reads on the host never published, and the person's own values; refusing at `publishing`; the gate's `private` step; guidance `private` (`docs/private.md`) |
 
 - **`Core` is every project's,** the part of the core a project can change. `Python` and `CodeRules` stay apart from it so each is one line to drop: dropping `CodeRules` turns off all of lup's code rules.
-- **`Core`, `Python` and `CodeRules` are data,** read from the catalog (`catalog/`), made of the same entry types a project writes; their guidance sections are files `lup_dev` ships. `GitHub`, `Transcripts` and `Private` live beside their machinery.
+- **`Core`, `Python` and `CodeRules` are data,** read from the catalog (`catalog/`), made of the same entry types a project writes; their guidance sections are files `lup_dev` ships. `GitHub` and `Private` live beside their machinery; `Transcripts` is a distribution of its own, `packages/lup-transcripts/`, its environment side in a subpackage its library side never imports (`packages/lup-transcripts/README.md`, *Layout*).
 
 **lup declares itself the same way,** through the surface any project uses (*An example*). What only lup's repository needs is its module `LupDevelopment`: the engine's and the dashboard's builds ahead of every other step, the catalog protected since lup's policy data lives there, its modules' guidance among the operator's documents since every project's sessions read it, `AGENTS.md` as its own section, and Chromium in the room, with a virtual display to type into it. `runtime-mention` is a rule about lup's own architecture, which would fire on every choice in a project picking its runtime by a setting, so lup's default leaves it out and lup's declaration adds it back.
 
