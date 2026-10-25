@@ -16,7 +16,8 @@ in while it runs (`docs/judging-writes.md`, *Which calls hold a checkpoint
 back*); and those lup made for the session at its runtime's asking, each with
 the commit it was made at, which the session is judged from where it first
 reaches one (`Holding.made`; `docs/judging-writes.md`, *A worktree the runtime
-asks for*).
+asks for*). A conversation lup isolates works in the worktree lup gave it,
+whatever its hooks report (`Holding.apart`; *A subagent lup isolates*).
 """
 
 from pathlib import Path
@@ -77,7 +78,7 @@ class Making(Model):
     """A worktree lup makes at its runtime's asking: its root, the worktree git makes it from, its new branch, and the commit it starts at.
 
     The judge decides it and the room's hook makes it, with the room's own git
-    (`MAKING`, `launch/session.py`): the hook reads `lines`, a field a line.
+    (`launch/worktree.sh`): the hook reads `lines`, a field a line.
     """
 
     root: Path
@@ -98,6 +99,66 @@ class Making(Model):
         return "".join(
             f"{field}\n" for field in [self.root, self.origin, self.branch, self.commit]
         )
+
+
+def branch_named(said: str) -> str:
+    """Return what a spawn says it's for as a branch's name: lowercased, each run of anything but ASCII letters and digits one `-`, none at either end.
+
+    >>> branch_named("Fix the gate's  ruff step")
+    'fix-the-gate-s-ruff-step'
+    >>> branch_named(" … ")
+    ''
+    """
+    kept = "".join(
+        each if each.isascii() and each.isalnum() else " " for each in said.lower()
+    )
+    return "-".join(kept.split())
+
+
+class Given(Model):
+    """What a conversation lup isolates is given at its spawn (`docs/judging-writes.md`, *A subagent lup isolates*): its worktree, the branch and the commit it's at, and whether lup made it for it or it's its parent's; and the worktree its runtime starts its tools in."""
+
+    root: Path
+    branch: str
+    commit: str
+    made: bool
+    """Whether lup made the worktree for it, rather than giving it the one the
+    conversation spawning it works apart in."""
+    beside: Path | None
+    """The worktree its runtime resolves its paths in and names as its working
+    directory, the session's; none where that's in no worktree, or is `root`."""
+
+    def told(self) -> str:
+        """Say where the conversation works, as it's told before its first move.
+
+        >>> print(Given(root=Path("/r.git/tree/fix"), branch="fix", commit="c0", made=True, beside=Path("/r.git/tree/dev")).told())
+        lup: you work apart, in a worktree lup made for you at your parent's commit: /r.git/tree/fix, on branch `fix`, at c0. Each command your shell runs starts there. /r.git/tree/dev, the working directory your environment names, is another conversation's: give your file tools paths in /r.git/tree/fix, since lup refuses a write of yours in /r.git/tree/dev. Every other worktree, and the repository's history, stay yours to read.
+        """
+        where = (
+            "you work apart, in a worktree lup made for you at your parent's commit"
+            if self.made
+            else "you work in the worktree your parent works apart in"
+        )
+        here = (
+            f"lup: {where}: {self.root}, on branch `{self.branch}`, at "
+            f"{self.commit}. Each command your shell runs starts there."
+        )
+        beside = (
+            f"{self.beside}, the working directory your environment names, is "
+            f"another conversation's: give your file tools paths in {self.root}, "
+            f"since lup refuses a write of yours in {self.beside}."
+        )
+        read = "Every other worktree, and the repository's history, stay yours to read."
+        return " ".join([here, *([] if self.beside is None else [beside]), read])
+
+
+class Apart(Model):
+    """Where a conversation lup isolates works, as each of its calls needs it: its worktree, and why the call's write is refused, where it is."""
+
+    root: Path
+    refused: str | None = None
+    """Why the call's write is refused: it's in the worktree the runtime names
+    as the conversation's working directory, another conversation's."""
 
 
 def made_root(repository: Path, name: str) -> Path:
@@ -130,10 +191,58 @@ class Holding(MutableModel):
     """By root, the worktrees lup made at its runtime's asking that the session
     hasn't reached yet, each with the commit it was made at: where the session
     first reaches one, it's judged from that commit rather than as it stands."""
+    apart: dict[str, Path] = {}
+    """By conversation, the worktree lup has it work in apart, which its
+    runtime's hooks never report (`docs/judging-writes.md`, *A subagent lup
+    isolates*): it works there from its first call, whatever its hooks say."""
+    spawning: dict[str, Path] = {}
+    """By the runtime's id for a call spawning a conversation that works apart,
+    the worktree lup gave it, until the conversation is linked to it (`link`)
+    or the call ends (`settle`)."""
 
     def make(self, root: Path, commit: str) -> None:
         """Note that a worktree is made at `root` from `commit`, for the session to be judged from that commit where it first reaches it."""
         self.made = {**self.made, root: commit}
+
+    def give(self, call: str, root: Path) -> bool:
+        """Note that the conversation call `call` spawns works apart in the worktree at `root`, once it's linked to it; say whether that's new."""
+        new = self.spawning.get(call) != root
+        self.spawning = {**self.spawning, call: root}
+        return new
+
+    def link(self, agent: str, call: str | None) -> bool:
+        """Have conversation `agent`, spawned by call `call` where its runtime says, work apart where lup gave that call's spawn a worktree; say whether that's new.
+
+        >>> held = Holding(repository=Path("/r.git"))
+        >>> held.give("t1", Path("/r.git/tree/w"))
+        True
+        >>> held.link("a1", "t2"), held.link("a1", "t1"), held.link("a1", "t1")
+        (False, True, False)
+        >>> held.apart, held.spawning
+        ({'a1': PosixPath('/r.git/tree/w')}, {})
+        """
+        if not agent or call is None or call not in self.spawning:
+            return False
+        self.apart = {**self.apart, agent: self.spawning[call]}
+        self.spawning = {
+            each: root for each, root in self.spawning.items() if each != call
+        }
+        return True
+
+    def settle(self, call: str, agent: str | None) -> bool:
+        """At the end of call `call`, which spawns a conversation, link the conversation it names, `agent`, where it gave one, and forget the call; say whether anything changed.
+
+        A spawn running apart may end, or launch in the background and answer,
+        before its conversation's first call: its result names the conversation.
+        One that failed spawned nothing, and its worktree waits for `land`.
+        """
+        linked = agent is not None and self.link(agent, call)
+        if call not in self.spawning:
+            return linked
+        self.spawning = {
+            each: root for each, root in self.spawning.items() if each != call
+        }
+        return True
 
     def first_reached(self, roots: list[Path]) -> dict[Path, str]:
         """Return each of `roots` made at the runtime's asking, with its commit, and forget it: it's judged from that commit once, as the session first reaches it."""
@@ -176,8 +285,10 @@ class Holding(MutableModel):
         subagent's hooks report where its session works rather than where it
         does (each adapter says so of its runtime), so a subagent works where
         its file tools write, and only until they have, where its hooks report.
+        One working apart works in the worktree lup gave it (`apart`) whatever
+        its hooks report, and where its file tools write.
 
-        >>> held = Holding(repository=Path("/r/.git"), worktrees=[Path("/a"), Path("/b")])
+        >>> held = Holding(repository=Path("/r/.git"), worktrees=[Path("/a"), Path("/b"), Path("/c")])
         >>> held.note("w", started=Path("/a"), wrote=None)
         True
         >>> held.works("w")
@@ -186,10 +297,20 @@ class Holding(MutableModel):
         True
         >>> held.works("w")
         [PosixPath('/b')]
+        >>> held.apart = {"w": Path("/c")}
+        >>> held.works("w")
+        [PosixPath('/c'), PosixPath('/b')]
         """
         started = self.started.get(agent, [])
         wrote = self.wrote.get(agent, [])
-        roots = [*started, *wrote] if not agent or not wrote else wrote
+        own = self.apart.get(agent)
+        roots = (
+            [own, *wrote]
+            if own is not None
+            else [*started, *wrote]
+            if not agent or not wrote
+            else wrote
+        )
         return [root for root in dict.fromkeys(roots) if root in self.worktrees]
 
     def release_removed(self) -> bool:

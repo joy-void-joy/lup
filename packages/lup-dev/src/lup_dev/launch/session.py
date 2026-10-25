@@ -39,7 +39,9 @@ what its runtime does).
 
 At a worktree asked for, the answer is the worktree the judge names, which the
 room's hook makes with the room's own git and names to the runtime, or why the
-judge makes none, which fails the making (`MAKING`).
+judge makes none, which fails the making; at a call's start, a worktree the
+answer names first is made the same way before the rest is printed
+(`worktree.sh`, `printing`).
 """
 
 import io
@@ -48,6 +50,7 @@ import tempfile
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import partial
+from importlib.resources import files
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -180,21 +183,6 @@ def lost(event: type[SessionEvent]) -> Lost:
     return losses[event]
 
 
-MAKING = """answer=${answer%.}
-case $answer in /*) ;; *) printf '%s' "$answer" >&2; exit 1 ;; esac
-{ read -r root; read -r origin; read -r branch; read -r commit; } <<EOF
-$answer
-EOF
-git -C "$origin" worktree add --quiet -b "$branch" "$root" "$commit" >&2 || exit 1
-printf '%s\\n' "$root\""""
-"""What the room's hook at a worktree asked for does with the judge's answer
-(`Making.lines`, `policy/worktrees.py`): an answer that isn't a path is why the
-judge makes no worktree, said on standard error, and the hook ends with status
-1, which fails the making; else it makes the worktree the answer names with the
-room's own git, which writes to standard error alone, and prints its root, which
-the runtime reads as the last line of standard output."""
-
-
 def piped(
     event: type[SessionEvent], timeout: timedelta = timedelta(hours=25)
 ) -> list[str]:
@@ -218,8 +206,8 @@ def piped(
     no decision the runtime would read in silence. The answer is kept whole,
     trailing newlines too, with a mark after it that the shell's capture can't
     strip. At a worktree asked for, the hook makes the worktree the answer
-    names (`MAKING`), in the room, so its checkout runs the room's own git,
-    never the host's.
+    names, and at a call's start, any the answer names first, in the room, so
+    its checkout runs the room's own git, never the host's (`printing`).
     """
     socket = LaunchSockets(directory=ROOM_SOCKETS).hook
     seconds = str(int(timeout.total_seconds()))
@@ -239,10 +227,25 @@ def piped(
                 f'[ "$answer" != . ] || {{ echo {shlex.quote(gone.said)} >&2; '
                 f"exit {gone.status}; }}"
             ),
-            MAKING if event is WorktreeAsked else 'printf %s "${answer%.}"',
+            printing(event),
         ]
     )
     return ["sh", "-c", script]
+
+
+WORKTREE = files("lup_dev.launch").joinpath("worktree.sh")
+"""The room's hook's last step where an answer may name a worktree for the room
+to make with its own git, a shell script of its own (`printing`)."""
+
+
+def printing(event: type[SessionEvent]) -> str:
+    """Return what the room's hook at `event` does with the service's answer, kept in `$answer` with its mark: at a worktree asked for and at a call's start, it's piped to `worktree.sh`, which makes the worktree it names first and prints the root or the rest; at every other event, it's printed as it is."""
+    answer = 'printf %s "${answer%.}"'
+    if event is WorktreeAsked:
+        return f"{answer} | sh -c {shlex.quote(WORKTREE.read_text())} worktree asked"
+    if event is CallStarted:
+        return f"{answer} | sh -c {shlex.quote(WORKTREE.read_text())} worktree started"
+    return answer
 
 
 def hooked(

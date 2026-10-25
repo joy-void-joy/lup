@@ -1399,6 +1399,48 @@ def test_the_hook_fails_the_making_where_git_does(tmp_path: Path, origin: Path) 
     assert not root.exists()
 
 
+SPAWN = '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {}}}'
+
+
+def test_the_hook_makes_the_worktree_a_calls_answer_names_first_and_prints_the_rest(
+    tmp_path: Path, origin: Path
+) -> None:
+    """A call spawning a subagent lup isolates: the worktree is made with the
+    room's git, and the runtime reads the answer after it."""
+    commit = run("git", "rev-parse", "HEAD", cwd=origin).text().strip()
+    root = origin / ".git" / "tree" / "fix-the-gate"
+    making = Making(root=root, origin=origin, branch="fix-the-gate", commit=commit)
+    ran = hook(answering(tmp_path, f"{making.lines()}{SPAWN}\n"), "{}")
+
+    assert (ran.status, ran.output.decode(), ran.error.decode()) == (
+        0,
+        f"{SPAWN}\n",
+        "",
+    )
+    branch = run("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=root).text().strip()
+    assert branch == "fix-the-gate"
+    assert run("git", "rev-parse", "HEAD", cwd=root).text().strip() == commit
+
+
+def test_the_hook_blocks_a_call_whose_worktree_git_cant_make_saying_why(
+    tmp_path: Path, origin: Path
+) -> None:
+    """Status 2 at a call's start blocks it on both runtimes, its standard
+    error told to the agent; the answer isn't printed, so nothing spawns."""
+    root = tmp_path / "made"
+    making = Making(root=root, origin=origin, branch="main", commit="HEAD")
+    ran = hook(answering(tmp_path, f"{making.lines()}{SPAWN}\n"), "{}")
+
+    assert (ran.status, ran.output.decode()) == (2, "")
+    said = ran.error.decode()
+    assert "'main' already exists" in said
+    assert said.endswith(
+        f"lup couldn't make {root}, the worktree of the subagent this call spawns, "
+        "so the call didn't run.\n"
+    )
+    assert not root.exists()
+
+
 SERVICE = """
 import os, signal, socket, sys
 path, mode = sys.argv[1:]

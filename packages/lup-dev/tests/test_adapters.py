@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from conftest import Kit
 
     from lup.events import SessionEvent
+    from lup.types import JsonObject
     from lup_dev.declaration.resolve import Selected
     from lup_dev.declaration.runner import Runner
 
@@ -2511,7 +2512,7 @@ def dev(bare: Path) -> Path:
 
 
 def made_in_room(printed: str) -> Path:
-    """Make the worktree a hook's answer names, as the room's hook does with the room's git (`MAKING`); return its root."""
+    """Make the worktree a hook's answer names, as the room's hook does with the room's git (`launch/worktree.sh`); return its root."""
     root, origin, branch, commit = printed.splitlines()
     Git(cwd=Path(origin)).run("worktree", "add", "--quiet", "-b", branch, root, commit)
     return Path(root)
@@ -2640,3 +2641,355 @@ def test_codex_runs_no_hook_at_a_worktree_asked_for() -> None:
     ]
     with pytest.raises(ValueError, match="WorktreeCreate"):
         codex.heard(worktree_create(Path("/w/dev")))
+
+
+# lup's own isolation: a subagent Claude Code would isolate (`isolation:
+# "worktree"`) works apart in a worktree lup makes, and Claude Code makes none,
+# so its guard on an isolated agent's shell applies nowhere. Codex isolates no
+# subagent: nothing of this reaches it.
+
+
+def spawning(
+    cwd: Path,
+    transcript: Path,
+    *,
+    description: str = "Fix the gate",
+    isolated: bool = True,
+    call: str = "s1",
+    agent: str = "",
+) -> str:
+    """`PreToolUse` on an `Agent` call, as 2.1.310 sent it."""
+    asked: dict[str, object] = {"isolation": "worktree"} if isolated else {}
+    tool_input: dict[str, object] = {
+        "description": description,
+        "prompt": "Fix it.",
+        "subagent_type": "general-purpose",
+        **asked,
+    }
+    raw = with_fields(
+        pre_tool_use(cwd, "Agent", tool_input, call),
+        transcript_path=str(transcript),
+        prompt_id="p1",
+    )
+    return of_subagent(raw, transcript, agent) if agent else raw
+
+
+def of_subagent(raw: str, transcript: Path, agent: str = "a1") -> str:
+    """A hook of subagent `agent`, as 2.1.310 sent each: its id and type, the session's transcript and working directory."""
+    return with_fields(
+        raw,
+        agent_id=agent,
+        agent_type="general-purpose",
+        transcript_path=str(transcript),
+    )
+
+
+def spawn_recorded(transcript: Path, agent: str, call: str) -> None:
+    """Write Claude Code's record of subagent `agent`, spawned by call `call`, beside the session's transcript, as 2.1.310 wrote it before its first call."""
+    folder = transcript.with_suffix("") / "subagents"
+    folder.mkdir(parents=True, exist_ok=True)
+    record = {
+        "agentType": "general-purpose",
+        "isBuiltIn": True,
+        "description": "Fix the gate",
+        "toolUseId": call,
+        "spawnDepth": 1,
+        "requestShape": "background",
+    }
+    (folder / f"agent-{agent}.meta.json").write_text(json.dumps(record))
+
+
+def spawned_in_room(printed: str) -> str:
+    """Make the worktree a call's answer names first, as the room's hook does with the room's git (`launch/worktree.sh`); return the answer Claude Code reads after it."""
+    made = claude.making(printed)
+    if made:
+        made_in_room(made)
+    return printed.removeprefix(made)
+
+
+def updated(answer: str) -> JsonObject:
+    """The input a `PreToolUse` answer gives the call in place of its own."""
+    given = claude.Said.model_validate_json(answer).hook_specific_output
+    assert given is not None
+    assert given.updated_input is not None
+    return given.updated_input
+
+
+@pytest.fixture
+def transcript(tmp_path: Path) -> Path:
+    return tmp_path / "projects" / "s1.jsonl"
+
+
+def told_apart(root: Path, head: str, beside: Path, *, made: bool = True) -> str:
+    where = (
+        "you work apart, in a worktree lup made for you at your parent's commit"
+        if made
+        else "you work in the worktree your parent works apart in"
+    )
+    return (
+        f"lup: {where}: {root}, on branch `{root.name}`, at {head}. Each command "
+        f"your shell runs starts there. {beside}, the working directory your "
+        "environment names, is another conversation's: give your file tools paths "
+        f"in {root}, since lup refuses a write of yours in {beside}. Every other "
+        "worktree, and the repository's history, stay yours to read."
+    )
+
+
+def test_claude_has_lup_make_the_worktree_of_a_subagent_asked_to_work_apart(
+    on_claude: Bench, bare: Path, dev: Path, kit: Kit, transcript: Path
+) -> None:
+    """From the spawning conversation's commit, on a branch named after the
+    call's description; Claude Code's own isolation dropped, and the subagent
+    told where it works in its prompt, with no decision, so the call goes
+    through the session's own permission mode."""
+    in_room(payload(dev, "SessionStart", source="startup"), on_claude)
+    printed = in_room(spawning(dev, transcript), on_claude)
+    head = Git(cwd=dev).commit("HEAD")
+    assert head is not None
+    root = bare / "tree" / "fix-the-gate"
+    assert claude.making(printed) == f"{root}\n{dev}\nfix-the-gate\n{head}\n"
+    assert json.loads(spawned_in_room(printed)) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "updatedInput": {
+                "description": "Fix the gate",
+                "prompt": f"{told_apart(root, head, dev)}\n\nFix it.",
+                "subagent_type": "general-purpose",
+            },
+        }
+    }
+    assert Git(cwd=root).text("rev-parse", "--abbrev-ref", "HEAD") == "fix-the-gate"
+    assert Git(cwd=root).commit("HEAD") == head
+    held = SessionIndex(layout=kit.layout).read("s1")
+    assert held is not None
+    assert (held.made, held.spawning, held.apart) == ({root: head}, {"s1": root}, {})
+
+
+@pytest.mark.parametrize("description", ["…", "dev", "Main"])
+def test_claude_names_a_worktree_after_its_call_where_its_description_cant(
+    on_claude: Bench, bare: Path, dev: Path, transcript: Path, description: str
+) -> None:
+    """A description naming no branch, or one there already, falls back to
+    the call's id."""
+    printed = in_room(spawning(dev, transcript, description=description), on_claude)
+    assert claude.making(printed).splitlines()[:3] == [
+        str(bare / "tree" / "agent-s1"),
+        str(dev),
+        "agent-s1",
+    ]
+
+
+def test_claude_refuses_a_spawn_lup_cant_make_a_worktree_for_saying_why(
+    on_claude: Bench, bare: Path, transcript: Path
+) -> None:
+    """A session in the bare repository's own directory works in no worktree,
+    so there's no commit to make one from."""
+    in_room(payload(bare, "SessionStart", source="startup"), on_claude)
+    printed = in_room(spawning(bare, transcript), on_claude)
+    assert json.loads(printed) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "lup made no worktree for the subagent this call spawns, so it "
+                "didn't run: lup makes a worktree from the commit of the one its "
+                f"conversation works in, and {bare} is in none"
+            ),
+        }
+    }
+
+
+def test_claude_leaves_a_subagent_not_asked_to_work_apart_as_it_is(
+    on_claude: Bench, dev: Path, kit: Kit, transcript: Path
+) -> None:
+    printed = in_room(spawning(dev, transcript, isolated=False), on_claude)
+    assert printed == ""
+    held = SessionIndex(layout=kit.layout).read("s1")
+    assert held is not None
+    assert (held.spawning, held.apart) == ({}, {})
+
+
+def apart_in_room(on_claude: Bench, dev: Path, transcript: Path) -> Path:
+    """Spawn subagent `a1` to work apart from `dev`, its worktree made in the room, its record written; return its worktree."""
+    in_room(payload(dev, "SessionStart", source="startup"), on_claude)
+    spawned_in_room(in_room(spawning(dev, transcript), on_claude))
+    spawn_recorded(transcript, "a1", "s1")
+    return dev.parent / "fix-the-gate"
+
+
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        {"command": "git add -A && git commit -q -m fix && git log | head -2"},
+        {"description": "Watch", "timeout_ms": 30000, "command": "tail -f log"},
+    ],
+    ids=["Bash", "Monitor"],
+)
+def test_claude_starts_the_commands_of_a_subagent_working_apart_in_its_worktree(
+    on_claude: Bench,
+    dev: Path,
+    kit: Kit,
+    transcript: Path,
+    tool_input: dict[str, object],
+) -> None:
+    """Linked at its first call by its record, which names the call that
+    spawned it; its calls count in its worktree, so they hold back no
+    checkpoint of its parent's, whatever its hooks' working directory says."""
+    root = apart_in_room(on_claude, dev, transcript)
+    tool = "Monitor" if "timeout_ms" in tool_input else "Bash"
+    raw = of_subagent(pre_tool_use(dev, tool, tool_input, "b1"), transcript)
+    command = tool_input["command"]
+    assert updated(in_room(raw, on_claude)) == {
+        **tool_input,
+        "command": f"cd -- {root} || exit 1\n{command}",
+    }
+    assert (running(kit, root), running(kit, dev)) == (["b1"], [])
+    held = SessionIndex(layout=kit.layout).read("s1")
+    assert held is not None
+    assert (held.apart, held.spawning) == ({"a1": root}, {})
+    assert (held.works("a1"), held.works("")) == ([root], [dev])
+
+
+def test_claude_refuses_a_write_of_a_subagent_working_apart_in_the_worktree_its_environment_names(
+    on_claude: Bench, dev: Path, transcript: Path
+) -> None:
+    """Claude Code resolves a relative path in the session's working directory,
+    which it names as the subagent's: the write would land in its parent's
+    worktree. One in its own lands, and so would one in any other."""
+    root = apart_in_room(on_claude, dev, transcript)
+    write: dict[str, object] = {"file_path": "docs/new.md", "content": "# New\n"}
+    refused = of_subagent(pre_tool_use(dev, "Write", write, "w1"), transcript)
+    assert json.loads(in_room(refused, on_claude)) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                f"lup: you work apart in {root}, and {dev / 'docs/new.md'} is in "
+                f"{dev}, the working directory your environment names, which is "
+                f"another conversation's: write {root / 'docs/new.md'} instead."
+            ),
+        }
+    }
+    own: dict[str, object] = {**write, "file_path": str(root / "docs/new.md")}
+    allowed = of_subagent(pre_tool_use(dev, "Write", own, "w2"), transcript)
+    assert json.loads(in_room(allowed, on_claude)) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+        }
+    }
+    read = of_subagent(
+        pre_tool_use(dev, "Read", {"file_path": str(dev / CORE)}, "r1"), transcript
+    )
+    assert in_room(read, on_claude) == ""
+
+
+def test_claude_links_a_subagent_launched_in_the_background_by_its_calls_result(
+    on_claude: Bench, dev: Path, kit: Kit, transcript: Path
+) -> None:
+    """2.1.310 answers a background spawn at its launch, naming the subagent,
+    which may come before the subagent's first call and its record."""
+    in_room(payload(dev, "SessionStart", source="startup"), on_claude)
+    spawned_in_room(in_room(spawning(dev, transcript), on_claude))
+    launched = {
+        "isAsync": True,
+        "status": "async_launched",
+        "agentId": "a1",
+        "description": "Fix the gate",
+    }
+    result = with_fields(
+        finished(dev, "Agent", {"prompt": "Fix it."}, "s1"),
+        tool_response=launched,
+        transcript_path=str(transcript),
+    )
+    in_room(result, on_claude)
+    root = dev.parent / "fix-the-gate"
+    held = SessionIndex(layout=kit.layout).read("s1")
+    assert held is not None
+    assert (held.apart, held.spawning) == ({"a1": root}, {})
+    raw = of_subagent(pre_tool_use(dev, "Bash", {"command": "ls"}, "b1"), transcript)
+    assert updated(in_room(raw, on_claude)) == {
+        "command": f"cd -- {root} || exit 1\nls"
+    }
+
+
+def test_claude_forgets_a_spawn_that_failed(
+    on_claude: Bench, dev: Path, kit: Kit, transcript: Path
+) -> None:
+    in_room(payload(dev, "SessionStart", source="startup"), on_claude)
+    spawned_in_room(in_room(spawning(dev, transcript), on_claude))
+    failed = payload(
+        dev,
+        "PostToolUseFailure",
+        tool_name="Agent",
+        tool_input={"prompt": "Fix it."},
+        tool_use_id="s1",
+        error="interrupted",
+    )
+    in_room(failed, on_claude)
+    held = SessionIndex(layout=kit.layout).read("s1")
+    assert held is not None
+    assert (held.apart, held.spawning) == ({}, {})
+
+
+def test_claude_has_a_plain_child_of_a_subagent_working_apart_work_in_its_worktree(
+    on_claude: Bench, dev: Path, kit: Kit, transcript: Path
+) -> None:
+    """As Claude Code's own isolation passes its worktree on: the child is
+    told it, and its commands start there."""
+    root = apart_in_room(on_claude, dev, transcript)
+    head = Git(cwd=root).commit("HEAD")
+    assert head is not None
+    child = spawning(
+        dev, transcript, description="Look", isolated=False, call="c1", agent="a1"
+    )
+    printed = in_room(child, on_claude)
+    assert claude.making(printed) == ""
+    told = told_apart(root, head, dev, made=False)
+    assert updated(printed) == {
+        "description": "Look",
+        "prompt": f"{told}\n\nFix it.",
+        "subagent_type": "general-purpose",
+    }
+    spawn_recorded(transcript, "a2", "c1")
+    raw = of_subagent(
+        pre_tool_use(dev, "Bash", {"command": "ls"}, "b2"), transcript, "a2"
+    )
+    assert updated(in_room(raw, on_claude)) == {
+        "command": f"cd -- {root} || exit 1\nls"
+    }
+    held = SessionIndex(layout=kit.layout).read("s1")
+    assert held is not None
+    assert held.apart == {"a1": root, "a2": root}
+
+
+def test_claude_makes_the_worktree_of_an_isolated_child_of_a_subagent_from_its_worktrees_commit(
+    on_claude: Bench, bare: Path, dev: Path, transcript: Path
+) -> None:
+    """Not from the session's working directory, which its hooks report."""
+    root = apart_in_room(on_claude, dev, transcript)
+    (root / "fixed.txt").write_text("fixed\n")
+    Git(cwd=root).run("add", "--all")
+    Git(cwd=root).run("commit", "--quiet", "-m", "fix")
+    head = Git(cwd=root).commit("HEAD")
+    assert head is not None
+    assert head != Git(cwd=dev).commit("HEAD")
+    child = spawning(dev, transcript, description="Check it", call="c1", agent="a1")
+    printed = in_room(child, on_claude)
+    made = bare / "tree" / "check-it"
+    assert claude.making(printed) == f"{made}\n{root}\ncheck-it\n{head}\n"
+
+
+def test_claude_keeps_the_worktree_a_spawns_answer_names_first_as_it_adds_to_it(
+    on_claude: Bench, dev: Path, transcript: Path
+) -> None:
+    raw = spawning(dev, transcript)
+    printed = in_room(raw, on_claude)
+    added = claude.told(raw, printed, Telling(caller="c1", items=["a message"]))
+    assert added is not None
+    made = claude.making(printed)
+    assert made
+    assert added.startswith(made)
+    answer = added.removeprefix(made)
+    assert json.loads(answer)["hookSpecificOutput"]["additionalContext"] == "a message"
+    assert "isolation" not in updated(answer)

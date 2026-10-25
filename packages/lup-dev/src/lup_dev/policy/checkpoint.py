@@ -103,10 +103,13 @@ from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.store import Elsewhere, Entry, Heads, Held, Store, WorktreeState
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.policy.worktrees import (
+    Apart,
+    Given,
     Holding,
     Making,
     Place,
     SessionIndex,
+    branch_named,
     made_root,
     place,
 )
@@ -175,7 +178,11 @@ class Reply(Model):
     """Why the conversation can't end yet; empty lets it end."""
     made: Making | None = None
     """Where a worktree is asked for, the one lup makes, which the room's hook
-    makes and names to the runtime (`WorktreeAsked`)."""
+    makes and names to the runtime (`WorktreeAsked`), or a call spawns a
+    conversation to work apart (`CallStarted`), the one lup makes for it."""
+    given: Given | None = None
+    """Where a call spawns a conversation lup isolates, where it works, which
+    it's told before its first move (`CallStarted`)."""
 
 
 def over(
@@ -840,12 +847,16 @@ def holding(
     *,
     agent: str = "",
     starts: bool = False,
+    spawned_by: str | None = None,
 ) -> Holding | None:
     """Return a session's repository and the worktrees it holds, reaching more.
 
     The worktree its working directory is in is reached, since a hook's working
     directory follows the session, and so is `written`'s, where a file tool
     writes; conversation `agent` is noted to work in each (`Holding.works`).
+    A conversation lup isolates is linked first to the worktree its spawn was
+    given, by the call that spawned it (`spawned_by`), and the worktree it works
+    apart in stands for its working directory, which its hooks don't report.
     Reaching a worktree begins the session there, from the commit it was made
     at where lup made it at the runtime's asking (`Holding.made`); a session
     that `starts`, or resumes, begins again in every worktree it holds. A
@@ -863,6 +874,10 @@ def holding(
             held = Holding(repository=here.repository)
         released = held.release_removed()
         repository = held.repository
+        linked = held.link(agent, spawned_by)
+        own = held.apart.get(agent)
+        if own is not None:
+            here = place(own) if own.is_dir() else None
 
         def within(where: Place | None) -> Path | None:
             if where is None or where.repository != repository:
@@ -875,7 +890,7 @@ def holding(
         reached = [each for each in reaching if held.reach(each)]
         made = held.first_reached(reached)
         noted = held.note(agent, started=within(here), wrote=within(written))
-        if recorded is None or reached or released or noted:
+        if recorded is None or reached or released or noted or linked:
             index.write(session, held)
         for root in held.worktrees if starts else reached:
             begin(
@@ -2232,10 +2247,26 @@ class Reported(Model, ABC):
     agent: str = ""
     """The conversation it's from: empty for the session's own, else a subagent's."""
     cwd: Path
+    spawned_by: str | None = None
+    """The runtime's id for the call that spawned the conversation, where its
+    runtime records it: a conversation lup isolates is linked by it to the
+    worktree its spawn was given (`Holding.link`)."""
 
     @abstractmethod
     def apply(self, bench: Bench) -> Reply:
         """Act on the event, and say what the agent hears."""
+
+
+def reached(bench: Bench, event: Reported, *, starts: bool = False) -> Holding | None:
+    """Return the session's repository and the worktrees it holds, reaching where `event`'s conversation works (`holding`)."""
+    return holding(
+        bench,
+        event.session,
+        event.cwd,
+        agent=event.agent,
+        starts=starts,
+        spawned_by=event.spawned_by,
+    )
 
 
 class SessionStarted(Reported, events.SessionStarted):
@@ -2255,7 +2286,7 @@ class SessionStarted(Reported, events.SessionStarted):
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd, agent=self.agent, starts=True)
+        held = reached(bench, self, starts=True)
         if held is None:
             return Reply()
         if self.forgotten:
@@ -2321,7 +2352,7 @@ class TurnStarted(Reported, events.TurnStarted):
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd, agent=self.agent)
+        held = reached(bench, self)
         if held is None:
             return Reply()
         now = bench.services.clock.now()
@@ -2342,17 +2373,26 @@ class TurnStarted(Reported, events.TurnStarted):
 class CallStarted(Reported, events.CallStarted):
     """A tool call is about to run: it counts in every worktree its conversation works in (`Holding.works`).
 
-    A subagent's call notes that the subagent is at work.
+    A subagent's call notes that the subagent is at work. A call spawning a
+    conversation to work apart has lup make its worktree, and one a
+    conversation working apart spawns works in that conversation's worktree
+    (`given`).
     """
 
     spawns: bool = False
     """Whether the call runs a subagent, whose own calls count instead."""
+    apart: bool = False
+    """Whether the conversation it spawns is to work apart, in a worktree of its
+    own lup makes (`docs/judging-writes.md`, *A subagent lup isolates*)."""
+    purpose: str = ""
+    """What the call says the conversation it spawns is for, which names a
+    worktree lup makes for it."""
     turn: str | None = None
     """The runtime's id for the turn it runs in; none where it names none."""
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd, agent=self.agent)
+        held = reached(bench, self)
         if held is None:
             return Reply()
         if self.agent:
@@ -2361,7 +2401,7 @@ class CallStarted(Reported, events.CallStarted):
             )
             record.opened(self.agent)
         if self.spawns:
-            return Reply()
+            return given(bench, self, held)
         now = bench.services.clock.now()
         call = Call(
             key=self.call,
@@ -2381,6 +2421,149 @@ class CallStarted(Reported, events.CallStarted):
 
 class WorktreeRefusedError(LupDevError):
     """A worktree the runtime asked for that lup doesn't make, saying why."""
+
+
+def unmakeable(origin: Git, repository: Path, name: str) -> str | None:
+    """Say why lup makes no worktree named `name` of `repository` from `origin`: the name can't name a new branch, or something is at its root (`made_root`); none where it makes one."""
+    ref = f"refs/heads/{name}"
+    formed = origin.run("check-ref-format", ref, ok=[0, 1])
+    if formed.status != 0 or not name or name.startswith("-"):
+        return f"`{name}` can't name a branch"
+    if origin.commit(ref) is not None:
+        return f"a branch `{name}` is there already"
+    root = made_root(repository, name)
+    if root.exists() or root.is_symlink():
+        return f"{root}, where lup would make the worktree, is there already"
+    return None
+
+
+class Origin(Model):
+    """The worktree a worktree lup makes is made from: its root, its repository, and the commit it's at, which the one made starts at."""
+
+    root: Path
+    repository: Path
+    commit: str
+
+
+def made_from(where: Place | None, cwd: Path) -> Origin:
+    """Return the worktree `where` is in as the one lup makes a worktree from; raise `WorktreeRefusedError` where it's in none, as the working directory `cwd` is, or that has no commit yet."""
+    if where is None or where.worktree is None:
+        message = (
+            "lup makes a worktree from the commit of the one its conversation "
+            f"works in, and {cwd} is in none"
+        )
+        raise WorktreeRefusedError(message)
+    commit = Git(cwd=where.worktree).commit("HEAD")
+    if commit is None:
+        message = (
+            f"{where.worktree}, which lup would make the worktree from, has no "
+            "commit yet"
+        )
+        raise WorktreeRefusedError(message)
+    return Origin(root=where.worktree, repository=where.repository, commit=commit)
+
+
+def kept(
+    bench: Bench, session: str, change: Callable[[Holding], bool]
+) -> Holding | None:
+    """Change what `session` holds under its lock (`change`), keeping it where `change` says it changed; none where the session was never seen."""
+    index = SessionIndex(layout=bench.services.layout)
+    with index.lock(session):
+        held = index.read(session)
+        if held is not None and change(held):
+            index.write(session, held)
+    return held
+
+
+def given(bench: Bench, call: CallStarted, held: Holding) -> Reply:
+    """Give the conversation `call` spawns the worktree it works apart in, where it does; tell it where before its first move (`docs/judging-writes.md`, *A subagent lup isolates*).
+
+    Asked to work apart, it gets a worktree lup makes from the commit the
+    spawning conversation's worktree is at, its own where it works apart: on a
+    new branch named after what the call says it's for (`branch_named`), or
+    `agent-<the call's id>` where that's empty or taken. Spawned without asking
+    by a conversation working apart, it works in that conversation's
+    worktree, as the runtime's own isolation would pass it on. Otherwise it
+    works where its runtime puts it, and nothing is given. Raise
+    `WorktreeRefusedError` where lup can't make the worktree.
+    """
+    own = held.apart.get(call.agent)
+    if not call.apart and own is None:
+        return Reply()
+    here = place(call.cwd) if call.cwd.is_dir() else None
+    beside = (
+        here.worktree
+        if here is not None and here.repository == held.repository
+        else None
+    )
+    if not call.apart and own is not None:
+        git = Git(cwd=own)
+        commit = git.commit("HEAD") or ""
+        branch = git.text("rev-parse", "--abbrev-ref", "HEAD")
+        kept(bench, call.session, lambda now: now.give(call.call, own))
+        apart = Given(
+            root=own,
+            branch=branch,
+            commit=commit,
+            made=False,
+            beside=None if beside == own else beside,
+        )
+        return Reply(given=apart)
+    origin = made_from(here if own is None else place(own), call.cwd)
+    commit = origin.commit
+    git = Git(cwd=origin.root)
+    named = [
+        name
+        for name in dict.fromkeys([branch_named(call.purpose), f"agent-{call.call}"])
+        if unmakeable(git, held.repository, name) is None
+    ]
+    if not named:
+        raise WorktreeRefusedError(
+            unmakeable(git, held.repository, f"agent-{call.call}")
+        )
+    branch = named[0]
+    root = made_root(held.repository, branch)
+
+    def made(now: Holding) -> bool:
+        now.make(root, commit)
+        now.give(call.call, root)
+        return True
+
+    kept(bench, call.session, made)
+    making = Making(root=root, origin=origin.root, branch=branch, commit=commit)
+    apart = Given(root=root, branch=branch, commit=commit, made=True, beside=beside)
+    return Reply(made=making, given=apart)
+
+
+def apart(bench: Bench, event: Reported, writes: Path | None = None) -> Apart | None:
+    """Return where `event`'s conversation works apart, linking it first to the worktree its spawn was given (`Holding.link`); none where it works where its runtime puts it.
+
+    A write it makes (`writes`) in the worktree its runtime names as its
+    working directory, which is another conversation's, is refused, saying the
+    same file in its own worktree: the runtime resolves a path it gives
+    relative there, and its file tools would land there unseen by it. Every
+    other worktree it may write, and read.
+    """
+    if not event.agent:
+        return None
+    held = kept(
+        bench, event.session, lambda now: now.link(event.agent, event.spawned_by)
+    )
+    root = None if held is None else held.apart.get(event.agent)
+    if root is None:
+        return None
+    here = place(event.cwd) if event.cwd.is_dir() else None
+    beside = None if here is None else here.worktree
+    target = None if writes is None or beside in [None, root] else place(writes)
+    if beside is None or target is None or target.worktree != beside:
+        return Apart(root=root)
+    mine = root / target.path
+    refused = (
+        f"lup: you work apart in {root}, and {writes} is in {beside}, the working "
+        f"directory your environment names, which is another conversation's: write "
+        f"{mine} instead."
+    )
+    return Apart(root=root, refused=refused)
 
 
 class WorktreeAsked(Reported, events.WorktreeAsked):
@@ -2406,41 +2589,19 @@ class WorktreeAsked(Reported, events.WorktreeAsked):
     @override
     def apply(self, bench: Bench) -> Reply:
         here = place(self.cwd) if self.cwd.is_dir() else None
-        if here is None or here.worktree is None:
-            message = (
-                "lup makes a worktree from the commit of the one its conversation "
-                f"works in, and {self.cwd} is in none"
-            )
-            raise WorktreeRefusedError(message)
-        origin = Git(cwd=here.worktree)
-        commit = origin.commit("HEAD")
-        if commit is None:
-            message = (
-                f"{here.worktree}, which lup would make the worktree from, has no "
-                "commit yet"
-            )
-            raise WorktreeRefusedError(message)
-        ref = f"refs/heads/{self.name}"
-        formed = origin.run("check-ref-format", ref, ok=[0, 1])
-        if formed.status != 0 or self.name.startswith("-"):
-            message = f"`{self.name}` can't name a branch"
-            raise WorktreeRefusedError(message)
-        if origin.commit(ref) is not None:
-            message = f"a branch `{self.name}` is there already"
-            raise WorktreeRefusedError(message)
-        root = made_root(here.repository, self.name)
-        if root.exists() or root.is_symlink():
-            message = f"{root}, where lup would make the worktree, is there already"
-            raise WorktreeRefusedError(message)
+        origin = made_from(here, self.cwd)
+        commit = origin.commit
+        why = unmakeable(Git(cwd=origin.root), origin.repository, self.name)
+        if why is not None:
+            raise WorktreeRefusedError(why)
+        root = made_root(origin.repository, self.name)
         index = SessionIndex(layout=bench.services.layout)
         with index.lock(self.session):
-            held = index.read(self.session) or Holding(repository=here.repository)
-            if held.repository == here.repository:
+            held = index.read(self.session) or Holding(repository=origin.repository)
+            if held.repository == origin.repository:
                 held.make(root, commit)
                 index.write(self.session, held)
-        making = Making(
-            root=root, origin=here.worktree, branch=self.name, commit=commit
-        )
+        making = Making(root=root, origin=origin.root, branch=self.name, commit=commit)
         return Reply(made=making)
 
 
@@ -2452,12 +2613,23 @@ class CallFinished(Reported, events.CallFinished):
     running, one after another, the agent hearing their reports together;
     another session's calls there don't hold it back. One that never started (a
     runtime can report a command's end on a later call) leaves the calls running
-    as they are, and a checkpoint still runs where none is.
+    as they are, and a checkpoint still runs where none is. A call that spawned
+    a conversation to work apart links it, where its result names it, to the
+    worktree it was given, which a spawn launched in the background ends
+    before its conversation's first call (`Holding.settle`).
     """
+
+    spawns: bool = False
+    """Whether the call ran a subagent."""
+    spawned: str | None = None
+    """The runtime's id for the conversation it spawned, where its result
+    names it."""
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd, agent=self.agent)
+        if self.spawns:
+            kept(bench, self.session, lambda now: now.settle(self.call, self.spawned))
+        held = reached(bench, self)
         if held is None:
             return Reply()
         opened = worktrees(bench, held)
@@ -2506,7 +2678,7 @@ class TurnEnded(Reported, events.TurnEnded):
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd, agent=self.agent)
+        held = reached(bench, self)
         if held is None:
             return Reply()
         opened = worktrees(bench, held)
@@ -2550,7 +2722,7 @@ class ConversationEnded(Reported, events.ConversationEnded):
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        held = holding(bench, self.session, self.cwd, agent=self.agent)
+        held = reached(bench, self)
         if held is None:
             return Reply()
         opened = worktrees(bench, held)
