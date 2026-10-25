@@ -240,6 +240,27 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             ),
         )
 
+    @classmethod
+    def of_worktree(
+        cls,
+        root: Path,
+        repository: Path,
+        recorded: dict[str, Recorded],
+        layout: Layout,
+        exchanges: Exchanges,
+    ) -> RepositoryModules:
+        """Load the declaration the worktree at `root` holds itself, as a room runs its modules' commands, the room containing them.
+
+        Raise `ProjectError` where it doesn't load or resolve.
+        """
+        return cls(
+            repository=repository,
+            resolved=resolve(load(root).project),
+            recorded=recorded,
+            layout=layout,
+            exchanges=exchanges,
+        )
+
     def related(self) -> list[Related]:
         """Find on the host the other repositories the declaration names, for a module's methods."""
         return related_of(self.resolved.repositories, self.repository)

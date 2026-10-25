@@ -271,12 +271,14 @@ protected_modules = ["openai_codex"]
 allowed_importers = ["lup.adapters.codex"]
 
 # Nothing inside lup imports its front door, which imports the adapters, so a
-# module they import would import itself in a cycle.
+# module they import would import itself in a cycle. A module outside lup's
+# directory writes the front door's doors (`@lup.on`, `@lup.view`), as a
+# project's module does: its environment side is listed here.
 [[tool.importlinter.contracts]]
 name = "nothing inside lup imports lup's front door"
 type = "protected"
 protected_modules = ["lup"]
-allowed_importers = ["lup_dev.**"]
+allowed_importers = ["lup_dev.**", "lup_transcripts.environment.**"]
 as_packages = false
 
 [dependency-groups]

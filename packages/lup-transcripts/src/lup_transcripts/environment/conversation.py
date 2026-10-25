@@ -33,6 +33,8 @@ from datetime import datetime
 from itertools import accumulate, groupby, pairwise
 from typing import TYPE_CHECKING
 
+from pydantic import Field
+
 from lup.blocks import (
     Block,
     Blocks,
@@ -146,16 +148,16 @@ class ConversationError(LupTranscriptsError):
 class OfExchange(OfAgent):
     """One exchange of an agent's conversation, as its fold in the drawer reads it: by the operator's words that open it."""
 
-    step: int | None = None
-    """The step of the operator's words that open it; none for what came before
-    their first words."""
+    step: int | None = Field(
+        default=None,
+        description="The step of your words that open it; left out, what came before your first words.",
+    )
 
 
 class OfCall(OfAgent):
     """One call of an agent's conversation, read whole as its fold in the drawer opens."""
 
-    id: str
-    """The runtime's id for the call (`Called.id`)."""
+    id: str = Field(description="The runtime's id for the call.")
 
 
 class Beside(Model):

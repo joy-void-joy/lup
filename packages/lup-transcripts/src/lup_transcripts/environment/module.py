@@ -2,8 +2,9 @@
 
 from pathlib import Path
 
-from lup_dev.declaration.kinds import Guidance, Mounted, Section, Serving
+from lup_dev.declaration.kinds import Folds, Guidance, Mounted, Section, Serving, Tones
 from lup_dev.declaration.module import Module
+from lup_transcripts.environment.conversation import FOLD_KINDS, TONES
 from lup_transcripts.environment.serving import TranscriptsServing
 
 
@@ -13,7 +14,14 @@ class Transcripts(Module):
     name = "transcripts"
 
     serving: Serving = Serving.of(TranscriptsServing)
-    """Copying what the runtime added or grew, when a launch opens and when it stops."""
+    """Copying what the runtime added or grew, when a launch opens and when it
+    stops; reading the copies; and each agent's conversation, live."""
+    folds: Folds = Folds.of(*FOLD_KINDS)
+    """What its conversation folds under: earlier exchanges, runs of calls,
+    items' text, and calls' input and output."""
+    tones: Tones = Tones.of(*TONES)
+    """What its conversation's lines are drawn in: calls, the items sent and
+    received, runs of calls."""
     data: Mounted = Mounted(always=True)
     """The copies, read-only in every room, so a session reads why things are
     as they are in the operator's own words (`lup-dev transcripts`); a project

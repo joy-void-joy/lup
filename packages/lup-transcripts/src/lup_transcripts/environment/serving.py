@@ -13,12 +13,19 @@ launch that never stopped left.
 Its commands read the copies (`packages/lup-transcripts/README.md`, *Reading
 them*): `list` every kept session, `show` one, the operator's words first,
 `search` what the operator said; each through its runtime's reading of its
-records, in the repository's process, for the operator or a room.
+records, for the operator or a room.
+
+Its views read a conversation live, from the runtime's own record as it grows
+(`conversation`, the drawer under each agent's banner; `exchange`, one earlier
+exchange; `call`, one call read whole), laid out in lup's blocks
+(`environment/conversation.py`), each record read again only once it changed
+(`Recording`).
 """
 
 import asyncio
 import shutil
-from typing import TYPE_CHECKING
+from datetime import timedelta
+from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import Field
 
@@ -27,12 +34,23 @@ from lup.blocks import OfAgent
 from lup.types import Model
 from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Room
 from lup_dev.git import Git
+from lup_dev.inbox.context import Recording
 from lup_transcripts.environment import views
+from lup_transcripts.environment.conversation import (
+    Beside,
+    OfCall,
+    OfExchange,
+    call_blocks,
+    conversation_blocks,
+    exchange_blocks,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from lup_dev.host.records import Record, Transcript
+    from lup_dev.inbox.protocol import Exchanged
+    from lup_dev.inbox.store import Conversation
     from lup_transcripts.environment.module import Transcripts
 
 
@@ -93,6 +111,9 @@ class TranscriptsServing(ModuleServing):
     """Keeping the repository's sessions' records: what the runtime added or grew, when a launch opens and when it stops."""
 
     module: Transcripts
+    recording: ClassVar[Recording] = Recording()
+    """Each conversation's record as last read, kept across calls in the
+    repository's process, so a record unchanged since isn't read again."""
 
     @lup.on(lup.Launched)
     @lup.on(lup.Stopped)
@@ -154,3 +175,74 @@ class TranscriptsServing(ModuleServing):
         del by
         sessions = await asyncio.to_thread(self.kept)
         return views.found(sessions, asked.words, whole=asked.whole)
+
+    def beside(self, exchanged: Exchanged) -> Beside:
+        """Return what a conversation shows beside its steps: the items of lup's inbox it exchanged, each conversation among their parties called by its runtime's ids."""
+
+        def named(party: Conversation) -> str:
+            own = f"{party.runtime} {party.session}"
+            return own if party.agent is None else f"{own} / {party.agent}"
+
+        return Beside(exchanged=exchanged, named=named)
+
+    @lup.view(
+        place=lup.Drawer(letter="v", called="the conversation", colour="cyan"),
+        watch=lup.Watch(
+            on=[
+                lup.TurnStarted,
+                lup.CallFinished,
+                lup.TurnEnded,
+                lup.ConversationEnded,
+            ],
+            longest=timedelta(minutes=1),
+        ),
+    )
+    async def conversation(self, viewed: OfAgent) -> lup.Blocks:
+        """Show an agent's whole conversation from its runtime's record, live: everything since your last words open, each earlier exchange folded under your words that opened it, each run of calls under one line, and the items of lup's inbox it sent and was sent where they happened."""
+        read = await asyncio.to_thread(
+            self.recording.read,
+            self.recorded,
+            viewed.runtime,
+            viewed.session,
+            viewed.agent,
+        )
+        exchanged = await self.exchanges.exchanged(viewed)
+        return conversation_blocks(
+            viewed,
+            read.transcript.entries,
+            self.beside(exchanged),
+            exchange=TranscriptsServing.exchange,
+            call=TranscriptsServing.call,
+        )
+
+    @lup.view
+    async def exchange(self, viewed: OfExchange) -> lup.Blocks:
+        """Show one earlier exchange of an agent's conversation, from your words that opened it to your next."""
+        read = await asyncio.to_thread(
+            self.recording.read,
+            self.recorded,
+            viewed.runtime,
+            viewed.session,
+            viewed.agent,
+        )
+        exchanged = await self.exchanges.exchanged(viewed)
+        return exchange_blocks(
+            viewed,
+            read.transcript.entries,
+            self.beside(exchanged),
+            call=TranscriptsServing.call,
+        )
+
+    @lup.view
+    async def call(self, viewed: OfCall) -> lup.Blocks:
+        """Show one call of an agent's conversation whole: what it was given, and what it returned."""
+        read = await asyncio.to_thread(
+            self.recording.read,
+            self.recorded,
+            viewed.runtime,
+            viewed.session,
+            viewed.agent,
+        )
+        reader = self.recorded[viewed.runtime].reader
+        found = await asyncio.to_thread(reader.calls, read.record, [viewed.id])
+        return call_blocks(viewed, found[0] if found else None)

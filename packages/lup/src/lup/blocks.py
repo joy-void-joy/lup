@@ -297,13 +297,17 @@ class Watch(Model):
 
 
 class OfAgent(Model):
-    """The agent a drawer under its banner is of: its runtime, its session, and its subagent where it's one."""
+    """The agent a drawer under its banner is of: its runtime, its session, and its subagent where it's one.
 
-    runtime: str
-    session: str
-    """The runtime's id for the session."""
-    agent: str | None = None
-    """The runtime's id for the subagent; none for the session's own conversation."""
+    Each field's description is its help on a view's command line.
+    """
+
+    runtime: str = Field(description="The runtime, by the name lup knows it by.")
+    session: str = Field(description="The runtime's id for the session.")
+    agent: str | None = Field(
+        default=None,
+        description="The runtime's id for the subagent; left out, the session's own conversation.",
+    )
 
 
 class BlockError(LupError):
