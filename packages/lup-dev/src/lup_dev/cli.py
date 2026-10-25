@@ -68,6 +68,7 @@ from lup_dev.declaration.resolve import Declaration, Selected, resolve
 from lup_dev.declaration.serving import Operator
 from lup_dev.declaration.serving import Room as RoomAsker
 from lup_dev.declaration.serving import tools as module_tools
+from lup_dev.environments import environment
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM, GitHubError, named
 from lup_dev.gate import (
@@ -2564,7 +2565,7 @@ def merge(
 
 
 def scrapped(worktree: Path, runner: Runner) -> None:
-    """End what a gate run left for the worktree at `worktree`, which goes next: its engine, and the store keeping the engine's lock and log.
+    """End what a gate run left for the worktree at `worktree`, which goes next: its engine, the store keeping the engine's lock and log, and in a room, the environment made for it among the launch's (`LUP_ENVIRONMENTS`).
 
     An engine that can't be told to stop is said, and stops on its own once
     idle (`LUP_ENGINE_IDLE`).
@@ -2581,6 +2582,10 @@ def scrapped(worktree: Path, runner: Runner) -> None:
     store = Layout.of(settings).store(worktree).home
     if store.exists():
         shutil.rmtree(store)
+    if settings.lup_environments is not None:
+        made = environment(settings.lup_environments, worktree)
+        if made.is_dir():
+            shutil.rmtree(made)
 
 
 @app.command("trust")
