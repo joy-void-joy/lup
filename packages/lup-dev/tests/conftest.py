@@ -463,6 +463,9 @@ class FakeRuntime(Runtime):
     def inside(self) -> bool:
         return self.within
 
+    def fits(self) -> int:
+        return 10_000
+
     def settings(self) -> PurePosixPath:
         return PurePosixPath(f".{self.called}")
 

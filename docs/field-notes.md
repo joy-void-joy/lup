@@ -534,6 +534,14 @@ What the judge (`docs/judging-writes.md`) rests on, measured on the operator's m
 - **The operator saw only `AGENTS.md` held in the review,** though the hold's item covers both files. This is unexplained so far.
 - **`git worktree remove` of a landed worker's worktree, from the room,** asked nothing. `git branch -d` warned that it couldn't write git's config, which is read-only in a room, and deleted the branch anyway.
 
+## What the post-call report said (lup's kept transcripts, 2026-10-20 to 25, measured 2026-10-25)
+
+Every `additionalContext` lup's hooks told in the Claude Code conversations kept since 2026-10-20 (about forty, nearly all subagents), each read whole from the file Claude Code saved it to where it was too long, before told-once:
+- **390 post-call reports, 4.9 MB;** 84 were past the 10,000-character cap, so Claude Code saved each to a file behind a 2 KB preview the model isn't asked to read.
+- **By section, of 4.3 MB of finding lines:** type errors in files importing what changed 3.2 MB, 85% of it told to the same conversation before (same file, line, column, rule and message); type errors and ruff's findings in the files changed 1.1 MB, 23% told before at the same line; lup's findings on the lines changed 33 KB, none told before; lup's findings on lines no change touched 21 KB, 46% told before.
+- **The worst conversation,** a worker moving an API across about sixty files (#113's step 1): 68 reports, 3.3 MB, 41 past the cap, 87% of its finding lines told before.
+- **lup's own findings were never past the preview:** they come first. The changed files' type errors often were.
+
 ## Package age gates (2026-10-12)
 
 - uv's `exclude-newer` accepts "3 days" (`UV_EXCLUDE_NEWER`);

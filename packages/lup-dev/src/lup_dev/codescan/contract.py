@@ -38,12 +38,16 @@ class Span(Model):
     end: Position
 
 
+type Owner = Literal["lup", "pyright", "ruff"]
+"""Who reports a finding: lup's rules, pyright's types, or ruff."""
+
+
 class Finding(Model):
     """One thing a checker reports in a file."""
 
     path: Path
     span: Span
-    owner: Literal["lup", "pyright", "ruff"]
+    owner: Owner
     rule: str
     """The rule's id.
 

@@ -22,7 +22,8 @@ The homes:
 - inside a worktree, `.lup/saved/`, where a refused version waits for the agent;
 - inside a repository's own git directory, `lup/passes/`, the gate's passes,
   which its worktrees and their rooms share, and which outlast a room's session
-  as lup's state there doesn't;
+  as lup's state there doesn't; and `lup/reports/`, the judge's reports too
+  long for a hook, kept whole where every room reads them;
 - inside `lup_dev`, the built engine (`Bundle`).
 """
 
@@ -296,6 +297,11 @@ class GitDirectoryLayout(Model):
     def due(self) -> Path:
         """The deferred work the gate last found due, which a session is told at its start (`codescan.contract.Due`)."""
         return self.common / "lup" / "due.json"
+
+    @property
+    def reports(self) -> Path:
+        """The judge's reports too long for a hook to tell whole, each kept whole in a file of its own, which the shortened report names (`policy.report.Reports`); in the git directory, so a report spanning several worktrees has one home every room reads."""
+        return self.common / "lup" / "reports"
 
 
 class PackageLayout(Model):

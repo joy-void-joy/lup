@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from pathlib import PurePosixPath
 
 
+# lup: ignore("interface-shape", why="the judge's one view of a runtime: four facts it reads of it, each a line; split, one runtime would fill two seams")
 class Runtime(ABC):
     """One agent runtime, as the judge sees it."""
 
@@ -26,6 +27,10 @@ class Runtime(ABC):
         It reads the variables the runtime sets in the commands it runs, so that an
         agent can't answer its own hold by mistake.
         """
+
+    @abstractmethod
+    def fits(self) -> int:
+        """Return the most a hook's answer tells the model whole, in bytes of UTF-8: past it, the runtime keeps the text in a file the model isn't asked to read."""
 
     @abstractmethod
     def settings(self) -> PurePosixPath:

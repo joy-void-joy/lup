@@ -29,7 +29,7 @@ isn't judged here.
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Literal, override
+from typing import TYPE_CHECKING, Literal, override
 
 from lup.types import Model
 from lup_dev.git import Git
@@ -37,8 +37,10 @@ from lup_dev.inbox.store import ChangedFile
 from lup_dev.policy.checkpoint import (
     Attributed,
     Bench,
+    Checked,
     Mail,
     Pending,
+    Session,
     Worktree,
     decoded,
     holding,
@@ -49,15 +51,19 @@ from lup_dev.policy.flags import Landed, Put, flagged
 from lup_dev.policy.holds import HeldFile, Hold, answered, outcome, unified
 from lup_dev.policy.judge import Ask, Change, Judgement
 from lup_dev.policy.report import (
+    Look,
+    Part,
     Refused,
     approval,
     information,
     placed,
     refusal,
-    sections,
 )
 from lup_dev.policy.store import Held
 from lup_dev.policy.worktrees import place
+
+if TYPE_CHECKING:
+    from lup_dev.codescan.contract import Finding
 
 
 class Proposal(Model, ABC):
@@ -135,17 +141,31 @@ class Decision(Model):
     empty for a plain allow."""
     told: str = ""
     """What the agent is told beside a write let through: lup's findings in it,
-    its type errors and ruff's, as a checkpoint reports them. They're told with
-    the call, as it's judged, since the checkpoint after it waits while another
-    call of the session runs (#86); that checkpoint tells them no more."""
+    its type errors and ruff's, as a checkpoint reports them, those its
+    conversation wasn't told yet. They're told with the call, as it's judged,
+    since the checkpoint after it waits while another call of the session runs
+    (#86); that checkpoint tells them no more."""
 
 
-def told(root: Path, judgement: Judgement) -> str:
-    """Say what a write's judgement found, its files named from `root`, as a checkpoint reports it; nothing where it found nothing."""
+def told(
+    record: Session, agent: str, root: Path, judgement: Judgement, content: str
+) -> list[Part]:
+    """Say what a write's judgement found in `content`, its files named from `root`, as a checkpoint reports it: what conversation `agent` wasn't told yet, which `record` remembers it told (`Session.news`); nothing where that's nothing."""
+    look = Look(
+        path=judgement.path,
+        owners=["lup", "pyright", "ruff"],
+        findings=[*judgement.findings, *judgement.information, *judgement.untouched],
+        content=content,
+    )
+    new = dict.fromkeys(record.news(agent, [look]))
+
+    def kept(found: list[Finding]) -> list[Finding]:
+        return placed(root, [each for each in found if each in new])
+
     return information(
-        placed(root, judgement.findings),
-        placed(root, judgement.information),
-        placed(root, judgement.untouched),
+        kept(judgement.findings),
+        kept(judgement.information),
+        kept(judgement.untouched),
         [],
     )
 
@@ -231,6 +251,7 @@ def before(
         logged = None if judgement.outcome == "ask" else verdict(bench, to, judgement)
         writer = agent or ""
         gathering = path in record.flagging.get(writer, [])
+        found: list[Part] = []
         if logged is not None:
             pending = Pending(
                 call=proposal.call,
@@ -242,6 +263,7 @@ def before(
             record.pending = [*record.pending, pending]
             record.waiting(services.clock.now())
             record.flagged(writer, [path] if judgement.flags else [])
+            found = told(record, writer, worktree.root, judgement, after)
             worktree.keep(record)
     if logged is None:
         return held_write(
@@ -274,8 +296,9 @@ def before(
         else Put()
     )
     unflag(bench, worktree, session, writer, put.read)
+    unsaid = [Part(whole=said) for said in put.unsaid]
     return Decision(
-        outcome="allow", told=sections([told(worktree.root, judgement), *put.unsaid])
+        outcome="allow", told=bench.said(held.repository, [*found, *unsaid])
     )
 
 
@@ -395,8 +418,11 @@ def held_write(
                     record.waiting(services.clock.now())
                     record.approved = list(dict.fromkeys([*record.approved, path]))
                 said = approval([where / path], answer.comment)
+                found = told(record, agent or "", where, judgement, after)
                 decision = Decision(
-                    outcome="allow", reason=said, told=told(where, judgement)
+                    outcome="allow",
+                    reason=said,
+                    told=bench.said(worktree.repository, found),
                 )
             else:
                 number = state.saved + 1
@@ -410,7 +436,7 @@ def held_write(
                 )
                 state.saved = number
                 if interrupted:
-                    mail = Mail(agent=agent or "", text=refusal([refused]))
+                    mail = Mail(agent=agent or "", checked=Checked(refused=[refused]))
                     record.mail = [*record.mail, mail]
                 decision = Decision(outcome="deny", reason=refusal([refused]))
             store.remember(state)
