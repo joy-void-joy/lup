@@ -251,6 +251,10 @@ class Poetry(Runner):
         return ["poetry.lock"]
 
     @override
+    def venv(self) -> Path | None:
+        return Path(".venv")
+
+    @override
     def room(self, root: Path, tools: Tools) -> RoomNeeds:
         return RoomNeeds()
 
@@ -288,6 +292,7 @@ def test_what_judging_reads_is_kept_as_json_whatever_classes_the_project_brings(
     ]
     assert kept.runner.command(["pytest"]) == ["poetry", "run", "pytest"]
     assert kept.runner.environment() == ["poetry.lock"]
+    assert kept.runner.venv() == Path(".venv")
     assert declaration.source == Path("lup_project.py")
     assert "episodes/**" in declaration.paths.protected
     assert declaration.conditions == ["audiobook.conditions"]

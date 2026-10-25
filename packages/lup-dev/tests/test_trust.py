@@ -1657,6 +1657,9 @@ class Marking(Runner):
     def environment(self) -> list[str]:
         return []
 
+    def venv(self) -> Path | None:
+        return None
+
     def room(self, root: Path, tools: Tools) -> RoomNeeds:
         return RoomNeeds()
 

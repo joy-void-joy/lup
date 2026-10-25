@@ -1,14 +1,16 @@
-"""How a project runs its tools, for the gate, the judge and the room: `Runner`, and `Plain` for a project with no environment manager.
+"""How a project runs its tools, for the gate and the room, and where its environment is, for the judge: `Runner`, and `Plain` for a project with no environment manager.
 
 Everything that runs a tool in the project's environment derives its command from
 the project's runner (`docs/declaration.md`, *The runner*); lup's default, `Uv`,
 is uv's, beside the rest of what lup knows of uv
-(`lup_dev.declaration.package_managers.uv`). Two commands, since the
-gate may make and sync the environment, while the judge must never write the
-project's files, `uv.lock` among them. A runner brings its own requirements, so a
-project whose runner is `Plain()` needs no uv. It also says what a room mounts so
-the environment works inside it, the one environment shared with the host
-(`docs/launch.md`, *The project's environment, shared with the host*).
+(`lup_dev.declaration.package_managers.uv`). Two commands, since the gate may make
+and sync the environment, while a gate run on a commit must never write the
+project's files, `uv.lock` among them. The host never runs a project's
+environment: the judge reads it as files, from the directory the runner names
+(`venv`). A runner brings its own requirements, so a project whose runner is
+`Plain()` needs no uv. It also says what a room mounts so the environment works
+inside it, the one environment shared with the host (`docs/launch.md`, *The
+project's environment, shared with the host*).
 """
 
 from abc import ABC, abstractmethod
@@ -47,18 +49,18 @@ class RoomNeeds(Model):
     none for a runner with no environment of its own."""
 
 
-# lup: ignore("interface-shape", why="`docs/launch.md` puts `room()` on the runner beside its three commands, so a project's own runner must say what a room mounts for its environment")
+# lup: ignore("interface-shape", why="`docs/declaration.md` puts `venv()` and `room()` on the runner beside its commands and files, so a project's own runner must say where the judge reads its environment and what a room mounts for it")
 class Runner(Model, ABC):
-    """How a project runs its tools in its environment, and what a room needs for it.
+    """How a project runs its tools in its environment, where that environment is, and what a room needs for it.
 
     Its contract: a runner runs a tool by putting its own command before it, as
     `uv run`, `poetry run` and `conda run -n …` do. `command(tool)` is
     `command([])` followed by `tool`, and `judging(tool)` is `judging([])`
     followed by `tool`. The judge keeps a declaration it read as plain data, to
     stand in for one that can't load, so it keeps a project's runner as those
-    commands and its environment's files (`Prefixed`) rather than as its class: a
-    runner that rewrote the tool itself would be judged with other commands than
-    it gives.
+    commands, its environment's directory and its files (`Prefixed`) rather than
+    as its class: a runner that rewrote the tool itself would be run with other
+    commands than it gives.
     """
 
     requirements: ClassVar[list[Requirement]] = []
@@ -71,11 +73,27 @@ class Runner(Model, ABC):
 
     @abstractmethod
     def judging(self, tool: list[str]) -> list[str]:
-        """Return the command the judge runs `tool` with: it never writes the project's files."""
+        """Return the command a gate run on a commit runs `tool` with: it never writes the project's files.
+
+        `lup-dev check --at` runs the commit's own gate so, in the room, for a
+        push and for `land`'s merge (`lup_dev.gate`, `at_commit`).
+        """
 
     @abstractmethod
     def environment(self) -> list[str]:
         """List the files, from the root, whose change means another environment."""
+
+    @abstractmethod
+    def venv(self) -> Path | None:
+        """Return the directory of the project's virtual environment, from the worktree's root or absolute; none where it has none.
+
+        It holds the environment's `pyvenv.cfg` and its `site-packages`, as
+        `python -m venv`, uv and poetry's in-project environments do. The judge
+        reads it as files, on the host, and never runs anything in it: the engine
+        gives pyright its `site-packages`, the paths its `.pth` files list, and the
+        Python its `pyvenv.cfg` records. This is the host's answer; a room's own
+        environment would be said by what `room()` returns.
+        """
 
     @abstractmethod
     def room(self, root: Path, tools: Tools) -> RoomNeeds:
@@ -89,8 +107,11 @@ class Runner(Model, ABC):
 class Plain(Runner):
     """Each tool as the `PATH` finds it, for a project with no environment manager.
 
-    >>> Plain().command(["pytest"]), Plain().environment()
-    (['pytest'], [])
+    With no environment of its own, the judge reads the project's own files and
+    the standard library's stubs alone.
+
+    >>> Plain().command(["pytest"]), Plain().environment(), Plain().venv()
+    (['pytest'], [], None)
     """
 
     @override
@@ -106,41 +127,51 @@ class Plain(Runner):
         return []
 
     @override
+    def venv(self) -> Path | None:
+        return None
+
+    @override
     def room(self, root: Path, tools: Tools) -> RoomNeeds:
         """Mount nothing: the tools on the room's `PATH` are the image's own."""
         return RoomNeeds()
 
 
 class Prefixed(Runner):
-    """A runner kept as the commands it puts before a tool, and its files.
+    """A runner kept as the commands it puts before a tool, its environment's directory, and its files.
 
     It's how the judge holds a project's runner, which may be a class of the
     project's own that the judge's kept data can't bring back. By `Runner`'s
-    contract those commands are the whole of a runner, so the judge runs each
-    tool as the project's runner gives it, a stand-in declaration's included.
+    contract those commands are the whole of a runner, so each tool runs as the
+    project's runner gives it, and the judge reads the environment it names, a
+    stand-in declaration's included.
 
     >>> from lup_dev.declaration.package_managers.uv import Uv
     >>> kept = Prefixed.of(Uv())
     >>> kept.judging(["ruff"]) == Uv().judging(["ruff"])
     True
-    >>> kept.environment() == Uv().environment()
-    True
+    >>> kept.environment() == Uv().environment(), kept.venv() == Uv().venv()
+    (True, True)
     """
 
     gate: list[str]
     """What the gate puts before a tool: the runner's `command([])`."""
     judge: list[str]
-    """What the judge puts before a tool: the runner's `judging([])`."""
+    """What a gate run on a commit puts before a tool: the runner's `judging([])`."""
     files: list[str]
     """The files, from the root, whose change means another environment."""
+    directory: Path | None = None
+    """The environment's directory, the runner's `venv()`. A declaration kept
+    before runners named one has none, so it's judged with no environment until a
+    declaration loads."""
 
     @classmethod
     def of(cls, runner: Runner) -> Prefixed:
-        """Keep `runner` as the commands it puts before a tool, and its files."""
+        """Keep `runner` as the commands it puts before a tool, its environment's directory, and its files."""
         return cls(
             gate=runner.command([]),
             judge=runner.judging([]),
             files=runner.environment(),
+            directory=runner.venv(),
         )
 
     @override
@@ -154,6 +185,10 @@ class Prefixed(Runner):
     @override
     def environment(self) -> list[str]:
         return self.files
+
+    @override
+    def venv(self) -> Path | None:
+        return self.directory
 
     @override
     def room(self, root: Path, tools: Tools) -> RoomNeeds:

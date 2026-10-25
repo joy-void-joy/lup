@@ -1,10 +1,10 @@
 // lup's typed engine (`docs/judging-writes.md`, *The engine: one typed tree*).
 //
-//   start --root R --socket S --idle-seconds N --interpreter I --environment-files F --log L
+//   start --root R --socket S --idle-seconds N --venv V --environment-files F --log L
 //       Make sure an engine serves the worktree R on socket S: return at once if one
 //       answers there, otherwise start one detached, logging to L, and return once it
 //       listens. Hooks run this; the engine outlives them.
-//   serve --root R --socket S --idle-seconds N --interpreter I --environment-files F
+//   serve --root R --socket S --idle-seconds N --venv V --environment-files F
 //       Be that engine, in the foreground.
 //   rules
 //       Print lup's rules (id, mistake, steer, examples) as JSON: every rule of the
@@ -17,9 +17,10 @@
 //       JSON list of `{path, content}` on its input, and each file's report printed
 //       as JSON, in the same order.
 //
-// I and F are JSON lists of strings, from the project's runner: the command running
-// the worktree's Python, which the engine runs to name its interpreter, and the
-// files, from the root, whose change means another environment.
+// V and F are JSON, from the project's runner: the directory of the worktree's
+// virtual environment, which the engine reads as files, from the root or absolute,
+// or null for none; and a list of the files, from the root, whose change means
+// another environment.
 //
 // The engine's build is identified by its bundle's size and modification time,
 // which the client reads from the same file.
@@ -46,7 +47,22 @@ interface Arguments {
     log: string;
 }
 
-// A JSON list of strings, as the client passes the runner's command and files.
+// A JSON string, or null, as the client passes the runner's environment.
+function stringOrNull(name: string, text: string): string | null {
+    const refused = () => new Error(`--${name} takes a JSON string or null, not ${JSON.stringify(text)}`);
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(text);
+    } catch {
+        throw refused();
+    }
+    if (parsed !== null && typeof parsed !== 'string') {
+        throw refused();
+    }
+    return parsed;
+}
+
+// A JSON list of strings, as the client passes the runner's files.
 function strings(name: string, text: string): string[] {
     const refused = () => new Error(`--${name} takes a JSON list of strings, not ${JSON.stringify(text)}`);
     let parsed: unknown;
@@ -86,8 +102,8 @@ function parse(argv: string[]): Arguments {
         socket: alone ? '' : need('socket'),
         idleSeconds: alone ? 0 : Number(need('idle-seconds')),
         environment: alone
-            ? { interpreter: [], files: [] }
-            : { interpreter: listed('interpreter'), files: listed('environment-files') },
+            ? { venv: null, files: [] }
+            : { venv: stringOrNull('venv', need('venv')), files: listed('environment-files') },
         log: command === 'start' ? need('log') : '',
     };
 }
@@ -187,8 +203,8 @@ async function start(args: Arguments) {
             args.socket,
             '--idle-seconds',
             String(args.idleSeconds),
-            '--interpreter',
-            JSON.stringify(args.environment.interpreter),
+            '--venv',
+            JSON.stringify(args.environment.venv),
             '--environment-files',
             JSON.stringify(args.environment.files),
         ],

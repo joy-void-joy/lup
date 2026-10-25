@@ -104,8 +104,10 @@ class Uv(Runner):
 
     >>> Uv().command(["ruff", "check"])
     ['uv', 'run', 'ruff', 'check']
-    >>> Uv().judging(["python"])
-    ['env', '-u', 'VIRTUAL_ENV', 'uv', 'run', '--frozen', '--quiet', 'python']
+    >>> Uv().judging(["lup-dev", "check"])
+    ['env', '-u', 'VIRTUAL_ENV', 'uv', 'run', '--frozen', '--quiet', 'lup-dev', 'check']
+    >>> Uv().venv()
+    PosixPath('.venv')
     """
 
     requirements = [
@@ -125,15 +127,24 @@ class Uv(Runner):
     def judging(self, tool: list[str]) -> list[str]:
         """Return `tool` run where uv puts the project, without relocking or syncing.
 
-        `--frozen` reads `uv.lock` without relocking, so the judge never writes
-        it, and `VIRTUAL_ENV` is unset so the judge's own environment, which it
-        inherits, isn't taken for the project's.
+        `--frozen` reads `uv.lock` without relocking, so a gate run on a commit
+        never writes it, and `VIRTUAL_ENV` is unset so the environment of the
+        session running it isn't taken for the commit's.
         """
         return ["env", "-u", "VIRTUAL_ENV", "uv", "run", "--frozen", "--quiet", *tool]
 
     @override
     def environment(self) -> list[str]:
         return ["pyproject.toml", "uv.toml", "uv.lock", ".python-version"]
+
+    @override
+    def venv(self) -> Path | None:
+        """Return `.venv`, where `uv run` makes the project's environment.
+
+        A `UV_PROJECT_ENVIRONMENT` in the host's variables, which moves it for the
+        host's own `uv run`, isn't read: the judge reads `.venv`.
+        """
+        return Path(".venv")
 
     @override
     def room(self, root: Path, tools: Tools) -> RoomNeeds:

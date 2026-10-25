@@ -2237,6 +2237,9 @@ class Poetry(Runner):
     def environment(self) -> list[str]:
         return ["poetry.lock"]
 
+    def venv(self) -> Path | None:
+        return Path(".venv")
+
     def room(self, root: Path, tools: Tools) -> RoomNeeds:
         return RoomNeeds()
 

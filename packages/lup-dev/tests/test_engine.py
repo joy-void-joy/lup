@@ -6,11 +6,11 @@ stops when told, a test that needs another build gives it another bundle, and uv
 which gives each project its environment, runs offline (`offline_uv`).
 """
 
+import importlib.util
 import os
 import re
 import shutil
 import sys
-import sysconfig
 import tempfile
 import threading
 from datetime import timedelta
@@ -129,6 +129,57 @@ def short() -> Iterator[Path]:
     shutil.rmtree(directory, ignore_errors=True)
 
 
+SHARED = [
+    "annotated_doc",
+    "annotated_types",
+    "click",
+    "dotenv",
+    "lup",
+    "packaging",
+    "pydantic",
+    "pydantic_core",
+    "pydantic_settings",
+    "rich",
+    "shellingham",
+    "typer",
+    "typing_extensions",
+    "typing_inspection",
+]
+"""What the rules' examples import from the packages the tests run with, and what
+those import in turn for their types."""
+
+
+def linked_or_copied(source: str, destination: str) -> None:
+    """Link a file where it can be, as uv installs a package, else copy it."""
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copy2(source, destination)
+
+
+def shared(site: Path) -> None:
+    """Install the packages the examples import in the environment holding `site`.
+
+    The engine reads nothing outside the worktree and its environment, so a
+    `.pth` file naming the running environment's packages would be left out:
+    each is put inside, as an installer puts it.
+    """
+    for name in SHARED:
+        spec = importlib.util.find_spec(name)
+        assert spec is not None, f"{name} isn't installed"
+        assert spec.origin is not None, f"{name} has no file"
+        origin = Path(spec.origin)
+        if spec.submodule_search_locations:
+            shutil.copytree(
+                origin.parent,
+                site / name,
+                copy_function=linked_or_copied,
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+        else:
+            linked_or_copied(str(origin), str(site / origin.name))
+
+
 def make_project(
     base: Path, runtime: Path, uv: Uv, bundle: Bundle | None = None
 ) -> Project:
@@ -138,11 +189,8 @@ def make_project(
     (root / "example" / "__init__.py").write_text('"""Examples."""\n')
     uv.lock(root)
     uv.sync(root)
-    # The examples import what the tests run with (lup's packages, pydantic, sh), so
-    # the project's environment reads the running one's packages too.
     [site] = (root / ".venv" / "lib").glob("python*/site-packages")
-    running = sysconfig.get_paths()["purelib"]
-    (site / "_running.pth").write_text(f"import site; site.addsitedir({running!r})\n")
+    shared(site)
     return Project(root, engine_for(runtime, base / "state", bundle))
 
 
@@ -637,16 +685,14 @@ def uv_workspace(root: Path, held: str, uv: Uv) -> None:
     uv.lock(root)
 
 
-def test_the_engine_reads_the_environment_uv_gives_the_worktree(
+def test_the_engine_reads_the_environment_uv_makes_in_the_worktree_never_the_sessions(
     tmp_path: Path, short: Path, offline_uv: Uv, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     in_session(tmp_path / "dev", monkeypatch)
     root = tmp_path / "branch"
     uv_workspace(root, RELEASING, offline_uv)
-    # Where the worktree's environment lives is uv's to say: here, not `.venv`.
-    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(tmp_path / "environment"))
     offline_uv.sync(root)
-    engine = engine_for(short / "elsewhere", tmp_path / "state")
+    engine = engine_for(short / "made", tmp_path / "state")
     try:
         [report] = engine.check(root, [CALLING], EVERY)
         assert pyright(report) == []
@@ -654,7 +700,7 @@ def test_the_engine_reads_the_environment_uv_gives_the_worktree(
         engine.stop(root)
 
 
-def test_a_missing_environment_is_made_rather_than_borrowed(
+def test_a_missing_environment_is_none_never_made_nor_borrowed(
     tmp_path: Path, short: Path, offline_uv: Uv, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     in_session(tmp_path / "dev", monkeypatch)
@@ -663,128 +709,264 @@ def test_a_missing_environment_is_made_rather_than_borrowed(
     engine = engine_for(short / "missing", tmp_path / "state")
     try:
         [report] = engine.check(root, [CALLING], EVERY)
+        # pyright finds the worktree's own `pkg` beside the file importing it, not
+        # the session's, which lacks the method.
         assert pyright(report) == []
-        assert (root / ".venv" / "pyvenv.cfg").is_file()
-        # Removed under a running engine, it's made again at the next check.
-        shutil.rmtree(root / ".venv")
-        [report] = engine.check(root, [CALLING], EVERY)
-        assert pyright(report) == []
-        assert (root / ".venv" / "pyvenv.cfg").is_file()
+        assert not (root / ".venv").exists()
     finally:
         engine.stop(root)
 
 
-def test_a_new_lock_is_synced_before_the_next_check(
-    tmp_path: Path, short: Path, offline_uv: Uv
+EXTRA = Source(
+    path=Path("packages/pkg/src/pkg/using.py"),
+    content=DOCSTRING + "from extra import EXTRA\n\nVALUE = EXTRA\n",
+)
+"""A module importing a package its environment alone has."""
+
+
+def test_a_package_installed_under_a_running_engine_is_read_at_the_next_check(
+    tmp_path: Path, short: Path
 ) -> None:
     root = tmp_path / "branch"
-    uv_workspace(root, RELEASING, offline_uv)
-    engine = engine_for(short / "relocked", tmp_path / "state")
+    environment(root / ".venv", workspace(root, RELEASING))
+    engine = engine_for(short / "installed", tmp_path / "state")
     try:
         engine.check(root, [CALLING], EVERY)
-        # A package arrives with the lock naming it, as a merge brings them, and
-        # nothing syncs the environment.
-        extra = root / "packages" / "extra"
-        (extra / "src" / "extra").mkdir(parents=True)
-        (extra / "src" / "extra" / "__init__.py").write_text(DOCSTRING + "EXTRA = 1\n")
-        (extra / "src" / "extra" / "py.typed").write_text("")
-        member(extra)
-        offline_uv.lock(root)
-        using = DOCSTRING + "from extra import EXTRA\n\nVALUE = EXTRA\n"
-        source = Source(path=Path("packages/pkg/src/pkg/using.py"), content=using)
-        [report] = engine.check(root, [source], EVERY)
+        # A package arrives installed editable, as uv installs one: a `.pth` file
+        # naming its source.
+        extra = root / "packages" / "extra" / "src"
+        (extra / "extra").mkdir(parents=True)
+        (extra / "extra" / "__init__.py").write_text(DOCSTRING + "EXTRA = 1\n")
+        (extra / "extra" / "py.typed").write_text("")
+        [site] = (root / ".venv" / "lib").glob("python*/site-packages")
+        (site / "_extra.pth").write_text(str(extra))
+        [report] = engine.check(root, [EXTRA], EVERY)
         assert pyright(report) == []
     finally:
         engine.stop(root)
 
 
-def test_where_uv_gives_no_environment_the_engine_says_why(
-    tmp_path: Path, short: Path, offline_uv: Uv
+def says_it_ran(program: Path, ran: Path) -> None:
+    """Make `program` a script noting each run in `ran`."""
+    program.unlink(missing_ok=True)
+    program.write_text(f"#!/bin/sh\necho {program.name} >> {ran}\nexit 1\n")
+    program.chmod(0o755)
+
+
+def test_the_engine_runs_nothing_of_the_environments_whatever_it_finds_there(
+    tmp_path: Path, short: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root = tmp_path / "unlocked"
-    workspace(root, HOLDING)
-    engine = engine_for(short / "unlocked", tmp_path / "state")
+    ran = tmp_path / "ran"
+    root = tmp_path / "branch"
+    environment(root / ".venv", workspace(root, RELEASING))
+    # Its interpreter notes each run, and so does a `.pth` file's `import` line,
+    # which Python runs at its start.
+    for each in (root / ".venv" / "bin").glob("python*"):
+        says_it_ran(each, ran)
+    [site] = (root / ".venv" / "lib").glob("python*/site-packages")
+    (site / "_run.pth").write_text(f"import os; os.system('echo pth >> {ran}')\n")
+    # Another environment has no `site-packages`, where pyright otherwise asks the
+    # Python on the `PATH` for its search path; that Python notes its runs too.
+    bare = tmp_path / "bare"
+    environment(bare / ".venv", workspace(bare, RELEASING))
+    shutil.rmtree(bare / ".venv" / "lib")
+    path = tmp_path / "path"
+    path.mkdir()
+    for name in ["python", "python3"]:
+        says_it_ran(path / name, ran)
+    monkeypatch.setenv("PATH", f"{path}{os.pathsep}{os.environ['PATH']}")
+    engine = engine_for(short / "nothing", tmp_path / "state")
     try:
-        with pytest.raises(
-            EngineError,
-            match=(
-                r"(?s)the runner gave .* no environment: "
-                r"`env -u VIRTUAL_ENV uv run --frozen --quiet python` exited .*`uv\.lock`"
-            ),
-        ):
+        [report] = engine.check(root, [CALLING], EVERY)
+        assert pyright(report) == []
+        [report] = engine.check(bare, [CALLING], EVERY)
+        assert pyright(report) == []
+    finally:
+        engine.stop(root)
+        engine.stop(bare)
+    assert not ran.exists()
+
+
+VERSIONED = """\
+[tool.pyright]
+typeCheckingMode = "strict"
+include = ["packages"]
+"""
+OVERRIDING = Source(
+    path=Path("packages/pkg/src/pkg/overriding.py"),
+    content=DOCSTRING + "from typing import override\n\nUSED = override\n",
+)
+
+
+@pytest.mark.parametrize("key", ["version_info", "version"])
+def test_the_python_is_the_environments_where_the_configuration_names_none(
+    tmp_path: Path, short: Path, key: str
+) -> None:
+    root = tmp_path / "branch"
+    environment(root / ".venv", workspace(root, RELEASING))
+    (root / "pyproject.toml").write_text(VERSIONED)
+    configuration = root / ".venv" / "pyvenv.cfg"
+    recorded = configuration.read_text()
+    # uv and virtualenv record `version_info`; `python -m venv`, `version`.
+    configuration.write_text(f"home = /usr/bin\n{key} = 3.11.9\n")
+    engine = engine_for(short / f"versioned-{key}", tmp_path / "state")
+    try:
+        # `typing.override` is Python 3.12's.
+        [report] = engine.check(root, [OVERRIDING], EVERY)
+        assert any(
+            '"override" is unknown import symbol' in each for each in pyright(report)
+        )
+        # The environment made again on another Python is another program.
+        configuration.write_text(recorded)
+        [report] = engine.check(root, [OVERRIDING], EVERY)
+        assert pyright(report) == []
+    finally:
+        engine.stop(root)
+
+
+SECRET = DOCSTRING + 'TOKEN = "s3cret"\nHOST = 1\n'
+LEAKING = Source(
+    path=Path("packages/pkg/src/pkg/leaking.py"),
+    content=(
+        DOCSTRING
+        + "from listed import TOKEN\n"
+        + "from linked import TOKEN as LINKED\n"
+        + "from linkedpkg import HOST\n"
+        + "from through64 import TOKEN as THROUGH\n"
+        + "from pkg.planted import TOKEN as PLANTED\n"
+        + "from pkg.held import Holding\n\n"
+        + "WRONG: int = TOKEN\n"
+    ),
+)
+
+
+def test_the_engine_reads_nothing_the_worktree_or_its_environment_links_to_elsewhere(
+    tmp_path: Path, short: Path
+) -> None:
+    host = tmp_path / "host"
+    (host / "linkedpkg").mkdir(parents=True)
+    for name in ["listed.py", "secret.py", "linkedpkg/__init__.py"]:
+        (host / name).write_text(SECRET)
+    (host / "lib" / "python3.14" / "site-packages").mkdir(parents=True)
+    (host / "lib" / "python3.14" / "site-packages" / "through64.py").write_text(SECRET)
+    root = tmp_path / "branch"
+    source = workspace(root, RELEASING)
+    environment(root / ".venv", source)
+    [site] = (root / ".venv" / "lib").glob("python*/site-packages")
+    # A `.pth` line naming a directory elsewhere, a module and a package linked
+    # there, and `lib64` linked to another library.
+    (site / "_host.pth").write_text(str(host))
+    (site / "linked.py").symlink_to(host / "secret.py")
+    (site / "linkedpkg").symlink_to(host / "linkedpkg", target_is_directory=True)
+    (root / ".venv" / "lib64").unlink(missing_ok=True)
+    (root / ".venv" / "lib64").symlink_to(host / "lib", target_is_directory=True)
+    # And a module of the worktree's own linked there.
+    (source / "pkg" / "planted.py").symlink_to(host / "secret.py")
+    engine = engine_for(short / "linked", tmp_path / "state")
+    try:
+        [report] = engine.check(root, [LEAKING], EVERY)
+        found = pyright(report)
+        for module in ["listed", "linked", "linkedpkg", "through64", "pkg.planted"]:
+            assert f'Import "{module}" could not be resolved' in " ".join(found)
+        assert not any("s3cret" in each for each in found)
+        with pytest.raises(EngineError, match="resolves outside the worktree"):
             engine.check(
-                root, [Source(path=Path("packages/pkg/src/pkg/held.py"))], EVERY
+                root, [Source(path=Path("packages/pkg/src/pkg/planted.py"))], EVERY
             )
     finally:
         engine.stop(root)
 
 
+def test_the_engines_parse_leaves_out_a_file_linking_out_of_the_worktree(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "branch"
+    root.mkdir()
+    noted = DOCSTRING + '# lup: note("s3cret")\nVALUE = 1\n'
+    (tmp_path / "host.py").write_text(noted)
+    (root / "own.py").write_text(noted)
+    (root / "linked.py").symlink_to(tmp_path / "host.py")
+    sources = [Source(path=Path("linked.py")), Source(path=Path("own.py"))]
+    linked, own = EngineParser().parsed(root, sources)
+    assert linked == FileReport(path=Path("linked.py"))
+    assert [type(each) for each in own.directives] == [Note]
+
+
 # Another runner.
 
 
-def test_with_plain_the_engine_reads_the_python_on_the_path(
+def test_with_plain_the_engine_reads_no_environment_and_runs_no_python(
     tmp_path: Path, short: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    ran = tmp_path / "ran"
     root = tmp_path / "plain"
-    found = environment(tmp_path / "environment", workspace(root, RELEASING))
+    workspace(root, RELEASING)
+    # The `PATH`'s Python, which notes its runs, has `extra` installed.
+    extra = tmp_path / "extra" / "src"
+    (extra / "extra").mkdir(parents=True)
+    (extra / "extra" / "__init__.py").write_text(DOCSTRING + "EXTRA = 1\n")
+    found = environment(tmp_path / "environment", extra)
+    for each in found.glob("python*"):
+        says_it_ran(each, ran)
     monkeypatch.setenv("PATH", f"{found}{os.pathsep}{os.environ['PATH']}")
     engine = engine_for(short / "plain", tmp_path / "state", runner=Plain())
     try:
-        [report] = engine.check(root, [CALLING], EVERY)
-        assert pyright(report) == []
+        [report] = engine.check(root, [EXTRA], EVERY)
+        assert 'reportMissingImports: Import "extra" could not be resolved' in pyright(
+            report
+        )
     finally:
         engine.stop(root)
+    assert not ran.exists()
 
 
 class Chosen(Runner):
-    """Each tool in the environment the worktree's `choice` file names, which decides
-    it: its own command, `script`, put before the tool, as a runner's is."""
+    """The environment at `directory`, which the worktree's `choice` file decides."""
 
-    script: Path
+    directory: Path
 
     @override
     def command(self, tool: list[str]) -> list[str]:
-        return self.judging(tool)
+        return tool
 
     @override
     def judging(self, tool: list[str]) -> list[str]:
-        return [str(self.script), *tool]
+        return tool
 
     @override
     def environment(self) -> list[str]:
         return ["choice"]
 
     @override
+    def venv(self) -> Path | None:
+        return self.directory
+
+    @override
     def room(self, root: Path, tools: Tools) -> RoomNeeds:
         return RoomNeeds()
 
 
-CHOOSE = """\
-#!/bin/sh
-PATH="$(cat "$(dirname "$0")/choice"):$PATH"
-export PATH
-exec "$@"
-"""
-"""Runs a tool with the directory `choice` names first on the `PATH`."""
-
-
-def test_a_file_the_runner_names_changing_builds_another_program(
+def test_the_engine_reads_the_environment_the_runner_names_and_reads_it_anew_when_its_files_change(
     tmp_path: Path, short: Path
 ) -> None:
     root = tmp_path / "chosen"
-    releasing = environment(tmp_path / "releasing", workspace(root, RELEASING))
-    holding = environment(tmp_path / "holding", workspace(tmp_path / "old", HOLDING))
-    script = root / "choose"
-    script.write_text(CHOOSE)
-    script.chmod(0o755)
-    (root / "choice").write_text(str(releasing))
+    releasing = workspace(root, RELEASING)
+    holding = workspace(root / "old", HOLDING)
+    # An environment outside the worktree, named by its absolute path.
+    elsewhere = tmp_path / "environments" / "chosen"
+    environment(elsewhere, releasing)
+    (root / "choice").write_text("releasing")
     engine = engine_for(
-        short / "chosen", tmp_path / "state", runner=Chosen(script=script)
+        short / "chosen", tmp_path / "state", runner=Chosen(directory=elsewhere)
     )
     try:
         [report] = engine.check(root, [CALLING], EVERY)
         assert pyright(report) == []
-        (root / "choice").write_text(str(holding))
+        # Its editable install moved elsewhere, a change the import search path's
+        # directories don't show; the runner's file changing does.
+        [site] = (elsewhere / "lib").glob("python*/site-packages")
+        (site / "_pkg.pth").write_text(str(holding))
+        (root / "choice").write_text("holding")
         [report] = engine.check(root, [CALLING], EVERY)
         assert any("release" in each for each in pyright(report))
     finally:

@@ -123,12 +123,12 @@ export interface ParsedSource {
     content: string;
 }
 
-// How the engine finds the worktree's environment, from the project's runner
-// (`EngineEnvironment` in `lup_dev/codescan/engine.py`): the command running the
-// environment's Python, which names the interpreter, and the files, from the root,
-// whose change means another environment.
+// Where the engine reads the worktree's environment, from the project's runner
+// (`EngineEnvironment` in `lup_dev/codescan/engine.py`): the virtual environment's
+// directory, from the root or absolute, null for none, and the files, from the
+// root, whose change means another environment.
 export interface Environment {
-    interpreter: string[];
+    venv: string | null;
     files: string[];
 }
 
