@@ -31,13 +31,13 @@ from lup_dev import (
     ProjectError,
     Room,
     Serving,
+    commanding,
 )
 from lup_dev.approval import Approval, ReleaseTool
-from lup_dev import commanding
 from lup_dev.cli import module_command
 from lup_dev.declaration.kinds import Folds, Mounted, Tones
-from lup_dev.declaration.serving import Operator
 from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.serving import Operator
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Limits, Register, Reply, Request

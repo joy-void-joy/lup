@@ -32,6 +32,7 @@ from filelock import Timeout as Held
 from pydantic import Field, TypeAdapter, ValidationError
 from typer.core import TyperGroup
 
+from lup.doors import served as methods
 from lup.errors import LupError
 from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.types import JsonObject, Model, MutableModel
@@ -39,7 +40,6 @@ from lup_dev import commanding
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import Adapter, claude, codex
-from lup.doors import served as methods
 from lup_dev.approval import approved
 from lup_dev.clipboard.desktop import Desktop
 from lup_dev.clipboard.protocol import routes as clipboard_routes

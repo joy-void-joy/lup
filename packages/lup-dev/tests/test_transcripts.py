@@ -10,21 +10,52 @@ from typing import TYPE_CHECKING
 import pytest
 from typer.testing import CliRunner
 
-from lup_dev import cli
+from lup_dev import Project, cli, commanding
 from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts, resulted
 from lup_dev.adapters.codex import CodexRecords, CodexTranscripts
+from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.serving import Operator
 from lup_dev.host.records import Call, Called, Entry, Said, Transcript
 from lup_dev.inbox.context import moment
+from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import Layout
 from lup_dev.settings import LupDevSettings
+from lup_dev.worker import RepositoryModules
 from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import typer
     from conftest import Shell
 
+    from lup.blocks import OfAgent
+
 runner = CliRunner()
+
+
+class Unexchanged(Exchanges):
+    """An inbox where no conversation exchanged any item."""
+
+    async def exchanged(self, viewed: OfAgent) -> Exchanged:
+        del viewed
+        return Exchanged(sent=[], received=[])
+
+
+def transcripts(repository: Path, exchanges: Exchanges) -> typer.Typer:
+    """Return `Transcripts`' commands, as the command line runs them for the repository at `repository`, reading each runtime's records as lup does."""
+    modules = RepositoryModules(
+        repository=repository,
+        resolved=resolve(Project()),
+        recorded=cli.recorded(),
+        layout=Layout.of(LupDevSettings()),
+        exchanges=exchanges,
+    )
+    return commanding.commands(
+        "transcripts", modules.resolved.served, modules.made, Operator
+    )
+
 
 AT = "2026-10-17T12:00:00.000Z"
 
@@ -171,12 +202,11 @@ def test_lup_dev_transcripts_reads_the_repositorys_kept_copies(
     folder = data / "claude" / "projects" / "-repo"
     folder.mkdir(parents=True)
     (folder / "s1.jsonl").write_text("\n".join(CLAUDE_SESSION) + "\n")
-    listed = runner.invoke(cli.app, ["transcripts", "list"])
-    shown = runner.invoke(cli.app, ["transcripts", "show", "lup-impl"])
-    found = runner.invoke(cli.app, ["transcripts", "search", "queue", "first"])
-    whole = runner.invoke(
-        cli.app, ["transcripts", "search", "queue", "first", "--whole"]
-    )
+    app = transcripts(common.resolve(), Unexchanged())
+    listed = runner.invoke(app, ["list"])
+    shown = runner.invoke(app, ["show", "lup-impl"])
+    found = runner.invoke(app, ["search", "queue", "first"])
+    whole = runner.invoke(app, ["search", "queue", "first", "--whole"])
     assert listed.exit_code == 0, listed.output
     assert "`lup-impl` (claude s1)  4 from you  in /w/lup.git/tree/dev" in listed.output
     assert "  you:\n    2->queue, yes\n" in shown.output

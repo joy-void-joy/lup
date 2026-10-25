@@ -41,11 +41,12 @@ from lup.programs import Ran, run
 from lup.rooms import Podman
 from lup.tools.serving import Answer as ToolAnswer
 from lup.tools.speaking import SPEAKING
-from lup_dev import Modules, Project, cli
+from lup_dev import Modules, Project, cli, commanding
 from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
 from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.runner import Uv
+from lup_dev.declaration.serving import Operator as OperatorAsker
 from lup_dev.declaration.serving import tools as module_tools
 from lup_dev.gate import Passed, Passes, Processes, Standing
 from lup_dev.gate import Ran as GateRan
@@ -191,6 +192,7 @@ from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.remote.protocol import Remotes
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
+from lup_dev.worker import HostExchanges, RepositoryModules
 from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
@@ -8565,13 +8567,8 @@ def test_lup_dev_transcripts_show_says_how_much_of_the_exchange_lups_inbox_holds
     shell: Shell,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repository = tmp_path / "repo"
-    repository.mkdir()
-    shell.git(repository, "init", "--quiet")
-    monkeypatch.chdir(repository)
-    kept = Layout.of(LupDevSettings()).module_data(
-        Transcripts.name, (repository / ".git").resolve()
-    )
+    common = tmp_path / "w" / ".git"
+    kept = Layout.of(LupDevSettings()).module_data(Transcripts.name, common)
     folder = kept / "claude" / "projects" / "-repo"
     folder.mkdir(parents=True)
     typed = {
@@ -8583,19 +8580,30 @@ def test_lup_dev_transcripts_show_says_how_much_of_the_exchange_lups_inbox_holds
     }
     for session in ["s1", "s7"]:
         (folder / f"{session}.jsonl").write_text(json.dumps(typed) + "\n")
+    modules = RepositoryModules(
+        repository=common,
+        resolved=resolve(Project()),
+        recorded=cli.recorded(),
+        layout=Layout.of(LupDevSettings()),
+        exchanges=HostExchanges(repository=common, layout=machine.host, clock=clock),
+    )
+    app = commanding.commands(
+        "transcripts", modules.resolved.served, modules.made, OperatorAsker
+    )
     with inboxed(machine, clock, notices, said):
         exchanged(machine, clock, tmp_path, Subagents(tmp_path))
-        shown = runner.invoke(cli.app, ["transcripts", "show", "s1"])
-        unheard = runner.invoke(cli.app, ["transcripts", "show", "s7"])
-    unserved = runner.invoke(cli.app, ["transcripts", "show", "s1"])
+        shown = runner.invoke(app, ["show", "s1"])
+        unheard = runner.invoke(app, ["show", "s7"])
+    unserved = runner.invoke(app, ["show", "s1"])
     assert shown.exit_code == 0, shown.output
     assert shown.output.endswith(
         "    Read the parser.\n\nIts exchange with you through lup, which this "
-        "leaves out, is 6 items in lup's inbox: `lup-dev inbox --conversation s1 "
+        "leaves out, is 7 items in lup's inbox: `lup-dev inbox --conversation s1 "
         "--every --whole` reads it.\n"
     )
     assert unheard.output.endswith("    Read the parser.\n")
-    assert unserved.output == shown.output.partition("\n\nIts exchange")[0] + "\n"
+    words = shown.output.partition("\n\nIts exchange")[0]
+    assert unserved.output.startswith(f"{words}\n\nlup's inbox wasn't asked")
 
 
 def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_name(

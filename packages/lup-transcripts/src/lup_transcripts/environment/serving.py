@@ -34,6 +34,7 @@ from lup.blocks import OfAgent
 from lup.types import Model
 from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Room
 from lup_dev.git import Git
+from lup_dev.host.protocol import HostError
 from lup_dev.inbox.context import Recording
 from lup_transcripts.environment import views
 from lup_transcripts.environment.conversation import (
@@ -151,14 +152,21 @@ class TranscriptsServing(ModuleServing):
         session through lup, your reviews and answers among it, and what it
         said to you, is its exchange in lup's inbox, which this leaves out:
         where the inbox holds some, the last line says how many items, and the
-        `lup-dev inbox --conversation` that reads them.
+        `lup-dev inbox --conversation` that reads them; where the host service
+        can't be asked, the last line says so.
         """
         del by
         chosen = views.chosen(await asyncio.to_thread(self.kept), asked.session)
         said = views.whole(chosen) if asked.everything else views.answered(chosen)
-        exchanged = await self.exchanges.exchanged(
-            OfAgent(runtime=chosen.runtime, session=chosen.session)
-        )
+        try:
+            exchanged = await self.exchanges.exchanged(
+                OfAgent(runtime=chosen.runtime, session=chosen.session)
+            )
+        except HostError as unasked:
+            return (
+                f"{said}\nlup's inbox wasn't asked for this session's exchange: "
+                f"{unasked}\n"
+            )
         items = len(exchanged.sent) + len(exchanged.received)
         if not items:
             return said
