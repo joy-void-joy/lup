@@ -52,12 +52,14 @@ from typing import TYPE_CHECKING, override
 
 from pydantic import TypeAdapter, ValidationError
 
+from lup.blocks import SHELL_TONES, Blocks, OfAgent
 from lup.doors import served
 from lup.events import Event, Publishing, events
 from lup.publishing import Place, Published, Refusal
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused
 from lup.types import Model
+from lup_dev.clock import Clock
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import Resolved, Served, resolve
 from lup_dev.declaration.serving import (
@@ -65,6 +67,7 @@ from lup_dev.declaration.serving import (
     Asker,
     Lup,
     ModuleServing,
+    Operator,
     Publisher,
     Related,
     Room,
@@ -76,6 +79,7 @@ from lup_dev.declaration.serving import (
     tools,
 )
 from lup_dev.errors import LupDevError
+from lup_dev.host.client import Detached, HostClient
 from lup_dev.host.protocol import HostError, Register, Reply
 from lup_dev.host.records import Records
 from lup_dev.host.service import Dispatcher, Handler, Reading, Route, unix_server
@@ -93,8 +97,13 @@ from lup_dev.host.workers import (
     Relayed,
     Relaying,
     Sent,
+    Viewed,
+    Viewing,
 )
-from lup_dev.layout import Layout
+from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.protocol import Exchanged, ListItems
+from lup_dev.inbox.store import Conversation as Party
+from lup_dev.layout import HostLayout, Layout
 from lup_dev.policy.checkpoint import Services, Worktree
 from lup_dev.private.withheld import related_of
 
@@ -170,6 +179,32 @@ class Answering(Model):
     name: str
 
 
+class HostExchanges(Model, Exchanges, arbitrary_types_allowed=True):
+    """The items as the host service holds them, for one repository's conversations."""
+
+    repository: Path
+    """The repository's git directory."""
+    layout: HostLayout
+    clock: Clock
+
+    @override
+    async def exchanged(self, viewed: OfAgent) -> Exchanged:
+        """Ask the host service, as `inbox-list-items` is asked, off the event loop.
+
+        Raise `HostError` where it can't be reached, saying why.
+        """
+        conversation = Party(
+            repository=self.repository,
+            runtime=viewed.runtime,
+            session=viewed.session,
+            agent=viewed.agent,
+        )
+        host = HostClient(layout=self.layout, clock=self.clock, starter=Detached())
+        return await asyncio.to_thread(
+            host.ask, ListItems(conversation=conversation), Exchanged
+        )
+
+
 class RepositoryModules(Model, arbitrary_types_allowed=True):
     """A repository's modules, as its declaration resolves them: what they serve, and each answer, for whichever of its launches asks."""
 
@@ -181,6 +216,8 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
     launch's hooks read its own runtime's."""
     layout: Layout
     """Where lup keeps its data, each module's own among it."""
+    exchanges: Exchanges
+    """Where its views read the items of lup's inbox a conversation exchanged."""
 
     @classmethod
     def loaded(
@@ -196,6 +233,11 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             resolved=resolve(load(root).project),
             records=records,
             layout=services.layout,
+            exchanges=HostExchanges(
+                repository=repository,
+                layout=services.layout.host,
+                clock=services.clock,
+            ),
         )
 
     def related(self) -> list[Related]:
@@ -230,6 +272,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             related=self.related(),
             records=self.records,
             publisher=Hooks(modules=self),
+            exchanges=self.exchanges,
         )
 
     def serving(self, name: str) -> Served | None:
@@ -254,6 +297,56 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             ),
             None,
         )
+
+    def viewing(self, module: str, view: str) -> Served | None:
+        """Return the class serving `module`'s view `view`, with its module; none where none does."""
+        return next(
+            (
+                each
+                for each in self.resolved.served
+                if each.module.name == module
+                and (method := served(each.serving).get(view)) is not None
+                and method.viewing() is not None
+            ),
+            None,
+        )
+
+    async def view(self, viewing: Viewing) -> Blocks:
+        """Answer one of the modules' views, for the operator, or for a room of one of the repository's launches.
+
+        Raise `LupDevError` where no module of the repository has it, where its
+        asker may not ask it, where what it's given isn't what it takes, or
+        where what it answers names a tone neither the shell nor a module
+        declares.
+        """
+        owner = self.viewing(viewing.module, viewing.view)
+        if owner is None:
+            message = (
+                f"no module `{viewing.module}` of this repository has a view "
+                f"`{viewing.view}`"
+            )
+            raise LupDevError(message)
+        asker = Operator() if viewing.launch is None else Room(launch=viewing.launch)
+        ask(owner.serving, viewing.view, asker)
+        method = served(owner.serving)[viewing.view]
+        try:
+            argument = method.taken.model.annotation.model_validate(viewing.argument)
+        except ValidationError as wrong:
+            message = f"`{viewing.view}` doesn't take what it was given: {wrong}"
+            raise LupDevError(message) from wrong
+        blocks = await method.called(self.made(owner), argument, asker)
+        if not isinstance(blocks, Blocks):
+            message = f"`{viewing.view}` answered {blocks!r}, not blocks"
+            raise LupDevError(message)
+        known = [tone.name for tone in [*SHELL_TONES, *self.resolved.looks.tones]]
+        unknown = [tone for tone in blocks.tones() if tone not in known]
+        if unknown:
+            message = (
+                f"`{viewing.view}` names tones no module declares: "
+                f"{', '.join(unknown)}"
+            )
+            raise LupDevError(message)
+        return blocks
 
     async def call(self, calling: Calling) -> Answer:
         """Run one call to a module's tool, asked by the conversation calling, and return what the agent reads."""
@@ -399,6 +492,25 @@ class Relays(Model, Handler[Relaying]):
         return Relayed(reply=reply.model_dump())
 
 
+class Views(Model, Reading[Viewing]):
+    """Answers `Viewing`: one of the modules' views, for the operator or a room."""
+
+    modules: RepositoryModules
+
+    @override
+    def request(self) -> type[Viewing]:
+        return Viewing
+
+    @override
+    async def answer(self, request: Viewing) -> Reply:
+        return Viewed(blocks=await self.modules.view(request))
+
+    @override
+    async def scoped(self, request: Viewing, repository: Path) -> Reply:
+        message = "a repository's process answers the host service, never a room"
+        raise HostError(message)
+
+
 class Happens(Model, Handler[Happening]):
     """Answers `Happening`: the modules' hooks run at its event."""
 
@@ -474,6 +586,7 @@ def routes(
         *listed,
         Route.to(Calls(modules=modules)),
         Route.to(Relays(modules=modules)),
+        Route.reading(Views(modules=modules)),
         Route.to(Happens(modules=modules)),
     ]
 

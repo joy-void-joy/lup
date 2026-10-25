@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Literal
 
 import pytest
 
+from lup.blocks import OfAgent
 from lup.programs import run
 from lup.types import MutableModel
 from lup_dev import Project, cli
@@ -67,7 +68,8 @@ from lup_dev.host.workers import (
     Relaying,
     Sent,
 )
-from lup_dev.inbox.protocol import AskFlag, Gathering, ShowGathering
+from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.protocol import AskFlag, Exchanged, Gathering, ShowGathering
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench, Services
 from lup_dev.policy.flags import Flagging
@@ -748,6 +750,17 @@ def fakes(kit: Kit, state: Layout, monkeypatch: pytest.MonkeyPatch) -> Kit:
     return kit
 
 
+class Exchanging(Exchanges):
+    """The inbox's items as a test sets them: each conversation exchanges the same, none by default."""
+
+    def __init__(self, items: Exchanged | None = None) -> None:
+        self.items = items or Exchanged(sent=[], received=[])
+
+    async def exchanged(self, viewed: OfAgent) -> Exchanged:
+        del viewed
+        return self.items
+
+
 class NoRecords(Records):
     """A runtime that keeps no records."""
 
@@ -778,6 +791,7 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
             resolved=self.resolved,
             records={launch.runtime: self.records},
             layout=self.layout,
+            exchanges=Exchanging(),
         )
 
     async def open(self, launch: Register) -> Offered:

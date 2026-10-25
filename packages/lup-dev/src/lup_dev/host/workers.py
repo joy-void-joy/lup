@@ -9,9 +9,10 @@ process serving another's. The service asks it, on a socket of its own under
 the host's sockets that no room mounts, what its modules serve, then passes it
 each hook the judge reads, each call to one of their tools or to one of the
 judge's own that asks the engine, each room's request of a kind they answer,
-and each event their hooks run at, one typed request per connection, one reply,
+each view the operator or a room asks of them, and each event their hooks run
+at, one typed request per connection, one reply,
 each answered at once whatever the others wait on. The launch travels with each
-request (`Calling`, `JudgeCalling`, `Relaying`, `Happening`), never with the
+request (`Calling`, `JudgeCalling`, `Relaying`, `Viewing`, `Happening`), never with the
 process, which serves each launch of its repository alike.
 
 The process stays running, so a hook costs the judgement alone, not a start of
@@ -39,6 +40,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
+from lup.blocks import Blocks
 from lup.events import EventName, Publishing, Told
 from lup.programs import ProgramError, Running, started
 from lup.publishing import Published, Refusal
@@ -153,6 +155,27 @@ class Relayed(Reply):
     reply: JsonObject
 
 
+class Viewing(Request, reads=True):
+    """Answer one of the repository's modules' views, for the operator, or for a room of one of its launches."""
+
+    kind: Literal["module-view"] = "module-view"
+    module: str
+    """The module's name."""
+    view: str
+    """The view's name: its method's."""
+    argument: JsonValue
+    """What it's given, as the asker sent it: the view's model validates it."""
+    launch: Register | None = None
+    """The launch whose room asks; none where the operator does."""
+
+
+class Viewed(Reply):
+    """A view's answer: its blocks."""
+
+    kind: Literal["module-viewed"] = "module-viewed"
+    blocks: Blocks
+
+
 class JudgeHook(Request, reads=False):
     """Put one of a launch's hooks the judge reads to its judge."""
 
@@ -172,12 +195,13 @@ class HookJudged(Reply):
 
 
 type Answered = Annotated[
-    Offered | Called | Relayed | Happened | HookJudged, Field(discriminator="kind")
+    Offered | Called | Relayed | Happened | HookJudged | Viewed,
+    Field(discriminator="kind"),
 ]
 """Whatever a repository's process replies, told apart by its `kind`."""
 
 type Replied = Annotated[
-    Refused | Offered | Called | Relayed | Happened | HookJudged,
+    Refused | Offered | Called | Relayed | Happened | HookJudged | Viewed,
     Field(discriminator="kind"),
 ]
 """A repository's process's reply, or its refusal, told apart by its `kind`."""

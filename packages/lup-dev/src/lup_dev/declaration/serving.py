@@ -3,21 +3,25 @@
 A module's methods are those of its `ModuleServing` classes, each behind one of
 the library's doors (`lup.doors`): `@lup.tool`, an agent's call through MCP;
 `@lup.request`, a room's request, routed by the `kind` of the model it takes;
-`@lup.on(Event)`, run at one of lup's events. A module lists its classes in its
+`@lup.on(Event)`, run at one of lup's events; `@lup.view`, what the dashboard
+shows and its command prints, laid out from lup's blocks (`lup.blocks`). A
+module lists its classes in its
 `serving`, `Serving.of(GitHubServing)`. A class only groups methods: it narrows
 `module` to its own module's class (`module: GitHub`), so they read its settings
 with their types, and gives them the module's own context through `self`: its
 data directory for the repository (`data`), the other repositories the
 declaration names (`related`), where each runtime keeps its records
-(`records`), and the publishing door (`publish`).
+(`records`), the items of lup's inbox a conversation exchanged, which the core
+keeps (`exchanges`), and the publishing door (`publish`).
 
 **Who asks is the method's** (`Asker`), by its `by` parameter, which hands it its
 caller: `Agent`, a conversation of a launch's session calling a tool; `Room`,
 code in one of the repository's rooms, untrusted, its launch with it; `Lup`,
 lup itself running a hook at an event of a launch, its conversation with it for
-a session's events. Each door has those who come through it (`askers`), and
-those a method leaving `by` out is for: a tool's are `Agent`, a hook's `Lup`; a
-request has none, so it says (`by: Room`). Defining a class checks each of its
+a session's events; `Operator`, the operator, from the dashboard or a terminal
+on the host. Each door has those who come through it (`askers`), and those a
+method leaving `by` out is for: a tool's are `Agent`, a hook's `Lup`, a view's
+`Operator | Room`; a request has none, so it says (`by: Room`). Defining a class checks each of its
 methods: a `by` naming someone its door never brings, or a request without one,
 fails the class's definition, naming the method (`checked`). Who actually asked
 is checked again before each call (`ask`), so a room never reaches a method
@@ -40,7 +44,7 @@ from typing import TYPE_CHECKING, get_args
 
 from pydantic import BaseModel, PydanticUndefinedAnnotation
 
-from lup.doors import Door, Method, OnDoor, RequestDoor, ToolDoor, served
+from lup.doors import Door, Method, OnDoor, RequestDoor, ToolDoor, ViewDoor, served
 from lup.events import Event, events
 from lup.publishing import Published, Refusal, told
 from lup.types import Model
@@ -50,6 +54,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Register, Reply, Request
 from lup_dev.host.records import Records
+from lup_dev.inbox.exchanges import Exchanges
 
 if TYPE_CHECKING:
     from lup.tools.tool import ToolSpec
@@ -86,6 +91,10 @@ class Lup(Asker):
     conversation would publish; none for a launch's own, and for a push."""
 
 
+class Operator(Asker):
+    """The operator: from the dashboard, or from a terminal on the host, where a command carries their authority."""
+
+
 class Askers(Model):
     """Who comes through a door, and those a method that leaves out `by` is for."""
 
@@ -95,7 +104,7 @@ class Askers(Model):
 
 
 def askers(door: Door) -> Askers:
-    """Return who comes through `door`: an agent through a tool's, a room through a request's, lup through a hook's."""
+    """Return who comes through `door`: an agent through a tool's, a room through a request's, lup through a hook's, the operator or a room through a view's."""
     match door:
         case ToolDoor():
             return Askers(through=[Agent], default=[Agent])
@@ -103,6 +112,8 @@ def askers(door: Door) -> Askers:
             return Askers(through=[Room], default=[])
         case OnDoor():
             return Askers(through=[Lup], default=[Lup])
+        case ViewDoor():
+            return Askers(through=[Operator, Room], default=[Operator, Room])
 
 
 def said(askers: list[type[Asker]]) -> str:
@@ -142,7 +153,7 @@ def named(owner: type, name: str, method: Method) -> list[type[Asker]]:
     if len(found) != len(typed):
         message = (
             f"{who} takes `by` typed {annotation!r}: who asks is one of lup's "
-            f"askers, {said([Agent, Room, Lup])}, or a union of them"
+            f"askers, {said([Agent, Room, Lup, Operator])}, or a union of them"
         )
         raise ProjectError(message)
     through = [each for door in doors for each in door.through]
@@ -252,6 +263,9 @@ class ModuleServing(Model, arbitrary_types_allowed=True):
     runtime's name: a launch's are its runtime's."""
     publisher: Publisher
     """Where what a method would publish is checked first (`publish`)."""
+    exchanges: Exchanges
+    """Where a view reads the items of lup's inbox a conversation of the
+    repository exchanged, which the core keeps."""
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:

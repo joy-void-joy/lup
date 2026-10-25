@@ -201,6 +201,37 @@ class Blocks(Model):
         summary = "".join(span.text for span in self.summary)
         return "\n".join([*([summary] if summary else []), *lines(self.blocks)])
 
+    def tones(self) -> list[str]:
+        """Return each tone the view names, once each, in the order first named.
+
+        >>> Blocks(summary=[Span(text="a", tone="muted")],
+        ...     blocks=[Fold(id="1", kind="calls", summary=[Span(text="b")],
+        ...         content=[Markdown(id="2", text="c", tone="operator")])]).tones()
+        ['muted', 'plain', 'operator']
+        """
+
+        def named(block: Block) -> list[str]:
+            match block:
+                case Line():
+                    return [span.tone for span in block.spans]
+                case Markdown():
+                    return [block.tone]
+                case Fold():
+                    inside = [] if isinstance(block.content, Load) else block.content
+                    return [
+                        *(span.tone for span in block.summary),
+                        *(tone for each in inside for tone in named(each)),
+                    ]
+
+        return list(
+            dict.fromkeys(
+                [
+                    *(span.tone for span in self.summary),
+                    *(tone for block in self.blocks for tone in named(block)),
+                ]
+            )
+        )
+
 
 class FoldKind(Model):
     """One kind of fold a module declares, as the page's fold keys know it: the letter naming it, what its folds are called, the level the keys open and close it at, how it opens, and its colour."""

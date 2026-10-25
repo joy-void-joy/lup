@@ -24,6 +24,7 @@ import pytest
 from pydantic import BaseModel
 
 from lup import events
+from lup.blocks import OfAgent
 from lup.github.module import GitHub
 from lup.github.serving import GitHubServing
 from lup.tools.serving import Answer
@@ -47,6 +48,8 @@ from lup_dev.host.protocol import (
 from lup_dev.host.records import Record, Records
 from lup_dev.host.service import Answerer, HostService
 from lup_dev.host.workers import Calling, LaunchJudge
+from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.private import serving as private_serving
 from lup_dev.private.withheld import Held, Withheld, kept
@@ -76,6 +79,14 @@ class Nothing(Records):
 
     def conversation(self, session: str, agent: str | None) -> Path | None:
         return None
+
+
+class Unexchanged(Exchanges):
+    """An inbox where no conversation exchanged any item."""
+
+    async def exchanged(self, viewed: OfAgent) -> Exchanged:
+        del viewed
+        return Exchanged(sent=[], received=[])
 
 
 STAND_IN = """#!{python}
@@ -212,6 +223,7 @@ def called(
         resolved=resolve(declared),
         records={registered.runtime: Nothing()},
         layout=layout,
+        exchanges=Unexchanged(),
     )
     calling = Calling(launch=registered, name=name, arguments=arguments, caller=CALLER)
     return asyncio.run(serving.call(calling))

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 import lup
+from lup.blocks import OfAgent
 from lup.programs import run
 from lup.publishing import Part, Place, Post, Refusal
 from lup.types import Model
@@ -38,6 +39,8 @@ from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Limits, Register, Reply, Request
 from lup_dev.host.records import Record, Records
 from lup_dev.host.workers import Called, Calling, Happening, Sent, Workers
+from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.stored import write_model
 from lup_dev.worker import RepositoryModules
@@ -56,6 +59,14 @@ class Nothing(Records):
 
     def conversation(self, session: str, agent: str | None) -> Path | None:
         return None
+
+
+class Unexchanged(Exchanges):
+    """An inbox where no conversation exchanged any item."""
+
+    async def exchanged(self, viewed: OfAgent) -> Exchanged:
+        del viewed
+        return Exchanged(sent=[], received=[])
 
 
 class Said(Model):
@@ -191,6 +202,7 @@ def serving(tmp_path: Path, volume: int = 1) -> RepositoryModules:
         resolved=resolved,
         records={"claude": Nothing()},
         layout=Layout(state=tmp_path, data=tmp_path),
+        exchanges=Unexchanged(),
     )
 
 
@@ -548,6 +560,7 @@ def listening(tmp_path: Path) -> RepositoryModules:
         resolved=resolved,
         records={"claude": Nothing()},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
+        exchanges=Unexchanged(),
     )
 
 
@@ -613,6 +626,7 @@ def test_each_launch_s_hooks_read_its_own_runtime_s_records(tmp_path: Path) -> N
         resolved=resolved,
         records={"claude": Nothing(), "codex": Elsewhere()},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
+        exchanges=Unexchanged(),
     )
     one = launch(tmp_path)
     two = one.model_copy(update={"launch": "two", "runtime": "codex"})
@@ -694,6 +708,7 @@ def guarding(tmp_path: Path) -> RepositoryModules:
         resolved=resolved,
         records={"claude": Nothing()},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
+        exchanges=Unexchanged(),
     )
 
 

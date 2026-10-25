@@ -12,16 +12,27 @@ from typing import TYPE_CHECKING
 import pytest
 
 import lup
+from lup.blocks import OfAgent
 from lup.programs import run
 from lup_dev.declaration.serving import Lup, Publisher
 from lup_dev.host.protocol import Limits, Register
 from lup_dev.host.records import Record, Records
+from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.protocol import Exchanged
 from lup_transcripts.environment.module import Transcripts
 from lup_transcripts.environment.serving import TranscriptsServing, copied
 
 if TYPE_CHECKING:
     from lup.publishing import Published, Refusal
     from lup_dev.host.courier import Conversation
+
+
+class Unexchanged(Exchanges):
+    """An inbox where no conversation exchanged any item."""
+
+    async def exchanged(self, viewed: OfAgent) -> Exchanged:
+        del viewed
+        return Exchanged(sent=[], received=[])
 
 
 class Unpublished(Publisher):
@@ -106,6 +117,7 @@ def test_transcripts_copy_the_repository_s_records_at_its_moments(
         data=data,
         related=[],
         publisher=Unpublished(),
+        exchanges=Unexchanged(),
     )
     asyncio.run(serving.keep(lup.Stopped(), by=Lup(launch=registered)))
     assert (data / "claude" / "projects" / "p" / "s1.jsonl").is_file()
