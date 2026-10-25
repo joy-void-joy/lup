@@ -23,11 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import BaseModel
 
-from lup_dev.host.records import Call as RecordedCall
-from lup_dev.host.records import Reader as RecordsReader
-from lup_dev.host.records import Recorded, Transcript
 from lup import events
-from lup.blocks import OfAgent
 from lup.github.module import GitHub
 from lup.github.serving import GitHubServing
 from lup.tools.serving import Answer
@@ -48,7 +44,9 @@ from lup_dev.host.protocol import (
     Stop,
     actions,
 )
-from lup_dev.host.records import Record, Records
+from lup_dev.host.records import Call as RecordedCall
+from lup_dev.host.records import Reader as RecordsReader
+from lup_dev.host.records import Record, Recorded, Records, Transcript
 from lup_dev.host.service import Answerer, HostService
 from lup_dev.host.workers import Calling, LaunchJudge
 from lup_dev.inbox.exchanges import Exchanges
@@ -65,6 +63,7 @@ if TYPE_CHECKING:
     from conftest import InProcess, StubFacts
     from pydantic import JsonValue
 
+    from lup.blocks import OfAgent
     from lup_dev.host.workers import LaunchModules
 
 RECORDED = Path(__file__).parent / "payloads" / "gh-2.102.0"

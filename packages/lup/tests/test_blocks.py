@@ -4,7 +4,17 @@ import pytest
 from pydantic import BaseModel, TypeAdapter
 
 import lup
-from lup.blocks import Block, BlockError, Blocks, Fold, Line, Load, Markdown, OfAgent, Span
+from lup.blocks import (
+    Block,
+    BlockError,
+    Blocks,
+    Fold,
+    Line,
+    Load,
+    Markdown,
+    OfAgent,
+    Span,
+)
 
 
 class Called(BaseModel):
@@ -34,22 +44,40 @@ def test_a_view_answers_blocks_that_read_back_as_they_were_sent() -> None:
         blocks=[
             Line(id="1", spans=[Span(text="you: ", tone="operator"), Span(text="hi")]),
             Markdown(id="2", text="**done**"),
-            Fold(id="3", kind="calls", summary=[Span(text="called Bash")], content=[Line.of("4", "ls")]),
+            Fold(
+                id="3",
+                kind="calls",
+                summary=[Span(text="called Bash")],
+                content=[Line.of("4", "ls")],
+            ),
         ],
     )
     assert Blocks.model_validate_json(view.model_dump_json()) == view
 
 
 def test_a_block_is_read_by_its_kind() -> None:
-    read = TypeAdapter[Block](Block).validate_python({"block": "markdown", "id": "1", "text": "hi"})
+    read = TypeAdapter[Block](Block).validate_python(
+        {"block": "markdown", "id": "1", "text": "hi"}
+    )
     assert read == Markdown(id="1", text="hi")
 
 
 def test_the_text_form_says_open_folds_whole_and_closed_ones_as_their_summary() -> None:
     view = Blocks(
         blocks=[
-            Fold(id="1", kind="earlier", summary=[Span(text="you: first")], content=[Line.of("2", "old")]),
-            Fold(id="3", kind="calls", open=True, summary=[Span(text="called Read")], content=[Line.of("4", "Read: a.py")]),
+            Fold(
+                id="1",
+                kind="earlier",
+                summary=[Span(text="you: first")],
+                content=[Line.of("2", "old")],
+            ),
+            Fold(
+                id="3",
+                kind="calls",
+                open=True,
+                summary=[Span(text="called Read")],
+                content=[Line.of("4", "Read: a.py")],
+            ),
             Markdown(id="5", text="one\ntwo"),
         ]
     )
@@ -59,7 +87,9 @@ def test_the_text_form_says_open_folds_whole_and_closed_ones_as_their_summary() 
 def test_a_fold_loads_another_view_with_what_it_takes() -> None:
     load = Load.of(Viewing.call, Called(call="c1"))
     assert load == Load(view="call", argument={"call": "c1"})
-    opened = Fold(id="c1", kind="call", open=True, summary=[Span(text="Bash: ls")], content=load)
+    opened = Fold(
+        id="c1", kind="call", open=True, summary=[Span(text="Bash: ls")], content=load
+    )
     assert Blocks(blocks=[opened]).text() == "▾ Bash: ls  [call call=c1]"
 
 

@@ -258,7 +258,9 @@ def test_a_view_says_where_its_placed_and_when_its_answered_again() -> None:
     assert door.place is not None
     assert door.place.letter == "v"
     assert door.watch.on == [TurnEnded]
-    answer = asyncio.run(Views().conversation(lup.OfAgent(runtime="claude", session="s1")))
+    answer = asyncio.run(
+        Views().conversation(lup.OfAgent(runtime="claude", session="s1"))
+    )
     assert answer.text() == "s1"
 
 

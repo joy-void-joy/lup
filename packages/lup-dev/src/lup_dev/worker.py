@@ -342,8 +342,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
         unknown = [tone for tone in blocks.tones() if tone not in known]
         if unknown:
             message = (
-                f"`{viewing.view}` names tones no module declares: "
-                f"{', '.join(unknown)}"
+                f"`{viewing.view}` names tones no module declares: {', '.join(unknown)}"
             )
             raise LupDevError(message)
         return blocks

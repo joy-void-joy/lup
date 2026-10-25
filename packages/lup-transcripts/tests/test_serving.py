@@ -12,20 +12,19 @@ from typing import TYPE_CHECKING
 import pytest
 
 import lup
-from lup_dev.host.records import Call as RecordedCall
-from lup_dev.host.records import Reader as RecordsReader
-from lup_dev.host.records import Recorded, Transcript
-from lup.blocks import OfAgent
 from lup.programs import run
 from lup_dev.declaration.serving import Lup, Publisher
 from lup_dev.host.protocol import Limits, Register
-from lup_dev.host.records import Record, Records
+from lup_dev.host.records import Call as RecordedCall
+from lup_dev.host.records import Reader as RecordsReader
+from lup_dev.host.records import Record, Recorded, Records, Transcript
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.protocol import Exchanged
 from lup_transcripts.environment.module import Transcripts
 from lup_transcripts.environment.serving import TranscriptsServing, copied
 
 if TYPE_CHECKING:
+    from lup.blocks import OfAgent
     from lup.publishing import Published, Refusal
     from lup_dev.host.courier import Conversation
 

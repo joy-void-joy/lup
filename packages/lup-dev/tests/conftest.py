@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Literal
 
 import pytest
 
-from lup.blocks import OfAgent
 from lup.programs import run
 from lup.types import MutableModel
 from lup_dev import Project, cli
@@ -83,6 +82,7 @@ from lup_dev.worker import RepositoryModules
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+    from lup.blocks import OfAgent
     from lup_dev.declaration.resolve import Selected
     from lup_dev.declaration.runner import Runner
     from lup_dev.forge.github import Visibility

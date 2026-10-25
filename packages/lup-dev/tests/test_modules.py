@@ -15,10 +15,6 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 import lup
-from lup_dev.host.records import Call as RecordedCall
-from lup_dev.host.records import Reader as RecordsReader
-from lup_dev.host.records import Recorded, Transcript
-from lup.blocks import OfAgent
 from lup.programs import run
 from lup.publishing import Part, Place, Post, Refusal
 from lup.types import Model
@@ -40,7 +36,9 @@ from lup_dev.declaration.resolve import resolve
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Limits, Register, Reply, Request
-from lup_dev.host.records import Record, Records
+from lup_dev.host.records import Call as RecordedCall
+from lup_dev.host.records import Reader as RecordsReader
+from lup_dev.host.records import Record, Recorded, Records, Transcript
 from lup_dev.host.workers import Called, Calling, Happening, Sent, Workers
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.protocol import Exchanged
@@ -50,6 +48,8 @@ from lup_dev.worker import RepositoryModules
 
 if TYPE_CHECKING:
     from conftest import Kit
+
+    from lup.blocks import OfAgent
 
 CALLER = Conversation(id="c1", session="s1")
 
