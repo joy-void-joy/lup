@@ -40,16 +40,16 @@ A value written in the committed `lup_project.py` would be published by its comm
 
 ## Where it's checked
 
-- **The door, the guarantee.** lup fires the `publishing` moment before a push through its remote helper and a post through its GitHub tools (`docs/declaration.md`, *What a module serves a launch*), and `Private`'s hook refuses one carrying a value (`hooks.py`). A push is read commit by commit beyond what the remote lists: each message, each path added or changed, each line added against every parent (a merge's resolution, not what a parent brought), a file that isn't text by its occurrences, and each ref's name (`history.py`). Where the list can't be built, nothing leaves, saying why.
+- **The door, the guarantee.** lup's `Publishing` event comes before a push through its remote helper and a post through its GitHub tools (`docs/declaration.md`, *The doors*), and `Private`'s hook there refuses one carrying a value (`serving.py`, `refusing.py`). A push is read commit by commit beyond what the remote lists: each message, each path added or changed, each line added against every parent (a merge's resolution, not what a parent brought), a file that isn't text by its occurrences, and each ref's name (`history.py`). Where the list can't be built, nothing leaves, saying why.
 - **At a write.** A value on a line the write touches, in any path git doesn't ignore (docs, tests and data included), is a finding told right after the write, and the write is flagged for the operator (`private` in `Project.flagged`; `docs/judging-writes.md`). It's never refused there: the write lands.
-- **The gate's `private` step** (`lup-dev private check`) reads every file and `HEAD`'s commits the remotes lack, catching what the shell wrote and what a commit's message says, before the branch lands. In a room it asks the host through the module's handler (`scanning.py`, `Scanning`). Where the list can't be built it fails, saying why; it passes, saying so, only where the host can't be reached from a room, or, outside one, where no launch was approved on the machine, as in CI, since a CI runner's user name, `runner`, is an ordinary word.
+- **The gate's `private` step** (`lup-dev private check`) reads every file and `HEAD`'s commits the remotes lack, catching what the shell wrote and what a commit's message says, before the branch lands. In a room it asks the host through the module's request (`serving.py`, `Scanning`). Where the list can't be built it fails, saying why; it passes, saying so, only where the host can't be reached from a room, or, outside one, where no launch was approved on the machine, as in CI, since a CI runner's user name, `runner`, is an ordinary word.
 
 ## What a room is told
 
 A kind and a place, never the value: the room never sees the list, so a value of the person's own stays out of the agent's screen and transcript. A path naming a value is shown masked. A push's refusal, on git's standard error:
 
 ```
-lup refused to publish this push to `refs/heads/feat`: a module's check at the `publishing` moment found what isn't published, at each place below.
+lup refused to publish this push to `refs/heads/feat`: a module's check at `Publishing` found what isn't published, at each place below.
   4e1f2a3 docs/notes.md:2:5 - the operator's home path
       steer: write it as `~`, or a path in the repository from its root
 A push sends every commit the remote lacks, so rewrite the commit that carries it (amend it, or rebase) and push again: a commit on top leaves it in what's pushed.
