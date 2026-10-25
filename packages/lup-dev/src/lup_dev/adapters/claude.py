@@ -5,6 +5,7 @@
 | `SessionStart` | `SessionStarted` |
 | `UserPromptSubmit` | `TurnStarted` |
 | `PreToolUse` | `CallStarted`; for `Edit` and `Write`, judged before it lands first |
+| `WorktreeCreate` | `WorktreeAsked`: lup makes the worktree |
 | `PostToolUse`, `PostToolUseFailure` | `CallFinished`: the checkpoint |
 | `Stop` | `TurnEnded` |
 | `SubagentStop` | `ConversationEnded` |
@@ -24,12 +25,20 @@ hold tells nothing: `systemMessage` would reach the operator, not the agent.
 When judging itself fails at a turn's end, the turn ends, and the operator is
 warned once in `systemMessage`.
 
+A worktree Claude Code would make, for a subagent it isolates (`isolation:
+"worktree"`) or a session entering one (`EnterWorktree`), lup makes instead
+(`WorktreeCreate`; `docs/judging-writes.md`, *A worktree the runtime asks
+for*): Claude Code's own starts from the repository's `HEAD`, a bare
+repository's default branch however far the work is from it, and a worker
+switching to its branch there had the judge read the switch as its writes.
+
 In a launched room (`docs/host.md`, *The one hook*), Claude Code runs the room's
 hook on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and
-`PostToolUseFailure` for every call, `Stop`, `SubagentStop` and `StopFailure`
-(`hooks`), so the host service hears each conversation's start, each turn's
-start and the prompt it starts on, its calls' starts and finishes, and its
-turn's ends, one failing on an error from the model's API among them
+`PostToolUseFailure` for every call, `WorktreeCreate`, `Stop`, `SubagentStop`
+and `StopFailure` (`hooks`), so the host service hears each conversation's
+start, each turn's start and the prompt it starts on, its calls' starts and
+finishes, each worktree it asks for, and its turn's ends, one failing on an
+error from the model's API among them
 (`docs/inbox.md`, *How an agent is told*). The judge reads every one of them
 (`heard`) but the calls `judging` leaves out: those to lup's own tools, and to a
 tool on the list of those that only read (`Reading`). So every
@@ -278,11 +287,14 @@ from lup_dev.policy.checkpoint import (
     SessionStarted,
     TurnEnded,
     TurnStarted,
+    WorktreeAsked,
+    WorktreeRefusedError,
     counted,
     first_warning,
 )
 from lup_dev.policy.report import judge_failed, sections
 from lup_dev.policy.runtime import Runtime
+from lup_dev.policy.worktrees import Making
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -398,6 +410,10 @@ class Claude(Runtime):
 class Output(Model, alias_generator=to_camel, populate_by_name=True):
     """What a hook prints for Claude Code, its fields in camel case."""
 
+    def printed(self) -> str:
+        """Return it as the hook prints it: JSON, which Claude Code reads every hook's answer as but `WorktreeCreate`'s."""
+        return self.model_dump_json(by_alias=True, exclude_none=True)
+
 
 class SessionStartAnswer(Output):
     """What `SessionStart` adds to the conversation's context as it starts."""
@@ -439,6 +455,17 @@ class Specific(Output):
     hook_specific_output: (
         SessionStartAnswer | PreToolUseAnswer | PostToolUseAnswer | StopAnswer
     )
+
+
+class Placed(Output):
+    """What `WorktreeCreate` prints, for the room's hook to read: the worktree lup makes, a field a line (`Making.lines`), or why it makes none, which never starts with `/`."""
+
+    made: Making | None = None
+    refused: str = "lup made no worktree"
+
+    @override
+    def printed(self) -> str:
+        return f"{self.refused}\n" if self.made is None else self.made.lines()
 
 
 class OperatorWarning(Output):
@@ -1077,6 +1104,72 @@ class StopFailure(Payload):
         return OperatorWarning(system_message=said)
 
 
+class WorktreeCreate(Payload):
+    """`WorktreeCreate`: Claude Code would make a worktree, for a subagent it isolates or a session entering one; lup makes it (`WorktreeAsked`), and the answer says where, for the room's hook to make it there.
+
+    From the hooks reference (read 2026-10-25): it runs where "a subagent uses
+    `isolation: "worktree"`", among other cases, and "replaces default git
+    behavior"; its input is the common fields and `name`, "a slug identifier
+    for the new worktree"; a command hook prints the worktree's path as "the
+    last non-empty line of stdout" and "can't return JSON", and "If the hook
+    fails or produces no path, worktree creation fails". Claude Code refuses a
+    path with `.` or `..` segments, or through a symlink below the repository
+    root, and keeps the worktree when the subagent ends, running no
+    `WorktreeRemove` and deleting no branch: `land` removes both once the
+    branch lands (`docs/judging-writes.md`, *Landing a branch*).
+
+    Measured on 2.1.310 (`docs/field-notes.md`, *A worktree for an isolated
+    subagent*): a subagent's `name` is `agent-<its agent_id>`; the input carries
+    the session's `session_id` and `transcript_path`, a `prompt_id`, and as
+    `cwd` the spawning conversation's working directory, never an `agent_id`,
+    so it names the session alone; the subagent runs in the directory printed,
+    each hook of its own carrying it as `cwd`, so its first call reaches it.
+    """
+
+    hook_event_name: Literal["WorktreeCreate"]
+    name: str
+    """Claude Code's name for the worktree, which its branch takes."""
+
+    def heard(self, fits: int) -> Heard:
+        """Read a worktree asked for, of the session as a whole: the judge reads it, and its answer, a path, tells the model nothing."""
+        del fits
+        return Heard(
+            event=events.WorktreeAsked(name=self.name),
+            session=self.session_id,
+            agent=self.agent_id or None,
+            judged=True,
+            fits=0,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Add nothing: the answer is where the worktree is, which carries nothing else."""
+        del telling
+        return said
+
+    @override
+    def answer(self, bench: Bench) -> Output | None:
+        """Have lup make the worktree from the commit the asking conversation's worktree is at, and say where."""
+        reply = WorktreeAsked(
+            session=self.session_id, agent=self.agent_id, cwd=self.cwd, name=self.name
+        ).apply(bench)
+        return Placed(made=reply.made)
+
+    @override
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
+        """Fail the making, saying why: lup refused it, or judging failed."""
+        why = (
+            str(failure)
+            if isinstance(failure, WorktreeRefusedError)
+            else f"lup's judge failed: {failure!r}"
+        )
+        return Placed(refused=f"lup made no worktree: {why}")
+
+    @override
+    def unanswered(self, said: str) -> Output:
+        """Fail the making, saying why: with the hook configured, Claude Code makes no worktree of its own in its place."""
+        return Placed(refused=f"{said}, so lup made no worktree")
+
+
 class SubagentRecord(Model, extra="ignore", alias_generator=to_camel):
     """What Claude Code records of a subagent beside the session's transcript, `<session>/subagents/agent-<id>.meta.json`.
 
@@ -1163,6 +1256,7 @@ type Received = Annotated[
     SessionStart
     | UserPromptSubmit
     | PreToolUse
+    | WorktreeCreate
     | PostToolUse
     | Stop
     | SubagentStop
@@ -1185,7 +1279,7 @@ def hook(raw: str, bench: Bench) -> str:
         output = received.failed(bench, failure)
     if output is None:
         return ""
-    return output.model_dump_json(by_alias=True, exclude_none=True)
+    return output.printed()
 
 
 def unanswered(raw: str, failure: str) -> str:
@@ -1201,7 +1295,7 @@ def unanswered(raw: str, failure: str) -> str:
         output: Output = OperatorWarning(system_message=said)
     else:
         output = received.unanswered(said)
-    return output.model_dump_json(by_alias=True, exclude_none=True)
+    return output.printed()
 
 
 def heard(raw: str) -> Heard:
@@ -1217,15 +1311,24 @@ def heard(raw: str) -> Heard:
 def told(raw: str, answer: str, telling: Telling) -> str | None:
     """Return what a Claude Code hook prints: `answer`, the judge's or none, with `telling` added; none where nothing is.
 
-    Raise `ValidationError` where the payload isn't one of the hooks this adapter
-    reads, or the answer isn't a hook's.
+    Claude Code reads an answer starting with `{` as JSON, and any other as
+    text, as `WorktreeCreate`'s path (`Placed`), which nothing is added to.
+    Raise `ValidationError` where the payload isn't one of the hooks this
+    adapter reads, or the answer isn't a hook's; and `ValueError` where
+    `telling` would add to an answer read as text, so what it tells is put
+    back.
     """
     received = TypeAdapter[Received](Received).validate_json(raw)
-    said = Said.model_validate_json(answer) if answer.strip() else Said()
+    text = answer.strip()
+    read = not text or text.startswith("{")
+    said = Said.model_validate_json(answer) if text and read else Said()
     added = received.told(said, telling)
     if added == said:
         return None
-    return added.model_dump_json(by_alias=True, exclude_none=True)
+    if not read:
+        message = "lup can't add to an answer Claude Code reads as text"
+        raise ValueError(message)
+    return added.printed()
 
 
 class UserTurn(Model):
@@ -1287,7 +1390,8 @@ def hooks(
     among them, which clears the calls the session's records show over (one
     interrupted); `PreToolUse` on every call, the file tools' writes judged
     before they land, every call told what waits for its conversation, and a
-    call to lup's tools stamped with its caller; `PostToolUse` and
+    call to lup's tools stamped with its caller; `WorktreeCreate`, a worktree
+    asked for, which lup makes; `PostToolUse` and
     `PostToolUseFailure` on every call, the checkpoint after it; `Stop` and
     `SubagentStop`, each conversation's turn's end, which clears the calls it
     left that no finish reported and judges what the turn left; and
@@ -1300,6 +1404,7 @@ def hooks(
         events.SessionStarted,
         events.TurnStarted,
         events.CallStarted,
+        events.WorktreeAsked,
         events.CallFinished,
         events.TurnEnded,
         events.ConversationEnded,
