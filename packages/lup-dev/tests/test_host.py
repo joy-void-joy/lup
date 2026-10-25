@@ -1656,6 +1656,24 @@ def test_a_hook_reaches_a_watch_each_conversation_saying_what_its_doing(
     ]
 
 
+def test_a_worktree_asked_for_goes_out_as_its_judge_answered_leaving_the_conversation_calling(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    """It names the session alone, and comes while the asking conversation's call
+    runs; its answer is where the worktree is, which carries nothing else."""
+    own = client(layout, clock)
+    with served(service(layout, Judge(), said, courier=Reads(), clock=clock)):
+        own.register(launch(tmp_path, "one", "first"))
+        hooks = layout.launch("one").hook
+        send(hooks, hook(events.SessionStarted()))
+        send(hooks, hook(events.CallStarted(call="c1", tool="Agent")))
+        asked = hook(events.WorktreeAsked(name="agent-a1"), judged=True, fits=0)
+        answer = send(hooks, asked)
+        [talker] = own.listed().talkers["one"]
+    assert answer == f"first answers {asked}\n"
+    assert talker.activity == Activity(state="calling", since=clock.now(), tool="Agent")
+
+
 # A launch's container, named after its launch and ended with it.
 
 

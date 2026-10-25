@@ -11,10 +11,11 @@ them and back, and the judge's events extend them with what the judge reads
 - a session's, which each runtime's hooks are read as (`SessionEvent`): a
   session started, resumed or cleared (`SessionStarted`); a turn starting on a
   prompt, the operator's or one a tool server pushed, or a prompt arriving in a
-  turn (`TurnStarted`); a tool call about to run (`CallStarted`); a tool call
-  finished, whether it succeeded or failed (`CallFinished`); the session's own
-  turn ending (`TurnEnded`); a subagent's conversation ending
-  (`ConversationEnded`).
+  turn (`TurnStarted`); a tool call about to run (`CallStarted`); a worktree
+  asked for, for a conversation to work in apart (`WorktreeAsked`), which a
+  runtime's hook makes; a tool call finished, whether it succeeded or failed
+  (`CallFinished`); the session's own turn ending (`TurnEnded`); a subagent's
+  conversation ending (`ConversationEnded`).
 
 An event carries its own facts alone: which call, which tool, what would leave.
 The launch it's of, and the conversation, travel with whoever asks a hook to
@@ -104,6 +105,13 @@ class CallStarted(Event):
     """The tool called, by the runtime's name for it."""
 
 
+class WorktreeAsked(Event):
+    """The runtime asks for a worktree of the repository, for a conversation to work in apart, as a subagent it isolates: the hook answers where it made it."""
+
+    name: str
+    """The runtime's name for the worktree, which its branch takes."""
+
+
 class CallFinished(Event):
     """A tool call finished, whether it succeeded or failed."""
 
@@ -125,11 +133,13 @@ type SessionEvent = (
     SessionStarted
     | TurnStarted
     | CallStarted
+    | WorktreeAsked
     | CallFinished
     | TurnEnded
     | ConversationEnded
 )
-"""A session's events, which each runtime's hooks are read as."""
+"""A session's events, which each runtime's hooks are read as: a runtime with no
+hook for one declares the gap in its adapter."""
 
 type Observed = Launched | Stopped | SessionEvent
 """The events a hook observes, answering nothing: every one but `Publishing`."""
@@ -212,6 +222,7 @@ def events() -> list[type[Event]]:
         SessionStarted,
         TurnStarted,
         CallStarted,
+        WorktreeAsked,
         CallFinished,
         TurnEnded,
         ConversationEnded,

@@ -14,6 +14,7 @@ from lup.events import (
     Publishing,
     SessionEvent,
     Told,
+    WorktreeAsked,
     events,
 )
 from lup.publishing import Part, Post
@@ -27,6 +28,7 @@ def test_an_event_s_name_on_a_wire_is_its_class_s() -> None:
         "session-started",
         "turn-started",
         "call-started",
+        "worktree-asked",
         "call-finished",
         "turn-ended",
         "conversation-ended",
@@ -37,6 +39,7 @@ def test_an_event_crosses_a_wire_and_is_read_back_by_its_name() -> None:
     told = TypeAdapter[Told](Told)
     for event in [
         CallStarted(call="c1", tool="Bash"),
+        WorktreeAsked(name="agent-a1"),
         ConversationEnded(),
         Publishing(
             published=Post(what="an issue", parts=[Part(name="title", text="x")])
@@ -56,12 +59,14 @@ def test_a_name_that_isn_t_an_event_s_is_refused_naming_them() -> None:
 
 
 def test_each_runtime_spells_every_one_of_a_session_s_events() -> None:
+    """Codex has no hook for a worktree asked for, a gap its adapter declares."""
     session: list[type[SessionEvent]] = list(get_args(SessionEvent.__value__))
     assert session == [each for each in events() if each in session]
     assert [claude_spelled(each) for each in session] == [
         ["SessionStart"],
         ["UserPromptSubmit"],
         ["PreToolUse"],
+        ["WorktreeCreate"],
         ["PostToolUse", "PostToolUseFailure"],
         ["Stop", "StopFailure"],
         ["SubagentStop"],
@@ -70,6 +75,7 @@ def test_each_runtime_spells_every_one_of_a_session_s_events() -> None:
         "SessionStart",
         "UserPromptSubmit",
         "PreToolUse",
+        None,
         "PostToolUse",
         "Stop",
         "SubagentStop",

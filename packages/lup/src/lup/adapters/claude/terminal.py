@@ -90,9 +90,16 @@ other Claude Code sessions can then start a turn in the room too.
 | `session-started` | `SessionStart` |
 | `turn-started` | `UserPromptSubmit` |
 | `call-started` | `PreToolUse` |
+| `worktree-asked` | `WorktreeCreate` |
 | `call-finished` | `PostToolUse`, `PostToolUseFailure` |
 | `turn-ended` | `Stop`, `StopFailure` |
 | `conversation-ended` | `SubagentStop` |
+
+`WorktreeCreate` runs where Claude Code would make a worktree itself, a
+subagent's `isolation: "worktree"` among the cases, and "replaces default git
+behavior": its command prints the worktree's absolute path, "the last non-empty
+line of stdout", and any status but 0 fails the making (the `hooks` docs,
+*WorktreeCreate*, read 2026-10-25).
 
 `StopFailure` runs instead of `Stop` or `SubagentStop` where a turn ends on an
 error from the model's API, a subagent's as the session's own, its `agent_id`
@@ -181,6 +188,7 @@ from lup.events import (
     SessionStarted,
     TurnEnded,
     TurnStarted,
+    WorktreeAsked,
 )
 from lup.rooms.container import Mount
 from lup.sessions.terminal import Cli, Terminal, TerminalError
@@ -364,6 +372,7 @@ def spelled(event: type[SessionEvent]) -> list[str]:
         SessionStarted: ["SessionStart"],
         TurnStarted: ["UserPromptSubmit"],
         CallStarted: ["PreToolUse"],
+        WorktreeAsked: ["WorktreeCreate"],
         CallFinished: ["PostToolUse", "PostToolUseFailure"],
         TurnEnded: ["Stop", "StopFailure"],
         ConversationEnded: ["SubagentStop"],

@@ -128,6 +128,7 @@ from lup.events import (
     SessionStarted,
     TurnEnded,
     TurnStarted,
+    WorktreeAsked,
 )
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
@@ -863,7 +864,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         they answer the operator's (`subagent_answered`). A subagent stopped, and a turn that failed on an error
         from the model's API, the session's or a subagent's, are held for
         nothing, since nothing would read it. A turn's start whose prompt
-        carries the token of what was pushed to it takes the push.
+        carries the token of what was pushed to it takes the push. A worktree
+        asked for is told nothing: its answer is where the worktree is, and
+        carries nothing else.
         """
         party = self.party(launch, conversation)
         self.heard_in(
@@ -910,6 +913,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case CallStarted() | CallFinished():
                 presence.turning = True
                 return self.told(party, room, heard.fits, "call")
+            case WorktreeAsked():
+                return Posted()
 
     @override
     async def concluded(
