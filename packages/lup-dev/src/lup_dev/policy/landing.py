@@ -73,8 +73,10 @@ shows that change as well.
 
 **A worktree is removed in the room,** never on the host: through `podman exec` in
 the launch's container, `git worktree remove` without `--force`, so git itself
-keeps one with changes or untracked files, and what it ignores (its `.venv`, its
-scratch) goes with it. Removed on the host, the path would be the one
+keeps one with changes or untracked files, and what it ignores (its scratch)
+goes with it; one whose `.venv` is hidden from the room fails there, its mount
+holding it, with the rest of what git hadn't removed (`docs/launch.md`, *The
+project's environment, the room's own*). Removed on the host, the path would be the one
 `<git directory>/worktrees/<name>/gitdir` names, which the room writes, and the
 host's recursive delete could be aimed outside the repository. The container is
 named as the launch's record has it when the cleanup runs (`reached`), since

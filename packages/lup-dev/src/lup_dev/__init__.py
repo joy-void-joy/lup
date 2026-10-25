@@ -51,7 +51,14 @@ from lup_dev.declaration.modules.python import Python
 from lup_dev.declaration.package_managers.uv import Uv
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Requirement, Tools
-from lup_dev.declaration.runner import Interpreter, Plain, RoomNeeds, Runner
+from lup_dev.declaration.runner import (
+    Interpreter,
+    Plain,
+    RoomEnvironment,
+    RoomNeeds,
+    RoomPlaces,
+    Runner,
+)
 from lup_dev.declaration.serving import Agent, Asker, Lup, ModuleServing, Room
 from lup_dev.private.module import Details, Private, Values
 
@@ -90,7 +97,9 @@ __all__ = [
     "Repository",
     "Requirement",
     "Room",
+    "RoomEnvironment",
     "RoomNeeds",
+    "RoomPlaces",
     "Rules",
     "Runner",
     "Section",

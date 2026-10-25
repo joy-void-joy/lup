@@ -29,6 +29,10 @@ class Room(Model, arbitrary_types_allowed=True):
     container: Container
     engine: ContainerEngine = Podman()
     """Builds the image and runs the container; a test gives a recording one."""
+    before: list[str] = []
+    """A program the CLI runs behind, in the room, and its first arguments:
+    given the CLI's command after them, it starts what the room starts first,
+    then runs the CLI in its own place. None by default."""
 
     def launch(self, arguments: list[str], settings: TerminalSettings) -> int:
         """Open the agent's CLI in the room, in this terminal, and return its exit status.
@@ -76,7 +80,7 @@ class Room(Model, arbitrary_types_allowed=True):
         return self.engine.run(
             Invocation(
                 container=container,
-                command=[*terminal.command, *arguments],
+                command=[*self.before, *terminal.command, *arguments],
                 workdir=workdir,
                 home=Path.home(),
                 terminal=sys.stdin.isatty(),

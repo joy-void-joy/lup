@@ -13,7 +13,9 @@ The homes:
   managers' settings and lup's commands there, and the lock its launcher holds,
   under lup's state;
 - lup's data, under `$XDG_DATA_HOME/lup/`: each repository's approved copies of
-  `lup-dev`, which trust on launch installs and its process runs;
+  `lup-dev`, which trust on launch installs and its process runs; and each
+  repository's rooms' own directory, their package cache and each launch's
+  environments, which its rooms mount read-write (`RoomsLayout`);
 - lup's cache, what can be fetched again, under `$XDG_CACHE_HOME/lup/`: pyright's
   source, kept for building the engine, the one part of the cache a room mounts;
   and each runtime's CLIs, as its release channel publishes them, under `clis/`
@@ -35,6 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lup.types import Model
+from lup_dev.environments import STARTER
 
 if TYPE_CHECKING:
     from lup_dev.settings import LupDevSettings
@@ -608,6 +611,25 @@ class LaunchLayout(Model):
         return self.bin / "wl-copy"
 
     @property
+    def wrapper(self) -> Path:
+        """`lup-environment`, which tells the runner's tools the environment of the worktree each runs in, under each of their names, and makes the launch's worktree's before the CLI starts (`lup_dev/environments.py`)."""
+        return self.bin / STARTER
+
+    def wrapping(self, program: str) -> Path:
+        """Say where the runner's program `program` is wrapped among the room's commands: a link to `wrapper`."""
+        return self.bin / program
+
+    @property
+    def empty_directory(self) -> Path:
+        """An empty directory of the launch's own, mounted read-only over each directory hidden from the room."""
+        return self.directory / "hidden" / "directory"
+
+    @property
+    def empty_file(self) -> Path:
+        """An empty file of the launch's own, mounted read-only over each file hidden from the room."""
+        return self.directory / "hidden" / "file"
+
+    @property
     def home(self) -> Path:
         """What the launch puts in its room's home, each file at its path there, mounted read-only: the package managers' user-level settings."""
         return self.directory / "home"
@@ -621,6 +643,32 @@ class LaunchLayout(Model):
     def stage(self) -> Path:
         """Where a directory lent read-only is made so before it's mounted in `lent`: a private mount in podman's namespace; removed when the launch ends."""
         return self.directory.with_name(f"{self.directory.name}.stage")
+
+
+class RoomsLayout(Model):
+    """One repository's rooms' own directory, outside the repository, which each of its rooms mounts read-write at its host path: their package cache, and each launch's environments.
+
+    One directory, so an environment's files are links into the cache: no hard
+    link crosses two mounts (`docs/field-notes.md`, *uv's environments across a
+    room's mounts*). One per repository, so one project's room can't write what
+    another's installs from.
+    """
+
+    home: Path
+
+    @property
+    def cache(self) -> Path:
+        """The runner's package cache, which the repository's rooms share."""
+        return self.home / "cache"
+
+    @property
+    def environments(self) -> Path:
+        """Each launch's environments, a directory each, named by the launch."""
+        return self.home / "environments"
+
+    def launch(self, launch: str) -> Path:
+        """Say where launch `launch`'s environments are, one per worktree, each placed by `lup_dev.environments.environment`; removed when it ends."""
+        return self.environments / launch
 
 
 class CliCacheLayout(Model):
@@ -716,6 +764,10 @@ class Layout(Model):
     def module_data(self, module: str, repository: Path) -> Path:
         """Say where module `module` keeps its own data for the repository whose git directory is `repository`."""
         return self.data / "modules" / module / digest(repository)
+
+    def rooms(self, repository: Path) -> RoomsLayout:
+        """Say where the rooms of the repository whose git directory is `repository` keep their package cache and their environments."""
+        return RoomsLayout(home=self.data / "rooms" / digest(repository))
 
     @property
     def judges(self) -> Path:

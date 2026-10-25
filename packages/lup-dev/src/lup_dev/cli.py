@@ -173,12 +173,14 @@ from lup_dev.inbox.store import Conversation as InboxConversation
 from lup_dev.inbox.tools import InboxTools
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.clis import CliCache
+from lup_dev.launch.hidden import removed
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
     QRENCODE,
     Lent,
     OperatorsEditor,
     RoomClipboard,
+    RoomEnvironments,
     RoomError,
     RoomPackageAge,
     host_needs,
@@ -190,6 +192,7 @@ from lup_dev.launch.room import (
     refreshed,
     related,
     room_git,
+    unclaimed,
     unlent,
 )
 from lup_dev.launch.room import repository as repository_of
@@ -1584,34 +1587,38 @@ def on_github(
 
 def swept(
     layout: Layout, host: HostClient, podman: Podman, say: Callable[[str], None]
-) -> None:
-    """End each launch the host service serves whose launcher and container are both gone.
+) -> list[str]:
+    """End each launch the host service serves whose launcher and container are both gone, and return the launches still served.
 
     A launcher holds its launch's lock for its whole life, which the OS frees, so
     a launch whose lock can be taken has no launcher left; its container, named
     when it registered, tells whether its session still runs. Each launch ended
-    is said, and a launch ended first elsewhere is passed over. A launch runs it
-    before it registers, and the host service on its own (`Sweeping`).
+    is said, and a launch ended first elsewhere is passed over; its
+    environments go with it. A launch runs it before it registers, and the host
+    service on its own (`Sweeping`).
     """
-    for each in host.launches():
+
+    def ending(each: Register) -> bool:
         own = layout.launch(each.launch)
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         lock = FileLock(own.lock, timeout=0)
         try:
             lock.acquire()
         except Held:
-            continue
+            return False
         try:
             if each.container is None or podman.exists(each.container):
-                continue
+                return False
             try:
                 host.unregister(each.launch)
             except HostError as gone:
                 say(f"Launch {each.launch} was ended already: {gone}")
-                continue
+                return False
             released(podman, own, say)
             if own.directory.is_dir():
                 shutil.rmtree(own.directory)
+            rooms = layout.rooms(each.repository)
+            removed(rooms.home, rooms.launch(each.launch))
             say(
                 f"Ended launch {each.launch}, {each.runtime} in {each.worktree}: its "
                 f"launcher and its container, {each.container}, are gone."
@@ -1619,6 +1626,9 @@ def swept(
         finally:
             lock.release()
         own.lock.unlink(missing_ok=True)
+        return True
+
+    return [each.launch for each in host.launches() if not ending(each)]
 
 
 class Sweeping(MutableModel, Companion, arbitrary_types_allowed=True):
@@ -1723,13 +1733,16 @@ def launched(
     operator's editor, said where lup doesn't know it; the room, its image
     built where it's missing; the package age each package manager in its
     image keeps, said where one keeps none; the terminal settings; the
-    repository's `config` checked for the room's git; the sweep, then the
-    launch registered, under its launcher's lock; the room's git
-    configuration and helper, the clipboard's programs, the package managers'
-    settings and the editor's link written; the CLI in the room, with
-    `arguments` after lup's own.
-    The registration ends, and the launch's directory goes, whatever the CLI
-    did.
+    repository's `config` checked for the room's git; the sweep, and the
+    environments a launch that crashed left, then the launch registered, under
+    its launcher's lock; the room's git configuration and helper, the
+    clipboard's programs, the package managers' settings, the environments'
+    program and places and the editor's link written; the CLI in the room,
+    behind the start making the worktree's environment, with `arguments` after
+    lup's own.
+    The registration ends, and the launch's directory and environments go,
+    with each of the host's environments that appeared in a worktree while the
+    room ran, whatever the CLI did.
     """
     runtime = adapter.runtime.name()
     launcher.say(launcher.trust(worktree).report())
@@ -1799,12 +1812,17 @@ def launched(
         }
         for place in shared.values():
             place.mkdir(parents=True, exist_ok=True)
+        launch = secrets.token_hex(8)
+        own = launcher.layout.launch(launch)
+        environments = RoomEnvironments.of(
+            declared.resolved.runner, worktree, launcher.layout, launch, launcher.tools
+        )
         room = maintaining_room(
             declared.resolved,
             worktree,
             launcher.layout,
             launcher.terminal,
-            launcher.tools,
+            environments,
             neighbours=neighbours,
             shared=shared,
             lent=lending,
@@ -1814,8 +1832,6 @@ def launched(
         )
         if built is not None:
             launcher.say(f"Built the room's image in {built.took()}: {built.tag}.")
-        launch = secrets.token_hex(8)
-        own = launcher.layout.launch(launch)
         ages = RoomPackageAge.of(own, declared.resolved, worktree)
         for each in ages.ungated:
             launcher.say(each.why)
@@ -1852,11 +1868,19 @@ def launched(
             name=name or branch_name(worktree),
             exact=name is not None,
             runner=declared.resolved.runner.command([]),
+            environments=environments.own,
         )
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         try:
             with FileLock(own.lock):
-                swept(launcher.layout, launcher.host, launcher.podman, launcher.say)
+                serving = swept(
+                    launcher.layout, launcher.host, launcher.podman, launcher.say
+                )
+                for each in unclaimed(environments.rooms, serving, launcher.layout):
+                    launcher.say(
+                        f"Removed {each}, the environments of a launch that ended "
+                        "without removing them."
+                    )
                 served = launcher.host.register(registered)
                 sockets = served.directory
                 launcher.say(f"This launch is `{served.name}`.")
@@ -1865,6 +1889,7 @@ def launched(
                     clipboard = RoomClipboard(launch=own)
                     clipboard.write()
                     ages.write()
+                    environments.write()
                     editor.link(own)
                     receives = receiving(launcher.podman, own)
                     walled = room.model_copy(
@@ -1881,11 +1906,16 @@ def launched(
                         }
                     )
                     opened = Room(
-                        agent=adapter.agent(), container=walled, engine=launcher.podman
+                        agent=adapter.agent(),
+                        container=walled,
+                        engine=launcher.podman,
+                        before=environments.before,
                     )
                     return opened.launch(arguments=arguments, settings=settings)
                 finally:
                     ended(launcher, launch)
+                    for line in environments.end():
+                        launcher.say(line)
         finally:
             own.lock.unlink(missing_ok=True)
 

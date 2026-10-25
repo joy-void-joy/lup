@@ -244,6 +244,13 @@ class Register(Request, reads=False):
     (`Runner.command([])`): `land` runs `lup-dev merge` behind it in the room.
     None in a record from before launches kept it, which `land` merges nothing
     for."""
+    environments: AbsolutePath | None = None
+    """The launch's own environments, one per worktree, outside the repository,
+    where its room has environments of its own (`docs/launch.md`, *The
+    project's environment, the room's own*): the judge reads each worktree's
+    there, for the launch's hooks, rather than where the runner names the
+    host's (`Runner.venv`). None where the room has none, and in a record from
+    before launches had them."""
     name: Name | None = None
     """Its name, as it stands: the one asked at registration, made unique
     (`exact`), and each rename since. None in a record from before launches

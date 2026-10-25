@@ -548,6 +548,28 @@ def test_a_launch_runs_the_agents_terminal_in_the_room(
     assert {path: path.read_text() for path in terminal.files} == terminal.files
 
 
+def test_a_launch_runs_the_cli_behind_what_the_room_starts_first(
+    tmp_path: Path, worktree: Path
+) -> None:
+    engine = RecordingEngine()
+    starting = ["/launch/bin/lup-environment", '["uv", "sync"]']
+    room = Room(
+        agent=Claude(model="opus"),
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        engine=engine,
+        before=starting,
+    )
+    settings = TerminalSettings(
+        directory=tmp_path / "launch", cli=Cli(program=Path("/opt/clis/claude"))
+    )
+    terminal = Claude(model="opus").terminal(settings)
+
+    room.launch(arguments=["--resume"], settings=settings)
+
+    [ran] = engine.ran
+    assert ran.command == [*starting, *terminal.command, "--resume"]
+
+
 def test_a_launch_refuses_a_working_directory_the_room_doesnt_mount(
     tmp_path: Path, worktree: Path
 ) -> None:

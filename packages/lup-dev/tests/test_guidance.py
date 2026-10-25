@@ -17,6 +17,7 @@ from lup_dev import (
     Modules,
     Project,
     RoomNeeds,
+    RoomPlaces,
     Runner,
     Section,
 )
@@ -53,7 +54,7 @@ class Stub(Runner):
         return None
 
     @override
-    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+    def room(self, root: Path, tools: Tools, places: RoomPlaces) -> RoomNeeds:
         return RoomNeeds()
 
 
