@@ -189,6 +189,13 @@ A module's Python lays out each of its views from lup's building blocks (`lup/bl
 
 `Transcripts`' conversation is the first: the drawer (`conversation`), one earlier exchange (`exchange`) and one call read whole (`call`), laid out in `packages/lup-transcripts/src/lup_transcripts/environment/conversation.py`.
 
+## Commands
+
+A module's commands come under its name on the command line, `lup-dev transcripts show abc --all`: each `@lup.command` method, and each view, whose command prints its text form (`lup_dev/commanding.py`). A first word that isn't one of `lup-dev`'s own commands names a module.
+
+- **Each is built with typer from its method's model:** a field with no default is an argument, one with a default an option named for its alias, else its name (`Field(default=False, alias="all")` is `--all`), a `bool` a flag, a `list` repeated; each field's description is its help, and the method's docstring the command's. Who runs it is found only as it runs, so `--help` asks nothing, and lists what they couldn't run.
+- **It runs in the terminal's own process,** never in the repository's: typer prints help and errors to its process's standard output, which the repository's process shares among every session it serves. On the host, the installed `lup-dev` hands a module's command over to the repository's approved copy, becoming it (`exec`), so only code the operator approved runs a project's module there, as the operator (`Operator`); the copy knows it's the one to run it by its own path. Before any approval, the host runs no module's command. In a room, the room's own `lup-dev` runs it from the worktree's declaration, which the room contains, as the room (`Room`), its launch as the host recorded it (`room-launch`). A command in a room is room code: what needs the host, the operator's credentials or the inbox, it asks the host for, as any room code does. The hand-over costs a second start of Python on the host, about 0.9 s (#298 watches it).
+
 ## lup's modules
 
 `Modules.default()`, in order (`declaration/modules/shipped.py`):
