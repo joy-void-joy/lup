@@ -74,9 +74,13 @@ shows that change as well.
 **A worktree is removed in the room,** never on the host: through `podman exec` in
 the launch's container, `git worktree remove` without `--force`, so git itself
 keeps one with changes or untracked files, and what it ignores (its scratch)
-goes with it; one whose `.venv` is hidden from the room fails there, its mount
-holding it, with the rest of what git hadn't removed (`docs/launch.md`, *The
-project's environment, the room's own*). Removed on the host, the path would be the one
+goes with it. Where the room has a mount at or inside a worktree, its `.venv`
+hidden from the room say, git's removal there would fail partway, having
+removed part of the worktree, the mount holding the rest: so the room is asked
+what it mounts first (`findmnt`, `laid`), and such a worktree is left whole,
+named as left with what's hidden, for the operator to remove on the host
+(`docs/launch.md`, *The project's environment, the room's own*). Where the room
+can't say, no worktree is removed, and why is said once. Removed on the host, the path would be the one
 `<git directory>/worktrees/<name>/gitdir` names, which the room writes, and the
 host's recursive delete could be aimed outside the repository. The container is
 named as the launch's record has it when the cleanup runs (`reached`), since
@@ -250,6 +254,35 @@ class Reached(Model):
 
     container: str | None = None
     unreached: str | None = None
+
+
+class Filesystem(Model):
+    """One mount as `findmnt --json --output TARGET` lists it: where it's mounted."""
+
+    target: Path
+
+
+class Filesystems(Model):
+    """What `findmnt --json --list --output TARGET` prints: every mount the room has."""
+
+    filesystems: list[Filesystem]
+
+
+class Laid(Model):
+    """What the launch's room has mounted, as a landing's cleanup asks it before removing a worktree: each mount's place there."""
+
+    targets: list[Path] = []
+    unlisted: str | None = None
+    """Why lup couldn't list them, where it couldn't: then no worktree is
+    removed."""
+
+    def over(self, root: Path) -> list[Path]:
+        """Return each mount at or inside the worktree at `root`, from its root, as the room has it: what `git worktree remove` there couldn't remove."""
+        return [
+            target.relative_to(root)
+            for target in self.targets
+            if target.is_relative_to(root)
+        ]
 
 
 class Cleaned(Model):
@@ -1271,7 +1304,21 @@ class Lander(Model, arbitrary_types_allowed=True):
         removing = [
             root for each in roots.values() for root in each if root not in left
         ]
-        room = await self.reached() if removing else Reached()
+        reached = await self.reached() if removing else Reached()
+        laid = await self.laid(reached)
+        room = reached if laid.unlisted is None else Reached(unreached=laid.unlisted)
+
+        def hidden(over: list[Path]) -> str:
+            named = ", ".join(f"`{each}`" for each in over)
+            verb = "is" if len(over) == 1 else "are"
+            return (
+                f"its {named} {verb} hidden from the room, so it's removed on the host"
+            )
+
+        left = {
+            **left,
+            **{root: hidden(over) for root in removing if (over := laid.over(root))},
+        }
         return Cleaned.joined(
             [
                 Cleaned(
@@ -1338,6 +1385,48 @@ class Lander(Model, arbitrary_types_allowed=True):
                         f"`{container}` is there ({said})"
                     )
                 )
+
+    async def laid(self, room: Reached) -> Laid:
+        """Ask the launch's room, where it's reached, what it has mounted; where it can't say, say why, so no worktree is removed.
+
+        The room's own mount table is the one to ask: the host doesn't see its
+        mounts, and one the launch laid moves with a directory the room moves.
+        """
+        if room.container is None:
+            return Laid()
+        ran = await self.run(
+            Program(
+                command=[
+                    "podman",
+                    "exec",
+                    "--workdir",
+                    str(self.launch.worktree),
+                    room.container,
+                    "findmnt",
+                    "--json",
+                    "--list",
+                    "--output",
+                    "TARGET",
+                ],
+                payload="",
+                directory=self.launch.repository,
+            )
+        )
+        if ran.status != 0:
+            said = oneline(ran.said()) or f"it ended with status {ran.status}"
+            return Laid(
+                unlisted=f"lup couldn't list what your room mounts (`findmnt`: {said})"
+            )
+        try:
+            listed = Filesystems.model_validate_json(ran.output)
+        except ValidationError as unreadable:
+            return Laid(
+                unlisted=(
+                    "lup couldn't read what your room mounts (`findmnt`: "
+                    f"{oneline(str(unreadable))})"
+                )
+            )
+        return Laid(targets=[each.target for each in listed.filesystems])
 
     async def branch_cleaned(
         self,

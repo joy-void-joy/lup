@@ -6922,6 +6922,10 @@ class Landings:
         """The gate the room's `lup-dev merge` runs on a merge."""
         self.unmerging: str | None = None
         """What the room's `lup-dev merge` says failing, where it fails, as one without the command does."""
+        self.mounted: list[Path] = [Path("/")]
+        """Where the room has something mounted, as its `findmnt` lists it: a test lays a mount over a path in a worktree here."""
+        self.unlisting: str | None = None
+        """What the room's `findmnt` says failing, where it fails."""
 
     def branched(self, name: str, start: str = "dev") -> Path:
         """Add a worktree on a new branch `name` from `start`, `dev` by default, and return its root."""
@@ -6938,6 +6942,13 @@ class Landings:
             case ["podman", "container", "exists", name]:
                 there = self.containers is None or name in self.containers
                 return Ran(command=program.command, status=0 if there else 1)
+            case ["podman", "exec", "--workdir", _, _, "findmnt", *_]:
+                if self.unlisting is not None:
+                    failing = self.unlisting.encode()
+                    return Ran(command=program.command, status=1, error=failing)
+                listed = {"filesystems": [{"target": str(at)} for at in self.mounted]}
+                printed = json.dumps(listed).encode()
+                return Ran(command=program.command, status=0, output=printed)
             case ["podman", "exec", "--workdir", workdir, _, *command]:
                 return await executed(
                     Program(command=command, payload="", directory=Path(workdir))
@@ -7099,6 +7110,14 @@ def started(runtime: str) -> str:
     return claude("SessionStart", source="startup")
 
 
+def listing(workdir: Path, container: str) -> list[str]:
+    """How a landing's cleanup asks the launch's room what it mounts, before it removes a worktree there."""
+    return [
+        *["podman", "exec", "--workdir", str(workdir), container],
+        *["findmnt", "--json", "--list", "--output", "TARGET"],
+    ]
+
+
 def lander(landings: Landings, runtime: str) -> Conversation:
     """The main conversation of the session `started` starts, in the landings' repository."""
     session = "t1" if runtime == "codex" else "s1"
@@ -7155,6 +7174,7 @@ def test_land_puts_the_branch_on_dev_and_cleans_up_what_it_landed_but_what_s_in_
     assert landings.shell.git(repository, "branch", "--list", "feat") == ""
     assert landings.ran == [
         ["podman", "container", "exists", "lup-one"],
+        listing(landings.dev, "lup-one"),
         *(
             [
                 "podman",
@@ -7222,6 +7242,7 @@ def test_land_removes_worktrees_in_the_container_the_launch_has_when_it_cleans_u
     assert f"one: its container lup-one is {renamed}" in said
     assert landings.ran == [
         ["podman", "container", "exists", renamed],
+        listing(landings.dev, renamed),
         [
             "podman",
             "exec",
@@ -7233,6 +7254,75 @@ def test_land_removes_worktrees_in_the_container_the_launch_has_when_it_cleans_u
             "remove",
             str(feat),
         ],
+    ]
+
+
+def test_land_leaves_whole_a_worktree_the_room_hides_something_in_saying_so(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat = landings.feat
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    (feat / ".venv").mkdir()
+    (feat / ".venv" / "python").write_text("the host's environment")
+    # The room lays an empty directory over the worktree's `.venv`, inside the
+    # tree's own mount: `git worktree remove` there fails partway.
+    landings.mounted = [Path("/"), landings.repository, feat / ".venv"]
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+    assert not error
+    assert answer == (
+        f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "Left:\n"
+        f"- the worktree {feat}: its `.venv` is hidden from the room, so it's "
+        "removed on the host\n"
+        f"- the local branch `feat`, checked out in {feat}\n{NOTHING_GOING}"
+    )
+    assert (feat / "src/pkg/rooms.py").is_file()
+    assert (feat / ".venv" / "python").is_file()
+    assert str(feat) in landings.shell.git(landings.repository, "worktree", "list")
+    assert landings.ran == [
+        ["podman", "container", "exists", "lup-one"],
+        listing(landings.dev, "lup-one"),
+    ]
+
+
+def test_land_removes_no_worktree_where_the_room_cant_say_what_it_mounts(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat = landings.feat
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    landings.unlisting = "findmnt: command not found"
+    old = landings.on_forge("refs/heads/dev")
+    tip = landings.merged()
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+    assert not error
+    assert answer == (
+        f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "Left:\n"
+        "- lup couldn't list what your room mounts (`findmnt`: findmnt: command "
+        "not found), so no worktree was removed\n"
+        f"- the worktree {feat}\n"
+        f"- the local branch `feat`, checked out in {feat}\n{NOTHING_GOING}"
+    )
+    assert feat.is_dir()
+    assert landings.ran == [
+        ["podman", "container", "exists", "lup-one"],
+        listing(landings.dev, "lup-one"),
     ]
 
 
@@ -7705,6 +7795,7 @@ def test_land_merges_a_branch_onto_dev_in_the_room_gates_the_merge_and_moves_dev
             *["git", "merge", "--ff-only", "--quiet", merge],
         ],
         ["podman", "container", "exists", "lup-one"],
+        listing(dev, "lup-one"),
         [
             *["podman", "exec", "--workdir", str(dev), "lup-one"],
             *["git", "worktree", "remove", str(feat)],
@@ -7766,6 +7857,7 @@ def test_land_of_a_branch_leaves_alone_one_made_from_its_tip_worktree_and_all(
             *["git", "merge", "--ff-only", "--quiet", merge],
         ],
         ["podman", "container", "exists", "lup-one"],
+        listing(dev, "lup-one"),
         [
             *["podman", "exec", "--workdir", str(dev), "lup-one"],
             *["git", "worktree", "remove", str(handed)],
