@@ -179,6 +179,7 @@ from lup_dev.launch.room import (
     OperatorsEditor,
     RoomClipboard,
     RoomError,
+    RoomPackageAge,
     host_needs,
     lend,
     lent,
@@ -1719,11 +1720,13 @@ def launched(
     service; the latest CLI, a fallback said; the other repositories the
     declaration names for its sessions to read, each missing one said; the
     operator's editor, said where lup doesn't know it; the room, its image
-    built where it's missing; the terminal settings; the repository's `config`
-    checked for the room's git; the sweep, then the launch registered, under
-    its launcher's lock; the room's git configuration and helper, the
-    clipboard's programs and the editor's link written; the CLI in the room,
-    with `arguments` after lup's own.
+    built where it's missing; the package age each package manager in its
+    image keeps, said where one keeps none; the terminal settings; the
+    repository's `config` checked for the room's git; the sweep, then the
+    launch registered, under its launcher's lock; the room's git
+    configuration and helper, the clipboard's programs, the package managers'
+    settings and the editor's link written; the CLI in the room, with
+    `arguments` after lup's own.
     The registration ends, and the launch's directory goes, whatever the CLI
     did.
     """
@@ -1812,6 +1815,9 @@ def launched(
             launcher.say(f"Built the room's image in {built.took()}: {built.tag}.")
         launch = secrets.token_hex(8)
         own = launcher.layout.launch(launch)
+        ages = RoomPackageAge.of(own, declared.resolved, worktree)
+        for each in ages.ungated:
+            launcher.say(each.why)
         settings = terminal_settings(
             declared,
             worktree,
@@ -1831,7 +1837,7 @@ def launched(
         git = room_git(
             repository,
             own,
-            [*room.mounts, *adapter.agent().terminal(settings).mounts],
+            [*room.mounts, *ages.mounts, *adapter.agent().terminal(settings).mounts],
             gating,
         )
         registered = Register(
@@ -1857,6 +1863,7 @@ def launched(
                     git.write()
                     clipboard = RoomClipboard(launch=own)
                     clipboard.write()
+                    ages.write()
                     editor.link(own)
                     receives = receiving(launcher.podman, own)
                     walled = room.model_copy(
@@ -1865,6 +1872,7 @@ def launched(
                             "mounts": [
                                 *room.mounts,
                                 *git.mounts,
+                                *ages.mounts,
                                 Mount(source=sockets, target=ROOM_SOCKETS),
                                 receives,
                             ],

@@ -5,7 +5,10 @@ configuration kept out; uv is stubbed through the runner's `Tools`, and no test
 runs podman.
 """
 
+import tomllib
+from datetime import timedelta
 from pathlib import Path
+from typing import override
 
 import pytest
 
@@ -13,14 +16,20 @@ from lup.programs import run
 from lup.rooms.container import Container, Image, Mount
 from lup_dev import Core, Modules, Package, Packages, Plain, Project, Python, Repository
 from lup_dev.catalog.room import Editors, RoomBase
+from lup_dev.declaration.package_managers.manager import (
+    HomeSettings,
+    PackageManager,
+    Ungated,
+)
 from lup_dev.declaration.requirements import Printed, Tools
-from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.launch.images import definition
 from lup_dev.launch.room import (
     Lent,
     OperatorsEditor,
     RelatedRepository,
     RoomError,
+    RoomPackageAge,
     lent,
     maintaining_room,
     related,
@@ -655,3 +664,92 @@ def test_a_repository_overlapping_the_room_s_own_mounts_is_refused(
             neighbours=related(naming(named), worktree),
         )
     assert str((tmp_path / named).resolve()) in str(refused.value)
+
+
+# The package age gate
+
+
+class Recorded(PackageManager):
+    """A package manager answering as a test says, whatever the project."""
+
+    package = "pip"
+    answer: HomeSettings | Ungated
+
+    @override
+    def aged(self, root: Path, age: timedelta) -> HomeSettings | Ungated:
+        del root, age
+        return self.answer
+
+
+def resolved_with(*names: str) -> Resolved:
+    """lup's defaults with these packages in the room's image, and a package age of 5 days."""
+    return resolve(
+        Project(
+            modules=Modules.default().edit(
+                Core(
+                    package_age=timedelta(days=5),
+                    packages=Packages().add(
+                        *(Package(name=name, why="a test's") for name in names)
+                    ),
+                )
+            )
+        )
+    )
+
+
+def test_each_package_manager_the_image_holds_gets_its_settings_at_the_declared_age(
+    tmp_path: Path, home: Path
+) -> None:
+    launch = LaunchLayout(directory=tmp_path / "launch")
+    (tmp_path / "pyproject.toml").write_text('[tool.uv]\nexclude-newer = "1 week"\n')
+    gate = RoomPackageAge.of(launch, resolved_with("npm"), tmp_path)
+    assert gate.ungated == []
+    assert [each.path for each in gate.settings] == [
+        Path(".npmrc"),
+        Path(".config/uv/uv.toml"),
+    ]
+    gate.write()
+    assert (launch.home / ".npmrc").read_text().splitlines()[1:] == [
+        "min-release-age=5.0"
+    ]
+    assert tomllib.loads((launch.home / ".config/uv/uv.toml").read_text()) == {
+        "exclude-newer": "P5D"
+    }
+    assert gate.mounts == [
+        Mount(source=launch.home / ".npmrc", target=home / ".npmrc", read_only=True),
+        Mount(
+            source=launch.home / ".config/uv/uv.toml",
+            target=home / ".config/uv/uv.toml",
+            read_only=True,
+        ),
+    ]
+
+
+def test_a_package_manager_the_image_doesnt_hold_gets_nothing(
+    tmp_path: Path, home: Path
+) -> None:
+    del home
+    launch = LaunchLayout(directory=tmp_path / "launch")
+    plain_image = resolve(plain())
+    assert "npm" not in [each.name for each in plain_image.packages]
+    assert "uv" not in [each.name for each in plain_image.packages]
+    gate = RoomPackageAge.of(launch, plain_image, tmp_path)
+    assert gate.settings == []
+    assert gate.ungated == []
+    assert gate.mounts == []
+
+
+def test_a_package_manager_getting_none_says_why_and_mounts_nothing(
+    tmp_path: Path, home: Path
+) -> None:
+    del home
+    why = Ungated(why="pip keeps no age here")
+    gate = RoomPackageAge.of(
+        LaunchLayout(directory=tmp_path / "launch"),
+        resolved_with("pip"),
+        tmp_path,
+        managers=[Recorded(answer=why)],
+    )
+    assert gate.settings == []
+    assert gate.ungated == [why]
+    assert gate.mounts == []

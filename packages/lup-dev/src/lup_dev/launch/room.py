@@ -66,6 +66,12 @@ condition, a file inside one of the room's mounts, each include resolved as git
 resolves it (relative to the file holding it, `~` the operator's home, an
 `:(optional)` one too) and followed through every file it includes
 (`docs/field-notes.md`, *Host-side git in a repository the room writes*).
+
+The package age gate (`RoomPackageAge`, `docs/launch.md`, *The package age
+gate*): the user-level settings of each package manager the room's image holds,
+as it spells them (`lup_dev.declaration.package_managers`), written into the
+launch's directory and mounted read-only in the room's home, each refusing what
+was published within `Core`'s `package_age`.
 """
 
 import inspect
@@ -84,6 +90,12 @@ from lup.types import Model
 from lup_dev.catalog.room import Editor, Editors, RoomBase
 from lup_dev.clipboard import shim
 from lup_dev.declaration.kinds import Package
+from lup_dev.declaration.package_managers import PACKAGE_MANAGERS
+from lup_dev.declaration.package_managers.manager import (
+    HomeSettings,
+    PackageManager,
+    Ungated,
+)
 from lup_dev.declaration.requirements import Needed, Requirement
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM
@@ -586,6 +598,63 @@ class RoomClipboard(Model):
         for path in [self.launch.pasting, self.launch.copying]:
             path.write_text(wanted[path])
             path.chmod(0o755)
+
+
+class RoomPackageAge(Model):
+    """What a room gets for the package age gate: the user-level settings of each package manager its image holds, each refusing what was published within the age (`docs/launch.md`, *The package age gate*).
+
+    Each is a file of the launch's own, under its `home`, mounted read-only
+    where its package manager reads it in the room's home.
+    """
+
+    launch: LaunchLayout
+    home: Path
+    """The room's home: the operator's home path, as the room has it."""
+    settings: list[HomeSettings]
+    ungated: list[Ungated] = []
+    """Why each package manager the image holds that gets no settings doesn't,
+    which the launch says."""
+
+    @classmethod
+    def of(
+        cls,
+        launch: LaunchLayout,
+        resolved: Resolved,
+        root: Path,
+        managers: list[PackageManager] = PACKAGE_MANAGERS,
+    ) -> RoomPackageAge:
+        """Ask each of `managers` the room's image holds for its settings keeping the declaration's package age, for the project at `root`."""
+        held = [each.name for each in resolved.packages]
+        aged = [
+            manager.aged(root, resolved.package_age)
+            for manager in managers
+            if manager.package in held
+        ]
+        return cls(
+            launch=launch,
+            home=Path.home(),
+            settings=[each for each in aged if isinstance(each, HomeSettings)],
+            ungated=[each for each in aged if isinstance(each, Ungated)],
+        )
+
+    @property
+    def mounts(self) -> list[Mount]:
+        """Each file, read-only, where its package manager reads it in the room's home."""
+        return [
+            Mount(
+                source=self.launch.home / each.path,
+                target=self.home / each.path,
+                read_only=True,
+            )
+            for each in self.settings
+        ]
+
+    def write(self) -> None:
+        """Write each file into the launch's `home`, at its path there."""
+        for each in self.settings:
+            written = self.launch.home / each.path
+            written.parent.mkdir(parents=True, exist_ok=True)
+            written.write_text(each.text)
 
 
 def receiving(podman: Podman, launch: LaunchLayout) -> Mount:

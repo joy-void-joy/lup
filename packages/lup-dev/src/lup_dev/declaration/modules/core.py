@@ -59,8 +59,9 @@ class Core(Module):
     package_age: Annotated[timedelta, Field(ge=timedelta(0))] = PackageAge().minimum
     """How long a package must have been published before the room's package
     managers install it: three days, unless the project says. The launch writes
-    it into npm's and uv's user-level settings in the room's home, which a
-    project's own setting outranks (`docs/launch.md`, *The package age gate*)."""
+    it into the user-level settings of each package manager the room's image
+    holds, which a project's own setting outranks (`docs/launch.md`, *The
+    package age gate*)."""
     session: Session = Session()
     """How every session runs: the subagents' prompt cache, auto memory, idle
     compaction, the built-in tools removed from context and the account's

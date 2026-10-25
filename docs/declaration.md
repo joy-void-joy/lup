@@ -1,6 +1,6 @@
 # The declaration: what a project declares in `lup_project.py`
 
-A project says what lup does for it in one file, `lup_project.py` at its root: a `Project` holding the modules it's made of. Every part a project can change (path roles, code rules, gate steps, guidance, the room's packages, session settings, the limits on the operator's credentials, a module's tools, requirements) comes from a selected module, lup's own included, so a module brings what it needs and takes it away when it's dropped (`DESIGN.md`, *Modules*). What every project gets alike, such as the inbox's and the judge's tools and the host's own requirements, is the host service's. The code is in `lup_dev/declaration/`.
+A project says what lup does for it in one file, `lup_project.py` at its root: a `Project` holding the modules it's made of. Every part a project can change (path roles, code rules, gate steps, guidance, the room's packages, the package age its package managers keep, session settings, the limits on the operator's credentials, a module's tools, requirements) comes from a selected module, lup's own included, so a module brings what it needs and takes it away when it's dropped (`DESIGN.md`, *Modules*). What every project gets alike, such as the inbox's and the judge's tools and the host's own requirements, is the host service's. The code is in `lup_dev/declaration/`.
 
 A word on words: a **module** here is a `Module` (`Core`, `Python`); a Python source file is a **file**.
 
@@ -202,7 +202,7 @@ A module's commands come under its name on the command line, `lup-dev transcript
 
 | Module | What it holds |
 |---|---|
-| `Core` | every protected path but the Python tools', the operator's documents, TypeScript's tests (`*.test.ts`, `*.test.tsx`), scratch, docs and data; the standard machine; lup's session defaults; the credentials' limits; guidance `core` |
+| `Core` | every protected path but the Python tools', the operator's documents, TypeScript's tests (`*.test.ts`, `*.test.tsx`), scratch, docs and data; the standard machine; the package age, three days; lup's session defaults; the credentials' limits; guidance `core` |
 | `Python` | the Python tools' files (protected), source trees, Python files and `conftest.py`; the runner, `Uv()`; the test roots, `tests/`; the gate's `rules`, `format`, `pytest` and `lint-imports`; guidance `python` |
 | `CodeRules` | every rule but those `catalog/rules.py` leaves out, each with its reason (`runtime-mention` alone today); no exemptions; guidance `code-rules`. Requires Node `>=22.18` for the engine |
 | `GitHub` | the GitHub tools; the answer to a room's gate asking an issue's state |
@@ -220,13 +220,13 @@ A module's commands come under its name on the command line, `lup-dev transcript
 
 **What judging reads** is kept apart as plain values (`Declaration`): the declaration's file, the roles, the test roots, the exemptions, the conditions, the rule selections, the runner as the commands it puts before a tool, and what's held and flagged. Plain values, since a module or a runner may be a class of the project's own, which JSON can't bring back, and the judge keeps the last declaration that loaded to stand in for one that can't (`docs/judging-writes.md`, *A declaration that can't load has a stand-in*).
 
-**What a launch reads,** at the approved commit (`approved_declaration`, `launch/session.py`): the packages; the session settings, with which fields some layer set, so those are imposed over the person's own runtime settings and the rest are lup's defaults theirs outrank; the credentials' limits, sent with the registration (`docs/credentials.md`, *What the declaration allows*); the guidance sections (`docs/launch.md`, *Guidance*); the related repositories; the runner's `room()`; and what each module serves.
+**What a launch reads,** at the approved commit (`approved_declaration`, `launch/session.py`): the packages; the package age (`docs/launch.md`, *The package age gate*); the session settings, with which fields some layer set, so those are imposed over the person's own runtime settings and the rest are lup's defaults theirs outrank; the credentials' limits, sent with the registration (`docs/credentials.md`, *What the declaration allows*); the guidance sections (`docs/launch.md`, *Guidance*); the related repositories; the runner's `room()`; and what each module serves.
 
 **Selecting the rules.** `CodeRules.rules` is a `Rules` selection, by default `Rules.all()` with a `.drop(…, why=…)` for each rule lup's default leaves out, so a rule a later release adds runs unless it's left out too. Python only composes and records a selection: each check request carries every module's, and the engine, which holds the table, resolves them and runs their union, refusing an id it doesn't have. Exemptions and `# lup: ignore` apply afterwards, in Python. `lup-dev rules list` lists what the worktree's declaration runs, resolved the same way, and a launch lists the approved one's in the guidance. A project's own rule tables are #175.
 
 ## The runner
 
-`Python.runner` says how the project runs its tools (`declaration/runner.py`), so uv is spelled once, in `Uv` (`declaration/package_managers/uv.py`), for everything run in the project's environment; a deferral's conditions asking uv for Pythons, and trust installing lup itself, ask uv for themselves:
+`Python.runner` says how the project runs its tools (`declaration/runner.py`), so uv is spelled once, in `Uv`, for everything run in the project's environment; `Uv` lives beside the rest of what lup knows of uv, the package age its user-level settings keep (`declaration/package_managers/uv.py`; `docs/launch.md`, *The package age gate*). A deferral's conditions asking uv for Pythons, and trust installing lup itself, ask uv for themselves:
 
 ```python
 class Runner(Model, ABC):
