@@ -78,7 +78,7 @@ class Making(Model):
     """A worktree lup makes at its runtime's asking: its root, the worktree git makes it from, its new branch, and the commit it starts at.
 
     The judge decides it and the room's hook makes it, with the room's own git
-    (`MAKING`, `launch/session.py`): the hook reads `lines`, a field a line.
+    (`launch/worktree.sh`): the hook reads `lines`, a field a line.
     """
 
     root: Path

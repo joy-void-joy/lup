@@ -2511,7 +2511,7 @@ def dev(bare: Path) -> Path:
 
 
 def made_in_room(printed: str) -> Path:
-    """Make the worktree a hook's answer names, as the room's hook does with the room's git (`MAKING`); return its root."""
+    """Make the worktree a hook's answer names, as the room's hook does with the room's git (`launch/worktree.sh`); return its root."""
     root, origin, branch, commit = printed.splitlines()
     Git(cwd=Path(origin)).run("worktree", "add", "--quiet", "-b", branch, root, commit)
     return Path(root)
