@@ -48,10 +48,11 @@ The operator's editor is the one `$VISUAL` names, else `$EDITOR`, which Ctrl+G
 opens (`OperatorsEditor`): where lup knows it (`Editors`), the room installs its
 package, unless the declaration has it already, and mounts its configuration.
 
-The environment's interpreter must resolve under the room's mounts, or the room
-refuses with the runner's remedy: without it, `uv run` in the room set about
+The directory of the environment's interpreter, which the runner reads without
+running anything (`Interpreter`), must resolve under the room's mounts, or the
+room refuses with the runner's remedy: without it, `uv run` in the room set about
 remaking the shared `.venv` (`docs/launch.md`, *The project's environment,
-shared with the host*). A system interpreter is outside every mount.
+shared with the host*). A system interpreter's is outside every mount.
 
 The room's git (`room_git`, `docs/credentials.md`, *git through a remote
 helper*): its own configuration in place of the operator's (`GIT_CONFIG_GLOBAL`,
@@ -454,22 +455,23 @@ def maintaining_room(
         return found.output.decode().strip() if found.status == 0 else None
 
     def reached(interpreter: Interpreter, mounts: list[Mount]) -> None:
-        resolved_path = interpreter.path.resolve()
+        resolved_home = interpreter.home.resolve()
         inside = any(
-            resolved_path.is_relative_to(mount.source.resolve()) for mount in mounts
+            resolved_home.is_relative_to(mount.source.resolve()) for mount in mounts
         )
-        if inside and resolved_path.is_file():
+        if inside and resolved_home.is_dir():
             return
         where = (
-            "outside every mount of the room, as a system interpreter is"
-            if resolved_path.is_file()
+            "outside every mount of the room, as a system interpreter's is"
+            if resolved_home.is_dir()
             else "and isn't there"
         )
         message = (
-            f"The project's environment runs on {interpreter.path}, which resolves "
-            f"to {resolved_path}, {where}: in the room the environment would have "
-            "no interpreter, and its tools would set about remaking the "
-            f"environment the host shares. To launch, {interpreter.remedy}"
+            f"The project's environment runs on the interpreter in "
+            f"{interpreter.home}, which resolves to {resolved_home}, {where}: in "
+            "the room the environment would have no interpreter, and its tools "
+            "would set about remaking the environment the host shares. To launch, "
+            f"{interpreter.remedy}"
         )
         raise RoomError(message)
 

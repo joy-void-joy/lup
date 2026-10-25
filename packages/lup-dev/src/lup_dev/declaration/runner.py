@@ -30,9 +30,10 @@ class RunnerError(LupDevError):
 class Interpreter(Model):
     """The interpreter a project's environment runs on, which a room must reach."""
 
-    path: Path
-    """As the runner finds it: the environment's own link to it, or the
-    interpreter the environment would be made from."""
+    home: Path
+    """The directory holding it, as the runner finds it without running anything:
+    the `home` the environment's `pyvenv.cfg` records, or where there's no
+    environment yet, that of the interpreter it would be made from."""
     remedy: str
     """How to move the environment onto an interpreter a room mounts, said when
     this one resolves outside every mount."""

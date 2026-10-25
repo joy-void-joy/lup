@@ -75,7 +75,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class AskedUv(Tools):
-    """uv's answers by the words after `--directory <root>`."""
+    """uv's answers by the two words after `uv --no-config`."""
 
     def __init__(self, store: Path, cache: Path, interpreter: Path) -> None:
         self.answers = {
@@ -88,7 +88,7 @@ class AskedUv(Tools):
         return True
 
     def run(self, command: list[str]) -> Printed:
-        return Printed(code=0, output=f"{self.answers[' '.join(command[6:])]}\n")
+        return Printed(code=0, output=f"{self.answers[' '.join(command[2:4])]}\n")
 
 
 class Machine:
@@ -101,12 +101,19 @@ class Machine:
         python = self.store / "cpython-3.14-linux" / "bin" / "python3.14"
         python.parent.mkdir(parents=True)
         python.write_text("")
-        self.link = worktree / ".venv" / "bin" / "python"
-        self.link.parent.mkdir(parents=True)
-        self.link.symlink_to(python)
+        self.environment = worktree / ".venv"
+        (self.environment / "bin").mkdir(parents=True)
+        (self.environment / "bin" / "python").symlink_to(python)
+        self.runs_on(python.parent)
 
-    def tools(self, interpreter: Path | None = None) -> AskedUv:
-        return AskedUv(self.store, self.cache, interpreter or self.link)
+    def runs_on(self, home: Path) -> None:
+        """Record `home` as the directory of the environment's interpreter."""
+        (self.environment / "pyvenv.cfg").write_text(
+            f"home = {home}\nversion_info = 3.14.0\n"
+        )
+
+    def tools(self) -> AskedUv:
+        return AskedUv(self.store, self.cache, self.store / "none" / "python")
 
 
 def terminal(**variables: str) -> TerminalVariables:
@@ -347,11 +354,11 @@ def test_an_environment_on_a_system_interpreter_is_refused(
     system = tmp_path / "usr" / "bin" / "python3.14"
     system.parent.mkdir(parents=True)
     system.write_text("")
-    machine.link.unlink()
-    machine.link.symlink_to(system)
+    machine.runs_on(system.parent)
 
     with pytest.raises(
-        RoomError, match=r"outside every mount of the room, as a system interpreter is"
+        RoomError,
+        match=r"outside every mount of the room, as a system interpreter's is",
     ) as refused:
         maintaining_room(
             resolve(Project()),
@@ -361,7 +368,7 @@ def test_an_environment_on_a_system_interpreter_is_refused(
             machine.tools(),
             neighbours=[],
         )
-    assert str(system) in str(refused.value)
+    assert str(system.parent) in str(refused.value)
     assert REMEDY in str(refused.value)
 
 
@@ -370,7 +377,7 @@ def test_an_environment_whose_interpreter_is_gone_is_refused(
 ) -> None:
     worktree = bare / "tree" / "main"
     machine = Machine(tmp_path, worktree)
-    machine.link.resolve().unlink()
+    machine.runs_on(tmp_path / "gone" / "bin")
 
     with pytest.raises(RoomError, match=r"and isn't there") as refused:
         maintaining_room(
