@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import Field
 
 from lup.types import Model
-from lup_dev.declaration.runner import Uv
+from lup_dev.declaration.package_managers.uv import Uv
 from lup_dev.layout import PackageLayout
 from lup_dev.stored import read_model
 

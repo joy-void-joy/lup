@@ -548,6 +548,22 @@ Every `additionalContext` lup's hooks told in the Claude Code conversations kept
 - bun 1.3.14 has `minimumReleaseAge`;
 - pacman holds to a dated Arch Linux Archive mirror (checked in a room: a snapshot's packages matched its date's base image), though some days are missing (*Rooms*).
 
+## User-level package age settings (npm 12.0.2, uv 0.12.5, measured in a room 2026-10-25)
+
+With a throwaway `HOME` and every project outside the repository: a project under the repository's `tmp/` picked up the root `pyproject.toml`'s `exclude-newer`, since uv climbs past a `pyproject.toml` without `[tool.uv]`. A 3-day cutoff fell between boto3 1.43.117 and 1.43.118 (uploaded 2026-10-22T19:22Z), and between TypeScript's nightlies.
+- **uv's user-level `~/.config/uv/uv.toml`** (the room sets no `XDG_CONFIG_HOME`):
+  - **in a project setting no `exclude-newer` of its own, it relocks:** `uv lock --check` failed with "Resolving despite existing lockfile due to addition of global exclude newer", and plain `uv run` rewrote `uv.lock`, adding `[options]` with `exclude-newer-span = "P3D"` and downgrading boto3 and botocore to 1.43.117. Without the file, the next `uv run` relocked again ("due to removal of global exclude newer"), keeping 1.43.117. Another span relocks too ("change of exclude newer span from `P7D` to `P3D`"); the same span at a later time doesn't. `--frozen` installed the locked version and wrote nothing; `--locked` refused, status 2;
+  - **a project's own `exclude-newer` outranks it both ways:** with the project at "3 days", `uv lock --check` passed under a user-level "1 day", "3 days" and "7 days" alike; fresh locks took the project's value (`P3D` with the user at "1 day", `P1D` with the project at "1 day" and the user at "3 days");
+  - **where uv takes a project's settings from:** a `uv.toml` at the root, whose presence hides `pyproject.toml`'s `[tool.uv]` beside it ("The following fields from `[tool.uv]` will be ignored in favor of the `uv.toml` file"), even where the `uv.toml` doesn't set `exclude-newer`; else the nearest `pyproject.toml` with a `[tool.uv]`. A workspace member's own `[tool.uv]` doesn't count, the root's settings applying; a nested project outside the workspace with a `[tool.uv]` of its own does, so one setting no `exclude-newer` relocks under a user-level one;
+  - **`uvx` reads it and ignores the project's:** in a project at "3 days" with no user-level file, `uvx --with boto3 --from iniconfig python` got 1.43.118; with the user-level file at "3 days" and the project at "1 day", 1.43.117;
+  - **it takes pydantic's ISO 8601 durations:** `P3D`, `P1DT12H`, `P7DT30M` and `PT0S` each resolved as their length says, recorded as the lock's span.
+- **npm's user-level `~/.npmrc`, `min-release-age`** (its config docs rank cli > env > project > user > global, a higher source able to relax a lower):
+  - **`npm ci` installs a locked version newer than the age,** cache empty or not, and `npm install` with the lock there said "up to date", leaving the lock as it was;
+  - **it refuses an explicit install:** "No matching version found for typescript@7.1.0-dev.20261025.1 with a date before …", `ETARGET`, status 1;
+  - **`npx` keeps it:** `npx -p typescript@next tsc --version` printed 7.0.2 with it and that day's nightly without;
+  - **a project's `.npmrc` outranks it both ways:** a project at 1 day installed a two-day-old nightly under a user-level 3; a project at 10 refused `typescript@7.1.0-beta`, five days old, which the user-level 3 alone allowed;
+  - **it takes a fraction of a day:** at 1.5 the cutoff was 36 hours back, refusing a 29-hour-old version 1 lets in; `3.0` reads as 3.
+
 ## Tools (ruff 0.16.10, pyright 1.1.414, 2026-10-07)
 
 - ruff 0.16.10 and pyright 1.1.414 resolve an extended base's relative paths from the base's own directory, so a base under `.lup/settings/` writes `../../`;

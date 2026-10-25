@@ -9,8 +9,9 @@ The homes:
   path is limited in length;
 - the host service's sockets and the launches it serves, under
   `$XDG_RUNTIME_DIR/lup/host/`, and its log under lup's state (`docs/launch.md`);
-  each launch's compiled settings, its room's git configuration and lup's
-  commands there, and the lock its launcher holds, under lup's state;
+  each launch's compiled settings, its room's git configuration, its package
+  managers' settings and lup's commands there, and the lock its launcher holds,
+  under lup's state;
 - lup's data, under `$XDG_DATA_HOME/lup/`: each repository's approved copies of
   `lup-dev`, which trust on launch installs and its process runs;
 - lup's cache, what can be fetched again, under `$XDG_CACHE_HOME/lup/`: pyright's
@@ -605,6 +606,11 @@ class LaunchLayout(Model):
     def copying(self) -> Path:
         """`wl-copy`, the room's way to write the operator's clipboard through the host, the same program as `pasting`."""
         return self.bin / "wl-copy"
+
+    @property
+    def home(self) -> Path:
+        """What the launch puts in its room's home, each file at its path there, mounted read-only: the package managers' user-level settings."""
+        return self.directory / "home"
 
     @property
     def lent(self) -> Path:

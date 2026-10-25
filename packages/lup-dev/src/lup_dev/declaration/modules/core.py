@@ -1,9 +1,13 @@
 """`Core`: the core's parts a project can change, which every project holds."""
 
+from datetime import timedelta
 from pathlib import Path
+from typing import Annotated
+
+from pydantic import Field
 
 from lup_dev.catalog.paths import CorePaths
-from lup_dev.catalog.room import StandardMachine
+from lup_dev.catalog.room import PackageAge, StandardMachine
 from lup_dev.declaration.kinds import (
     Credentials,
     Guidance,
@@ -52,6 +56,12 @@ class Core(Module):
     usual tools, an agent's everyday work, what the runtimes call on, and `nano`,
     beside which a launch installs the operator's own editor
     (`lup_dev.catalog.room`)."""
+    package_age: Annotated[timedelta, Field(ge=timedelta(0))] = PackageAge().minimum
+    """How long a package must have been published before the room's package
+    managers install it: three days, unless the project says. The launch writes
+    it into the user-level settings of each package manager the room's image
+    holds, which a project's own setting outranks (`docs/launch.md`, *The
+    package age gate*)."""
     session: Session = Session()
     """How every session runs: the subagents' prompt cache, auto memory, idle
     compaction, the built-in tools removed from context and the account's

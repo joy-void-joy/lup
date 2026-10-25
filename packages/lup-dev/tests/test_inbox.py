@@ -44,8 +44,8 @@ from lup.tools.speaking import SPEAKING
 from lup_dev import Modules, Project, cli, commanding
 from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
 from lup_dev.codescan.engine import EngineError
+from lup_dev.declaration.package_managers.uv import Uv
 from lup_dev.declaration.resolve import resolve
-from lup_dev.declaration.runner import Uv
 from lup_dev.declaration.serving import Operator as OperatorAsker
 from lup_dev.declaration.serving import tools as module_tools
 from lup_dev.gate import Passed, Passes, Processes, Standing

@@ -6,7 +6,8 @@ from lup_dev.catalog import gate as lup_gate
 from lup_dev.catalog.paths import PythonPaths
 from lup_dev.declaration.kinds import Gate, Guidance, Paths, Pytest, Section, TestRoots
 from lup_dev.declaration.module import Module
-from lup_dev.declaration.runner import Runner, Uv
+from lup_dev.declaration.package_managers.uv import Uv
+from lup_dev.declaration.runner import Runner
 
 
 class Python(Module):

@@ -11,6 +11,7 @@ import json
 import shlex
 import subprocess
 import sys
+import tomllib
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -118,6 +119,36 @@ project = Project(
 '''
 
 runner = CliRunner()
+
+NO_EXCLUDE_NEWER = (
+    "This project sets no `exclude-newer` of its own for uv (its `uv.toml`, else "
+    "its `pyproject.toml`'s `[tool.uv]`), so the room gets none at the user "
+    "level, which would have uv relock a `uv.lock` resolved without it. `uvx`, "
+    "`uv tool` and `uv pip` there install packages of any age. Add "
+    '`exclude-newer = "P3D"` to `[tool.uv]` to gate them, and the project\'s own '
+    "`uv run`."
+)
+"""What a launch says of uv's package age gate where the project sets none."""
+
+
+def holding_npm_and_uv(*, age: str | None = None) -> str:
+    """The project's declaration with npm and uv in the room's image, and `age`, a `timedelta`'s arguments, as its package age."""
+    aged = "" if age is None else f", package_age=timedelta({age})"
+    return (
+        DECLARED.replace(
+            "from pathlib import Path\n",
+            "from datetime import timedelta\nfrom pathlib import Path\n",
+            1,
+        )
+        .replace("    Module,\n", "    Module,\n    Package,\n    Packages,\n", 1)
+        .replace(
+            ".edit(Core(credentials=limits))",
+            ".edit(Core(credentials=limits, packages=Packages().add("
+            'Package(name="npm", why="installs the page\'s packages"), '
+            f'Package(name="uv", why="runs uvx")){aged}))',
+        )
+    )
+
 
 RUNNING = [
     Rule(
@@ -266,6 +297,9 @@ class Engine:
         self.gitconfig: str | None = None
         self.linked: dict[str, Path] = {}
         """The links among the launch's commands while the room ran, by name."""
+        self.package_settings: dict[str, str] = {}
+        """The package managers' settings the launch put in its room's home
+        while the room ran, by their path there."""
         self.unshared: list[list[str]] = []
 
     def __call__(self, process: Process) -> Ran:
@@ -300,6 +334,12 @@ class Engine:
                     each.name: each.readlink()
                     for each in commands.iterdir()
                     if each.is_symlink()
+                }
+                home = commands.parent / "home"
+                self.package_settings = {
+                    str(each.relative_to(home)): each.read_text()
+                    for each in home.rglob("*")
+                    if each.is_file()
                 }
                 return Ran(command=process.arguments, status=self.ran)
             case _:
@@ -735,6 +775,74 @@ def test_a_launch_says_nothing_of_an_editor_it_knows_and_links_hx_to_helix(
 
     assert not [each for each in machine.events.said if "editor" in each]
     assert machine.engine.linked == {"hx": Path("/usr/bin/helix")}
+
+
+def test_a_launch_holding_no_package_manager_writes_and_says_nothing_of_the_age(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    assert not [each for each in machine.events.said if "exclude-newer" in each]
+    assert machine.engine.package_settings == {}
+    assert not [
+        each for each in machine.engine.run() if ".npmrc" in each or "uv.toml" in each
+    ]
+
+
+def test_a_launch_gates_npm_by_age_and_says_once_why_uv_isn_t(
+    project: Path, tmp_path: Path, clock: FakeClock, shell: Shell
+) -> None:
+    (project / "lup_project.py").write_text(holding_npm_and_uv())
+    shell.commit(project, "npm and uv in the room")
+    machine = Machine(tmp_path, clock)
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    assert [each for each in machine.events.said if "exclude-newer" in each] == [
+        NO_EXCLUDE_NEWER
+    ]
+    [launch] = [each.launch for each in machine.host.served]
+    written = machine.layout.launch(launch).home
+    home = tmp_path / "home"
+    run = machine.engine.run()
+    assert (
+        f"--mount=type=bind,source={written / '.npmrc'},"
+        f"destination={home / '.npmrc'},ro=true"
+    ) in run
+    assert not [each for each in run if "uv.toml" in each]
+    assert list(machine.engine.package_settings) == [".npmrc"]
+    assert machine.engine.package_settings[".npmrc"].splitlines()[1:] == [
+        "min-release-age=3.0"
+    ]
+
+
+def test_a_project_with_its_own_exclude_newer_gets_uv_s_gate_at_the_declared_age(
+    project: Path, tmp_path: Path, clock: FakeClock, shell: Shell
+) -> None:
+    (project / "lup_project.py").write_text(holding_npm_and_uv(age="days=5"))
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "work"\n\n[tool.uv]\nexclude-newer = "1 week"\n'
+    )
+    shell.commit(project, "a package age of its own")
+    machine = Machine(tmp_path, clock)
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    assert not [each for each in machine.events.said if "exclude-newer" in each]
+    [launch] = [each.launch for each in machine.host.served]
+    written = machine.layout.launch(launch).home
+    home = tmp_path / "home"
+    run = machine.engine.run()
+    for path in [Path(".npmrc"), Path(".config/uv/uv.toml")]:
+        assert (
+            f"--mount=type=bind,source={written / path},"
+            f"destination={home / path},ro=true"
+        ) in run
+    settings = machine.engine.package_settings
+    assert settings[".npmrc"].splitlines()[1:] == ["min-release-age=5.0"]
+    assert tomllib.loads(settings[".config/uv/uv.toml"]) == {"exclude-newer": "P5D"}
 
 
 def test_a_launch_without_gh_says_so_once_and_names_no_repository(
