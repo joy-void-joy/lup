@@ -148,8 +148,9 @@ class Fold(Model):
         """Say the fold as text, each line after `indent`: its summary, marked open or closed, then, open, its content, indented further.
 
         Content read as it opens isn't said: its summary is, with the view it
-        reads and what it gives it beyond the agent it's of, so a reader knows
-        which view's command reads it (`[exchange step=12]`).
+        reads and what it gives it beyond the agent it's of, what it leaves
+        unset left out, so a reader knows which view's command reads it
+        (`[exchange step=12]`).
 
         >>> loaded = Load(view="call", argument={"runtime": "r", "session": "s",
         ...     "call": "c1"})
@@ -163,7 +164,7 @@ class Fold(Model):
             given = " ".join(
                 f"{key}={value}"
                 for key, value in self.content.argument.items()
-                if key not in own
+                if key not in own and value is not None
             )
             reads = " ".join(part for part in [self.content.view, given] if part)
             return [f"{indent}{mark} {summary}  [{reads}]"]
@@ -178,14 +179,17 @@ type Block = Annotated[Line | Markdown | Fold, Field(discriminator="block")]
 
 
 def lines(blocks: list[Block], indent: str = "") -> list[str]:
-    """Say `blocks` as lines of text, each after `indent`."""
+    """Say `blocks` as lines of text, each after `indent` but a blank one."""
 
     def said(block: Block) -> list[str]:
         match block:
             case Line():
                 return [f"{indent}{block.said()}"]
             case Markdown():
-                return [f"{indent}{line}" for line in block.text.splitlines()]
+                return [
+                    f"{indent}{line}" if line else ""
+                    for line in block.text.splitlines()
+                ]
             case Fold():
                 return block.said(indent)
 
