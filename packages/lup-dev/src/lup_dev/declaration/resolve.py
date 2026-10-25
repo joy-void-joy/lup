@@ -18,7 +18,9 @@ hold it, by the kind's type (`docs/declaration.md`, *Resolving it*):
 - the runner comes from the one module holding one, `Plain()` where none does,
   the session settings from the one holding them, `Core`, with the fields the
   declaration set, which a launch imposes over the person's own, and the limits
-  on the operator's credentials from the one holding them, `Core` too.
+  on the operator's credentials from the one holding them, `Core` too;
+- the package age is `Core`'s own field, read from it by name, since a
+  duration isn't a kind: another module's `timedelta` would be its own setting.
 
 Rule selections are kept as recorded, one per module beside the module's own
 default, for the engine to resolve.
@@ -29,6 +31,7 @@ bring back: the judge keeps the last declaration that loaded, to stand in for on
 that can't.
 """
 
+from datetime import timedelta
 from pathlib import Path
 from typing import Self
 
@@ -227,6 +230,9 @@ class Resolved(Model):
     then the one each requirement names. One name from two places is one
     package, the first's."""
     session: SessionChoices
+    package_age: timedelta
+    """How long a package must have been published before the room's package
+    managers install it: `Core`'s `package_age`."""
     limits: Limits
     """What the host does with the operator's credentials for a launched
     session without asking, and the refs no push updates: `Core`'s
@@ -612,6 +618,9 @@ def resolve(project: Project) -> Resolved:
         requirements=requirements,
         packages=image(modules, requirements),
         session=settled(parts(modules, Session)),
+        package_age=next(
+            module.package_age for module in modules if isinstance(module, Core)
+        ),
         limits=limited(parts(modules, Credentials)),
         guidance=held(Guidance(), parts(modules, Guidance), "Guidance"),
         repositories=neighbours(modules),

@@ -1,13 +1,14 @@
-"""The room's defaults: what every room's image starts from, its machine, its editors, and how its sessions run.
+"""The room's defaults: what every room's image starts from, its machine, its editors, how its sessions run, and how old a package it installs must be.
 
-`Core` reads the machine and the sessions (`lup_dev.declaration.modules.core`;
-`docs/launch.md`, *The image* and *The settings compiled for each runtime*), and a
-project changes them as it changes any module's part, with a layer on `Core`. The
-base and the editors are lup's, read by the launch (`lup_dev.launch`). A package
-is named as Arch Linux's repositories name it, the room's image being Arch's.
+`Core` reads the machine, the sessions and the package age
+(`lup_dev.declaration.modules.core`; `docs/launch.md`, *The image*, *The
+package age gate* and *The settings compiled for each runtime*), and a project
+changes them as it changes any module's part, with a layer on `Core`. The base
+and the editors are lup's, read by the launch (`lup_dev.launch`). A package is
+named as Arch Linux's repositories name it, the room's image being Arch's.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -239,6 +240,20 @@ class Editors(Model):
             configuration=[Path(".config/helix")],
         ),
     ]
+
+
+class PackageAge(Model):
+    """How long a package must have been published before a room's package managers install it: `Core`'s default.
+
+    A release published with stolen credentials is usually found and pulled
+    within hours: litellm 1.107.0's wheels were on PyPI for under two hours
+    (2026-10-21). Three days lets that happen before a room installs one. The
+    launch writes it into npm's and uv's own user-level settings in the room's
+    home, which a project's own setting outranks either way (`docs/launch.md`,
+    *The package age gate*).
+    """
+
+    minimum: timedelta = timedelta(days=3)
 
 
 type CacheLifetime = Literal["5m", "1h"]

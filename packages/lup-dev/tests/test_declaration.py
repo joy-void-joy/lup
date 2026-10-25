@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
+from datetime import timedelta
 from pathlib import Path
 from typing import ClassVar
 
@@ -46,7 +47,7 @@ from lup_dev import (
 )
 from lup_dev.catalog.credentials import CredentialDefaults
 from lup_dev.catalog.paths import CorePaths, PythonPaths
-from lup_dev.catalog.room import SessionDefaults, StandardMachine
+from lup_dev.catalog.room import PackageAge, SessionDefaults, StandardMachine
 from lup_dev.catalog.rules import DefaultRules
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
@@ -1070,6 +1071,48 @@ def test_the_resolved_session_holds_every_session_setting() -> None:
 def test_a_misspelled_session_setting_is_refused() -> None:
     with pytest.raises(pydantic.ValidationError, match=r"auto_memroy"):
         Session.model_validate({"auto_memroy": True})
+
+
+# The package age
+
+
+class Paced(Module):
+    """Pacing its own work, by a duration of its own."""
+
+    name = "paced"
+
+    pause: timedelta = timedelta(days=30)
+
+
+def test_the_package_age_is_three_days_unless_the_project_says() -> None:
+    assert resolve(Project()).package_age == PackageAge().minimum == timedelta(days=3)
+    modules = Modules.default().edit(
+        Core(package_age=timedelta(days=7)), why="a week, as the team's own"
+    )
+    resolved = resolve(Project(modules=modules))
+    assert resolved.package_age == timedelta(days=7)
+    assert module(resolved, "core").origins.of("package_age") == Origin(
+        field="package_age", position=1, why="a week, as the team's own"
+    )
+
+
+def test_a_layer_on_another_of_core_s_parts_keeps_the_package_age() -> None:
+    modules = (
+        Modules.default()
+        .edit(Core(package_age=timedelta(hours=36)))
+        .edit(Core(paths=Paths().add(scratch=["notes/**"])))
+    )
+    assert resolve(Project(modules=modules)).package_age == timedelta(hours=36)
+
+
+def test_a_negative_package_age_is_refused() -> None:
+    with pytest.raises(ValidationError, match=r"greater than or equal to 0"):
+        Core(package_age=timedelta(hours=-1))
+
+
+def test_another_module_s_duration_isnt_the_package_age() -> None:
+    resolved = resolve(Project(modules=Modules.default().add(Paced())))
+    assert resolved.package_age == timedelta(days=3)
 
 
 # The limits on the operator's credentials
