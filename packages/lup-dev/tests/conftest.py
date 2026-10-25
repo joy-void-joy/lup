@@ -50,6 +50,7 @@ from lup_dev.codescan.directives import (
 )
 from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.resolve import Resolved, resolve
+from lup_dev.declaration.serving import Room
 from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import RoomClient
 from lup_dev.host.protocol import HostError
@@ -73,7 +74,7 @@ from lup_dev.policy.holds import Announcing, Hold, Response, answer
 from lup_dev.policy.importers import Spawner
 from lup_dev.policy.runtime import Runtime
 from lup_dev.private.withheld import Facts, Machine
-from lup_dev.worker import Serving
+from lup_dev.worker import RepositoryModules
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -759,15 +760,15 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     records: Records = NoRecords()
     """Where each launch's runtime keeps its records, whichever it is."""
     layout: Layout = Layout(state=Path("/nowhere"), data=Path("/nowhere"))
-    """Where lup keeps its data, each module's own among it: a test that runs
-    hooks gives its own."""
+    """Where lup keeps its data, each module's own among it, made as a module's
+    method runs: a test that runs one gives its own."""
     closed: list[str] = []
     told: list[Happening] = []
     stopped: bool = False
 
-    def serving(self, launch: Register) -> Serving:
+    def serving(self, launch: Register) -> RepositoryModules:
         """Return the modules of `launch`'s repository, as its process serves them."""
-        return Serving(
+        return RepositoryModules(
             repository=launch.repository,
             resolved=self.resolved,
             records={launch.runtime: self.records},
@@ -785,7 +786,9 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
             case Calling():
                 return Called(answer=await serving.call(request))
             case Relaying(request=sent, launch=asking):
-                reply = await serving.answer(Sent.model_validate(sent), asking)
+                reply = await serving.answer(
+                    Sent.model_validate(sent), Room(launch=asking)
+                )
                 return Relayed(reply=reply.model_dump())
             case Happening():
                 self.told.append(request)
@@ -802,9 +805,10 @@ class InProcess(MutableModel, LaunchModules, arbitrary_types_allowed=True):
 
 
 @pytest.fixture
-def default_modules() -> InProcess:
-    """lup's default modules, the GitHub module among them, served in the test's own process."""
-    return InProcess(resolved=resolve(Project()))
+def default_modules(tmp_path: Path) -> InProcess:
+    """lup's default modules, the GitHub module among them, served in the test's own process, their data under the test's own directory."""
+    layout = Layout(state=tmp_path / "modules-state", data=tmp_path / "modules-data")
+    return InProcess(resolved=resolve(Project()), layout=layout)
 
 
 @pytest.fixture

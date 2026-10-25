@@ -8,7 +8,7 @@ approved for that repository, and one project's module never runs inside the
 process serving another's. The service asks it, on a socket of its own under
 the host's sockets that no room mounts, what its modules serve, then passes it
 each hook the judge reads, each call to one of their tools, each room's request
-of a kind they answer, and each moment their hooks run at, one typed request per
+of a kind they answer, and each event their hooks run at, one typed request per
 connection, one reply, each answered at once whatever the others wait on. The
 launch travels with each request (`Calling`, `Relaying`, `Happening`), never
 with the process, which serves each launch of its repository alike.
@@ -38,14 +38,14 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
+from lup.events import EventName, Publishing, Told
 from lup.programs import ProgramError, Running, started
-from lup.sessions.terminal import Event
+from lup.publishing import Published, Refusal
 from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec
 from lup.types import JsonObject, Model, MutableModel
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import HostError, Refused, Register, Reply, Request
-from lup_dev.host.publishing import Published, Refusal
 from lup_dev.layout import HostLayout
 
 if TYPE_CHECKING:
@@ -71,43 +71,36 @@ class Listing(Request, reads=True):
     kind: Literal["module-listing"] = "module-listing"
 
 
-type Occasion = Event | Literal["launched", "stopped", "publishing"]
-"""When a module's hooks may run, as the service tells it: a launch opening, a
-launch ending once its session has fully stopped, something about to leave under
-the operator's name, and each event a runtime's hooks are read as."""
-
-
 class Offered(Reply):
-    """What the repository's modules serve: each tool, each kind of the room's requests they answer, and each occasion their hooks run at."""
+    """What the repository's modules serve: each tool, each kind of the room's requests they answer, and each event their hooks run at."""
 
     kind: Literal["module-offered"] = "module-offered"
     tools: list[ToolSpec] = []
     kinds: list[str] = []
-    occasions: list[Occasion] = []
+    events: list[EventName] = []
+    """Each event their hooks run at, by its name (`lup.events`): the service
+    tells them those alone."""
 
 
 class Happening(Request, reads=False):
-    """Tell the repository's modules an occasion of one of its launches, which their hooks run at."""
+    """Tell the repository's modules an event of one of its launches, which their hooks run at."""
 
     kind: Literal["module-happening"] = "module-happening"
     launch: Register
     """The launch it's of."""
-    occasion: Occasion
+    event: Told
     conversation: Conversation | None = None
-    """The conversation it's of, for a session's events."""
-    call: str | None = None
-    tool: str | None = None
-    published: Published | None = None
-    """What would leave, at `publishing`."""
+    """The conversation it's of: for a session's events, and something a
+    conversation would publish."""
 
 
 class Happened(Reply):
-    """The hooks ran: what failed among them, each said whole, and at `publishing` what they refused."""
+    """The hooks ran: what failed among them, each said whole, and at `Publishing` what they refused."""
 
     kind: Literal["module-happened"] = "module-happened"
     failures: list[str] = []
     refusals: list[Refusal] = []
-    """Each hook's refusal at `publishing`, a hook that failed there among them."""
+    """Each hook's refusal at `Publishing`, a hook that failed there among them."""
 
 
 class Calling(Request, reads=False):
@@ -246,19 +239,19 @@ class WorkerJudge(Model, LaunchJudge, arbitrary_types_allowed=True):
 async def refusals(
     modules: LaunchModules, launch: Register, published: Published
 ) -> list[Refusal]:
-    """Run `launch`'s modules' hooks at `publishing` on `published`, and return their refusals: none lets it leave.
+    """Run `launch`'s modules' hooks at `Publishing` on `published`, and return their refusals: none lets it leave.
 
     Raise `HostError` where they can't be asked, so what can't be checked
     doesn't leave.
     """
     reply = await modules.ask(
-        launch, Happening(launch=launch, occasion="publishing", published=published)
+        launch, Happening(launch=launch, event=Publishing(published=published))
     )
     match reply:
         case Happened(refusals=refused):
             return refused
         case _:
-            message = f"the launch's modules replied {reply.kind} at publishing"
+            message = f"the launch's modules replied {reply.kind} at `Publishing`"
             raise HostError(message)
 
 

@@ -1614,7 +1614,7 @@ A tool that stops its answer at a bound its caller can't set hands the agent par
 ```python
 from pydantic import Field
 
-from lup.tools import lup_tool
+import lup
 from lup.types import Model
 
 
@@ -1630,7 +1630,7 @@ class Notes(Model):
     notes: list[str]
     shown: int = 50
 
-    @lup_tool
+    @lup.tool
     async def find_notes(self, query: Query) -> str:
         """Find the notes holding some words."""
         found = [note for note in self.notes if query.words in note]
@@ -1642,7 +1642,7 @@ Done the steer's way:
 ```python
 from pydantic import Field, PositiveInt
 
-from lup.tools import lup_tool
+import lup
 from lup.types import Model
 
 
@@ -1658,7 +1658,7 @@ class Notes(Model):
 
     notes: list[str]
 
-    @lup_tool
+    @lup.tool
     async def find_notes(self, query: Query) -> str:
         """Find the notes holding some words."""
         found = [note for note in self.notes if query.words in note]
@@ -1671,8 +1671,8 @@ class Notes(Model):
 ```python
 from pydantic import Field
 
+import lup
 from lup.programs import run
-from lup.tools import lup_tool
 from lup.types import Model
 
 
@@ -1682,7 +1682,7 @@ class Query(Model):
     words: str = Field(description="What to search for, in GitHub's search syntax.")
 
 
-@lup_tool
+@lup.tool
 async def find_issues(query: Query) -> str:
     """Search the repository's issues."""
     return run("gh", "search", "issues", "--limit=100", "--", query.words).text()
@@ -1693,8 +1693,8 @@ Done the steer's way:
 ```python
 from pydantic import Field, PositiveInt
 
+import lup
 from lup.programs import run
-from lup.tools import lup_tool
 from lup.types import Model
 
 
@@ -1705,7 +1705,7 @@ class Query(Model):
     limit: PositiveInt = Field(default=100, description="How many issues to list at most.")
 
 
-@lup_tool
+@lup.tool
 async def find_issues(query: Query) -> str:
     """Search the repository's issues."""
     ran = run("gh", "search", "issues", f"--limit={query.limit}", "--", query.words)
@@ -1734,7 +1734,7 @@ class Notes(Model):
 ```python
 from pydantic import Field, PositiveInt
 
-from lup.tools import lup_tool
+import lup
 from lup.types import Model
 
 
@@ -1755,7 +1755,7 @@ class Notes(Model):
 
     notes: list[str]
 
-    @lup_tool
+    @lup.tool
     async def find_notes(self, query: Query) -> str:
         """Find the notes holding some words, `limit` at most."""
         return "\n".join(search(self.notes, query.words, query.limit))

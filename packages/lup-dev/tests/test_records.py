@@ -7,14 +7,32 @@ and Codex lay out their own: no test reads the operator's.
 import asyncio
 import json
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
-from lup.transcripts.hooks import TranscriptsHooks, copied
+import lup
 from lup.transcripts.module import Transcripts
+from lup.transcripts.serving import TranscriptsServing, copied
 from lup_dev.adapters.claude import ClaudeRecords
 from lup_dev.adapters.codex import CodexRecords
-from lup_dev.declaration.serving import Moment
+from lup_dev.declaration.serving import Lup, Publisher
 from lup_dev.host.protocol import Limits, Register
 from lup_dev.host.records import Record, Records
+
+if TYPE_CHECKING:
+    from lup.publishing import Published, Refusal
+    from lup_dev.host.courier import Conversation
+
+
+class Unpublished(Publisher):
+    """A publishing door nothing goes through."""
+
+    async def refusals(
+        self,
+        published: Published,
+        launch: Register,
+        conversation: Conversation | None,
+    ) -> list[Refusal]:
+        raise AssertionError
 
 
 def lines(path: Path, *records: dict[str, object]) -> None:
@@ -122,10 +140,14 @@ def test_transcripts_copy_the_repository_s_records_at_its_moments(
         limits=Limits(actions=[], protected=[]),
         github=None,
     )
-    hooks = TranscriptsHooks(
-        module=Transcripts(), launch=registered, records=held, data=data, related=[]
+    serving = TranscriptsServing(
+        module=Transcripts(),
+        records={"claude": held},
+        data=data,
+        related=[],
+        publisher=Unpublished(),
     )
-    asyncio.run(hooks.keep(Moment(name="stopped")))
+    asyncio.run(serving.keep(lup.Stopped(), by=Lup(launch=registered)))
     assert (data / "claude" / "projects" / "p" / "s1.jsonl").is_file()
     [under] = held.asked
     assert under[0] == repo / ".git"

@@ -19,7 +19,7 @@ directory, within the limits the project's declaration sets
   git hands over the revision as written (`HEAD~1`), and sent as an object id
   with its destination and whether it's forced (`+`); an empty source is a
   deletion. Each destination's `ok`, or `error` with why; what the host says
-  beside them, the places a refusal at `publishing` names, is printed on
+  beside them, the places a refusal at `Publishing` names, is printed on
   git's standard error first, since git shows one line for each ref;
 - `fetch`: the objects fetched on the host into the repository's own store,
   which the room shares, so git writes the room's refs itself.

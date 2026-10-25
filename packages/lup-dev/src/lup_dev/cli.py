@@ -62,6 +62,7 @@ from lup_dev.declaration.load import load, person_layer
 from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
 from lup_dev.declaration.resolve import Declaration, Selected, resolve
+from lup_dev.declaration.serving import tools as module_tools
 from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM, GitHubError, named
 from lup_dev.gate import (
@@ -641,7 +642,7 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
         for spec in tools.specs()
     ]
     naming = Naming.model_construct().specs()
-    modules = [spec for each in resolved.served for spec in each.tools.specs()]
+    modules = [spec for each in resolved.served for spec in module_tools(each.serving)]
     return [*core, *naming, *modules]
 
 

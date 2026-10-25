@@ -1,6 +1,8 @@
-"""lup's GitHub tools in a launched session: reading and finding issues, filing, editing, closing and reopening one, commenting and editing a comment, opening a draft pull request.
+"""What `GitHub` serves: lup's GitHub tools in a launched session, and whether an issue is open, which the gate asks from a room.
 
-`docs/inbox.md`, *lup's tools*. Each acts on the launch's own repository on
+**The tools** (`docs/inbox.md`, *lup's tools*): reading and finding issues,
+filing, editing, closing and reopening one, commenting and editing a comment,
+opening a draft pull request. Each acts on the launch's own repository on
 GitHub, named when the launch started (`Register.github`), but for the two that
 read, which reach another the operator's login can read where a call names it
 (`repository`, `docs/launch.md`, *Related repositories*); each through the
@@ -10,8 +12,8 @@ the project's declaration sets (`Register.limits`): a tool's action
 `edit-comment`, `draft-pull-request`) is checked before anything runs, and one
 beyond the limits is refused, saying the declaration doesn't allow it and that
 allowing it is the operator's call. What a tool that writes would post is put to
-every module's hooks at the `publishing` moment first (`ModuleTools.publish`),
-and refused there, it isn't posted. There's no merge tool: work lands on the
+every module's hooks at `Publishing` first (`ModuleServing.publish`), and
+refused there, it isn't posted. There's no merge tool: work lands on the
 integration branch through git, and what reaches `main` is the operator's to
 merge.
 
@@ -21,19 +23,29 @@ answer says which happened.
 
 A tool's description is its docstring, whose first line is the summary each
 session's guidance lists (`ToolSpec.summary`). Results are text.
+
+**An issue's state** (`docs/credentials.md`, *The gate in a room*). The gate
+checks each deferral's issue is still open, and a room holds no `gh` and no
+login, so the gate there asks the host on the launch's `request.sock`
+(`lup_dev.codescan.directives`, `HostIssues`), which reads the state with the
+operator's `gh`. Reading an issue is the launch's `read-issues` action, refused
+where the project's declaration leaves it out. The request is the core's
+(`lup_dev.forge.protocol`), since the gate asks it whatever modules a project
+selects.
 """
 
 from typing import TYPE_CHECKING, Literal, Self, override
 
 from pydantic import Field, PositiveInt, model_validator
 
-from lup.tools.tool import lup_tool
+from lup import doors
+from lup.publishing import Part, Post
 from lup.types import Model
-from lup_dev.declaration.serving import ModuleTools
+from lup_dev.declaration.serving import Agent, ModuleServing, Room
 from lup_dev.forge import github as gh
 from lup_dev.forge.github import Closing, GitHubError, Search, terms
-from lup_dev.host.protocol import Action, GitHubRepository
-from lup_dev.host.publishing import Part, Post
+from lup_dev.forge.protocol import IssueState, Stated
+from lup_dev.host.protocol import Action, GitHubRepository, HostError, Register
 from lup_dev.settings import LupDevSettings
 
 if TYPE_CHECKING:
@@ -236,23 +248,23 @@ class NewDraft(Arguments):
     )
 
 
-class GitHubTools(ModuleTools):
-    """lup's GitHub tools, served to each launched session: they write to its repository alone, and read any the operator's login can."""
+class GitHubServing(ModuleServing):
+    """lup's GitHub tools, served to each launched session, which write to its repository alone and read any the operator's login can; and an issue's state, for the gate in a room."""
 
     module: GitHub
 
-    def github(self, action: Action, asked: Arguments) -> gh.GitHub:
-        """Return GitHub, through `gh`, for `action` on the repository `asked` names, or the launch's own.
+    def github(self, action: Action, asked: Arguments, launch: Register) -> gh.GitHub:
+        """Return GitHub, through `gh`, for `action` of `launch`'s on the repository `asked` names, or the launch's own.
 
         Raise `GitHubError` where the launch's limits don't allow `action`.
         """
-        refusal = self.launch.limits.refusal(action)
+        refusal = launch.limits.refusal(action)
         if refusal is not None:
             raise GitHubError(refusal)
-        return gh.GitHub.launched(self.launch, asked.elsewhere())
+        return gh.GitHub.launched(launch, asked.elsewhere())
 
-    @lup_tool(reads=True)
-    async def read_issue(self, asked: Numbered) -> str:
+    @doors.tool(reads=True)
+    async def read_issue(self, asked: Numbered, by: Agent) -> str:
         """Read an issue or pull request, with its comments.
 
         Any issue or pull request of this repository on GitHub, by its number,
@@ -262,11 +274,11 @@ class GitHubTools(ModuleTools):
         whether it's a draft, its review decision, and each check on its head
         with how it stands and where to look.
         """
-        github = self.github("read-issues", asked)
+        github = self.github("read-issues", asked, by.launch)
         return (await github.thread(asked.number)).text()
 
-    @lup_tool(reads=True)
-    async def find_issues(self, asked: Query) -> str:
+    @doors.tool(reads=True)
+    async def find_issues(self, asked: Query, by: Agent) -> str:
         """Search a repository's issues and pull requests.
 
         GitHub's search over this repository on GitHub, or over another the
@@ -277,7 +289,7 @@ class GitHubTools(ModuleTools):
         match. `read_issue` reads one whole. Searching before filing an issue
         finds one already open.
         """
-        github = self.github("read-issues", asked)
+        github = self.github("read-issues", asked, by.launch)
         if asked.limit > github.searched:
             message = (
                 f"`limit` is {github.searched:,} at most, the most matches GitHub's "
@@ -305,8 +317,8 @@ class GitHubTools(ModuleTools):
         )
         return "\n".join([heading, *found, *elsewhere, *more])
 
-    @lup_tool
-    async def file_issue(self, asked: NewIssue) -> str:
+    @doors.tool
+    async def file_issue(self, asked: NewIssue, by: Agent) -> str:
         """File an issue in this repository.
 
         It opens on GitHub at once, in the operator's name, so `find_issues`
@@ -314,7 +326,7 @@ class GitHubTools(ModuleTools):
         name it doesn't define is refused in `gh`'s words. Its link is the
         answer.
         """
-        github = self.github("file-issue", asked)
+        github = self.github("file-issue", asked, by.launch)
         await self.publish(
             Post(
                 what="an issue",
@@ -325,11 +337,12 @@ class GitHubTools(ModuleTools):
                 ],
             ),
             "this issue",
+            by,
         )
         return f"Filed: {await github.file(asked.title, asked.body, asked.labels)}"
 
-    @lup_tool
-    async def edit_issue(self, asked: IssueEdit) -> str:
+    @doors.tool
+    async def edit_issue(self, asked: IssueEdit, by: Agent) -> str:
         """Edit an issue's title, body or labels.
 
         Any issue of this repository on GitHub, by its number, in the
@@ -339,7 +352,7 @@ class GitHubTools(ModuleTools):
         which only the operator can clear, on the web: where an edit takes out
         something that shouldn't be public, tell them.
         """
-        github = self.github("edit-issue", asked)
+        github = self.github("edit-issue", asked, by.launch)
         await self.publish(
             Post(
                 what=f"an edit of #{asked.number}",
@@ -358,6 +371,7 @@ class GitHubTools(ModuleTools):
                 ],
             ),
             "this edit",
+            by,
         )
         await github.edit(
             asked.number,
@@ -368,8 +382,8 @@ class GitHubTools(ModuleTools):
         )
         return f"Edited #{asked.number}."
 
-    @lup_tool
-    async def close_issue(self, asked: IssueClosing) -> str:
+    @doors.tool
+    async def close_issue(self, asked: IssueClosing, by: Agent) -> str:
         """Close an issue in this repository, saying why.
 
         `comment` is posted first, in the operator's name, then the issue
@@ -379,13 +393,14 @@ class GitHubTools(ModuleTools):
         and the comment saying where each went. A pull request isn't closed
         here. `reopen_issue` undoes it.
         """
-        github = self.github("close-issue", asked)
+        github = self.github("close-issue", asked, by.launch)
         await self.publish(
             Post(
                 what=f"the closing comment on #{asked.number}",
                 parts=[Part(name="body", text=asked.comment)],
             ),
             "this comment",
+            by,
         )
         await self.issue_in(github, asked.number, "OPEN")
         link = await github.comment(asked.number, asked.comment)
@@ -396,20 +411,21 @@ class GitHubTools(ModuleTools):
             raise GitHubError(message) from failed
         return f"Closed #{asked.number} as {asked.reason}, after the comment {link}"
 
-    @lup_tool
-    async def reopen_issue(self, asked: IssueReopening) -> str:
+    @doors.tool
+    async def reopen_issue(self, asked: IssueReopening, by: Agent) -> str:
         """Reopen a closed issue in this repository.
 
         `comment`, saying why, is posted first, in the operator's name, then
         the issue reopens.
         """
-        github = self.github("close-issue", asked)
+        github = self.github("close-issue", asked, by.launch)
         await self.publish(
             Post(
                 what=f"the reopening comment on #{asked.number}",
                 parts=[Part(name="body", text=asked.comment)],
             ),
             "this comment",
+            by,
         )
         await self.issue_in(github, asked.number, "CLOSED")
         link = await github.comment(asked.number, asked.comment)
@@ -438,25 +454,26 @@ class GitHubTools(ModuleTools):
             message = f"#{number} is already {thread.state.lower()}"
             raise GitHubError(message)
 
-    @lup_tool
-    async def comment(self, asked: NewComment) -> str:
+    @doors.tool
+    async def comment(self, asked: NewComment, by: Agent) -> str:
         """Comment on an issue or pull request.
 
         On any issue or pull request of this repository on GitHub, by its
         number, in the operator's name. The comment's link is the answer.
         """
-        github = self.github("comment", asked)
+        github = self.github("comment", asked, by.launch)
         await self.publish(
             Post(
                 what=f"a comment on #{asked.number}",
                 parts=[Part(name="body", text=asked.body)],
             ),
             "this comment",
+            by,
         )
         return f"Commented: {await github.comment(asked.number, asked.body)}"
 
-    @lup_tool
-    async def edit_comment(self, asked: CommentEdit) -> str:
+    @doors.tool
+    async def edit_comment(self, asked: CommentEdit, by: Agent) -> str:
         """Edit a comment on an issue or pull request.
 
         The comment at `link` on the issue or pull request `number` of this
@@ -466,26 +483,27 @@ class GitHubTools(ModuleTools):
         takes out something that shouldn't be public, tell them. The comment's
         link is the answer.
         """
-        github = self.github("edit-comment", asked)
+        github = self.github("edit-comment", asked, by.launch)
         await self.publish(
             Post(
                 what=f"an edit of a comment on #{asked.number}",
                 parts=[Part(name="body", text=asked.body)],
             ),
             "this edit",
+            by,
         )
         edited = await github.edit_comment(asked.number, asked.link, asked.body)
         return f"Edited: {edited}"
 
-    @lup_tool
-    async def draft_pull_request(self, asked: NewDraft) -> str:
+    @doors.tool
+    async def draft_pull_request(self, asked: NewDraft, by: Agent) -> str:
         """Open a draft pull request from a pushed branch.
 
         From `branch`, which must be on GitHub already (`git push` puts it
         there), into the project's integration branch, as a draft the operator
         reviews and merges: there's no merging here. Its link is the answer.
         """
-        github = self.github("draft-pull-request", asked)
+        github = self.github("draft-pull-request", asked, by.launch)
         await self.publish(
             Post(
                 what="a draft pull request",
@@ -496,6 +514,7 @@ class GitHubTools(ModuleTools):
                 ],
             ),
             "this pull request",
+            by,
         )
         if not await github.pushed(asked.branch):
             message = (
@@ -509,6 +528,23 @@ class GitHubTools(ModuleTools):
             f"Opened a draft pull request from `{asked.branch}` into "
             f"`{integration}`: {link}"
         )
+
+    @doors.request
+    async def issue_state(self, asked: IssueState, by: Room) -> Stated:
+        """Say whether an issue is open, as the gate in a room asks of a deferral's issue, where the launch's limits allow reading issues.
+
+        A `HostError` refuses it, saying why.
+        """
+        refusal = by.launch.limits.refusal("read-issues")
+        if refusal is not None:
+            message = f"lup didn't read the issue's state: {refusal}"
+            raise HostError(message)
+        try:
+            github = gh.GitHub.launched(by.launch)
+            state = await github.state(asked.number, asked.repository)
+        except GitHubError as failed:
+            raise HostError(str(failed)) from failed
+        return Stated(state=state)
 
 
 def beyond(search: Search, searched: int) -> list[str]:

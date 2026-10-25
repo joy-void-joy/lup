@@ -28,8 +28,6 @@ from lup_dev.declaration.kinds import (
     Exemptions,
     Gate,
     Guidance,
-    Handlers,
-    Hooks,
     Mounted,
     Package,
     Packages,
@@ -42,9 +40,9 @@ from lup_dev.declaration.kinds import (
     Repository,
     Rules,
     Section,
+    Serving,
     Session,
     TestRoots,
-    Toolsets,
 )
 from lup_dev.declaration.module import Module, Modules
 from lup_dev.declaration.modules.code_rules import CodeRules
@@ -53,11 +51,13 @@ from lup_dev.declaration.modules.python import Python
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Requirement, Tools
 from lup_dev.declaration.runner import Interpreter, Plain, RoomNeeds, Runner, Uv
-from lup_dev.declaration.serving import ModuleHandler, ModuleHooks, ModuleTools, Moment
+from lup_dev.declaration.serving import Agent, Asker, Lup, ModuleServing, Room
 from lup_dev.private.module import Details, Private, Values
 
 __all__ = [
     "Actions",
+    "Agent",
+    "Asker",
     "CodeRules",
     "Core",
     "Credentials",
@@ -66,15 +66,11 @@ __all__ = [
     "Exemptions",
     "Gate",
     "Guidance",
-    "Handlers",
-    "Hooks",
     "Interpreter",
+    "Lup",
     "Module",
-    "ModuleHandler",
-    "ModuleHooks",
-    "ModuleTools",
+    "ModuleServing",
     "Modules",
-    "Moment",
     "Mounted",
     "Named",
     "Package",
@@ -92,15 +88,16 @@ __all__ = [
     "Repositories",
     "Repository",
     "Requirement",
+    "Room",
     "RoomNeeds",
     "Rules",
     "Runner",
     "Section",
+    "Serving",
     "Session",
     "Step",
     "TestRoots",
     "Tools",
-    "Toolsets",
     "Uv",
     "Values",
 ]

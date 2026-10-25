@@ -4,7 +4,7 @@
 the shell wrote, a commit's message, a value added in one commit and taken out
 in the next. On the host, `lup-dev private check` reads the list itself; in a
 room, which never sees the list, it sends the files and `HEAD` to the host
-(`Scanning`), and the `Private` module's handler answers (`Scanner`) with each
+(`Scanning`), and the `Private` module answers (`PrivateServing.scan`) with each
 kind and place, never a value. Where no list is kept for the repository, the
 host builds it first, as a launch would.
 
@@ -16,25 +16,20 @@ and its remote-tracking refs, each read as a push reads it
 read, said, rather than reading the whole history.
 """
 
-import asyncio
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
-from lup_dev.declaration.serving import ModuleHandler
-from lup_dev.errors import LupDevError
+from lup.publishing import Place
 from lup_dev.git import Git
-from lup_dev.host.publishing import Place
 from lup_dev.private.found import counted, found, masked, textual
 from lup_dev.private.history import Spot, in_commits, remotes_hold, walked
-from lup_dev.private.hooks import refused
-from lup_dev.private.protocol import Scanned, Scanning, Sent
-from lup_dev.private.withheld import HostFacts, Withheld, kept, prepared
-from lup_dev.stored import read_model
+from lup_dev.private.protocol import Scanned
+from lup_dev.private.refusing import refused
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from lup_dev.host.protocol import Reply
-    from lup_dev.private.module import Private
+    from lup_dev.private.protocol import Sent
+    from lup_dev.private.withheld import Withheld
 
 UNAPPROVED = (
     "no launch was approved for this repository on this machine, so no list of "
@@ -101,37 +96,3 @@ def scanned(
         found=refused([*in_files, *in_commits(git, commits, held)]),
         commits=len(commits),
     )
-
-
-class Scanner(ModuleHandler):
-    """Answers `Scanning` for a launch's room: its files and `HEAD`'s new commits read on the host, against the list the room never sees."""
-
-    module: Private
-    request: Scanning
-
-    @override
-    async def answer(self) -> Reply:
-        """Read the room's files and `HEAD`'s new commits against the list kept for the repository, building it first where none is, as a launch would."""
-        held = read_model(kept(self.data), Withheld)
-        if held is None:
-            try:
-                made = await prepared(
-                    HostFacts(),
-                    self.launch.repository,
-                    related=self.related,
-                    details=self.module.chosen_details(),
-                    values=self.module.chosen_values(),
-                    data=self.data,
-                )
-            except (LupDevError, OSError) as failed:
-                return Scanned(unbuilt=f"the host couldn't build it: {failed}")
-            held = made.withheld
-        refusal = self.launch.limits.refusal("fetch")
-        head = self.request.head if refusal is None else None
-        answer = await asyncio.to_thread(
-            scanned, self.request.files, head, self.launch.repository, held
-        )
-        if refusal is not None and self.request.head is not None:
-            reason = f"`HEAD`'s commits weren't read, since listing the remotes is fetching: {refusal}"
-            return answer.model_copy(update={"unchecked": reason})
-        return answer

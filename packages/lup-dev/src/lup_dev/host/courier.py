@@ -31,9 +31,9 @@ while every MCP connection the service before held closed with it.
 
 import secrets
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from lup.sessions.terminal import Event
+from lup.events import ByKind, SessionEvent
 from lup.types import JsonObject, Model, MutableModel
 from lup_dev.host.protocol import Activity
 
@@ -56,16 +56,14 @@ class Failure(Model):
 class Heard(Model):
     """One hook, as the host reads it."""
 
-    event: Event
+    event: Annotated[SessionEvent, ByKind]
+    """The event it's read as, which says the call and the tool at a call's
+    start or finish (`lup.events`)."""
     session: str
     """The runtime's id for the session."""
     agent: str | None = None
     """The runtime's id for the subagent whose conversation it is; none for the
     session's own."""
-    call: str | None = None
-    """The call's id, at a call's start or finish."""
-    tool: str | None = None
-    """The tool called, by the runtime's name for it."""
     served: bool = False
     """Whether the call is to one of lup's tools, served on the launch's
     `mcp.sock`: its own result tells the conversation what waits, so its start

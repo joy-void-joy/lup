@@ -78,9 +78,9 @@ def call_for(session: str, kit: Kit, repo: Path, key: str) -> None:
 def finish(
     kit: Kit, repo: Path, key: str, *, agent: str = "", session: str = SESSION
 ) -> Reply:
-    return CallFinished(session=session, agent=agent, cwd=repo, call=key).apply(
-        kit.bench
-    )
+    return CallFinished(
+        session=session, agent=agent, cwd=repo, call=key, tool="Bash"
+    ).apply(kit.bench)
 
 
 def end(
@@ -1437,7 +1437,7 @@ def test_a_call_interrupted_while_it_waits_gives_its_hold_up_and_is_told_next(
     mark = tmp_path / "ended"
     bench = kit.bench.model_copy(update={"ended": mark})
     kit.clock.on_sleep.append(mark.touch)
-    CallFinished(session=SESSION, cwd=repo, call="p1").apply(bench)
+    CallFinished(session=SESSION, cwd=repo, call="p1", tool="Write").apply(bench)
     assert not new.exists()
     [hold] = waiting(kit.layout)
     assert (hold.abandoned, hold.interrupted) == (True, True)

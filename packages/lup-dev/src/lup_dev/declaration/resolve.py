@@ -12,9 +12,9 @@ hold it, by the kind's type (`docs/declaration.md`, *Resolving it*):
   which each module keeps for its own paths;
 - entries placed `before=` or `after=` another go there, whichever module holds
   it, and the rest keep the order of their modules;
-- each module's toolsets and handlers are made with that module, so each must
-  narrow `module` to its class; a tool's name and a request's kind are shared
-  across modules, so one from two modules fails, naming both;
+- each module's classes of methods (`Serving`) are made with that module, so
+  each must narrow `module` to its class; a tool's name and a request's kind
+  are shared across modules, so one from two modules fails, naming both;
 - the runner comes from the one module holding one, `Plain()` where none does,
   the session settings from the one holding them, `Core`, with the fields the
   declaration set, which a launch imposes over the person's own, and the limits
@@ -45,8 +45,6 @@ from lup_dev.declaration.kinds import (
     Exemptions,
     Gate,
     Guidance,
-    Handlers,
-    Hooks,
     Mounted,
     Package,
     Packages,
@@ -57,9 +55,9 @@ from lup_dev.declaration.kinds import (
     Repository,
     Rules,
     Section,
+    Serving,
     Session,
     TestRoots,
-    Toolsets,
 )
 from lup_dev.declaration.load import load
 from lup_dev.declaration.module import Module
@@ -68,13 +66,7 @@ from lup_dev.declaration.modules.shipped import default, shipped
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Needed
 from lup_dev.declaration.runner import Plain, Prefixed, Runner
-from lup_dev.declaration.serving import (
-    ModuleHandler,
-    ModuleHooks,
-    ModuleTools,
-    answering,
-    made_with,
-)
+from lup_dev.declaration.serving import ModuleServing, made_with, requests, tools
 from lup_dev.host.protocol import Limits
 
 
@@ -173,24 +165,10 @@ class Kept[E](Model):
 
 
 class Served(Model):
-    """A class of tools a launch serves, with the module it's made with."""
+    """A class of a module's methods, with the module it's made with."""
 
     module: Module
-    tools: type[ModuleTools]
-
-
-class Handled(Model):
-    """A handler of a launch's room's requests, with the module it's made with."""
-
-    module: Module
-    handler: type[ModuleHandler]
-
-
-class Hooked(Model):
-    """A class of hooks a launch runs at lup's moments, with the module it's made with."""
-
-    module: Module
-    hooks: type[ModuleHooks]
+    serving: type[ModuleServing]
 
 
 class Shared(Model):
@@ -243,12 +221,8 @@ class Resolved(Model):
     flagged: list[str]
     """What a change lands with, flagged, by name (`Project.flagged`)."""
     served: list[Served] = []
-    """Each module's classes of tools, each with its module: what a launch serves
-    its session."""
-    handled: list[Handled] = []
-    """Each module's handlers of a room's requests, each with its module."""
-    hooked: list[Hooked] = []
-    """Each module's classes of hooks, each with its module."""
+    """Each module's classes of methods, each with its module: its tools, its
+    requests and its hooks."""
     shared: list[Shared] = []
     """The modules whose own data directory each room mounts."""
 
@@ -312,64 +286,35 @@ def made(label: str, owners: list[Owned], wrong: list[Owned]) -> None:
 
 
 def served(modules: list[Module]) -> list[Served]:
-    """Return each module's classes of tools, each with its module, checking each tool's name is one module's."""
+    """Return each module's classes of methods, each with its module, checking each is made with it, and that each tool's name and each kind of request is one module's."""
     by_name = {module.name: module for module in modules}
     found = [
-        Served(module=by_name[each.module], tools=each.entry)
-        for each in entries(modules, Toolsets)
+        Served(module=by_name[each.module], serving=each.entry)
+        for each in entries(modules, Serving)
     ]
     made(
+        "Serving",
+        [],
+        [
+            Owned(module=each.module.name, name=each.serving.__name__)
+            for each in found
+            if not made_with(each.serving, each.module)
+        ],
+    )
+    distinct(
         "Tools",
         [
             Owned(module=each.module.name, name=spec.name)
             for each in found
-            for spec in each.tools.specs()
-        ],
-        [
-            Owned(module=each.module.name, name=each.tools.__name__)
-            for each in found
-            if not made_with(each.tools, each.module)
+            for spec in tools(each.serving)
         ],
     )
-    return found
-
-
-def handled(modules: list[Module]) -> list[Handled]:
-    """Return each module's handlers, each with its module, checking each kind of request is one module's."""
-    by_name = {module.name: module for module in modules}
-    found = [
-        Handled(module=by_name[each.module], handler=each.entry)
-        for each in entries(modules, Handlers)
-    ]
-    made(
+    distinct(
         "The room's requests",
         [
-            Owned(module=each.module.name, name=answering(each.handler).named())
+            Owned(module=each.module.name, name=kind)
             for each in found
-        ],
-        [
-            Owned(module=each.module.name, name=each.handler.__name__)
-            for each in found
-            if not made_with(each.handler, each.module)
-        ],
-    )
-    return found
-
-
-def hooked(modules: list[Module]) -> list[Hooked]:
-    """Return each module's classes of hooks, each with its module, checking each is made with it."""
-    by_name = {module.name: module for module in modules}
-    found = [
-        Hooked(module=by_name[each.module], hooks=each.entry)
-        for each in entries(modules, Hooks)
-    ]
-    made(
-        "Hooks",
-        [],
-        [
-            Owned(module=each.module.name, name=each.hooks.__name__)
-            for each in found
-            if not made_with(each.hooks, each.module)
+            for kind in requests(each.serving)
         ],
     )
     return found
@@ -607,8 +552,6 @@ def resolve(project: Project) -> Resolved:
         held=project.held,
         flagged=project.flagged,
         served=served(modules),
-        handled=handled(modules),
-        hooked=hooked(modules),
         shared=[
             Shared(
                 module=part.module,

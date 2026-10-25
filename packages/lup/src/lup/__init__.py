@@ -22,6 +22,12 @@ the fake and the guard (`lup.testing`). Beside it, each declaration compiles for
 terminal too, and a room opens that terminal in a container (`lup.rooms`,
 `docs/launch.md`).
 
+It holds, too, the doors a module's methods are reached through, each a
+decorator (`lup.doors`): `lup.tool`, which a plain function given to an ask is
+made a tool with too, `lup.request` and `lup.on`; lup's events, one class each
+(`lup.events`); and what a hook at `Publishing` reads and refuses
+(`lup.publishing`). `lup_dev` serves them.
+
     translator = Claude(model="opus", system_prompt=PROMPT)
     result = await translator.ask(segment.model_dump_json(), Translations)
     result.output  # Translations
@@ -34,7 +40,21 @@ and a project installs only the extra it asks through (`lup[claude]`,
 
 from lup.adapters.claude import Claude
 from lup.adapters.codex import Codex
+from lup.doors import on, request, tool
 from lup.errors import LupError
+from lup.events import (
+    CallFinished,
+    CallStarted,
+    ConversationEnded,
+    Event,
+    Launched,
+    Publishing,
+    SessionStarted,
+    Stopped,
+    TurnEnded,
+    TurnStarted,
+)
+from lup.publishing import Part, Place, Post, Published, Push, Refusal
 from lup.sessions.errors import (
     AgentUnavailableError,
     AuthMissingError,
@@ -56,22 +76,41 @@ __all__ = [
     "AgentUnavailableError",
     "AuthMissingError",
     "BlockedError",
+    "CallFinished",
+    "CallStarted",
     "Claude",
     "Codex",
+    "ConversationEnded",
+    "Event",
     "Friction",
     "HowItWent",
+    "Launched",
     "LupError",
     "OutputMissingError",
+    "Part",
+    "Place",
+    "Post",
+    "Published",
+    "Publishing",
+    "Push",
     "Recovery",
+    "Refusal",
     "Rejection",
     "RuntimeMissingError",
     "SessionLayers",
+    "SessionStarted",
+    "Stopped",
     "StoppedError",
     "Submission",
     "ToolsPresentError",
+    "TurnEnded",
     "TurnError",
     "TurnResult",
+    "TurnStarted",
     "TurnTimeoutError",
     "Usage",
     "UsageLimitReachedError",
+    "on",
+    "request",
+    "tool",
 ]

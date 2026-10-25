@@ -1,16 +1,10 @@
-"""The runtime-neutral events, the calls running, and the checkpoint.
+"""The events as the judge reads them, the calls running, and the checkpoint.
 
-The judging core never sees a runtime: each adapter turns its hooks into these
-events (`docs/judging-writes.md`, *After a call: the checkpoint*):
-
-| Event | When |
-|---|---|
-| `SessionStarted` | a session starts or resumes |
-| `TurnStarted` | a conversation's turn starts, or a prompt arrives in it |
-| `CallStarted` | a tool call is about to run |
-| `CallFinished` | a tool call finished, or failed |
-| `TurnEnded` | the agent ends its turn |
-| `ConversationEnded` | a subagent's conversation ends |
+The judging core never sees a runtime: each adapter turns its hooks into a
+session's events, lup's own (`lup.events.SessionEvent`), each extended here
+with what the judge reads of it, the runtime's ids for its conversation among
+it, and what the judge does at it (`Reported.apply`; `docs/judging-writes.md`,
+*After a call: the checkpoint*).
 
 A session holds one or more worktrees of its repository (`worktrees.py`), and a
 call counts as running in each worktree its conversation works in when it starts
@@ -54,6 +48,7 @@ from typing import Literal, override
 
 from filelock import FileLock
 
+from lup import events
 from lup.types import Model, MutableModel
 from lup_dev.approval import approved
 from lup_dev.clock import Clock
@@ -1960,7 +1955,7 @@ def unlisted(bench: Bench, worktree: Worktree, key: str) -> list[RemovedNote]:
 
 def end_turn(
     bench: Bench,
-    event: Event,
+    event: Reported,
     opened: list[Worktree],
     judging: list[Path],
     *,
@@ -2025,8 +2020,12 @@ def end_turn(
     return Reply(block=sections([*told, turn_end(left) if holds else "", *listed]))
 
 
-class Event(Model, ABC):
-    """Something a runtime reports, in lup's own words."""
+class Reported(Model, ABC):
+    """One of a session's events, as its runtime's hook reports it to the judge: the conversation it's from, and what the judge does at it.
+
+    Each of the judge's events is lup's own (`lup.events`), with what the
+    judge reads of it beside.
+    """
 
     session: str
     agent: str = ""
@@ -2038,7 +2037,7 @@ class Event(Model, ABC):
         """Act on the event, and say what the agent hears."""
 
 
-class SessionStarted(Event):
+class SessionStarted(Reported, events.SessionStarted):
     """A session started, or resumed: it begins again in each worktree it holds.
 
     Its record of the subagents at work starts again too, and its main
@@ -2075,7 +2074,7 @@ def counted(bench: Bench, session: str) -> list[Call]:
     return list({each.key: each for each in calls}.values())
 
 
-class TurnStarted(Event):
+class TurnStarted(Reported, events.TurnStarted):
     """A turn of conversation `agent` starts, or a prompt arrives in its turn: the calls of its session the runtime shows are over stop counting as running.
 
     A call the runtime never reports finishing, one the operator interrupts
@@ -2126,14 +2125,12 @@ class TurnStarted(Event):
         return Reply()
 
 
-class CallStarted(Event):
+class CallStarted(Reported, events.CallStarted):
     """A tool call is about to run: it counts in every worktree its conversation works in (`Holding.works`).
 
     A subagent's call notes that the subagent is at work.
     """
 
-    call: str
-    tool: str
     spawns: bool = False
     """Whether the call runs a subagent, whose own calls count instead."""
     turn: str | None = None
@@ -2168,7 +2165,7 @@ class CallStarted(Event):
         return Reply()
 
 
-class CallFinished(Event):
+class CallFinished(Reported, events.CallFinished):
     """A tool call finished, whether it succeeded or failed.
 
     It's confirmed in each worktree it counted in or its conversation works in,
@@ -2178,8 +2175,6 @@ class CallFinished(Event):
     runtime can report a command's end on a later call) leaves the calls running
     as they are, and a checkpoint still runs where none is.
     """
-
-    call: str
 
     @override
     def apply(self, bench: Bench) -> Reply:
@@ -2214,7 +2209,7 @@ class CallFinished(Event):
         return Reply(context=sections([*(each.text() for each in checked), *waiting]))
 
 
-class TurnEnded(Event):
+class TurnEnded(Reported, events.TurnEnded):
     """The session's own conversation ended its turn.
 
     In each worktree the session holds, its calls that never reported finishing
@@ -2247,7 +2242,7 @@ class TurnEnded(Event):
         )
 
 
-class ConversationEnded(Event):
+class ConversationEnded(Reported, events.ConversationEnded):
     """A subagent's conversation ended its turn; the session's own goes on.
 
     Its calls are cleared in each worktree the session holds, and a checkpoint

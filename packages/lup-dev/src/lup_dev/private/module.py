@@ -15,17 +15,9 @@ from pydantic import model_validator
 from lup_dev.catalog.gate import Step
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Named, listed
-from lup_dev.declaration.kinds import (
-    Gate,
-    Guidance,
-    Handlers,
-    Hooks,
-    Section,
-    mentioned,
-)
+from lup_dev.declaration.kinds import Gate, Guidance, Section, Serving, mentioned
 from lup_dev.declaration.module import Module
-from lup_dev.private.hooks import PrivateHooks
-from lup_dev.private.scanning import Scanner
+from lup_dev.private.serving import PrivateServing
 from lup_dev.private.withheld import DETAILS, Detail
 
 
@@ -94,11 +86,9 @@ class Private(Module):
     values: Values = Values()
     """The person's own values: none, unless their own layer,
     `lup_project.local.py`, adds them."""
-    hooks: Hooks = Hooks.of(PrivateHooks)
-    """At `publishing`, refusing a push or a post that carries a value."""
-    handlers: Handlers = Handlers.of(Scanner)
-    """The gate's step in a room, which never sees the list, answered on the
-    host."""
+    serving: Serving = Serving.of(PrivateServing)
+    """At `Publishing`, refusing a push or a post that carries a value; and the
+    gate's step in a room, which never sees the list, answered on the host."""
     gate: Gate = Gate.of(Step(name="private", command=["lup-dev", "private", "check"]))
     """`private`: every file, and `HEAD`'s commits the remotes lack, read for a
     value, failing on one."""

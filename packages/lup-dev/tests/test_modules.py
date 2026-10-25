@@ -1,7 +1,7 @@
-"""A module's tools and its answers to the room's requests: declared, resolved, and served by the repository's process.
+"""A module's methods, behind the library's doors: declared, checked, resolved, and served by the repository's process.
 
 The modules here are small: `Echo`, whose one tool shouts what it's told and whose
-handler answers `ping`. Some tests start the real `lup-dev worker` process on a
+request answers `ping`. Some tests start the real `lup-dev worker` process on a
 repository whose declaration holds such a module, and talk to it as the host
 service does.
 """
@@ -10,39 +10,37 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, override
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
+import lup
 from lup.programs import run
-from lup.tools.hook import lup_hook
-from lup.tools.tool import ToolError, lup_tool
+from lup.publishing import Part, Place, Post, Refusal
 from lup.types import Model
 from lup_dev import (
+    Agent,
     Core,
-    Handlers,
-    Hooks,
+    Lup,
     Module,
-    ModuleHandler,
     Modules,
-    ModuleTools,
+    ModuleServing,
     Project,
     ProjectError,
-    Toolsets,
+    Room,
+    Serving,
 )
 from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.declaration.kinds import Mounted
 from lup_dev.declaration.resolve import resolve
-from lup_dev.declaration.serving import ModuleHooks, Moment
 from lup_dev.errors import LupDevError
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Limits, Register, Reply, Request
-from lup_dev.host.publishing import Part, Place, Post, Refusal
 from lup_dev.host.records import Record, Records
 from lup_dev.host.workers import Called, Calling, Happening, Sent, Workers
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.stored import write_model
-from lup_dev.worker import Serving
+from lup_dev.worker import RepositoryModules
 
 if TYPE_CHECKING:
     from conftest import Kit
@@ -66,24 +64,6 @@ class Said(Model):
     text: str
 
 
-class EchoTools(ModuleTools):
-    """Echo's tool."""
-
-    module: Echo
-
-    @lup_tool
-    async def shout(self, said: Said) -> str:
-        """Shout what you're told."""
-        loud = said.text.upper() * self.module.volume
-        return f"{loud}, for {self.caller.id} of {self.launch.launch}"
-
-    @lup_tool
-    async def fail(self, said: Said) -> str:
-        """Fail, saying why."""
-        message = f"it can't: {said.text}"
-        raise LupDevError(message)
-
-
 class Ping(Request, reads=True):
     """Ask the module to answer."""
 
@@ -98,17 +78,27 @@ class Pong(Reply):
     text: str
 
 
-class Ponging(ModuleHandler):
-    """Answers `ping`, as many times as the module's volume."""
+class EchoServing(ModuleServing):
+    """Echo's tools, and its answer to `ping`."""
 
     module: Echo
-    request: Ping
 
-    @override
-    async def answer(self) -> Reply:
-        return Pong(
-            text=f"{self.request.text * self.module.volume} to {self.launch.launch}"
-        )
+    @lup.tool
+    async def shout(self, said: Said, by: Agent) -> str:
+        """Shout what you're told."""
+        loud = said.text.upper() * self.module.volume
+        return f"{loud}, for {by.conversation.id} of {by.launch.launch}"
+
+    @lup.tool
+    async def fail(self, said: Said) -> str:
+        """Fail, saying why."""
+        message = f"it can't: {said.text}"
+        raise LupDevError(message)
+
+    @lup.request
+    async def ping(self, asked: Ping, by: Room) -> Pong:
+        """Answer `ping`, as many times as the module's volume."""
+        return Pong(text=f"{asked.text * self.module.volume} to {by.launch.launch}")
 
 
 class Echo(Module):
@@ -117,16 +107,15 @@ class Echo(Module):
     name = "echo"
 
     volume: int = 1
-    tools: Toolsets = Toolsets.of(EchoTools)
-    handlers: Handlers = Handlers.of(Ponging)
+    serving: Serving = Serving.of(EchoServing)
 
 
-class OtherTools(ModuleTools):
+class OtherServing(ModuleServing):
     """Another module's tool of the same name."""
 
     module: Other
 
-    @lup_tool
+    @lup.tool
     async def shout(self, said: Said) -> str:
         """Shout too."""
         return said.text
@@ -137,15 +126,15 @@ class Other(Module):
 
     name = "other"
 
-    tools: Toolsets = Toolsets.of(OtherTools)
+    serving: Serving = Serving.of(OtherServing)
 
 
 class Borrowing(Module):
-    """Listing another module's tools as its own."""
+    """Listing another module's methods as its own."""
 
     name = "borrowing"
 
-    tools: Toolsets = Toolsets.of(EchoTools)
+    serving: Serving = Serving.of(EchoServing)
 
 
 def launch(tmp_path: Path) -> Register:
@@ -163,27 +152,24 @@ def launch(tmp_path: Path) -> Register:
     )
 
 
-def test_a_module_s_tools_and_handlers_resolve_with_their_module() -> None:
+def test_a_module_s_classes_resolve_with_their_module() -> None:
     resolved = resolve(Project(modules=Modules.only(Core(), Echo(volume=2))))
     [served] = resolved.served
-    assert served.tools is EchoTools
+    assert served.serving is EchoServing
     assert isinstance(served.module, Echo)
     assert served.module.volume == 2
-    [handled] = resolved.handled
-    assert handled.handler is Ponging
-    assert handled.module is served.module
 
 
-def test_lup_s_defaults_serve_github_s_tools_until_it_s_dropped() -> None:
-    names = [each.tools.__name__ for each in resolve(Project()).served]
-    assert names == ["GitHubTools"]
+def test_lup_s_defaults_serve_their_methods_until_dropped() -> None:
+    names = [each.serving.__name__ for each in resolve(Project()).served]
+    assert names == ["GitHubServing", "TranscriptsServing", "PrivateServing"]
     dropped = Project(modules=Modules.default().drop("github"))
-    assert resolve(dropped).served == []
-    assert [each.module.name for each in resolve(dropped).handled] == ["private"]
+    served = [each.module.name for each in resolve(dropped).served]
+    assert served == ["transcripts", "private"]
 
 
-def test_a_toolset_is_dropped_by_its_class_s_name() -> None:
-    quiet = Echo(tools=Toolsets().drop("EchoTools"))
+def test_a_class_of_methods_is_dropped_by_its_name() -> None:
+    quiet = Echo(serving=Serving().drop("EchoServing"))
     resolved = resolve(Project(modules=Modules.only(Core(), quiet)))
     assert resolved.served == []
 
@@ -193,14 +179,14 @@ def test_a_tool_named_alike_by_two_modules_is_refused_naming_both() -> None:
         resolve(Project(modules=Modules.only(Core(), Echo(), Other())))
 
 
-def test_tools_made_with_another_module_are_refused() -> None:
-    with pytest.raises(ProjectError, match=r"`EchoTools` in `borrowing` narrows"):
+def test_methods_made_with_another_module_are_refused() -> None:
+    with pytest.raises(ProjectError, match=r"`EchoServing` in `borrowing` narrows"):
         resolve(Project(modules=Modules.only(Core(), Borrowing())))
 
 
-def serving(tmp_path: Path, volume: int = 1) -> Serving:
+def serving(tmp_path: Path, volume: int = 1) -> RepositoryModules:
     resolved = resolve(Project(modules=Modules.only(Core(), Echo(volume=volume))))
-    return Serving(
+    return RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
         records={"claude": Nothing()},
@@ -263,22 +249,112 @@ def test_a_tool_no_module_serves_is_said(tmp_path: Path) -> None:
     assert answer.text == "no module of this launch serves `whisper`"
 
 
-def test_a_room_s_request_is_answered_by_its_module_s_handler_for_its_launch(
+def test_a_room_s_request_is_answered_by_its_module_s_method_for_its_launch(
     tmp_path: Path,
 ) -> None:
     sent = Sent.model_validate({"kind": "ping", "text": "a"})
     served = serving(tmp_path, volume=3)
     one = launch(tmp_path)
     two = one.model_copy(update={"launch": "two"})
-    answered = [asyncio.run(served.answer(sent, each)) for each in [one, two]]
+    answered = [
+        asyncio.run(served.answer(sent, Room(launch=each))) for each in [one, two]
+    ]
     assert answered == [Pong(text="aaa to one"), Pong(text="aaa to two")]
+
+
+def test_a_method_answers_only_who_it_s_for(tmp_path: Path) -> None:
+    sent = Sent.model_validate({"kind": "ping", "text": "a"})
+    agent = Agent(launch=launch(tmp_path), conversation=CALLER)
+    with pytest.raises(
+        LupDevError,
+        match=r"`EchoServing.ping` of `Echo` is asked by `Room`, never by `Agent`",
+    ):
+        asyncio.run(serving(tmp_path).answer(sent, agent))
+
+
+def test_a_tool_leaving_by_out_is_its_door_s_default_askers(tmp_path: Path) -> None:
+    calling = Calling(
+        launch=launch(tmp_path), name="fail", arguments={"text": "x"}, caller=CALLER
+    )
+    # `fail` leaves `by` out: a tool's default askers, an agent, call it.
+    assert asyncio.run(serving(tmp_path).call(calling)).text == (
+        "`fail` didn't run: it can't: x"
+    )
+
+
+def test_who_may_ask_a_method_is_checked_as_its_class_is_defined() -> None:
+    def roomy() -> type[ModuleServing]:
+        class Roomy(ModuleServing):
+            """A tool for a room, which never calls one."""
+
+            module: Echo
+
+            @lup.tool
+            async def shout(self, said: Said, by: Room) -> str:
+                """Shout."""
+                return said.text
+
+        return Roomy
+
+    def nobody() -> type[ModuleServing]:
+        class Nobody(ModuleServing):
+            """A request that doesn't say who may ask it."""
+
+            module: Echo
+
+            @lup.request
+            async def ping(self, asked: Ping) -> Pong:
+                """Answer."""
+                return Pong(text=asked.text)
+
+        return Nobody
+
+    def widened() -> type[ModuleServing]:
+        class Widened(ModuleServing):
+            """A tool naming an asker beside the one that calls it."""
+
+            module: Echo
+
+            @lup.tool
+            async def shout(self, said: Said, by: Agent | Room) -> str:
+                """Shout."""
+                return said.text
+
+        return Widened
+
+    def stray() -> type[ModuleServing]:
+        class Stray(ModuleServing):
+            """A request taking a model that isn't a request's."""
+
+            module: Echo
+
+            @lup.request
+            async def ping(self, asked: Said, by: Room) -> Pong:
+                """Answer."""
+                return Pong(text=asked.text)
+
+        return Stray
+
+    with pytest.raises(
+        ProjectError,
+        match=r"`Roomy.shout` takes `by: Room`, but a tool is asked by `Agent` alone",
+    ):
+        roomy()
+    with pytest.raises(
+        ProjectError, match=r"`Nobody.ping` is a request, which says who may ask it"
+    ):
+        nobody()
+    with pytest.raises(ProjectError, match=r"never by `Room`"):
+        widened()
+    with pytest.raises(ProjectError, match=r"`Stray.ping` is a request, so it takes"):
+        stray()
 
 
 DECLARATION = '''"""A project with a module of its own."""
 
-from lup.tools.tool import lup_tool
+import lup
 from lup.types import Model
-from lup_dev import Module, ModuleTools, Modules, Project, Toolsets
+from lup_dev import Module, Modules, ModuleServing, Project, Serving
 
 
 class Said(Model):
@@ -287,12 +363,12 @@ class Said(Model):
     text: str
 
 
-class LoudTools(ModuleTools):
+class LoudServing(ModuleServing):
     """Loud's tool."""
 
     module: Loud
 
-    @lup_tool
+    @lup.tool
     async def shout(self, said: Said) -> str:
         """Shout what you're told."""
         return f"{said.text.upper()} from {self.module.name}"
@@ -303,7 +379,7 @@ class Loud(Module):
 
     name = "loud"
 
-    tools: Toolsets = Toolsets.of(LoudTools)
+    serving: Serving = Serving.of(LoudServing)
 
 
 project = Project(modules=Modules.default().add(Loud()))
@@ -367,9 +443,9 @@ def test_a_repository_s_process_serves_its_committed_declaration_s_modules(
 
 LOCAL = '''"""The person's own layer: a module of theirs."""
 
-from lup.tools.tool import lup_tool
+import lup
 from lup.types import Model
-from lup_dev import Module, ModuleTools, Modules, Project, Toolsets
+from lup_dev import Module, Modules, ModuleServing, Project, Serving
 
 
 class Words(Model):
@@ -378,12 +454,12 @@ class Words(Model):
     text: str
 
 
-class QuietTools(ModuleTools):
+class QuietServing(ModuleServing):
     """Quiet's tool."""
 
     module: Quiet
 
-    @lup_tool
+    @lup.tool
     async def whisper(self, words: Words) -> str:
         """Whisper what you're told."""
         return words.text.lower()
@@ -394,7 +470,7 @@ class Quiet(Module):
 
     name = "quiet"
 
-    tools: Toolsets = Toolsets.of(QuietTools)
+    serving: Serving = Serving.of(QuietServing)
 
 
 project = Project(modules=Modules().add(Quiet()))
@@ -424,44 +500,50 @@ def test_a_bare_repository_s_modules_are_made_from_its_approved_declaration(
         local=LOCAL,
     )
     write_model(kit.layout.approved(bare), approval)
-    served = Serving.loaded(bare, kit.bench.services, {"claude": Nothing()})
+    served = RepositoryModules.loaded(bare, kit.bench.services, {"claude": Nothing()})
     names = [spec.name for spec in served.offered().tools]
     assert {"shout", "whisper"} <= set(names)
 
 
-# Hooks: what a module does at lup's moments.
+# Hooks: what a module does at lup's events.
 
 
-class Noted(ModuleHooks):
-    """Notes each moment in its module's data directory, and fails when the launch stops."""
+class NotedServing(ModuleServing):
+    """Notes each event in its module's data directory, and fails when the launch stops."""
 
     module: Listening
 
-    @lup_hook(on=["launched", "call_started", "stopped"])
-    async def note(self, moment: Moment) -> None:
-        """Note the moment, and the tool where there's one."""
-        with (self.data / "moments").open("a", encoding="utf-8") as notes:
-            notes.write(f"{moment.name} {moment.tool}\n")
+    @lup.on(lup.Launched)
+    @lup.on(lup.CallStarted)
+    @lup.on(lup.Stopped)
+    async def note(
+        self, event: lup.Launched | lup.CallStarted | lup.Stopped, by: Lup
+    ) -> None:
+        """Note the event, the tool where there's one, and the conversation."""
+        tool = event.tool if isinstance(event, lup.CallStarted) else None
+        caller = None if by.conversation is None else by.conversation.id
+        with (self.data / "events").open("a", encoding="utf-8") as notes:
+            notes.write(f"{event.named()} {tool} {caller}\n")
 
-    @lup_hook
-    async def stopped(self, moment: Moment) -> None:
+    @lup.on(lup.Stopped)
+    async def stopped(self, event: lup.Stopped) -> None:
         """Fail when the launch stops."""
-        message = f"it broke at {moment.name}"
+        message = f"it broke at {event.named()}"
         raise RuntimeError(message)
 
 
 class Listening(Module):
-    """Listening to lup's moments."""
+    """Listening to lup's events."""
 
     name = "listening"
 
-    hooks: Hooks = Hooks.of(Noted)
+    serving: Serving = Serving.of(NotedServing)
     data: Mounted = Mounted()
 
 
-def listening(tmp_path: Path) -> Serving:
+def listening(tmp_path: Path) -> RepositoryModules:
     resolved = resolve(Project(modules=Modules.only(Core(), Listening())))
-    return Serving(
+    return RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
         records={"claude": Nothing()},
@@ -469,60 +551,51 @@ def listening(tmp_path: Path) -> Serving:
     )
 
 
-def test_a_hook_naming_no_moment_of_lups_is_refused() -> None:
-    with pytest.raises(ProjectError, match=r"runs `landed` at `landed`"):
-        # lup: ignore("reportUnusedClass", why="defining it is the test: its definition is refused")
-        class Landing(ModuleHooks):
-            """Runs at a moment lup doesn't have."""
-
-            module: Listening
-
-            @lup_hook
-            async def landed(self, moment: Moment) -> None:
-                """Never runs."""
-
-
-def test_a_module_s_hooks_offer_the_occasions_they_run_at(tmp_path: Path) -> None:
-    assert listening(tmp_path).offered().occasions == [
+def test_a_module_s_hooks_offer_the_events_they_run_at(tmp_path: Path) -> None:
+    assert listening(tmp_path).offered().events == [
         "launched",
         "stopped",
         "call-started",
     ]
 
 
-def test_a_moment_runs_each_hook_with_its_module_s_data_and_tells_what_failed(
+def test_an_event_runs_each_hook_with_its_module_s_data_and_tells_what_failed(
     tmp_path: Path,
 ) -> None:
     serving = listening(tmp_path)
     registered = launch(tmp_path)
     started = Happening(
-        launch=registered, occasion="call-started", conversation=CALLER, tool="Bash"
+        launch=registered,
+        event=lup.CallStarted(call="u1", tool="Bash"),
+        conversation=CALLER,
     )
     assert asyncio.run(serving.happen(started)).failures == []
-    ending = Happening(launch=registered, occasion="stopped")
+    ending = Happening(launch=registered, event=lup.Stopped())
     stopped = asyncio.run(serving.happen(ending))
     [failure] = stopped.failures
-    assert failure.startswith("`Noted.stopped` failed at stopped:")
+    assert failure.startswith("`NotedServing.stopped` failed at stopped:")
     assert "it broke at stopped" in failure
     data = tmp_path / "data" / "modules" / "listening"
-    [notes] = list(data.rglob("moments"))
-    assert notes.read_text() == "call_started Bash\nstopped None\n"
+    [notes] = list(data.rglob("events"))
+    assert notes.read_text() == "call-started Bash c1\nstopped None None\n"
 
 
 class Elsewhere(Nothing):
     """Another runtime, keeping no records either."""
 
 
-class Reading(ModuleHooks):
+class ReadingServing(ModuleServing):
     """Notes whose records each launch opening reads."""
 
     module: Reader
 
-    @lup_hook
-    async def launched(self, moment: Moment) -> None:
+    @lup.on(lup.Launched)
+    async def read(self, event: lup.Launched, by: Lup) -> None:
         """Note the launch, and its runtime's records."""
+        del event
+        records = type(self.records[by.launch.runtime]).__name__
         with (self.data / "read").open("a", encoding="utf-8") as notes:
-            notes.write(f"{self.launch.launch} {type(self.records).__name__}\n")
+            notes.write(f"{by.launch.launch} {records}\n")
 
 
 class Reader(Module):
@@ -530,12 +603,12 @@ class Reader(Module):
 
     name = "reader"
 
-    hooks: Hooks = Hooks.of(Reading)
+    serving: Serving = Serving.of(ReadingServing)
 
 
 def test_each_launch_s_hooks_read_its_own_runtime_s_records(tmp_path: Path) -> None:
     resolved = resolve(Project(modules=Modules.only(Core(), Reader())))
-    serving = Serving(
+    serving = RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
         records={"claude": Nothing(), "codex": Elsewhere()},
@@ -545,7 +618,7 @@ def test_each_launch_s_hooks_read_its_own_runtime_s_records(tmp_path: Path) -> N
     two = one.model_copy(update={"launch": "two", "runtime": "codex"})
     for each in [one, two]:
         happened = asyncio.run(
-            serving.happen(Happening(launch=each, occasion="launched"))
+            serving.happen(Happening(launch=each, event=lup.Launched()))
         )
         assert happened.failures == []
     [notes] = list((tmp_path / "data").rglob("read"))
@@ -559,86 +632,49 @@ def test_a_module_s_data_each_room_mounts_resolves_by_its_name() -> None:
     ]
 
 
-def test_a_hook_or_a_tool_named_like_a_field_is_refused() -> None:
-    with pytest.raises(ToolError, match=r"`Shadowing`'s hook `launch` takes the name"):
-        # lup: ignore("reportUnusedClass", why="defining it is the test: its definition is refused")
-        class Shadowing(ModuleHooks):
-            """Names a hook after the launch it's made with."""
-
-            module: Listening
-
-            @lup_hook(on="launched")
-            # lup: ignore("reportIncompatibleVariableOverride", why="the clash is the test: the class is refused for it")
-            async def launch(self, moment: Moment) -> None:
-                """Would vanish under the field."""
-
-    with pytest.raises(ToolError, match=r"`Hiding`'s tool `caller` takes the name"):
-        # lup: ignore("reportUnusedClass", why="defining it is the test: its definition is refused")
-        class Hiding(ModuleTools):
-            """Names a tool after the conversation calling."""
-
-            module: Echo
-
-            @lup_tool
-            # lup: ignore("reportIncompatibleVariableOverride", why="the clash is the test: the class is refused for it")
-            async def caller(self, said: Said) -> str:
-                """Would vanish under the field."""
-                return said.text
+# `Publishing`: the one event a hook answers, refusing what would leave.
 
 
-# The `publishing` moment: the one a hook answers, refusing what would leave.
-
-
-class Guarded(ModuleHooks):
-    """Refuses a post whose body says `hush`; fails where its body says `crash`."""
+class GuardedServing(ModuleServing):
+    """Refuses a post whose body says `hush`, failing where its body says `crash`; and a tool that publishes."""
 
     module: Guarding
 
-    @lup_hook
-    async def publishing(self, moment: Moment) -> list[Refusal]:
-        """Refuse each part saying `hush`, by its place."""
-        match moment.published:
+    @lup.on(lup.Publishing)
+    async def refuse(self, event: lup.Publishing, by: Lup) -> list[Refusal]:
+        """Refuse each part saying `hush`, by its place, and a post an agent didn't make."""
+        match event.published:
             case Post(parts=parts):
                 if any("crash" in part.text for part in parts):
                     message = "the check broke"
                     raise RuntimeError(message)
+                unmade = (
+                    [Refusal(what="a post", place=Place(within="it"), steer="no")]
+                    if by.conversation is None
+                    else []
+                )
                 return [
-                    Refusal(
-                        what="a word kept quiet",
-                        place=Place(within=f"the {part.name}", line=1),
-                        steer="say it another way",
-                    )
-                    for part in parts
-                    if "hush" in part.text
+                    *unmade,
+                    *(
+                        Refusal(
+                            what="a word kept quiet",
+                            place=Place(within=f"the {part.name}", line=1),
+                            steer="say it another way",
+                        )
+                        for part in parts
+                        if "hush" in part.text
+                    ),
                 ]
             case _:
                 return []
 
-
-class Overstepping(ModuleHooks):
-    """Refuses at a moment a hook only observes."""
-
-    module: Guarding
-
-    @lup_hook
-    async def launched(self, moment: Moment) -> list[Refusal]:
-        """Refuse the launch opening, which nothing can."""
-        return [
-            Refusal(what="a launch", place=Place(within="it"), steer="nothing to do")
-        ]
-
-
-class Announcing(ModuleTools):
-    """A tool that publishes."""
-
-    module: Guarding
-
-    @lup_tool
-    async def announce(self, said: Said) -> str:
+    @lup.tool
+    async def announce(self, said: Said, by: Agent) -> str:
         """Announce what you're told."""
         await self.publish(
             Post(what="an announcement", parts=[Part(name="body", text=said.text)]),
             "this announcement",
+            by,
         )
         return f"announced: {said.text}"
 
@@ -648,13 +684,12 @@ class Guarding(Module):
 
     name = "guarding"
 
-    hooks: Hooks = Hooks.of(Guarded, Overstepping)
-    tools: Toolsets = Toolsets.of(Announcing)
+    serving: Serving = Serving.of(GuardedServing)
 
 
-def guarding(tmp_path: Path) -> Serving:
+def guarding(tmp_path: Path) -> RepositoryModules:
     resolved = resolve(Project(modules=Modules.only(Core(), Guarding())))
-    return Serving(
+    return RepositoryModules(
         repository=tmp_path / ".git",
         resolved=resolved,
         records={"claude": Nothing()},
@@ -664,7 +699,9 @@ def guarding(tmp_path: Path) -> Serving:
 
 def publishing(tmp_path: Path, text: str) -> Happening:
     return Happening(
-        launch=launch(tmp_path), occasion="publishing", published=post(text)
+        launch=launch(tmp_path),
+        event=lup.Publishing(published=post(text)),
+        conversation=CALLER,
     )
 
 
@@ -675,8 +712,8 @@ def post(text: str) -> Post:
     )
 
 
-def test_publishing_is_a_moment_a_module_s_hooks_offer(tmp_path: Path) -> None:
-    assert "publishing" in guarding(tmp_path).offered().occasions
+def test_publishing_is_an_event_a_module_s_hooks_offer(tmp_path: Path) -> None:
+    assert "publishing" in guarding(tmp_path).offered().events
 
 
 def test_a_hook_at_publishing_refuses_naming_what_and_where(tmp_path: Path) -> None:
@@ -700,22 +737,10 @@ def test_a_hook_failing_at_publishing_refuses_what_it_couldn_t_check(
     happening = publishing(tmp_path, "crash")
     happened = asyncio.run(guarding(tmp_path).happen(happening))
     [failure] = happened.failures
-    assert failure.startswith("`Guarded.publishing` failed at publishing:")
+    assert failure.startswith("`GuardedServing.refuse` failed at publishing:")
     [refusal] = happened.refusals
-    assert refusal.what.startswith("a check that didn't run: `Guarded.publishing`")
+    assert refusal.what.startswith("a check that didn't run: `GuardedServing.refuse`")
     assert refusal.place == Place(within="all of it")
-
-
-def test_a_hook_refusing_where_it_only_observes_has_failed(tmp_path: Path) -> None:
-    launched = Happening(launch=launch(tmp_path), occasion="launched")
-    happened = asyncio.run(guarding(tmp_path).happen(launched))
-    assert happened.refusals == []
-    assert happened.failures == [
-        (
-            "`Overstepping.launched` refused at launched, where a hook only "
-            "observes: only publishing can be refused"
-        )
-    ]
 
 
 def test_a_tool_publishes_through_every_module_s_hooks_first(tmp_path: Path) -> None:
@@ -727,10 +752,11 @@ def test_a_tool_publishes_through_every_module_s_hooks_first(tmp_path: Path) -> 
     )
     answer = asyncio.run(guarding(tmp_path).call(calling))
     assert answer.error
+    # The conversation calling is the one publishing, so the hook knows it.
     assert answer.text == (
         "`announce` didn't run: lup refused to publish this announcement: a "
-        "module's check at the `publishing` moment found what isn't published, at "
-        "each place below.\n"
+        "module's check at `Publishing` found what isn't published, at each "
+        "place below.\n"
         "  the body:1 - a word kept quiet\n"
         "      steer: say it another way"
     )

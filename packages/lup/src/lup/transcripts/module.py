@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from lup.transcripts.hooks import TranscriptsHooks
-from lup_dev.declaration.kinds import Guidance, Hooks, Mounted, Section
+from lup.transcripts.serving import TranscriptsServing
+from lup_dev.declaration.kinds import Guidance, Mounted, Section, Serving
 from lup_dev.declaration.module import Module
 
 
@@ -12,7 +12,7 @@ class Transcripts(Module):
 
     name = "transcripts"
 
-    hooks: Hooks = Hooks.of(TranscriptsHooks)
+    serving: Serving = Serving.of(TranscriptsServing)
     """Copying what the runtime added or grew, when a launch opens and when it stops."""
     data: Mounted = Mounted(always=True)
     """The copies, read-only in every room, so a session reads why things are

@@ -27,22 +27,21 @@ from mcp.types import TextContent, jsonrpc_message_adapter
 from pydantic import JsonValue, ValidationError
 from typer.testing import CliRunner
 
+import lup
+from lup import events
 from lup.programs import Ran
 from lup.rooms.engine import Podman, Process
-from lup.tools.hook import lup_hook
 from lup.tools.serving import Answer
-from lup.tools.tool import ToolSpec, lup_tool
+from lup.tools.tool import ToolSpec
 from lup.types import Model
 from lup_dev import (
+    Agent,
     Core,
-    Hooks,
     Module,
-    ModuleHooks,
     Modules,
-    ModuleTools,
-    Moment,
+    ModuleServing,
     Project,
-    Toolsets,
+    Serving,
     cli,
 )
 from lup_dev.copies import Copies
@@ -101,7 +100,7 @@ if TYPE_CHECKING:
     from conftest import FakeClock, InProcess, Kit
     from mcp.client._transport import TransportStreams
 
-    from lup.sessions.terminal import Event
+    from lup.events import SessionEvent
     from lup_dev.clock import Clock
     from lup_dev.settings import Address
 
@@ -122,7 +121,12 @@ class Hears(Courier):
     """Hears every payload as a call of one session's own conversation, which the judge reads, and adds nothing."""
 
     def heard(self, runtime: str, payload: str) -> Heard:
-        return Heard(event="call-started", session="s1", judged=True, fits=10_000)
+        return Heard(
+            event=events.CallStarted(call="u1", tool="Bash"),
+            session="s1",
+            judged=True,
+            fits=10_000,
+        )
 
     def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
         return answer
@@ -1408,15 +1412,15 @@ class Words(Model):
     text: str
 
 
-class LoudTools(ModuleTools):
+class LoudServing(ModuleServing):
     """Loud's tool."""
 
     module: Loud
 
-    @lup_tool
-    async def shout(self, said: Words) -> str:
+    @lup.tool
+    async def shout(self, said: Words, by: Agent) -> str:
         """Shout, naming who's calling."""
-        return f"{said.text.upper()}, {self.caller.id} of {self.launch.launch}"
+        return f"{said.text.upper()}, {by.conversation.id} of {by.launch.launch}"
 
 
 class Loud(Module):
@@ -1424,7 +1428,7 @@ class Loud(Module):
 
     name = "loud"
 
-    tools: Toolsets = Toolsets.of(LoudTools)
+    serving: Serving = Serving.of(LoudServing)
 
 
 class Broken(LaunchModules):
@@ -1458,7 +1462,8 @@ def test_a_launch_s_modules_tools_are_served_beside_the_core_s_with_the_caller(
 ) -> None:
     host = client(layout, clock)
     modules = in_process(
-        resolved=resolve(Project(modules=Modules.only(Core(), Loud())))
+        resolved=resolve(Project(modules=Modules.only(Core(), Loud()))),
+        layout=Layout(state=tmp_path / "state", data=tmp_path / "data"),
     )
     with served(on_claude(layout, Quiet(), said, [Recording()], modules)):
         host.register(launch(tmp_path, "one", "claude"))
@@ -1507,17 +1512,18 @@ def test_a_module_s_tool_named_like_a_core_tool_is_left_to_the_core(
     assert any("which the core serves already" in line for line in said)
 
 
-class Moments(ModuleHooks):
+class MomentsServing(ModuleServing):
     """Listens when a call starts, and when the launch opens and stops, so the service tells it."""
 
     module: Listener
 
-    @lup_hook
-    async def call_started(self, moment: Moment) -> None:
+    @lup.on(lup.CallStarted)
+    async def calling(self, event: lup.CallStarted) -> None:
         """Listen."""
 
-    @lup_hook(on=["launched", "stopped"])
-    async def bounds(self, moment: Moment) -> None:
+    @lup.on(lup.Launched)
+    @lup.on(lup.Stopped)
+    async def bounds(self, event: lup.Launched | lup.Stopped) -> None:
         """Listen."""
 
 
@@ -1526,10 +1532,10 @@ class Listener(Module):
 
     name = "listener"
 
-    hooks: Hooks = Hooks.of(Moments)
+    serving: Serving = Serving.of(MomentsServing)
 
 
-def test_a_launch_s_modules_are_told_the_moments_they_listen_to(
+def test_a_launch_s_modules_are_told_the_events_they_listen_to(
     layout: HostLayout,
     clock: FakeClock,
     said: list[str],
@@ -1546,11 +1552,11 @@ def test_a_launch_s_modules_are_told_the_moments_they_listen_to(
         send(layout.launch("one").hook, claude("SessionStart", source="startup"))
         send(layout.launch("one").hook, lups("echo", "t1"))
         host.unregister("one")
-    told = [each.occasion for each in modules.told]
+    told = [each.event.named() for each in modules.told]
     assert sorted(told) == ["call-started", "launched", "stopped"]
     assert told[-1] == "stopped"
-    [call] = [each for each in modules.told if each.occasion == "call-started"]
-    assert call.tool == "mcp__lup__echo"
+    [call] = [each for each in modules.told if isinstance(each.event, lup.CallStarted)]
+    assert call.event == lup.CallStarted(call="t1", tool="mcp__lup__echo")
     assert call.conversation is not None
     assert modules.closed == ["one"]
 
@@ -1565,11 +1571,10 @@ class Reads(Courier):
         return answer
 
 
-def hook(event: Event, **fields: object) -> str:
+def hook(event: SessionEvent, **fields: object) -> str:
     """A hook of session `s1` the judge doesn't read, as `Reads` hears it."""
-    return json.dumps(
-        {"event": event, "session": "s1", "judged": False, "fits": 10_000, **fields}
-    )
+    heard = {"event": event.model_dump(), "session": "s1", "judged": False}
+    return json.dumps({**heard, "fits": 10_000, **fields})
 
 
 @contextmanager
@@ -1615,16 +1620,18 @@ def test_a_hook_reaches_a_watch_each_conversation_saying_what_its_doing(
         hooks = layout.launch("one").hook
         with watched(layout, ListLaunches()) as following:
             before = following()
-            send(hooks, hook("session-started"))
+            send(hooks, hook(events.SessionStarted()))
             started = following()
-            send(hooks, hook("call-started", call="c1", tool="Bash"))
+            send(hooks, hook(events.CallStarted(call="c1", tool="Bash")))
             calling = following()
             asking = hook(
-                "call-started", agent="a1", call="c2", tool="mcp__lup__ask", served=True
+                events.CallStarted(call="c2", tool="mcp__lup__ask"),
+                agent="a1",
+                served=True,
             )
             send(hooks, asking)
             held = following()
-            send(hooks, hook("conversation-ended", agent="a1"))
+            send(hooks, hook(events.ConversationEnded(), agent="a1"))
             ended = following()
 
     def doing(listed: str) -> list[tuple[str, Activity | None]]:
@@ -1974,7 +1981,9 @@ def test_what_a_conversation_is_doing_outlasts_a_restart_of_the_service(
     own = client(layout, clock)
     with served(service(layout, Judge(), said, courier=Reads(), clock=clock)):
         own.register(launch(tmp_path, "one", "first"))
-        send(layout.launch("one").hook, hook("call-started", call="c1", tool="Bash"))
+        send(
+            layout.launch("one").hook, hook(events.CallStarted(call="c1", tool="Bash"))
+        )
     with served(service(layout, Judge(), said, courier=Reads(), clock=clock)):
         listed = own.listed()
     [talker] = listed.talkers["one"]
@@ -1994,8 +2003,8 @@ def test_the_operator_holds_each_flagged_write_of_one_conversation(
     with served(service(layout, Judge(), said, courier=Reads(), clock=clock)):
         own.register(launch(tmp_path, "one", "first"))
         hooks = layout.launch("one").hook
-        send(hooks, hook("session-started"))
-        send(hooks, hook("call-started", agent="a1", call="c1", tool="Bash"))
+        send(hooks, hook(events.SessionStarted()))
+        send(hooks, hook(events.CallStarted(call="c1", tool="Bash"), agent="a1"))
         before = on(subagent)
         turned = on(SetHolding(launch="one", session="s1", agent="a1", on=True))
         holding = [

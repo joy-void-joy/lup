@@ -10,9 +10,9 @@ place, never a value.
 import base64
 from typing import Literal
 
+from lup.publishing import Refusal
 from lup.types import Model
 from lup_dev.host.protocol import Reply, Request
-from lup_dev.host.publishing import Refusal
 
 
 class Sent(Model):

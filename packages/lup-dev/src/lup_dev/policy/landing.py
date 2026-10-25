@@ -34,7 +34,7 @@ gated branch, `dev` by default:
    decline, sends the operator's words to the conversation landing, and nothing
    is pushed (`Delivery.held_back`, `Delivery.landing_decided`);
 6. the push goes the remote helper's way (`PushHandler`): held to the launch's
-   limits, through the `publishing` moment, and told to `Remotes.landed`, which
+   limits, through `Publishing`, and told to `Remotes.landed`, which
    asks trust's approval where it moved the integration branch;
 7. each branch it landed is cleaned up after: its copy on the remote deleted,
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
@@ -104,9 +104,11 @@ from typing import override
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
+import lup
+from lup.doors import bound, declared
 from lup.programs import Ran
 from lup.tools.serving import Answer
-from lup.tools.tool import Accepted, Refused, ToolSpec, bound, declared, lup_tool
+from lup.tools.tool import Accepted, Refused, ToolSpec
 from lup.types import Model, MutableModel
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Passed, Standing
@@ -669,7 +671,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             reviews=Reviews(layout=self.layout.reviewed(repository)),
         )
 
-    @lup_tool(idempotent=True)
+    @lup.tool(idempotent=True)
     async def land(self, landing: Landing) -> str:
         """Land a branch on the integration branch.
 
@@ -955,6 +957,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             self.launch,
             "rev-list",
             "--parents",
+            # lup: ignore("fixed-tool-limit", why="one commit's own parents are read, the one line `rev-list` gives for it: no list an agent asked for is cut short")
             "--max-count=1",
             commit,
             own_parents=True,

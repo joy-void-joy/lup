@@ -58,11 +58,22 @@ from typing import TYPE_CHECKING, Self, override
 from filelock import FileLock, Timeout
 from pydantic import Field, JsonValue, ValidationError, model_validator
 
+import lup
+from lup.events import (
+    CallFinished,
+    CallStarted,
+    ConversationEnded,
+    Launched,
+    SessionStarted,
+    Stopped,
+    TurnEnded,
+    TurnStarted,
+)
 from lup.programs import ProgramMissingError, Ran, awaited
 from lup.rooms.engine import ContainerError, Podman
 from lup.tools import speaking
 from lup.tools.serving import Answer, Outbox, serve
-from lup.tools.tool import Accepted, AgentTool, ToolSpec, lup_tool
+from lup.tools.tool import Accepted, AgentTool, ToolSpec
 from lup.tools.tool import Refused as Rejected
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock, SystemClock
@@ -369,7 +380,7 @@ class Dispatcher(Model, arbitrary_types_allowed=True):
         return Refused(error=error)
 
 
-class ModuleTools(Model, RoomTools, arbitrary_types_allowed=True):
+class ModulesTools(Model, RoomTools, arbitrary_types_allowed=True):
     """A launch's modules' tools, as its session is served them: each call passed to its repository's process."""
 
     modules: LaunchModules
@@ -810,8 +821,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         finally:
             del self.opening[request.launch]
         self.layout.record(request.launch).write_text(request.model_dump_json(indent=2))
-        if "launched" in offered.occasions:
-            launched = Happening(launch=request, occasion="launched")
+        if Launched.named() in offered.events:
+            launched = Happening(launch=request, event=Launched())
             self.background(self.happened(request, launched))
         self.say(
             f"{request.launch}: served as `{request.name}`, {request.runtime} in "
@@ -898,7 +909,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         given = None if theirs is None else shaped(theirs)
         if title is not None:
             self.names.titled(session, title)
-        last = self.names.last(session) if heard.event == "session-started" else None
+        starting = isinstance(heard.event, SessionStarted)
+        last = self.names.last(session) if starting else None
         wanted = [
             each
             for each in [given, last]
@@ -915,11 +927,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 f"runtime is given `{name}`"
             )
         gives = name if heard.takes_title and name and name != title else None
-        match heard.event:
-            case "session-started":
-                told = [named_here(name)]
-            case _:
-                told = [renamed_there(name)] if name == given != current.name else []
+        renamed = [renamed_there(name)] if name == given != current.name else []
+        told = [named_here(name)] if starting else renamed
         return Named(name=name, told=told, title=gives)
 
     async def offered(self, request: Register) -> Offered:
@@ -954,7 +963,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         return Offered(
             tools=[spec for spec in offered.tools if spec.name not in names],
             kinds=[kind for kind in offered.kinds if kind not in kinds],
-            occasions=offered.occasions,
+            events=offered.events,
         )
 
     def background(self, running: Coroutine[None, None, None]) -> None:
@@ -963,7 +972,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         self.pending = [*(each for each in self.pending if not each.done()), task]
 
     async def happened(self, request: Register, happening: Happening) -> None:
-        """Tell the launch's modules an occasion their hooks run at, and say what failed among them."""
+        """Tell the launch's modules an event their hooks run at, and say what failed among them."""
         if self.modules is None:
             return
         try:
@@ -971,7 +980,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         except HostError as failed:
             self.say(
                 f"{request.launch}: its modules' hooks didn't run at "
-                f"{happening.occasion}: {failed}"
+                f"{happening.event.named()}: {failed}"
             )
             return
         match reply:
@@ -981,7 +990,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             case _:
                 self.say(
                     f"{request.launch}: its modules replied {reply.kind} at "
-                    f"{happening.occasion}"
+                    f"{happening.event.named()}"
                 )
 
     async def hook(
@@ -1089,19 +1098,15 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         write_model(self.layout.conversations(request.launch), conversations)
         if conversation.internal:
             return Spoken(answer="")
-        if heard.event in self.served[request.launch].offered.occasions:
+        if heard.event.named() in self.served[request.launch].offered.events:
             happening = Happening(
-                launch=request,
-                occasion=heard.event,
-                conversation=conversation,
-                call=heard.call,
-                tool=heard.tool,
+                launch=request, event=heard.event, conversation=conversation
             )
             self.background(self.happened(request, happening))
         answer = await self.judgement(request, payload, writer) if heard.judged else ""
         own = heard.agent is None
-        starting = heard.event == "session-started" and own
-        prompted = heard.event == "turn-started" and own and heard.takes_title
+        starting = isinstance(heard.event, SessionStarted) and own
+        prompted = isinstance(heard.event, TurnStarted) and own and heard.takes_title
         named = (
             await self.named_at(request.launch, heard) if starting or prompted else None
         )
@@ -1122,7 +1127,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             - len(answer.encode())
             - sum(len(each.encode()) for each in naming)
         )
-        if self.post is not None and heard.event == "turn-ended" and own:
+        if self.post is not None and isinstance(heard.event, TurnEnded) and own:
             await self.post.concluded(request, conversation, heard)
         parent = conversations.spawner(conversation)
         posted = (
@@ -1249,7 +1254,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         modules = (
             []
             if self.modules is None
-            else [ModuleTools(modules=self.modules, offered=offered)]
+            else [ModulesTools(modules=self.modules, offered=offered)]
         )
         return [*self.tools, Naming(launches=self), *modules]
 
@@ -1267,8 +1272,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         served.ending.set()
         for server in served.servers:
             await closed(server)
-        if "stopped" in served.offered.occasions:
-            stopped = Happening(launch=served.launch, occasion="stopped")
+        if Stopped.named() in served.offered.events:
+            stopped = Happening(launch=served.launch, event=Stopped())
             await self.happened(served.launch, stopped)
         if self.modules is not None:
             await self.modules.close(served.launch)
@@ -1312,14 +1317,14 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             conversation = conversations.linked(conversation, spawned)
         if conversation.internal:
             return Noted(conversation=conversation)
-        calling = heard.event in ["call-started", "call-finished"]
+        calling = isinstance(heard.event, CallStarted | CallFinished)
         naming = (
             [unnamed(conversations.path(conversation, self.named(request)))]
             if first and conversation.name is None and calling
             else []
         )
         introducing: list[str] = []
-        ending = heard.event in ["turn-ended", "conversation-ended"]
+        ending = isinstance(heard.event, TurnEnded | ConversationEnded)
         if heard.agent is not None and not conversation.introduced and not ending:
             conversation = conversations.kept(
                 conversation.model_copy(update={"introduced": True})
@@ -1442,11 +1447,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         """Return what a hook says its conversation is doing, from the hook on: running the call it starts, between calls, or ended."""
         at = self.clock.now()
         match heard.event:
-            case "call-started":
-                return Activity(
-                    state="calling", since=at, tool=heard.tool, lups=heard.served
-                )
-            case "conversation-ended":
+            case CallStarted(tool=tool):
+                return Activity(state="calling", since=at, tool=tool, lups=heard.served)
+            case ConversationEnded():
                 return Activity(state="ended", since=at)
             case _:
                 return Activity(state="idle", since=at)
@@ -1554,7 +1557,7 @@ class Namer(Model, arbitrary_types_allowed=True):
 
     def tools(self) -> list[AgentTool]:
         """Return the naming tool, bound to this launch."""
-        return [lup_tool(self.rename)]
+        return [lup.tool(self.rename)]
 
 
 class Naming(Model, RoomTools, arbitrary_types_allowed=True):

@@ -108,7 +108,7 @@ Every collection a module holds is a selection (`Selection`, `declaration/gramma
 | `Credentials` | a `Layer`: the actions allowed, and the protected and gated refs (`docs/credentials.md`) | `Core` |
 | `Guidance` | `Section`s: a file from the root, or one a Python package ships | each of lup's modules but `GitHub` |
 | `Repositories` | `Repository`s | a person's layer |
-| `Toolsets`, `Handlers`, `Hooks` | classes, by name | `GitHub`, `Transcripts`, `Private` |
+| `Serving` | `ModuleServing` classes, by name | `GitHub`, `Transcripts`, `Private` |
 | `Details`, `Values` | what lup reads on the host never published, and the person's own values | `Private` |
 
 ## What a module is
@@ -121,10 +121,55 @@ A `Module` subclass (`declaration/module.py`):
 Defining the class checks it, each failure naming the module and the field: a module with no `name` or docstring; a field with no default, since a module added with nothing set stands on its own defaults; a plain `list` or `dict`, which a layer would replace whole, so it takes a selection; a default starting from `Kind.default()`, which would start from itself. At load, every module a selected one `requires` must be selected too, with no cycle: lup never adds or drops a module behind the project's back.
 
 **What a module serves a launch** (`declaration/serving.py`). It runs on the host, in the repository's process of its approved copy, which serves each of its launches, the launch travelling with each request (`docs/host.md`, *Each repository's judge and modules*):
-- **tools,** `ModuleTools` classes, each tool a method decorated with the library's `@lup_tool`, reading its module's settings through `self.module`;
-- **handlers,** `ModuleHandler`s, each answering one kind of the room's requests;
-- **hooks,** `ModuleHooks` classes, each method marked `@lup_hook` and run at a moment of lup's: `launched`, `stopped`, `publishing` (before anything leaves under the operator's name, the one moment a hook answers, with refusals), or the five each runtime's hooks are read as;
+- **its methods,** grouped in `ModuleServing` classes the module lists in its `serving` (`Serving.of(GitHubServing)`), each behind one of the library's doors (*The doors*, below), reading the module's own context through `self`: its settings (`self.module`, which the class narrows to its module's class), its data directory for the repository (`self.data`), the other repositories the declaration names (`self.related`), where each runtime keeps its records (`self.records`), and the publishing door (`self.publish`, below);
 - **data,** `Mounted`: the module's own data directory for the repository, mounted at its host path in every room (`always=True`), or only where a launch lends it by name (`--mount transcripts`), read-only unless the module says. A guidance section names where with `{{ data(…) }}` and asks whether with `{% if mounted(…) %}`.
+
+```python
+import lup
+from lup_dev import Agent, Lup, Module, ModuleServing, Room, Serving
+
+
+class EchoServing(ModuleServing):
+    """Echo's tool, its answer to a room's `ping`, and what it keeps at a launch's bounds."""
+
+    module: Echo
+
+    @lup.tool(reads=True)
+    async def shout(self, said: Said, by: Agent) -> str:
+        """Shout what you're told."""
+        return f"{said.text.upper()}, for {by.conversation.id}"
+
+    @lup.request
+    async def ping(self, asked: Ping, by: Room) -> Pong:
+        """Answer a room's `ping`."""
+        return Pong(text=f"{asked.text} to {by.launch.launch}")
+
+    @lup.on(lup.Launched)
+    @lup.on(lup.Stopped)
+    async def keep(self, event: lup.Launched | lup.Stopped, by: Lup) -> None:
+        """Note each launch's bounds in the module's own data."""
+
+
+class Echo(Module):
+    """Shouting what it's told."""
+
+    name = "echo"
+
+    serving: Serving = Serving.of(EchoServing)
+```
+
+**The doors** (`lup/doors.py`). A door exists only where the contract differs: who calls a method, what it takes, what it returns. Each is a decorator in the library's namespace, typed with its contract, so pyright holds the method behind it to what the door takes and returns:
+
+| Door | Who calls it | It takes | It returns | Who asks, by default |
+|---|---|---|---|---|
+| `@lup.tool` | an agent, through MCP | a model | a model, or `str` | `Agent` |
+| `@lup.request` | code in a room | a `Request`, whose `kind` routes it | a `Reply` | none: it says |
+| `@lup.on(Event)` | lup, at the event | the event | nothing, or `list[Refusal]` at `Publishing` | `Lup` |
+
+- **A method takes one model,** then, where it needs whoever asks it, `by`; its docstring describes it, to the agent for a tool, whose summary line is 50 characters at most. A tool's name is its method's; a request is routed by the `kind` of the model it takes, since code in a room sends that typed model whichever module answers it. One method is reached through one audience's doors: a hook through several events, stacked, the method taking a union of them.
+- **Who asks is the method's** (`Asker`): `Agent`, a conversation of the launch's session, with its launch and conversation; `Room`, code in one of the repository's rooms, untrusted, with its launch, as the host recorded it; `Lup`, lup itself running a hook, with the launch the event is of and, for a session's events, its conversation. `by`'s type narrows who may ask the method to those it names, and hands it its caller; left out, the method is for its door's default askers. Defining a class checks each method, the failure naming it: a `by` naming someone its door never brings (a tool for a `Room`), or a request leaving it out. Who actually asks is checked again before each call, so a room never reaches a method meant for another, and a room is offered only the kinds of request it may send.
+- **lup's events** (`lup/events.py`), one class each, are what a hook names: `Launched`; `Stopped`, once the launch's session has fully stopped; `Publishing`, before anything leaves under the operator's name; and a session's, which each runtime's hooks are read as, `SessionStarted`, `TurnStarted`, `CallStarted`, `CallFinished` (each with its `call` and `tool`), `TurnEnded` and `ConversationEnded`. An event carries its own facts; the launch and conversation come with `by: Lup`. Where an event crosses a wire, it's named in kebab case derived from its class (`call-started`), and nowhere else is it spelled as a string.
+- **`Publishing` is the one event a hook answers,** returning its refusals (`lup/publishing.py`), each naming what it found and where, never the value; one refusal keeps what would leave from leaving, and a hook failing there refuses too. A hook taking `Publishing` beside another event is refused as it's declared. A method that would publish puts it through every module's hooks first, `await self.publish(post, "this issue", by)`, which raises `UnpublishedError` listing the refusals.
 
 A tool's name and a request's kind are shared across modules, so the same one from two fails the load.
 

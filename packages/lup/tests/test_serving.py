@@ -18,8 +18,8 @@ from mcp.shared.message import SessionMessage
 from mcp.types import TextContent, ToolAnnotations, jsonrpc_message_adapter
 from pydantic import BaseModel, JsonValue
 
+import lup
 from lup.sessions.submission import Toolbox
-from lup.tools import lup_tool
 from lup.tools.serving import Answer, Notice, Outbox, Toolset, serve
 from lup.tools.tool import ToolSpec
 
@@ -190,7 +190,7 @@ class Weather(BaseModel):
     summary: str
 
 
-@lup_tool
+@lup.tool
 async def weather(query: Query) -> Weather:
     """Look up today's weather in a city."""
     return Weather(summary=f"sunny in {query.city}")

@@ -5,13 +5,14 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
+import lup
+from lup.doors import DoorError, bound, declared
 from lup.sessions.results import Friction, HowItWent
 from lup.sessions.submission import End, GiveUp, KeepGoing, Toolbox
-from lup.tools import Allow, Deny, Hook, Submit, Tool, lup_hook, lup_tool
-from lup.tools.hook import hooks
+from lup.tools import Allow, Deny, Submit, Tool
 from lup.tools.serving import Answer
 from lup.tools.speaking import SPEAKING, Heard, Problem, Stop, friction, how_it_went
-from lup.tools.tool import Accepted, Refused, ToolError, ToolSpec, bound, declared
+from lup.tools.tool import Accepted, Refused, ToolError, ToolSpec
 
 
 class Query(BaseModel):
@@ -25,7 +26,7 @@ class Weather(BaseModel):
 NOWHERE = Query(city="")
 
 
-@lup_tool
+@lup.tool
 async def weather(query: Query) -> Weather:
     """Look up today's weather in a city."""
     return Weather(summary=f"sunny in {query.city}")
@@ -40,7 +41,7 @@ def test_a_tool_is_named_and_described_by_its_function() -> None:
 
 
 def test_a_tool_s_summary_is_its_docstring_s_first_line_and_the_rest_stays() -> None:
-    @lup_tool
+    @lup.tool
     async def forecast(query: Query) -> Weather:
         """Forecast a city's weather for the week.
 
@@ -64,7 +65,7 @@ def test_a_summary_past_fifty_characters_is_refused_naming_the_tool() -> None:
     with pytest.raises(
         ToolError, match=r"`long_winded`'s summary.* 63 characters, past 50"
     ):
-        lup_tool(long_winded)
+        lup.tool(long_winded)
 
 
 def test_a_summary_running_onto_a_second_line_is_no_summary() -> None:
@@ -75,14 +76,14 @@ def test_a_summary_running_onto_a_second_line_is_no_summary() -> None:
         return Weather(summary="")
 
     with pytest.raises(ToolError, match="the tool `wrapped` has no summary"):
-        lup_tool(wrapped)
+        lup.tool(wrapped)
 
 
 async def heard(problem: Problem) -> Heard:
     return Heard(message="")
 
 
-def test_a_tool_made_without_lup_tool_is_checked_too() -> None:
+def test_a_tool_made_without_its_decorator_is_checked_too() -> None:
     with pytest.raises(ToolError, match="the tool `quiet` has no summary"):
         Tool[Problem, Heard](
             name="quiet", description="", input=Problem, function=heard
@@ -96,13 +97,13 @@ def test_a_tool_made_without_lup_tool_is_checked_too() -> None:
 
 
 def test_a_tool_s_marks_say_whether_a_call_may_be_sent_again() -> None:
-    @lup_tool(reads=True)
+    @lup.tool(reads=True)
     async def lookup(query: Query) -> Weather:
         """Look a city up."""
         return Weather(summary=query.city)
 
     class Waiter(BaseModel):
-        @lup_tool(idempotent=True)
+        @lup.tool(idempotent=True)
         async def wait(self, query: Query) -> str:
             """Wait for a city's weather."""
             return query.city
@@ -114,7 +115,7 @@ def test_a_tool_s_marks_say_whether_a_call_may_be_sent_again() -> None:
     assert waiting.spec() == waits
     # Unmarked, a tool acts; marked when made from a function, as when decorated.
     assert (weather.spec().reads, weather.spec().idempotent) == (False, False)
-    assert lup_tool(weather.function, idempotent=True).spec().idempotent
+    assert lup.tool(idempotent=True)(weather.function).spec().idempotent
     assert not any(tool.spec().reads or tool.spec().idempotent for tool in SPEAKING)
 
 
@@ -158,16 +159,18 @@ def test_a_function_without_one_model_isnt_a_tool() -> None:
         """Two inputs."""
         return Weather(summary="")
 
-    with pytest.raises(ToolError, match="takes 2 parameters"):
-        lup_tool(two)
+    with pytest.raises(
+        DoorError, match="`two` takes `a`, `b`: a method takes one model"
+    ):
+        lup.tool(two)
 
 
 def test_a_function_without_a_docstring_isnt_a_tool() -> None:
     async def bare(query: Query) -> Weather:
         return Weather(summary="")
 
-    with pytest.raises(ToolError, match="docstring"):
-        lup_tool(bare)
+    with pytest.raises(DoorError, match="docstring"):
+        lup.tool(bare)
 
 
 class Forecaster(BaseModel):
@@ -175,12 +178,12 @@ class Forecaster(BaseModel):
 
     region: str
 
-    @lup_tool
+    @lup.tool
     async def forecast(self, query: Query) -> Weather:
         """Forecast a city's weather in this region."""
         return Weather(summary=f"rain in {query.city}, {self.region}")
 
-    @lup_tool
+    @lup.tool
     async def say(self, query: Query) -> str:
         """Say a city's weather in words."""
         return f"{query.city}: dry"
@@ -192,14 +195,20 @@ def test_a_method_is_each_instance_s_tool_and_its_class_s_description() -> None:
         "Forecast a city's weather in this region."
     )
     north = Forecaster(region="north")
-    assert asyncio.run(north.forecast.call({"city": "Oslo"})) == Accepted(
+    [forecast, _] = bound(north)
+    assert asyncio.run(forecast.call({"city": "Oslo"})) == Accepted(
         value=Query(city="Oslo"), answer='{"summary":"rain in Oslo, north"}'
     )
     assert [tool.spec().name for tool in bound(north)] == ["forecast", "say"]
+    # Read through the instance, it's the instance's method, called as any.
+    assert asyncio.run(north.forecast(Query(city="Bergen"))) == Weather(
+        summary="rain in Bergen, north"
+    )
 
 
 def test_a_tool_returning_words_answers_in_them() -> None:
-    accepted = asyncio.run(Forecaster(region="x").say.call({"city": "Oslo"}))
+    [_, say] = bound(Forecaster(region="x"))
+    accepted = asyncio.run(say.call({"city": "Oslo"}))
     assert isinstance(accepted, Accepted)
     assert accepted.answer == "Oslo: dry"
 
@@ -209,8 +218,8 @@ def test_a_method_taking_two_models_isnt_a_tool() -> None:
         """Two inputs."""
         return Weather(summary="")
 
-    with pytest.raises(ToolError, match="takes 2 parameters besides `self`"):
-        lup_tool(two)
+    with pytest.raises(DoorError, match="`two` takes `a`, `b`"):
+        lup.tool(two)
 
 
 def test_a_typed_turn_ends_only_once_an_answer_is_accepted() -> None:
@@ -295,54 +304,3 @@ def test_a_call_to_an_unknown_tool_says_which_exist() -> None:
     assert answer == Answer(
         text="There's no tool named forecast; the tools are: weather.", error=True
     )
-
-
-class Happened(BaseModel):
-    """What's known of a moment."""
-
-    what: str
-
-
-class Watcher(BaseModel):
-    """A class of hooks, each run at its moments."""
-
-    seen: list[str] = []
-
-    @lup_hook
-    async def stopped(self, moment: Happened) -> None:
-        """Run when it stops."""
-        self.seen.append(f"stopped: {moment.what}")
-
-    @lup_hook(on=["launched", "stopped"])
-    async def both(self, moment: Happened) -> None:
-        """Run at both."""
-        self.seen.append(f"both: {moment.what}")
-
-
-def test_a_hook_runs_at_the_moment_its_name_names_or_those_on_names() -> None:
-    assert hooks(Watcher) == {"stopped": ["stopped"], "both": ["launched", "stopped"]}
-
-
-def test_a_hook_read_through_an_instance_is_its_function_of_the_moment() -> None:
-    watcher = Watcher()
-    asyncio.run(watcher.stopped(Happened(what="x")))
-    asyncio.run(watcher.both(Happened(what="y")))
-    assert watcher.seen == ["stopped: x", "both: y"]
-    assert isinstance(Watcher.both, Hook)
-
-
-def test_a_hook_takes_one_model_besides_self() -> None:
-    async def loose(self: Watcher, what: str) -> None:
-        """Takes a string."""
-
-    with pytest.raises(ToolError, match="must be a method taking one pydantic model"):
-        # lup: ignore("reportArgumentType", why="the wrong shape, on purpose, to see it refused")
-        lup_hook(loose)
-
-
-def test_a_hook_runs_at_some_moment() -> None:
-    async def nowhere(self: Watcher, moment: Happened) -> None:
-        """Runs at nothing."""
-
-    with pytest.raises(ToolError, match="runs at no moment"):
-        lup_hook(on=[])(nowhere)

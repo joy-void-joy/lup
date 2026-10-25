@@ -21,8 +21,8 @@
   where the branch's tip on the remote is in the history of a gated branch's
   tip there, both fetched into the store, and is pushed with a lease on the tip
   checked (`Remotes.merged`);
-- what each update would publish is put to the launch's modules' hooks at the
-  `publishing` moment before git runs (`lup_dev.host.publishing`), with what the
+- what each update would publish is put to the launch's modules' hooks at
+  `Publishing` before git runs (`lup.publishing`), with what the
   remote holds already: the listing git asked for before the push
   (`list for-push`), or a fresh one. An update a hook refuses isn't pushed, its
   error pointing at the refusals, which the reply says whole (`Pushed.said`)
@@ -58,10 +58,10 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 from pydantic import AfterValidator
 
 from lup.programs import Ran
+from lup.publishing import Place, Push, Refusal, Updating, told
 from lup.types import Model, MutableModel
 from lup_dev.git import pinning
 from lup_dev.host.protocol import Action, HostError, Limits, Register, Reply, Request
-from lup_dev.host.publishing import Place, Push, Refusal, Updating, told
 from lup_dev.host.rooms import RoomHandler, RoomRoute
 from lup_dev.host.service import Program, executed
 from lup_dev.host.workers import LaunchModules, refusals
@@ -214,7 +214,7 @@ class Updated(Model):
 
 
 class Pushed(Reply):
-    """How each update of a push ended, in the order asked, and what the room is told beside: the refusals at `publishing`, whole."""
+    """How each update of a push ended, in the order asked, and what the room is told beside: the refusals at `Publishing`, whole."""
 
     kind: Literal["remote-pushed"] = "remote-pushed"
     updates: list[Updated]
@@ -224,7 +224,7 @@ class Pushed(Reply):
 
 
 class Barred(Model):
-    """The updates refused at `publishing`, each by its destination with its one line, and what the room is told of them whole."""
+    """The updates refused at `Publishing`, each by its destination with its one line, and what the room is told of them whole."""
 
     refused: dict[str, str] = {}
     said: str = ""
@@ -240,7 +240,7 @@ class Merging(Model):
 BARRED = (
     "refused by lup: it would publish what isn't published, at the places listed above"
 )
-"""An update's one line where a hook at `publishing` refused it: git shows one
+"""An update's one line where a hook at `Publishing` refused it: git shows one
 line for each ref, so the places are said before them (`Pushed.said`)."""
 
 REWRITE = (
@@ -427,7 +427,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
     host zone at its tip in the operator's inbox (`cli.py`). None tells
     nothing."""
     modules: LaunchModules | None = None
-    """Each launch's modules, whose hooks at `publishing` see what a push would
+    """Each launch's modules, whose hooks at `Publishing` see what a push would
     publish before git runs; none asks nothing, for a service serving no
     modules."""
     listings: Listings = Listings()
@@ -818,7 +818,7 @@ class PushHandler(Model, RoomHandler[Pushing]):
     async def barred(
         self, request: Pushing, launch: Register, allowed: list[Update]
     ) -> Barred:
-        """Put what each update `allowed` would publish to the launch's modules' hooks at `publishing`, and return those they refuse, with their refusals said whole.
+        """Put what each update `allowed` would publish to the launch's modules' hooks at `Publishing`, and return those they refuse, with their refusals said whole.
 
         A deletion publishes nothing, so it isn't asked about. Where the modules
         can't be asked, the update is refused, since what wasn't checked

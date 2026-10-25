@@ -35,7 +35,8 @@ from mcp.types import (
 from pydantic import Field, TypeAdapter
 from typer.testing import CliRunner
 
-from lup.github.tools import GitHubTools
+from lup import events
+from lup.github.serving import GitHubServing
 from lup.programs import Ran, run
 from lup.rooms import Podman
 from lup.tools.speaking import SPEAKING
@@ -45,6 +46,7 @@ from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscr
 from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.runner import Uv
+from lup_dev.declaration.serving import tools as module_tools
 from lup_dev.gate import Passed, Passes, Processes, Standing
 from lup_dev.gate import Ran as GateRan
 from lup_dev.host.client import HostClient, RoomClient, Starter
@@ -3707,7 +3709,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "Edit what you sent the operator.",
     ]
     assert "inbox as a problem" in served[0].description
-    github = GitHubTools.specs()
+    github = module_tools(GitHubServing)
     judging = JudgeTools.model_construct().specs()
     assert [(spec.name, spec.summary) for spec in judging] == [
         ("judged", "Read the judge's verdicts and holds.")
@@ -3766,7 +3768,12 @@ def test_what_doesnt_fit_waits_for_the_next_hook_and_what_a_gone_hook_told_is_pu
     launch = registration(tmp_path)
     caller = Caller(id="c1", session="s1")
     main = Conversation(repository=tmp_path / ".git", runtime="claude", session="s1")
-    heard = Heard(event="call-started", session="s1", judged=False, fits=10_000)
+    heard = Heard(
+        event=events.CallStarted(call="u1", tool="Bash"),
+        session="s1",
+        judged=False,
+        fits=10_000,
+    )
 
     async def told(room: int) -> Posted:
         return await delivery.telling(launch, caller, None, heard, room)
@@ -5109,7 +5116,9 @@ def test_a_flagged_write_is_an_item_gathering_its_file_a_comment_reaching_its_ag
         ).apply(bench)
         current = rooms.read_text() if rooms.is_file() else None
         rooms.write_text(proposal.content(current) or "")
-        CallFinished(session="s1", cwd=repo, call=proposal.call).apply(bench)
+        CallFinished(
+            session="s1", cwd=repo, call=proposal.call, tool=proposal.tool
+        ).apply(bench)
         return decision.told
 
     sender = Conversation(repository=repo / ".git", runtime="claude", session="s1")
@@ -5224,7 +5233,9 @@ def test_an_edit_flagging_nothing_refreshes_the_open_item_and_makes_none_once_it
         ).apply(bench)
         current = rooms.read_text() if rooms.is_file() else None
         rooms.write_text(proposal.content(current) or "")
-        CallFinished(session="s1", cwd=repo, call=proposal.call).apply(bench)
+        CallFinished(
+            session="s1", cwd=repo, call=proposal.call, tool=proposal.tool
+        ).apply(bench)
 
     def plain(call: str, line: str) -> Replacement:
         kept = rooms.read_text()
@@ -8039,7 +8050,9 @@ def test_lup_s_tools_say_which_may_be_sent_again_across_a_restart(
         "wait_inbox",
         "land",
     }
-    github = {spec.name: (spec.reads, spec.idempotent) for spec in GitHubTools.specs()}
+    github = {
+        spec.name: (spec.reads, spec.idempotent) for spec in module_tools(GitHubServing)
+    }
     assert {name for name, (reads, _) in github.items() if reads} == {
         "read_issue",
         "find_issues",

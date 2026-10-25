@@ -15,7 +15,7 @@ for good, since no runtime starts a stdio server again.
   back, where sending it again is safe (`repeatable`): a `tools/call` to a tool
   the server's own tool list marks as one that only reads (`readOnlyHint`) or
   that a call sent again adds nothing to (`idempotentHint`), as lup's
-  `@lup_tool` marks a read, and a call that finds its wait again; and any
+  `@lup.tool` marks a read, and a call that finds its wait again; and any
   other request, which reads. The bridge reads the marks off each `tools/list`
   answer going by (`listed`), so nothing here names a tool. A call to a tool
   marked neither acts, so it's answered with an error saying so: its answer is

@@ -1,12 +1,12 @@
-"""What leaves under the operator's name, as lup's `publishing` moment tells a module's hooks, and what a hook answers.
+"""What leaves under the operator's name, as lup's `Publishing` event tells a module's hooks, and what a hook answers.
 
-lup fires the moment before anything leaves under the operator's name: a push
-through git's remote helper (`lup_dev.remote.protocol`, `PushHandler`) and a
-post through lup's GitHub tools that write (`lup.github.tools`). Every module's
-hooks at it may refuse (`lup_dev.declaration.serving`), each refusal naming what
-it found and where, never what it found itself: one refusal keeps the push or
-the post from leaving. A hook that fails there refuses too, since a check that
-didn't run let nothing through.
+lup's `Publishing` event (`lup.events`) comes before anything leaves under the
+operator's name: a push through git's remote helper (`lup_dev.remote.protocol`,
+`PushHandler`) and a post through lup's GitHub tools that write
+(`lup.github.serving`). Every module's hooks at it may refuse, each refusal
+naming what it found and where, never what it found itself: one refusal keeps
+the push or the post from leaving. A hook that fails there refuses too, since a
+check that didn't run let nothing through.
 """
 
 from typing import Annotated, Literal
@@ -56,7 +56,7 @@ class Post(Model):
 
 
 type Published = Annotated[Push | Post, Field(discriminator="kind")]
-"""What the `publishing` moment is about: a push, or a post."""
+"""What `Publishing` is about: a push, or a post."""
 
 
 class Place(Model):
@@ -118,12 +118,12 @@ def told(refusals: list[Refusal], publishing: str) -> str:
 
     >>> at = Place(within="the title", line=1, column=7)
     >>> print(told([Refusal(what="the host's name", place=at, steer="leave it out")], "this issue"))
-    lup refused to publish this issue: a module's check at the `publishing` moment found what isn't published, at each place below.
+    lup refused to publish this issue: a module's check at `Publishing` found what isn't published, at each place below.
       the title:1:7 - the host's name
           steer: leave it out
     """
     header = (
-        f"lup refused to publish {publishing}: a module's check at the "
-        "`publishing` moment found what isn't published, at each place below."
+        f"lup refused to publish {publishing}: a module's check at `Publishing` "
+        "found what isn't published, at each place below."
     )
     return "\n".join([header, *(line for each in refusals for line in each.lines())])
