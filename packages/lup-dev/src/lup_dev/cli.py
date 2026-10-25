@@ -39,6 +39,7 @@ from lup_dev import commanding
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import Adapter, claude, codex
+from lup.doors import served as methods
 from lup_dev.approval import approved
 from lup_dev.clipboard.desktop import Desktop
 from lup_dev.clipboard.protocol import routes as clipboard_routes
@@ -2608,19 +2609,67 @@ def module_ran(words: list[str]) -> None:
     commanding.run(words, modules.resolved.served, modules.made, Operator)
 
 
+def module_commands_said() -> str:
+    """Say which of the repository's modules have commands, for `lup-dev --help`: from the worktree's declaration in a room, from the one the operator approved on the host, whose code alone the host runs; why not, where it can't be read."""
+    try:
+        git = Git(cwd=Path.cwd())
+        root = Path(git.text("rev-parse", "--show-toplevel"))
+        if RoomClient().socket.exists():
+            served = resolve(load(root).project).served
+        else:
+            repository = Path(
+                git.text("rev-parse", "--path-format=absolute", "--git-common-dir")
+            )
+            approval = approved(Layout.of(LupDevSettings()), repository)
+            if approval is None:
+                return "Nothing is approved for this repository, so its modules' commands don't run here."
+            with approved_declaration(
+                root, approval.commit, local=approval.local
+            ) as declared:
+                served = declared.resolved.served
+    except (LupDevError, LupError) as unread:
+        return f"This repository's modules' commands couldn't be listed: {unread}"
+    named = list(
+        dict.fromkeys(
+            owner.module.name
+            for owner in served
+            for method in methods(owner.serving).values()
+            if method.commanded() or method.viewing() is not None
+        )
+    )
+    if not named:
+        return ""
+    listed = ", ".join(f"`lup-dev {name}`" for name in named)
+    return f"This repository's modules' commands come under their names: {listed}."
+
+
+def helped() -> None:
+    """Show `lup-dev`'s help, then which of the repository's modules have commands."""
+    try:
+        app()
+    finally:
+        said = module_commands_said()
+        if said:
+            typer.echo(said)
+
+
 def main() -> None:
     """Run the command line, reporting lup's own errors without a traceback.
 
     The library's own (`LupError`) among them: a launch's room, and its runtime's
     declaration, are the library's. A first word that isn't one of `lup-dev`'s
-    own commands names a module, whose commands it runs (`module_ran`).
+    own commands names a module, whose commands it runs (`module_ran`); its
+    help names the modules that have commands (`module_commands_said`).
     """
     try:
         words = sys.argv[1:]
         if module_command(words):
             module_ran(words)
-        else:
-            app()
+            return
+        if words in ([], ["--help"]):
+            helped()
+            return
+        app()
     except (LupDevError, LupError) as failure:
         typer.echo(f"lup-dev: {failure}", err=True)
         raise SystemExit(1) from failure
