@@ -22,8 +22,10 @@ class RoomBase(Model):
     packages exactly as old as the base's own and upgrades none of the base's:
     the Arch Linux Archive's 2026-08-15 snapshot matched the image of 2026-08-16
     (`docs/field-notes.md`, *Rooms*), and a full upgrade against it found nothing
-    to upgrade. Every package is at least as old as the pin, the minimum package
-    age `DESIGN.md` asks for (*Policy*). Moving the pin is a release's decision,
+    to upgrade. Every package is at least as old as the pin, which does for the
+    image what the package age does for what a room installs itself
+    (`PackageAge`; `docs/launch.md`, *The package age gate*). Moving the pin is a
+    release's decision,
     checked when it's chosen, since some days are missing from the archive
     (2026-08-16's `core.db` answers 404).
     """
