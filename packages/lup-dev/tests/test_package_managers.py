@@ -10,6 +10,7 @@ from lup_dev import Uv
 from lup_dev.declaration.package_managers import PACKAGE_MANAGERS
 from lup_dev.declaration.package_managers.manager import HomeSettings, Ungated
 from lup_dev.declaration.package_managers.npm import NpmManager
+from lup_dev.declaration.package_managers.pnpm import PnpmManager
 from lup_dev.declaration.package_managers.uv import UvManager
 
 THREE_DAYS = timedelta(days=3)
@@ -21,7 +22,7 @@ def settings(answer: HomeSettings | Ungated) -> HomeSettings:
 
 
 def test_lup_knows_npm_and_uv_by_the_packages_bringing_them() -> None:
-    assert [each.package for each in PACKAGE_MANAGERS] == ["npm", "uv"]
+    assert [each.package for each in PACKAGE_MANAGERS] == ["npm", "pnpm", "uv"]
     assert [each.package for each in Uv.requirements] == [UvManager.package]
 
 
@@ -38,6 +39,22 @@ def test_npm_keeps_the_age_in_days_in_its_npmrc_whatever_the_project(
 ) -> None:
     written = settings(NpmManager().aged(tmp_path, age))
     assert written.path == Path(".npmrc")
+    assert written.text.splitlines()[1:] == [line]
+
+
+@pytest.mark.parametrize(
+    ("age", "line"),
+    [
+        pytest.param(THREE_DAYS, "minimumReleaseAge: 4320", id="days"),
+        pytest.param(timedelta(seconds=90), "minimumReleaseAge: 2", id="rounded-up"),
+        pytest.param(timedelta(0), "minimumReleaseAge: 0", id="none"),
+    ],
+)
+def test_pnpm_keeps_the_age_in_minutes_in_its_config_whatever_the_project(
+    tmp_path: Path, age: timedelta, line: str
+) -> None:
+    written = settings(PnpmManager().aged(tmp_path, age))
+    assert written.path == Path(".config/pnpm/config.yaml")
     assert written.text.splitlines()[1:] == [line]
 
 
