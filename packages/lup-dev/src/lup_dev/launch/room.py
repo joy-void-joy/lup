@@ -496,7 +496,7 @@ def maintaining_room(
 
     hooks = held.git / "hooks"
     hooks.mkdir(exist_ok=True)
-    pyright = layout.pyright_source
+    pyright = layout.pyright_source.home
     pyright.mkdir(parents=True, exist_ok=True)
     mounts = [
         Mount(source=held.tree),

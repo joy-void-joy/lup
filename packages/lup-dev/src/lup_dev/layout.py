@@ -14,14 +14,15 @@ The homes:
   under lup's state;
 - lup's data, under `$XDG_DATA_HOME/lup/`: each repository's approved copies of
   `lup-dev`, which trust on launch installs and its process runs; and each
-  repository's rooms' own directory, their package cache and each launch's
-  environments, which its rooms mount read-write (`RoomsLayout`);
+  repository's rooms' own directory, their package cache, each launch's
+  environments and pyright's source at a release a room's image doesn't carry,
+  which its rooms mount read-write (`RoomsLayout`);
 - lup's cache, what can be fetched again, under `$XDG_CACHE_HOME/lup/`: pyright's
-  source, kept for building the engine, the one part of the cache a room mounts;
-  and each runtime's CLIs, as its release channel publishes them, under `clis/`
+  source, kept for building the engine on the host, which no room mounts; and
+  each runtime's CLIs, as its release channel publishes them, under `clis/`
   (`docs/launch.md`, *The CLIs*);
-- inside every room, where its launch's sockets and what's lent are mounted
-  (`RoomPaths`);
+- inside every room, where its launch's sockets and what's lent are mounted, and
+  where its image keeps pyright's source (`RoomPaths`);
 - the record of each room image built, in lup's state;
 - lup's inbox, its items and parties one file each, in lup's state;
 - inside a worktree, `.lup/saved/`, where a refused version waits for the agent;
@@ -75,6 +76,8 @@ class RoomPaths(Model):
     """Where a room mounts its launch's socket directory, so its hook finds the host service."""
     lent: Path = Path("/lent")
     """Where a room finds each directory the operator lends it while it runs (`lup-dev mount`), one per name."""
+    pyright: Path = Path("/opt/lup/pyright")
+    """Where a room's image keeps pyright's source, a directory per release, which the engine's build in the room reads (`lup_dev/pyright_source.py`)."""
     path: list[Path] = [
         Path("/usr/local/sbin"),
         Path("/usr/local/bin"),
@@ -105,6 +108,65 @@ class Bundle(Model):
     def stubs(self) -> Path:
         """The standard library's stubs at pyright's pinned release, which it reads."""
         return self.directory / "typeshed-fallback"
+
+
+class PyrightDownloads(Model):
+    """What a fetch of pyright's source downloads, beside the release and removed once it's installed, so a place keeps the source alone.
+
+    pnpm keeps its store, its cache and its state where XDG's variables name,
+    the pnpm release it switches to among them. On the source's own file system,
+    so pnpm links its files from the store rather than copying them, and they
+    outlive the store's removal. In the image's build, which has no home for
+    pnpm, it's pnpm's home too, holding the settings a room's has.
+    """
+
+    home: Path
+
+    @property
+    def data(self) -> Path:
+        """`XDG_DATA_HOME` for pnpm: its store, which the source's `node_modules` link from."""
+        return self.home / "data"
+
+    @property
+    def cache(self) -> Path:
+        """`XDG_CACHE_HOME` for pnpm: the registry's metadata."""
+        return self.home / "cache"
+
+    @property
+    def state(self) -> Path:
+        """`XDG_STATE_HOME` for pnpm."""
+        return self.home / "state"
+
+
+class PyrightLayout(Model):
+    """One place keeping pyright's source for the engine's build, a directory per release: the host's cache, a room's image, or the project's rooms' own directory (`lup_dev/pyright_source.py`).
+
+    A release's directory is whole once it holds its mark: a fetch clones beside
+    it and moves the clone in, installs its dependencies, and marks it last.
+    """
+
+    home: Path
+
+    def release(self, release: str) -> Path:
+        """Say where release `release` is kept."""
+        return self.home / release
+
+    def installed(self, release: str) -> Path:
+        """Say where a release is marked whole, its dependencies installed: a file holding the release, written last."""
+        return self.release(release) / ".lup-installed"
+
+    def partial(self, release: str) -> Path:
+        """Where a fetch clones release `release` before moving it into place."""
+        return self.home / f"{release}.partial"
+
+    def downloads(self, release: str) -> PyrightDownloads:
+        """Say where a fetch of release `release` keeps what its package managers download, beside it."""
+        return PyrightDownloads(home=self.home / f"{release}.downloads")
+
+    @property
+    def lock(self) -> Path:
+        """The lock a fetch holds, so two builds fetching at once don't clone over each other."""
+        return self.home / ".lup-fetching.lock"
 
 
 class StoreLayout(Model):
@@ -277,7 +339,7 @@ class CheckoutLayout(Model):
 
     @property
     def lock(self) -> Path:
-        """The project's `uv.lock`, which pins the `lup-dev` the host runs for it."""
+        """The project's `uv.lock`, which pins the `lup-dev` the host runs for it, and in lup the pyright whose source the engine is built from."""
         return self.root / "uv.lock"
 
     def saved_copy(self, number: int, path: Path) -> Path:
@@ -674,6 +736,11 @@ class RoomsLayout(Model):
         """Say where launch `launch`'s environments are, one per worktree, each placed by `lup_dev.environments.environment`; removed when it ends."""
         return self.environments / launch
 
+    @property
+    def pyright(self) -> PyrightLayout:
+        """Where the engine's build in a room fetches pyright's source at a release the room's image doesn't carry, once for the project's rooms; never read on the host."""
+        return PyrightLayout(home=self.home / "pyright")
+
 
 class CliCacheLayout(Model):
     """Where one runtime's CLIs are cached, a directory per version (`docs/launch.md`, *The CLIs*).
@@ -733,14 +800,14 @@ class Layout(Model):
         )
 
     @property
-    def pyright_source(self) -> Path:
-        """The source of pyright, which the engine's build fetches and builds from.
+    def pyright_source(self) -> PyrightLayout:
+        """The host's own copies of pyright's source, which the engine's builds there fetch and build from: trust on launch's, and the operator's own.
 
-        `packages/lup-dev/checker/build.py` keeps it here, and a room mounts it
-        read-write for the gate, rather than the whole cache, whose other parts
-        (the CLIs a room runs) a room mustn't rewrite.
+        The host's alone: no room mounts it, since what a room wrote there would
+        be bundled into the host's engine at the next approval. A room reads its
+        image's, and its project's rooms' (`RoomsLayout.pyright`).
         """
-        return self.cache / "pyright"
+        return PyrightLayout(home=self.cache / "pyright")
 
     @property
     def builds(self) -> Path:
