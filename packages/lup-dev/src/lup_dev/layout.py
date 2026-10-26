@@ -20,6 +20,8 @@ The homes:
   source, kept for building the engine, the one part of the cache a room mounts;
   and each runtime's CLIs, as its release channel publishes them, under `clis/`
   (`docs/launch.md`, *The CLIs*);
+- inside every room, where its launch's sockets and what's lent are mounted
+  (`RoomPaths`);
 - the record of each room image built, in lup's state;
 - lup's inbox, its items and parties one file each, in lup's state;
 - inside a worktree, `.lup/saved/`, where a refused version waits for the agent;
@@ -45,23 +47,6 @@ if TYPE_CHECKING:
 LOCALTIME = Path("/etc/localtime")
 """The host's time zone, which a room mounts read-only so its clock reads as the operator's."""
 
-ROOM_SOCKETS = Path("/run/lup")
-"""Where a room mounts its launch's socket directory, so its hook finds the host service."""
-
-ROOM_LENT = Path("/lent")
-"""Where a room finds each directory the operator lends it while it runs (`lup-dev mount`), one per name."""
-
-ROOM_PATH = [
-    Path("/usr/local/sbin"),
-    Path("/usr/local/bin"),
-    Path("/usr/sbin"),
-    Path("/usr/bin"),
-    Path("/sbin"),
-    Path("/bin"),
-]
-"""The room's own `PATH`, which a launch puts lup's commands before: the one
-Arch Linux's image sets, and podman's default for an image setting none."""
-
 
 def digest(path: Path) -> str:
     """Name a directory by its absolute path, as a stable file name.
@@ -81,6 +66,25 @@ def short_digest(path: Path) -> str:
     32
     """
     return hashlib.blake2b(str(path).encode(), digest_size=16).hexdigest()
+
+
+class RoomPaths(Model):
+    """The paths lup places inside every room, as the room sees them, wherever the host keeps what's there."""
+
+    sockets: Path = Path("/run/lup")
+    """Where a room mounts its launch's socket directory, so its hook finds the host service."""
+    lent: Path = Path("/lent")
+    """Where a room finds each directory the operator lends it while it runs (`lup-dev mount`), one per name."""
+    path: list[Path] = [
+        Path("/usr/local/sbin"),
+        Path("/usr/local/bin"),
+        Path("/usr/sbin"),
+        Path("/usr/bin"),
+        Path("/sbin"),
+        Path("/bin"),
+    ]
+    """The room's own `PATH`, which a launch puts lup's commands before: the one
+    Arch Linux's image sets, and podman's default for an image setting none."""
 
 
 class Bundle(Model):
@@ -636,7 +640,7 @@ class LaunchLayout(Model):
 
     @property
     def lent(self) -> Path:
-        """Where what the operator lends the room while it runs is mounted, each directory by its name: a shared mount in podman's namespace, which the room mounts at `ROOM_LENT` and receives mounts through; removed when the launch ends."""
+        """Where what the operator lends the room while it runs is mounted, each directory by its name: a shared mount in podman's namespace, which the room mounts at `RoomPaths.lent` and receives mounts through; removed when the launch ends."""
         return self.directory.with_name(f"{self.directory.name}.lent")
 
     @property

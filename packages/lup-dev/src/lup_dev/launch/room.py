@@ -117,11 +117,9 @@ from lup_dev.launch.hidden import Hidden, removed
 from lup_dev.launch.images import definition
 from lup_dev.layout import (
     LOCALTIME,
-    ROOM_LENT,
-    ROOM_PATH,
-    ROOM_SOCKETS,
     LaunchLayout,
     LaunchSockets,
+    RoomPaths,
     RoomsLayout,
 )
 from lup_dev.remote import helper
@@ -741,7 +739,9 @@ class RoomGit(Model):
         """The room's variables for git: the configuration in place of the operator's, and the helper's directory first on the `PATH`."""
         return {
             "GIT_CONFIG_GLOBAL": str(self.launch.gitconfig),
-            "PATH": ":".join(str(each) for each in [self.launch.bin, *ROOM_PATH]),
+            "PATH": ":".join(
+                str(each) for each in [self.launch.bin, *RoomPaths().path]
+            ),
         }
 
     def write(self) -> None:
@@ -749,7 +749,7 @@ class RoomGit(Model):
         room_config(
             self.repository,
             self.launch.gitconfig,
-            LaunchSockets(directory=ROOM_SOCKETS).request,
+            LaunchSockets(directory=RoomPaths().sockets).request,
             self.gating,
         )
         self.launch.bin.mkdir(parents=True, exist_ok=True)
@@ -848,7 +848,7 @@ def receiving(podman: Podman, launch: LaunchLayout) -> Mount:
         each.mkdir(parents=True, exist_ok=True)
     podman.shared(launch.lent)
     podman.private(launch.stage)
-    return Mount(source=launch.lent, target=ROOM_LENT, receives=True)
+    return Mount(source=launch.lent, target=RoomPaths().lent, receives=True)
 
 
 def lend(
@@ -859,7 +859,7 @@ def lend(
     read_only: bool,
     name: str | None = None,
 ) -> Path:
-    """Lend the host's directory `source` to a launch's running room, and return where the room finds it: under `ROOM_LENT`, by `name`, the directory's own by default, numbered where that's taken.
+    """Lend the host's directory `source` to a launch's running room, and return where the room finds it: under `RoomPaths.lent`, by `name`, the directory's own by default, numbered where that's taken.
 
     Raise `RoomError` where the launch's room can't receive it, started before
     rooms could.
@@ -878,7 +878,7 @@ def lend(
     at = launch.lent / free
     at.mkdir()
     podman.lend(source, at, launch.stage, read_only=read_only)
-    return ROOM_LENT / free
+    return RoomPaths().lent / free
 
 
 def unlent(podman: Podman, launch: LaunchLayout) -> None:

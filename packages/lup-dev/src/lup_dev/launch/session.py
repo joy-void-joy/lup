@@ -80,7 +80,7 @@ from lup_dev.git import Git
 from lup_dev.host.rooms import SERVER
 from lup_dev.launch.guidance import render
 from lup_dev.launch.room import repository
-from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, LaunchSockets
+from lup_dev.layout import CheckoutLayout, LaunchSockets, RoomPaths
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -209,7 +209,7 @@ def piped(
     names, and at a call's start, any the answer names first, in the room, so
     its checkout runs the room's own git, never the host's (`printing`).
     """
-    socket = LaunchSockets(directory=ROOM_SOCKETS).hook
+    socket = LaunchSockets(directory=RoomPaths().sockets).hook
     seconds = str(int(timeout.total_seconds()))
     bridge = Bridge(socket, io.StringIO())
     tries = round(bridge.patience / bridge.retry)
@@ -269,7 +269,7 @@ def served(hold: timedelta = timedelta(hours=25)) -> list[ToolServer]:
     the hook does: `hold`, above a hold's day. It pushes what waits for an idle
     session, starting its turn, where the runtime takes a push.
     """
-    socket = LaunchSockets(directory=ROOM_SOCKETS).mcp
+    socket = LaunchSockets(directory=RoomPaths().sockets).mcp
     return [ToolServer(name=SERVER, socket=socket, timeout=hold, pushes=True)]
 
 
@@ -349,7 +349,7 @@ def terminal_settings(
         cli=cli,
         hooks=hooks,
         servers=served(),
-        messages=LaunchSockets(directory=ROOM_SOCKETS).messages,
+        messages=LaunchSockets(directory=RoomPaths().sockets).messages,
         guidance=render(
             resolved,
             approved.root,
