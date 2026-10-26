@@ -2,10 +2,13 @@
 
 1. Read the pyright release the gate pins, from `uv.lock`, so the engine and the gate
    answer alike.
-2. Fetch pyright's source at that release into lup's cache, once, where `lup_dev`'s
-   layout says (`Layout.pyright_source`: `$XDG_CACHE_HOME/lup/pyright/`), which a
-   room mounts; and install its dependencies with the pnpm release pyright's own
-   manifest names.
+2. Find pyright's source at that release, with its dependencies installed, where
+   this build reads it (`lup_dev/pyright_source.py`): on the host, lup's cache
+   (`Layout.pyright_source`: `$XDG_CACHE_HOME/lup/pyright/`), which no room mounts;
+   in a room, its image's copy, read-only, else its project's rooms' own
+   directory. Where none holds it, fetch it there, once: clone the release and
+   install its dependencies with pnpm, from its lockfile, held to the package age
+   pnpm's own settings keep.
 3. Link that source beside the engine as `pyright`, and install the engine's bundler.
 4. Type-check the engine and the rule table (`lup_dev/catalog/rules.ts`).
 5. Bundle them into `lup_dev/codescan/bundle/engine.js`, with the standard-library
@@ -17,37 +20,17 @@ installed from a checkout that built it.
 
 import logging
 import shutil
-import tomllib
 from pathlib import Path
 
-from pydantic import Field
+from filelock import FileLock
 
 from lup.programs import ProgramFailedError, run
 from lup.types import Model
-from lup_dev.layout import Bundle, Layout
+from lup_dev.layout import Bundle, CheckoutLayout, Layout
+from lup_dev.pyright_source import Fetching, PyrightSourceError, Sources, pinned
 from lup_dev.settings import LupDevSettings
 
 log = logging.getLogger("build")
-
-
-class Locked(Model):
-    """One package `uv.lock` pins."""
-
-    name: str
-    version: str | None = None
-
-
-class Lock(Model):
-    """The part of `uv.lock` the build reads."""
-
-    package: list[Locked]
-
-
-class Manifest(Model):
-    """The part of pyright's `package.json` the build reads."""
-
-    package_manager: str = Field(alias="packageManager")
-    """The pnpm release pyright installs with, as `pnpm@<version>`."""
 
 
 class Places(Model):
@@ -55,8 +38,6 @@ class Places(Model):
 
     checker: Path = Path(__file__).resolve().parent
     bundle: Bundle = Bundle()
-    repository: str = "https://github.com/microsoft/pyright"
-    """Where pyright's source is fetched from."""
 
     @property
     def root(self) -> Path:
@@ -74,59 +55,45 @@ class Places(Model):
         return self.checker / "node_modules" / ".bin"
 
     @property
-    def cache(self) -> Path:
-        """Where pyright's sources are kept, one directory per release: `lup_dev`'s layout's."""
-        return Layout.of(LupDevSettings()).pyright_source
+    def lock(self) -> Path:
+        """The `uv.lock` pinning pyright's release."""
+        return CheckoutLayout(root=self.root).lock
 
 
-def pinned(places: Places) -> str:
-    """Return the pyright release `uv.lock` pins, which the gate runs."""
-    lock = Lock.model_validate(tomllib.loads((places.root / "uv.lock").read_text()))
-    releases = [p.version for p in lock.package if p.name == "pyright" and p.version]
-    if len(releases) != 1:
-        message = f"`uv.lock` pins pyright {len(releases)} times, not once"
-        raise SystemExit(message)
-    return releases[0]
+def fetch(sources: Sources, release: str) -> Path:
+    """Fetch pyright's source at `release`, with its dependencies, where `sources` fetch, unless it's there whole.
 
-
-def fetch(release: str, cache: Path, repository: str) -> Path:
-    """Fetch pyright's source at `release`, with its dependencies, unless kept."""
-    source = cache / release
-    installed = source / ".lup-installed"
-    if installed.is_file():
-        return source
-    if not source.is_dir():
-        log.info("fetching pyright %s", release)
-        cache.mkdir(parents=True, exist_ok=True)
-        partial = cache / f"{release}.partial"
-        shutil.rmtree(partial, ignore_errors=True)
-        run(
-            "git",
-            "clone",
-            "--quiet",
-            "--depth",
-            "1",
-            "--branch",
-            release,
-            repository,
-            str(partial),
-        )
-        partial.rename(source)
-    manifest = Manifest.model_validate_json((source / "package.json").read_text())
-    log.info("installing pyright's dependencies with %s", manifest.package_manager)
-    run(
-        "npm",
-        "exec",
-        "--yes",
-        manifest.package_manager,
-        "--",
-        "install",
-        "--frozen-lockfile",
-        "--filter",
-        "pyright-internal",
-        cwd=source,
-    )
-    installed.write_text(release + "\n")
+    The fetch holds the place's lock, so two builds fetching at once, a room's
+    two worktrees or two rooms of the project, don't clone over each other: the
+    second finds the first's. pnpm is an optional requirement, needed only here,
+    so its absence is said here.
+    """
+    place = sources.fetched
+    source = place.release(release)
+    place.home.mkdir(parents=True, exist_ok=True)
+    with FileLock(place.lock):
+        if place.installed(release).is_file():
+            return source
+        log.info("%s", sources.why(release))
+        if shutil.which("pnpm") is None:
+            message = (
+                f"build: pnpm 11 or later installs pyright {release}'s dependencies, "
+                "and isn't on the `PATH`: install it (https://pnpm.io/installation)"
+            )
+            raise SystemExit(message)
+        fetching = Fetching(release=release)
+        if not source.is_dir():
+            partial = place.partial(release)
+            shutil.rmtree(partial, ignore_errors=True)
+            run(*fetching.clone(partial))
+            partial.rename(source)
+        log.info("installing pyright's dependencies with pnpm")
+        downloads = place.downloads(release)
+        try:
+            run(*fetching.install(downloads), cwd=source)
+        finally:
+            shutil.rmtree(downloads.home, ignore_errors=True)
+        place.installed(release).write_text(release + "\n")
     return source
 
 
@@ -184,11 +151,17 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="build: %(message)s")
     log.setLevel(logging.INFO)
     places = Places()
+    settings = LupDevSettings()
+    sources = Sources.of(settings, Layout.of(settings))
     try:
-        source = fetch(pinned(places), places.cache, places.repository)
+        release = pinned(places.lock)
+        source = sources.found(release) or fetch(sources, release)
         link(places, source)
         install_bundler(places)
         bundle(places, source)
+    except PyrightSourceError as failure:
+        message = f"build: {failure}"
+        raise SystemExit(message) from failure
     except ProgramFailedError as failure:
         ran = failure.ran
         output = ran.output.decode(errors="replace") + ran.error.decode(

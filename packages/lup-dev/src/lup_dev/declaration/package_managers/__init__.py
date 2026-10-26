@@ -10,10 +10,11 @@ room's image holds (`docs/launch.md`, *The package age gate*).
 from typing import TYPE_CHECKING
 
 from lup_dev.declaration.package_managers.npm import NpmManager
+from lup_dev.declaration.package_managers.pnpm import PnpmManager
 from lup_dev.declaration.package_managers.uv import UvManager
 
 if TYPE_CHECKING:
     from lup_dev.declaration.package_managers.manager import PackageManager
 
-PACKAGE_MANAGERS: list[PackageManager] = [NpmManager(), UvManager()]
+PACKAGE_MANAGERS: list[PackageManager] = [NpmManager(), PnpmManager(), UvManager()]
 """The package managers lup knows, which a launch asks for their settings."""

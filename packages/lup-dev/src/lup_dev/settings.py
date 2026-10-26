@@ -57,6 +57,11 @@ class LupDevSettings(Settings):
     """`LUP_ENVIRONMENTS`: in a room, its launch's own environments, one per
     worktree, which lup's `uv` names to uv there and the room's engine reads
     (`lup_dev/environments.py`); unset on the host."""
+    lup_room_pyright: Path | None = None
+    """`LUP_ROOM_PYRIGHT`: in a room whose image carries pyright's source, the
+    project's rooms' directory where the engine's build fetches a release the
+    image doesn't carry (`lup_dev/pyright_source.py`); unset on the host, whose
+    build reads its own cache alone."""
     lup_integration_branch: str = "dev"
     """`LUP_INTEGRATION_BRANCH`: the branch whose tip holds what the host runs, and the declaration judged by.
 

@@ -594,6 +594,23 @@ With a throwaway `HOME` and every project outside the repository: a project unde
   - **a project's `.npmrc` outranks it both ways:** a project at 1 day installed a two-day-old nightly under a user-level 3; a project at 10 refused `typescript@7.1.0-beta`, five days old, which the user-level 3 alone allowed;
   - **it takes a fraction of a day:** at 1.5 the cutoff was 36 hours back, refusing a 29-hour-old version 1 lets in; `3.0` reads as 3.
 
+## pyright's source in the room's image (pyright 1.1.414, pnpm 11.3.0 and 11.21.0, npm 12.0.2, bun 1.3.14, git 2.55.0, Node 26.7.0, measured in a room 2026-10-26)
+
+No podman in a room, so the image step's commands were measured outside one: `fetched`'s text, rendered for a scratch place under `tmp/` and run by bash with a throwaway `HOME`, Arch's own pnpm 11.3.0 (the base's day, 2026-08-15, holds it, with corepack 0.34.6, npm 12.0.2, bun 1.3.14 and Node 26.7.0) on the `PATH`. Not measured: podman committing the layer, and the image's size as podman lists it.
+- **The step:** 8.3 s with every cache empty: the clone about 2 s, pnpm's install 4.6 s, 3.5 s of it checking the lockfile's 1,152 entries against the age. pyright's `1.1.414` tag is an annotated one, so the clone warns "is not a commit!" and checks out its commit, `a28cce40`, dated 2026-09-09.
+- **What it keeps:** the source alone, 441 MB on disk and 337 MB apparent, 29,523 files: `node_modules` 379 MB, linked from pnpm's store, `packages/` 49 MB, `.git` 7.8 MB. What pnpm downloaded beside, gone in the same step: its store 380 MB, its metadata cache 214 MB, its state 12 KB.
+- **pnpm switches itself:** pyright's manifest names `pnpm@11.21.0` (published 2026-08-09), and Arch's 11.3.0 fetched it and finished "using pnpm v11.21.0". `--filter pyright-internal` installs 896 packages.
+- **pnpm's package age** (`minimumReleaseAge`, minutes; unset by default):
+  - **it checks a frozen lockfile's entries:** at five years, a `--frozen-lockfile` install refused 777 of pyright's entries ("The lockfile contains entries that the active policies reject") and installed nothing, status 1; at three days it passed. Rendered at five years, the image step failed the same way and marked nothing whole;
+  - **it's read from `~/.config/pnpm/config.yaml`**, where `pnpm config set --location global` writes it, and from `pnpm_config_minimum_release_age`, but not from `~/.npmrc`, as `minimum-release-age` or as npm's `min-release-age`: the install went ahead under five years there;
+  - **a project's own `pnpm-workspace.yaml` outranks it:** one minute there let the install through under five years in the user-level file.
+- **pnpm's downloads go where XDG's variables say:** its store under `XDG_DATA_HOME`, its cache under `XDG_CACHE_HOME`, its state under `XDG_STATE_HOME`, the release it switched to among them, so a home's `.local` and `.cache` stayed empty.
+- **npm's `--min-release-age` holds `npm exec` to it,** an exact version too: `npm exec --min-release-age=1800 pnpm@11.21.0` refused, `ETARGET`, "No matching version found for pnpm@11.21.0 with a date before …"; at 3 it ran.
+- **bun's package age doesn't reach a lockfile:** at five years in `~/.bunfig.toml`, `bun add typescript@6.0.3` was refused ("blocked by minimum-release-age"), but `bun install --frozen-lockfile` in pyright's source installed all 2,132 packages under it, from the user-level file and from the project's own `bunfig.toml` alike. bun has no lockfile of pyright's to install from: it migrated `pnpm-lock.yaml` into a `bun.lock` of its own, rewriting pyright's `package.json` as it did, though the TypeScript it installed, 6.0.3, was pnpm's.
+- **The engine from an unwritable copy:** with the source's every file and directory unwritable, `build.py`'s link, the bundler's install, the type-check and the bundle took 5.4 s and wrote nothing into the source: the engine's `tsconfig.json` sets `noEmit`. The stubs it copies come out writable, since `Path.copy` keeps no mode.
+- **A room's fetch:** `build.py` run with `LUP_ROOM_PYRIGHT` naming a scratch directory, and a home holding the settings `PnpmManager` writes, said once what it fetched and why, and took 13.8 s to fetch, install, type-check and bundle. It left the release and its lock alone in that directory. The next build found it and fetched nothing.
+- **The pin:** `uv.lock` has pinned pyright 1.1.414 since the workspace began, 2026-10-07.
+
 ## Tools (ruff 0.16.10, pyright 1.1.414, 2026-10-07)
 
 - ruff 0.16.10 and pyright 1.1.414 resolve an extended base's relative paths from the base's own directory, so a base under `.lup/settings/` writes `../../`;
