@@ -197,6 +197,7 @@ from lup_dev.launch.room import (
     unlent,
 )
 from lup_dev.launch.room import repository as repository_of
+from lup_dev.launch.secrets import RoomSecrets, Search, Tree, git_directory
 from lup_dev.launch.session import (
     LaunchError,
     approved_declaration,
@@ -1747,16 +1748,20 @@ def launched(
     operator's editor, said where lup doesn't know it; the room, its image
     built where it's missing; the package age each package manager in its
     image keeps, said where one keeps none; the terminal settings; the
-    repository's `config` checked for the room's git; the sweep, and the
+    repository's `config` checked for the room's git; the files with a secret's
+    name no commit holds as they are, in the project's tree and each related
+    repository mounted, found as late as can be and said
+    (`lup_dev.launch.secrets`); the sweep, and the
     environments a launch that crashed left, then the launch registered, under
     its launcher's lock; the room's git configuration and helper, the
     clipboard's programs, the package managers' settings, the environments'
-    program and places and the editor's link written; the CLI in the room,
-    behind the start making the worktree's environment, with `arguments` after
-    lup's own.
+    program and places, what the hidden files are mounted from, and the
+    editor's link written; the CLI in the room, behind the start making the
+    worktree's environment, with `arguments` after lup's own.
     The registration ends, and the launch's directory and environments go,
     with each of the host's environments that appeared in a worktree while the
-    room ran, whatever the CLI did.
+    room ran, whatever the CLI did; each file with a secret's name that
+    appeared or changed in the project's tree meanwhile is said, and left.
     """
     runtime = adapter.runtime.name()
     launcher.say(launcher.trust(worktree).report())
@@ -1884,6 +1889,21 @@ def launched(
             runner=declared.resolved.runner.command([]),
             environments=environments.own,
         )
+        hiding = RoomSecrets.of(
+            Search(
+                patterns=declared.resolved.paths.secret,
+                hidden=[each.path for each in environments.hidden.found],
+            ),
+            Tree(path=environments.hidden.tree, git=environments.repository),
+            [
+                Tree(path=each.path, git=git_directory(each.path))
+                for each in neighbours
+                if each.mounted
+            ],
+            own,
+        )
+        for line in hiding.said():
+            launcher.say(line)
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         try:
             with FileLock(own.lock):
@@ -1904,6 +1924,7 @@ def launched(
                     clipboard.write()
                     ages.write()
                     environments.write()
+                    hiding.write()
                     editor.link(own)
                     receives = receiving(launcher.podman, own)
                     walled = room.model_copy(
@@ -1911,6 +1932,7 @@ def launched(
                             "name": served.container,
                             "mounts": [
                                 *room.mounts,
+                                *hiding.mounts,
                                 *git.mounts,
                                 *ages.mounts,
                                 Mount(source=sockets, target=ROOM_SOCKETS),
@@ -1928,7 +1950,7 @@ def launched(
                     return opened.launch(arguments=arguments, settings=settings)
                 finally:
                     ended(launcher, launch)
-                    for line in environments.end():
+                    for line in [*environments.end(), *hiding.end()]:
                         launcher.say(line)
         finally:
             own.lock.unlink(missing_ok=True)
