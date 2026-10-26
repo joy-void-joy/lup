@@ -302,6 +302,8 @@ class Engine:
         """The package managers' settings the launch put in its room's home
         while the room ran, by their path there."""
         self.unshared: list[list[str]] = []
+        self.during: Callable[[], object] | None = None
+        """What the room does while it runs, where a test has it do something."""
 
     def __call__(self, process: Process) -> Ran:
         self.processes.append(process)
@@ -342,6 +344,8 @@ class Engine:
                     for each in home.rglob("*")
                     if each.is_file()
                 }
+                if self.during is not None:
+                    self.during()
                 return Ran(command=process.arguments, status=self.ran)
             case _:
                 message = f"podman asked {process.arguments}"
@@ -965,6 +969,42 @@ def test_the_approved_layer_s_repositories_are_mounted_said_and_listed(
         f"- `gone`, not here. At `{gone}`, missing: it isn't on this machine, so "
         "it isn't mounted."
     ) in guidance
+
+
+def test_files_with_a_secret_s_name_are_hidden_and_said_as_the_room_starts_and_ends(
+    project: Path, tmp_path: Path, clock: FakeClock, shell: Shell
+) -> None:
+    (project / ".env.example").write_text("TOKEN=\n")
+    shell.commit(project, "the example")
+    (project / ".env.local").write_text("TOKEN=the operator's\n")
+    notes = tmp_path / "repos" / "notes.git"
+    (notes / "profile").mkdir(parents=True)
+    (notes / "profile" / ".credentials.json").write_text("{}")
+    machine = Machine(tmp_path, clock, local=MINE)
+    machine.engine.during = lambda: (project / ".env").write_text("TOKEN=the room's\n")
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    here = notes.resolve()
+    [launch] = [each.launch for each in machine.host.served]
+    empty = machine.layout.launch(launch).empty_file
+    run = machine.engine.run()
+    for hidden in [project / ".env.local", here / "profile" / ".credentials.json"]:
+        assert f"--mount=type=bind,source={empty},destination={hidden},ro=true" in run
+    assert not [each for each in run if ".env.example" in each]
+    said = machine.events.said
+    assert said[said.index("image") + 1] == (
+        "Hidden from the room, each reading as an empty file: the files with a "
+        "secret's name no commit holds as they are (`docs/launch.md`, *Files with a "
+        f"secret's name*):\n  {project / '.env.local'}\n"
+        f"  {here / 'profile' / '.credentials.json'}"
+    )
+    assert said[-1] == (
+        "These files with a secret's name appeared or changed while the room ran, so "
+        "the room may have written them, and your tools read such a file: look at "
+        f"each before they do.\n  {project / '.env'}"
+    )
+    assert (project / ".env").read_text() == "TOKEN=the room's\n"
 
 
 def test_a_codex_launch_refuses_guidance_past_what_codex_takes_before_registering(

@@ -1,6 +1,7 @@
 """Path roles: which role a path in a worktree has, the first that matches.
 
-1. **protected:** the project's declaration, and the paths its modules protect;
+1. **protected:** the project's declaration, the paths its modules protect, and
+   the files that hold secrets (`secret`), which the host's tools read;
 2. **operator:** the operator's documents, `DESIGN.md` and `AGENTS.md`;
 3. **excluded:** what its modules hold to nothing;
 4. **test:** a file the test patterns match, TypeScript's `*.test.ts` and
@@ -61,7 +62,8 @@ class Roles(Model):
         ['protected', 'operator', 'scratch', 'production']
         """
         paths = self.declaration.paths
-        if self.protecting(path) is not None or path == self.declaration.source:
+        protected = self.protecting(path) is not None or self.secret(path) is not None
+        if protected or path == self.declaration.source:
             return "protected"
         if matches(path, paths.operator_documents):
             return "operator"
@@ -90,6 +92,17 @@ class Roles(Model):
         return next(
             (pattern for pattern in protected if path.full_match(pattern)), None
         )
+
+    def secret(self, path: Path) -> str | None:
+        """Return the first pattern of a file holding secrets that `path` matches, or none.
+
+        >>> from lup_dev import Project
+        >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
+        >>> roles.secret(Path("web/.env.local")), roles.role(Path("web/.env.local"))
+        ('**/.env*', 'protected')
+        """
+        secret = self.declaration.paths.secret
+        return next((pattern for pattern in secret if path.full_match(pattern)), None)
 
     def is_python(self, path: Path) -> bool:
         """Say whether `path` is a Python module, which the rules read."""

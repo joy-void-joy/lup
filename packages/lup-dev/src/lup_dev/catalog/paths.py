@@ -36,7 +36,6 @@ class CorePaths(Model):
         ".codex/**",
         "**/sync.json",
         "**/sync.json.local",
-        "**/.env*.local",
         "**/.gitignore",
         "AGENTS.local.md",
         "lup_project.local.py",
@@ -49,7 +48,6 @@ class CorePaths(Model):
     - what runs outside the agent's reach: CI, git's own directory and hooks,
       pre-commit, editor and container configurations, the runtimes' settings;
     - what widens a later launch, `sync.json` and `sync.json.local`;
-    - secrets, `.env*.local`;
     - `.gitignore`, since what it ignores the checkpoint never sees;
     - the person's own section of a session's guidance, `AGENTS.local.md` at the
       root, which steers every later session and which git ignores, so nothing
@@ -57,6 +55,61 @@ class CorePaths(Model):
     - the person's own layer of the declaration, `lup_project.local.py` at the
       root, which the host runs once trust on launch approves it, and which git
       ignores.
+
+    A secret's path asks too (`secret`).
+    """
+    secret: list[str] = [
+        "**/.env*",
+        "**/.dev.vars*",
+        "**/*.pem",
+        "**/*.key",
+        "**/*.p12",
+        "**/*.pfx",
+        "**/*.jks",
+        "**/*.keystore",
+        "**/id_rsa*",
+        "**/id_ecdsa*",
+        "**/id_ed25519*",
+        "**/*credentials*.json",
+        "**/client_secret*.json",
+        "**/*[sS]ervice*[aA]ccount*.json",
+        "**/.netrc",
+        "**/.git-credentials",
+        "**/.pypirc",
+        "**/*.tfvars",
+        "**/*.tfvars.json",
+        "**/*.tfstate",
+        "**/*.tfstate.backup",
+        "**/*.tfstate.*.backup",
+        "**/.streamlit/secrets.toml",
+    ]
+    """Files that hold secrets, by the names tools give them. A room never reads
+    one its worktree's commit doesn't hold as it is: an ignored one, an untracked
+    one, or one changed since (`docs/launch.md`, *Files with a secret's name*).
+    Every write to one asks the operator, as a protected path's does, since the
+    host's tools read them.
+
+    - dotenv's files, `.env`, `.env.local`, `.env.production`, and dotenvx's
+      `.env.keys` among them, and direnv's `.envrc`; Cloudflare Wrangler's
+      `.dev.vars`;
+    - private keys and certificates (`.pem`, `.key`: mkcert's, Rails'
+      `master.key`, a runtime's `daemon/control.key` in a profile kept in a
+      repository) and key stores (PKCS #12, Java's, Android's signing keys), and
+      OpenSSH's key files by their default names;
+    - credentials in JSON: Google's `credentials.json` and the OAuth client
+      `client_secret_….json` its console downloads, a runtime's login in
+      `.credentials.json`, a service account's key (Firebase's
+      `serviceAccountKey.json`);
+    - logins kept in a file: `.netrc`, git's `.git-credentials`, PyPI's
+      `.pypirc`. Not npm's `.npmrc`, protected already, whose usual content is
+      configuration, a token in it read from a variable: a project's own scratch
+      holds `.npmrc` files to test npm with;
+    - Terraform's variables and state, its backups among it, which hold secrets
+      in plain text, and Streamlit's `.streamlit/secrets.toml`.
+
+    The launch tests a name by what a pattern's last part starts or ends with
+    before matching it whole, so one starting and ending with a wildcard, such
+    as `*.tfstate.*`, has it test every file's name, slowly.
     """
     operator_documents: list[str] = ["DESIGN.md", "AGENTS.md"]
     """The operator's documents: changing one is a design decision, so it asks."""

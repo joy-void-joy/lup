@@ -1,8 +1,10 @@
-"""Paths hidden from a room: each, inside every worktree of the repository, mounted over by something empty and read-only of the launch's own, so the room neither reads nor writes what's there.
+"""Paths hidden from a room: each mounted over by something empty and read-only of the launch's own, so the room neither reads nor writes what's there.
 
 `docs/launch.md`, *The project's environment, the room's own*. The host's
-environment, `.venv` under `Uv()`, is the first: the operator's own `uv run`
-runs it, so what a room wrote there would run on the host. Each path that's a
+environment, `.venv` under `Uv()`, is the first, inside every worktree of the
+repository: the operator's own `uv run` runs it, so what a room wrote there
+would run on the host. Files that hold secrets are the second, wherever a room
+mounts a repository (`launch/secrets.py`), and are never removed. Each path that's a
 directory or a file as the room starts is mounted over, read-only, at its host
 path, by the launch's empty directory or empty file (`LaunchLayout`), as the git
 directory's `config` and `hooks/` are, over the tree's own mount. A link isn't:
@@ -44,6 +46,39 @@ class Found(Model):
     device: int
     inode: int
 
+    @classmethod
+    def at(cls, tree: Path, path: Path) -> Found | None:
+        """Return what's at `path`, inside `tree`, where it's a directory or a file, never following a link there or on the way; none for anything else, a link among it, since podman would follow it to place the mount."""
+        seen = status(tree, path)
+        if seen is None or not (
+            stat.S_ISDIR(seen.st_mode) or stat.S_ISREG(seen.st_mode)
+        ):
+            return None
+        return cls(
+            path=path,
+            directory=stat.S_ISDIR(seen.st_mode),
+            device=seen.st_dev,
+            inode=seen.st_ino,
+        )
+
+
+def covering(found: list[Found], launch: LaunchLayout) -> list[Mount]:
+    """Mount the launch's empty directory, or its empty file, read-only over each of `found`."""
+    return [
+        Mount(
+            source=launch.empty_directory if each.directory else launch.empty_file,
+            target=each.path,
+            read_only=True,
+        )
+        for each in found
+    ]
+
+
+def made(launch: LaunchLayout) -> None:
+    """Make the launch's empty directory and empty file, which the mounts over what's hidden need as their sources."""
+    launch.empty_directory.mkdir(parents=True, exist_ok=True)
+    launch.empty_file.touch()
+
 
 class Hidden(Model):
     """The paths a launch hides from its room, inside each worktree, and what each was as the room started."""
@@ -64,34 +99,20 @@ class Hidden(Model):
         """Find each of `paths` in each of the repository's `worktrees`, inside `tree`, as the room is about to start."""
         inside = [root for root in worktrees if root.is_relative_to(tree)]
         found = [
-            Found(
-                path=root / path,
-                directory=stat.S_ISDIR(seen.st_mode),
-                device=seen.st_dev,
-                inode=seen.st_ino,
-            )
+            seen
             for root in inside
             for path in paths
-            if (seen := status(tree, root / path)) is not None
-            and (stat.S_ISDIR(seen.st_mode) or stat.S_ISREG(seen.st_mode))
+            if (seen := Found.at(tree, root / path)) is not None
         ]
         return cls(tree=tree, paths=paths, worktrees=inside, found=found)
 
     def mounts(self, launch: LaunchLayout) -> list[Mount]:
         """Mount the launch's empty directory, or its empty file, read-only over each path found."""
-        return [
-            Mount(
-                source=launch.empty_directory if each.directory else launch.empty_file,
-                target=each.path,
-                read_only=True,
-            )
-            for each in self.found
-        ]
+        return covering(self.found, launch)
 
     def write(self, launch: LaunchLayout) -> None:
         """Make the launch's empty directory and empty file, which the mounts need as their sources."""
-        launch.empty_directory.mkdir(parents=True, exist_ok=True)
-        launch.empty_file.touch()
+        made(launch)
 
     def appeared(self, worktrees: list[Path]) -> list[Path]:
         """Return each of the paths, in each worktree there as the room started and each of `worktrees` inside the tree, that wasn't there as the room started: none found then, or another in its place."""

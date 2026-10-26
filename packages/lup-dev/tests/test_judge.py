@@ -133,6 +133,18 @@ def test_a_protected_path_asks(judge: Judging) -> None:
     )
 
 
+def test_a_file_holding_secrets_asks_as_a_protected_path_does(judge: Judging) -> None:
+    for path in ["web/.env.local", ".env", "certs/dev.key"]:
+        judgement = judge(edit(path, None, "TOKEN=x\n"))
+        assert judgement.outcome == "ask", path
+        assert judgement.role == "protected"
+        assert [ask.kind for ask in judgement.asks] == ["protected"]
+    judgement = judge(edit("web/.env.local", "A=1\n", "A=2\n"))
+    assert judgement.asks[0].reason == (
+        "web/.env.local has the name of a file holding secrets (**/.env*)"
+    )
+
+
 PROTECTED = ".claude/hooks/check.py"
 
 

@@ -492,6 +492,35 @@ podman isn't in a room, so a mount over a path inside a bind mount was made in a
 - `mv tree/wt tree/wt-moved` succeeded, and the mount moved with the directory: `tree/wt-moved/.venv` listed nothing inside and held the host's files outside, and a `tree/wt/.venv` could be made anew.
 - `git worktree remove` of a worktree whose ignored `.venv` was mounted over ended with status 255 ("failed to delete … Device or resource busy"), having removed the worktree's registration, its `.git` file and a tracked file, and left `.gitignore` and the host's `.venv` on disk.
 
+### Files with a secret's name (git 2.55.0, Python 3.14.0, bfs 4.1.1, Linux 7.2.11, measured in a room 2026-10-26)
+
+What `docs/launch.md`, *Files with a secret's name*, rests on, measured from a room mounting lup's repository read-write and the operator's twelve related repositories read-only, about a hundred worktrees in all, with `CorePaths.secret` as it stands. The related repositories are told apart by their shape alone. No file's content was read; scripts in the session scratchpad.
+- **What's there.** 168 files matched, outside `node_modules/`, `site-packages/`, `dist-packages/` and lup's hidden `.venv`s, and 82 would be hidden: `.env*` 54 (an `.env.local` beside a tracked `.env`, copies under ignored `tmp/` and `.bak/` directories, two in a directory git no longer listed as a worktree), `*credentials*.json` 23 (among them a runtime's login, `.credentials.json`, in two repositories' ignored profile directories, which `credentials*.json` would have missed for its leading dot), `*.key` 3 (two a runtime's `daemon/control.key` in those profiles), `*.pem` 2. The other 86 were tracked and as committed, nearly all a `.env` the operator's projects track as configuration, and stay in view. lup's own tree held none.
+- **The commit, or what git ignores.** No file matched that was untracked and not ignored, and every tracked one was as committed, so on this machine the two rules hide the same files; they part where a room steers what git ignores, with `git add -f` or a `!` line in a `.gitignore`.
+- **What packages install.** Under `site-packages/`: 95 `certifi/cacert.pem`, 5 of Google's API discovery documents named `iamcredentials.v1.json`, 3 of grpc's `roots.pem`, 2 of tornado's `test/test.key`, pip's and botocore's own `cacert.pem`; under `node_modules/`, npm's own `.npmrc`, twice. None the operator's.
+- **`.npmrc`, left out of the role.** With it, 38 more files matched, each an untracked npm configuration, nine of them a worker's fixtures for the package age gate under lup's `tmp/`, which the next launch would have hidden from it.
+- **Pinned git.** `git worktree list --porcelain -z`, with `GIT_DIR` and `GIT_COMMON_DIR` naming a clone's `.git`, listed its main worktree and a linked one under `.git/tree/`, each with its `HEAD`; an unborn branch's `HEAD` is forty zeros; a bare repository's own directory is listed `bare`, with no `HEAD`. One related bare repository held a `commondir` reading `.`, which git pinned there never reads.
+- **The walk's cost,** through directory descriptors, outside what packages install and lup's hidden `.venv`s, each directory's names tested at once for each pattern's longest literal part before any name is matched:
+
+| Tree | Layout | Worktrees | Files | Directories | Time |
+|---|---|---|---|---|---|
+| lup's | bare | 4 | 205,776 | 19,212 | 0.52 s |
+| related 1 | bare | 1 | 1,156 | 663 | 0.02 s |
+| related 2 | clone | 1 | 31,558 | 1,818 | 0.08 s |
+| related 3 | bare | 37 | 115,812 | 16,442 | 0.46 s |
+| related 4 | bare | 4 | 5,309 | 1,139 | 0.03 s |
+| related 5 | bare | 26 | 1,404,191 | 106,981 | 3.14 s |
+| related 6 | bare | 2 | 150,358 | 11,897 | 0.32 s |
+| related 7 | clone | 3 | 30,418 | 5,939 | 0.12 s |
+| related 8 | bare | 6 | 75,179 | 6,409 | 0.18 s |
+| related 9 | clone | 1 | 3,296 | 662 | 0.02 s |
+| related 10 | bare | 2 | 23,701 | 4,819 | 0.11 s |
+| related 11 | bare | 4 | 17,054 | 2,457 | 0.07 s |
+| related 12 | bare | 4 | 4,324 | 1,332 | 0.04 s |
+
+  The related repositories: 1.86M files in 160k directories, 4.6 s. 670k of related 5's files are under one worktree's ignored `tmp/`: a copy of a bare repository with its worktrees, calibration runs and a Lean build, where copies of `.env` files turn up.
+- **Other ways, over the same trees.** The walk with no test of a name took 2.2 s; bfs, the room's `find`, with one `-name` per pattern, 2.0 s under `LC_ALL=C` and 3.8 s for related 5 alone under `en_US.UTF-8`, and one `-regex` in place of the names, 7.0 s for related 5; Python threads over the walk, 7.3 s for related 5 at one thread and 12.2 s at sixteen, the GIL held for every entry; git's listing of each worktree's ignored files, 6.0 s over the hundred worktrees, seeing nothing outside them. Testing a name against each pattern once it passed a test of its prefixes and suffixes, before the test of each directory's names at once, took 4.8 s in related 5 alone, for 7.8M tests: every JSON file passed on `.json`.
+
 ### What agents reached for in rooms (measured 2026-10-22)
 
 - **Programs missing, from 699 transcript files** of room sessions, 2026-10-14 to 10-22: commands that printed a missing-program error, or whose agent reported one (a silent probe, `2>/dev/null`, is missed). `time` 4; `gh` 4; `man` 2 (`git help` "failed to exec 'man'", `man socat`) and 2 silent tries; `ltrace` 1; a display to send real key events to 1 (#95); `tmux` none, though agents on the host ran it 43 times and a worker in a room reported needing it; `rsync`, `nc`, `dig`, `sqlite3` and `xxd` none.

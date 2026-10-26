@@ -99,7 +99,7 @@ Every collection a module holds is a selection (`Selection`, `declaration/gramma
 | Kind | Entries | Held by |
 |---|---|---|
 | `Rules` | rule ids | `CodeRules` |
-| `Paths` | a `Layer` of patterns per role (`protected`, `operator_documents`, `excluded`, `tests`, `scratch`, `docs`, `data`, `source_trees`, `python`, `conftest`), the verbs taking roles as keywords | `Core`, `Python` |
+| `Paths` | a `Layer` of patterns per role (`protected`, `secret`, `operator_documents`, `excluded`, `tests`, `scratch`, `docs`, `data`, `source_trees`, `python`, `conftest`), the verbs taking roles as keywords. `secret` names the files that hold secrets: a room never reads one its worktree's commit doesn't hold as it is (`docs/launch.md`, *Files with a secret's name*), and every write to one asks, as a protected path's does | `Core`, `Python` |
 | `Gate` | `Step`s, by name | `Python`, `Private` |
 | `Exemptions` | an `Exemption` per rule, listing every path it lifts the rule from | `CodeRules` |
 | `TestRoots` | `Pytest` roots | `Python` |
@@ -203,7 +203,7 @@ A module's commands come under its name on the command line, `lup-dev transcript
 
 | Module | What it holds |
 |---|---|
-| `Core` | every protected path but the Python tools', the operator's documents, TypeScript's tests (`*.test.ts`, `*.test.tsx`), scratch, docs and data; the standard machine; the package age, three days; lup's session defaults; the credentials' limits; guidance `core` |
+| `Core` | every protected path but the Python tools', the files that hold secrets (`.env*`, keys and key stores, credentials in JSON, logins kept in a file, Terraform's variables and state: `CorePaths.secret`), the operator's documents, TypeScript's tests (`*.test.ts`, `*.test.tsx`), scratch, docs and data; the standard machine; the package age, three days; lup's session defaults; the credentials' limits; guidance `core` |
 | `Python` | the Python tools' files (protected), source trees, Python files and `conftest.py`; the runner, `Uv()`; the test roots, `tests/`; the gate's `rules`, `format`, `pytest` and `lint-imports`; guidance `python` |
 | `CodeRules` | every rule but those `catalog/rules.py` leaves out, each with its reason (`runtime-mention` alone today); no exemptions; guidance `code-rules`. Requires Node `>=22.18` for the engine |
 | `GitHub` | the GitHub tools; the answer to a room's gate asking an issue's state |
@@ -221,7 +221,7 @@ A module's commands come under its name on the command line, `lup-dev transcript
 
 **What judging reads** is kept apart as plain values (`Declaration`): the declaration's file, the roles, the test roots, the exemptions, the conditions, the rule selections, the runner as the commands it puts before a tool, and what's held and flagged. Plain values, since a module or a runner may be a class of the project's own, which JSON can't bring back, and the judge keeps the last declaration that loaded to stand in for one that can't (`docs/judging-writes.md`, *A declaration that can't load has a stand-in*).
 
-**What a launch reads,** at the approved commit (`approved_declaration`, `launch/session.py`): the packages, and whether the image carries pyright's source, at the release the launch's worktree's `uv.lock` pins; the package age (`docs/launch.md`, *The package age gate*); the session settings, with which fields some layer set, so those are imposed over the person's own runtime settings and the rest are lup's defaults theirs outrank; the credentials' limits, sent with the registration (`docs/credentials.md`, *What the declaration allows*); the guidance sections (`docs/launch.md`, *Guidance*); the related repositories; the runner's `room()`; and what each module serves.
+**What a launch reads,** at the approved commit (`approved_declaration`, `launch/session.py`): the packages, and whether the image carries pyright's source, at the release the launch's worktree's `uv.lock` pins; the package age (`docs/launch.md`, *The package age gate*); the session settings, with which fields some layer set, so those are imposed over the person's own runtime settings and the rest are lup's defaults theirs outrank; the credentials' limits, sent with the registration (`docs/credentials.md`, *What the declaration allows*); the guidance sections (`docs/launch.md`, *Guidance*); the related repositories; the `secret` role's patterns, the files it hides from the room (`docs/launch.md`, *Files with a secret's name*); the runner's `room()`; and what each module serves.
 
 **Selecting the rules.** `CodeRules.rules` is a `Rules` selection, by default `Rules.all()` with a `.drop(…, why=…)` for each rule lup's default leaves out, so a rule a later release adds runs unless it's left out too. Python only composes and records a selection: each check request carries every module's, and the engine, which holds the table, resolves them and runs their union, refusing an id it doesn't have. Exemptions and `# lup: ignore` apply afterwards, in Python. `lup-dev rules list` lists what the worktree's declaration runs, resolved the same way, and a launch lists the approved one's in the guidance. A project's own rule tables are #175.
 

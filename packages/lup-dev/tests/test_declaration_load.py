@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from lup_dev import Project, Section
+from lup_dev.catalog.paths import CorePaths
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.load import load, person_layer
 from lup_dev.declaration.resolve import Declaration, resolve
@@ -304,6 +305,16 @@ def test_what_judging_reads_is_kept_as_json_whatever_classes_the_project_brings(
     assert declaration.conditions == ["audiobook.conditions"]
     assert declaration.held == ["protected"]
     assert declaration.tests is None
+
+
+def test_a_declaration_kept_before_the_secret_role_stands_in_with_lup_s_own(
+    tmp_path: Path,
+) -> None:
+    write(tmp_path / "lup_project.py", OWN_CLASSES)
+    kept = Declaration.read(tmp_path).model_dump(mode="json")
+    del kept["paths"]["secret"]
+    older = Declaration.model_validate(kept)
+    assert older.paths.secret == CorePaths().secret
 
 
 # The person's own layer, `lup_project.local.py`
