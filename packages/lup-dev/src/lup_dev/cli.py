@@ -1834,7 +1834,6 @@ def launched(
         room = maintaining_room(
             declared.resolved,
             worktree,
-            launcher.layout,
             launcher.terminal,
             environments,
             neighbours=neighbours,

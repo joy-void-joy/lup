@@ -20,6 +20,7 @@ from lup_dev import (
     Packages,
     Paths,
     Project,
+    PyrightSource,
     Pytest,
     Python,
     Requirement,
@@ -40,6 +41,15 @@ class LupDevelopment(Module):
       step the same way to build the copy the operator approves
       (`lup_dev/launch/trust.py`). npm, which installs its bundler, joins the
       room's image as Arch's `npm`.
+    - pyright's source, which the engine is built from, is in the room's image,
+      at the release the launch's worktree's `uv.lock` pins, so the room's build
+      reads its own and the host's cache stays the host's: what a room wrote
+      there would be bundled into the host's engine at the next approval
+      (`lup_dev/pyright_source.py`). pnpm installs its dependencies, from
+      pyright's own lockfile: pnpm 11, the first to read its package age from
+      `~/.config/pnpm/config.yaml` and check a frozen lockfile against it. It's
+      needed only to fetch a release no place keeps, so it's optional: a room
+      whose image predates it still runs the gate.
     - The dashboard's page is built the same way, after the engine: its types
       generated from the API's description, type-checked, tested and bundled
       (`packages/lup-dashboard/build.py`), again only when one of its sources,
@@ -67,7 +77,20 @@ class LupDevelopment(Module):
             why="installs the engine's bundler",
             install="it comes with Node",
             package="npm",
-        )
+        ),
+        Requirement(
+            tool="pnpm",
+            version=">=11",
+            probe=["pnpm", "--version"],
+            optional=True,
+            why=(
+                "installs pyright's dependencies from its own lockfile, held to the "
+                "package age its settings keep, where the engine's build fetches a "
+                "release no place keeps"
+            ),
+            install="https://pnpm.io/installation",
+            package="pnpm",
+        ),
     ]
 
     packages: Packages = Packages.of(
@@ -129,6 +152,7 @@ class LupDevelopment(Module):
         before="rules",
     )
     guidance: Guidance = Guidance.of(Section(name="lup", path=Path("AGENTS.md")))
+    pyright_source: PyrightSource = PyrightSource()
 
 
 project = Project(
