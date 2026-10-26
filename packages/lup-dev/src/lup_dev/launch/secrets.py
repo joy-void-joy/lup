@@ -451,8 +451,9 @@ class RoomSecrets(Model):
         listed = "\n".join(f"  {each}" for each in files)
         named = (
             "Hidden from the room, each reading as an empty file: the files with a "
-            "secret's name no commit holds as they are (`docs/launch.md`, *Files "
-            f"with a secret's name*):\n{listed}"
+            "secret's name no commit holds as they are "
+            "(`docs/launch.md`, *Files with a secret's name*):\n"
+            f"{listed}"
         )
         return [
             *([named] if files else []),
