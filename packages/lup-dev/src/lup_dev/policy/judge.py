@@ -473,8 +473,13 @@ class Judge(Model, arbitrary_types_allowed=True):
         match role:
             case "protected":
                 pattern = self.roles.protecting(change.path)
+                secret = self.roles.secret(change.path)
                 why = f" ({pattern})" if pattern else ", the project's declaration"
-                reason = f"{change.path} is a protected path{why}"
+                reason = (
+                    f"{change.path} is a protected path{why}"
+                    if pattern is not None or secret is None
+                    else f"{change.path} has the name of a file holding secrets ({secret})"
+                )
                 ask = Ask(kind="protected", reason=reason)
                 if change.after is None or not self.roles.ruled(change.path):
                     sorted_ = self.sorted([ask])

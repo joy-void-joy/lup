@@ -41,6 +41,7 @@ from lup.blocks import SHELL_TONES, Drawer, FoldKind, Tone
 from lup.doors import served as methods
 from lup.types import Model
 from lup_dev.catalog.gate import Step
+from lup_dev.catalog.paths import CorePaths
 from lup_dev.catalog.room import CacheLifetime
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Named, listed, set_fields
@@ -81,6 +82,9 @@ class PathRoles(Model, extra="forbid"):
     """Each role's patterns from every selected module, as the roles read them."""
 
     protected: list[str]
+    secret: list[str] = CorePaths().secret
+    """lup's own in a declaration kept before this role, which may still stand
+    in: none would leave every secret's path writable unasked."""
     operator_documents: list[str]
     excluded: list[str]
     tests: list[str] = []
