@@ -82,6 +82,7 @@ class LupDevelopment(Module):
             tool="pnpm",
             version=">=11",
             probe=["pnpm", "--version"],
+            # lup: defer(issue=308, why="required once every room's image carries pnpm: optional while rooms launched before it joined the image still run the gate")
             optional=True,
             why=(
                 "installs pyright's dependencies from its own lockfile, held to the "
