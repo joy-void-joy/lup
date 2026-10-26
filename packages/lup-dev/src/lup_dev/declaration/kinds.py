@@ -593,3 +593,16 @@ class Mounted(Model, extra="forbid"):
     read_only: bool = True
     always: bool = False
     """Whether every room mounts it; otherwise only a launch lending it."""
+
+
+class PyrightSource(Model, extra="forbid"):
+    """pyright's source, which lup's engine is built from, in the room's image: for a repository whose gate builds the engine, as lup's own does.
+
+    The image clones it at the release the launch's worktree's `uv.lock` pins
+    and installs its dependencies, in the image's own build, with the git and
+    pnpm the image must hold (lup's own brings pnpm by a requirement). The engine's build in the room reads it there, and
+    fetches a release the image doesn't carry into the project's rooms' own
+    directory, never the host's cache (`lup_dev/pyright_source.py`;
+    `docs/launch.md`, *The image*). A project running the engine its installed
+    `lup-dev` carries needs none.
+    """

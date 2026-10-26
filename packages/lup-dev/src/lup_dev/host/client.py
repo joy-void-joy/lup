@@ -46,7 +46,7 @@ from lup_dev.host.protocol import (
     Stop,
     Unregister,
 )
-from lup_dev.layout import ROOM_SOCKETS, HostLayout, LaunchSockets
+from lup_dev.layout import HostLayout, LaunchSockets, RoomPaths
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
@@ -223,7 +223,7 @@ class RoomClient(Model):
     and the room can't start a service, so finding none is said.
     """
 
-    socket: Path = LaunchSockets(directory=ROOM_SOCKETS).request
+    socket: Path = LaunchSockets(directory=RoomPaths().sockets).request
     """The launch's request socket, where the room mounts it."""
     timeout: timedelta = timedelta(minutes=1)
     """How long to wait for one reply."""

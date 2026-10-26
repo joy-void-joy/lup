@@ -18,11 +18,13 @@ from lup.programs import run
 from lup.rooms.container import Container, Image, Mount
 from lup_dev import (
     Core,
+    Module,
     Modules,
     Package,
     Packages,
     Plain,
     Project,
+    PyrightSource,
     Python,
     Repository,
     environments,
@@ -49,8 +51,9 @@ from lup_dev.launch.room import (
     repository,
     unclaimed,
 )
-from lup_dev.layout import LOCALTIME, LaunchLayout, Layout
-from lup_dev.settings import TerminalVariables
+from lup_dev.layout import LOCALTIME, LaunchLayout, Layout, PyrightLayout, RoomPaths
+from lup_dev.pyright_source import Fetching, Sources
+from lup_dev.settings import LupDevSettings, TerminalVariables
 
 REMEDY = "uv python install"
 LAUNCH = "0f3a"
@@ -144,7 +147,6 @@ def room_for(
     return maintaining_room(
         resolved,
         worktree,
-        layout,
         terminal,
         RoomEnvironments.of(resolved.runner, worktree, layout, LAUNCH, tools),
         neighbours=neighbours,
@@ -253,7 +255,6 @@ def test_the_maintaining_room_mounts_and_sets_what_the_note_lists(
                 target=worktree / ".venv",
                 read_only=True,
             ),
-            Mount(source=tmp_path / "cache" / "lup" / "pyright"),
             Mount(source=home / ".vim", read_only=True),
             *localtime,
         ],
@@ -273,11 +274,10 @@ def test_the_maintaining_room_mounts_and_sets_what_the_note_lists(
             "LANG": "en_US.UTF-8",
             "EDITOR": "/usr/bin/nvim --clean",
             "VISUAL": "vim",
-            "XDG_CACHE_HOME": str(tmp_path / "cache"),
         },
         network="host",
     )
-    assert (tmp_path / "cache" / "lup" / "pyright").is_dir()
+    assert not (tmp_path / "cache").exists()
 
 
 def test_the_room_makes_the_hooks_directory_it_holds_read_only(
@@ -357,12 +357,11 @@ def test_a_plain_runner_mounts_and_checks_nothing_of_uv(
     )
 
     assert not any(name.startswith(("UV_", "LUP_")) for name in room.env)
-    assert [each.source for each in room.mounts if isinstance(each, Mount)][:5] == [
+    assert [each.source for each in room.mounts if isinstance(each, Mount)][:4] == [
         bare,
         bare / "config",
         bare / "hooks",
         layout.rooms(bare).home,
-        tmp_path / "cache" / "lup" / "pyright",
     ]
 
 
@@ -387,6 +386,126 @@ def test_a_clone_s_git_directory_is_mounted_on_its_own_so_the_room_cant_move_it(
         Mount(source=repo / ".git" / "config", read_only=True),
         Mount(source=repo / ".git" / "hooks", read_only=True),
     ]
+
+
+# pyright's source
+
+
+class BuildingTheEngine(Module):
+    """Builds lup's engine from pyright's source, as lup's own repository does."""
+
+    name = "building-the-engine"
+    pyright_source: PyrightSource = PyrightSource()
+
+
+def building() -> Project:
+    """A project whose rooms build the engine, its tools run as the `PATH` finds them."""
+    return Project(
+        modules=Modules.default().edit(Python(runner=Plain())).add(BuildingTheEngine())
+    )
+
+
+def pinning(worktree: Path, lock: str) -> None:
+    """Write the worktree's `uv.lock`, as `lock`'s text."""
+    (worktree / "uv.lock").write_text(f"version = 1\n\n{lock}")
+
+
+PYRIGHT = '[[package]]\nname = "pyright"\nversion = "1.1.414"\n'
+
+
+def test_a_room_building_the_engine_carries_pyright_at_the_worktree_s_release(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    pinning(worktree, PYRIGHT)
+    layout = scratch(tmp_path)
+    resolved = resolve(building())
+
+    room = room_for(
+        resolved,
+        worktree,
+        layout,
+        terminal(),
+        AskedUv(tmp_path / "none", tmp_path / "none"),
+        neighbours=[],
+    )
+
+    fetching = Fetching(release="1.1.414", age=timedelta(days=3))
+    assert room.image.definition == definition(resolved.packages, RoomBase(), fetching)
+    rooms = layout.rooms(bare)
+    assert {name: value for name, value in room.env.items() if "LUP_" in name} == {
+        "LUP_ROOM_PYRIGHT": str(rooms.pyright.home)
+    }
+
+
+def test_no_room_mounts_the_host_s_pyright_source(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    pinning(worktree, PYRIGHT)
+    layout = scratch(tmp_path)
+
+    room = room_for(
+        resolve(building()),
+        worktree,
+        layout,
+        terminal(),
+        AskedUv(tmp_path / "none", tmp_path / "none"),
+        neighbours=[],
+    )
+
+    cache = layout.pyright_source.home
+    mounted = [each.source for each in room.mounts if isinstance(each, Mount)]
+    assert not [
+        each
+        for each in mounted
+        if cache.is_relative_to(each) or each.is_relative_to(layout.cache)
+    ]
+    assert not cache.exists()
+
+
+def test_the_build_in_that_room_reads_its_image_s_then_its_rooms_mounted_writable(
+    bare: Path, tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktree = bare / "tree" / "main"
+    pinning(worktree, PYRIGHT)
+    layout = scratch(tmp_path)
+    room = room_for(
+        resolve(building()),
+        worktree,
+        layout,
+        terminal(),
+        AskedUv(tmp_path / "none", tmp_path / "none"),
+        neighbours=[],
+    )
+    for name, value in room.env.items():
+        monkeypatch.setenv(name, value)
+
+    sources = Sources.of(LupDevSettings(), layout)
+
+    rooms = layout.rooms(bare)
+    assert sources == Sources(
+        kept=PyrightLayout(home=RoomPaths().pyright), fetched=rooms.pyright
+    )
+    assert Mount(source=rooms.home) in room.mounts
+    assert rooms.pyright.home.is_relative_to(rooms.home)
+
+
+def test_a_room_whose_worktree_pins_no_one_pyright_is_refused(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    pinning(worktree, '[[package]]\nname = "ruff"\nversion = "0.16.10"\n')
+
+    with pytest.raises(RoomError, match=r"pins pyright 0 times, not once\. Pin it"):
+        room_for(
+            resolve(building()),
+            worktree,
+            scratch(tmp_path),
+            terminal(),
+            AskedUv(tmp_path / "none", tmp_path / "none"),
+            neighbours=[],
+        )
 
 
 # Refusals
@@ -717,7 +836,6 @@ def test_each_repository_there_is_mounted_read_only_at_its_host_path_after_the_p
         Mount(source=bare / "config", read_only=True),
         Mount(source=bare / "hooks", read_only=True),
         Mount(source=layout.rooms(bare).home),
-        Mount(source=tmp_path / "cache" / "lup" / "pyright"),
         *localtime,
         Mount(source=(tmp_path / "work").resolve(), read_only=True),
     ]

@@ -26,6 +26,18 @@ the selected modules name (`docs/launch.md`, *The image*):
   room, beside the base's `C.UTF-8` (checked in a room: `locale -a` lists it);
 - the package cache is emptied in the same step, so the layer keeps none.
 
+Where the declaration holds a `PyrightSource`, as lup's own does, a second step
+puts pyright's source in the image, for the engine's build in the room
+(`lup_dev/pyright_source.py`): cloned at the release the launch's worktree's
+`uv.lock` pins, its dependencies installed by pnpm from its lockfile, in a home
+of the step's own holding the package age as a room's pnpm settings hold it
+(`PnpmManager.aged`), that home and what pnpm downloaded removed in the same
+step, and the release marked whole last. A step of its own, after the packages
+it runs (git, pnpm), so a change of release builds that layer alone, podman
+keeping the one before it. It runs in the image's build, inside its own
+container, never on the host, and its files are root's, so the room reads them
+and can't write them.
+
 Building goes through the library's engine, podman, which tags the image by its
 definition's digest and labels it with its project. Each build is recorded with
 its duration and size, one JSON line in lup's state, and after it the project's
@@ -38,7 +50,10 @@ from shlex import join, quote
 from typing import TYPE_CHECKING
 
 from lup.types import Model
+from lup_dev.declaration.package_managers.manager import HomeSettings
+from lup_dev.declaration.package_managers.pnpm import PnpmManager
 from lup_dev.errors import LupDevError
+from lup_dev.layout import PyrightLayout, RoomPaths
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,14 +63,17 @@ if TYPE_CHECKING:
     from lup_dev.catalog.room import RoomBase
     from lup_dev.clock import Clock
     from lup_dev.declaration.kinds import Package
+    from lup_dev.pyright_source import Fetching
 
 
 class ImageError(LupDevError):
     """A room's image that was built but can't be found among its project's images."""
 
 
-def definition(packages: list[Package], base: RoomBase) -> str:
-    r"""Return the Containerfile of a room holding `packages`, on `base`.
+def definition(
+    packages: list[Package], base: RoomBase, pyright: Fetching | None = None
+) -> str:
+    r"""Return the Containerfile of a room holding `packages`, on `base`, and pyright's source where it's fetched by `pyright`.
 
     The man pages come with `man-db`, which reads them and builds their index,
     so a room without it doesn't carry them.
@@ -96,7 +114,60 @@ def definition(packages: list[Package], base: RoomBase) -> str:
         "locale-gen",
         "rm -rf /var/cache/pacman/pkg/*",
     ]
-    return f"FROM {base.image}\nRUN " + " \\\n    && ".join(steps) + "\n"
+    carried = [] if pyright is None else [fetched(pyright)]
+    return "".join([f"FROM {base.image}\n", instruction(steps), *carried])
+
+
+def instruction(steps: list[str]) -> str:
+    """Return one `RUN` instruction running `steps` in turn, each only once the one before succeeded."""
+    return "RUN " + " \\\n    && ".join(steps) + "\n"
+
+
+def fetched(fetching: Fetching, kept: PyrightLayout | None = None) -> str:
+    r"""Return the `RUN` instruction putting pyright's source in the image, fetched by `fetching`, where `kept` keeps it: the room's image's place (`RoomPaths.pyright`) unless given.
+
+    pnpm runs in a home of the step's own, its downloads' directory, so
+    nothing it writes stays in the image beside the source, and the package age
+    is written there as a room's pnpm settings hold it, each line printed apart
+    since a Containerfile's instruction can't hold a line's end.
+
+    >>> from datetime import timedelta
+    >>> from lup_dev.pyright_source import Fetching
+    >>> print(fetched(Fetching(release="1.1.414", age=timedelta(days=3))))
+    RUN git clone --quiet --depth 1 --branch 1.1.414 https://github.com/microsoft/pyright /opt/lup/pyright/1.1.414 \
+        && cd /opt/lup/pyright/1.1.414 \
+        && mkdir -p /opt/lup/pyright/1.1.414.downloads/.config/pnpm \
+        && printf '%s\n' '# lup'"'"'s package age, from the declaration'"'"'s `Core.package_age`: a project'"'"'s own `pnpm-workspace.yaml` outranks it.' 'minimumReleaseAge: 4320' > /opt/lup/pyright/1.1.414.downloads/.config/pnpm/config.yaml \
+        && HOME=/opt/lup/pyright/1.1.414.downloads env XDG_DATA_HOME=/opt/lup/pyright/1.1.414.downloads/data XDG_CACHE_HOME=/opt/lup/pyright/1.1.414.downloads/cache XDG_STATE_HOME=/opt/lup/pyright/1.1.414.downloads/state pnpm install --frozen-lockfile --filter pyright-internal \
+        && rm -rf /opt/lup/pyright/1.1.414.downloads \
+        && echo 1.1.414 > /opt/lup/pyright/1.1.414/.lup-installed
+    <BLANKLINE>
+    """
+    place = PyrightLayout(home=RoomPaths().pyright) if kept is None else kept
+    release = fetching.release
+    source = place.release(release)
+    downloads = place.downloads(release)
+    home = downloads.home
+    aged = None if fetching.age is None else PnpmManager().aged(source, fetching.age)
+    settings = (
+        [
+            f"mkdir -p {quote(str((home / aged.path).parent))}",
+            join(["printf", "%s\\n", *aged.text.splitlines()])
+            + f" > {quote(str(home / aged.path))}",
+        ]
+        if isinstance(aged, HomeSettings)
+        else []
+    )
+    return instruction(
+        [
+            join(fetching.clone(source)),
+            f"cd {quote(str(source))}",
+            *settings,
+            f"HOME={quote(str(home))} {join(fetching.install(downloads))}",
+            f"rm -rf {quote(str(home))}",
+            f"echo {quote(release)} > {quote(str(place.installed(release)))}",
+        ]
+    )
 
 
 class Build(Model):

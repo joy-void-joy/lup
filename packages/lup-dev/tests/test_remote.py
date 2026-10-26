@@ -43,7 +43,7 @@ from lup_dev.host.protocol import (
 from lup_dev.host.service import Answerer, HostService, Program, executed
 from lup_dev.host.workers import LaunchJudge
 from lup_dev.launch.room import RoomError, RoomGit, programs, refreshed, room_git
-from lup_dev.layout import ROOM_PATH, HostLayout, LaunchLayout, LaunchSockets, Layout
+from lup_dev.layout import HostLayout, LaunchLayout, LaunchSockets, Layout, RoomPaths
 from lup_dev.private import serving as private_serving
 from lup_dev.private.withheld import Facts, Held, Machine, Withheld, kept
 from lup_dev.remote.config import Gating, room_config
@@ -1247,7 +1247,7 @@ def test_a_launch_writes_the_helper_and_puts_it_first_on_the_room_s_path(
     assert launch.helper.read_text().startswith("#!/usr/bin/env python3\n")
     assert room.env == {
         "GIT_CONFIG_GLOBAL": str(launch.gitconfig),
-        "PATH": ":".join(str(each) for each in [launch.bin, *ROOM_PATH]),
+        "PATH": ":".join(str(each) for each in [launch.bin, *RoomPaths().path]),
     }
     assert room.mounts == [
         Mount(source=launch.bin, read_only=True),

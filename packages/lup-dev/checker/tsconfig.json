@@ -1,6 +1,7 @@
 {
-    // `pyright` links to pyright's source at the release the gate pins, kept in a
-    // cache outside the repository (`build.py`). The rule table lives with lup's
+    // `pyright` links to pyright's source at the release the gate pins, kept outside
+    // the repository: on the host in lup's cache, in a room in its image or its
+    // project's rooms' directory (`build.py`). The rule table lives with lup's
     // other policy data, in `lup_dev/catalog/`; it reaches the engine's helpers as
     // `checker/…`, and the engine reaches it as `catalog/…`. The build hands this file
     // to the bundler explicitly: the bundler otherwise looks for the one nearest each

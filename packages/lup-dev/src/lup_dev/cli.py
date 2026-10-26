@@ -214,12 +214,12 @@ from lup_dev.launch.trust import (
     trusted,
 )
 from lup_dev.layout import (
-    ROOM_SOCKETS,
     CheckoutLayout,
     GitDirectoryLayout,
     HostLayout,
     LaunchLayout,
     Layout,
+    RoomPaths,
 )
 from lup_dev.listing import given, latest, many, unlisted
 from lup_dev.merging import Merging, merged
@@ -1839,7 +1839,6 @@ def launched(
         room = maintaining_room(
             declared.resolved,
             worktree,
-            launcher.layout,
             launcher.terminal,
             environments,
             neighbours=neighbours,
@@ -1935,7 +1934,7 @@ def launched(
                                 *hiding.mounts,
                                 *git.mounts,
                                 *ages.mounts,
-                                Mount(source=sockets, target=ROOM_SOCKETS),
+                                Mount(source=sockets, target=RoomPaths().sockets),
                                 receives,
                             ],
                             "env": {**room.env, **git.env, **clipboard.env},

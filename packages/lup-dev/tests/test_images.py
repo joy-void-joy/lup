@@ -6,6 +6,7 @@ time passes on the test's clock.
 
 import json
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,11 +19,11 @@ from lup_dev.catalog.room import RoomBase
 from lup_dev.declaration.kinds import Package
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import resolve
-from lup_dev.launch.images import Build, ImageError, build, definition
+from lup_dev.launch.images import Build, ImageError, build, definition, fetched
+from lup_dev.layout import PyrightLayout
+from lup_dev.pyright_source import Fetching
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from conftest import FakeClock
 
 IMAGE = Image(definition="FROM archlinux\n", project="/srv/lup.git")
@@ -119,6 +120,61 @@ def test_a_room_without_man_db_keeps_no_man_pages() -> None:
 def test_a_name_the_shell_would_read_is_quoted() -> None:
     text = definition([Package(name="a b;rm", why="hostile")], RoomBase())
     assert "-- 'a b;rm' \\" in text
+
+
+TOOLS = [
+    Package(name="git", why="clones pyright's source"),
+    Package(name="pnpm", why="installs pyright's dependencies"),
+]
+
+
+def test_pyright_s_source_is_a_step_of_its_own_after_the_packages() -> None:
+    fetching = Fetching(release="1.1.414", age=timedelta(days=3))
+
+    text = definition(TOOLS, RoomBase(), fetching)
+
+    assert text == definition(TOOLS, RoomBase()) + fetched(fetching)
+    assert [line.split()[0] for line in text.splitlines() if line[0] != " "] == [
+        "FROM",
+        "RUN",
+        "RUN",
+    ]
+
+
+def test_another_release_changes_pyright_s_step_alone() -> None:
+    one = definition(TOOLS, RoomBase(), Fetching(release="1.1.414")).split("RUN ")
+    other = definition(TOOLS, RoomBase(), Fetching(release="1.1.415")).split("RUN ")
+
+    assert one[:2] == other[:2]
+    assert one[2] != other[2]
+
+
+def test_pyright_s_step_installs_in_a_home_of_its_own_under_the_package_age() -> None:
+    place = PyrightLayout(home=Path("/opt/lup/pyright"))
+    fetching = Fetching(release="1.1.414", age=timedelta(hours=36))
+
+    text = fetched(fetching, place)
+
+    steps = text.removeprefix("RUN ").removesuffix("\n").split(" \\\n    && ")
+    home = place.downloads("1.1.414").home
+    assert steps[2:4] == [
+        f"mkdir -p {home}/.config/pnpm",
+        (
+            "printf '%s\\n' '# lup'\"'\"'s package age, from the declaration'\"'\"'s "
+            "`Core.package_age`: a project'\"'\"'s own `pnpm-workspace.yaml` outranks it.' "
+            f"'minimumReleaseAge: 2160' > {home}/.config/pnpm/config.yaml"
+        ),
+    ]
+    install = fetching.install(place.downloads("1.1.414"))
+    assert steps[4] == f"HOME={home} {' '.join(install)}"
+    assert steps[5:] == [
+        f"rm -rf {home}",
+        "echo 1.1.414 > /opt/lup/pyright/1.1.414/.lup-installed",
+    ]
+
+
+def test_a_room_not_building_the_engine_carries_no_pyright() -> None:
+    assert "pyright" not in definition(resolve(Project()).packages, RoomBase())
 
 
 class Script:

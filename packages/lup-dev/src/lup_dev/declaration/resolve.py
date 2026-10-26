@@ -20,7 +20,9 @@ hold it, by the kind's type (`docs/declaration.md`, *Resolving it*):
   declaration set, which a launch imposes over the person's own, and the limits
   on the operator's credentials from the one holding them, `Core` too;
 - the package age is `Core`'s own field, read from it by name, since a
-  duration isn't a kind: another module's `timedelta` would be its own setting.
+  duration isn't a kind: another module's `timedelta` would be its own setting;
+- pyright's source is in the room's image where any module holds a
+  `PyrightSource`, as lup's own `LupDevelopment` does.
 
 Rule selections are kept as recorded, one per module beside the module's own
 default, for the engine to resolve.
@@ -56,6 +58,7 @@ from lup_dev.declaration.kinds import (
     Package,
     Packages,
     Paths,
+    PyrightSource,
     Pytest,
     RemovedTools,
     Repositories,
@@ -259,6 +262,9 @@ class Resolved(Model):
     """The modules whose own data directory each room mounts."""
     looks: Looks = Looks()
     """The fold kinds, tones and drawers the modules' views declare."""
+    pyright_source: PyrightSource | None = None
+    """pyright's source in the room's image, for the engine's build in the room,
+    where a module holds it; none otherwise."""
 
 
 def parts[K](modules: list[Module], kind: type[K]) -> list[Part[K]]:
@@ -640,6 +646,9 @@ def resolve(project: Project) -> Resolved:
             )
             for part in parts(modules, Mounted)
         ],
+        pyright_source=next(
+            (part.value for part in parts(modules, PyrightSource)), None
+        ),
     )
 
 

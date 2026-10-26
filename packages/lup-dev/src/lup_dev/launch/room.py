@@ -25,9 +25,6 @@ each at its host path (`docs/launch.md`, *The mounts*):
 - over each worktree's own environment, the host's (`Runner.venv`), where it's
   there as the room starts, an empty directory read-only, so the room neither
   reads nor writes what the operator's own `uv run` runs (`launch/hidden.py`);
-- pyright's source in lup's cache, read-write, which the gate builds the engine
-  from. Only that part: the cache holds the CLIs rooms run, which a room
-  mustn't rewrite;
 - the configuration of the operator's editor, read-only, where it exists, so
   Ctrl+G opens it as the operator knows it;
 - `/etc/localtime`, read-only, so the room's clock reads in the operator's zone;
@@ -43,12 +40,17 @@ each at its host path (`docs/launch.md`, *The mounts*):
 
 Its variables are the runner's, the git identity, read from the host's git as
 `GIT_AUTHOR_*` and `GIT_COMMITTER_*` since `~/.gitconfig` isn't mounted, the
-terminal's (`TerminalVariables`), and `XDG_CACHE_HOME` as the host's lup has it
-(`Layout.cache`'s parent), so the engine's build in the room finds pyright's
-source where it's mounted: the build takes the path from the same layout. What
-the launch adds is the terminal compile's
-and the launch command's: the launch's directory, its socket directory, the CLI
-and the runtime's home.
+terminal's (`TerminalVariables`). What the launch adds is the terminal
+compile's and the launch command's: the launch's directory, its socket
+directory, the CLI and the runtime's home.
+
+pyright's source, for the engine's build in the room, is the room's own, never
+the host's cache, which no room mounts: where the declaration holds a
+`PyrightSource`, the image carries it at the release the worktree's `uv.lock`
+pins (`launch/images.py`), and the room's variables name its project's rooms'
+directory, where the build fetches a release the image doesn't carry
+(`lup_dev/pyright_source.py`), pnpm held there to the package age as every
+package manager in the room is.
 
 The operator's editor is the one `$VISUAL` names, else `$EDITOR`, which Ctrl+G
 opens (`OperatorsEditor`): where lup knows it (`Editors`), the room installs its
@@ -117,13 +119,13 @@ from lup_dev.launch.hidden import Hidden, removed
 from lup_dev.launch.images import definition
 from lup_dev.layout import (
     LOCALTIME,
-    ROOM_LENT,
-    ROOM_PATH,
-    ROOM_SOCKETS,
+    CheckoutLayout,
     LaunchLayout,
     LaunchSockets,
+    RoomPaths,
     RoomsLayout,
 )
+from lup_dev.pyright_source import Fetching, PyrightSourceError, Sources, pinned
 from lup_dev.remote import helper
 from lup_dev.remote.config import Gating, room_config
 
@@ -443,7 +445,6 @@ def apart(other: RelatedRepository, mounts: list[Mount]) -> None:
 def maintaining_room(
     resolved: Resolved,
     worktree: Path,
-    layout: Layout,
     terminal: TerminalVariables,
     environments: RoomEnvironments,
     *,
@@ -463,7 +464,9 @@ def maintaining_room(
     last. Raise `RoomError` where the
     repository's tree would hold the operator's home, where the operator's
     editor isn't a command line, where the environment's interpreter doesn't
-    resolve under the room's mounts, or where another repository overlaps them.
+    resolve under the room's mounts, where another repository overlaps them, or
+    where the image carries pyright's source and the worktree's lock pins no
+    one plain release of it.
     """
     home = Path.home()
     editor = OperatorsEditor.of(terminal).known
@@ -498,8 +501,6 @@ def maintaining_room(
 
     hooks = held.git / "hooks"
     hooks.mkdir(exist_ok=True)
-    pyright = layout.pyright_source
-    pyright.mkdir(parents=True, exist_ok=True)
     mounts = [
         Mount(source=held.tree),
         *([] if held.git == held.tree else [Mount(source=held.git)]),
@@ -507,7 +508,6 @@ def maintaining_room(
         Mount(source=hooks, read_only=True),
         *needs.mounts,
         *environments.mounts,
-        Mount(source=pyright),
         *(
             Mount(source=home / path, read_only=True)
             for path in ([] if editor is None else editor.configuration)
@@ -541,8 +541,12 @@ def maintaining_room(
     packages = resolved.packages
     if editor is not None and editor.package not in [each.name for each in packages]:
         packages = [*packages, Package(name=editor.package, why=editor.why)]
+    pyright = None if resolved.pyright_source is None else carried(resolved, worktree)
     return Container(
-        image=Image(definition=definition(packages, RoomBase()), project=str(held.git)),
+        image=Image(
+            definition=definition(packages, RoomBase(), pyright),
+            project=str(held.git),
+        ),
         mounts=[
             *mounts,
             *(
@@ -557,10 +561,27 @@ def maintaining_room(
             **environments.env,
             **identity,
             **terminal.passed(),
-            "XDG_CACHE_HOME": str(layout.cache.parent),
+            **({} if pyright is None else Sources.room(environments.rooms.pyright)),
         },
         network="host",
     )
+
+
+def carried(resolved: Resolved, worktree: Path) -> Fetching:
+    """Return how the room's image fetches pyright's source: at the release the worktree's `uv.lock` pins, held to the declaration's package age.
+
+    Raise `RoomError` where the lock pins no one plain release.
+    """
+    try:
+        release = pinned(CheckoutLayout(root=worktree).lock)
+    except PyrightSourceError as failed:
+        message = (
+            "The room's image carries pyright's source, for the engine's build in "
+            f"the room, at the release the worktree's lock pins, but {failed}. Pin "
+            "it once in the worktree's `uv.lock`, or launch from a worktree that does"
+        )
+        raise RoomError(message) from failed
+    return Fetching(release=release, age=resolved.package_age)
 
 
 class RoomEnvironments(Model):
@@ -741,7 +762,9 @@ class RoomGit(Model):
         """The room's variables for git: the configuration in place of the operator's, and the helper's directory first on the `PATH`."""
         return {
             "GIT_CONFIG_GLOBAL": str(self.launch.gitconfig),
-            "PATH": ":".join(str(each) for each in [self.launch.bin, *ROOM_PATH]),
+            "PATH": ":".join(
+                str(each) for each in [self.launch.bin, *RoomPaths().path]
+            ),
         }
 
     def write(self) -> None:
@@ -749,7 +772,7 @@ class RoomGit(Model):
         room_config(
             self.repository,
             self.launch.gitconfig,
-            LaunchSockets(directory=ROOM_SOCKETS).request,
+            LaunchSockets(directory=RoomPaths().sockets).request,
             self.gating,
         )
         self.launch.bin.mkdir(parents=True, exist_ok=True)
@@ -848,7 +871,7 @@ def receiving(podman: Podman, launch: LaunchLayout) -> Mount:
         each.mkdir(parents=True, exist_ok=True)
     podman.shared(launch.lent)
     podman.private(launch.stage)
-    return Mount(source=launch.lent, target=ROOM_LENT, receives=True)
+    return Mount(source=launch.lent, target=RoomPaths().lent, receives=True)
 
 
 def lend(
@@ -859,7 +882,7 @@ def lend(
     read_only: bool,
     name: str | None = None,
 ) -> Path:
-    """Lend the host's directory `source` to a launch's running room, and return where the room finds it: under `ROOM_LENT`, by `name`, the directory's own by default, numbered where that's taken.
+    """Lend the host's directory `source` to a launch's running room, and return where the room finds it: under `RoomPaths.lent`, by `name`, the directory's own by default, numbered where that's taken.
 
     Raise `RoomError` where the launch's room can't receive it, started before
     rooms could.
@@ -878,7 +901,7 @@ def lend(
     at = launch.lent / free
     at.mkdir()
     podman.lend(source, at, launch.stage, read_only=read_only)
-    return ROOM_LENT / free
+    return RoomPaths().lent / free
 
 
 def unlent(podman: Podman, launch: LaunchLayout) -> None:
