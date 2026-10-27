@@ -418,6 +418,7 @@ class Machine:
             runtime=tmp_path / "run",
             cache=tmp_path / "cache" / "lup",
             data=tmp_path / "data",
+            config=tmp_path / "config" / "lup",
         )
         self.sockets = tmp_path / "run" / "host" / "launches" / "this"
         self.sockets.mkdir(parents=True)

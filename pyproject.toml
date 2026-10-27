@@ -86,8 +86,9 @@ task-tags = ["lup"]
 # `TYPE_CHECKING` block. Models derive from lup's bases (`lup.types`); the host
 # service's requests and replies are models a module declares beside its handler,
 # in a module of its own, where ruff can't follow their bases; so is a tool's input
-# narrowed by when what it lists was made (`lup_dev.listing.Span`), and a module of
-# a declaration, whose parts are its fields (`lup_dev.declaration.module.Module`).
+# narrowed by when what it lists was made (`lup_dev.listing.Span`), a module of a
+# declaration, whose parts are its fields (`lup_dev.declaration.module.Module`), and
+# a declaration's layer of settings, a profile among them (`lup_dev.declaration.grammar.Layer`).
 runtime-evaluated-base-classes = [
     "pydantic.BaseModel",
     "pydantic_settings.BaseSettings",
@@ -98,6 +99,7 @@ runtime-evaluated-base-classes = [
     "lup_dev.host.protocol.Reply",
     "lup_dev.listing.Span",
     "lup_dev.declaration.module.Module",
+    "lup_dev.declaration.grammar.Layer",
 ]
 # FastAPI reads a route's parameter and return types at runtime: a stream's
 # items, its body's union. Moved under `TYPE_CHECKING`, a stream is read as a

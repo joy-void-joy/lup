@@ -1859,9 +1859,14 @@ def test_lup_dev_trust_says_so_in_one_line_when_nothing_changed(
 ) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
-    state = Layout(state=tmp_path / "xdg" / "lup", data=tmp_path / "xdg-data" / "lup")
+    state = Layout(
+        state=tmp_path / "xdg" / "lup",
+        data=tmp_path / "xdg-data" / "lup",
+        config=tmp_path / "xdg-config" / "lup",
+    )
     first = trusting(lup, kit, yes()).model_copy(update={"layout": state})
     outcome = first.ensure()
     assert isinstance(outcome, Trusted)
@@ -1878,6 +1883,7 @@ def test_lup_dev_trust_refuses_inside_a_session(
     lup: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     monkeypatch.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
     monkeypatch.chdir(lup)
     result = CliRunner().invoke(cli.app, ["trust"])
@@ -2021,11 +2027,15 @@ def machine(
     xdg = tmp_path_factory.mktemp("xdg")
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg / "run"))
     monkeypatch.setenv("XDG_STATE_HOME", str(xdg / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg / "config"))
     monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
     monkeypatch.setattr(cli, "SystemClock", lambda: clock)
     return Layout(
-        state=xdg / "state" / "lup", runtime=xdg / "run" / "lup", data=xdg / "data"
+        state=xdg / "state" / "lup",
+        runtime=xdg / "run" / "lup",
+        data=xdg / "data",
+        config=xdg / "config" / "lup",
     )
 
 
