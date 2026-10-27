@@ -115,7 +115,7 @@ from lup_dev.host.records import Called, Recorded
 from lup_dev.host.rooms import OwnLaunch, OwnLaunches, RoomRoute, ShowOwnLaunch
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
 from lup_dev.host.watch import Changes
-from lup_dev.host.workers import WorkerJudge, Workers
+from lup_dev.host.workers import WorkerJudge, Workers, WorkersAsking
 from lup_dev.inbox.bearings import RepositoryBearings
 from lup_dev.inbox.citations import plainly
 from lup_dev.inbox.delivery import (
@@ -573,6 +573,7 @@ def host_serve(context: typer.Context) -> None:
             RoomRoute.to(OwnLaunches()),
         ],
         modules=workers,
+        asking=WorkersAsking(workers=workers),
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
         podman=podman,

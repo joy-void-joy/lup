@@ -48,7 +48,7 @@ from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec
 from lup.types import JsonObject, Model, MutableModel
 from lup_dev.host.courier import Conversation
-from lup_dev.host.protocol import HostError, Refused, Register, Reply, Request
+from lup_dev.host.protocol import HostError, Looks, Refused, Register, Reply, Request
 from lup_dev.layout import HostLayout
 
 if TYPE_CHECKING:
@@ -75,7 +75,7 @@ class Listing(Request, reads=True):
 
 
 class Offered(Reply):
-    """What the repository's modules serve: each tool, each kind of the room's requests they answer, and each event their hooks run at."""
+    """What the repository's modules serve: each tool, each kind of the room's requests they answer, each event their hooks run at, and how their views look."""
 
     kind: Literal["module-offered"] = "module-offered"
     tools: list[ToolSpec] = []
@@ -83,6 +83,9 @@ class Offered(Reply):
     events: list[EventName] = []
     """Each event their hooks run at, by its name (`lup.events`): the service
     tells them those alone."""
+    looks: Looks = Looks()
+    """Their views' fold kinds, tones and drawers, as the declaration resolves
+    them: the host keeps them for the listing, which the page draws views by."""
 
 
 class Happening(Request, reads=False):
@@ -323,7 +326,7 @@ class Holder(Model):
 
 
 class RepositoryAsking(ABC):
-    """Answers a request the operator puts to a repository's process, with no launch: a view the dashboard shows, a command run on the host."""
+    """Answers a request the operator puts to a repository's process, with no launch, a view the dashboard shows, and says how each repository's views look."""
 
     @abstractmethod
     async def asked(self, repository: Path, request: Request) -> Reply:
@@ -332,6 +335,10 @@ class RepositoryAsking(ABC):
         Raise `HostError` where nothing is approved for the repository, or its
         process couldn't answer, saying why.
         """
+
+    @abstractmethod
+    def looks(self) -> dict[Path, Looks]:
+        """Return how each repository's modules' views look, by its git directory, as its process said when it last started: none for one whose process hasn't started."""
 
 
 class Worker(MutableModel, arbitrary_types_allowed=True):
@@ -372,6 +379,9 @@ class Processes(MutableModel, arbitrary_types_allowed=True):
     stopping: asyncio.Task[None] | None = None
     """Ends its processes once nothing has held them for a while
     (`Workers.idle`); none while something holds them."""
+    looks: Looks | None = None
+    """How its modules' views look, as its process said when it last started,
+    kept once it ends; none before one started."""
 
     def taken(self) -> list[Worker]:
         """Take every one of its processes off it, to end them: none answers its requests from now on."""
@@ -457,6 +467,14 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     def processes(self, repository: Path) -> Processes:
         """Return the processes of the repository whose git directory is `repository`."""
         return self.repositories.setdefault(repository, Processes())
+
+    def looks(self) -> dict[Path, Looks]:
+        """Return how each repository's modules' views look, by its git directory, as its process said when it last started."""
+        return {
+            repository: processes.looks
+            for repository, processes in self.repositories.items()
+            if processes.looks is not None
+        }
 
     async def hold(self, repository: Path, holder: Holder) -> None:
         """Count `holder` among what holds `repository`'s process: it runs, or starts at the next request, until nothing has held it for `idle`."""
@@ -589,6 +607,7 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
             worker = await self.readied(repository, argv, process, socket, approval)
         finally:
             processes.starting = None
+        processes.looks = worker.offered.looks
         self.say(
             f"{repository}: its modules serve {len(worker.offered.tools)} tools "
             f"and {len(worker.offered.kinds)} kinds of the room's requests, and its "
@@ -714,3 +733,7 @@ class WorkersAsking(Model, RepositoryAsking, arbitrary_types_allowed=True):
     @override
     async def asked(self, repository: Path, request: Request) -> Reply:
         return await self.workers.asked(repository, request)
+
+    @override
+    def looks(self) -> dict[Path, Looks]:
+        return self.workers.looks()

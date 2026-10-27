@@ -97,6 +97,7 @@ from lup_dev.host.protocol import (
     HostError,
     Listed,
     ListLaunches,
+    Looks,
     Refused,
     Register,
     Registered,
@@ -125,6 +126,7 @@ from lup_dev.host.workers import (
     Passed,
     Relayed,
     Relaying,
+    RepositoryAsking,
     Sent,
 )
 from lup_dev.layout import HostLayout
@@ -965,6 +967,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             tools=[spec for spec in offered.tools if spec.name not in names],
             kinds=[kind for kind in offered.kinds if kind not in kinds],
             events=offered.events,
+            looks=offered.looks,
         )
 
     def background(self, running: Coroutine[None, None, None]) -> None:
@@ -1677,10 +1680,16 @@ class Ending(Model, Handler[Unregister]):
         return Done()
 
 
-class Listing(Model, Reading[ListLaunches]):
-    """Answers `ListLaunches`: each launch served, as it was registered; for a room, its repository's alone, with whether each one's container runs."""
+class Listing(Model, Reading[ListLaunches], arbitrary_types_allowed=True):
+    """Answers `ListLaunches`: each launch served, as it was registered, and how each repository's views look; for a room, its repository's alone, with whether each one's container runs."""
 
     launches: Launches
+    asking: RepositoryAsking | None = None
+    """Says how each repository's views look; none says nothing of them."""
+
+    def looks(self) -> dict[Path, Looks]:
+        """Return how each repository's views look, as its process last said."""
+        return {} if self.asking is None else self.asking.looks()
 
     @override
     def request(self) -> type[ListLaunches]:
@@ -1695,6 +1704,7 @@ class Listing(Model, Reading[ListLaunches]):
             talkers={
                 each.launch.launch: self.launches.talkers(each) for each in served
             },
+            looks=self.looks(),
         )
 
     @override
@@ -1728,6 +1738,11 @@ class Listing(Model, Reading[ListLaunches]):
             running={
                 each.launch.launch: await asyncio.to_thread(runs, each.launch.container)
                 for each in served
+            },
+            looks={
+                place: looks
+                for place, looks in self.looks().items()
+                if place == repository
             },
         )
 
@@ -1790,6 +1805,10 @@ class HostService(Model, arbitrary_types_allowed=True):
     modules: LaunchModules | None = None
     """Serves each launch's modules, their tools and their answers to the room's
     requests, in its repository's process; none serves the core's alone."""
+    asking: RepositoryAsking | None = None
+    """Asks each repository's process with no launch, and says how each
+    repository's views look, for the listing (`WorkersAsking`); none says
+    nothing of them."""
     line_limit: int = 16 * 1024 * 1024
     """The longest line lup's tool server reads, one MCP message: well above
     asyncio's 64 KiB, which a long message to the operator could pass."""
@@ -1904,7 +1923,7 @@ class HostService(Model, arbitrary_types_allowed=True):
         own = [
             Route.to(Registering(launches=launches)),
             Route.to(Ending(launches=launches)),
-            Route.reading(Listing(launches=launches)),
+            Route.reading(Listing(launches=launches, asking=self.asking)),
             Route.to(Renaming(launches=launches)),
             Route.to(HoldingSetting(launches=launches)),
             Route.reading(HoldingShowing(launches=launches)),

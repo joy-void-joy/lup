@@ -68,6 +68,7 @@ from lup_dev.host.protocol import (
     Limits,
     Listed,
     ListLaunches,
+    Looks,
     Refused,
     Register,
     Registered,
@@ -89,7 +90,12 @@ from lup_dev.host.service import (
     Route,
     executed,
 )
-from lup_dev.host.workers import LaunchJudge, LaunchModules, Offered
+from lup_dev.host.workers import (
+    LaunchJudge,
+    LaunchModules,
+    Offered,
+    RepositoryAsking,
+)
 from lup_dev.layout import CopyLayout, HostLayout, Layout
 from lup_dev.settings import LupDevSettings
 
@@ -270,6 +276,7 @@ def service(
     clock: Clock | None = None,
     companions: list[Companion] | None = None,
     podman: Podman | None = None,
+    asking: RepositoryAsking | None = None,
 ) -> HostService:
     built = HostService(
         layout=layout,
@@ -281,6 +288,7 @@ def service(
         room_routes=room_routes or [],
         tools=tools or [],
         modules=modules,
+        asking=asking,
         refresh=refresh,
         companions=companions or [],
         podman=podman,
@@ -1609,6 +1617,39 @@ def test_a_watch_answers_at_once_then_again_each_time_its_reply_changes(
     assert names(first) == []
     assert names(second) == ["one"]
     assert names(third) == ["renamed"]
+
+
+class Looking(RepositoryAsking):
+    """Says how two repositories' views look, and answers nothing it's asked."""
+
+    def __init__(self, looks: dict[Path, Looks]) -> None:
+        self.kept = looks
+
+    @override
+    async def asked(self, repository: Path, request: Request) -> Reply:
+        message = "nothing is asked of this stand-in"
+        raise HostError(message)
+
+    @override
+    def looks(self) -> dict[Path, Looks]:
+        return self.kept
+
+
+def test_the_listing_says_how_each_repository_s_views_look_and_a_room_s_its_own(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    ours = Looks(tones=[lup.Tone(name="warm", colour="orange")])
+    theirs = Looks(tones=[lup.Tone(name="cold", colour="info")])
+    asking = Looking({tmp_path / ".git": ours, tmp_path / "other.git": theirs})
+    own = client(layout, clock)
+    with served(service(layout, Judge(), said, asking=asking)):
+        own.register(launch(tmp_path, "one", "first"))
+        listed = own.listed()
+        room = Listed.model_validate_json(
+            send(layout.launch("one").request, ListLaunches().model_dump_json())
+        )
+    assert listed.looks == {tmp_path / ".git": ours, tmp_path / "other.git": theirs}
+    assert room.looks == {tmp_path / ".git": ours}
 
 
 def test_a_hook_reaches_a_watch_each_conversation_saying_what_its_doing(

@@ -266,7 +266,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
         return related_of(self.resolved.repositories, self.repository)
 
     def offered(self) -> Offered:
-        """Return what the modules serve: each tool, each kind of request a room may send them, and each event their hooks run at."""
+        """Return what the modules serve: each tool, each kind of request a room may send them, each event their hooks run at, and how their views look."""
         listened = [
             event for each in self.resolved.served for event in listening(each.serving)
         ]
@@ -281,6 +281,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
                 if asked_by_room(each.serving, name)
             ],
             events=[event.named() for event in events() if event in listened],
+            looks=self.resolved.looks,
         )
 
     def made(self, owner: Served) -> ModuleServing:

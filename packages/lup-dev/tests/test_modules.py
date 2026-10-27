@@ -888,6 +888,13 @@ def test_a_view_placed_in_a_drawer_resolves_with_its_letter(tmp_path: Path) -> N
     assert [tone.name for tone in looks.tones] == ["warm"]
 
 
+def test_the_repository_s_process_says_how_its_views_look_as_it_lists_them(
+    tmp_path: Path,
+) -> None:
+    modules = viewing(tmp_path)
+    assert modules.offered().looks == modules.resolved.looks
+
+
 def test_the_repository_s_process_answers_a_view_for_the_operator(
     tmp_path: Path,
 ) -> None:
