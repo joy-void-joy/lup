@@ -12,7 +12,10 @@ same way (`docs/launch.md`, *The user, the process, the network*):
   runtimes would write their state;
 - each directory between the home and a mount inside it a tmpfs owned by the
   operator too: podman makes the missing ones owned by root, and uv refused a
-  root-owned `~/.cache`;
+  root-owned `~/.cache`. Not one inside another bind mount, a worktree above
+  its hidden `.venv`: that's the host's directory, which a tmpfs would cover
+  with a copy of it. Each is `notmpcopyup`, so none ever copies what's under
+  it: the image's `/home` is empty, and nothing is lost;
 - with a terminal, `-it` and no detach keys, so Ctrl+P reaches the program rather
   than podman, whose default detach sequence starts with it;
 - no log driver, so the session's output isn't kept in podman's logs, which go to
@@ -29,6 +32,10 @@ What this relies on, measured with rootless podman 6.1.3 (`docs/field-notes.md`,
 - a tmpfs mounted with `U=true` and `tmpfs-mode=0700` is owned by the operator
   under keep-id, and runs programs (unlike `--tmpfs`, whose default is `noexec`),
   while a directory podman makes for a mount inside it is owned by root;
+- a tmpfs inside a bind mount is filled with a copy of what the mount holds at
+  its path, unless it's `notmpcopyup`: one over each directory above the files
+  hidden in the related repositories took the host's memory (podman 6.1.4,
+  `docs/field-notes.md`, *A tmpfs inside a bind mount*);
 - `podman build --file -` reads the Containerfile from its input, with the
   context given apart; `podman image exists` answers 0 or 1;
 - `podman images --format json` lists each image's `Id`, `Names`, `Created`,
@@ -216,12 +223,17 @@ class Podman(Model, ContainerEngine):
             mount.destination if isinstance(mount, Mount) else mount.target
             for mount in container.mounts
         ]
+        bound = [
+            mount.destination for mount in container.mounts if isinstance(mount, Mount)
+        ]
         between = sorted(
             dict.fromkeys(
                 parent
                 for target in targets
                 for parent in target.parents
-                if parent != home and parent.is_relative_to(home)
+                if parent != home
+                and parent.is_relative_to(home)
+                and not any(parent.is_relative_to(each) for each in bound)
             )
         )
         owned = [home, *(path for path in between if path not in targets)]
@@ -271,6 +283,7 @@ class Podman(Model, ContainerEngine):
                         f"destination={path}",
                         "tmpfs-mode=0700",
                         "U=true",
+                        "notmpcopyup",
                     ]
                 )
                 for path in owned
