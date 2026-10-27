@@ -60,7 +60,7 @@ from pydantic import AfterValidator
 from lup.programs import Ran
 from lup.publishing import Place, Push, Refusal, Updating, told
 from lup.types import Model, MutableModel
-from lup_dev.git import pinning
+from lup_dev.git import pinning, stray
 from lup_dev.host.protocol import Action, HostError, Limits, Register, Reply, Request
 from lup_dev.host.rooms import RoomHandler, RoomRoute
 from lup_dev.host.service import Program, executed
@@ -68,7 +68,6 @@ from lup_dev.host.workers import LaunchModules, refusals
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 
 def object_id(value: str) -> str:
@@ -270,31 +269,6 @@ class Fetched(Reply):
     """Every object asked for is in the repository's store."""
 
     kind: Literal["remote-fetched"] = "remote-fetched"
-
-
-def stray(objects: Path) -> list[Path]:
-    """List what has the object store at `objects` read objects from elsewhere: its alternates files, and every symbolic link in it.
-
-    One look covers every way measured: alternates absolute, relative or nested,
-    and a pack linked in from another repository with no alternates at all.
-    """
-    if objects.is_symlink():
-        return [objects]
-    alternates = [
-        path
-        for path in [
-            objects / "info" / "alternates",
-            objects / "info" / "http-alternates",
-        ]
-        if path.exists() or path.is_symlink()
-    ]
-    linked = [
-        directory / name
-        for directory, folders, files in objects.walk()
-        for name in [*folders, *files]
-        if (directory / name).is_symlink()
-    ]
-    return [*alternates, *linked]
 
 
 def require(action: Action, launch: Register) -> None:

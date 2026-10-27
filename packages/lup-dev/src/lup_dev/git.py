@@ -94,6 +94,34 @@ def pinning(common: Path) -> list[str]:
     return ["env", f"GIT_DIR={common}", f"GIT_COMMON_DIR={common}"]
 
 
+def stray(objects: Path) -> list[Path]:
+    """List what has the object store at `objects` read objects from elsewhere: its alternates files, and every symbolic link in it.
+
+    One look covers every way measured: alternates absolute, relative or nested,
+    and a pack linked in from another repository with no alternates at all
+    (`docs/field-notes.md`, *Host-side git in a repository the room writes*).
+    Where a room writes the store, git the host runs there reads only what it
+    holds while this lists nothing.
+    """
+    if objects.is_symlink():
+        return [objects]
+    alternates = [
+        path
+        for path in [
+            objects / "info" / "alternates",
+            objects / "info" / "http-alternates",
+        ]
+        if path.exists() or path.is_symlink()
+    ]
+    linked = [
+        directory / name
+        for directory, folders, files in objects.walk()
+        for name in [*folders, *files]
+        if (directory / name).is_symlink()
+    ]
+    return [*alternates, *linked]
+
+
 class Git(Model):
     """git, run in one place with what could run code turned off."""
 
