@@ -25,7 +25,7 @@ lup-dev sessions [--all]
 6. builds the room's image where it's missing, and compiles the session's settings and renders its guidance;
 7. looks for the files with a secret's name no commit holds as they are, in the repository's tree and each related repository mounted, and names each it hides (*Files with a secret's name*);
 8. removes the environments a crashed launch left, registers with the host service, which opens the launch's sockets, writes the settings into the launch's own directory under lup's state, and runs the container in the foreground, the CLI behind the start making the worktree's environment (*The project's environment, the room's own*);
-9. when the CLI exits, ends the registration and removes the launch's directory, its environments, and each `.venv` that appeared in a worktree while it ran, and names each file with a secret's name that appeared or changed in the repository's tree meanwhile, removing none.
+9. when the CLI exits, ends the registration and removes the launch's directory, its room's home, its environments, and each `.venv` that appeared in a worktree while it ran, and names each file with a secret's name that appeared or changed in the repository's tree meanwhile, removing none.
 
 A container starts in under a second; an image already built and a CLI already current cost nothing more.
 
@@ -67,7 +67,7 @@ A launch has an id, which never changes and under which everything of it is file
 | The editor's configuration, `/etc/localtime` | read-only | Ctrl+G opens the operator's editor as they know it, and the clock reads in their zone |
 | Each related repository, whole | read-only | *Related repositories* |
 | What's lent: `--mount`, `--mount-rw`, `/lent` | as lent | *The command* |
-| A tmpfs at the home | read-write | podman would otherwise set `HOME` to the working directory, and the CLIs would write their state into the worktree |
+| The launch's own home, `<launch>.home` beside its directory under lup's state, at the home | read-write | podman would otherwise set `HOME` to the working directory, and the CLIs would write their state into the worktree. On disk, where a tmpfs would hold what the room writes in the host's memory. Each directory and file a mount inside the home lands on is made there first, the operator's, since podman makes them root's, and nothing inside another mount (`Invocation.landings`, `packages/lup/src/lup/rooms/engine.py`). Removed as the launch ends, or by the sweep after one that crashed, its read-only directories made writable first, as Go's module cache is, following no link |
 
 Not mounted: the SSH agent, `gh`'s login, `~/.gitconfig` (it holds the operator's aliases and an LFS filter the image lacks, so the git identity is passed as variables), the rest of lup's cache, pyright's source the host builds from among it (*pyright's source*), and the rest of the home.
 

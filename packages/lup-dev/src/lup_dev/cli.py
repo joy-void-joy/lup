@@ -195,6 +195,7 @@ from lup_dev.launch.room import (
     room_git,
     unclaimed,
     unlent,
+    vacated,
 )
 from lup_dev.launch.room import repository as repository_of
 from lup_dev.launch.secrets import RoomSecrets, Search, Tree, git_directory
@@ -1630,6 +1631,7 @@ def swept(
                 say(f"Launch {each.launch} was ended already: {gone}")
                 return False
             released(podman, own, say)
+            vacated(own)
             if own.directory.is_dir():
                 shutil.rmtree(own.directory)
             rooms = layout.rooms(each.repository)
@@ -1943,6 +1945,7 @@ def launched(
                     opened = Room(
                         agent=adapter.agent(),
                         container=walled,
+                        home_source=own.room_home,
                         engine=launcher.podman,
                         before=environments.before,
                     )
@@ -1956,7 +1959,7 @@ def launched(
 
 
 def ended(launcher: Launcher, launch: str) -> None:
-    """End a launch's registration, and remove its directory.
+    """End a launch's registration, and remove its directory and its room's home.
 
     Where the host service can't end it, that's said, and the launch's record
     stays for the sweep.
@@ -1970,6 +1973,7 @@ def ended(launcher: Launcher, launch: str) -> None:
         )
     own = launcher.layout.launch(launch)
     released(launcher.podman, own, launcher.say)
+    vacated(own)
     if own.directory.is_dir():
         shutil.rmtree(own.directory)
 

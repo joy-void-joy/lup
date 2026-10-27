@@ -100,6 +100,7 @@ def test_a_run_sets_home_itself() -> None:
             command=["true"],
             workdir=Path("/srv"),
             home=Path("/home/op"),
+            home_source=Path("/srv/rooms/home"),
         )
 
 
@@ -127,6 +128,7 @@ def test_a_run_carries_the_wall_the_terminal_the_variables_and_the_mounts() -> N
         command=["/opt/clis/claude", "--resume"],
         workdir=Path("/srv/lup.git/tree/dev"),
         home=Path("/home/op"),
+        home_source=Path("/srv/rooms/home"),
         terminal=True,
     )
 
@@ -148,11 +150,7 @@ def test_a_run_carries_the_wall_the_terminal_the_variables_and_the_mounts() -> N
         "--env=TERM=xterm-256color",
         "--env=LANG=en_US.UTF-8",
         "--env=HOME=/home/op",
-        "--mount=type=tmpfs,destination=/home/op,tmpfs-mode=0700,U=true,notmpcopyup",
-        "--mount=type=tmpfs,destination=/home/op/.cache,tmpfs-mode=0700,U=true,notmpcopyup",
-        "--mount=type=tmpfs,destination=/home/op/.local,tmpfs-mode=0700,U=true,notmpcopyup",
-        "--mount=type=tmpfs,destination=/home/op/.local/share,tmpfs-mode=0700,U=true,notmpcopyup",
-        "--mount=type=tmpfs,destination=/home/op/.local/share/uv,tmpfs-mode=0700,U=true,notmpcopyup",
+        "--mount=type=bind,source=/srv/rooms/home,destination=/home/op",
         "--mount=type=bind,source=/srv/lup.git,destination=/srv/lup.git",
         "--mount=type=bind,source=/srv/lup.git/config,destination=/srv/lup.git/config,ro=true",
         "--mount=type=tmpfs,destination=/srv/lup.git/tree/other,notmpcopyup",
@@ -176,6 +174,7 @@ def test_a_run_without_a_terminal_on_its_own_network() -> None:
         command=["true"],
         workdir=Path("/srv/repo"),
         home=Path("/home/op"),
+        home_source=Path("/srv/rooms/home"),
     )
 
     command = engine.command(invocation)
@@ -197,6 +196,7 @@ def test_a_mount_receiving_what_s_mounted_later_is_a_slave() -> None:
         command=["true"],
         workdir=Path("/srv/lent"),
         home=Path("/home/op"),
+        home_source=Path("/srv/rooms/home"),
     )
     assert (
         "--mount=type=bind,source=/srv/lent,destination=/lent,bind-propagation=rslave"
@@ -259,64 +259,93 @@ def test_a_command_in_podman_s_namespace_that_fails_raises(tmp_path: Path) -> No
         engine.released(tmp_path)
 
 
-def test_a_mount_at_a_directory_inside_the_home_isnt_a_tmpfs_too() -> None:
-    engine, _ = podman()
+def test_a_run_makes_what_each_mount_inside_the_home_lands_on(tmp_path: Path) -> None:
+    home = Path("/home/op")
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    settings = tmp_path / "uv.toml"
+    settings.touch()
     invocation = Invocation(
         container=Container(
             image=IMAGE,
             mounts=[
-                Mount(source=Path("/srv/cache")),
-                Mount(source=Path("/srv/cache"), target=Path("/home/op/.cache")),
-                Mount(source=Path("/srv/uv"), target=Path("/home/op/.cache/uv")),
+                Mount(source=cache, target=home / ".cache"),
+                Mount(source=cache, target=home / ".cache" / "uv"),
+                Mount(source=settings, target=home / ".config/uv/uv.toml"),
+                Mask(target=home / ".local" / "hidden"),
+                Mount(source=tmp_path, target=Path("/srv/elsewhere")),
             ],
         ),
         command=["true"],
-        workdir=Path("/srv/cache"),
-        home=Path("/home/op"),
+        workdir=Path("/srv/elsewhere"),
+        home=home,
+        home_source=tmp_path / "room-home",
     )
 
-    owned = [
-        argument
-        for argument in engine.command(invocation)
-        if argument.startswith("--mount=type=tmpfs")
-    ]
+    assert invocation.landings == {
+        home / ".cache": True,
+        home / ".config": True,
+        home / ".config" / "uv": True,
+        home / ".config" / "uv" / "uv.toml": False,
+        home / ".local": True,
+        home / ".local" / "hidden": True,
+    }, "`~/.cache/uv` lands inside the mount at `~/.cache`"
 
-    assert owned == [
-        "--mount=type=tmpfs,destination=/home/op,tmpfs-mode=0700,U=true,notmpcopyup"
-    ]
 
-
-def test_a_directory_inside_a_bind_mount_in_the_home_isnt_a_tmpfs() -> None:
-    engine, _ = podman()
-    repository = Path("/home/op/work/lup.git")
+def test_nothing_is_made_inside_a_mount_in_the_home(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    repository = home / "work" / "lup.git"
+    (repository / "tree" / "dev" / ".venv").mkdir(parents=True)
+    hidden = tmp_path / "hidden"
+    hidden.mkdir()
     invocation = Invocation(
         container=Container(
             image=IMAGE,
             mounts=[
                 Mount(source=repository),
-                Mount(
-                    source=Path("/home/op/.lup/hidden"),
-                    target=repository / "tree/dev/.venv",
-                    read_only=True,
-                ),
-                Mask(target=repository / "tree/other/tmp"),
+                Mount(source=hidden, target=repository / "tree/dev/.venv"),
+                Mask(target=repository / "tree" / "other" / "tmp"),
             ],
         ),
         command=["true"],
-        workdir=repository / "tree/dev",
-        home=Path("/home/op"),
+        workdir=repository / "tree" / "dev",
+        home=home,
+        home_source=tmp_path / "room-home",
     )
 
-    owned = [
-        argument
-        for argument in engine.command(invocation)
-        if argument.startswith("--mount=type=tmpfs") and "U=true" in argument
-    ]
+    assert invocation.landings == {
+        home / "work": True,
+        repository: True,
+    }, "the worktree is the host's own, under the repository's mount"
 
-    assert owned == [
-        "--mount=type=tmpfs,destination=/home/op,tmpfs-mode=0700,U=true,notmpcopyup",
-        "--mount=type=tmpfs,destination=/home/op/work,tmpfs-mode=0700,U=true,notmpcopyup",
-    ], "a tmpfs over the worktree would cover it with a copy of it"
+
+def test_a_run_makes_its_home_before_podman_starts(tmp_path: Path) -> None:
+    engine, recorder = podman(exited(0))
+    settings = tmp_path / "uv.toml"
+    settings.touch()
+    home = Path("/home/op")
+    source = tmp_path / "room-home"
+    invocation = Invocation(
+        container=Container(
+            image=IMAGE,
+            mounts=[
+                Mount(source=tmp_path, target=Path("/srv/repo")),
+                Mount(source=settings, target=home / ".config/uv/uv.toml"),
+            ],
+        ),
+        command=["true"],
+        workdir=Path("/srv/repo"),
+        home=home,
+        home_source=source,
+    )
+
+    assert engine.run(invocation) == 0
+
+    assert source.stat().st_mode & 0o777 == 0o700
+    assert (source / ".config" / "uv").is_dir()
+    assert (source / ".config" / "uv" / "uv.toml").is_file()
+    [ran] = recorder.processes
+    assert f"--mount=type=bind,source={source},destination={home}" in ran.arguments
 
 
 def test_ensure_builds_a_missing_image_with_its_projects_label() -> None:
@@ -360,12 +389,15 @@ def test_ensure_refuses_when_podman_fails(exits: list[Ran]) -> None:
         engine.ensure(IMAGE)
 
 
-def test_run_returns_the_programs_status_and_refuses_podmans_own_failure() -> None:
+def test_run_returns_the_programs_status_and_refuses_podmans_own_failure(
+    tmp_path: Path,
+) -> None:
     invocation = Invocation(
         container=Container(image=IMAGE, mounts=[Mount(source=Path("/srv/repo"))]),
         command=["true"],
         workdir=Path("/srv/repo"),
         home=Path("/home/op"),
+        home_source=tmp_path / "room-home",
     )
     engine, recorder = podman(exited(3), exited(125))
 
@@ -446,6 +478,7 @@ def test_a_named_container_is_run_by_its_name_and_asked_after() -> None:
         command=["true"],
         workdir=Path("/srv/repo"),
         home=Path("/home/op"),
+        home_source=Path("/srv/rooms/home"),
     )
     command = engine.command(invocation)
 
@@ -553,6 +586,7 @@ def test_a_launch_runs_the_agents_terminal_in_the_room(
         container=Container(
             image=IMAGE, mounts=own, env={"TERM": "xterm"}, name="lup-1a2b"
         ),
+        home_source=tmp_path / "room-home",
         engine=engine,
     )
     settings = TerminalSettings(
@@ -577,6 +611,7 @@ def test_a_launch_runs_the_agents_terminal_in_the_room(
             command=[*terminal.command, "--resume"],
             workdir=worktree,
             home=tmp_path / "home",
+            home_source=tmp_path / "room-home",
             terminal=False,
         )
     ]
@@ -591,6 +626,7 @@ def test_a_launch_runs_the_cli_behind_what_the_room_starts_first(
     room = Room(
         agent=Claude(model="opus"),
         container=Container(image=IMAGE, mounts=[Mount(source=tmp_path)]),
+        home_source=tmp_path / "room-home",
         engine=engine,
         before=starting,
     )
@@ -612,6 +648,7 @@ def test_a_launch_refuses_a_working_directory_the_room_doesnt_mount(
     room = Room(
         agent=Claude(model="opus"),
         container=Container(image=IMAGE, mounts=[Mount(source=tmp_path / "elsewhere")]),
+        home_source=tmp_path / "room-home",
         engine=engine,
     )
     launch = tmp_path / "launch"
@@ -638,6 +675,7 @@ def test_a_launch_refuses_variables_the_terminal_needs_otherwise(
             mounts=[Mount(source=worktree)],
             env={"DISABLE_AUTOUPDATER": "0"},
         ),
+        home_source=tmp_path / "room-home",
         engine=RecordingEngine(),
     )
 

@@ -497,6 +497,12 @@ podman isn't in a room, so a mount over a path inside a bind mount was made in a
 - A scratch tree bound at its path, and `--mount type=tmpfs,destination=<tree>/tree,tmpfs-mode=0700,U=true` inside it: the tmpfs held a copy of the host's `tree/`, its 1 MB file among it (`df`: 984 KiB used), where the host's own directory was meant to be seen. With `notmpcopyup` it was empty. `podman-run(1)` says the copy is the default, and is made from the parent mount where the tmpfs is inside one.
 - A launch of lup's repository, which is under the operator's home, gave such a tmpfs to each directory between a mounted tree and a path hidden inside it: each worktree above its `.venv`, and each directory above each file with a secret's name in the related repositories, 6 to 9 deep in trees of 46 GB and 40 GB. Its container was created in 7.8 s, where the launch before took 0.06 s, and never started; the host's 125 GiB of memory and its swap ran out within fifteen minutes.
 
+### The room's home on disk (podman 6.1.4, crun 1.30.1, Linux 7.2.11, measured on the host 2026-10-27)
+
+A run through `Podman.run`, its home a scratch directory, with a bind mount at `~/work/repo`, an empty file over `~/work/repo/wt/.env` inside it, a directory at `~/.cache/uv` and a file at `~/.config/uv/uv.toml`, under keep-id, `--cap-drop=all` and `no-new-privileges`:
+- The run made `.cache/`, `.cache/uv/`, `.config/`, `.config/uv/`, an empty `uv.toml`, `work/` and `work/repo/` in the home, and nothing in the repository: in the room, each was the operator's, each mount landed on its own, `.env` read as empty and `uv.toml` as its source; a file the room wrote at `~/written` was on disk after, the operator's. No path on the host was uid 100000's.
+- A mount whose path is missing is made by podman, the directory and the file both uid 100000's on the host, mode 755 and 700: `missing/.env` under a bind mount, where only `podman unshare` removes them.
+
 ### Files with a secret's name (git 2.55.0, Python 3.14.0, bfs 4.1.1, Linux 7.2.11, measured in a room 2026-10-26)
 
 What `docs/launch.md`, *Files with a secret's name*, rests on, measured from a room mounting lup's repository read-write and the operator's twelve related repositories read-only, about a hundred worktrees in all, with `CorePaths.secret` as it stands. The related repositories are told apart by their shape alone. No file's content was read; scripts in the session scratchpad.

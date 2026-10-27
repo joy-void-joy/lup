@@ -518,6 +518,11 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
     machine = Machine(tmp_path, clock)
     machine.host.served.extend([dead(project), live(project)])
     (machine.layout.launch("dead").directory).mkdir(parents=True)
+    # The dead launch's room left a read-only directory in its home, as Go's
+    # module cache is.
+    left = machine.layout.launch("dead").room_home / "go" / "pkg" / "mod"
+    left.mkdir(parents=True)
+    left.chmod(0o555)
     # Environments the dead launch and one that crashed unregistered left, and
     # the live launch's own.
     rooms = machine.layout.rooms(project / ".git")
@@ -576,7 +581,9 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
         f"unregister {launch}",
     ]
     assert not machine.layout.launch("dead").directory.exists()
+    assert not machine.layout.launch("dead").room_home.exists()
     assert not machine.layout.launch(launch).directory.exists()
+    assert not machine.layout.launch(launch).room_home.exists()
     assert not machine.layout.launch(launch).lock.exists()
     [own] = [each for each in machine.host.served if each.launch == launch]
     assert own == Register(
