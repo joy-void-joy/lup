@@ -43,16 +43,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { shownOnce, tally, tokensOf, within, type ChangedFile, type Matter, type Taken } from "./code";
 import { changes, cited, moved, shownIn, type Block, type Change, type Folding, type Span } from "./comments";
-import { closedAs, folding, hiddenAt, isFolded, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, type Landing } from "./editor";
+import { closedAs, folding, hiddenAt, isFolded, mapLetters, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, type Landing } from "./editor";
 import { Following } from "./follow";
 import { mapOutlineKey, mapScopeKeys, Outline, setOutlineFocus, setOutlineToggle, setScopeJump, useNarrow, type ScopeKey } from "./Outline";
 import { Stack, type Mark as StackMark } from "./Stack";
-import { redrawn, SCOPES, structureMargin, type Labelled, type Structured } from "./rails";
+import { redrawn, structureMargin, type Labelled, type Structured } from "./rails";
 import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled, ofKind } from "./folds";
-import { FOLD_KINDS, type DrawerKind, type FoldKind, type ReviewPlace } from "./keys";
+import type { DrawerKind, FoldKind, ReviewPlace } from "./keys";
+import { kindOf, type Merged } from "./looks";
 import { markerEnd, outdated, unfound } from "./exchange";
 import { source, sourced, without, type Source } from "./markdown";
 import {
@@ -182,6 +183,8 @@ interface Props {
     order: readonly string[] | null;
     /** Tell the host where the groups go once the review is laid out: what's laid out, and what's gone from it; none where what the page shows isn't all the host's answers, as where it refused one. */
     keepOrder: ((keeping: Keeping) => void) | null;
+    /** How the views look, every repository's merged (`looks.ts`): the kinds of fold the keys take, and each repository's drawers. */
+    looks: Merged;
 }
 
 /** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it's set in under a summary or a file's header, as a file's reviewed line isn't. */
@@ -561,7 +564,7 @@ function itemNamed(header: string): string {
 
 /** The header over the review: where the cursor is, each part marked by its kind, and whom what's being written goes to; at its end, what waits below (`tallied`). */
 function Heading({ parts, tally }: { parts: Where[]; tally: string }) {
-    const letter = (kind: Where["kind"]) => FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? null;
+    const letter = (kind: Where["kind"]) => kindOf(kind)?.letter ?? null;
     // A body around another, which a narrow screen leaves out for the innermost.
     const inner = parts.findLast((each) => each.kind === "body");
     const shown = (part: Where) => (
@@ -674,6 +677,7 @@ export function Review({
     setOverview,
     order,
     keepOrder,
+    looks,
 }: Props) {
     // Where the cursor is, and whether a comment is being written: what the header says.
     const [head, setHead] = useState(0);
@@ -684,7 +688,7 @@ export function Review({
     const places = useRef<string[]>([]);
     const toldOrder = useRef<string[] | null>(null);
     const narrow = useNarrow();
-    const arranging = useMemo(() => ({ parents }), [parents]);
+    const arranging = useMemo(() => ({ parents, looks }), [parents, looks]);
     const laidOut = useMemo(
         () =>
             laid(
@@ -787,7 +791,6 @@ export function Review({
         }
         follower.attach(current);
         mapOutlineKey();
-        mapScopeKeys();
         current.dispatch({
             effects: StateEffect.appendConfig.of([
                 gutters.of([]),
@@ -806,6 +809,11 @@ export function Review({
         // Made once, with the editor.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+    // The keys each kind's letter takes, after `zf`, Space `z` `f` and `]`, as the kinds known change.
+    useEffect(() => {
+        mapLetters(looks.kinds);
+        mapScopeKeys(looks.kinds);
+    }, [looks]);
     // What's laid out now, which a click on a citation, or on the passage of the operator's words it answers, reads.
     const laidNow = useRef(laidOut);
     laidNow.current = laidOut;
@@ -1183,10 +1191,7 @@ export function Review({
                     fresh: standing.fresh,
                 };
             }
-            case "drawer":
-            case "tasks":
-            case "since":
-            case "conversation": {
+            case "drawer": {
                 const drawer = laidOut.drawers.find((each) => each.header.from === from);
                 const which = drawer?.kind ?? "since";
                 const waiting = which === "since" && / to review| flagged/.test(header);
@@ -1202,7 +1207,7 @@ export function Review({
                 return { ...plain(path.split("/").at(-1) ?? path), state };
             }
             default:
-                return null;
+                return kindOf(kind)?.drawer === true ? labelOf("drawer", from) : null;
         }
     };
     /** Go to the next or previous scope of `kind`, as `]` or `[` and its letter does: onto its header, a closed fold hiding it counting as its summary line, brought into view where it isn't (`bring`). */
@@ -1241,7 +1246,7 @@ export function Review({
     const structured = useRef<Structured>({ folds: [], label: () => null, jump: jumpTo, toggle: () => undefined });
     structured.current = {
         folds: laidFor.folds,
-        label: (fold) => (fold.kind !== undefined && SCOPES.has(fold.kind) ? labelOf(fold.kind, fold.summary.from) : null),
+        label: (fold) => (fold.kind !== undefined && fold.scope === true ? labelOf(fold.kind, fold.summary.from) : null),
         jump: jumpTo,
         toggle: (fold) => {
             const current = view.current;
@@ -1291,7 +1296,7 @@ export function Review({
             const walked = scopesOf(laidOut).filter(
                 (scope) =>
                     !laidFor.folds.some(
-                        (fold) => fold.of === scope.of && FOLD_KINDS.some((each) => each.kind === fold.kind && each.own) && isFolded(current.state, fold),
+                        (fold) => fold.of === scope.of && kindOf(fold.kind)?.whole === true && isFolded(current.state, fold),
                     ),
             );
             const target = stepped(
@@ -1462,7 +1467,7 @@ export function Review({
     };
     // Each pinned header's fold, its letter in its column and its label, as the margin has them.
     const pinnedFolds = useMemo(() => {
-        const kinded = laidFor.folds.filter((each) => each.kind !== undefined && SCOPES.has(each.kind));
+        const kinded = laidFor.folds.filter((each) => each.kind !== undefined && each.scope === true);
         const deep = depths(laidFor.folds.filter((each) => each.kind !== undefined));
         return new Map(kinded.map((each) => [each.summary.from, { fold: each, depth: deep.get(each) ?? 0 }]));
     }, [laidFor.folds]);
@@ -1472,7 +1477,7 @@ export function Review({
         if (found === undefined || kind === undefined) {
             return null;
         }
-        const letter = FOLD_KINDS.find((each) => each.kind === kind)?.letter ?? "";
+        const letter = kindOf(kind)?.letter ?? "";
         return { kind, letter, depth: found.depth, label: narrow ? null : labelOf(kind, sticky.header.from) };
     };
     // What settles what a pinned header heads, so the operator knows what would validate the file they're in.

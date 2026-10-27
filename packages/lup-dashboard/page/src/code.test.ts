@@ -1,4 +1,5 @@
 import { pythonLanguage } from "@codemirror/lang-python";
+import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { highlighted, languageOf, lines, shown, tally, tokensOf, within, type ChangedFile, type Reading } from "./code";

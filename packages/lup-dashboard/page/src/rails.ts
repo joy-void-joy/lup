@@ -17,10 +17,7 @@ import { GutterMarker, gutter, type BlockInfo } from "@codemirror/view";
 
 import type { Folding } from "./comments";
 import { around, depths } from "./folds";
-import { FOLD_KINDS, type FoldKind } from "./keys";
-
-/** The kinds of fold that are the review's scopes, a bar their full height in the margin, labelled: an agent's group, an item, a drawer, a file. */
-export const SCOPES: ReadonlySet<FoldKind> = new Set<FoldKind>(["group", "item", "tasks", "since", "conversation", "file"]);
+import { kindOf } from "./looks";
 
 /** One scope's label in the margin: what it says, how it stands before it, and after it whether it's new and what the draft does with it. */
 export interface Labelled {
@@ -47,7 +44,7 @@ export const redrawn = StateEffect.define<null>();
 /** One fold beside a line: its column, its kind, whether it's a scope's, bright, and whether the line is its first or its last. */
 interface Bar {
     depth: number;
-    kind: FoldKind;
+    kind: string;
     scope: boolean;
     bright: boolean;
     first: boolean;
@@ -57,7 +54,7 @@ interface Bar {
 /** One fold's letter on its summary line, outlined where it's folded, with its label where it's a scope's. */
 interface Mark {
     depth: number;
-    kind: FoldKind;
+    kind: string;
     closed: boolean;
     at: number;
     label: Labelled | null;
@@ -89,7 +86,7 @@ class Beside extends GutterMarker {
             const letter = document.createElement("span");
             letter.className = `fold-mark fold-${mark.kind}${mark.closed ? " is-folded" : ""}`;
             letter.style.setProperty("--depth", `${mark.depth}`);
-            letter.textContent = FOLD_KINDS.find((each) => each.kind === mark.kind)?.letter ?? "";
+            letter.textContent = kindOf(mark.kind)?.letter ?? "";
             letter.title = `${mark.closed ? "folded" : "open"}: ${mark.kind} (a click ${mark.closed ? "opens" : "closes"} it)`;
             letter.dataset["fold"] = mark.key;
             cell.append(letter);
@@ -154,7 +151,7 @@ function placedOf(folds: readonly Folding[]): Placed {
     // The scopes, each inside the one before it that holds it, from its summary line to its last.
     const roots: Nested[] = [];
     const holding: Nested[] = [];
-    const scopes = kinded.filter((each) => each.kind !== undefined && SCOPES.has(each.kind)).sort((a, b) => a.summary.from - b.summary.from || b.to - a.to);
+    const scopes = kinded.filter((each) => each.scope === true).sort((a, b) => a.summary.from - b.summary.from || b.to - a.to);
     for (const fold of scopes) {
         while (holding.length > 0 && (holding.at(-1)?.fold.to ?? 0) < fold.summary.from) {
             holding.pop();
@@ -225,7 +222,7 @@ function besideLine(state: EditorState, structured: Structured, line: BlockInfo,
     }
     // Each other fold the cursor is in, down its lines.
     for (const fold of chained.chain) {
-        if (fold.kind === undefined || SCOPES.has(fold.kind) || line.to < fold.summary.from || line.from > fold.to) {
+        if (fold.kind === undefined || fold.scope === true || line.to < fold.summary.from || line.from > fold.to) {
             continue;
         }
         bars.push({ depth: deep.get(fold) ?? 0, kind: fold.kind, scope: false, bright: true, first: line.from <= fold.summary.from, last: line.to >= fold.to });
@@ -239,7 +236,7 @@ function besideLine(state: EditorState, structured: Structured, line: BlockInfo,
                       kind: fold.kind,
                       closed: folded(state, fold),
                       at: fold.summary.from,
-                      label: labels && SCOPES.has(fold.kind) ? structured.label(fold) : null,
+                      label: labels && fold.scope === true ? structured.label(fold) : null,
                       key: fold.key,
                   },
               ],

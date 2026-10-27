@@ -2,6 +2,7 @@ import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState, type Range, type TransactionSpec } from "@codemirror/state";
 import type { Decoration } from "@codemirror/view";
 import { NodeProp } from "@lezer/common";
+import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import type { Span } from "./comments";

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { FOLD_KINDS, REVIEW_KEYS, barOf, chords, type ReviewPlace } from "./keys";
+import { LOOKS } from "./fixtures/looks";
+import { barOf, chords, reviewKeys, type ReviewPlace } from "./keys";
+
+const REVIEW_KEYS = reviewKeys(LOOKS.kinds);
+const KINDS = LOOKS.kinds;
 
 const shown = (place: ReviewPlace) => barOf(REVIEW_KEYS, place).map((key) => key.keys);
 
@@ -79,6 +83,7 @@ describe("what may follow a chord", () => {
             "u unchanged lines",
             "k runs of calls",
             "c context",
+            "m items' text",
             "d calls' input and output",
         ];
         expect(following("␣zf", "file")).toEqual(kinds);
@@ -101,15 +106,16 @@ describe("what may follow a chord", () => {
             "u the unchanged lines",
             "k the run of calls",
             "c the context",
+            "m the item's text",
             "d the call's input and output",
         ]);
     });
 
     it("names each kind of fold by a letter of its own, Space z's beside every one but the item's own", () => {
-        const letters = FOLD_KINDS.map((each) => each.letter);
+        const letters = KINDS.map((each) => each.letter);
         expect(new Set(letters).size).toBe(letters.length);
         const spaced = following("␣zf", "file").map((each) => each.split(" ")[0]);
-        expect(spaced).toEqual(FOLD_KINDS.filter((each) => each.chord).map((each) => each.letter));
+        expect(spaced).toEqual(KINDS.filter((each) => each.chord).map((each) => each.letter));
         expect(following("zf", "file").map((each) => each.split(" ")[0])).toEqual(letters);
         // Space z leads the folds alone, the item left for later on Space p: z and p each follow Space once.
         expect(following("␣", "file").filter((each) => each.startsWith("z "))).toEqual(["z by kind"]);

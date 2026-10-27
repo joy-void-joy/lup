@@ -63,7 +63,8 @@ import {
 import { SET_IN, above, citedOn, editedOf, markerEnd, passageOf, type Citation, type Row as Beside, type RowKind } from "./exchange";
 import { around } from "./folds";
 import type { components } from "./generated/api";
-import { DRAWERS, type DrawerKind, type FoldKind, type ReviewPlace } from "./keys";
+import type { DrawerKind, FoldKind, ReviewPlace } from "./keys";
+import { adopted, kindOf, type Merged } from "./looks";
 import { reviewedLine } from "./since";
 
 export { calls, type Block, type ChangedFile, type Line, type Span };
@@ -266,6 +267,8 @@ export interface Fold extends Span {
     /** Whether it's folded until the operator opens it. */
     closed: boolean;
     summary: Span;
+    /** Whether it's a scope's: a group's, an item's or a drawer's whole, or a file's. */
+    scope?: boolean;
 }
 
 /** Where a changed file is under its item or in its drawer: from its header to its last line and the comments under it. */
@@ -297,9 +300,10 @@ export interface Group {
     fold: Fold | null;
 }
 
-/** How the review's groups are arranged beyond the order items came in: each subagent's group under its parent's, by `whose` each conversation is and its parent's. */
+/** How the review's groups are arranged beyond the order items came in: each subagent's group under its parent's, by `whose` each conversation is and its parent's; and how the views look, which drawers each repository's agents have (`looks.ts`). */
 export interface Arranging {
     parents?: ReadonlyMap<string, string> | null;
+    looks?: Merged;
 }
 
 /**
@@ -829,7 +833,7 @@ function layCode(w: Writer, into: Gathering, of: string, files: Filed[], first: 
     const bodies = new Map<string, { summary: Span; from: number; closed: boolean }>();
     // A fold under a file's lines, named by the file's path and what it hides within it, hiding up to `to`.
     const fold = (kind: FoldKind, path: string, name: string, label: string, closed: boolean, summary: Span, from: number, to: number) =>
-        into.folds.push({ of, kind, name: name === "" ? path : `${path} ${name}`, label, closed, summary, from, to });
+        into.folds.push({ of, kind, name: name === "" ? path : `${path} ${name}`, label, closed, summary, from, to, ...(kind === "file" ? { scope: true } : {}) });
     files.forEach((each, index) => {
         const path = each.file.path;
         if (each.opens !== null) {
@@ -940,6 +944,8 @@ export function nested(groups: Grouping[], parents: ReadonlyMap<string, string> 
 /** Return a drawer's label under its banner, from what the host answered of its agent, and whether it holds what waits on the operator; none where it has nothing in it. */
 export function rowLabel(kind: DrawerKind, data: AgentDrawers): { text: string; waiting: boolean } | null {
     switch (kind) {
+        default:
+            return null;
         case "tasks": {
             if (data.tasks.length === 0) {
                 return null;
@@ -1024,7 +1030,7 @@ export function laid(
             const end = (next < 0 ? w.text.length : (groups[next]?.banner.from ?? w.text.length)) - 1;
             if (end > group.banner.to) {
                 const label = w.text.slice(group.banner.from, group.banner.to);
-                group.fold = { of: `group ${group.place}`, kind: "group", name: "", label, closed: false, summary: group.banner, from: group.banner.to, to: end };
+                group.fold = { of: `group ${group.place}`, kind: "group", name: "", label, closed: false, summary: group.banner, from: group.banner.to, to: end, scope: true };
             }
         });
     }
@@ -1072,7 +1078,7 @@ export function laid(
         groups.push(made);
         // Under the banner, before the items, one under the other: each drawer a label, folded until opened in place.
         if (conversation !== null && data !== undefined) {
-            for (const kind of DRAWERS) {
+            for (const kind of (arranging.looks ?? adopted()).drawers(conversation.repository).map((each) => each.view)) {
                 const drawer = layDrawer(kind, conversation, data);
                 if (drawer !== null) {
                     made.drawers.push(drawer);
@@ -1186,7 +1192,7 @@ export function laid(
         }
         // The item whole folds under its header, what folds within it inside: folded once it's marked read, or left for later.
         const closed = isParked || done.includes(item.number);
-        into.folds.push({ of, kind: "item", name: "", label: head, closed, summary: headed, from: headed.to, to: w.at - 1 });
+        into.folds.push({ of, kind: "item", name: "", label: head, closed, summary: headed, from: headed.to, to: w.at - 1, scope: true });
         w.line("");
         regions.push({ item, of, header: headed, said, changed, ...into });
     }
@@ -1239,6 +1245,10 @@ export function laid(
         let settled: Span | null = null;
         const labelled = rowLabel(kind, data);
         if (labelled === null) {
+            return null;
+        }
+        const known = kind === "tasks" || kind === "since" || kind === "conversation";
+        if (!known) {
             return null;
         }
         const said = labelled.text;
@@ -1328,7 +1338,7 @@ export function laid(
             return null;
         }
         // Folded until opened, a line under the banner.
-        into.folds.push({ of, kind, name: "", label, closed: true, summary, from: summary.to, to: last });
+        into.folds.push({ of, kind, name: "", label, closed: true, summary, from: summary.to, to: last, scope: true });
         return { kind, conversation, talk, files, reviewed, settled, worktree: data.since?.worktree ?? null, waiting: labelled.waiting, of, header: summary, ...into };
     }
 }
@@ -1590,7 +1600,7 @@ export function heading(laidOut: Laid, head: number, writing: boolean, wrote: Wr
     }
     // A file's path: from its lines, or from its line in "since you approved" once it stands as the operator last saw it.
     const file = scope.filed.find((each) => head >= each.from && head <= each.to)?.file.path ?? (isDrawer(scope) ? reviewedAt(scope, head)?.file.path : undefined);
-    const inner = around(scope.folds, head).filter((each) => each.kind !== "file" && each.of !== scope.of || (each.kind !== "item" && each.kind !== "file" && !(DRAWERS as string[]).includes(each.kind)));
+    const inner = around(scope.folds, head).filter((each) => each.kind !== "file" && each.of !== scope.of || (each.kind !== "item" && each.kind !== "file" && kindOf(each.kind)?.drawer !== true));
     const named: Where = isRegion(scope) ? { kind: "item", text: naming.item(scope) } : { kind: (scope as Drawer).kind, text: (scope as Drawer).kind };
     return [
         ...going,

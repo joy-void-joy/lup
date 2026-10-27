@@ -22,8 +22,9 @@ import { doing, everyone, launches, ring, running, type Activity, type Agent, ty
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useWatched } from "./hooks";
-import { REVIEW_KEYS, REVIEW_PLACES, type ReviewPlace } from "./keys";
+import { REVIEW_PLACES, reviewKeys, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
+import { adopt, merged } from "./looks";
 import { useNarrow } from "./Outline";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
@@ -162,6 +163,25 @@ export function App() {
     const [jump, setJump] = useState<Jump | null>(null);
     const keeping = useRef<ReturnType<typeof setTimeout> | null>(null);
     const served = useMemo(() => (reply?.kind === "listed" ? launches(reply) : []), [reply]);
+    // How the views look, each repository's as its process said it and lup's default standing in for the rest, merged:
+    // the same object while the listing says the same of them, which it says again at every hook.
+    const declared = useSame(
+        useMemo(() => (reply?.kind === "listed" ? { looks: reply.looks ?? {}, standing: reply.standing } : null), [reply]),
+        (each) => JSON.stringify(each),
+    );
+    const looks = useMemo(() => {
+        const made = declared === null ? merged({}, { folds: [], tones: [], drawers: [], banners: [] }) : merged(declared.looks, declared.standing);
+        // Taken as what's merged now before anything is drawn by it: the keys, the margin and the fold keys read it as they act.
+        adopt(made);
+        return made;
+    }, [declared]);
+    const parts = useMemo(() => reviewKeys(looks.kinds), [looks]);
+    // A fold kind of another repository's taking a letter one already took is refused it, and said.
+    useEffect(() => {
+        if (looks.refused.length > 0) {
+            setSaid(looks.refused.join(" "));
+        }
+    }, [looks]);
     const agents = useMemo(() => everyone(served), [served]);
     // What the review reads of the listing stays the same object while it says the same (`useSame`): the host
     // answers the watch again at every hook, with what each conversation is doing, and the review lays nothing out
@@ -846,6 +866,7 @@ export function App() {
                         setOverview={setOverview}
                         order={ready ? kept : null}
                         keepOrder={whole ? keepOrder : null}
+                        looks={looks}
                     />
                     <div className="status">
                         {!replying ? (
@@ -865,7 +886,7 @@ export function App() {
                         )}
                     </div>
                     <Keys
-                        parts={REVIEW_KEYS}
+                        parts={parts}
                         place={inserting ? "insert" : place}
                         places={REVIEW_PLACES}
                         open={listing}
