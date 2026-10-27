@@ -15,7 +15,7 @@ from lup.sessions.terminal import Hook
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model
 from lup_dev.host.courier import Heard, Spawned, Telling
-from lup_dev.host.records import Reader, Records
+from lup_dev.host.records import Queues, Reader, Records
 from lup_dev.launch.clis import Channel
 from lup_dev.policy.checkpoint import Bench
 from lup_dev.policy.runtime import Runtime
@@ -71,3 +71,7 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """Where it keeps each session's record on this machine, which a module copies."""
     reader: Reader
     """Reads the copies of its records: which are sessions, and what was said in each."""
+    queues: Queues | None
+    """Reads what it holds queued for each conversation of a running session,
+    which ends a held call of lup's; none where its records don't say, a gap its
+    module declares."""

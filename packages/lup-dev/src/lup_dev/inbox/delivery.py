@@ -10,7 +10,11 @@ conversation is told together, oldest first, by whichever comes first:
 - **its turn's end,** where some are still waiting: the end is held once, the
   items its reason, so they never hold an end again (`inbox/ends.py`);
 - **`wait_inbox`,** or `ask` with `wait`, a call held until something arrives,
-  whose result is the items (`held`);
+  whose result is the items (`held`). It ends too on what the conversation's
+  runtime holds for it, which it hands the agent once the call returns, where
+  its records say (`Queues`): what the operator typed in its terminal, a task
+  it runs in the background, a subagent's end, each by whose news it is
+  (`Waking`), as the call's `on` asks; `within` limits how long it holds;
 - **its session's start or resumption,** in the start's answer;
 - **its turn's start,** beside the prompt it starts on (`turn-started`);
 - **its idle session starting a turn,** for an item the operator's own act made,
@@ -121,6 +125,8 @@ from collections.abc import Callable, Generator
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal, override
 
+from pydantic import TypeAdapter
+
 from lup.events import (
     CallFinished,
     CallStarted,
@@ -135,6 +141,7 @@ from lup_dev.clock import Clock
 from lup_dev.host.courier import Failure, Heard, Post, Posted, Waker
 from lup_dev.host.names import Names
 from lup_dev.host.pushes import Pushes
+from lup_dev.host.records import Queued, Queues, Queuing
 from lup_dev.inbox.citations import failing, plainly, resolved, unresolved
 from lup_dev.inbox.edits import replaced
 from lup_dev.inbox.ends import holding
@@ -315,6 +322,15 @@ def written(item: Item) -> str:
             return f"{text}\n{summary}"
         case _:
             return body(item)
+
+
+def spelled(duration: timedelta) -> str:
+    """Spell a duration as a call gives one, in ISO 8601.
+
+    >>> spelled(timedelta(minutes=10))
+    'PT10M'
+    """
+    return TypeAdapter[timedelta](timedelta).dump_python(duration, mode="json")
 
 
 def clocked(at: datetime) -> str:
@@ -760,6 +776,90 @@ def announcement(item: Item, size: int) -> str:
     ).written()
 
 
+type Waking = Literal["operator", "agents", "tasks"]
+"""Whose news ends a held call: the operator's, an answer, a review or a message
+through lup, or their words typed in the terminal; another agent's, a message
+from the conversation's parent or one of its subagents, a subagent's end or
+what it said of its work, another session's message; or a task the
+conversation started in the background, a command ending or a Monitor's
+event."""
+
+
+def whose(item: Item) -> Waking:
+    """Say whose news `item` is, for what ends a held call: another agent's, where a conversation other than the one it's for sent it; else the operator's, lup's own word to the conversation among it.
+
+    >>> from datetime import UTC, datetime
+    >>> from pathlib import Path
+    >>> me = Conversation(repository=Path("/w/.git"), runtime="r1", session="s1")
+    >>> worker = me.model_copy(update={"agent": "a1"})
+    >>> made = datetime(2026, 1, 1, tzinfo=UTC)
+    >>> note = Message(kind="note", text="Found it.")
+    >>> whose(Item(number=7, reason=note, sender=worker, recipient=me, made=made))
+    'agents'
+    >>> whose(Item(number=8, reason=note, sender=Operator(), recipient=me, made=made))
+    'operator'
+    """
+    match item.sender:
+        case Conversation() as sender if (
+            sender != item.recipient and sender != item.addressed
+        ):
+            return "agents"
+        case _:
+            return "operator"
+
+
+def waking(kind: Queuing) -> Waking:
+    """Say whose news something a runtime holds for a conversation is, for what ends a held call."""
+    match kind:
+        case "typed":
+            return "operator"
+        case "task":
+            return "tasks"
+        case "subagent" | "message":
+            return "agents"
+
+
+def queue(held: list[Queued]) -> str:
+    """Say what a conversation's runtime holds for it, which reaches the agent from the runtime as its held call returns: each by what it is, in the runtime's words where it says.
+
+    >>> gate = 'Background command "gate" completed (exit code 0)'
+    >>> print(queue([Queued(id="1", kind="typed"), Queued(id="2", kind="task", summary=gate)]))
+    <queued from="your runtime">
+    <waiting kind="typed" from="operator">Their words, typed in your terminal.</waiting>
+    <waiting kind="task">Background command "gate" completed (exit code 0)</waiting>
+    Each reaches you from your runtime as this call returns.
+    </queued>
+    """
+
+    def said(each: Queued) -> Tag:
+        match each.kind:
+            case "typed":
+                attributes = {"kind": "typed", "from": "operator"}
+                line = "Their words, typed in your terminal."
+            case "task":
+                attributes = {"kind": "task"}
+                line = each.summary or "A task you started in the background."
+            case "subagent":
+                attributes = {"kind": "subagent"}
+                line = each.summary or "A subagent of yours ended, or reported."
+            case "message":
+                attributes = {"kind": "message"}
+                line = "Another session's message" + (
+                    "." if each.summary is None else f", {each.summary}."
+                )
+        return Tag(name="waiting", attributes=attributes, parts=[line])
+
+    reaches = "It reaches" if len(held) == 1 else "Each reaches"
+    return Tag(
+        name="queued",
+        attributes={"from": "your runtime"},
+        parts=[
+            *(said(each) for each in held),
+            f"{reaches} you from your runtime as this call returns.",
+        ],
+    ).written()
+
+
 class Choice(Model):
     """What a hook tells of one item: its text or its announcement."""
 
@@ -790,6 +890,9 @@ class Presence(MutableModel):
     """Whether it was woken since its last hook: the turn the wake starts tells
     what arrives meanwhile at its first call."""
     held: list[Held] = []
+    queued: list[str] = []
+    """What its runtime holds for it that a held call told, by each one's id,
+    of those it still holds, so none is told twice."""
     pushed: Pushed | None = None
     """What was last pushed to its session, until a turn's start carries its
     token, or its wait runs out."""
@@ -819,6 +922,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     patience: timedelta = timedelta(seconds=30)
     """How long a push waits for the turn's start carrying its token, after
     which what it told is put back and the session's messaging socket rings."""
+    queues: dict[str, Queues] = {}
+    """What each runtime holds for a conversation while its call runs, by the
+    runtime's name, which ends a held call (`held`); a runtime without, a gap
+    its adapter declares, ends one on its inbox alone."""
+    glance: timedelta = timedelta(seconds=1)
+    """How often a held call looks at what its conversation's runtime holds
+    for it, and at its time limit: a look at a record that hasn't grown is a
+    file's size, and one that has reads only what it gained."""
     unpushed: list[str] = []
     """The launches whose session took no push in time: said once, and woken
     through the messaging socket from then on."""
@@ -1661,28 +1772,72 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             self.inbox.kept(item.model_copy(update={"state": told}))
         return SEPARATOR.join(self.said(item) for item in waiting)
 
-    async def held(self, party: Conversation, until: Callable[[], bool]) -> str:
-        """Hold a call of `party`'s until `until()`, checked again at each arrival; then tell it everything waiting.
+    async def held(
+        self,
+        party: Conversation,
+        until: Callable[[], bool],
+        *,
+        on: list[Waking],
+        within: timedelta | None = None,
+    ) -> str:
+        """Hold a call of `party`'s until `until()`, checked again at each arrival; until its runtime holds for it news of whoever `on` names; or until `within` passes, by the delivery's clock, where it's given. Then tell it everything waiting, and what its runtime holds for it.
 
-        Where its turn ended while the call held, nothing is counted told: it
-        says what waits reaches the agent at its next call. A call cancelled
-        while it holds, its connection gone, leaves everything waiting.
+        What the runtime holds is looked at each `glance`, and as the call
+        returns, and told once: it reaches the agent from the runtime as the
+        call returns, so the call says only what it is (`queue`). Where its
+        turn ended while the call held, nothing is counted told: it says what
+        waits reaches the agent at its next call. A call cancelled while it
+        holds, its connection gone, leaves everything waiting.
         """
         presence = self.presence(party)
         holder = Held(arrived=asyncio.Event())
         presence.held = [*presence.held, holder]
+        deadline = None if within is None else self.clock.now() + within
+
+        async def glancing() -> None:
+            while True:
+                await asyncio.sleep(self.glance.total_seconds())
+                holder.arrived.set()
+
+        glances = asyncio.create_task(glancing())
         try:
             while not until():
+                held = await self.queued(party)
+                if any(waking(each.kind) in on for each in held):
+                    break
+                if deadline is not None and self.clock.now() >= deadline:
+                    break
                 await holder.arrived.wait()
                 holder.arrived.clear()
         finally:
+            glances.cancel()
             presence.held = [each for each in presence.held if each is not holder]
         if holder.ended:
             return (
                 "Your turn ended while this call waited, so what reached your inbox "
                 "reaches you at your next call instead."
             )
-        return self.whole(party, "held call")
+        held = await self.queued(party)
+        presence.queued = [*presence.queued, *(each.id for each in held)]
+        told = [self.whole(party, "held call"), *([queue(held)] if held else [])]
+        said = SEPARATOR.join(each for each in told if each)
+        if said or within is None:
+            return said
+        return f"Nothing reached you within {spelled(within)}, this call's `within`."
+
+    async def queued(self, party: Conversation) -> list[Queued]:
+        """Return what `party`'s runtime holds for it that no held call told yet, oldest first: none where its runtime's records don't say (`queues`).
+
+        What a call told is kept while the runtime holds it, and forgotten
+        once it doesn't, so the list stays as short as the runtime's queue.
+        """
+        queues = self.queues.get(party.runtime)
+        if queues is None:
+            return []
+        kept = await asyncio.to_thread(queues.queued, party.session, party.agent)
+        presence = self.presence(party)
+        presence.queued = [each.id for each in kept if each.id in presence.queued]
+        return [each for each in kept if each.id not in presence.queued]
 
     def arrive(self, party: Conversation) -> None:
         """Wake each call of `party`'s held until something arrives."""

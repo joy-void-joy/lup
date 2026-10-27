@@ -114,6 +114,18 @@ start a turn (`turn/start`) runs inside the terminal's own process under
 turn: the operator typing in its terminal starts one, told it at
 `UserPromptSubmit`.
 
+Nor can lup see what Codex holds for a thread while one of its calls runs, so
+a held call of lup's ends there on what reaches the inbox and on its time limit
+alone (`queues` is none): a gap declared with its evidence, read at
+`rust-v0.165.0` (`docs/field-notes.md`, *What a session holds queued*). What
+arrives mid-call, the operator's words steered in with Enter among it, waits in
+the process's memory (`InputQueue`, `core/src/session/input_queue.rs`) and
+reaches the rollout only as the turn takes it up after the call returns
+(`record_pending_input`, `core/src/session/turn.rs`); what's queued with Tab
+waits in the TUI's until the turn ends; the app-server tells no other client of
+either; and a background terminal's end queues nothing, the model learning of
+it by polling.
+
 Nor can lup's name for a session reach Codex's own title, at its start or at a
 prompt after a rename, nor a `/rename` there reach lup: a gap declared with its
 evidence. Codex names threads (`/rename`, its own generated titles, `codex
@@ -1577,4 +1589,5 @@ def adapter() -> Adapter:
         agent=agent,
         records=CodexRecords(home=CodexLayout.of(CodexSettings()).operator_home),
         reader=CodexTranscripts(),
+        queues=None,
     )

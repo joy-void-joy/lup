@@ -539,6 +539,11 @@ def host_serve(context: typer.Context) -> None:
         settle_hold=lambda change, approved, said: hold_answered(
             layout, change, approved=approved, comment=said
         ),
+        queues={
+            adapter.runtime.name(): adapter.queues
+            for adapter in known.known
+            if adapter.queues is not None
+        },
     )
     types = TypeReader(delivery=delivery, read=typed_reading, say=typer.echo)
     podman = Podman()
