@@ -258,6 +258,22 @@ def test_gits_merge_of_judged_commits_is_set_aside(
     assert Elsewhere(store=store, commits=tips).holds(CORE, merged)
 
 
+def test_content_a_merge_made_in_a_tip_s_history_is_set_aside(
+    repo: Path, store: Store, shell: Shell
+) -> None:
+    # Both sides changed the file, so the merge's content is in neither parent,
+    # as a landing's merge of a file the integration branch changed too is.
+    diverge(repo, shell)
+    shell.git(repo, "merge", "-q", "--no-edit", "feature")
+    merged = store.blob(store.snapshot(), CORE)
+    (repo / "README.md").write_text("# Later\n")
+    shell.commit(repo, "main: made since")
+    tips = store.tips(store.head())
+    shell.git(repo, "switch", "-q", "--detach", "feature")
+    assert store.committed(CORE, merged, tips)
+    assert Elsewhere(store=store, commits=tips).holds(CORE, merged)
+
+
 def test_a_merge_with_a_parent_made_since_isnt_set_aside(
     repo: Path, store: Store, shell: Shell
 ) -> None:

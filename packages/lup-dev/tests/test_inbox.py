@@ -7149,12 +7149,17 @@ def test_land_puts_the_branch_on_dev_and_cleans_up_what_it_landed_but_what_s_in_
         landings.dev, "merge", "-q", "--no-ff", "--no-edit", "kept", "busy"
     )
     tip = landings.merged()
+    tracking = ["for-each-ref", "--format=%(objectname)", "refs/remotes/origin/dev"]
+    before = landings.shell.git(repository, *tracking)
     with inboxed(machine, clock, notices, said, rooms=landings.room):
         landings.launched("claude")
         landings.launched("claude", name="two", worktree=busy)
         send(machine.host.launch("one").hook, started("claude"))
         answer, error = call(machine.host.launch("one").mcp, "land", {})
     assert not error
+    # The push names the forge's URL, so `land` moves `origin/dev` here itself.
+    assert before == ""
+    assert landings.shell.git(repository, *tracking) == tip
     assert answer == (
         f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
         "Cleaned up after it:\n"

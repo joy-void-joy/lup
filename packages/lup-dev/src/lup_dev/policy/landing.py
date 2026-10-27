@@ -35,7 +35,10 @@ gated branch, `dev` by default:
    is pushed (`Delivery.held_back`, `Delivery.landing_decided`);
 6. the push goes the remote helper's way (`PushHandler`): held to the launch's
    limits, through `Publishing`, and told to `Remotes.landed`, which
-   asks trust's approval where it moved the integration branch;
+   asks trust's approval where it moved the integration branch. It names the
+   remote's URL, so the gated branch's remote-tracking ref is moved to what
+   landed after it (`tracked`), as `git push <remote>` moves it: the judge
+   counts what those refs name as judged;
 7. each branch it landed is cleaned up after: its copy on the remote deleted,
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
    it's clean and nobody works in it; then the local branch deleted;
@@ -860,6 +863,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             refusals = f"\n{reply.said}" if reply.said else ""
             moved = [] if made.moved is None else [made.moved]
             return "\n".join([f"Not landed: {update.error}.{kept}{refusals}", *moved])
+        untracked = await asyncio.to_thread(tracked, git, remote, onto, lands)
         cleaned = await self.cleaned(git, remote, refs, branches.landed, onto)
         withdrawn = await self.withdrawn(git, onto, lands, branches.holding, changed)
         was = "new there" if old is None else f"which was at {old}"
@@ -868,6 +872,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             [
                 *made.said,
                 f"Landed {lands} on `{short(onto)}` at `{remote}`, {was}.",
+                *untracked,
                 *approvals(waited),
                 *said(cleaned),
                 *withdrawals(short(onto), withdrawn),
@@ -1748,6 +1753,22 @@ def waiting(ref: str, roots: list[Path], working: dict[Path, str]) -> str:
         f"checked out in {'; in '.join(places)}" if places else "checked out nowhere"
     )
     return f"- `{short(ref)}`, {where}"
+
+
+def tracked(git: Git, remote: str, onto: str, tip: str) -> list[str]:
+    """Move `onto`'s remote-tracking ref for `remote` to `tip`, which a landing just put there, as `git push <remote>` would; say why it didn't, a line, or nothing where it did.
+
+    The push names the remote's URL, which moves no remote-tracking ref, and
+    the judge counts what those name as judged (`Elsewhere`): without it, the
+    checkout `tip` was fast-forwarded to judges again what the landing's merge
+    made where both sides changed a file, the branch merged being gone.
+    """
+    name = f"{remote}/{short(onto)}"
+    try:
+        git.run("update-ref", f"refs/remotes/{name}", tip)
+    except LupDevError as failed:
+        return [f"`{name}` here still names what it did: {failed}."]
+    return []
 
 
 def local_deleted(git: Git, ref: str, commit: str) -> Cleaned:
