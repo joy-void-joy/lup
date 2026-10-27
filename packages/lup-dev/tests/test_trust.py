@@ -1314,6 +1314,141 @@ def test_what_the_layer_imports_of_the_commit_joins_the_zone(
     assert zone.local == f"import neighbours\n{LAYER}"
 
 
+PROFILES = '''"""The person's profiles, as they have them."""
+
+from lup_dev import Profile, Profiles
+
+profiles = Profiles().add(Profile(name="work", account="work"))
+'''
+"""A person's profiles file, adding one of their own."""
+
+
+def profiled(kit: Kit, text: str | None) -> Path:
+    """Write the person's profiles file where the kit's layout places it, or remove it where `text` is none; return where it is."""
+    declared = kit.layout.profiles.declared
+    if text is None:
+        declared.unlink()
+    else:
+        declared.parent.mkdir(parents=True, exist_ok=True)
+        declared.write_text(text)
+    return declared
+
+
+def test_the_person_s_profiles_are_approved_by_their_content_shown_whole(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    profiled(kit, PROFILES)
+    trust = trusting(lup, kit, yes())
+    outcome = trust.ensure()
+    assert isinstance(outcome, Trusted)
+    assert outcome.approval.profiles == PROFILES
+    assert outcome.approval.local is None
+    summary = summarised(trust)
+    heading = summary.index(
+        "Your profiles, `~/.config/lup/profiles.py`, which no repository holds, "
+        "changed since approved:"
+    )
+    assert summary[heading + 1 : heading + 3] == [
+        "diff --git yours/profiles.py yours/profiles.py",
+        "new file mode 100644",
+    ]
+    assert '+profiles = Profiles().add(Profile(name="work", account="work"))' in summary
+    assert approved(lup, kit, shell) == outcome.approval
+
+
+def test_unchanged_profiles_ask_nothing(lup: Path, kit: Kit, shell: Shell) -> None:
+    profiled(kit, PROFILES)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    trust = trusting(lup, kit, unasked())
+    assert trust.ensure() == Unchanged(
+        commit=first.approval.commit, approval=first.approval
+    )
+
+
+def test_profiles_changed_alone_install_nothing_and_say_so(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    assert first.approval.profiles is None
+    profiled(kit, PROFILES)
+    trust = trusting(lup, kit, yes())
+    outcome = trust.ensure()
+    assert isinstance(outcome, Trusted)
+    assert outcome.approval.profiles == PROFILES
+    assert recording(trust).installed == []
+    assert service(trust).calls == []
+    assert outcome.report() == (
+        "Approved: your profiles, which its launches run on from the next, beside "
+        f"`lup-dev` from {first.approval.commit} as before."
+    )
+    edited = PROFILES.replace('account="work"', 'account="spare"')
+    profiled(kit, edited)
+    layered(lup, LAYER)
+    both = trusting(lup, kit, yes()).ensure()
+    assert isinstance(both, Trusted)
+    assert both.report() == (
+        "Approved: your own layer, which judges this repository's sessions from "
+        "their next hook, and your profiles, which its launches run on from the "
+        f"next, beside `lup-dev` from {first.approval.commit} as before."
+    )
+
+
+def test_profiles_declined_or_removed_are_kept_or_asked(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    profiled(kit, PROFILES)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    profiled(kit, PROFILES + "\nprint('edited')\n")
+    kept = trusting(lup, kit, no()).ensure()
+    assert kept == Kept(commit=first.approval.commit, approval=first.approval)
+    profiled(kit, None)
+    trust = trusting(lup, kit, yes())
+    removed = trust.ensure()
+    assert isinstance(removed, Trusted)
+    assert removed.approval.profiles is None
+    assert "deleted file mode 100644" in "\n".join(summarised(trust))
+
+
+def test_the_profiles_file_joins_the_approval_unread_by_the_judge(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    changed(lup, {CORE_PATH: CORE}, shell)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    changed(lup, {CORE_PATH: CORE_CHANGED}, shell)
+    declared = profiled(kit, PROFILES)
+    trust = trusting(lup, kit, unasked())
+    trust.proposed()
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    [core, profiles] = asking.files
+    assert core.reading == Reading(role="production", asks=CORE_ASKS)
+    assert profiles.path == declared
+    assert profiles.before is None
+    assert profiles.after == TextContent(text=PROFILES)
+    assert profiles.reading is None
+    typed = trust.typed(Path(trust.repository()), asking.files)
+    assert [each.path for each in typed] == [core.path, declared]
+    assert typed[1].reading is None
+    assert all(each.path != declared for batch in kit.engine.checked for each in batch)
+
+
+def test_a_first_approval_leaves_the_profiles_file_unread_too(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    declared = profiled(kit, PROFILES)
+    trust = trusting(lup, kit, unasked())
+    trust.proposed()
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    readings = {each.path: each.reading for each in asking.files}
+    assert readings[declared] is None
+    assert readings[Path("lup_project.py")] == Reading(role="protected")
+
+
 def test_nothing_approved_and_no_refuses_and_records_nothing(
     lup: Path, kit: Kit, shell: Shell
 ) -> None:

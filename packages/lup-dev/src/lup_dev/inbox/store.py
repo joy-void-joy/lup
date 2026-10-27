@@ -723,7 +723,9 @@ class ChangedFile(Model):
     """One file a change touches, whole on each side: what it was, and what it becomes, with the judge's reading of it."""
 
     path: Path
-    """From the root of the worktree it's in, or of the repository."""
+    """From the root of the worktree it's in, or of the repository; absolute
+    for a file outside every repository, the person's profiles, which an
+    approval carries unread by the judge."""
     before: Content | None
     """What it held; none for a file the change creates."""
     after: Content | None
