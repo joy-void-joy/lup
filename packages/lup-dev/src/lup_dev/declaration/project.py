@@ -44,6 +44,12 @@ class Project(Model, extra="forbid"):
     flagged: list[str] = ["new-file", "whole-file", "public-api", "private"]
     """What a change lands with, flagged for the operator's review of the branch,
     by the same names. A name in neither list is let through."""
+    profile: str | None = None
+    """The profile the repository's launches run on where `--profile` names
+    none, by its name among the person's profiles (`docs/declaration.md`,
+    *Profiles*); none for `default`. A profile is a person's own, so only their
+    layer, `lup_project.local.py`, chooses one: a committed declaration setting
+    it fails the load."""
 
     @field_validator("held", "flagged")
     @classmethod

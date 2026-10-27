@@ -8,6 +8,7 @@ them.
 
 from collections.abc import Callable
 from datetime import timedelta
+from pathlib import Path
 
 from lup.events import SessionEvent
 from lup.sessions.declaration import Declaration
@@ -67,6 +68,9 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """Its release channel, which a launch fetches the latest CLI from."""
     agent: Callable[[], Declaration]
     """The declaration a launched session runs."""
+    login: Callable[[Path], Path]
+    """Where it keeps its login in a home of its own at the directory given, an
+    account's among them: the file its sign-in writes."""
     records: Records
     """Where it keeps each session's record on this machine, which a module copies."""
     reader: Reader

@@ -692,7 +692,9 @@ class Kit:
         self.spawner = FakeSpawner()
         # lup's data under the test's directory too: the copies of `lup-dev`
         # trust installs live there.
-        self.layout = Layout(state=state, data=state.parent / "data")
+        self.layout = Layout(
+            state=state, data=state.parent / "data", config=state.parent / "config"
+        )
         self.runtime = runtime
         self.announced = Announced(self.layout, self.clock, answering)
         self.flags = Flags()
@@ -740,9 +742,14 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Layout:
     """lup's state and data under `tmp_path`, outside any runtime's session."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
-    return Layout(state=tmp_path / "xdg" / "lup", data=tmp_path / "xdg-data" / "lup")
+    return Layout(
+        state=tmp_path / "xdg" / "lup",
+        data=tmp_path / "xdg-data" / "lup",
+        config=tmp_path / "xdg-config" / "lup",
+    )
 
 
 @pytest.fixture

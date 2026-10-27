@@ -5,7 +5,8 @@ the library `lup`, which the project's production code imports. Everything it
 raises descends from `lup_dev.errors.LupDevError`.
 
 It's also the front door for a project's declaration: every name `lup_project.py`
-imports is bound here, lup's modules among them (`docs/declaration.md`):
+imports is bound here, lup's modules among them, and every name a person's
+profiles file imports (`docs/declaration.md`):
 
     from lup_dev import CodeRules, Modules, Project, Rules
 
@@ -50,6 +51,13 @@ from lup_dev.declaration.modules.code_rules import CodeRules
 from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.python import Python
 from lup_dev.declaration.package_managers.uv import Uv
+from lup_dev.declaration.profiles import (
+    Lend,
+    Lending,
+    Profile,
+    Profiles,
+    RuntimeDefaults,
+)
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Requirement, Tools
 from lup_dev.declaration.runner import (
@@ -76,6 +84,8 @@ __all__ = [
     "Gate",
     "Guidance",
     "Interpreter",
+    "Lend",
+    "Lending",
     "Lup",
     "Module",
     "ModuleServing",
@@ -88,6 +98,8 @@ __all__ = [
     "Patterns",
     "Plain",
     "Private",
+    "Profile",
+    "Profiles",
     "Project",
     "ProjectError",
     "PyrightSource",
@@ -104,6 +116,7 @@ __all__ = [
     "RoomPlaces",
     "Rules",
     "Runner",
+    "RuntimeDefaults",
     "Section",
     "Serving",
     "Session",

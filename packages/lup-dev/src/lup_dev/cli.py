@@ -38,6 +38,7 @@ from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.rooms.engine import stopped
 from lup.types import JsonObject, Model, MutableModel
 from lup_dev import commanding
+from lup_dev.accounts import AccountError, Accounts, RuntimeLogin
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import Adapter, claude, codex
@@ -62,7 +63,8 @@ from lup_dev.codescan.ruff import Ruff
 from lup_dev.commanding import RoomExchanges
 from lup_dev.confined import Confined
 from lup_dev.copies import removable
-from lup_dev.declaration.load import load, person_layer
+from lup_dev.declaration.load import declared_profiles, load, person_layer
+from lup_dev.declaration.profiles import chosen
 from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
 from lup_dev.declaration.resolve import Declaration, Selected, resolve
@@ -271,10 +273,15 @@ private = typer.Typer(
     no_args_is_help=True,
     help="What never leaves under your name: the `Private` module's values.",
 )
+account = typer.Typer(
+    no_args_is_help=True,
+    help="The accounts rooms log in with, each a login per runtime.",
+)
 app.add_typer(rules, name="rules")
 app.add_typer(host, name="host")
 app.add_typer(inbox, name="inbox")
 app.add_typer(private, name="private")
+app.add_typer(account, name="account")
 
 
 def engine(environments: Path | None = None) -> Checker:
@@ -1760,13 +1767,18 @@ def launched(
     *,
     modules: list[str] | None = None,
     name: str | None = None,
+    profile: str | None = None,
+    account: str | None = None,
 ) -> int:
     """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, and return its CLI's exit status.
 
     In the order `docs/launch.md` gives (*The command*): trust on launch, its
     report said; replace refs in the repository said, which lup's git ignores
     (`lup_dev.git`); the declaration at the commit approved, with the person's own
-    layer approved beside it, and the rules its selection runs, which the
+    layer approved beside it; the launch's profile, `profile` or else the one
+    the person's layer chooses, and its runtime's account, `account` or else
+    the profile's, from the person's profiles approved with it, said where
+    either isn't `default` (`chosen`); the rules its selection runs, which the
     engine resolves for the guidance; the host's requirements, each optional
     one off said; the repository named on GitHub, or why not said; the host
     service; the latest CLI, a fallback said; the other repositories the
@@ -1810,6 +1822,17 @@ def launched(
     with approved_declaration(
         worktree, approval.commit, local=approval.local
     ) as declared:
+        # lup: defer(issue=324, why="the room runs on the profile's setting and logs in with the account once rooms have homes of their own (room-homes)")
+        choice = chosen(
+            declared_profiles(approval.profiles, launcher.layout.profiles.declared),
+            runtime,
+            [each.name() for each in runtimes()],
+            profile=profile or declared.resolved.profile,
+            account=account,
+        )
+        said = choice.said()
+        if said is not None:
+            launcher.say(said)
         running = launcher.rules(declared.resolved.rules)
         needs = checked(host_needs(), launcher.tools).require()
         for off in needs.off:
@@ -2080,6 +2103,28 @@ def launch(
             ),
         ),
     ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help=(
+                "The profile this launch runs on, by its name among yours "
+                "(`~/.config/lup/profiles.py`); by default, the one your own layer "
+                "chooses for the repository, else `default`. The runtime's own "
+                "`--profile` goes after `--`."
+            ),
+        ),
+    ] = None,
+    account: Annotated[
+        str | None,
+        typer.Option(
+            "--account",
+            help=(
+                "The account this launch's runtime logs in with, by its name, in "
+                "place of its profile's."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Launch a runtime's session in a room for this worktree, in this terminal.
 
@@ -2087,10 +2132,12 @@ def launch(
     this repository, asking where that changed, as `trust` does. `--mount`
     lends a directory to this launch alone, read-only, and `--mount-rw` one it
     may write, each mounted at its path and listed in the session's guidance,
-    with nothing declared. Every argument
+    with nothing declared. `--profile` and `--account` choose the profile it
+    runs on and its runtime's account. Every argument
     after the runtime's name that lup doesn't know reaches the runtime's CLI as
-    given, so `lup-dev launch <runtime> --resume` resumes. It ends with the CLI's
-    exit status.
+    given, so `lup-dev launch <runtime> --resume` resumes, and every one after
+    `--`, so a runtime's own flag of a name lup takes reaches it there. It ends
+    with the CLI's exit status.
     """
     inside = [each.name() for each in runtimes() if each.inside()]
     if inside:
@@ -2114,8 +2161,58 @@ def launch(
         lending,
         modules=named,
         name=name,
+        profile=profile,
+        account=account,
     )
     raise typer.Exit(code=status)
+
+
+def machine_accounts() -> Accounts:
+    """Return every account on this machine, by the runtimes lup knows, as the settings place them."""
+    return Accounts(
+        layout=Layout.of(LupDevSettings()).accounts,
+        runtimes=[
+            RuntimeLogin(name=each.runtime.name(), login=each.login)
+            for each in adapters()
+        ],
+    )
+
+
+@account.command("list")
+def account_list() -> None:
+    """List every account, `default` first, and the runtimes each holds a login for.
+
+    Each is kept at `~/.local/share/lup/accounts/<name>/`, a directory per
+    runtime; `default` is listed whether or not anything signed in to it yet.
+    """
+    for line in machine_accounts().listed():
+        typer.echo(line)
+
+
+@account.command("logout")
+def account_logout(
+    name: Annotated[str, typer.Argument(help="The account, by its name.")],
+    runtime: Annotated[
+        str | None,
+        typer.Argument(
+            help="The runtime to log it out of, by its name; by default, every one."
+        ),
+    ] = None,
+) -> None:
+    """Log an account out of a runtime, or of every one: its login file is emptied in place, which a room's own logout can't do through a mount.
+
+    Run it yourself, in your own terminal. The login is forgotten on this
+    machine alone: it isn't revoked with the provider.
+    """
+    inside = [each.name() for each in runtimes() if each.inside()]
+    if inside:
+        message = (
+            f"this runs inside a {inside[0]} session: log an account out from your "
+            "own terminal"
+        )
+        raise AccountError(message)
+    for line in machine_accounts().logout(name, runtime):
+        typer.echo(line)
 
 
 @app.command("mount")

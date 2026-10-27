@@ -1573,6 +1573,11 @@ def stepped(line: Rolled) -> list[Entry]:
             return []
 
 
+def login(directory: Path) -> Path:
+    """Return where Codex keeps its login in a home of its own at `directory`, as `CODEX_HOME` names one: `auth.json` there, as in the operator's."""
+    return CodexLayout(home=directory, operator_home=directory).operator_login
+
+
 def adapter() -> Adapter:
     """Return what lup needs of Codex: its hooks answered, and its launch."""
     return Adapter(
@@ -1587,6 +1592,7 @@ def adapter() -> Adapter:
         hooks=hooks,
         channel=CodexChannel(),
         agent=agent,
+        login=login,
         records=CodexRecords(home=CodexLayout.of(CodexSettings()).operator_home),
         reader=CodexTranscripts(),
         queues=None,

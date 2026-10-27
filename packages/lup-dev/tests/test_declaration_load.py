@@ -377,6 +377,39 @@ def test_the_person_s_layer_is_layered_on_the_project_s(tmp_path: Path) -> None:
     assert not (tmp_path / "__pycache__").exists()
 
 
+def test_the_person_s_layer_chooses_the_repository_s_profile(tmp_path: Path) -> None:
+    write(tmp_path / "lup_project.py", OURS)
+    write(
+        tmp_path / "lup_project.local.py",
+        """
+        from lup_dev import Project
+
+        project = Project(profile="work")
+        """,
+    )
+    assert resolve(load(tmp_path).project).profile == "work"
+    assert resolve(Project()).profile is None
+
+
+def test_a_committed_declaration_choosing_a_profile_fails_the_load(
+    tmp_path: Path,
+) -> None:
+    write(
+        tmp_path / "lup_project.py",
+        """
+        from lup_dev import Project
+
+        project = Project(profile="work")
+        """,
+    )
+    with pytest.raises(ProjectError) as failed:
+        load(tmp_path)
+    assert str(failed.value) == (
+        "`lup_project.py` chooses the profile `work`: a profile is a person's own, "
+        "so their layer, `lup_project.local.py`, chooses it"
+    )
+
+
 def test_the_person_s_layer_is_read_where_it_s_given(tmp_path: Path) -> None:
     root = tmp_path / "worktree"
     write(root / "lup_project.py", OURS)

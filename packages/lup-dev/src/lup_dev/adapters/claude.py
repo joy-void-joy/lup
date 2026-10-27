@@ -2749,6 +2749,11 @@ def followed(kept: Following, raw: bytes, at: int, *, sidechains: bool) -> None:
             return
 
 
+def login(directory: Path) -> Path:
+    """Return where Claude Code keeps its login in a directory of its own at `directory`, as `CLAUDE_CONFIG_DIR` names one: `.credentials.json` there."""
+    return ClaudeLayout(home=Path.home(), configured=directory).credentials
+
+
 def adapter() -> Adapter:
     """Return what lup needs of Claude Code: its hooks answered, and its launch."""
     layout = ClaudeLayout.of(ClaudeSettings())
@@ -2765,6 +2770,7 @@ def adapter() -> Adapter:
         hooks=hooks,
         channel=ClaudeChannel(),
         agent=agent,
+        login=login,
         records=records,
         reader=ClaudeTranscripts(settings=layout.settings),
         queues=ClaudeQueues(records=records),
