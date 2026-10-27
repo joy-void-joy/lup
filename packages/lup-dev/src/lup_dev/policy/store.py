@@ -415,6 +415,10 @@ class Store(Model):
     def committed(self, path: Path, blob: str | None, tips: list[str]) -> bool:
         """Say whether `path` as object `blob` is in a commit reachable from `tips`.
 
+        Content a merge commit made, where both sides changed the file, counts:
+        `git log` compares a merge with each of its parents (`-m`), where it
+        would otherwise show no change of a merge's at all, and miss it.
+
         For a deletion (`blob` none): whether `HEAD` lacks the path and was
         reachable from `tips`, as after switching to a branch without the file.
         """
@@ -431,6 +435,7 @@ class Store(Model):
             "log",
             "--format=%H",
             "--max-count=1",
+            "-m",
             f"--find-object={blob}",
             *tips,
             "--",
