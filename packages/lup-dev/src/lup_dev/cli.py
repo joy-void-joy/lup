@@ -2233,29 +2233,39 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
     `ignore` waits on is checked: on GitHub, or in a room through the host
     service; without, it goes unchecked. Each file is read only where it
     resolves inside the worktree (`lup_dev.confined`): one that doesn't is left
-    out, unread, and named.
+    out, unread, and named; so is a path given that isn't in the worktree at all,
+    as a scratch file elsewhere, whatever the roles say.
     """
     root = toplevel(Path.cwd())
     layout = Layout.of(LupDevSettings())
     worktree = Worktree.at(root, layout)
-    chosen = [
-        path.parent.resolve().relative_to(root) / path.name
-        if path.is_absolute()
-        else path
-        for path in paths or []
-    ]
-    listed = chosen or [
-        Path(name)
-        for name in nul_separated(
-            Git(cwd=root)
-            .run("ls-files", "-z", "--cached", "--others", "--exclude-standard")
-            .output
-        )
-        if (root / name).is_file()
-    ]
+
+    def placed(path: Path) -> Path | None:
+        """Return `path` from the root, its directory resolved; none where that directory is outside the root."""
+        directory = (root / path).parent.resolve()
+        if not directory.is_relative_to(root):
+            return None
+        return directory.relative_to(root) / path.name
+
+    placing = {path: placed(path) for path in paths or []}
+    elsewhere = [path for path, place in placing.items() if place is None]
+    inside = [place for place in placing.values() if place is not None]
+    listed = (
+        inside
+        if paths
+        else [
+            Path(name)
+            for name in nul_separated(
+                Git(cwd=root)
+                .run("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+                .output
+            )
+            if (root / name).is_file()
+        ]
+    )
     checked = [path for path in listed if worktree.roles.checked(path)]
     within = Confined(root=root)
-    unread = [path for path in checked if within.outside(path)]
+    unread = [*elsewhere, *(path for path in checked if within.outside(path))]
     read = {path: within.text(path) for path in checked if path not in unread}
     files = [path for path, content in read.items() if content is not None]
     if not files:
