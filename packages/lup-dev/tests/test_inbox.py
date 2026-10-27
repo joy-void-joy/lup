@@ -42,7 +42,12 @@ from lup.rooms import Podman
 from lup.tools.serving import Answer as ToolAnswer
 from lup.tools.speaking import SPEAKING
 from lup_dev import Modules, Project, cli, commanding
-from lup_dev.adapters.claude import ChannelMessage, ClaudeRecords, ClaudeTranscripts
+from lup_dev.adapters.claude import (
+    ChannelMessage,
+    ClaudeQueues,
+    ClaudeRecords,
+    ClaudeTranscripts,
+)
 from lup_dev.codescan.engine import EngineError
 from lup_dev.declaration.package_managers.uv import Uv
 from lup_dev.declaration.resolve import resolve
@@ -65,7 +70,7 @@ from lup_dev.host.protocol import (
     Stop,
 )
 from lup_dev.host.pushes import Pushes
-from lup_dev.host.records import Call, Called, Recorded, Said
+from lup_dev.host.records import Call, Called, Queues, Recorded, Said
 from lup_dev.host.service import UNDECIDED, HostService, Naming, Program, executed
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
@@ -76,7 +81,7 @@ from lup_dev.host.workers import (
     Workers,
 )
 from lup_dev.inbox.bearings import Repository, RepositoryBearings, Unlanded
-from lup_dev.inbox.delivery import Delivery, clocked, opening
+from lup_dev.inbox.delivery import SEPARATOR, Delivery, Waking, clocked, opening
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.parts import PartId, blocks
 from lup_dev.inbox.protocol import (
@@ -375,9 +380,16 @@ class Watched(Delivery):
     holding: threading.Event = Field(default_factory=threading.Event)
 
     @override
-    async def held(self, party: Conversation, until: Callable[[], bool]) -> str:
+    async def held(
+        self,
+        party: Conversation,
+        until: Callable[[], bool],
+        *,
+        on: list[Waking],
+        within: timedelta | None = None,
+    ) -> str:
         self.holding.set()
-        return await super().held(party, until)
+        return await super().held(party, until, on=on, within=within)
 
 
 @pytest.fixture
@@ -431,8 +443,9 @@ def inboxed(
     remotes: Callable[[Delivery], Remotes] | None = None,
     rooms: Callable[[Program], Awaitable[Ran]] | None = None,
     bearings: bool = False,
+    queues: dict[str, Queues] | None = None,
 ) -> Generator[Watched]:
-    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, and running in a launch's room through `rooms`, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`."""
+    """A host service with lup's inbox and the dashboard's kind, its delivery yielded, until the context ends; an item's moment read from `recorded`, the judge's stores from `judging`, or `machine`'s; an approval's types read by `typed`, where given, which tells `told` too; a subagent's spawn read by `spawns`, or by each runtime's adapter; containers asked of `podman`, where given; each hook answered by `judge`, else with nothing, and each launch's modules served by `modules`, where given; `land` pushing through the remotes `remotes` makes over the delivery, where given, else through remotes telling no one, and running in a launch's room through `rooms`, where given; a new main session told its bearings where `bearings` asks, its integration branch `dev`; what each runtime holds for a conversation read by `queues`, where given, a held call looking at it, and at its time limit, every few milliseconds."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
     wakers = cli.Wakers(adapters=known)
@@ -447,6 +460,8 @@ def inboxed(
         clock=clock,
         say=said.append,
         patience=patience,
+        queues=queues or {},
+        glance=timedelta(milliseconds=5),
     )
 
     def saying(line: str) -> None:
@@ -734,6 +749,239 @@ def test_a_call_to_lups_tools_tells_nothing_at_its_start_and_its_result_does(
         )
     assert "additionalContext" not in started["hookSpecificOutput"]
     assert returned == (first_note("Already here."), False)
+
+
+# What a Claude Code session's runtime holds for each of its conversations, as
+# its records say (`docs/field-notes.md`, *What a session holds queued*): the
+# tests write the records, laid out as Claude Code lays out its home.
+
+
+def appended(path: Path, *lines: dict[str, JsonValue]) -> None:
+    """Add `lines` to the record at `path`, as Claude Code writes them, each whole."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as written:
+        written.writelines(f"{json.dumps(each)}\n" for each in lines)
+
+
+def enqueued(content: str) -> dict[str, JsonValue]:
+    """A line of a session's record saying Claude Code queued `content` for it."""
+    return {
+        "type": "queue-operation",
+        "operation": "enqueue",
+        "timestamp": "2026-10-01T12:00:00.000Z",
+        "sessionId": "s1",
+        "content": content,
+    }
+
+
+def background(call: str, **result: JsonValue) -> dict[str, JsonValue]:
+    """A line of a conversation's record carrying the result of its call `call`, which says what the call started in the background."""
+    return {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": call, "content": ""}],
+        },
+        "toolUseResult": result,
+    }
+
+
+def notified(task: str, call: str, summary: str) -> str:
+    """A task notification, as Claude Code queues one for a task's end."""
+    return (
+        f"<task-notification>\n<task-id>{task}</task-id>\n"
+        f"<tool-use-id>{call}</tool-use-id>\n<status>completed</status>\n"
+        f"<summary>{summary}</summary>\n</task-notification>"
+    )
+
+
+def holding(kind: str, line: str, attributes: str = "") -> str:
+    """What a held call says of one thing its runtime holds for it."""
+    return (
+        '<queued from="your runtime">\n'
+        f'<waiting kind="{kind}"{attributes}>{line}</waiting>\n'
+        "It reaches you from your runtime as this call returns.\n</queued>"
+    )
+
+
+TYPED_WORDS = holding(
+    "typed", "Their words, typed in your terminal.", ' from="operator"'
+)
+"""What a held call says of the operator's words typed in its terminal."""
+
+
+def queued_in(home: Path) -> dict[str, Queues]:
+    """What Claude Code holds for each conversation, read from its home at `home`."""
+    return {"claude": ClaudeQueues(records=ClaudeRecords(directory=home))}
+
+
+def test_wait_inbox_returns_for_the_operator_s_typed_words_whatever_on_says(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    home = tmp_path / ".claude"
+    records = Subagents(home / "projects")
+    with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting = pool.submit(call, mcp, "wait_inbox", {"on": ["tasks"]})
+            assert delivery.holding.wait(timeout=60)
+            appended(records.transcript, enqueued("Stop the gate, it hangs."))
+            returned = waiting.result(timeout=60)
+    assert returned == (TYPED_WORDS, False)
+
+
+def test_wait_inbox_returns_for_a_task_of_its_own_and_never_for_its_subagent_s(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    home = tmp_path / ".claude"
+    records = Subagents(home / "projects")
+    gate = 'Background command "gate" completed (exit code 0)'
+    probe = 'Background command "probe" completed (exit code 0)'
+    with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        sockets = (hook, mcp)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "general-purpose", "t1", name="parser")
+        send(hook, records.call("a1", "general-purpose", "c1"))
+        appended(records.transcript, background("m1", backgroundTaskId="b1"))
+        appended(
+            records.folder / "agent-a1.jsonl",
+            {**background("c2", backgroundTaskId="b2"), "isSidechain": True},
+        )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            waiting = pool.submit(call, mcp, "wait_inbox", {})
+            assert delivery.holding.wait(timeout=60)
+            appended(records.transcript, enqueued(notified("b2", "c2", probe)))
+            theirs = pool.submit(
+                records.lup, sockets, "wait_inbox", {}, "a1", "general-purpose"
+            ).result(timeout=60)
+            # The subagent's task is told to it alone: the session's own call
+            # holds through it, until its own task ends.
+            appended(records.transcript, enqueued(notified("b1", "m1", gate)))
+            returned = waiting.result(timeout=60)
+    assert theirs == (holding("task", probe), False)
+    assert returned == (holding("task", gate), False)
+
+
+def test_wait_inbox_on_the_operator_alone_holds_through_a_subagent_s_message(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting = pool.submit(call, mcp, "wait_inbox", {"on": ["operator"]})
+            assert delivery.holding.wait(timeout=60)
+            records.lup((hook, mcp), "send", to_parent("Found it."), "a1", "Explore")
+            inbox("send", "one", "Here it is.")
+            returned = waiting.result(timeout=60)
+        items = [delivery.inbox.item(number) for number in [1, 3]]
+    assert returned == (
+        f"{delivery.said(items[0])}{SEPARATOR}{note(3, 'Here it is.')}",
+        False,
+    )
+    assert [each.state for each in items] == [
+        Told(at=clock.now(), how="held call"),
+        Told(at=clock.now(), how="held call"),
+    ]
+
+
+def waited_within(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    runtime: str,
+) -> tuple[str, bool]:
+    """Call `wait_inbox` with a `within` of five minutes from a session of `runtime`, and return what it returned once the clock moved past it."""
+    starting = claude if runtime == "claude" else codex
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", runtime)
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, starting("SessionStart", source="startup"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting = pool.submit(call, mcp, "wait_inbox", {"within": "PT5M"})
+            assert delivery.holding.wait(timeout=60)
+            clock.sleep(300)
+            return waiting.result(timeout=60)
+
+
+NOTHING_CAME = ("Nothing reached you within PT5M, this call's `within`.", False)
+"""What `wait_inbox` returns once its `within` of five minutes passed."""
+
+
+def test_wait_inbox_within_a_time_returns_saying_nothing_came_on_claude_code(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    waited = waited_within(machine, clock, notices, said, tmp_path, runtime="claude")
+    assert waited == NOTHING_CAME
+
+
+def test_wait_inbox_within_a_time_returns_saying_nothing_came_on_codex(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    waited = waited_within(machine, clock, notices, said, tmp_path, runtime="codex")
+    assert waited == NOTHING_CAME
+
+
+def test_what_the_runtime_holds_is_told_by_one_held_call(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    home = tmp_path / ".claude"
+    records = Subagents(home / "projects")
+    with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        appended(records.transcript, enqueued("Stop the gate, it hangs."))
+        first = call(mcp, "wait_inbox", {})
+        # Still in the record, as its runtime hands it over once the call has
+        # returned: the next call holds through it.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            delivery.holding.clear()
+            waiting = pool.submit(call, mcp, "wait_inbox", {"within": "PT1M"})
+            assert delivery.holding.wait(timeout=60)
+            clock.sleep(60)
+            second = waiting.result(timeout=60)
+    assert first == (TYPED_WORDS, False)
+    assert second == ("Nothing reached you within PT1M, this call's `within`.", False)
+
+
+def test_ask_with_wait_returns_for_the_operator_s_typed_words_its_question_open(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    home = tmp_path / ".claude"
+    records = Subagents(home / "projects")
+    asking: dict[str, JsonValue] = {"question": "Which parser?", "wait": True}
+    with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting = pool.submit(call, mcp, "ask", asking)
+            assert delivery.holding.wait(timeout=60)
+            appended(records.transcript, enqueued("Lark. I'll answer properly later."))
+            returned = waiting.result(timeout=60)
+        question = delivery.inbox.item(1)
+    assert returned == (
+        (
+            f"{TYPED_WORDS}\n\nYour question @1 is still open: its answer reaches "
+            "you at a later call; `wait_inbox` waits for it."
+        ),
+        False,
+    )
+    assert question.state == Waiting()
 
 
 def test_a_question_held_for_its_answer_reaches_a_watch_of_the_inbox_at_once(
@@ -3740,7 +3988,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "Tell the operator how the work went and felt.",
         "Ask the operator, with numbered decisions.",
         "Send a message to a party's inbox.",
-        "Wait until something reaches your inbox.",
+        "Wait until something reaches you.",
         "Read this repository's inbox, changing nothing.",
         "Take back an item the operator needn't see.",
         "Edit what you sent the operator.",

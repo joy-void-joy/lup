@@ -22,7 +22,13 @@ layer beside it:
   (`docs/trust.md`, *Trusted by its content*). A room writes the worktree, so
   an edit made there runs nowhere until approved: the judge and a launch read
   the copy kept with the approval. Where it changed, its diff is in the summary
-  itself (`compared`).
+  itself (`compared`);
+- the person's profiles file, `~/.config/lup/profiles.py`, which no repository
+  holds, by its content too (`Zone.profiles`): a launch runs the copy approved
+  with the repository's zone, so an edit asks again in each repository, at its
+  next launch. It runs apart from the declaration, importing nothing of the
+  commit, and the judge doesn't read it: the repository's roles and rules
+  aren't its own.
 
 The zone's fingerprint is kept with the commit the operator approved, per
 repository, in lup's state (`Approval`). `trusted`, which a launch calls before
@@ -378,6 +384,10 @@ class Zone(Model):
     """The person's own layer, `lup_project.local.py` in the worktree trust runs
     from, whole: git holds none of it, so it's in the zone by its content; none
     where there's none."""
+    profiles: str | None = None
+    """The person's profiles file, `~/.config/lup/profiles.py`, whole: no
+    repository holds it, so it's in the zone by its content; none where there's
+    none."""
     unread: list[str] = []
     """What of the declaration couldn't be followed, each said, so a file it runs
     may be missing from `paths`; empty where all of it was."""
@@ -444,6 +454,9 @@ class Change(Model):
     local: Diffed = Diffed()
     """The person's own layer, from the copy approved before to the worktree's;
     empty where it's the same."""
+    profiles: Diffed = Diffed()
+    """The person's profiles file, from the copy approved before to the one in
+    their configuration; empty where it's the same."""
     files: list[ChangedFile]
     """Each file the diff shows, whole on each side, in its order, with the
     judge's reading of it: what the dashboard shows (`docs/dashboard.md`, *The
@@ -479,9 +492,10 @@ class Change(Model):
         """Return what the operator reads first: what's approved and why, the commits, and git's count of each file.
 
         The count is git's own, as git prints it: the paths approved before,
-        then those joining the zone, shown whole. The person's own layer, which
-        git doesn't hold, is shown whole where it changed: its diff, not a count,
-        since it's short and nothing else shows it. A release's change is said
+        then those joining the zone, shown whole. The person's own layer and
+        their profiles, which git doesn't hold, are each shown whole where they
+        changed: their diff, not a count, since they're short and nothing else
+        shows them. A release's change is said
         by its versions, then what of the declaration couldn't be followed, and
         last why the judge couldn't read the change, where it couldn't.
         """
@@ -499,6 +513,14 @@ class Change(Model):
             if self.local.diff
             else []
         )
+        profiles = (
+            [
+                "Your profiles, which no repository holds, changed since approved:",
+                *self.profiles.diff.splitlines(),
+            ]
+            if self.profiles.diff
+            else []
+        )
         unknown = "Not followed, so the zone may miss a file the declaration runs:"
         unread = (
             [unknown, *(f"  {each}" for each in self.unread)] if self.unread else []
@@ -514,6 +536,7 @@ class Change(Model):
             *changed,
             *joined,
             *local,
+            *profiles,
             *self.tool,
             *unread,
             *unjudged,
@@ -521,8 +544,10 @@ class Change(Model):
         return "\n".join(said)
 
     def diff(self) -> str:
-        """Return the whole diff, coloured: the paths approved before, then those joining the zone, then the person's own layer."""
-        return self.changed.diff + self.joined.diff + self.local.diff
+        """Return the whole diff, coloured: the paths approved before, then those joining the zone, then the person's own layer, then their profiles."""
+        return (
+            self.changed.diff + self.joined.diff + self.local.diff + self.profiles.diff
+        )
 
     def question(self) -> str:
         """Ask whether to approve the zone, and run its `lup-dev` on the host: the first time, whether to trust it as it is."""
@@ -573,15 +598,36 @@ class Trusted(Model):
     from only where the copy is lup's own command."""
     installed: bool = True
     """Whether the copy was installed: not where only the person's own layer
-    changed, the copy approved before being the commit's already."""
+    or their profiles changed, the copy approved before being the commit's
+    already."""
+    layer: bool = True
+    """Whether the person's own layer is among what changed, where nothing was installed."""
+    profiles: bool = False
+    """Whether the person's profiles are among what changed, where nothing was installed."""
 
     def report(self) -> str:
         """Say what was installed, and where the host service stands."""
         if not self.installed:
+            approved = [
+                *(
+                    [
+                        (
+                            "your own layer, which judges this repository's "
+                            "sessions from their next hook"
+                        )
+                    ]
+                    if self.layer
+                    else []
+                ),
+                *(
+                    ["your profiles, which its launches run on from the next"]
+                    if self.profiles
+                    else []
+                ),
+            ]
             return (
-                "Approved: your own layer, which judges this repository's sessions "
-                f"from their next hook, beside `lup-dev` from {self.approval.commit} "
-                "as before."
+                f"Approved: {', and '.join(approved)}, beside `lup-dev` from "
+                f"{self.approval.commit} as before."
             )
         approved = (
             f"Approved: `lup-dev` from {self.approval.commit} judges this "
@@ -1358,17 +1404,24 @@ def diffed(
     )
 
 
-def compared(approved: str | None, current: str | None) -> Diffed:
-    """Return git's diff of the person's own layer, from the copy `approved` to the `current` one, coloured; empty where they're the same.
+def compared(
+    approved: str | None,
+    current: str | None,
+    name: str | None = None,
+    here: str = "worktree",
+) -> Diffed:
+    """Return git's diff of a file git doesn't hold, from the copy `approved` to the `current` one, coloured; empty where they're the same.
 
-    Git holds neither copy, so each is written into a scratch directory, as
-    `approved/` and `worktree/`, and git compares them there (`git diff
-    --no-index`), its own diff with no external diff command or text
-    conversion. A copy that's none is no file: the layer created, or removed.
+    The file is `name`, the person's own layer where it's none. Git holds
+    neither copy, so each is written into a scratch directory, as `approved/`
+    and `here/`, where the current one is (`worktree/` for the layer), and git
+    compares them there (`git diff --no-index`), its own diff with no external
+    diff command or text conversion. A copy that's none is no file: the file
+    created, or removed.
     """
     if approved == current:
         return Diffed()
-    name = CheckoutLayout(root=Path()).local_declaration.name
+    name = name or CheckoutLayout(root=Path()).local_declaration.name
     with tempfile.TemporaryDirectory() as scratch:
         root = Path(scratch)
 
@@ -1381,7 +1434,7 @@ def compared(approved: str | None, current: str | None) -> Diffed:
             return str(path.relative_to(root))
 
         before = placed("approved", approved)
-        after = placed("worktree", current)
+        after = placed(here, current)
         own = [
             "diff",
             "--no-index",
@@ -1440,11 +1493,18 @@ def files_between(
     ]
 
 
-def layer_changed(approved: str | None, current: str | None) -> list[ChangedFile]:
-    """Return the person's own layer, whole on each side, where it changed from the copy `approved` to the `current` one; none where they're the same."""
+def layer_changed(
+    approved: str | None, current: str | None, name: Path | None = None
+) -> list[ChangedFile]:
+    """Return a file git doesn't hold, whole on each side, where it changed from the copy `approved` to the `current` one; none where they're the same.
+
+    The file is at `name`, the person's own layer where it's none: from the
+    repository's root, or absolute for one outside every repository, their
+    profiles, which the judge doesn't read (`Trust.read`).
+    """
     if approved == current:
         return []
-    name = CheckoutLayout(root=Path()).local_declaration
+    name = name or CheckoutLayout(root=Path()).local_declaration
     return [
         ChangedFile.of(
             name,
@@ -1524,14 +1584,16 @@ class Trust(Model, arbitrary_types_allowed=True):
         )
 
     def zone(self) -> Zone:
-        """Read the host zone at the integration branch's tip, with the person's own layer.
+        """Read the host zone at the integration branch's tip, with the person's own layer and their profiles.
 
         Where the repository has no such branch, at the worktree's `HEAD`. The
         person's own layer, which git doesn't hold, is read by its content from
         the repository's main worktree (a clone's root, or a bare repository's
         own directory), whichever worktree trust runs from: one layer per
         repository, so a worktree added later, which git gives no ignored file,
-        asks nothing. What it imports of the commit joins the zone's paths. Raise
+        asks nothing. What it imports of the commit joins the zone's paths.
+        Their profiles file is read by its content from their configuration,
+        importing nothing of the commit. Raise
         `TrustError` before any commit, or where the lock doesn't say which
         `lup-dev` the host runs.
         """
@@ -1546,6 +1608,8 @@ class Trust(Model, arbitrary_types_allowed=True):
         tool = self.tool(commit)
         own = person_layer(self.root)
         local = own.read_text() if own.is_file() else None
+        declared = self.layout.profiles.declared
+        profiles = declared.read_text() if declared.is_file() else None
         named = self.named(commit, tool.paths(), local)
         declaration = CheckoutLayout(root=Path())
         listed = list(
@@ -1564,7 +1628,12 @@ class Trust(Model, arbitrary_types_allowed=True):
             if not any(path != other and path.is_relative_to(other) for other in listed)
         ]
         return Zone(
-            commit=commit, paths=paths, tool=tool, local=local, unread=named.unread
+            commit=commit,
+            paths=paths,
+            tool=tool,
+            local=local,
+            profiles=profiles,
+            unread=named.unread,
         )
 
     def tool(self, commit: str) -> Tool:
@@ -1599,12 +1668,12 @@ class Trust(Model, arbitrary_types_allowed=True):
             return declared(source, covered)
 
     def fingerprint(self, zone: Zone) -> str:
-        """Fingerprint the zone: git's listing of its files, the `lup-dev` it runs, and the person's own layer.
+        """Fingerprint the zone: git's listing of its files, the `lup-dev` it runs, the person's own layer and their profiles.
 
         The listing names each file's path, mode and object, so any change to one
         of them, or a file joining or leaving the zone, changes it. The person's
-        own layer counts by its content, where there's one, so a zone without one
-        keeps the fingerprint it had before the layer existed.
+        own layer and their profiles count by their content, where there's each,
+        so a zone without one keeps the fingerprint it had before it existed.
         """
         listed = Git(cwd=self.root).run(
             "ls-tree",
@@ -1621,6 +1690,9 @@ class Trust(Model, arbitrary_types_allowed=True):
             name = CheckoutLayout(root=Path()).local_declaration.name
             digest.update(f"\0{name}\0".encode())
             digest.update(zone.local.encode())
+        if zone.profiles is not None:
+            digest.update(f"\0{self.layout.profiles.declared.name}\0".encode())
+            digest.update(zone.profiles.encode())
         return digest.hexdigest()
 
     def change(self, standing: Standing) -> Change:
@@ -1629,7 +1701,8 @@ class Trust(Model, arbitrary_types_allowed=True):
         The paths the approval held, since its commit; the paths it didn't, whole.
         The first time, or where the repository doesn't hold the approved commit,
         every path whole. The person's own layer, from the copy approved to the
-        worktree's, where they differ (`compared`). Each file the diff shows is
+        worktree's, and their profiles, from the copy approved to theirs, where
+        they differ (`compared`). Each file the diff shows is
         read whole on each side too (`files_between`, `layer_changed`), with the
         judge's first reading of it, from its parse alone (`read`), which the
         host service follows with the whole judgement once it's asked (`typed`);
@@ -1644,6 +1717,10 @@ class Trust(Model, arbitrary_types_allowed=True):
         before = approval.local if approval is not None else None
         local = compared(before, zone.local)
         layer = layer_changed(before, zone.local)
+        mine = approval.profiles if approval is not None else None
+        declared = self.layout.profiles.declared
+        profiles = compared(mine, zone.profiles, declared.name, "yours")
+        layer = [*layer, *layer_changed(mine, zone.profiles, declared)]
         held = approval is not None and (
             git.run(
                 "cat-file", "-e", f"{approval.commit}^{{commit}}", ok=[0, 1, 128]
@@ -1659,6 +1736,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                 changed=diffed(git, nothing, zone.commit, zone.paths),
                 joined=Diffed(),
                 local=local,
+                profiles=profiles,
                 files=files,
                 tool=tool,
                 unread=zone.unread,
@@ -1678,6 +1756,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                 changed=diffed(git, approval.commit, zone.commit, kept),
                 joined=diffed(git, nothing, zone.commit, joined),
                 local=local,
+                profiles=profiles,
                 files=files,
                 tool=tool,
                 unread=zone.unread,
@@ -1694,7 +1773,11 @@ class Trust(Model, arbitrary_types_allowed=True):
         """Return a first approval's files, each read by its path's role alone, by lup's defaults with the tip's declaration protected, asking nothing: trusted as they are, they're folded for the review, and the engine doesn't run."""
         roles = self.judge(self.repository(), None, files).roles
         return [
-            each.model_copy(update={"reading": Reading(role=roles.role(each.path))})
+            each
+            if each.path.is_absolute()
+            else each.model_copy(
+                update={"reading": Reading(role=roles.role(each.path))}
+            )
             for each in files
         ]
 
@@ -1714,9 +1797,13 @@ class Trust(Model, arbitrary_types_allowed=True):
         with lup's rules; otherwise from each file's parse alone (`Judge.parsed`),
         which costs a parse where the check costs seconds. A side that isn't
         text is judged as an empty one: no rule reads it, and only whether it's
-        there decides what it asks. Raise what the judge raises.
+        there decides what it asks. A file outside every repository, at an
+        absolute path, the person's profiles, goes unread: the repository's
+        roles and rules aren't its own, and the operator reads its whole diff in
+        the summary. Raise what the judge raises.
         """
-        judge = self.judge(repository, approval, files)
+        inside = [each for each in files if not each.path.is_absolute()]
+        judge = self.judge(repository, approval, inside)
         changes = [
             FileChange(
                 path=each.path,
@@ -1724,17 +1811,18 @@ class Trust(Model, arbitrary_types_allowed=True):
                 after=judged(each.after),
                 baseline=judged(each.before),
             )
-            for each in files
+            for each in inside
         ]
         judgements = (
             judge.judge(changes, inform=False)
             if typed
             else judge.parsed(changes, self.parser)
         )
-        return [
-            each.model_copy(update={"reading": judgement.reading()})
-            for each, judgement in zip(files, judgements, strict=True)
-        ]
+        read = {
+            each.path: each.model_copy(update={"reading": judgement.reading()})
+            for each, judgement in zip(inside, judgements, strict=True)
+        }
+        return [read.get(each.path, each) for each in files]
 
     def typed(self, repository: Path, files: list[ChangedFile]) -> list[ChangedFile]:
         """Return an approval's `files` with the judge's whole reading of each, types and lup's rules included, in place of the reading of their parse they were asked with.
@@ -1920,8 +2008,9 @@ class Trust(Model, arbitrary_types_allowed=True):
 
         Where another launch waiting on the same approval acted on it first, its
         approval is read, and nothing is installed twice. Where only the
-        person's own layer changed, the copy approved before is the commit's
-        already, so the approval is recorded and nothing installed or restarted.
+        person's own layer or their profiles changed, the copy approved before
+        is the commit's already, so the approval is recorded and nothing
+        installed or restarted.
         """
         kept = self.layout.approved(repository)
         copy = self.layout.judge(repository)
@@ -1947,14 +2036,22 @@ class Trust(Model, arbitrary_types_allowed=True):
             tool=zone.tool,
             time=self.clock.now(),
             local=zone.local,
+            profiles=zone.profiles,
         )
         if now is not None and now.commit == zone.commit and now.tool == zone.tool:
-            # Only the person's own layer changed, which the judge reads from the
-            # approval at each hook: the copy is the commit's already, so nothing
-            # is installed, and no service restarts under running sessions.
+            # Only the person's own layer or their profiles changed, which the
+            # judge and a launch read from the approval: the copy is the
+            # commit's already, so nothing is installed, and no service restarts
+            # under running sessions.
             self.reinstall(now, zone.commit, copy)
             write_model(kept, recorded)
-            return Trusted(approval=recorded, restarted=False, installed=False)
+            return Trusted(
+                approval=recorded,
+                restarted=False,
+                installed=False,
+                layer=now.local != zone.local,
+                profiles=now.profiles != zone.profiles,
+            )
         own = zone.tool.lups_own()
         self.installed(zone.tool, zone.commit, copy, users=own)
         restarted = own and self.restart()

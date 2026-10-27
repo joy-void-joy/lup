@@ -239,6 +239,10 @@ class Resolved(Model):
     """What a change waits for the operator's answer on, by name (`Project.held`)."""
     flagged: list[str]
     """What a change lands with, flagged, by name (`Project.flagged`)."""
+    profile: str | None = None
+    """The profile the person's layer chooses for the repository's launches,
+    by its name (`Project.profile`); none for `default`, where `--profile`
+    names none."""
     served: list[Served] = []
     """Each module's classes of methods, each with its module: its tools, its
     requests and its hooks."""
@@ -676,6 +680,7 @@ def resolve(project: Project) -> Resolved:
         repositories=neighbours(modules),
         held=project.held,
         flagged=project.flagged,
+        profile=project.profile,
         served=found,
         looks=looked(modules, found),
         shared=[

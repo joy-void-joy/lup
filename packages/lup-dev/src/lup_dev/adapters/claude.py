@@ -243,8 +243,10 @@ Its release channel (`ClaudeChannel`) is the one its native installer reads
 
 import io
 import shlex
+import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, get_args, override
 
@@ -266,6 +268,9 @@ from lup_dev.host.records import (
     Call,
     Called,
     Entry,
+    Queued,
+    Queues,
+    Queuing,
     Reader,
     Record,
     Records,
@@ -1811,6 +1816,11 @@ class ToolResult(Model, extra="ignore"):
                 return "\n".join(part.said() for part in parts)
 
 
+type Background = Literal["command", "monitor", "subagent"]
+"""What a call starts in the background: a command `Bash` runs, a `Monitor`'s
+watch, or a subagent `Agent` spawns."""
+
+
 class TaskMade(Model, extra="ignore"):
     """A task as `TaskCreate`'s result names it: its id, numbered in the session's list, and its subject."""
 
@@ -1821,13 +1831,35 @@ class TaskMade(Model, extra="ignore"):
 class ToolResulted(
     Model, extra="ignore", alias_generator=to_camel, populate_by_name=True
 ):
-    """What a `user` line keeps of a call's result beyond its text (`toolUseResult`): the task a `TaskCreate` made, where it's one, and where a command's whole output was saved where the agent was given only its start."""
+    """What a `user` line keeps of a call's result beyond its text (`toolUseResult`): the task a `TaskCreate` made, where it's one, where a command's whole output was saved where the agent was given only its start, and what the call started in the background."""
 
     task: TaskMade | None = None
     persisted_output_path: Path | None = None
     """The file Claude Code saved a command's whole output to, under the
     session's own folder, where the result the agent was given is its start and
     that path (`docs/field-notes.md`, *A session's record*)."""
+    background_task_id: str | None = None
+    """The task a `Bash` call run in the background started, which the
+    `<task-notification>` of its end names as its `<task-id>`."""
+    task_id: str | None = None
+    """The task a `Monitor` call started, which each of its events names."""
+    agent_id: str | None = None
+    """The subagent an `Agent` call started in the background, which the
+    notification of its end names as its `<task-id>`."""
+
+    def started(self) -> dict[str, Background]:
+        """Return what the call started in the background, by the id its notifications name: a command, a Monitor's watch or a subagent.
+
+        >>> ToolResulted(background_task_id="b1").started()
+        {'b1': 'command'}
+        """
+        kinds: list[Background] = ["command", "monitor", "subagent"]
+        named = [self.background_task_id, self.task_id, self.agent_id]
+        return {
+            each: kind
+            for each, kind in zip(named, kinds, strict=True)
+            if each is not None
+        }
 
 
 class CommandRun(Model, extra="ignore"):
@@ -2042,7 +2074,7 @@ class AssistantLine(Model, extra="ignore", alias_generator=to_camel):
     the long variant; none in a record before Claude Code 2.1.295."""
 
 
-class Queued(Model, extra="ignore", alias_generator=to_camel):
+class QueuedCommand(Model, extra="ignore", alias_generator=to_camel):
     """A message that arrived while the agent worked, given to it at its next step."""
 
     type: Literal["queued_command"]
@@ -2061,7 +2093,9 @@ class AttachmentLine(Model, extra="ignore"):
     """An `attachment` line."""
 
     type: Literal["attachment"]
-    attachment: Annotated[Queued | OtherAttachment, Field(union_mode="left_to_right")]
+    attachment: Annotated[
+        QueuedCommand | OtherAttachment, Field(union_mode="left_to_right")
+    ]
     timestamp: datetime | None = None
 
 
@@ -2411,7 +2445,7 @@ def entries(line: Line, *, sidechain: bool = False) -> list[Entry]:
                 if step is not None
             ]
         case AttachmentLine(
-            attachment=Queued(
+            attachment=QueuedCommand(
                 command_mode="prompt", origin=Origin(kind="human")
             ) as queued,
             timestamp=at,
@@ -2432,8 +2466,298 @@ def said_by_agent(block: Block, at: datetime | None) -> Entry | None:
             return None
 
 
+class QueueOperation(Model, extra="ignore"):
+    """A line saying what Claude Code did with its session's queue, which holds what reaches a conversation once its running call returns: `enqueue` puts a prompt there; `dequeue` hands the oldest to an idle session as its turn's prompt; `remove` takes one out by its text, absorbed into a running turn; `popAll` takes the operator's typed words back into the input to edit."""
+
+    type: Literal["queue-operation"]
+    operation: Literal["enqueue", "dequeue", "remove", "popAll"]
+    content: str | None = None
+
+
+type Followed = Annotated[QueueOperation | UserLine, Field(discriminator="type")]
+"""A line of a record its queue is followed through: one saying what Claude Code
+did with the queue, or one carrying a call's result, which says what the call
+started in the background."""
+
+
+class Pending(Model):
+    """A prompt Claude Code holds in its session's queue: where its `enqueue` line starts in the record, and its text."""
+
+    at: int
+    content: str
+
+
+class Following(MutableModel):
+    """A conversation's record as read so far, for what Claude Code holds queued: how far it was read, the queue its lines leave where it's a session's own record, and what the conversation's calls started."""
+
+    read: int = 0
+    """The bytes read, to the end of the last whole line."""
+    pending: list[Pending] = []
+    started: dict[str, Background] = {}
+    """What the conversation's calls started in the background, by each id its
+    notifications name: its task's, and its call's."""
+
+
+class Attributes(Model, extra="ignore"):
+    """What lup reads of the attributes of the tag a queued prompt opens with."""
+
+    source: str | None = None
+    """A channel's: the server that pushed it."""
+    from_name: str | None = Field(default=None, alias="from-name")
+    """Another session's message: the name of the session that sent it."""
+
+
+class Opening(HTMLParser):
+    """Reads what a queued prompt opens with: the tag it starts with, where text doesn't come first, its attributes, and the text of each element inside it, such as `<task-id>` and `<summary>`."""
+
+    def __init__(self) -> None:
+        """Read nothing yet."""
+        super().__init__(convert_charrefs=True)
+        self.tag: str | None = None
+        self.attributes = Attributes()
+        self.texts: dict[str, str] = {}
+        self.inside: list[str] = []
+        self.worded = False
+        """Whether text came before any tag: the operator's words, typed."""
+
+    @override
+    def handle_starttag(
+        self,
+        tag: str,
+        # lup: ignore("tuple-shape", why="`HTMLParser`'s own signature, which this overrides")
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        if self.tag is None and not self.worded:
+            self.tag = tag
+            self.attributes = Attributes.model_validate(
+                {name: value or "" for name, value in attrs}
+            )
+        self.inside = [*self.inside, tag]
+
+    @override
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self.inside:
+            last = len(self.inside) - 1 - self.inside[::-1].index(tag)
+            self.inside = self.inside[:last]
+
+    @override
+    def handle_data(self, data: str) -> None:
+        if self.tag is None and data.strip():
+            self.worded = True
+        if self.inside:
+            innermost = self.inside[-1]
+            self.texts = {
+                **self.texts,
+                innermost: self.texts.get(innermost, "") + data,
+            }
+
+    def text(self, tag: str) -> str | None:
+        """Return the text of the element `tag` inside the prompt, without the space around it; none where there's none, or it's blank."""
+        said = self.texts.get(tag, "").strip()
+        return said or None
+
+
+class Prompted(Model):
+    """What a prompt Claude Code queued is, read off its text: what it holds for the agent, the ids tying it to the conversation that started what it's about, and what it says it is."""
+
+    kind: Queuing
+    names: list[str] = []
+    """The ids of the task and of the call it's about; none for what's the
+    session's own conversation's, whatever made it."""
+    summary: str | None = None
+
+
+def prompted(content: str) -> Prompted | None:
+    r"""Read what a prompt Claude Code queued for its session is; none for lup's own push or doorbell, which lup's inbox tells already.
+
+    Measured on 2.1.311 (`docs/field-notes.md`, *What a session holds queued*):
+    a background command's end, a Monitor's event and a background subagent's
+    end are each a `<task-notification>`, naming its `<task-id>` and, but for
+    most Monitors', its call's `<tool-use-id>`; a background subagent's report
+    is an `<agent-message>`, and another session's message a
+    `<cross-session-message>`, both the session's own conversation's; the
+    operator's typed words are their text. What opens with no tag lup knows
+    is taken for the operator's, so a call is never held past it.
+
+    >>> prompted("Stop the gate.").kind
+    'typed'
+    >>> prompted('<channel source="lup" wake="t1">\n<note item="7"/>\n</channel>') is None
+    True
+    >>> notice = prompted(
+    ...     "<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n"
+    ...     '<summary>Background command "gate" completed (exit code 0)</summary>\n'
+    ...     "</task-notification>"
+    ... )
+    >>> notice.kind, notice.names, notice.summary
+    ('task', ['b1', 'toolu_1'], 'Background command "gate" completed (exit code 0)')
+    >>> prompted('<cross-session-message from="uds:/s" from-name="main-09">\nHi\n</cross-session-message>').summary
+    'from main-09'
+    """
+    opening = Opening()
+    opening.feed(content)
+    opening.close()
+    match opening.tag:
+        case "channel" if opening.attributes.source == SERVER:
+            return None
+        case "doorbell":
+            return None
+        case "task-notification":
+            named = [opening.text("task-id"), opening.text("tool-use-id")]
+            return Prompted(
+                kind="task",
+                names=[each for each in named if each is not None],
+                summary=opening.text("summary"),
+            )
+        case "agent-message":
+            return Prompted(kind="subagent")
+        case "cross-session-message":
+            sender = opening.attributes.from_name
+            return Prompted(
+                kind="message", summary=None if sender is None else f"from {sender}"
+            )
+        case _:
+            return Prompted(kind="typed")
+
+
+class ClaudeQueues(MutableModel, Queues, arbitrary_types_allowed=True):
+    """What Claude Code holds queued for each conversation of a session, read from its records as they grow (`docs/field-notes.md`, *What a session holds queued*).
+
+    Measured on 2.1.311: a session has one queue, written in its own record as
+    `queue-operation` lines whoever it's for, a subagent's background command
+    among it; what a subagent absorbs is written in its own record only once
+    it has. So the queue is replayed from the session's record (`Following`),
+    and a prompt is a subagent's where the task or the call it names was
+    started by that subagent's own calls, as its record says; the operator's
+    words, a subagent's report and another session's message, which name
+    none, are the session's own conversation's.
+    """
+
+    records: ClaudeRecords
+    followed: dict[Path, Following] = {}
+    """Each record as read so far, by its path, so a look reads only what it
+    gained since."""
+    found: dict[str, Path] = {}
+    """Each conversation's record, by `session/agent`, once found."""
+    reading: threading.Lock = Field(default_factory=threading.Lock)
+    """Held while a look reads, since held calls look from threads of their own."""
+
+    @override
+    def queued(self, session: str, agent: str | None) -> list[Queued]:
+        with self.reading:
+            main = self.record(session, None)
+            if main is None:
+                return []
+            queue = self.following(main, sidechains=False)
+            own = queue
+            if agent is not None:
+                record = self.record(session, agent)
+                own = (
+                    Following()
+                    if record is None
+                    else self.following(record, sidechains=True)
+                )
+            pending = list(queue.pending)
+
+        def held(each: Pending) -> Queued | None:
+            said = prompted(each.content)
+            if said is None:
+                return None
+            ours = any(name in own.started for name in said.names)
+            if (said.names and not ours) or (not said.names and agent is not None):
+                return None
+            ended = said.kind == "task" and any(
+                own.started.get(name) == "subagent" for name in said.names
+            )
+            return Queued(
+                id=str(each.at),
+                kind="subagent" if ended else said.kind,
+                summary=said.summary,
+            )
+
+        return [queued for each in pending if (queued := held(each)) is not None]
+
+    def record(self, session: str, agent: str | None) -> Path | None:
+        """Return conversation `agent`'s record of session `session`, the session's own for none, found once and looked for again where it's gone; none where it isn't on this machine."""
+        key = f"{session}/{agent}"
+        kept = self.found.get(key)
+        if kept is not None and kept.is_file():
+            return kept
+        record = self.records.conversation(session, agent)
+        if record is not None:
+            self.found = {**self.found, key: record}
+        return record
+
+    def following(self, record: Path, *, sidechains: bool) -> Following:
+        """Return `record` as read so far, read on from where the last look left off to the end of its last whole line; read anew where it shrank, written again. `sidechains` says whether its lines marked a subagent's are its own: in a subagent's record they all are, and in a session's an earlier release kept its subagents' there."""
+        kept = self.followed.get(record, Following())
+        size = record.stat().st_size
+        if size < kept.read:
+            kept = Following()
+        if size > kept.read:
+            with record.open("rb") as written:
+                written.seek(kept.read)
+                grown = written.read(size - kept.read)
+            at = kept.read
+            for raw in io.BytesIO(grown):
+                if not raw.endswith(b"\n"):
+                    break
+                followed(kept, raw, at, sidechains=sidechains)
+                at += len(raw)
+            kept.read = at
+        self.followed = {**self.followed, record: kept}
+        return kept
+
+
+def followed(kept: Following, raw: bytes, at: int, *, sidechains: bool) -> None:
+    """Follow one whole line of a record, starting at byte `at`, into what was read of it: its queue, where it says what Claude Code did with it, and what the conversation's calls started, where it carries a call's result.
+
+    Only a line naming the queue or a call's result is parsed, a record being
+    mostly the conversation's own steps; one that isn't JSON, or isn't either,
+    is passed over.
+    """
+    if b'"queue-operation"' not in raw and b'"toolUseResult"' not in raw:
+        return
+    try:
+        line = TypeAdapter[Followed](Followed).validate_json(raw)
+    except ValidationError:
+        return
+    match line:
+        case QueueOperation(operation="enqueue", content=str() as content):
+            kept.pending = [*kept.pending, Pending(at=at, content=content)]
+        case QueueOperation(operation="dequeue"):
+            kept.pending = kept.pending[1:]
+        case QueueOperation(operation="remove", content=content):
+            taken = next(
+                (each for each in kept.pending if each.content == content), None
+            )
+            kept.pending = [each for each in kept.pending if each is not taken]
+        case QueueOperation(operation="popAll"):
+            kept.pending = [
+                each
+                for each in kept.pending
+                if (said := prompted(each.content)) is None or said.kind != "typed"
+            ]
+        case UserLine(is_sidechain=True) if not sidechains:
+            return
+        case UserLine(tool_use_result=ToolResulted() as result) as user:
+            started = result.started()
+            calls: dict[str, Background] = {
+                call: kind for call in user.answers() for kind in started.values()
+            }
+            kept.started = {**kept.started, **started, **calls}
+        case _:
+            return
+
+
+def login(directory: Path) -> Path:
+    """Return where Claude Code keeps its login in a directory of its own at `directory`, as `CLAUDE_CONFIG_DIR` names one: `.credentials.json` there."""
+    return ClaudeLayout(home=Path.home(), configured=directory).credentials
+
+
 def adapter() -> Adapter:
     """Return what lup needs of Claude Code: its hooks answered, and its launch."""
+    layout = ClaudeLayout.of(ClaudeSettings())
+    records = ClaudeRecords(directory=layout.directory)
     return Adapter(
         runtime=Claude(),
         hook=hook,
@@ -2446,6 +2770,8 @@ def adapter() -> Adapter:
         hooks=hooks,
         channel=ClaudeChannel(),
         agent=agent,
-        records=ClaudeRecords(directory=ClaudeLayout.of(ClaudeSettings()).directory),
-        reader=ClaudeTranscripts(settings=ClaudeLayout.of(ClaudeSettings()).settings),
+        login=login,
+        records=records,
+        reader=ClaudeTranscripts(settings=layout.settings),
+        queues=ClaudeQueues(records=records),
     )

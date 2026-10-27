@@ -51,7 +51,35 @@ A project without a `lup_project.py` gets `Project()`, which is `Project(modules
 - **Imported** with the root, its `src/`, and each uv workspace member and its `src/` on the path, since the judge runs from its own installed copy, without the project's environment; a shared base kept in a package of its own is found only as a workspace member. It writes no bytecode into the worktree.
 - **Who reads which copy:** the judge and a launch read it at the commit the operator approved (`docs/trust.md`), the gate from the worktree. The declaration's own file is protected, so every change to it reaches the operator; the other files of a `lup_project/` package are judged as code, and take effect once approved.
 
-**A person's own layer, `lup_project.local.py`:** one per repository, in its main worktree (a clone's root, or a bare repository's own directory), so every worktree shares it. It's gitignored and protected. It binds `project` too, a `Project` written as a layer on the project's in the same grammar, and runs after the declaration, so it can import the project's own modules. It holds what a person sets up for themselves, the other repositories they relate above all (`docs/launch.md`, *Related repositories*), and their private values (`docs/private.md`). The host runs it, so trust approves it by its content (`docs/trust.md`, *Trusted by its content*).
+**A person's own layer, `lup_project.local.py`:** one per repository, in its main worktree (a clone's root, or a bare repository's own directory), so every worktree shares it. It's gitignored and protected. It binds `project` too, a `Project` written as a layer on the project's in the same grammar, and runs after the declaration, so it can import the project's own modules. It holds what a person sets up for themselves, the other repositories they relate above all (`docs/launch.md`, *Related repositories*), their private values (`docs/private.md`), and the profile the repository's launches run on, `Project(profile="work")` (*Profiles*). The host runs it, so trust approves it by its content (`docs/trust.md`, *Trusted by its content*).
+
+## Profiles
+
+A profile is the whole setting a person's rooms run with, in every repository: the account its sessions log in with, the directories it lends every launch, each runtime's session defaults, a section of guidance of its own, its own runtime configuration over the operator's, where its rooms keep their history, and optionally a layer on each repository's project (`declaration/profiles.py`). An account is a login per runtime, kept by its name, so every room on it shares one login (`docs/launch.md`, *Accounts and profiles*).
+
+```python
+from pathlib import Path
+
+from lup_dev import Lend, Lending, Profile, Profiles, RuntimeDefaults
+
+profiles = Profiles().add(
+    Profile(
+        name="work",
+        account="work",
+        accounts={"codex": "home"},
+        lent=Lending.of(Lend(path=Path("~/notes"))),
+        defaults={"claude": RuntimeDefaults(model="opus", effort="high")},
+    ),
+)
+```
+
+- **The file** is `~/.config/lup/profiles.py` (`$XDG_CONFIG_HOME/lup/`), binding `profiles`, a `Profiles` written as a layer on lup's own in the declaration's grammar: `.add` adds a profile, `.edit(Profile(name="default", …))` changes one field by field, as a module's layer does, and a selection starting over that leaves `default` out is refused.
+- **`default` needs no file:** account `default`, the operator's own runtime configuration, nothing lent. A person who never writes the file runs on it.
+- **A launch's profile** is `--profile`'s, else the one the repository's person's layer chooses, else `default`; `--account` replaces the profile's account for the runtime launched (`docs/launch.md`, *Accounts and profiles*). Only the person's layer chooses one: a committed declaration choosing a profile fails the load, since a profile is the person's own, and another person's clone has none of that name.
+- **What differs by runtime is keyed by the runtime's name,** as `lup-dev launch` takes it: `accounts`, an account other than `account` for one runtime, and `defaults`, the model and effort, spelled as that runtime spells them, since neither names the same thing on another. A launch refuses a name no runtime has.
+- **Each profile's own runtime configuration** is in `~/.config/lup/profiles/<name>/<runtime>/`, over the operator's own unless `operator_configuration=False`. `rooms_home` keeps its rooms' history and state in a home of each project's own (`project`, the default), or in one shared by every project's rooms on the profile (`global`).
+- **The host runs the file,** so trust on launch approves it by its content, in each repository's host zone, as it does the person's layer (`docs/trust.md`, *Trusted by its content*). A launch runs the copy approved, as a file of its own with no import path of its own: it imports what's installed, `lup_dev` above all, so nothing beside it runs unapproved.
+- **What reads it:** a launch chooses its profile and account, refusing a name that's neither, and says them where either isn't `default`. The room it starts doesn't change yet: the other fields are declared ahead of the room homes that read them, each marked `defer` on #324.
 
 ## The verbs on modules
 
@@ -223,7 +251,7 @@ A module's commands come under its name on the command line, `lup-dev transcript
 
 **What judging reads** is kept apart as plain values (`Declaration`): the declaration's file, the roles, the test roots, the exemptions, the conditions, the rule selections, the runner as the commands it puts before a tool, and what's held and flagged. Plain values, since a module or a runner may be a class of the project's own, which JSON can't bring back, and the judge keeps the last declaration that loaded to stand in for one that can't (`docs/judging-writes.md`, *A declaration that can't load has a stand-in*).
 
-**What a launch reads,** at the approved commit (`approved_declaration`, `launch/session.py`): the packages, and whether the image carries pyright's source, at the release the launch's worktree's `uv.lock` pins; the package age (`docs/launch.md`, *The package age gate*); the session settings, with which fields some layer set, so those are imposed over the person's own runtime settings and the rest are lup's defaults theirs outrank; the credentials' limits, sent with the registration (`docs/credentials.md`, *What the declaration allows*); the guidance sections (`docs/launch.md`, *Guidance*); the related repositories; the `secret` role's patterns, the files it hides from the room (`docs/launch.md`, *Files with a secret's name*); the runner's `room()`; and what each module serves.
+**What a launch reads,** at the approved commit (`approved_declaration`, `launch/session.py`): the packages, and whether the image carries pyright's source, at the release the launch's worktree's `uv.lock` pins; the package age (`docs/launch.md`, *The package age gate*); the session settings, with which fields some layer set, so those are imposed over the person's own runtime settings and the rest are lup's defaults theirs outrank; the credentials' limits, sent with the registration (`docs/credentials.md`, *What the declaration allows*); the guidance sections (`docs/launch.md`, *Guidance*); the profile the person's layer chooses (*Profiles*); the related repositories; the `secret` role's patterns, the files it hides from the room (`docs/launch.md`, *Files with a secret's name*); the runner's `room()`; and what each module serves.
 
 **Selecting the rules.** `CodeRules.rules` is a `Rules` selection, by default `Rules.all()` with a `.drop(…, why=…)` for each rule lup's default leaves out, so a rule a later release adds runs unless it's left out too. Python only composes and records a selection: each check request carries every module's, and the engine, which holds the table, resolves them and runs their union, refusing an id it doesn't have. Exemptions and `# lup: ignore` apply afterwards, in Python. `lup-dev rules list` lists what the worktree's declaration runs, resolved the same way, and a launch lists the approved one's in the guidance. A project's own rule tables are #175.
 

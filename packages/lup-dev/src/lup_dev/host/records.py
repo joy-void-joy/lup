@@ -212,6 +212,37 @@ class Recorded(Model, arbitrary_types_allowed=True):
     reader: Reader
 
 
+type Queuing = Literal["typed", "task", "subagent", "message"]
+"""What a runtime holds for a conversation while its call runs: the operator's
+words typed in its terminal, and anything the record doesn't say is another's,
+so it's never taken for less; a task the conversation started in the
+background, a command ending or a Monitor's event; a subagent it started ending,
+or its report; another session's message."""
+
+
+class Queued(Model):
+    """Something a runtime holds for one conversation of a session, which it hands the agent once its running call returns, as the session's record says while it runs."""
+
+    id: str
+    """Which it is, as the runtime's record places it, so it's told once."""
+    kind: Queuing
+    summary: str | None = None
+    """What the runtime says it is, in a line, where it says: a command's end
+    and its exit code, a Monitor's event, a subagent finishing; none for the
+    operator's words, which the agent reads whole from the runtime."""
+
+
+class Queues(ABC):
+    """What a runtime holds queued for each conversation of its sessions on this machine, read from their records as they grow."""
+
+    @abstractmethod
+    def queued(self, session: str, agent: str | None) -> list[Queued]:
+        """Return what the runtime holds for session `session`'s own conversation, or for its subagent `agent`, to hand it once its running call returns, oldest first; none where nothing is, or the session's record isn't on this machine.
+
+        Each look reads only what the records gained since the last.
+        """
+
+
 def gist(value: JsonValue, width: int = 160) -> str | None:
     r"""Say `value` in a line, as a call's gist says what it did: a string's first line with words in it, any other value as JSON; cut at `width` characters, marked `…`, where it's longer; none where it says nothing.
 

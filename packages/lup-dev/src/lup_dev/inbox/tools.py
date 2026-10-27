@@ -11,14 +11,18 @@ calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
   parent as well, whole and quiet (`Item.quiet`), so it can file what got in
   the way, or learn its brief misled;
 - `ask` puts a question to the operator, its decisions numbered, each with the
-  agent's lean; with `wait` it holds until they answer;
+  agent's lean; with `wait` it holds until they answer, or until other news of
+  theirs reaches the agent, their words typed in its terminal among it;
 - `send` is the inbox's general verb, a message of a kind to a party's inbox:
   the operator's, the conversation's parent's, or one of its own subagents',
   each by a name the conversation knows it by, the operator reading a copy of
   a message between conversations; one whom nothing would read is refused;
-- `wait_inbox` holds until something reaches the agent's inbox, one of its own
-  subagents' ends among it. It isn't called `wait`, a name a runtime has for a
-  tool of its own;
+- `wait_inbox` holds until something reaches the agent: an item of its inbox,
+  one of its own subagents' ends among it, or what its runtime holds for it,
+  the operator's typed words and its background tasks among it, where the
+  runtime's records say. `on` narrows it to whose news (`Waking`), the
+  operator's always among it, and `within` limits how long it holds. It isn't
+  called `wait`, a name a runtime has for a tool of its own;
 - `inbox` reads the inbox of the agent's repository, changing nothing: each
   item in a line or whole, the latest up to the call's `limit`, narrowed by
   `since` and `until` as `judged` is (`lup_dev.listing`), by kind, and to one
@@ -40,6 +44,7 @@ runtime's tool search finds. Each answers in words, as `content`.
 """
 
 import inspect
+from datetime import timedelta
 from typing import TYPE_CHECKING, override
 
 from pydantic import Field, JsonValue
@@ -56,11 +61,13 @@ from lup_dev.host.rooms import RoomTools
 from lup_dev.inbox.citations import unresolved
 from lup_dev.inbox.delivery import (
     Delivery,
+    Waking,
     body,
     clocked,
     standing,
     what,
     who,
+    whose,
 )
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.reading import Narrowing, Reader
@@ -144,8 +151,30 @@ class Sending(Model):
     text: str = Field(description="The message, in full.")
 
 
-class Nothing(Model):
-    """No input."""
+class Awaiting(Model):
+    """Whose news ends the wait, beside the operator's, and how long it may hold."""
+
+    on: list[Waking] = Field(
+        default=["operator", "agents", "tasks"],
+        description=(
+            "Whose news ends it: `operator`, their answers, reviews and messages "
+            "through lup, and their words typed in your terminal; `agents`, a "
+            "message from your parent or one of your subagents, a subagent's end, "
+            "what one says of its work, another session's message; `tasks`, a "
+            "command you run in the background ending, or a Monitor's event. All "
+            "three by default. The operator's news ends it whatever this says: "
+            '`["operator"]` waits on theirs alone, and `["tasks"]` on your '
+            "background work and the operator."
+        ),
+    )
+    within: timedelta | None = Field(
+        default=None,
+        description=(
+            "How long it may hold, as an ISO 8601 duration such as `PT10M`, after "
+            "which it returns saying nothing came: for a wait on what nothing here "
+            "reports. Left out, it holds until something comes."
+        ),
+    )
 
 
 class Reading(Narrowing):
@@ -341,7 +370,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
         "leaning" (they go with your lean), "undecided" or "leave open", with a
         comment, or in their own words; or ask a plain question, answered in
         words. With `wait`, this call holds until they answer and
-        returns the answer, which may take hours. Without it, the call returns
+        returns the answer, which may take hours; or until other news of theirs
+        reaches you, a message or their words typed in your terminal, which it
+        returns or says, the question still open. Without it, the call returns
         at once, and the answer reaches you at a later call, or through
         `wait_inbox`.
         """
@@ -366,10 +397,20 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 item,
             )
 
-        def answered() -> bool:
-            return isinstance(self.delivery.inbox.item(number).state, Answered)
+        inbox = self.delivery.inbox
 
-        told = await self.delivery.held(self.party, answered)
+        def answered() -> bool:
+            return isinstance(inbox.item(number).state, Answered) or any(
+                whose(each) == "operator" for each in inbox.waiting(self.party)
+            )
+
+        told = await self.delivery.held(self.party, answered, on=["operator"])
+        if not isinstance(inbox.item(number).state, Answered):
+            return self.answered(
+                f"{told}\n\nYour question {cited(number)} is still open: its answer "
+                "reaches you at a later call; `wait_inbox` waits for it.",
+                item,
+            )
         return self.answered(
             told
             or (
@@ -530,31 +571,48 @@ class Speaker(Model, arbitrary_types_allowed=True):
         )
 
     @lup.tool(idempotent=True)
-    async def wait_inbox(self, nothing: Nothing) -> Said:
-        """Wait until something reaches your inbox.
+    async def wait_inbox(self, awaiting: Awaiting) -> Said:
+        """Wait until something reaches you.
 
-        Holds this call until an item reaches your inbox, and returns
-        everything waiting there, each whole: what a hook announced as too
-        long to tell is read here. An item is the operator's answer or
-        message; a message your parent or one of your subagents sent you;
-        one of your own subagents ending its turn, stopped, or failed on an
-        error from the model's API, which names it; or a subagent's
-        `friction` or `how_it_went`. Something already waiting, a
-        subagent that ended since your last call among it, is returned at
-        once; each is told once, here or beside another call.
+        Holds this call until news reaches you, and returns everything
+        waiting in your inbox, each whole (what a hook announced as too long
+        to tell is read here), and says what your runtime holds for you,
+        which it hands you as the call returns. Whose news ends it, as `on`
+        says, all three by default:
+        - `operator`: their answer, review or message through lup, and their
+          words typed in your terminal;
+        - `agents`: a message your parent or one of your subagents sent you;
+          one of your own subagents ending its turn, stopped, or failed on an
+          error from the model's API, which names it; a subagent's `friction`
+          or `how_it_went`; another session's message;
+        - `tasks`: a command you run in the background ending, or a Monitor's
+          event.
 
-        It doesn't return for what no item says: a background command's end,
-        another session's or another conversation's subagents, the operator
-        marking something read. Nor for a subagent stopped or failing where
-        its runtime doesn't report that, as some don't.
+        Whatever `on` says, the operator's news ends it: `["operator"]` waits
+        on theirs alone, and `["tasks"]`, waiting on your background work,
+        still returns for their words. `within` returns after a time, saying
+        nothing came. Something already waiting, a subagent that ended since
+        your last call among it, is returned at once; each is told once, here
+        or beside another call.
+
+        It doesn't return for another session's or another conversation's
+        subagents, nor the operator marking something read; nor for a subagent
+        stopped or failing where its runtime doesn't report that, as some
+        don't. A subagent's call doesn't return for the words the operator
+        types to its session's main conversation. Where your runtime's records
+        don't say what it holds for you, as one runtime's don't, only your
+        inbox ends it, beside `within`.
         """
-        del nothing
         inbox = self.delivery.inbox
+        on: list[Waking] = [*awaiting.on, "operator"]
 
         def arrived() -> bool:
-            return bool(inbox.waiting(self.party))
+            return any(whose(each) in on for each in inbox.waiting(self.party))
 
-        return Said(text=await self.delivery.held(self.party, arrived))
+        told = await self.delivery.held(
+            self.party, arrived, on=on, within=awaiting.within
+        )
+        return Said(text=told)
 
     @lup.tool(reads=True)
     async def inbox(self, reading: Reading) -> Said:

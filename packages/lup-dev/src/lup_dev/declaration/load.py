@@ -15,11 +15,16 @@ the repository's main worktree, a clone's root or a bare repository's own
 directory, shared by every worktree (`person_layer`), so the gate in any of them
 reads it there. The judge and a launch read the copy trust on launch approved,
 put beside the commit's export.
+
+The person's profiles file, `~/.config/lup/profiles.py`, is run apart from any
+repository's declaration, from the copy trust on launch approved
+(`declared_profiles`; `docs/declaration.md`, *Profiles*).
 """
 
 import importlib
 import importlib.util
 import sys
+import tempfile
 import threading
 import tomllib
 from contextlib import contextmanager
@@ -29,6 +34,7 @@ from typing import TYPE_CHECKING
 from lup.types import Model
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import applied, set_fields
+from lup_dev.declaration.profiles import Profile, Profiles, resolved_profiles
 from lup_dev.declaration.project import Project
 from lup_dev.git import Git
 from lup_dev.layout import CheckoutLayout
@@ -244,9 +250,10 @@ def load(root: Path, *, local: Path | None = None) -> Declared:
     modules and edit them. It's read at `local` where given, a worktree's in its
     repository's main worktree (`person_layer`); otherwise beside the
     declaration, as in a commit's export, where the approved copy is written.
-    Raise `ProjectError` where both forms of the declaration are there, or
-    where the declaration or the person's layer can't be imported or binds no
-    `Project`. Whatever importing one raises (a name the installed `lup_dev`
+    Raise `ProjectError` where both forms of the declaration are there, where
+    the declaration or the person's layer can't be imported or binds no
+    `Project`, or where the declaration chooses a profile, which is the
+    person's layer's alone to choose. Whatever importing one raises (a name the installed `lup_dev`
     lacks, conflict markers, a module edited with another's class) is that.
     """
     layout = CheckoutLayout(root=root)
@@ -283,9 +290,43 @@ def load(root: Path, *, local: Path | None = None) -> Declared:
                 message = f"`{shown}` can't be imported: {failure}"
                 raise ProjectError(message) from failure
             project = bound(module, shown)
+            if project.profile is not None:
+                message = (
+                    f"`{shown}` chooses the profile `{project.profile}`: a profile "
+                    f"is a person's own, so their layer, `{layout.local_declaration.name}`, "
+                    "chooses it"
+                )
+                raise ProjectError(message)
         if not local.is_file():
             return Declared(project=project, source=shown)
         mine = bound(executed(local, f"{layout.declaration.stem}_local"), named)
     return Declared(
         project=applied(mine, project, set_fields(mine)), source=shown, local=named
     )
+
+
+def declared_profiles(text: str | None, shown: Path) -> list[Profile]:
+    """Run the profiles file whose content is `text`, shown as `shown`, and return the profiles it gives, lup's below them; lup's alone where `text` is none.
+
+    `text` is the copy trust on launch approved, never the file itself. It's
+    run as a file of its own in a scratch directory, with no import path of its
+    own. Raise `ProjectError` where it can't be run, binds no `Profiles` as
+    `profiles`, or leaves `default` out, which a launch choosing no profile
+    runs.
+    """
+    if text is None:
+        return resolved_profiles(Profiles())
+    name = "lup_profiles"
+    with tempfile.TemporaryDirectory(prefix="lup-profiles-") as scratch, IMPORTING:
+        path = Path(scratch) / shown.name
+        path.write_text(text)
+        try:
+            module = executed(path, name)
+        finally:
+            sys.modules.pop(name, None)
+    declared = getattr(module, "profiles", None)
+    if not isinstance(declared, Profiles):
+        found = "nothing" if declared is None else f"a `{type(declared).__name__}`"
+        message = f"`{shown}` binds {found} as `profiles`, not a `Profiles`"
+        raise ProjectError(message)
+    return resolved_profiles(declared)

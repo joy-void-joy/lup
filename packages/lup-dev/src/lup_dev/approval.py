@@ -3,8 +3,9 @@
 Trust on launch records it (`lup_dev.launch.trust`; `docs/trust.md`), and the
 judge reads the declaration at its commit (`lup_dev.policy`;
 `docs/judging-writes.md`, *The declaration, from the approved commit*), with the
-person's own layer approved beside it, so what runs on the host is what the
-operator approved. It's here, below both, since the judge can't import the
+person's own layer approved beside it, and a launch runs the person's
+profiles approved with it, so what runs on the host is what the operator
+approved. It's here, below both, since the judge can't import the
 launch. Kept per repository in lup's state (`Layout.approved`).
 """
 
@@ -172,6 +173,10 @@ class Approval(Model):
     """The person's own layer approved with it, `lup_project.local.py`, whole,
     since git holds none of it: the judge and a launch read this copy, put
     beside the commit's declaration; none where none was there."""
+    profiles: str | None = None
+    """The person's profiles file approved with it, `~/.config/lup/profiles.py`,
+    whole, since no repository holds it: a launch runs this copy, never the
+    file; none where none was there."""
 
 
 def approved(layout: Layout, repository: Path) -> Approval | None:

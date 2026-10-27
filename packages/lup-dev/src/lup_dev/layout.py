@@ -16,7 +16,10 @@ The homes:
   `lup-dev`, which trust on launch installs and its process runs; and each
   repository's rooms' own directory, their package cache, each launch's
   environments and pyright's source at a release a room's image doesn't carry,
-  which its rooms mount read-write (`RoomsLayout`);
+  which its rooms mount read-write (`RoomsLayout`); and each account's logins,
+  one per runtime (`AccountsLayout`);
+- the person's own configuration, under `$XDG_CONFIG_HOME/lup/`: their profiles
+  file, and each profile's runtime configuration (`ProfilesLayout`);
 - lup's cache, what can be fetched again, under `$XDG_CACHE_HOME/lup/`: pyright's
   source, kept for building the engine on the host, which no room mounts; and
   each runtime's CLIs, as its release channel publishes them, under `clis/`
@@ -747,6 +750,57 @@ class RoomsLayout(Model):
         return PyrightLayout(home=self.home / "pyright")
 
 
+class AccountLayout(Model):
+    """One account's logins, a directory per runtime, each holding the file its runtime's sign-in writes (`docs/launch.md`, *Accounts and profiles*).
+
+    Kept by the account's name, never by a project's, so every room on the
+    account shares one login: a sign-in in one is every room's. A runtime's
+    directory is named by its adapter's name for it, and the file inside is
+    the adapter's to name.
+    """
+
+    home: Path
+
+    def runtime(self, runtime: str) -> Path:
+        """Say where the account keeps runtime `runtime`'s login, by its adapter's name for it."""
+        return self.home / runtime
+
+
+class AccountsLayout(Model):
+    """Every account's logins, a directory each, under lup's data."""
+
+    home: Path
+
+    def account(self, name: str) -> AccountLayout:
+        """Say where the account `name` keeps its logins."""
+        return AccountLayout(home=self.home / name)
+
+
+class ProfileLayout(Model):
+    """One profile's own runtime configuration, a directory per runtime, layered over the operator's own."""
+
+    home: Path
+
+    def runtime(self, runtime: str) -> Path:
+        """Say where the profile keeps runtime `runtime`'s configuration, by its adapter's name for it."""
+        return self.home / runtime
+
+
+class ProfilesLayout(Model):
+    """The person's profiles: the file declaring them, and each one's own runtime configuration."""
+
+    home: Path
+
+    @property
+    def declared(self) -> Path:
+        """The file declaring them, in the declaration's grammar, which trust on launch approves by its content."""
+        return self.home / "profiles.py"
+
+    def profile(self, name: str) -> ProfileLayout:
+        """Say where the profile `name` keeps its own runtime configuration."""
+        return ProfileLayout(home=self.home / "profiles" / name)
+
+
 class CliCacheLayout(Model):
     """Where one runtime's CLIs are cached, a directory per version (`docs/launch.md`, *The CLIs*).
 
@@ -788,21 +842,36 @@ class Layout(Model):
     data: Path = Path.home() / ".local" / "share" / "lup"
     """lup's data, the copies of `lup-dev` it installs among it: `$XDG_DATA_HOME/lup`,
     or `~/.local/share/lup`."""
+    config: Path = Path.home() / ".config" / "lup"
+    """The person's own configuration, their profiles among it: `$XDG_CONFIG_HOME/lup`,
+    or `~/.config/lup`."""
 
     @classmethod
     def of(cls, settings: LupDevSettings) -> Layout:
-        """Place lup's state, sockets, cache and data where the settings say, or XDG's defaults."""
+        """Place lup's state, sockets, cache, data and the person's configuration where the settings say, or XDG's defaults."""
         home = settings.xdg_state_home or Path.home() / ".local" / "state"
         cache = (settings.xdg_cache_home or Path.home() / ".cache") / "lup"
         data = (settings.xdg_data_home or Path.home() / ".local" / "share") / "lup"
+        config = (settings.xdg_config_home or Path.home() / ".config") / "lup"
         if settings.xdg_runtime_dir is None:
-            return cls(state=home / "lup", cache=cache, data=data)
+            return cls(state=home / "lup", cache=cache, data=data, config=config)
         return cls(
             state=home / "lup",
             runtime=settings.xdg_runtime_dir / "lup",
             cache=cache,
             data=data,
+            config=config,
         )
+
+    @property
+    def accounts(self) -> AccountsLayout:
+        """Where every account keeps its logins: `~/.local/share/lup/accounts/<name>/`."""
+        return AccountsLayout(home=self.data / "accounts")
+
+    @property
+    def profiles(self) -> ProfilesLayout:
+        """Where the person's profiles are declared and keep their own runtime configuration: `~/.config/lup/`."""
+        return ProfilesLayout(home=self.config)
 
     @property
     def pyright_source(self) -> PyrightLayout:

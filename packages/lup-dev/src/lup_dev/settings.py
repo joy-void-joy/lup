@@ -32,6 +32,8 @@ class LupDevSettings(Settings):
     """`XDG_CACHE_HOME`, where per-user caches, what can be fetched again, live; `layout.py` says the default."""
     xdg_data_home: Path | None = None
     """`XDG_DATA_HOME`, where per-user data lives, programs installed for the user among it; `layout.py` says the default."""
+    xdg_config_home: Path | None = None
+    """`XDG_CONFIG_HOME`, where a user's own configuration lives, their profiles among it; `layout.py` says the default."""
     wayland_display: str | None = None
     """`WAYLAND_DISPLAY`: the Wayland session the host service runs in, whose clipboard rooms reach (`clipboard/desktop.py`)."""
     display: str | None = None
