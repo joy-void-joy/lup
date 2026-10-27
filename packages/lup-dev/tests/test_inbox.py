@@ -155,6 +155,7 @@ from lup_dev.inbox.store import (
     Unresolved,
     Waiting,
     Whereabouts,
+    Withdrawn,
     cited,
     item_number,
     ranked,
@@ -7480,6 +7481,7 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_as_a_hold_and_lan
     rooms, hall = '"""Rooms."""\n', '"""Hall."""\n'
     landings.wrote(landings.feat, "src/pkg/rooms.py", rooms)
     landings.wrote(landings.feat, "src/pkg/hall.py", hall)
+    landings.shell.git(landings.repository, "branch", "other", "main")
     old = landings.on_forge("refs/heads/dev")
     tip = landings.merged()
     session = lander(landings, runtime)
@@ -7493,7 +7495,9 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_as_a_hold_and_lan
         flags = [
             landings.flag("src/pkg/rooms.py", rooms, session),
             landings.flag("src/pkg/rooms.py", rooms, worker),
-            # On a branch the landing doesn't land, a file it doesn't change, a flag approved: none holds.
+            # On a branch the landing doesn't land, a file it doesn't change, a
+            # flag approved: none holds, and the one on a file it doesn't change
+            # is withdrawn once `feat` is gone.
             landings.flag("src/pkg/rooms.py", rooms, worker, branch="other"),
             landings.flag("src/pkg/gone.py", rooms, worker),
             landings.flag("src/pkg/hall.py", hall, worker),
@@ -7542,9 +7546,104 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_as_a_hold_and_lan
         f"The operator approved @{hold.number} (`src/pkg/rooms.py`).\n"
         "Cleaned up after it:\n"
     )
+    assert (
+        "Withdrew from the operator's inbox the flagged writes left nothing to hold, "
+        "on branches gone or on files it leaves as `dev` had them: "
+        f"@{flags[3]} (`src/pkg/gone.py` on `feat`).\n"
+    ) in answer
     assert landings.on_forge("refs/heads/dev") == tip
     approved = Decided(at=clock.now(), approved=True)
-    assert states == [approved, approved, Waiting(), Waiting(), approved]
+    withdrawn = Withdrawn(
+        at=clock.now(), why=f"`feat` landed on `dev` at {tip}, and is gone since"
+    )
+    assert states == [approved, approved, Waiting(), withdrawn, approved]
+
+
+def test_land_withdraws_each_flag_left_nothing_to_hold_on_a_branch_gone_or_a_file_it_leaves_unchanged_and_no_later_landing_holds_on_it(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    hall, notes = '"""Hall."""\n', '"""Notes."""\n'
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    # On the remote's `dev` already, as a landing's merge is once it's pushed.
+    landings.wrote(dev, "src/pkg/hall.py", hall)
+    shell.git(landings.repository, "push", "-q", "origin", "dev")
+    old = landings.on_forge("refs/heads/dev")
+    # `kept` lands, its worktree left with work not committed, so the branch stays.
+    kept = landings.branched("kept")
+    landings.wrote(kept, "src/pkg/kept.py", '"""Kept."""\n')
+    (kept / "draft.txt").write_text("work not committed")
+    landings.wrote(feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    shell.git(dev, "merge", "-q", "--no-ff", "--no-edit", "kept")
+    tip = landings.merged()
+    session = lander(landings, "claude")
+    with inboxed(machine, clock, notices, said, rooms=landings.room) as delivery:
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        flags = [
+            # Withdrawn: the file stands at the tip as it flagged it, landed before.
+            landings.flag("src/pkg/hall.py", hall, session, branch="dev"),
+            # Waiting: written on branches still there, and not at the tip, so
+            # perhaps not committed yet.
+            landings.flag("src/pkg/draft.py", notes, session, branch="dev"),
+            landings.flag("src/pkg/notes.py", notes, session, branch="kept"),
+            # Withdrawn: `feat` is gone once it landed, and `quiet` was gone
+            # before, holding no landing.
+            landings.flag("src/pkg/gone.py", notes, session),
+            landings.flag("src/pkg/quiet.py", notes, session, branch="quiet"),
+        ]
+        answer, error = call(machine.host.launch("one").mcp, "land", {})
+        states = [delivery.inbox.item(each).state for each in flags]
+        shown = inbox("show", str(flags[0]))
+        # A later landing changing the file holds on no flag withdrawn.
+        later = landings.branched("later")
+        landings.wrote(later, "src/pkg/hall.py", '"""Hall, later."""\n')
+        again = landings.merged("later")
+        landed_again, _ = call(machine.host.launch("one").mcp, "land", {})
+        holds = [
+            item
+            for item in delivery.inbox.items.values()
+            if isinstance(item.reason, HeldChange)
+        ]
+        after = [delivery.inbox.item(each).state for each in flags]
+    assert not error
+    assert answer == (
+        f"Landed {tip} on `dev` at `origin`, which was at {old}.\n"
+        "Cleaned up after it:\n"
+        f"- removed the worktree {feat}\n"
+        "- deleted the local branch `feat`\n"
+        "Left:\n"
+        f"- the worktree {kept}: `git worktree remove`: fatal: '{kept}' contains "
+        "modified or untracked files, use --force to delete it\n"
+        f"- the local branch `kept`, checked out in {kept}\n"
+        "Withdrew from the operator's inbox the flagged writes left nothing to hold, "
+        "on branches gone or on files it leaves as `dev` had them: "
+        f"@{flags[0]} (`src/pkg/hall.py` on `dev`), "
+        f"@{flags[3]} (`src/pkg/gone.py` on `feat`), "
+        f"@{flags[4]} (`src/pkg/quiet.py` on `quiet`).\n{NOTHING_GOING}"
+    )
+    assert states == [
+        Withdrawn(
+            at=clock.now(),
+            why=f"the file stands on `dev` at {tip} as it flagged it, landed before",
+        ),
+        Waiting(),
+        Waiting(),
+        Withdrawn(
+            at=clock.now(), why=f"`feat` landed on `dev` at {tip}, and is gone since"
+        ),
+        Withdrawn(at=clock.now(), why="`quiet` is gone, so it holds no landing"),
+    ]
+    assert "withdrawn at " in shown
+    assert f"by lup: the file stands on `dev` at {tip}" in shown
+    assert landed_again.startswith(
+        f"Landed {again} on `dev` at `origin`, which was at {tip}.\n"
+    )
+    assert holds == []
+    assert after == states
 
 
 def test_a_comment_on_a_hold_lands_nothing_and_the_next_hold_shows_what_changed_since(

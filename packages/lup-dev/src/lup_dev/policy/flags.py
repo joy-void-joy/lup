@@ -18,8 +18,9 @@ operator holds each flagged write of a conversation, its writes are held
 instead (`Judge.holding`), and none is flagged.
 
 Each flag keeps the branch its worktree has checked out (`Flagged.branch`), and
-says so: the landing of that branch waits on it until the operator approves it
-(`lup_dev.policy.landing`).
+says so: the landing of that branch waits on it until the operator approves it.
+A landing withdraws it once it's left nothing to hold, its branch gone or its
+file left unchanged as the flag keeps it (`lup_dev.policy.landing`).
 
 A write lands whatever fails here: what couldn't be put before the operator is
 said to the agent, to pass on.
