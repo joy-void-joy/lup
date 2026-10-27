@@ -25,6 +25,7 @@ import { useNow, useSame, useWatched } from "./hooks";
 import { REVIEW_PLACES, reviewKeys, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
 import { adopt, merged } from "./looks";
+import type { Remote } from "./views";
 import { useNarrow } from "./Outline";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
@@ -34,7 +35,6 @@ import {
     answer,
     changing,
     covered,
-    currentTask,
     EMPTY,
     flag,
     messages,
@@ -256,11 +256,19 @@ export function App() {
     // (`useSame`): a hook that changed nothing a banner says, or a record read that changed no task or ring, lays
     // nothing out anew; one that did changes the banner's words, which the text holds, so the review is laid out.
     const bannered = useSame(
-        useMemo(() => new Map(live.map((agent) => [agent.key, bannerOf(agent, drawers.get(agent.key) ?? UNREAD, soon)])), [live, drawers, soon]),
+        useMemo(() => new Map(live.map((agent) => [agent.key, bannerOf(agent, soon)])), [live, soon]),
         (map) => JSON.stringify([...map]),
     );
 
-    // What the banner says of an agent beyond its name: what it's doing, what it's working on, its context, and whether its flagged writes are held.
+    // Each conversation running, by `whose` it is: which of its banner's parts its views say, and what holding its writes asks.
+    const runningNow = useSame(
+        useMemo(() => new Map(live.map((agent) => [agent.key, { launch: agent.launch.launch, holding: agent.talker.holding === true }])), [live]),
+        (map) => JSON.stringify([...map]),
+    );
+    // What the host answered of each view the page doesn't lay out itself, by its instance's id.
+    const remote = useMemo<Remote>(() => new Map(), []);
+    // What the banner says of an agent beyond its name: where it is and what it's doing, the core's; what it's working on,
+    // its context and whether its flagged writes are held are its banner's parts, which its views say (`views/`).
     const banner = useCallback(
         (head: Head) => {
             if ("conversation" in head) {
@@ -867,6 +875,8 @@ export function App() {
                         order={ready ? kept : null}
                         keepOrder={whole ? keepOrder : null}
                         looks={looks}
+                        running={runningNow}
+                        remote={remote}
                     />
                     <div className="status">
                         {!replying ? (
@@ -920,17 +930,9 @@ function last(path: string): string {
     return name.endsWith(".git") ? name.slice(0, -".git".length) : name;
 }
 
-/** Say an agent's banner beyond its name: where it is, what it's doing as of `now`, what it's working on, its context, and whether its flagged writes are held. */
-function bannerOf(agent: Live, data: AgentDrawers, now: Date): string {
-    const task = currentTask(data.tasks);
-    const usage = data.usage;
-    return [
-        [last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · "),
-        doing(agent.talker.activity, now),
-        ...(task === null ? [] : [`▶ ${task}`]),
-        ...(usage === null ? [] : [ring(usage.used, usage.window)]),
-        ...(agent.talker.holding === true ? ["holding"] : []),
-    ].join(" · ");
+/** Say what the core says of an agent on its banner: where it is, and what it's doing as of `now`; its banner's parts, which its views say, come after. */
+function bannerOf(agent: Live, now: Date): string {
+    return [[last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · "), doing(agent.talker.activity, now)].join(" · ");
 }
 
 /** Say what marking files reviewed came to: how many, the flagged writes approved with them, and those that changed since the version shown, whose flags wait. */

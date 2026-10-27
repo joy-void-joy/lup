@@ -2,7 +2,22 @@ import { pythonLanguage } from "@codemirror/lang-python";
 import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
-import { highlighted, languageOf, lines, shown, tally, tokensOf, within, type ChangedFile, type Reading } from "./code";
+import { highlighted, languageOf, lines, shown as laidOutOf, tokensOf as tokensOfDiff, within, type ChangedFile } from "./code";
+import type { components } from "./generated/api";
+import { foldedOf, judged, tally } from "./views/judge";
+
+type Reading = components["schemas"]["Reading"];
+
+/** A changed file as the review shows it: as the judge reads it, `first` where it's a first approval's (`judged`), laid out as the `Diff` it is; with why it folds whole, where it does, and what its header says of it. */
+function shown(file: ChangedFile, first = false) {
+    const diff = judged(file, first);
+    return { ...laidOutOf(diff), folded: foldedOf(file, first), reasons: diff.says ?? [] };
+}
+
+/** The tokens of one side of a changed file, as the judge's `Diff` of it highlights them. */
+function tokensOf(file: ChangedFile, side: "before" | "after") {
+    return tokensOfDiff(judged(file, false), side);
+}
 
 function text(value: string): ChangedFile["after"] {
     return { kind: "text", text: value };

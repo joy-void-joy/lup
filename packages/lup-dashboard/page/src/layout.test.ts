@@ -2,8 +2,9 @@ import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
-import { EMPTY, laid, nested, ownerOf, rowLabel, whose, UNREAD, type AgentDrawers, type Around, type Conversation, type Head, type Item } from "./review";
+import { EMPTY, laid, nested, ownerOf, rowLabel, whose, UNREAD, type AgentDrawers, type Around, type Conversation, type Head, type Item, type Placed } from "./review";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
+import { blockId, instanceOf } from "./views";
 
 const AT = "2026-10-17T12:00:00Z";
 const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
@@ -107,6 +108,38 @@ describe("groups folding whole", () => {
         expect(parent!.from).toBeLessThan(child!.from);
         expect(parent!.to).toBe(child!.to);
         expect(out.text.slice(folds[0]!.summary.from, folds[0]!.summary.to)).toBe("━━ s2 ━━");
+    });
+});
+
+describe("the review's tree", () => {
+    it("keeps each part laid out by an id that stays across layouts: a group, its banner, a drawer, an item, a view of either, its blocks", () => {
+        const drawers = new Map([[whose(PARENT), TASKED]]);
+        const out = laid([note(4, PARENT), note(1, CHILD)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS });
+        const ids = (parts: Placed[]): unknown[] => parts.map((each) => (each.children.length === 0 ? `${each.kind} ${each.id}` : [`${each.kind} ${each.id}`, ids(each.children)]));
+        const tasks = instanceOf("/r/lup.git", "adapters", "tasks", { runtime: "claude", session: "s1", agent: null });
+        const conversation = instanceOf("/r/lup.git", "transcripts", "conversation", { runtime: "claude", session: "s1", agent: null });
+        const body = (number: number) => instanceOf("/r/lup.git", "inbox", "message", { number });
+        // The subagent's group came first, its item the earlier, but nests in its parent's.
+        expect(ids(out.nodes)).toEqual([
+            [
+                `group group now ${whose(PARENT)}`,
+                [
+                    `banner group now ${whose(PARENT)} banner`,
+                    [`view ${tasks}`, [`block ${blockId(tasks, "task 1")}`, `block ${blockId(tasks, "task 2")}`]],
+                    `view ${conversation}`,
+                    [`item item 4`, [`header item 4 header`, [`view ${body(4)}`, [`block ${blockId(body(4), "text")}`]]]],
+                    [`group group now ${whose(CHILD)}`, [`banner group now ${whose(CHILD)} banner`, [`item item 1`, [`header item 1 header`, [`view ${body(1)}`, [`block ${blockId(body(1), "text")}`]]]]]],
+                ],
+            ],
+        ]);
+        // Each part where it's laid out, from its first line to its last.
+        const [group] = out.nodes;
+        const item = group!.children.find((each) => each.id === "item 4")!;
+        expect(out.text.slice(item.header.from, item.header.to)).toBe("── @4 note ──");
+        expect(out.text.slice(item.from, item.to + 1)).toBe("── @4 note ──\nNote 4.\nSecond line.\n");
+        // Laid out again, as a comment's key is typed, each part keeps its id.
+        const again = laid([note(4, PARENT), note(1, CHILD)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS });
+        expect(ids(again.nodes)).toEqual(ids(out.nodes));
     });
 });
 
