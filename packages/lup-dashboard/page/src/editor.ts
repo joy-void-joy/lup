@@ -32,10 +32,13 @@
 // pressed, to show what may follow. `"+` and `"*` are the system clipboard, and a
 // yank or a put the clipboard refused is said in the page's top line
 // (`clipboard.ts`). What's written, an agent's text and a comment, is
-// Markdown, shown as such, Enter in a comment continuing the list it's in, and
-// `o` and `O` on one of its items opening the next item or the one before it
-// (`markdown.ts`); each view says which stretches of its text those are, in the
-// transaction that lays the text out. Each view says what else its keys do, lays
+// Markdown, shown as such, its lists written in a comment as neovim's Markdown
+// writes them: Enter, `o` and `O` open a line at the indentation of the one
+// they're on, with no bullet, taken back where nothing's typed after it, and
+// `>>` and `<<`, Ctrl+T and Ctrl+D in insert mode, move a line in and out by the
+// list's indentation (`markdown.ts`, `shifting`); each view says which
+// stretches of its text those are, in the transaction that lays the text out.
+// Each view says what else its keys do, lays
 // its own text out and draws it, and may paint the lines in view as well, as the
 // review paints a changed file's, and draw its folds' marks and bars in the
 // margin (`rails.ts`; `Review.tsx`, `Conversation.tsx`; `docs/dashboard.md`).
@@ -58,7 +61,7 @@ import { defineClipboard, shownBelow } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, aroundOf, foldEdge, levelled, nextFold } from "./folds";
 import { FOLD_KINDS, type FoldKind } from "./keys";
-import { continued, hiddenOn, markdown, openedLine } from "./markdown";
+import { brokenLine, hiddenOn, markdown, openedLine, shifted, unindented } from "./markdown";
 import { placeheld, type Margined } from "./margin";
 
 /** What the vim keys and the editor's own events do, as a view stands: replaced at each render. */
@@ -564,8 +567,8 @@ const deadKeys = ViewPlugin.fromClass(
 
 /**
  * The keys that vim's keymap can't say, read ahead of vim, which takes every key it's given before a keymap would:
- * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere; Enter in insert mode, which continues the list
- * the cursor is in, where it's in one (`continued`), and is vim's otherwise. Every key is noted first, for what vim
+ * Ctrl+Enter, which ends a comment in insert mode and sends elsewhere; Enter in insert mode, which breaks the line, the
+ * new one at the indentation of the one it's broken from (`brokenLine`). Every key is noted first, for what vim
  * makes of it (`Keyed`): one with no key of vim's pending begins what it notes, `c` or `C` in normal mode beginning
  * vim's change. A composition outside insert mode is a dead key's, as some browsers give one with no dead key pressed
  * first, and what it ends with is what vim gets of it, where nothing it typed was given first (`deadTyped`).
@@ -635,7 +638,8 @@ const keys = Prec.highest(
                 event.preventDefault();
                 return true;
             }
-            if (event.key === "Enter" && !modified && !event.isComposing && cm.state.vim.insertMode && continued(view)) {
+            if (event.key === "Enter" && !modified && !event.isComposing && cm.state.vim.insertMode) {
+                view.dispatch({ ...brokenLine(view.state), scrollIntoView: true, userEvent: "input" });
                 event.preventDefault();
                 return true;
             }
@@ -656,6 +660,27 @@ export function chordOf(cm: CodeMirrorV): string {
         return "zf";
     }
     return held[0] === "<Space>" ? held.map((key) => (key === "<Space>" ? "␣" : key)).join("") : "";
+}
+
+/**
+ * Make vim's indenting move lines by the list's indentation (`shifted`): `>>` and `<<`, `>` and `<` with a motion or
+ * a selection, and Ctrl+T and Ctrl+D in insert mode. Vim does each through its editor's `indentMore` and `indentLess`,
+ * on the lines of the selection, which CodeMirror's own commands would move by a fixed unit; a block selection's, which
+ * vim moves itself at the block's column, stays vim's.
+ */
+function shifting(view: EditorView): void {
+    const cm = getCM(view);
+    if (cm === null) {
+        return;
+    }
+    const shift = (inward: boolean) => {
+        const spec = shifted(view.state, inward);
+        if (spec !== null) {
+            view.dispatch({ ...spec, userEvent: inward ? "input.indent" : "delete.dedent" });
+        }
+    };
+    cm.indentMore = () => shift(true);
+    cm.indentLess = () => shift(false);
 }
 
 /** Give vim each character of `text`, as typed. */
@@ -1322,6 +1347,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             }),
         });
         view.current = created;
+        shifting(created);
         getCM(created)?.on("vim-mode-change", (event: { mode: string }) => {
             const now = event.mode === "insert" || event.mode === "replace";
             const was = keyed.inserting;
@@ -1333,6 +1359,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 queueMicrotask(() => bound.current.actions?.entered(cm));
             }
             if (was && !now) {
+                // An indentation nothing was typed after goes as the writing ends, in the step that wrote it.
+                const emptied = unindented(created.state, created.state.selection.main.head);
+                if (emptied !== null) {
+                    created.dispatch(emptied);
+                }
                 bound.current.actions?.left();
             }
         });
@@ -1412,7 +1443,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 if (editor === null) {
                     return;
                 }
-                // In a comment, a line below or above to write on, a list's next item or the one before it.
+                // In a comment, a line below or above to write on, at the indentation of the one it's beside.
                 if (on !== "whole" && blockAt(head()) !== undefined) {
                     editor.dispatch(openedLine(editor.state, head(), on === "line"));
                     // The line opened and what's written on it are one step, as a comment opened is.

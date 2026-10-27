@@ -1,11 +1,11 @@
 import { syntaxTree } from "@codemirror/language";
-import { EditorState, type Range, type Transaction } from "@codemirror/state";
+import { EditorSelection, EditorState, type Range, type TransactionSpec } from "@codemirror/state";
 import type { Decoration } from "@codemirror/view";
 import { NodeProp } from "@lezer/common";
 import { describe, expect, it } from "vitest";
 
 import type { Span } from "./comments";
-import { continued, decorate, hiddenOn, markdown, openedLine, revealing, source, sourced, sources, treeOf, without, type Source } from "./markdown";
+import { brokenLine, decorate, hiddenOn, markdown, openedLine, revealing, shifted, source, sourced, sources, treeOf, unindented, without, type Source } from "./markdown";
 
 /** The lines of `text` from the one holding `first` to the one holding `last`, each with its line break, as a source is read from them. */
 function lined(text: string, first: string, last: string = first): Span[] {
@@ -166,83 +166,122 @@ describe("a construct's marks", () => {
     });
 });
 
-describe("Enter in a comment", () => {
-    /** What `continued` makes of `text` with the cursor at `at`, the comment being `comment`; none where it does nothing. */
-    function entered(text: string, comment: string, at: number): string | null {
-        const from = text.indexOf(comment);
-        const found = [
-            source("text", lined(text, "an item's line")),
-            source("comment", [{ from, to: from + comment.length }]),
-        ].flatMap((each) => (each === null ? [] : [each]));
-        const state = laid(text, found).update({ selection: { anchor: at } }).state;
-        let made: string | null = null;
-        const did = continued({ state, dispatch: (transaction: Transaction) => (made = transaction.state.doc.toString()) });
-        return did ? made : null;
+/**
+ * What `act` makes of the comment `written` under the item's line `above`, its cursor where `|` is, or with `lines`
+ * whole lines from the cursor's selected, as vim selects those `>>` or `>j` moves: the comment after, `|` where the
+ * cursor is but with lines selected; none where it does nothing.
+ */
+function writing(written: string, act: (state: EditorState) => TransactionSpec | null, lines = 0, above = "an item's line"): string | null {
+    const comment = written.replace("|", "");
+    const text = `${above}\n${comment}\n`;
+    const from = above.length + 1;
+    const found = [source("text", lined(text, above)), source("comment", [{ from, to: from + comment.length }])].flatMap((each) =>
+        each === null ? [] : [each],
+    );
+    const laidOut = laid(text, found);
+    const at = laidOut.doc.lineAt(from + written.indexOf("|"));
+    const after = lines === 0 ? undefined : laidOut.doc.line(at.number + lines);
+    const selection = after === undefined ? EditorSelection.cursor(from + written.indexOf("|")) : EditorSelection.range(at.from, after.from);
+    const state = laidOut.update({ selection }).state;
+    const spec = act(state);
+    if (spec === null) {
+        return null;
     }
+    const made = state.update(spec).state;
+    const head = made.selection.main.head;
+    const shown = lines === 0 ? `${made.sliceDoc(0, head)}|${made.sliceDoc(head)}` : made.doc.toString();
+    return shown.slice(from, shown.length - 1);
+}
 
-    it("continues the list the cursor is in, at its indentation, with its bullet or the next number", () => {
-        const text = "an item's line\n- a\n  - b\n";
-        expect(entered(text, "- a\n  - b", text.indexOf("- b") + 3)).toBe("an item's line\n- a\n  - b\n  - \n");
-        const numbered = "an item's line\n1. a\n2. b\n";
-        expect(entered(numbered, "1. a\n2. b", numbered.indexOf("2. b") + 4)).toBe("an item's line\n1. a\n2. b\n3. \n");
+describe("Enter in a comment", () => {
+    const entered = (written: string) => writing(written, brokenLine);
+
+    it("starts the next line at the indentation of the one it's broken from, with no bullet or number", () => {
+        expect(entered("- a|")).toBe("- a\n|");
+        expect(entered("- a\n  - b|")).toBe("- a\n  - b\n  |");
+        expect(entered("1. a|\n2. b")).toBe("1. a\n|\n2. b");
+        expect(entered("> quoted|")).toBe("> quoted\n|");
+        expect(entered("- [x] done|")).toBe("- [x] done\n|");
     });
 
-    it("ends the list on an empty item, and is vim's own elsewhere", () => {
-        const text = "an item's line\n- a\n- \n";
-        expect(entered(text, "- a\n- ", text.indexOf("- \n") + 2)).toBe("an item's line\n- a\n\n");
-        const plain = "an item's line\nsome words\n";
-        expect(entered(plain, "some words", plain.indexOf("words") + 2)).toBeNull();
-        expect(entered(plain, "some words", 3)).toBeNull();
+    it("never ends a list on an empty item, nor numbers the items after it", () => {
+        expect(entered("- a\n- |")).toBe("- a\n- \n|");
+        expect(entered("1. a\n2. |\n3. c")).toBe("1. a\n2. \n|\n3. c");
+    });
+
+    it("breaks a line inside it, the spaces after the cursor going, and empties a line left holding only spaces, as vim's autoindent does", () => {
+        expect(entered("  - one| two")).toBe("  - one\n  |two");
+        expect(entered("- a\n  |")).toBe("- a\n\n  |");
+        expect(entered("  |- a")).toBe("\n  |- a");
+        expect(entered("some |words")).toBe("some \n|words");
+    });
+
+    it("takes back an indentation nothing was typed after as the writing ends, and nothing else", () => {
+        const ended = (written: string) => writing(written, (state) => unindented(state, state.selection.main.head));
+        expect(ended("- a\n  - b\n  |")).toBe("- a\n  - b\n|");
+        expect(ended("- a\n  |\n- b")).toBe("- a\n|\n- b");
+        expect(ended("- a\n  - |b")).toBeNull();
+        expect(ended("- a\n|")).toBeNull();
     });
 });
 
 describe("o and O in a comment", () => {
-    /** What `o` (`below`) or `O` makes of the comment `comment` under an item's line, on its line holding `on`: the comment after, `|` where the cursor is. */
-    function opening(comment: string, on: string, below: boolean): string {
-        const text = `an item's line\n${comment}\n`;
-        const from = text.indexOf(comment);
-        const found = [source("text", lined(text, "an item's line")), source("comment", [{ from, to: from + comment.length }])].flatMap((each) =>
-            each === null ? [] : [each],
-        );
-        const state = laid(text, found);
-        const made = state.update(openedLine(state, text.indexOf(on, from), below)).state;
-        const head = made.selection.main.head;
-        const after = `${made.sliceDoc(0, head)}|${made.sliceDoc(head)}`;
-        return after.slice(from, after.length - 1);
-    }
+    const opening = (written: string, below: boolean) => writing(written, (state) => openedLine(state, state.selection.main.head, below));
 
-    it("starts the next item below a list's item, as Enter at its end does, and the one before it above, at its indentation, with its bullet", () => {
-        expect(opening("- a\n- b", "- a", true)).toBe("- a\n- |\n- b");
-        expect(opening("- a\n- b", "- b", false)).toBe("- a\n- |\n- b");
-        expect(opening("- a\n  - b\n- c", "  - b", true)).toBe("- a\n  - b\n  - |\n- c");
-        expect(opening("- a\n  - b\n- c", "  - b", false)).toBe("- a\n  - |\n  - b\n- c");
+    it("open a line below or above at the line's indentation, with no bullet or number", () => {
+        expect(opening("- |a\n- b", true)).toBe("- a\n|\n- b");
+        expect(opening("- a\n- |b", false)).toBe("- a\n|\n- b");
+        expect(opening("- a\n  - |b\n- c", true)).toBe("- a\n  - b\n  |\n- c");
+        expect(opening("- a\n  - |b\n- c", false)).toBe("- a\n  |\n  - b\n- c");
     });
 
-    it("numbers the item it starts, and each after it one more, as long as they were numbered one after another", () => {
-        expect(opening("1. a\n2. b\n3. c", "1. a", true)).toBe("1. a\n2. |\n3. b\n4. c");
-        expect(opening("1. a\n2. b\n3. c", "2. b", false)).toBe("1. a\n2. |\n3. b\n4. c");
-        expect(opening("1. a\n2. b\n3. c", "1. a", false)).toBe("1. |\n2. a\n3. b\n4. c");
-        expect(opening("1) a\n2) b\n7) c", "2) b", false)).toBe("1) a\n2) |\n3) b\n7) c");
+    it("leave the numbers, a task's box and a quote's mark as they are", () => {
+        expect(opening("1. |a\n2. b\n3. c", true)).toBe("1. a\n|\n2. b\n3. c");
+        expect(opening("1. a\n2. |b\n3. c", false)).toBe("1. a\n|\n2. b\n3. c");
+        expect(opening("- [x] |done", true)).toBe("- [x] done\n|");
+        expect(opening("> |quoted", false)).toBe("|\n> quoted");
+        expect(opening("- a\n  |more", true)).toBe("- a\n  more\n  |");
+    });
+});
+
+describe("moving a comment's line in and out", () => {
+    const moved = (written: string, inward: boolean, lines = 0, above?: string) => writing(written, (state) => shifted(state, inward), lines, above);
+
+    it("moves a line in to where the words of the item above it begin, nesting it under that item", () => {
+        expect(moved("- a\n- |b", true)).toBe("- a\n  - |b");
+        expect(moved("1. a\n2. |b", true)).toBe("1. a\n   2. |b");
+        expect(moved("10. a\n- |b", true)).toBe("10. a\n    - |b");
+        expect(moved("- a\n  - b\n    - c\n  - |d", true)).toBe("- a\n  - b\n    - c\n    - |d");
     });
 
-    it("starts the next item below one just begun, where Enter would end the list, never changing the line it's on", () => {
-        expect(opening("- a\n- ", "- \n", true)).toBe("- a\n- \n- |");
-        expect(opening("1. a\n2. \n3. c", "2. ", true)).toBe("1. a\n2. \n3. |\n4. c");
+    it("moves a line in by one indent unit past the item's words, or with no item above it in its comment", () => {
+        expect(moved("- a\n  - |b", true)).toBe("- a\n    - |b");
+        expect(moved("|plain", true)).toBe("  |plain");
+        expect(moved("- |b", true, 0, "1. an item's line")).toBe("  - |b");
+        // A block of code holds no item.
+        expect(moved("```\n1. x\n```\n|y", true)).toBe("```\n1. x\n```\n  |y");
     });
 
-    it("leaves a task's box unticked, and takes a quote's mark and an item's further line's indentation", () => {
-        expect(opening("- [x] done", "- [x]", true)).toBe("- [x] done\n- [ ] |");
-        expect(opening("- [x] done", "- [x]", false)).toBe("- [ ] |\n- [x] done");
-        expect(opening("> quoted\n> - a", "> quoted", false)).toBe("> |\n> quoted\n> - a");
-        expect(opening("> quoted\n> - a", "> - a", true)).toBe("> quoted\n> - a\n> - |");
-        expect(opening("- a\n  more", "  more", false)).toBe("- a\n  |\n  more");
-        expect(opening("- a\n  more", "  more", true)).toBe("- a\n  more\n  |");
+    it("moves a line out to the item it's nested in, then to where that item begins", () => {
+        expect(moved("- a\n  - b\n    - |c", false)).toBe("- a\n  - b\n  - |c");
+        expect(moved("- a\n  - b\n  - |c", false)).toBe("- a\n  - b\n- |c");
+        expect(moved("1. a\n   2. |b", false)).toBe("1. a\n2. |b");
+        expect(moved("- a\n      |deep", false)).toBe("- a\n  |deep");
+        expect(moved("    |plain", false)).toBe("  |plain");
+        expect(moved("- |a", false)).toBeNull();
     });
 
-    it("opens a plain line beside a line in no list, and in a block of code", () => {
-        expect(opening("some words\nmore", "some words", true)).toBe("some words\n|\nmore");
-        expect(opening("some words\nmore", "more", false)).toBe("some words\n|\nmore");
-        expect(opening("```\n- code\n```", "- code", false)).toBe("```\n|\n- code\n```");
+    it("keeps the cursor on what it was on, and after the indentation where it was in it, as on a line just begun", () => {
+        expect(moved("- a\n|", true)).toBe("- a\n  |");
+        expect(moved("- a\n|- b", true)).toBe("- a\n  |- b");
+        expect(moved("- a\n  |", false)).toBe("- a\n|");
+    });
+
+    it("moves each line selected by as much as the first, an item's own items with it, an empty line staying empty", () => {
+        expect(moved("- a\n- |b\n  - c", true, 2)).toBe("- a\n  - b\n    - c");
+        expect(moved("1. a\n2. |b\n   - c", true, 2)).toBe("1. a\n   2. b\n      - c");
+        expect(moved("|- a\n\n- b", true, 3)).toBe("  - a\n\n  - b");
+        expect(moved("- a\n  - |b\n    - c", false, 2)).toBe("- a\n- b\n  - c");
     });
 });
 
