@@ -35,6 +35,7 @@ from typer.core import TyperGroup
 from lup.doors import served as methods
 from lup.errors import LupError
 from lup.rooms import ContainerError, Mount, Podman, Room
+from lup.rooms.engine import stopped
 from lup.types import JsonObject, Model, MutableModel
 from lup_dev import commanding
 
@@ -184,6 +185,7 @@ from lup_dev.launch.room import (
     RoomEnvironments,
     RoomError,
     RoomPackageAge,
+    cleared,
     host_needs,
     lend,
     lent,
@@ -1608,9 +1610,10 @@ def swept(
 
     A launcher holds its launch's lock for its whole life, which the OS frees, so
     a launch whose lock can be taken has no launcher left; its container, named
-    when it registered, tells whether its session still runs. Each launch ended
-    is said, and a launch ended first elsewhere is passed over; its
-    environments go with it. A launch runs it before it registers, and the host
+    when it registered, tells whether its session still runs, and one that
+    isn't running, left as its launch ended before it started, is removed with
+    it. Each launch ended is said, and a launch ended first elsewhere is passed
+    over; its environments go with it. A launch runs it before it registers, and the host
     service on its own (`Sweeping`).
     """
 
@@ -1623,13 +1626,18 @@ def swept(
         except Held:
             return False
         try:
-            if each.container is None or podman.exists(each.container):
+            if each.container is None:
+                return False
+            state = podman.state(each.container)
+            if state is not None and not stopped(state):
                 return False
             try:
                 host.unregister(each.launch)
             except HostError as gone:
                 say(f"Launch {each.launch} was ended already: {gone}")
                 return False
+            if state is not None:
+                podman.discard(each.container)
             released(podman, own, say)
             vacated(own)
             if own.directory.is_dir():
@@ -1920,6 +1928,7 @@ def launched(
                 sockets = served.directory
                 launcher.say(f"This launch is `{served.name}`.")
                 try:
+                    cleared(launcher.podman, served.container, launcher.say)
                     git.write()
                     clipboard = RoomClipboard(launch=own)
                     clipboard.write()

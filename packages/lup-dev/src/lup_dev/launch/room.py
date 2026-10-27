@@ -97,6 +97,7 @@ from filelock import FileLock, Timeout
 
 from lup.programs import ProgramMissingError, run
 from lup.rooms.container import Container, Image, Mask, Mount
+from lup.rooms.engine import stopped
 from lup.sessions import bridge
 from lup.sessions.terminal import TerminalSettings
 from lup.types import Model
@@ -130,7 +131,7 @@ from lup_dev.remote import helper
 from lup_dev.remote.config import Gating, room_config
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from lup.rooms.engine import Podman
     from lup_dev.declaration import kinds
@@ -902,6 +903,29 @@ def lend(
     at.mkdir()
     podman.lend(source, at, launch.stage, read_only=read_only)
     return RoomPaths().lent / free
+
+
+def cleared(podman: Podman, container: str, say: Callable[[str], None]) -> None:
+    """Remove a container left under the name a launch's container is about to take, saying so; raise `RoomError` where one runs under it.
+
+    The host service gives a launch a name no launch it serves holds, so a
+    container already under it was left by a launch the service
+    doesn't know: one that ended before its container started, or before
+    `--rm` removed it. One running is a session the service lost track of, at
+    a restart say, and is the operator's to end.
+    """
+    state = podman.state(container)
+    if state is None:
+        return
+    if not stopped(state):
+        message = (
+            f"a container named {container} is {state}, and no launch the host "
+            "service knows holds it: end that session, or remove it with "
+            f"`podman rm -f {container}`, and launch again"
+        )
+        raise RoomError(message)
+    podman.discard(container)
+    say(f"Removed the container {container}, {state}, which a launch that ended left.")
 
 
 def unlent(podman: Podman, launch: LaunchLayout) -> None:

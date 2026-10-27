@@ -287,11 +287,11 @@ class Found(Tools):
 class Engine:
     """podman, answering each command as a test scripts it."""
 
-    def __init__(
-        self, record: Callable[[str], None], *, gone: list[str], ran: int
-    ) -> None:
+    def __init__(self, record: Callable[[str], None], *, ran: int) -> None:
         self.record = record
-        self.gone = gone
+        self.containers: dict[str, str] = {}
+        """Each container podman holds, by its name, with its state: none
+        unless a test puts one there."""
         self.ran = ran
         self.processes: list[Process] = []
         self.guidance: str | None = None
@@ -316,8 +316,24 @@ class Engine:
             case ["container", "exists", name]:
                 self.record(f"container {name}")
                 return Ran(
-                    command=process.arguments, status=1 if name in self.gone else 0
+                    command=process.arguments,
+                    status=0 if name in self.containers else 1,
                 )
+            case ["ps", "--all", "--format", "json"]:
+                self.record("containers")
+                listed = [
+                    {"Names": [name], "State": state}
+                    for name, state in self.containers.items()
+                ]
+                return Ran(
+                    command=process.arguments,
+                    status=0,
+                    output=json.dumps(listed).encode(),
+                )
+            case ["rm", name]:
+                self.record(f"rm {name}")
+                del self.containers[name]
+                return Ran(command=process.arguments, status=0)
             case ["unshare", *unshared]:
                 self.unshared.append(unshared)
                 return Ran(command=process.arguments, status=0)
@@ -405,7 +421,7 @@ class Machine:
         )
         self.sockets = tmp_path / "run" / "host" / "launches" / "this"
         self.sockets.mkdir(parents=True)
-        self.engine = Engine(record, gone=["lup-dead"], ran=ran)
+        self.engine = Engine(record, ran=ran)
         self.host = Host(
             layout=self.layout.host,
             clock=clock,
@@ -564,7 +580,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
         ),
         "image",
         "launches",
-        "container lup-dead",
+        "containers",
         "unregister dead",
         (
             f"Ended launch dead, claude in {project}: its launcher and its "
@@ -576,6 +592,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
         ),
         f"register claude {container}",
         "This launch is `dev`.",
+        "containers",
         "image",
         "run",
         f"unregister {launch}",
@@ -1067,6 +1084,44 @@ def test_a_selection_the_engine_refuses_stops_the_launch_after_its_declaration(
     assert not [each for each in said if each.startswith("github")]
     assert not [each for each in said if each.startswith("register")]
     assert "run" not in said
+
+
+def test_a_container_left_under_the_launch_s_name_is_removed_and_said(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    machine.host.served.append(dead(project))
+    machine.engine.containers = {"lup-dead": "created", "lup-work-dev": "created"}
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    said = machine.events.said
+    assert said.index("rm lup-dead") < said.index(
+        f"Ended launch dead, claude in {project}: its launcher and its "
+        "container, lup-dead, are gone."
+    ), "the sweep removes a dead launch's container that never started"
+    removed = said.index("rm lup-work-dev")
+    assert said[removed + 1] == (
+        "Removed the container lup-work-dev, created, which a launch that ended left."
+    )
+    assert said.index("rm lup-work-dev") < said.index("run")
+    assert machine.engine.containers == {}
+
+
+def test_a_launch_refuses_where_a_container_runs_under_its_name(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    machine.engine.containers = {"lup-work-dev": "running"}
+
+    with pytest.raises(RoomError, match="lup-work-dev is running"):
+        cli.launched(machine.adapter, [], project, machine.launcher)
+
+    said = machine.events.said
+    [launch] = [each.launch for each in machine.host.served]
+    assert "run" not in said
+    assert said[-1] == f"unregister {launch}"
+    assert machine.engine.containers == {"lup-work-dev": "running"}
 
 
 def test_the_registration_ends_when_the_cli_fails(
