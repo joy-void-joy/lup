@@ -782,6 +782,38 @@ def test_a_clean_change_to_a_protected_module_through_the_shell_is_held(
     assert (repo / HOOK).read_text() == changed
 
 
+def test_an_approved_deletion_of_a_protected_file_is_not_held_again(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    protected_module(repo, shell)
+    start(kit, repo)
+    call(kit, repo, "c1")
+    (repo / HOOK).unlink()
+    reply = finish(kit, repo, "c1")
+    assert reply.context.startswith("lup held the write to")
+    assert len(kit.announced.holds) == 1
+    call(kit, repo, "c2")
+    assert finish(kit, repo, "c2").context == ""
+    assert len(kit.announced.holds) == 1
+    assert not (repo / HOOK).exists()
+
+
+def test_an_approved_deletion_whose_call_died_is_not_held_again(
+    holding_kit: Kit, repo: Path, shell: Shell, dying: Dying
+) -> None:
+    kit = holding_kit
+    protected_module(repo, shell)
+    start(kit, repo)
+    call(kit, repo, "c1")
+    (repo / HOOK).unlink()
+    key = orphaned(kit, repo, "c1", dying)
+    answer(kit.layout, key, Response(approved=True), [], kit.clock)
+    call(kit, repo, "c2")
+    finish(kit, repo, "c2")
+    assert len(kit.announced.holds) == 1
+    assert not (repo / HOOK).exists()
+
+
 def test_a_protected_modules_type_errors_keep_the_turn_from_ending(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:

@@ -82,7 +82,7 @@ class HeldFile(Model):
     path: Path
     role: Role
     blob: str
-    """The held content's object id in the store."""
+    """The held content's object id in the store, empty where the change deletes the file."""
     reasons: list[str]
     """The kinds of ask, as the verdict log records them."""
     asks: list[str]
