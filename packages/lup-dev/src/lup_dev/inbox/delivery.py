@@ -339,6 +339,8 @@ def standing(item: Item) -> str:
             return f"{'approved' if approved else 'declined'} at {clocked(at)}"
         case Superseded(at=at, by=by):
             return f"superseded at {clocked(at)} by {cited(by)}"
+        case Withdrawn(at=at, why=why) if isinstance(item.reason, Flagged):
+            return f"withdrawn at {clocked(at)} by lup: {why}"
         case Withdrawn(at=at, why=why):
             return f"withdrawn at {clocked(at)} by its sender: {why}"
 
@@ -1981,6 +1983,20 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         approved = Decided(at=self.clock.now(), approved=True)
         self.say(f"{cited(number)}, a flagged write, was approved")
         return self.inbox.kept(item.model_copy(update={"state": approved}))
+
+    def flag_withdrawn(self, number: int, why: str) -> Item | None:
+        """Take the flagged write item `number` back off the operator's list for lup, with its reason, a landing having left it nothing to hold; none where it isn't a flagged write still waiting for them, which keeps its state.
+
+        It's left unread: what it kept is no version the operator saw.
+        """
+        item = self.inbox.items.get(number)
+        match item:
+            case Item(reason=Flagged(), recipient=Operator(), state=Waiting()):
+                taken = Withdrawn(at=self.clock.now(), why=why)
+                self.say(f"{cited(number)}, a flagged write, was withdrawn by lup")
+                return self.inbox.kept(item.model_copy(update={"state": taken}))
+            case _:
+                return None
 
     def done(self, number: int) -> Item:
         """Take the message item `number` off the operator's list: a flagged write approved, read with nothing to add.

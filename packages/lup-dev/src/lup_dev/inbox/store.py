@@ -473,7 +473,9 @@ class Flagged(Model):
     (`Inbox.gathering`), the file kept whole since the first and as it stands.
     Marked read with nothing to add, it's approved (`Decided`); commented on or
     replied to, it's read and not approved (`Done`), and the landing of its
-    branch waits on it (`lup_dev.policy.landing`).
+    branch waits on it (`lup_dev.policy.landing`). Still waiting where a
+    landing of its branch leaves its file unchanged, with nothing left to
+    hold, lup takes it back (`Withdrawn`).
     """
 
     reason: Literal["flagged"] = "flagged"
@@ -805,12 +807,12 @@ class Superseded(Model):
 
 
 class Withdrawn(Model):
-    """A message or a question its sender took back while it waited for the operator, who needn't read or answer it."""
+    """A message or a question its sender took back while it waited for the operator, who needn't read or answer it; or a flagged write lup took back, a landing of its branch having left it nothing to hold (`lup_dev.policy.landing`), unread, so it's no version the operator saw."""
 
     state: Literal["withdrawn"] = "withdrawn"
     at: datetime
     why: str
-    """The sender's reason, in a line."""
+    """The sender's reason, or lup's, in a line."""
 
 
 type State = Annotated[

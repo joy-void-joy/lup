@@ -39,7 +39,13 @@ gated branch, `dev` by default:
 7. each branch it landed is cleaned up after: its copy on the remote deleted,
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
    it's clean and nobody works in it; then the local branch deleted;
-8. the answer ends on what's still running or waiting to land (`going`): the
+8. each flagged write still waiting on a branch whose flags hold it, on a file
+   it leaves unchanged, is withdrawn from the operator's inbox where nothing's
+   left for it to hold (`Lander.withdrawn`): its branch is gone since, or the
+   file stands as the flag keeps it, landed before. It's left unread, so it's
+   no version they saw (`Withdrawn`). One on a branch still there whose file
+   stands otherwise may be a write not committed yet, and waits;
+9. the answer ends on what's still running or waiting to land (`going`): the
    subagents of the session landing that lup hasn't heard end, and the local
    branches not on what landed, each with who works in it.
 
@@ -142,6 +148,7 @@ from lup_dev.inbox.store import (
     Text,
     Waiting,
     Whereabouts,
+    Withdrawn,
     cited,
 )
 from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, HostLayout, Layout
@@ -514,6 +521,23 @@ def text(found: bytes | None) -> str | None:
         return None
 
 
+def stands(kept: ChangedFile, landed: bytes | None) -> bool:
+    """Say whether the file a flagged write keeps, `kept`, is the file a landing leaves, `landed`: the same text, or none on both sides; never where what it keeps isn't text.
+
+    >>> stands(ChangedFile.of(Path("a.py"), None, b"x = 1"), b"x = 1")
+    True
+    >>> stands(ChangedFile.of(Path("a.py"), b"x = 1", None), b"x = 1")
+    False
+    """
+    match kept.after:
+        case None:
+            return landed is None
+        case Text(text=written):
+            return written.encode() == landed
+        case _:
+            return False
+
+
 def settled_at(item: Item) -> datetime | None:
     """Return when the operator settled `item`, read, commented on, approved or declined; none where they haven't."""
     match item.state:
@@ -603,7 +627,7 @@ class Baseline(Model, arbitrary_types_allowed=True):
         return self.inbox.about(self.repository) if self.items is None else self.items
 
     def flags(self, branches: list[str], path: Path | None = None) -> list[Flag]:
-        """Return the flagged writes on `branches` the operator hasn't approved, those on the file at `path` alone where one's given."""
+        """Return the flagged writes on `branches` the operator hasn't approved and lup hasn't taken back (`Withdrawn`), those on the file at `path` alone where one's given."""
         return [
             Flag(number=item.number, flagged=item.reason)
             for item in self.about
@@ -611,6 +635,7 @@ class Baseline(Model, arbitrary_types_allowed=True):
             and item.reason.branch in branches
             and (path is None or item.reason.path == path)
             and not approved(item)
+            and not isinstance(item.state, Withdrawn)
         ]
 
     def seen(self, path: Path, landed: list[str]) -> Item | None:
@@ -732,6 +757,9 @@ class Lander(Model, arbitrary_types_allowed=True):
         what they approved stays approved. Once landed, it cleans up after each
         branch it landed: deletes its copy on the remote, removes its worktree
         where it's clean and nobody works in it, and deletes the local branch.
+        A flagged write still waiting on a branch it landed, on a file it
+        doesn't change, it withdraws from the operator's inbox where nothing's
+        left for it to hold, saying which.
         The branches it landed are the one you gave, and each other merged
         into `dev` whose tip no other branch shares; a branch made from the
         one you gave, at its tip, is left alone, worktree and all, as is each
@@ -811,7 +839,10 @@ class Lander(Model, arbitrary_types_allowed=True):
         # given, and the gated one a merge moved onto what lands.
         given = {f"refs/heads/{source}": tip, f"refs/heads/{named}": lands}
         branches = await asyncio.to_thread(landed_branches, git, lands, old, given)
-        holds = await self.holds(git, onto, lands, old, branches.holding)
+        changed = await asyncio.to_thread(changed_files, git, old, lands)
+        holds = await self.holds(
+            git, onto, lands, old, branches.holding, changed=changed
+        )
         waited = await self.waited(holds)
         if not all(each.approved for each in waited.outcomes):
             return unapproved(waited, made.moved)
@@ -829,6 +860,7 @@ class Lander(Model, arbitrary_types_allowed=True):
             moved = [] if made.moved is None else [made.moved]
             return "\n".join([f"Not landed: {update.error}.{kept}{refusals}", *moved])
         cleaned = await self.cleaned(git, remote, refs, branches.landed, onto)
+        withdrawn = await self.withdrawn(git, onto, lands, branches.holding, changed)
         was = "new there" if old is None else f"which was at {old}"
         going = await self.going(git, lands, onto)
         return "\n".join(
@@ -837,6 +869,7 @@ class Lander(Model, arbitrary_types_allowed=True):
                 f"Landed {lands} on `{short(onto)}` at `{remote}`, {was}.",
                 *approvals(waited),
                 *said(cleaned),
+                *withdrawals(short(onto), withdrawn),
                 *left_alone(named, branches),
                 *going,
             ]
@@ -1179,10 +1212,11 @@ class Lander(Model, arbitrary_types_allowed=True):
         tip: str,
         old: str | None,
         branches: list[str],
+        *,
+        changed: list[Path],
     ) -> list[Held]:
-        """Put a hold in the operator's inbox for each file the landing changes that's flagged on one of `branches`, those it lands or may have merged (`Branches.holding`), and not approved, covering every such flag on it, and return them."""
+        """Put a hold in the operator's inbox for each file the landing changes, `changed`, that's flagged on one of `branches`, those it lands or may have merged (`Branches.holding`), and not approved, covering every such flag on it, and return them."""
         names = [short(ref) for ref in branches]
-        changed = await asyncio.to_thread(changed_files, git, old, tip)
         flags = [
             each for each in self.baseline.flags(names) if each.flagged.path in changed
         ]
@@ -1252,6 +1286,67 @@ class Lander(Model, arbitrary_types_allowed=True):
             change, self.party, diff, [file], call=self.call
         )
         return Held(number=item.number, path=path)
+
+    async def withdrawn(
+        self,
+        git: Git,
+        onto: str,
+        tip: str,
+        branches: list[str],
+        changed: list[Path],
+    ) -> list[Flag]:
+        """Withdraw each flagged write still waiting for the operator on one of `branches`, those the landing of `tip` on `onto` holds on, whose file it doesn't change, `changed` being those it does, where nothing's left for it to hold; return those withdrawn.
+
+        Nothing is where its branch is gone since, the landing's cleanup
+        having deleted it, or where the file stands at `tip` as the flag keeps
+        it, landed before. On a branch still there, a file standing otherwise
+        may be a write not committed yet, which the branch's next landing holds
+        on: that flag waits.
+        """
+        names = [short(ref) for ref in branches]
+        inbox = self.delivery.inbox
+        waiting = [
+            Flag(number=item.number, flagged=item.reason)
+            for item in self.baseline.about
+            if isinstance(item.reason, Flagged)
+            and item.reason.branch in names
+            and item.reason.path not in changed
+            and isinstance(item.state, Waiting)
+        ]
+        gone = [
+            branch
+            for branch in names
+            if await asyncio.to_thread(git.commit, f"refs/heads/{branch}") is None
+        ]
+        name = short(onto)
+
+        async def why(flag: Flag) -> str | None:
+            path, branch = flag.flagged.path, flag.flagged.branch
+            if branch in gone:
+                return (
+                    f"`{branch}` landed on `{name}` at {tip} leaving the file as it "
+                    "was, and is gone since"
+                )
+            try:
+                files = inbox.files(flag.number)
+            except InboxError:
+                return None
+            kept = next((each for each in files if each.path == path), None)
+            landed = await asyncio.to_thread(blob, git, tip, path)
+            if kept is None or not stands(kept, landed):
+                return None
+            return (
+                f"the file stands on `{name}` at {tip} as it flagged it, landed before"
+            )
+
+        async def withdrew(flag: Flag) -> bool:
+            reason = await why(flag)
+            return (
+                reason is not None
+                and self.delivery.flag_withdrawn(flag.number, reason) is not None
+            )
+
+        return [flag for flag in waiting if await withdrew(flag)]
 
     async def waited(self, holds: list[Held]) -> Waited:
         """Hold the call until no hold of `holds` waits for the operator, and return what reached the conversation meanwhile, told, and how each was answered; at once, telling nothing, where there's none."""
@@ -1694,6 +1789,27 @@ def approvals(waited: Waited) -> list[str]:
     return [
         f"The operator approved {named}.",
         *([waited.told] if waited.told else []),
+    ]
+
+
+def withdrawals(onto: str, flags: list[Flag]) -> list[str]:
+    """Say which flagged writes a landing on `onto` withdrew from the operator's inbox, their files left as they were with nothing more to hold; nothing where it withdrew none.
+
+    >>> flagged = Flagged(text="", summary="", worktree=Path("/r"), path=Path("a.py"), branch="feat")
+    >>> withdrawals("dev", [Flag(number=12, flagged=flagged)])
+    ["Withdrew from the operator's inbox the flagged writes on files it leaves as `dev` had them, which hold nothing more: @12 (`a.py` on `feat`)."]
+    """
+    if not flags:
+        return []
+    named = ", ".join(
+        f"{cited(each.number)} (`{each.flagged.path}` on `{each.flagged.branch}`)"
+        for each in flags
+    )
+    return [
+        (
+            "Withdrew from the operator's inbox the flagged writes on files it leaves "
+            f"as `{onto}` had them, which hold nothing more: {named}."
+        )
     ]
 
 
