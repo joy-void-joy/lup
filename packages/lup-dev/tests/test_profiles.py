@@ -203,5 +203,9 @@ def test_an_unknown_profile_or_runtime_or_a_malformed_account_is_refused() -> No
         "Profile `work` names `second`, which no runtime is called: the runtimes "
         "are `first`"
     )
-    with pytest.raises(ProjectError, match=re.escape("`--account ../x`: ")):
+    with pytest.raises(ProjectError) as malformed:
         chosen(PROFILES, "first", RUNTIMES, profile=None, account="../x")
+    assert str(malformed.value) == (
+        "`--account ../x`: `../x` can't name a profile or an account: a name is "
+        "letters, digits, `-`, `_` and `.`, not starting with `.`"
+    )

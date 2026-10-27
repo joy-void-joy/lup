@@ -283,8 +283,10 @@ def chosen(
             f"called: the runtimes are {listed(runtimes)}"
         )
         raise ProjectError(message)
-    try:
-        return Chosen(profile=found, account=account or found.account_for(runtime))
-    except ValueError as malformed:
-        message = f"`--account {account}`: {malformed}"
-        raise ProjectError(message) from malformed
+    if account is not None:
+        try:
+            directory_named(account)
+        except ValueError as malformed:
+            message = f"`--account {account}`: {malformed}"
+            raise ProjectError(message) from malformed
+    return Chosen(profile=found, account=account or found.account_for(runtime))
