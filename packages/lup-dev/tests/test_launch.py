@@ -743,7 +743,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
     assert "As committed." in guidance
     assert "Uncommitted." not in guidance
     assert "## lup's tools" in guidance
-    assert "- `wait_inbox`: Wait until something reaches your inbox." in guidance
+    assert "- `wait_inbox`: Wait until something reaches you." in guidance
     assert "- `judged`: Read the judge's verdicts and holds." in guidance
     assert guidance.index("As committed.") < guidance.index("## lup's tools")
     assert guidance.endswith("Mine.\n")
