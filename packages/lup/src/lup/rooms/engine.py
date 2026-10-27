@@ -47,6 +47,12 @@ What this relies on, measured with rootless podman 6.1.3 (`docs/field-notes.md`,
 `podman-container-exists(1)`); a run's `--name` names its container while it
 runs, and `--rm` removes it when it exits. `podman rename` renames a container in
 any state, running included, freeing its old name (`podman-rename(1)`).
+
+A container a run created and never started stays, `created`, holding its
+name: a launch that took the host down before its container started left two,
+which the next launch's run met as "the container name … is already in use"
+(podman 6.1.4). `podman ps --all --format json` lists each container's `Names`
+and its `State`, `created` for that one.
 """
 
 import csv
@@ -55,7 +61,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Literal, get_args, override
 
 from pydantic import TypeAdapter, model_validator
 from pydantic.alias_generators import to_pascal
@@ -72,6 +78,10 @@ if TYPE_CHECKING:
 
 PROJECT_LABEL = "lup.project"
 """The label naming the project an image is built for."""
+type Stopped = Literal["configured", "created", "initialized", "exited", "stopped"]
+"""The states of a container that isn't running, as podman names them: a run's
+container in one was left by a launch that ended before it started or before
+`--rm` removed it, and nothing runs in it."""
 
 
 class ContainerError(LupError):
@@ -184,6 +194,22 @@ def run_process(process: Process) -> Ran:
         )
     except ProgramMissingError as missing:
         raise ContainerError(str(missing)) from missing
+
+
+def stopped(state: str) -> bool:
+    """Say whether a container in `state` isn't running (`Stopped`).
+
+    >>> stopped("created"), stopped("running")
+    (True, False)
+    """
+    return state in get_args(Stopped.__value__)
+
+
+class StoredContainer(Model, alias_generator=to_pascal, populate_by_name=True):
+    """A container podman holds, as `podman ps --all` lists it."""
+
+    names: list[str]
+    state: str
 
 
 class StoredImage(Model, alias_generator=to_pascal, populate_by_name=True):
@@ -380,8 +406,8 @@ class Podman(Model, ContainerEngine):
     def exists(self, container: str) -> bool:
         """Say whether a container named `container` is there, running or stopped.
 
-        A run's container is removed when it exits, so one that's there runs, or
-        is just ending.
+        A run's container is removed when it exits, so one that's there runs, is
+        just ending, or never started (`state` tells them apart).
         """
         asked = self.execute(
             Process(arguments=[self.program, "container", "exists", container])
@@ -397,6 +423,37 @@ class Podman(Model, ContainerEngine):
                     f"(status {status})"
                 )
                 raise ContainerError(message)
+
+    def state(self, container: str) -> str | None:
+        """Return the state of the container named `container`, as podman names it (`running`, or one of `Stopped`); none where no container has that name."""
+        listed = self.execute(
+            Process(
+                arguments=[self.program, "ps", "--all", "--format", "json"],
+                capture=True,
+            )
+        )
+        if listed.status != 0:
+            message = (
+                f"podman couldn't say how the container {container} is "
+                f"(status {listed.status})"
+            )
+            raise ContainerError(message)
+        held = TypeAdapter(list[StoredContainer]).validate_json(listed.output)
+        return next((each.state for each in held if container in each.names), None)
+
+    def discard(self, container: str) -> None:
+        """Remove the container named `container`, one that isn't running (`Stopped`)."""
+        removed = self.execute(
+            Process(arguments=[self.program, "rm", container], capture=True)
+        )
+        if removed.status != 0:
+            said = removed.said()
+            told = f": {said}" if said else ""
+            message = (
+                f"podman couldn't remove the container {container} "
+                f"(status {removed.status}){told}"
+            )
+            raise ContainerError(message)
 
     def rename(self, container: str, name: str) -> None:
         """Rename the container named `container` to `name`, while it runs as well.

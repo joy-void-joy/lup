@@ -1700,6 +1700,17 @@ class Containers:
                 return Ran(
                     command=process.arguments, status=0 if name in self.running else 1
                 )
+            case ["ps", "--all", "--format", "json"] if self.broken:
+                return Ran(command=process.arguments, status=125)
+            case ["ps", "--all", "--format", "json"]:
+                listed = [
+                    {"Names": [each], "State": "running"} for each in self.running
+                ]
+                return Ran(
+                    command=process.arguments,
+                    status=0,
+                    output=json.dumps(listed).encode(),
+                )
             case ["rename", before, after] if not self.refusing:
                 self.running = [
                     after if each == before else each for each in self.running
@@ -1900,7 +1911,9 @@ def test_the_service_ends_a_launch_whose_launcher_and_container_are_gone(
             f"container, lup-{each}, are gone."
         ) in said
         assert not machine.launch(each).lock.exists()
-    assert ["container", "exists", "lup-held"] not in containers.asked
+    assert containers.asked.count(["ps", "--all", "--format", "json"]) == 3 + 2, (
+        "podman is asked of each launch whose launcher is gone, never of the held one"
+    )
 
 
 def test_a_sweep_podman_fails_is_said_and_the_service_goes_on(
@@ -1927,7 +1940,7 @@ def test_a_sweep_podman_fails_is_said_and_the_service_goes_on(
     assert left == ["gone"]
     assert (
         "The sweep of launches whose launcher and container are gone failed: podman "
-        "couldn't say whether the container lup-gone exists (status 125)"
+        "couldn't say how the container lup-gone is (status 125)"
     ) in said
 
 

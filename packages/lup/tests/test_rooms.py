@@ -348,6 +348,36 @@ def test_a_run_makes_its_home_before_podman_starts(tmp_path: Path) -> None:
     assert f"--mount=type=bind,source={source},destination={home}" in ran.arguments
 
 
+def test_a_container_s_state_is_read_by_its_name_and_none_where_none_has_it() -> None:
+    listed = json.dumps(
+        [
+            {"Id": "37c551b26579", "Names": ["lup-lup-dev"], "State": "created"},
+            {"Id": "cd13d0eac773", "Names": ["lup-lup-dev-2"], "State": "running"},
+        ]
+    )
+    engine, recorder = podman(*[exited(0, listed)] * 3)
+
+    assert engine.state("lup-lup-dev") == "created"
+    assert engine.state("lup-lup-dev-2") == "running"
+    assert engine.state("lup-lup") is None, "a name is matched whole"
+    assert recorder.processes[0] == Process(
+        arguments=["podman", "ps", "--all", "--format", "json"], capture=True
+    )
+
+
+def test_a_state_podman_can_t_give_or_a_removal_it_refuses_raises() -> None:
+    engine, recorder = podman(exited(125), exited(0), exited(2))
+
+    with pytest.raises(ContainerError, match="how the container lup-x is"):
+        engine.state("lup-x")
+    engine.discard("lup-x")
+    with pytest.raises(ContainerError, match="couldn't remove the container lup-x"):
+        engine.discard("lup-x")
+    assert recorder.processes[1] == Process(
+        arguments=["podman", "rm", "lup-x"], capture=True
+    ), "podman's echo of the name stays off the operator's terminal"
+
+
 def test_ensure_builds_a_missing_image_with_its_projects_label() -> None:
     engine, recorder = podman(exited(1), exited(0))
 
