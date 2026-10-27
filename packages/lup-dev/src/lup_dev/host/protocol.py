@@ -15,6 +15,7 @@ from typing import Annotated, ClassVar, Literal, Unpack, get_args
 
 from pydantic import AfterValidator, ConfigDict
 
+from lup.blocks import Drawer, FoldKind, Tone
 from lup.rooms.container import AbsolutePath
 from lup.types import Model
 from lup_dev.errors import LupDevError
@@ -377,6 +378,24 @@ class Talker(Model):
     """Whether the operator holds each flagged write of it."""
 
 
+class Drawn(Model):
+    """A view a module places in a drawer, with its module: what the page lists under each agent's banner."""
+
+    module: str
+    """The module's name."""
+    view: str
+    """The view's name: its method's, which the drawer's fold kind is named for."""
+    place: Drawer
+
+
+class Looks(Model):
+    """How a repository's modules' views look: their fold kinds, their tones, and the drawers they place."""
+
+    folds: list[FoldKind] = []
+    tones: list[Tone] = []
+    drawers: list[Drawn] = []
+
+
 class Listed(Reply):
     """The launches the service serves, each as it stands, the name each session of theirs last had, and each launch's conversations."""
 
@@ -393,6 +412,11 @@ class Listed(Reply):
     """By launch id, whether its container runs, as the host's podman says: for
     a room, which has no podman to ask; none for the operator's terminal, which
     asks podman itself."""
+    looks: dict[Path, Looks] = {}
+    """By repository's git directory, how its modules' views look, as its
+    process said when it last started: the page draws their fold kinds, tones
+    and drawers from them. A repository whose process hasn't started since the
+    service did has none yet."""
 
 
 class Done(Reply):

@@ -6,7 +6,8 @@ needs no TypeScript for what it shows, the page has one way of drawing, and a
 view's text form, which its command prints and agents read, comes from the
 same blocks (`Blocks.text`), so an agent reads what the operator saw.
 
-- `Line`: one line of text in spans, each in a tone (`Span`).
+- `Line`: one line of text in spans, each in a tone (`Span`), a span naming a
+  conversation referring to it by its runtime's ids.
 - `Markdown`: text the page shows as Markdown, in a tone.
 - `Fold`: a summary line and what folds under it, of one of the module's fold
   kinds (`FoldKind`), open or closed: its content given, or read as it opens
@@ -66,11 +67,16 @@ forward, and the operator's own words."""
 
 
 class Span(Model):
-    """A run of a line's text, in a tone."""
+    """A run of a line's text, in a tone, and the conversation it names, where it names one."""
 
     text: str
     tone: str = "plain"
     """One of the shell's tones (`SHELL_TONES`), or one its module declares."""
+    conversation: OfAgent | None = None
+    """The conversation its text names, by its runtime's ids, which never change
+    as it's renamed: its text says it as the core calls it, its path
+    (`lup-impl/parser`), and the page can go to it by these, whatever it's
+    called by then."""
 
 
 class Line(Model):
@@ -85,7 +91,7 @@ class Line(Model):
         """Return a line of `text` in one tone, its id `key`.
 
         >>> Line.of("1", "hello").spans
-        [Span(text='hello', tone='plain')]
+        [Span(text='hello', tone='plain', conversation=None)]
         """
         return cls(id=key, spans=[Span(text=text, tone=tone)])
 

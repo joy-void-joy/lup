@@ -39,7 +39,7 @@ from typing import Self
 
 from pydantic import model_validator
 
-from lup.blocks import SHELL_TONES, Drawer, FoldKind, Tone
+from lup.blocks import SHELL_TONES
 from lup.doors import served as methods
 from lup.types import Model
 from lup_dev.catalog.gate import Step
@@ -78,7 +78,7 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Needed
 from lup_dev.declaration.runner import Plain, Prefixed, Runner
 from lup_dev.declaration.serving import ModuleServing, made_with, requests, tools
-from lup_dev.host.protocol import Limits
+from lup_dev.host.protocol import Drawn, Limits, Looks
 
 
 class PathRoles(Model, extra="forbid"):
@@ -183,24 +183,6 @@ class Served(Model):
 
     module: Module
     serving: type[ModuleServing]
-
-
-class Drawn(Model):
-    """A view a module places in a drawer, with its module: what the page lists under each agent's banner."""
-
-    module: str
-    """The module's name."""
-    view: str
-    """The view's name: its method's, which the drawer's fold kind is named for."""
-    place: Drawer
-
-
-class Looks(Model):
-    """How a repository's modules' views look: their fold kinds, their tones, and the drawers they place."""
-
-    folds: list[FoldKind] = []
-    tones: list[Tone] = []
-    drawers: list[Drawn] = []
 
 
 class Shared(Model):

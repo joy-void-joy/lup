@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING, override
 
 from pydantic import TypeAdapter, ValidationError
 
-from lup.blocks import SHELL_TONES, Blocks, OfAgent
+from lup.blocks import SHELL_TONES, Blocks, OfAgent, Watch
 from lup.doors import served
 from lup.events import Event, Publishing, events
 from lup.publishing import Place, Published, Refusal
@@ -99,6 +99,7 @@ from lup_dev.host.workers import (
     Sent,
     Viewed,
     Viewing,
+    Watching,
 )
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.protocol import Exchanged, ListItems
@@ -266,7 +267,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
         return related_of(self.resolved.repositories, self.repository)
 
     def offered(self) -> Offered:
-        """Return what the modules serve: each tool, each kind of request a room may send them, and each event their hooks run at."""
+        """Return what the modules serve: each tool, each kind of request a room may send them, each event their hooks run at, and how their views look."""
         listened = [
             event for each in self.resolved.served for event in listening(each.serving)
         ]
@@ -281,6 +282,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
                 if asked_by_room(each.serving, name)
             ],
             events=[event.named() for event in events() if event in listened],
+            looks=self.resolved.looks,
         )
 
     def made(self, owner: Served) -> ModuleServing:
@@ -332,14 +334,20 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             None,
         )
 
-    async def view(self, viewing: Viewing) -> Blocks:
-        """Answer one of the modules' views, for the operator, or for a room of one of the repository's launches.
+    async def view(self, viewing: Viewing) -> Viewed:
+        """Answer one of the modules' views, for the operator, or for a room of one of the repository's launches: its blocks, and when it's answered again while it's shown, as its door says, with the agent it's of.
 
-        Raise `LupDevError` where no module of the repository has it, where its
-        asker may not ask it, where what it's given isn't what it takes, or
-        where what it answers names a tone neither the shell nor a module
-        declares.
+        Raise `LupDevError` where it's another repository's, where no module of
+        the repository has it, where its asker may not ask it, where what it's
+        given isn't what it takes, or where what it answers names a tone neither
+        the shell nor a module declares.
         """
+        if viewing.repository != self.repository:
+            message = (
+                f"a view of {viewing.repository} was asked of {self.repository}'s "
+                "process"
+            )
+            raise LupDevError(message)
         owner = self.viewing(viewing.module, viewing.view)
         if owner is None:
             message = (
@@ -366,7 +374,21 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
                 f"`{viewing.view}` names tones no module declares: {', '.join(unknown)}"
             )
             raise LupDevError(message)
-        return blocks
+        door = method.viewing()
+        declared = Watch() if door is None else door.watch
+        of = (
+            OfAgent(
+                runtime=argument.runtime, session=argument.session, agent=argument.agent
+            )
+            if isinstance(argument, OfAgent)
+            else None
+        )
+        watch = Watching(
+            of=of,
+            on=[event.named() for event in declared.on],
+            longest=declared.longest,
+        )
+        return Viewed(blocks=blocks, watch=watch)
 
     async def call(self, calling: Calling) -> Answer:
         """Run one call to a module's tool, asked by the conversation calling, and return what the agent reads."""
@@ -523,7 +545,11 @@ class Views(Model, Reading[Viewing]):
 
     @override
     async def answer(self, request: Viewing) -> Reply:
-        return Viewed(blocks=await self.modules.view(request))
+        """Answer the view, or refuse it saying why, as what the operator asked for rather than a failure of the process's (`HostError`)."""
+        try:
+            return await self.modules.view(request)
+        except LupDevError as refused:
+            raise HostError(str(refused)) from refused
 
     @override
     async def scoped(self, request: Viewing, repository: Path) -> Reply:

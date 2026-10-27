@@ -473,8 +473,15 @@ class Exchange(Model):
     text: str
 
 
+class Pathed(Model):
+    """A conversation, and its path as lup's commands call it: its session's name, then each subagent's down to it (`lup-impl/parser`), an unnamed one by its runtime's id."""
+
+    conversation: Conversation
+    path: str
+
+
 class Exchanged(Reply):
-    """The items one conversation sent, and those it was sent, each oldest first, in every state, with its text whole."""
+    """The items one conversation sent, and those it was sent, each oldest first, in every state, with its text whole, and each conversation among their parties by its path."""
 
     kind: Literal["inbox-exchanged"] = "inbox-exchanged"
     sent: list[Exchange]
@@ -482,6 +489,18 @@ class Exchanged(Reply):
     """Those for it, those passed on to it from a subagent of its session that
     had ended, and, for a subagent, those for it passed on to its session's main
     conversation once it had."""
+    paths: list[Pathed] = []
+    """Each conversation the items are from, for or were addressed to, with its
+    path, where lup knows its session's name: a view says a conversation by
+    it, and refers to it by its runtime's ids, which never change as it's
+    renamed."""
+
+    def path(self, conversation: Conversation) -> str | None:
+        """Return `conversation`'s path, as the exchange gives it; none where lup knows none."""
+        return next(
+            (each.path for each in self.paths if each.conversation == conversation),
+            None,
+        )
 
 
 def owned(item: Item, repository: Path) -> Item:
@@ -870,11 +889,23 @@ class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
         return self.exchanged(party, [each for each in items if each.of(repository)])
 
     def exchanged(self, party: Conversation, items: list[Item]) -> Exchanged:
-        """Return `items` as `party` sent them, as it wrote them, and as it was sent them, as it's told them: lup's word on its citations that named no passage among those it was sent, though it's its own item, being lup's to it (`Unresolved`)."""
+        """Return `items` as `party` sent them, as it wrote them, and as it was sent them, as it's told them: lup's word on its citations that named no passage among those it was sent, though it's its own item, being lup's to it (`Unresolved`); and each conversation among their parties by its path, as the operator's `inbox` names it."""
 
         def told(item: Item) -> bool:
             return item.sender != party or isinstance(item.reason, Unresolved)
 
+        reader = Reader(
+            delivery=self.delivery,
+            reader=Operator(),
+            names=Names(path=self.delivery.layout.names).all(),
+        )
+        every = list(self.delivery.inbox.items.values())
+        parties = dict.fromkeys(
+            each
+            for item in items
+            for each in [item.sender, item.recipient, item.addressed]
+            if isinstance(each, Conversation)
+        )
         return Exchanged(
             sent=[
                 Exchange(item=each, text=written(each))
@@ -885,6 +916,11 @@ class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
                 Exchange(item=each, text=self.delivery.words(each))
                 for each in items
                 if told(each)
+            ],
+            paths=[
+                Pathed(conversation=each, path=path)
+                for each in parties
+                if (path := reader.path(each, every)) is not None
             ],
         )
 

@@ -23,9 +23,9 @@ The operator's words come first, since a past session is read for what they said
 Each agent's conversation is a view (`docs/declaration.md`, *Views and blocks*), read from the runtime's own record as it grows, not the copies, and each record read again only once it changed (`Recording`):
 - `conversation <runtime> <session> [--agent <id>]`, the drawer under each agent's banner (`v`): its summary counting the steps, everything since the operator's last words open, each earlier exchange folded under their words that opened it (`e`, opening one at a time, the latest first), each run of three calls or more under one line saying how many of which (`k`), each call a line saying what it did with its input and output under it (`d`), and each item of lup's inbox the conversation sent or was sent a line where it happened, its text under it (`m`);
 - `exchange <runtime> <session> [--step <n>]`, one earlier exchange, which its fold reads as it opens, so the drawer's answer stays small;
-- `call <runtime> <session> <id>`, one call read whole, as its fold opens.
+- `call <runtime> <session> <id>`, one call read whole, as its fold opens, and answered again while it's open and shown as a call of the agent's finishes, so one still running shows what it returned once it has.
 
-The layout is `environment/conversation.py`: pure, from the record's steps and the items the core keeps (`self.exchanges`), each block's id naming what it shows so it stays from one answer to the next. The module declares its fold kinds and tones (`folds`, `tones`).
+The layout is `environment/conversation.py`: pure, from the record's steps and the items the core keeps (`self.exchanges`), each block's id naming what it shows so it stays from one answer to the next. Each conversation an item's line names is said by its path, as the core gives it with the items (`Exchanged.paths`), else by its runtime's ids, in a span referring to it by those ids (`Span.conversation`), which a rename never changes. The module declares its fold kinds and tones (`folds`, `tones`).
 
 ## Layout
 

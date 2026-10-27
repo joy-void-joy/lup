@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
-from lup.blocks import Blocks
+from lup.blocks import Blocks, OfAgent
 from lup.events import EventName, Publishing, Told
 from lup.programs import ProgramError, Running, started
 from lup.publishing import Published, Refusal
@@ -48,11 +48,12 @@ from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec
 from lup.types import JsonObject, Model, MutableModel
 from lup_dev.host.courier import Conversation
-from lup_dev.host.protocol import HostError, Refused, Register, Reply, Request
+from lup_dev.host.protocol import HostError, Looks, Refused, Register, Reply, Request
 from lup_dev.layout import HostLayout
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from contextlib import AbstractAsyncContextManager
 
 
 async def exchanged(path: Path, request: Request) -> str:
@@ -75,7 +76,7 @@ class Listing(Request, reads=True):
 
 
 class Offered(Reply):
-    """What the repository's modules serve: each tool, each kind of the room's requests they answer, and each event their hooks run at."""
+    """What the repository's modules serve: each tool, each kind of the room's requests they answer, each event their hooks run at, and how their views look."""
 
     kind: Literal["module-offered"] = "module-offered"
     tools: list[ToolSpec] = []
@@ -83,6 +84,9 @@ class Offered(Reply):
     events: list[EventName] = []
     """Each event their hooks run at, by its name (`lup.events`): the service
     tells them those alone."""
+    looks: Looks = Looks()
+    """Their views' fold kinds, tones and drawers, as the declaration resolves
+    them: the host keeps them for the listing, which the page draws views by."""
 
 
 class Happening(Request, reads=False):
@@ -159,6 +163,9 @@ class Viewing(Request, reads=True):
     """Answer one of the repository's modules' views, for the operator, or for a room of one of its launches."""
 
     kind: Literal["module-view"] = "module-view"
+    repository: Path
+    """The git directory of the repository whose modules answer it: the host
+    puts it to that repository's process."""
     module: str
     """The module's name."""
     view: str
@@ -169,11 +176,25 @@ class Viewing(Request, reads=True):
     """The launch whose room asks; none where the operator does."""
 
 
+class Watching(Model):
+    """When a view the page shows is answered again, as its door declares it (`lup.Watch`), and the agent it's of: at those events of that agent's, at an item of the inbox that agent sent or was sent changing, and that long apart at most."""
+
+    of: OfAgent | None = None
+    """The agent it's of, where what it takes is an agent's (`OfAgent`); none
+    for a view of no agent, answered again at `longest` alone."""
+    on: list[EventName] = []
+    """The events of that agent after which it's answered again, by their names
+    (`lup.events`)."""
+    longest: timedelta | None = None
+    """The longest it goes unanswered; none waits for its agent alone."""
+
+
 class Viewed(Reply):
-    """A view's answer: its blocks."""
+    """A view's answer: its blocks, and when it's answered again while it's shown."""
 
     kind: Literal["module-viewed"] = "module-viewed"
     blocks: Blocks
+    watch: Watching = Watching()
 
 
 class JudgeHook(Request, reads=False):
@@ -304,12 +325,14 @@ class Holder(Model):
 
     One of the repository's launches holds it while it's open (`launched`); a
     request the operator puts to it with no launch, a view or a command, while
-    it's answered (`asking`).
+    it's answered (`asking`); a page watching one of its views, while it
+    watches (`watching`), so the view's answers between its triggers never wait
+    for the process to start again.
     """
 
-    what: Literal["launch", "asking"]
+    what: Literal["launch", "asking", "watch"]
     which: str
-    """Which one of its kind: a launch's id, or a request's own."""
+    """Which one of its kind: a launch's id, or a request's or a watch's own."""
 
     @classmethod
     def launched(cls, launch: Register) -> Holder:
@@ -321,9 +344,14 @@ class Holder(Model):
         """Return a hold of its own for one request put with no launch, while it's answered."""
         return cls(what="asking", which=secrets.token_hex(8))
 
+    @classmethod
+    def watching(cls) -> Holder:
+        """Return a hold of its own for one watch of a view, while it watches."""
+        return cls(what="watch", which=secrets.token_hex(8))
+
 
 class RepositoryAsking(ABC):
-    """Answers a request the operator puts to a repository's process, with no launch: a view the dashboard shows, a command run on the host."""
+    """Answers a request the operator puts to a repository's process, with no launch, a view the dashboard shows, holds it while a view is watched, and says how each repository's views look."""
 
     @abstractmethod
     async def asked(self, repository: Path, request: Request) -> Reply:
@@ -332,6 +360,18 @@ class RepositoryAsking(ABC):
         Raise `HostError` where nothing is approved for the repository, or its
         process couldn't answer, saying why.
         """
+
+    @abstractmethod
+    def watching(self, repository: Path) -> AbstractAsyncContextManager[None]:
+        """Hold the process of the repository whose git directory is `repository` while the context is open, as a view of it is watched: it runs on between the view's answers, or starts at the next.
+
+        Raise `HostError` as it opens where nothing is approved for the
+        repository.
+        """
+
+    @abstractmethod
+    def looks(self) -> dict[Path, Looks]:
+        """Return how each repository's modules' views look, by its git directory, as its process said when it last started: none for one whose process hasn't started."""
 
 
 class Worker(MutableModel, arbitrary_types_allowed=True):
@@ -372,6 +412,9 @@ class Processes(MutableModel, arbitrary_types_allowed=True):
     stopping: asyncio.Task[None] | None = None
     """Ends its processes once nothing has held them for a while
     (`Workers.idle`); none while something holds them."""
+    looks: Looks | None = None
+    """How its modules' views look, as its process said when it last started,
+    kept once it ends; none before one started."""
 
     def taken(self) -> list[Worker]:
         """Take every one of its processes off it, to end them: none answers its requests from now on."""
@@ -430,10 +473,7 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
 
         Raise `HostError` where nothing is approved for it, or it couldn't answer.
         """
-        command = self.approved(repository)
-        if command is None:
-            message = f"nothing is approved for {repository}, so no process of it runs"
-            raise HostError(message)
+        command = self.command(repository)
         holder = Holder.asking()
         await self.hold(repository, holder)
         try:
@@ -441,6 +481,31 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
                 return await self.exchange(worker, request)
         finally:
             await self.release(repository, holder)
+
+    @asynccontextmanager
+    async def watching(self, repository: Path) -> AsyncGenerator[None]:
+        """Hold `repository`'s process while the context is open (`Holder.watching`), as a view of it is watched: it runs on between the view's answers, which each start it where it's gone.
+
+        Raise `HostError` as it opens where nothing is approved for it.
+        """
+        self.command(repository)
+        holder = Holder.watching()
+        await self.hold(repository, holder)
+        try:
+            yield
+        finally:
+            await self.release(repository, holder)
+
+    def command(self, repository: Path) -> Path:
+        """Return the command of the copy approved for `repository`, which a request put with no launch starts its process from.
+
+        Raise `HostError` where nothing is approved for it.
+        """
+        command = self.approved(repository)
+        if command is None:
+            message = f"nothing is approved for {repository}, so no process of it runs"
+            raise HostError(message)
+        return command
 
     @override
     async def stop(self) -> None:
@@ -457,6 +522,14 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
     def processes(self, repository: Path) -> Processes:
         """Return the processes of the repository whose git directory is `repository`."""
         return self.repositories.setdefault(repository, Processes())
+
+    def looks(self) -> dict[Path, Looks]:
+        """Return how each repository's modules' views look, by its git directory, as its process said when it last started."""
+        return {
+            repository: processes.looks
+            for repository, processes in self.repositories.items()
+            if processes.looks is not None
+        }
 
     async def hold(self, repository: Path, holder: Holder) -> None:
         """Count `holder` among what holds `repository`'s process: it runs, or starts at the next request, until nothing has held it for `idle`."""
@@ -589,6 +662,7 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
             worker = await self.readied(repository, argv, process, socket, approval)
         finally:
             processes.starting = None
+        processes.looks = worker.offered.looks
         self.say(
             f"{repository}: its modules serve {len(worker.offered.tools)} tools "
             f"and {len(worker.offered.kinds)} kinds of the room's requests, and its "
@@ -714,3 +788,11 @@ class WorkersAsking(Model, RepositoryAsking, arbitrary_types_allowed=True):
     @override
     async def asked(self, repository: Path, request: Request) -> Reply:
         return await self.workers.asked(repository, request)
+
+    @override
+    def watching(self, repository: Path) -> AbstractAsyncContextManager[None]:
+        return self.workers.watching(repository)
+
+    @override
+    def looks(self) -> dict[Path, Looks]:
+        return self.workers.looks()

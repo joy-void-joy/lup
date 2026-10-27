@@ -19,7 +19,9 @@ Its views read a conversation live, from the runtime's own record as it grows
 (`conversation`, the drawer under each agent's banner; `exchange`, one earlier
 exchange; `call`, one call read whole), laid out in lup's blocks
 (`environment/conversation.py`), each record read again only once it changed
-(`Recording`).
+(`Recording`). Shown, the drawer is answered again at its agent's turns and
+calls and a minute apart at most; a call read whole, open in it, as a call of
+the agent's finishes, so one still running shows what it returned once it has.
 """
 
 import asyncio
@@ -185,9 +187,12 @@ class TranscriptsServing(ModuleServing):
         return views.found(sessions, asked.words, whole=asked.whole)
 
     def beside(self, exchanged: Exchanged) -> Beside:
-        """Return what a conversation shows beside its steps: the items of lup's inbox it exchanged, each conversation among their parties called by its runtime's ids."""
+        """Return what a conversation shows beside its steps: the items of lup's inbox it exchanged, each conversation among their parties called by its path as the core gives it, else by its runtime's ids."""
 
         def named(party: Conversation) -> str:
+            path = exchanged.path(party)
+            if path is not None:
+                return path
             own = f"{party.runtime} {party.session}"
             return own if party.agent is None else f"{own} / {party.agent}"
 
@@ -241,9 +246,9 @@ class TranscriptsServing(ModuleServing):
             call=TranscriptsServing.call,
         )
 
-    @lup.view
+    @lup.view(watch=lup.Watch(on=[lup.CallFinished]))
     async def call(self, viewed: OfCall) -> lup.Blocks:
-        """Show one call of an agent's conversation whole: what it was given, and what it returned."""
+        """Show one call of an agent's conversation whole: what it was given, and what it returned, or that it hasn't returned yet."""
         read = await asyncio.to_thread(
             self.recording.read,
             self.recorded,

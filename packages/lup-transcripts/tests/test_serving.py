@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import lup
+from lup.doors import served
 from lup.programs import run
 from lup_dev.declaration.serving import Lup, Publisher
 from lup_dev.host.protocol import Limits, Register
@@ -19,7 +20,8 @@ from lup_dev.host.records import Call as RecordedCall
 from lup_dev.host.records import Reader as RecordsReader
 from lup_dev.host.records import Record, Recorded, Records, Transcript
 from lup_dev.inbox.exchanges import Exchanges
-from lup_dev.inbox.protocol import Exchanged
+from lup_dev.inbox.protocol import Exchanged, Pathed
+from lup_dev.inbox.store import Conversation as InboxConversation
 from lup_transcripts.environment.module import Transcripts
 from lup_transcripts.environment.serving import TranscriptsServing, copied
 
@@ -142,3 +144,34 @@ def test_transcripts_copy_the_repository_s_records_at_its_moments(
     [under] = held.asked
     assert under[0] == repo / ".git"
     assert repo in under
+
+
+def test_a_conversation_beside_is_called_by_the_path_its_exchange_gives_else_by_its_runtime_s_ids(
+    tmp_path: Path,
+) -> None:
+    serving = TranscriptsServing(
+        module=Transcripts(),
+        recorded={},
+        data=tmp_path,
+        related=[],
+        publisher=Unpublished(),
+        exchanges=Unexchanged(),
+    )
+    named = InboxConversation(
+        repository=tmp_path / ".git", runtime="claude", session="s1", agent="a1"
+    )
+    unnamed = named.model_copy(update={"agent": "a2"})
+    exchanged = Exchanged(
+        sent=[], received=[], paths=[Pathed(conversation=named, path="one/parser")]
+    )
+    beside = serving.beside(exchanged)
+    assert beside.named(named) == "one/parser"
+    assert beside.named(unnamed) == "claude s1 / a2"
+
+
+def test_a_call_read_whole_is_answered_again_as_a_call_of_its_agent_s_finishes() -> (
+    None
+):
+    door = served(TranscriptsServing)["call"].viewing()
+    assert door is not None
+    assert door.watch == lup.Watch(on=[lup.CallFinished])

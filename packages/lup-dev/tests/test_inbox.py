@@ -5811,9 +5811,13 @@ def test_a_message_sent_from_reading_a_conversation_quotes_each_passage_it_repli
         told = context(send(hook, bash("b1")))
         assert isinstance(sent.recipient, Conversation)
         listed = host.ask(ListItems(conversation=sent.recipient), Exchanged)
+        [named] = host.listed().launches
     assert sent.reason == Message(
         kind="note", text="Carry on after.", passages=passages
     )
+    # Its recipient is said by its path, its session's name as its launch has it.
+    assert named.name is not None
+    assert listed.path(sent.recipient) == named.name
 
     def quoted(item: int) -> str:
         """The first passage's quote and reply, as item `item` carries them, the reply numbered as its first part."""
