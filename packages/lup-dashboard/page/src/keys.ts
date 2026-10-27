@@ -126,9 +126,10 @@ const WRITING: Part<"insert">[] = [
         keys: [
             { keys: "^⏎", does: "end it, back on what it's about", short: "end it", at: ["insert"] },
             { keys: "⏎", does: "a new line at the indentation of the one it's on, with no bullet or number: type - or 1. where you want an item", short: "new line", at: [] },
+            { keys: "Tab ⇧Tab", does: "move the line in or out by the list's indentation, as >> and << do", short: "in out", at: [] },
             {
                 keys: "^t ^d",
-                does: "move the line in or out by the list's indentation, as >> and << do; a browser tab keeps ^t to open a tab, so there Esc >> moves it in",
+                does: "the same, as vim's own keys, where ^t reaches the page: a browser tab keeps it to open a tab",
                 short: "in out",
                 at: [],
             },
