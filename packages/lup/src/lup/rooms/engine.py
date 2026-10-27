@@ -7,15 +7,15 @@ same way (`docs/launch.md`, *The user, the process, the network*):
 - `--init`, which reaps exited processes: without it the first lup piled up 4,045
   zombies against its pids limit;
 - `--cap-drop=all` and `no-new-privileges`, so no capability carries in;
-- the home a tmpfs at the path the run gives, owned by the operator, with `HOME`
-  set to it: keep-id otherwise sets `HOME` to the working directory, where the
-  runtimes would write their state;
-- each directory between the home and a mount inside it a tmpfs owned by the
-  operator too: podman makes the missing ones owned by root, and uv refused a
-  root-owned `~/.cache`. Not one inside another bind mount, a worktree above
-  its hidden `.venv`: that's the host's directory, which a tmpfs would cover
-  with a copy of it. Each is `notmpcopyup`, so none ever copies what's under
-  it: the image's `/home` is empty, and nothing is lost;
+- the home a directory of the host's the run is given, mounted at the path it
+  gives, with `HOME` set to it: keep-id otherwise sets `HOME` to the working
+  directory, where the runtimes would write their state. On disk rather than a
+  tmpfs, which would hold what the room writes there in the host's memory;
+- each directory and file a mount inside the home lands on made there by the
+  run before podman starts, owned by the operator (`Invocation.landings`):
+  podman makes the missing ones owned by root, which the operator can't
+  remove, and uv refused a root-owned `~/.cache`. Not one inside another
+  mount, a worktree above its hidden `.venv`: that's the host's own;
 - with a terminal, `-it` and no detach keys, so Ctrl+P reaches the program rather
   than podman, whose default detach sequence starts with it;
 - no log driver, so the session's output isn't kept in podman's logs, which go to
@@ -29,12 +29,11 @@ a comma is quoted rather than split.
 What this relies on, measured with rootless podman 6.1.3 (`docs/field-notes.md`,
 *Rooms*, the engine's command lines):
 - a quoted CSV field in `--mount` (`"source=/a,b"`) mounts a path holding a comma;
-- a tmpfs mounted with `U=true` and `tmpfs-mode=0700` is owned by the operator
-  under keep-id, and runs programs (unlike `--tmpfs`, whose default is `noexec`),
-  while a directory podman makes for a mount inside it is owned by root;
+- a directory or file podman makes for a mount is owned by root, a subordinate
+  uid on the host, and one the operator made before is theirs and is mounted
+  over (podman 6.1.4, `docs/field-notes.md`, *The room's home on disk*);
 - a tmpfs inside a bind mount is filled with a copy of what the mount holds at
-  its path, unless it's `notmpcopyup`: one over each directory above the files
-  hidden in the related repositories took the host's memory (podman 6.1.4,
+  its path, unless it's `notmpcopyup`, as a mask is (podman 6.1.4,
   `docs/field-notes.md`, *A tmpfs inside a bind mount*);
 - `podman build --file -` reads the Containerfile from its input, with the
   context given apart; `podman image exists` answers 0 or 1;
@@ -86,9 +85,45 @@ class Invocation(Model):
     command: list[str]
     workdir: AbsolutePath
     home: AbsolutePath
-    """The room's home: an empty tmpfs owned by the operator, and `HOME`."""
+    """The room's home, and `HOME`."""
+    home_source: AbsolutePath
+    """The host's directory that's the room's home, mounted read-write at `home`:
+    the run makes it, and in it what each mount inside the home lands on
+    (`landings`); whoever gives it removes it."""
     terminal: bool = False
     """Whether the run is attached to a terminal, with its input kept open."""
+
+    @property
+    def landings(self) -> dict[Path, bool]:
+        """Each path inside the home a mount lands on, and each directory on the way there, by its path in the room, with whether it's a directory: what the run makes in `home_source` first.
+
+        A mount's own path is a directory where its source is one, else a file,
+        and a mask's is a directory. A mount inside another mount lands on that
+        mount's paths, the host's or a mask's tmpfs, and nothing is made for it.
+        """
+        home = self.home
+        places = {
+            (each.destination if isinstance(each, Mount) else each.target): (
+                each.source.is_dir() if isinstance(each, Mount) else True
+            )
+            for each in self.container.mounts
+        }
+        landing = {
+            target: directory
+            for target, directory in places.items()
+            if target != home
+            and target.is_relative_to(home)
+            and not any(
+                target != each and target.is_relative_to(each) for each in places
+            )
+        }
+        on_the_way = {
+            parent: True
+            for target in landing
+            for parent in target.parents
+            if parent != home and parent.is_relative_to(home)
+        }
+        return dict(sorted({**on_the_way, **landing}.items()))
 
     @model_validator(mode="after")
     def home_is_the_runs(self) -> Invocation:
@@ -219,24 +254,6 @@ class Podman(Model, ContainerEngine):
         """Return the command line that runs the invocation's container."""
         container = invocation.container
         home = invocation.home
-        targets = [
-            mount.destination if isinstance(mount, Mount) else mount.target
-            for mount in container.mounts
-        ]
-        bound = [
-            mount.destination for mount in container.mounts if isinstance(mount, Mount)
-        ]
-        between = sorted(
-            dict.fromkeys(
-                parent
-                for target in targets
-                for parent in target.parents
-                if parent != home
-                and parent.is_relative_to(home)
-                and not any(parent.is_relative_to(each) for each in bound)
-            )
-        )
-        owned = [home, *(path for path in between if path not in targets)]
 
         def option(mount: Mount | Mask) -> str:
             match mount:
@@ -275,18 +292,13 @@ class Podman(Model, ContainerEngine):
             f"--network={network}",
             f"--workdir={invocation.workdir}",
             *(f"--env={name}={value}" for name, value in variables.items()),
-            *(
-                "--mount="
-                + mount_option(
-                    [
-                        "type=tmpfs",
-                        f"destination={path}",
-                        "tmpfs-mode=0700",
-                        "U=true",
-                        "notmpcopyup",
-                    ]
-                )
-                for path in owned
+            "--mount="
+            + mount_option(
+                [
+                    "type=bind",
+                    f"source={invocation.home_source}",
+                    f"destination={home}",
+                ]
             ),
             *(f"--mount={option(mount)}" for mount in container.mounts),
             container.image.tag,
@@ -297,8 +309,18 @@ class Podman(Model, ContainerEngine):
     def run(self, invocation: Invocation) -> int:
         """Run the invocation's container in the foreground, and return the program's exit status.
 
-        A status of 125 is podman's own failure, not the program's, and raises.
+        Its home is made first, with what each mount inside it lands on
+        (`Invocation.landings`). A status of 125 is podman's own failure, not the
+        program's, and raises.
         """
+        source = invocation.home_source
+        source.mkdir(mode=0o700, parents=True, exist_ok=True)
+        for path, directory in invocation.landings.items():
+            landing = source / path.relative_to(invocation.home)
+            if directory:
+                landing.mkdir(exist_ok=True)
+            else:
+                landing.touch()
         exited = self.execute(Process(arguments=self.command(invocation)))
         if exited.status == 125:
             message = (

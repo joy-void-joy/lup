@@ -701,6 +701,11 @@ class LaunchLayout(Model):
         return self.directory / "home"
 
     @property
+    def room_home(self) -> Path:
+        """The room's home itself, mounted read-write at the operator's home path, so what the room writes there is on disk (`Room.home_source`): beside the launch's directory, which the room mounts, rather than in it; removed when the launch ends (`vacated`)."""
+        return self.directory.with_name(f"{self.directory.name}.home")
+
+    @property
     def lent(self) -> Path:
         """Where what the operator lends the room while it runs is mounted, each directory by its name: a shared mount in podman's namespace, which the room mounts at `RoomPaths.lent` and receives mounts through; removed when the launch ends."""
         return self.directory.with_name(f"{self.directory.name}.lent")

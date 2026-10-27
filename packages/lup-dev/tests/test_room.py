@@ -50,6 +50,7 @@ from lup_dev.launch.room import (
     related,
     repository,
     unclaimed,
+    vacated,
 )
 from lup_dev.layout import LOCALTIME, LaunchLayout, Layout, PyrightLayout, RoomPaths
 from lup_dev.pyright_source import Fetching, Sources
@@ -738,6 +739,32 @@ def test_an_editor_the_declaration_installs_already_is_installed_once(
         )
         assert room.image.definition == definition(resolved.packages, RoomBase())
     assert installed(room).count("vim") == 1
+
+
+def test_a_room_s_home_is_removed_with_what_it_left_read_only_following_no_link(
+    tmp_path: Path,
+) -> None:
+    launch = LaunchLayout(directory=tmp_path / "launch")
+    outside = tmp_path / "outside"
+    (outside / "kept").mkdir(parents=True)
+    outside.chmod(0o555)
+    module = launch.room_home / "go" / "pkg" / "mod" / "example@v1"
+    module.mkdir(parents=True)
+    (module / "go.mod").touch()
+    for each in [module, module.parent]:
+        each.chmod(0o555)
+    locked = launch.room_home / "locked"
+    locked.mkdir()
+    (locked / "file").touch()
+    locked.chmod(0)
+    (launch.room_home / "elsewhere").symlink_to(outside)
+
+    vacated(launch)
+
+    assert not launch.room_home.exists()
+    assert (outside / "kept").is_dir()
+    assert outside.stat().st_mode & 0o777 == 0o555, "a link's target is left as it is"
+    outside.chmod(0o755)
 
 
 def test_hx_is_linked_to_helix_among_the_launch_s_commands(tmp_path: Path) -> None:

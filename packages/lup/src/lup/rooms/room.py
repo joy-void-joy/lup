@@ -1,19 +1,24 @@
 """`Room`: an agent behind a wall, opened in a terminal.
 
-    room = Room(agent=agent, container=Container(image=image, mounts=mounts))
+    room = Room(
+        agent=agent,
+        container=Container(image=image, mounts=mounts),
+        home_source=home,
+    )
     status = room.launch(arguments=["--resume"], settings=settings)
 
 A launch compiles the agent for a terminal (`Declaration.terminal`), writes the
 files it needs, builds the room's image if it's missing, and runs the CLI in the
 container in the foreground, in the directory it's launched from, with the
-room's home a tmpfs at the host's home path. It returns the CLI's exit status.
+room's home the directory it's given, mounted at the host's home path. It
+returns the CLI's exit status.
 """
 
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup.rooms.container import Container, Mount
+from lup.rooms.container import AbsolutePath, Container, Mount
 from lup.rooms.engine import ContainerEngine, ContainerError, Invocation, Podman
 from lup.sessions.declaration import Declaration
 from lup.types import Model
@@ -27,6 +32,10 @@ class Room(Model, arbitrary_types_allowed=True):
 
     agent: Declaration
     container: Container
+    home_source: AbsolutePath
+    """The host's directory that's the room's home, at the host's home path in the
+    room: the run makes it (`Invocation.home_source`), and whoever gives it
+    removes it."""
     engine: ContainerEngine = Podman()
     """Builds the image and runs the container; a test gives a recording one."""
     before: list[str] = []
@@ -83,6 +92,7 @@ class Room(Model, arbitrary_types_allowed=True):
                 command=[*self.before, *terminal.command, *arguments],
                 workdir=workdir,
                 home=Path.home(),
+                home_source=self.home_source,
                 terminal=sys.stdin.isatty(),
             )
         )

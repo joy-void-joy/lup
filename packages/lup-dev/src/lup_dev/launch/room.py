@@ -916,6 +916,25 @@ def unlent(podman: Podman, launch: LaunchLayout) -> None:
             shutil.rmtree(each)
 
 
+def vacated(launch: LaunchLayout) -> None:
+    """Remove a launch's room's home, with what the room wrote there, once its room is gone.
+
+    Each directory in it is made its owner's to write first, since a room leaves
+    read-only ones, as Go's module cache is, which `shutil.rmtree` can't empty.
+    No link is followed: `Path.walk` lists one among the files, and
+    `shutil.rmtree` removes the link, not what it points at. Nothing writes the
+    home by then, so its paths hold still while they're read.
+    """
+    home = launch.room_home
+    if home.is_symlink() or not home.is_dir():
+        return
+    home.chmod(0o700)
+    for directory, inside, _ in home.walk():
+        for name in inside:
+            (directory / name).chmod(0o700)
+    shutil.rmtree(home)
+
+
 def programs(launch: LaunchLayout) -> dict[Path, str]:
     """Return the programs a launch writes for its room to run, by where they go: git's remote helper, the clipboard's `wl-paste` and `wl-copy`, `lup-environment`, which the runner's programs link to, and lup's MCP bridge for its tool servers."""
     clipboard = inspect.getsource(shim)
