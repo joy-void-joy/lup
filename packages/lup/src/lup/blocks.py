@@ -31,9 +31,9 @@ repository's looks carry.
 
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field, JsonValue, model_validator
 
 from lup.errors import LupError
 from lup.events import Event
@@ -76,6 +76,85 @@ SHELL_TONES = [
 ]
 """The tones every module's spans may name: plain text, text set back, text set
 forward, and the operator's own words."""
+
+
+class Offer(Model):
+    """What a block offers the operator to do with what it shows: one of its module's actions, what it's given, the verb whose key reaches it or a chord of its own, when it runs, and whether a comment on the block implies it.
+
+    `docs/declaration.md`, *Views and blocks*. A verb's key, Space and its
+    letter, does what the innermost block under the cursor offering that verb
+    offers, so one key approves a held change, marks a file reviewed or holds
+    an agent's writes, as the block it's on says. From the offer come the line
+    of keys and the stack's word on what the key does (`says`).
+    """
+
+    action: str
+    """The action, by its name: the method's of the module whose view the block
+    is in; for a view the page lays out itself until its module serves it, the
+    request the page sends (`inbox-answer-approval`)."""
+    argument: dict[str, JsonValue] = {}
+    """What the action is given, as JSON."""
+    verb: str | None = None
+    """The verb it answers, by its name (`Verb`): the core's `done`, `decline`,
+    `send` or `comment`, which apply to anything, or one a module declares, as
+    the judge's `hold`; none where it takes a chord of its own."""
+    chord: str | None = None
+    """Its own keys, as vim's keymap writes them, where it answers no verb: a
+    module's view key, changing only what its view shows."""
+    runs: Literal["send", "once"] = "send"
+    """When it runs: as the reply is sent, recorded in the draft until
+    Ctrl+Enter, refused where what it's on changed since it was shown; or at
+    once, as a key changing only the view does, and as each of the page's own
+    views' does until each moves to its module (#247)."""
+    commented: bool = False
+    """Whether a comment written on its block implies it, as one on a held
+    change approves it with the comment, and one on a file of "since you
+    approved" marks it reviewed."""
+    says: str
+    """What it does, as the line of keys and the stack say it after its key:
+    `approve`, `mark it reviewed`."""
+
+    @model_validator(mode="after")
+    def reached(self) -> Self:
+        """Refuse an offer that answers a verb and takes a chord of its own too, or neither: one key reaches it.
+
+        >>> Offer(action="hold", verb="hold", says="hold its writes").runs
+        'send'
+        """
+        if (self.verb is None) == (self.chord is None):
+            message = (
+                "an offer answers a verb or takes a chord of its own, one of "
+                f"them: `{self.action}` gives {'neither' if self.verb is None else 'both'}"
+            )
+            raise ValueError(message)
+        return self
+
+
+class Verb(Model):
+    """A verb the operator's keys say, Space and its key, which the innermost block under the cursor offering it answers (`Offer.verb`).
+
+    The shell's apply to anything (`SHELL_VERBS`); a module declares its own
+    beside them, as the judge's `hold`, each a field of its module so a
+    person's layer gives it another key. Two taking one key fail the load.
+    """
+
+    name: str
+    key: str
+    """The key after Space: `d`."""
+    called: str
+    """What the list of keys calls it: `done`, `send to`."""
+
+
+SHELL_VERBS = [
+    Verb(name="done", key="d", called="done"),
+    Verb(name="decline", key="x", called="decline"),
+    Verb(name="send", key="s", called="send to"),
+    Verb(name="comment", key="c", called="comment"),
+]
+"""The verbs every block may offer, which the core's module declares so a
+person's layer may give each another key: marking something done, as an item
+read, a file reviewed or a change approved; declining it; sending it to
+another party; and commenting on it."""
 
 
 class Ticking(Model):
@@ -129,6 +208,9 @@ class Line(Model):
     """The version of what it shows, which a comment written on it records so
     the agent is told what changed since: a file's, as git names its content;
     none where the page goes by its text."""
+    offers: list[Offer] = []
+    """What it offers the operator to do with what it shows, each answering a
+    verb's key or a chord of its own (`Offer`)."""
     spans: list[Span] = []
 
     @classmethod
@@ -154,6 +236,9 @@ class Markdown(Model):
     """The version of what it shows, which a comment written on it records so
     the agent is told what changed since: a file's, as git names its content;
     none where the page goes by its text."""
+    offers: list[Offer] = []
+    """What it offers the operator to do with what it shows, each answering a
+    verb's key or a chord of its own (`Offer`)."""
     text: str
     tone: str = "plain"
 
@@ -193,6 +278,9 @@ class Fold(Model):
     """The version of what it shows, which a comment written on it records so
     the agent is told what changed since: a file's, as git names its content;
     none where the page goes by its text."""
+    offers: list[Offer] = []
+    """What it offers the operator to do with what it shows, each answering a
+    verb's key or a chord of its own (`Offer`)."""
     kind: str
     """One of its module's fold kinds (`FoldKind`), or a drawer's own, by name."""
     summary: list[Span]
@@ -289,6 +377,9 @@ class Diff(Model):
     """The version of what it shows, which a comment written on it records so
     the agent is told what changed since: a file's, as git names its content;
     none where the page goes by its text."""
+    offers: list[Offer] = []
+    """What it offers the operator to do with what it shows, each answering a
+    verb's key or a chord of its own (`Offer`)."""
     path: str
     """From the root of the worktree or the repository it's in."""
     before: FileContent | None = None
@@ -412,6 +503,9 @@ class Code(Model):
     """The version of what it shows, which a comment written on it records so
     the agent is told what changed since: a file's, as git names its content;
     none where the page goes by its text."""
+    offers: list[Offer] = []
+    """What it offers the operator to do with what it shows, each answering a
+    verb's key or a chord of its own (`Offer`)."""
     path: str
     """From the root of the worktree or the repository it's in."""
     text: str
@@ -505,13 +599,18 @@ class Blocks(Model):
 
     blocks: list[Block] = []
     summary: list[Span] = []
-    """A drawer's line under its banner, in its kind's colour; none for a view
-    no drawer shows."""
+    """A drawer's line under its banner, in its kind's colour; a banner part's
+    words on the banner's line; an item kind's words in its item's header,
+    before the state words the core adds (`edited`, `new`, how long it has
+    waited); none for a view nothing shows a line of."""
     waiting: bool = False
     """Whether it holds what waits on the operator: its summary line is bold."""
     count: int = 0
     """How many of what it holds wait on the operator, said beside its agent in
     the overview (`◇3`): none where nothing does."""
+    offers: list[Offer] = []
+    """What the view offers as a whole, as a drawer marking every file it
+    shows reviewed: what a verb's key does where no block within offers it."""
 
     def text(self) -> str:
         """Say the view as text, as its command prints it and an agent reads it: its summary, then its blocks, a closed fold as its summary line.

@@ -69,6 +69,7 @@ from lup_dev.declaration.kinds import (
     Session,
     TestRoots,
     Tones,
+    Verbs,
 )
 from lup_dev.declaration.load import load
 from lup_dev.declaration.looks import CORE_LOOKS
@@ -344,17 +345,29 @@ def served(modules: list[Module]) -> list[Served]:
 
 
 def looked(modules: list[Module], found: list[Served]) -> Looks:
-    """Return how the views look: the core's (`CORE_LOOKS`), then each module's fold kinds and tones, the drawers its views are placed in, and the parts of the banner they are.
+    """Return how the views look: the core's (`CORE_LOOKS`), then each module's fold kinds and tones, the drawers its views are placed in, the parts of the banner they are, and the verbs, `Core`'s first.
 
     Raise `ProjectError` where two take one letter, a fold kind's or a drawer's,
     or one name, a fold kind's, a drawer's or a tone's, a module clashing with
-    the core's among them; where a tone takes a shell tone's name, takes the
-    look of a tone that's none of the shell's, the core's or the modules', or
-    takes no look at all.
+    the core's among them; where two verbs take one name or one key, or a verb
+    takes `z`, which leads the fold keys after Space; where a tone takes a shell
+    tone's name, takes the look of a tone that's none of the shell's, the
+    core's or the modules', or takes no look at all.
     """
     core = CORE_LOOKS
     folds = held(Folds(), parts(modules, Folds), "Fold kinds")
     tones = held(Tones(), parts(modules, Tones), "Tones")
+    verbs = held(Verbs(), parts(modules, Verbs), "Verbs")
+    distinct(
+        "Verb keys",
+        [
+            Owned(module="the core's fold keys", name="z"),
+            *(
+                Owned(module=each.module, name=each.entry.key)
+                for each in entries(modules, Verbs)
+            ),
+        ],
+    )
     placed = [
         (each.module.name, name, door.place)
         for each in found
@@ -424,6 +437,7 @@ def looked(modules: list[Module], found: list[Served]) -> Looks:
         tones=[*core.tones, *tones],
         drawers=[*core.drawers, *drawers],
         banners=[*core.banners, *banners],
+        verbs=verbs,
     )
 
 

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 import lup
 from lup.blocks import (
@@ -22,6 +22,7 @@ from lup.blocks import (
     Mark,
     Markdown,
     OfAgent,
+    Offer,
     Span,
     Ticking,
 )
@@ -232,3 +233,30 @@ def test_the_shell_s_fold_kinds_each_take_a_letter_of_their_own() -> None:
     [item] = [kind for kind in SHELL_FOLDS if kind.name == "item"]
     assert item.whole
     assert not item.chord
+
+
+def test_a_block_offers_actions_each_reached_by_a_verb_or_a_chord_and_reads_back() -> (
+    None
+):
+    review = Offer(
+        action="policy-review-since",
+        argument={"files": [{"path": "a.py", "version": "4b1d"}]},
+        verb="done",
+        runs="once",
+        commented=True,
+        says="mark it reviewed",
+    )
+    toggle = Offer(action="wrap", chord="zw", runs="once", says="wrap its lines")
+    view = Blocks(
+        offers=[review],
+        blocks=[Diff(id="file a.py", path="a.py", offers=[review, toggle])],
+    )
+    assert Blocks.model_validate_json(view.model_dump_json()) == view
+    assert Offer(action="read", verb="done", says="mark it read").runs == "send"
+
+
+def test_an_offer_answers_a_verb_or_takes_a_chord_one_of_them() -> None:
+    with pytest.raises(ValidationError, match="gives both"):
+        Offer(action="hold", verb="hold", chord="zh", says="hold")
+    with pytest.raises(ValidationError, match="gives neither"):
+        Offer(action="hold", says="hold")

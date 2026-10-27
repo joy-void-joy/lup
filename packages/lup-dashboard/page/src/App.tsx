@@ -170,7 +170,7 @@ export function App() {
         (each) => JSON.stringify(each),
     );
     const looks = useMemo(() => {
-        const made = declared === null ? merged({}, { folds: [], tones: [], drawers: [], banners: [] }) : merged(declared.looks, declared.standing);
+        const made = declared === null ? merged({}, { folds: [], tones: [], drawers: [], banners: [], verbs: [] }) : merged(declared.looks, declared.standing);
         // Taken as what's merged now before anything is drawn by it: the keys, the margin and the fold keys read it as they act.
         adopt(made);
         return made;

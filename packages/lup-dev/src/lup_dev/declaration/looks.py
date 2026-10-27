@@ -16,11 +16,16 @@ one of their letters or names fails the load (`resolve.looked`):
   and how full its context is;
 - the judge's: what an agent's branch changed since the operator approved it,
   a drawer, the line of a file standing as they last saw it, and its banner's
-  part, whether its flagged writes are held. The judge's code sits above the
-  declaration in `lup_dev`'s layers, so its parts are declared here.
+  part, whether its flagged writes are held, and its verb, holding them. The
+  judge's code sits above the declaration in `lup_dev`'s layers, so its parts
+  are declared here.
+
+The verbs are fields of `Core` (`verbs`), the shell's, the judge's and the
+runtime adapters' alike, so a person's layer gives one another key; the rest is
+the core's own until each moves into its module.
 """
 
-from lup.blocks import SHELL_FOLDS, SHELL_TONES, Drawer, Tone
+from lup.blocks import SHELL_FOLDS, SHELL_TONES, Drawer, Tone, Verb
 from lup_dev.host.protocol import Bannered, Drawn, Looks
 from lup_dev.host.records import TASK_TONE, TASKS_DRAWER
 
@@ -50,6 +55,11 @@ of its own, with nothing under it."""
 HOLDING = Bannered(module="judge", view="banner")
 """The judge's part of an agent's banner: whether the operator holds each of
 its flagged writes for their answer (`set-holding`)."""
+HOLD = Verb(name="hold", key="h", called="hold")
+"""The judge's verb: holding each flagged write of an agent and its subagents
+for the operator's answer, which its banner offers. `Core` declares it until
+the judge is a module (#113, step 4), so a person's layer may give it another
+key."""
 
 CORE_LOOKS = Looks(
     folds=SHELL_FOLDS,

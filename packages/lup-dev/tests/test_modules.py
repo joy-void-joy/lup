@@ -36,7 +36,7 @@ from lup_dev import (
 )
 from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.cli import module_command
-from lup_dev.declaration.kinds import Folds, Mounted, Tones
+from lup_dev.declaration.kinds import Folds, Mounted, Tones, Verbs
 from lup_dev.declaration.looks import CORE_LOOKS
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.serving import Operator
@@ -892,6 +892,7 @@ class Viewer(Module):
     serving: Serving = Serving.of(ViewerServing)
     tones: Tones = Tones.of(lup.Tone(name="warm", colour="orange"))
     folds: Folds = Folds()
+    verbs: Verbs = Verbs()
 
 
 def viewing(tmp_path: Path) -> RepositoryModules:
@@ -1142,3 +1143,48 @@ def test_a_first_word_that_isn_t_lup_dev_s_own_names_a_module() -> None:
     assert not module_command(["inbox"])
     assert not module_command(["--help"])
     assert not module_command([])
+
+
+def test_the_verbs_are_the_core_s_the_judge_s_and_the_runtime_s_then_each_module_s(
+    tmp_path: Path,
+) -> None:
+    assert [(each.name, each.key) for each in resolve(Project()).looks.verbs] == [
+        ("done", "d"),
+        ("decline", "x"),
+        ("send", "s"),
+        ("comment", "c"),
+        ("hold", "h"),
+        ("pause", "p"),
+    ]
+    tagging = Viewer(verbs=Verbs.of(lup.Verb(name="tag", key="t", called="tag")))
+    looks = resolve(Project(modules=Modules.only(Core(), tagging))).looks
+    assert [each.name for each in looks.verbs][-1] == "tag"
+    del tmp_path
+
+
+@pytest.mark.parametrize(
+    ("verb", "says"),
+    [
+        (lup.Verb(name="tag", key="d", called="tag"), r"Verb keys: .*`d` from `core`"),
+        (lup.Verb(name="hold", key="q", called="hold"), r"Verbs: .*`hold`"),
+        (lup.Verb(name="zoom", key="z", called="zoom"), r"Verb keys: .*`z`"),
+    ],
+)
+def test_a_verb_taking_a_key_or_a_name_another_has_fails_the_load(
+    verb: lup.Verb, says: str
+) -> None:
+    clashing = Viewer(verbs=Verbs.of(verb))
+    with pytest.raises(ProjectError, match=says):
+        resolve(Project(modules=Modules.only(Core(), clashing)))
+
+
+def test_a_layer_gives_a_verb_another_key() -> None:
+    moved = Core(
+        verbs=Verbs.default().replace(
+            "hold", lup.Verb(name="hold", key="H", called="hold")
+        )
+    )
+    looks = resolve(Project(modules=Modules.only(moved))).looks
+    assert [(each.name, each.key) for each in looks.verbs if each.name == "hold"] == [
+        ("hold", "H")
+    ]

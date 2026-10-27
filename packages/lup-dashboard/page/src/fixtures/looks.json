@@ -236,5 +236,37 @@
       "module": "judge",
       "view": "banner"
     }
+  ],
+  "verbs": [
+    {
+      "name": "done",
+      "key": "d",
+      "called": "done"
+    },
+    {
+      "name": "decline",
+      "key": "x",
+      "called": "decline"
+    },
+    {
+      "name": "send",
+      "key": "s",
+      "called": "send to"
+    },
+    {
+      "name": "comment",
+      "key": "c",
+      "called": "comment"
+    },
+    {
+      "name": "hold",
+      "key": "h",
+      "called": "hold"
+    },
+    {
+      "name": "pause",
+      "key": "p",
+      "called": "pause"
+    }
   ]
 }

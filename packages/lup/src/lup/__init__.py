@@ -57,9 +57,11 @@ from lup.blocks import (
     Mark,
     Markdown,
     OfAgent,
+    Offer,
     Span,
     Ticking,
     Tone,
+    Verb,
     Watch,
 )
 from lup.doors import command, on, request, tool, view
@@ -123,6 +125,7 @@ __all__ = [
     "Mark",
     "Markdown",
     "OfAgent",
+    "Offer",
     "OutputMissingError",
     "Part",
     "Place",
@@ -150,6 +153,7 @@ __all__ = [
     "TurnTimeoutError",
     "Usage",
     "UsageLimitReachedError",
+    "Verb",
     "Watch",
     "command",
     "on",

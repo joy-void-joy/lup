@@ -15,7 +15,7 @@ from typing import Annotated, ClassVar, Literal, Unpack, get_args
 
 from pydantic import AfterValidator, ConfigDict
 
-from lup.blocks import Drawer, FoldKind, Tone
+from lup.blocks import Drawer, FoldKind, Tone, Verb
 from lup.rooms.container import AbsolutePath
 from lup.types import Model
 from lup_dev.errors import LupDevError
@@ -407,6 +407,8 @@ class Looks(Model):
     banners: list[Bannered] = []
     """In the order the page says them on a banner, after what the core says
     of the agent."""
+    verbs: list[Verb] = []
+    """The verbs the review's keys say, Space and a key, the core's first."""
 
 
 class Listed(Reply):

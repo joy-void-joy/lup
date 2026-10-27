@@ -17,7 +17,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue, ValidationInfo, field_validator
 
-from lup.blocks import Drawer, Tone
+from lup.blocks import Drawer, Tone, Verb
 from lup.types import JsonObject, Model
 
 
@@ -139,6 +139,10 @@ step 4); the core's looks place it (`lup_dev.declaration.looks`)."""
 TASK_TONE = Tone(name="task", like="plain")
 """A line of an agent's task list in its drawer, each entry marked done, in
 progress or to do."""
+PAUSE = Verb(name="pause", key="p", called="pause")
+"""The runtime adapters' verb: pausing an agent, which its banner will offer
+once its host side is designed (#157). `Core` declares it until the adapters
+are a module (#113, step 4), so a person's layer may give it another key."""
 
 
 class Transcript(Model):

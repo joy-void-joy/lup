@@ -127,7 +127,13 @@ def test_ask_relays_a_request_to_the_host_and_returns_its_reply(page: Path) -> N
         "talkers": {},
         "running": None,
         "looks": {},
-        "standing": {"folds": [], "tones": [], "drawers": [], "banners": []},
+        "standing": {
+            "folds": [],
+            "tones": [],
+            "drawers": [],
+            "banners": [],
+            "verbs": [],
+        },
     }
     assert host.asked == [ListLaunches()]
 
@@ -195,7 +201,13 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
             "talkers": {},
             "running": None,
             "looks": {},
-            "standing": {"folds": [], "tones": [], "drawers": [], "banners": []},
+            "standing": {
+                "folds": [],
+                "tones": [],
+                "drawers": [],
+                "banners": [],
+                "verbs": [],
+            },
         },
     }
     # Watch 1, stopped, sends nothing more: not even its end.
