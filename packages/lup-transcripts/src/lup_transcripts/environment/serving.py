@@ -185,9 +185,12 @@ class TranscriptsServing(ModuleServing):
         return views.found(sessions, asked.words, whole=asked.whole)
 
     def beside(self, exchanged: Exchanged) -> Beside:
-        """Return what a conversation shows beside its steps: the items of lup's inbox it exchanged, each conversation among their parties called by its runtime's ids."""
+        """Return what a conversation shows beside its steps: the items of lup's inbox it exchanged, each conversation among their parties called by its path as the core gives it, else by its runtime's ids."""
 
         def named(party: Conversation) -> str:
+            path = exchanged.path(party)
+            if path is not None:
+                return path
             own = f"{party.runtime} {party.session}"
             return own if party.agent is None else f"{own} / {party.agent}"
 

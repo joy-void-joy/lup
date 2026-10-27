@@ -762,6 +762,46 @@ def test_one_passed_on_from_an_ended_subagent_says_whose_it_was_in_its_session_a
     ]
 
 
+def test_a_conversation_an_item_s_line_names_is_said_as_it_s_called_and_refers_to_it_by_its_runtime_s_ids() -> (
+    None
+):
+    reply = item(
+        46,
+        note("Right.", of=44),
+        3,
+        sender=OPERATOR,
+        recipient=SESSION,
+        addressed=SURVEY,
+        state=Told(at=at(4), how="call"),
+    )
+    asked = item(51, Question(text="Which?", decisions=[]), 2, recipient=SURVEY)
+    view = drawer(
+        STEPS[:3],
+        Beside(
+            named=named,
+            exchanged=Exchanged(
+                sent=[Exchange(item=asked, text="Which?")],
+                received=[Exchange(item=reply, text="Right.")],
+            ),
+        ),
+    )
+    survey = OfAgent(runtime="claude", session="s1", agent="a04")
+    passed = block(view.blocks, "item 46")
+    assert isinstance(passed, Fold)
+    assert passed.summary == [
+        lup.Span(text="← @46 your reply to @44, for ", tone="received"),
+        lup.Span(text="lup-impl/a04", tone="received", conversation=survey),
+        lup.Span(text=", which had ended", tone="received"),
+    ]
+    question = block(view.blocks, "item 51")
+    assert isinstance(question, Fold)
+    assert [(span.text, span.conversation) for span in question.summary] == [
+        ("→ @51 question to ", None),
+        ("lup-impl/a04", survey),
+        (" · not told yet", None),
+    ]
+
+
 def test_a_step_with_no_time_takes_the_last_before_it_and_in_a_record_with_no_times_items_go_at_its_end() -> (
     None
 ):

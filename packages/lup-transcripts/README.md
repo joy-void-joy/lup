@@ -25,7 +25,7 @@ Each agent's conversation is a view (`docs/declaration.md`, *Views and blocks*),
 - `exchange <runtime> <session> [--step <n>]`, one earlier exchange, which its fold reads as it opens, so the drawer's answer stays small;
 - `call <runtime> <session> <id>`, one call read whole, as its fold opens.
 
-The layout is `environment/conversation.py`: pure, from the record's steps and the items the core keeps (`self.exchanges`), each block's id naming what it shows so it stays from one answer to the next. The module declares its fold kinds and tones (`folds`, `tones`).
+The layout is `environment/conversation.py`: pure, from the record's steps and the items the core keeps (`self.exchanges`), each block's id naming what it shows so it stays from one answer to the next. Each conversation an item's line names is said by its path, as the core gives it with the items (`Exchanged.paths`), else by its runtime's ids, in a span referring to it by those ids (`Span.conversation`), which a rename never changes. The module declares its fold kinds and tones (`folds`, `tones`).
 
 ## Layout
 

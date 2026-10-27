@@ -183,13 +183,20 @@ class Calling(Model):
     called: Called
 
 
+type Piece = str | Conversation
+"""A run of an item's line: its own text, or a conversation it names, said as
+the conversation is called and referring to it."""
+
+
 class Inboxed(Model):
     """An item of lup's inbox as the conversation shows it: its line, its text folded under it, and where it goes among the steps."""
 
     number: int
     sent: bool
     """Whether the conversation sent it, rather than was sent it."""
-    line: str
+    line: list[Span]
+    """Its line, in the tone of what it is, each conversation it names a span
+    of its own referring to it (`Span.conversation`)."""
     text: str
     """Its text as it's folded under its line, with the operator's comment on
     their decision after it; empty where there's none."""
@@ -340,7 +347,9 @@ def inboxed(beside: Beside, agent: str | None) -> list[Inboxed]:
     by what, read, waiting on the operator, unread, withdrawn, decided. One it
     was sent says `←`, what it is, for whom where it was passed on, and whether
     it's told yet. A turn's last words, which lup made a note, are left out:
-    they're the agent's words, already shown.
+    they're the agent's words, already shown. Each conversation a line names
+    is said as `beside` calls it, in a span referring to it by its runtime's
+    ids.
     """
     sent, received = beside.exchanged.sent, beside.exchanged.received
     named = beside.named
@@ -390,32 +399,71 @@ def inboxed(beside: Beside, agent: str | None) -> list[Inboxed]:
             case _:
                 return None
 
-    def came(item: Item) -> str:
+    def came(item: Item) -> list[Piece]:
         match item.reason, item.sender:
             case Unresolved(of=of, citations=[_]), _:
-                return f"from lup: a citation of your words in {cited(of)} named no one passage"
+                return [
+                    f"from lup: a citation of your words in {cited(of)} named no one passage"
+                ]
             case Unresolved(of=of, citations=citations), _:
-                return (
-                    f"from lup: {len(citations)} citations of your words in "
-                    f"{cited(of)} named no one passage"
-                )
+                return [
+                    (
+                        f"from lup: {len(citations)} citations of your words in "
+                        f"{cited(of)} named no one passage"
+                    )
+                ]
             case _, Conversation() as sender:
-                return f"{what(item)} from {named(sender)}"
+                return [f"{what(item)} from ", sender]
             case Answer(question=question), _:
-                return f"your answer to {cited(question)}"
+                return [f"your answer to {cited(question)}"]
             case Review(covers=[]), _:
-                return "your message, from the review"
+                return ["your message, from the review"]
             case Review(covers=covers), _:
-                return f"your review of {', '.join(cited(each) for each in covers)}"
+                return [f"your review of {', '.join(cited(each) for each in covers)}"]
             case Message(of=None), _:
-                return "your message"
+                return ["your message"]
             case Message(of=int() as of), _:
-                return f"your reply to {cited(of)}"
+                return [f"your reply to {cited(of)}"]
             case _:
-                return f"your {what(item)}"
+                return [f"your {what(item)}"]
 
-    def dotted(first: str, *parts: str | None) -> str:
-        return " · ".join([first, *(each for each in parts if each is not None)])
+    def dotted(first: list[Piece], *parts: str | list[Piece] | None) -> list[Piece]:
+        kept = [
+            first,
+            *(
+                [each] if isinstance(each, str) else each
+                for each in parts
+                if each is not None
+            ),
+        ]
+        return [
+            piece
+            for at, part in enumerate(kept)
+            for piece in [*([" · "] if at else []), *part]
+        ]
+
+    def spanned(pieces: list[Piece], tone: Tone) -> list[Span]:
+        def referring(party: Conversation) -> Span:
+            of = OfAgent(
+                runtime=party.runtime, session=party.session, agent=party.agent
+            )
+            return Span(text=named(party), tone=tone.name, conversation=of)
+
+        runs = groupby(pieces, key=lambda each: isinstance(each, str))
+        return [
+            span
+            for plain, run in runs
+            for span in (
+                [
+                    Span(
+                        text="".join(each for each in run if isinstance(each, str)),
+                        tone=tone.name,
+                    )
+                ]
+                if plain
+                else [referring(each) for each in run if isinstance(each, Conversation)]
+            )
+        ]
 
     def text(said: str, comment: str) -> str:
         parts = [said, *([f"your comment: {comment}"] if comment else [])]
@@ -431,7 +479,7 @@ def inboxed(beside: Beside, agent: str | None) -> list[Inboxed]:
     def its(item: Item, said: str) -> Inboxed:
         match item.recipient:
             case Conversation() as recipient:
-                to = named(recipient)
+                to: Piece = recipient
             case Operator():
                 to = "you"
         match item.state:
@@ -439,10 +487,11 @@ def inboxed(beside: Beside, agent: str | None) -> list[Inboxed]:
                 pass
             case _:
                 comment = ""
+        head: list[Piece] = [f"→ {cited(item.number)} {what(item)} to ", to]
         return Inboxed(
             number=item.number,
             sent=True,
-            line=dotted(f"→ {cited(item.number)} {what(item)} to {to}", standing(item)),
+            line=spanned(dotted(head, standing(item)), SENT_TONE),
             text=text(said, comment),
             call=item.call,
             at=item.made,
@@ -451,12 +500,16 @@ def inboxed(beside: Beside, agent: str | None) -> list[Inboxed]:
     def theirs(item: Item, said: str) -> Inboxed:
         passed = item.addressed
         ours = passed is not None and passed.agent == agent
-        head = f"← {cited(item.number)} {came(item)}"
+        head: list[Piece] = [f"← {cited(item.number)} ", *came(item)]
         if passed is not None and not ours:
-            head = f"{head}, for {named(passed)}, which had ended"
+            head = [*head, ", for ", passed, ", which had ended"]
         match item.recipient:
             case Conversation() as recipient if ours:
-                onward = f"passed on to {named(recipient)}, this one having ended"
+                onward: list[Piece] | None = [
+                    "passed on to ",
+                    recipient,
+                    ", this one having ended",
+                ]
             case _:
                 onward = None
         match item.state:
@@ -469,7 +522,7 @@ def inboxed(beside: Beside, agent: str | None) -> list[Inboxed]:
         return Inboxed(
             number=item.number,
             sent=False,
-            line=dotted(head, told, onward),
+            line=spanned(dotted(head, told, onward), RECEIVED_TONE),
             text=text(said, ""),
             at=at,
         )
@@ -602,8 +655,7 @@ def turned(turns: list[Turn], of: OfAgent, view: Method, run: int = 3) -> list[B
         )
 
     def item(inboxed: Inboxed) -> Block:
-        tone = SENT_TONE if inboxed.sent else RECEIVED_TONE
-        summary = [Span(text=inboxed.line, tone=tone.name)]
+        summary = inboxed.line
         number = inboxed.number
         if not inboxed.text:
             return Line(id=f"item {number} line", spans=summary)
