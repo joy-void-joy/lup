@@ -101,6 +101,7 @@ from lup_dev.settings import LupDevSettings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator
+    from contextlib import AbstractAsyncContextManager
     from pathlib import Path
 
     from conftest import FakeClock, InProcess, Kit
@@ -1628,6 +1629,11 @@ class Looking(RepositoryAsking):
     @override
     async def asked(self, repository: Path, request: Request) -> Reply:
         message = "nothing is asked of this stand-in"
+        raise HostError(message)
+
+    @override
+    def watching(self, repository: Path) -> AbstractAsyncContextManager[None]:
+        message = "nothing is watched of this stand-in"
         raise HostError(message)
 
     @override

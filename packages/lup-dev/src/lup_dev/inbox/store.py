@@ -48,7 +48,7 @@ from lup.sessions import results
 from lup.tools import speaking
 from lup.types import Model, MutableModel
 from lup_dev.host.protocol import HostError
-from lup_dev.host.watch import Changes
+from lup_dev.host.watch import Changes, Touched
 from lup_dev.inbox.parts import PartId
 from lup_dev.layout import InboxLayout
 from lup_dev.stored import read_model, write_model
@@ -1136,11 +1136,21 @@ class Inbox(MutableModel):
         return talk
 
     def kept(self, item: Item) -> Item:
-        """Write `item` through to its file, and hold it."""
+        """Write `item` through to its file, and hold it, telling `changes` of each conversation it's from, for, or was addressed to."""
         write_model(self.layout.item(item.number), item)
         self.items = {**self.items, item.number: item}
         if self.changes is not None:
-            self.changes.changed()
+            self.changes.changed(
+                Touched(
+                    repository=each.repository,
+                    runtime=each.runtime,
+                    session=each.session,
+                    agent=each.agent,
+                    by="item",
+                )
+                for each in [item.sender, item.recipient, item.addressed]
+                if isinstance(each, Conversation)
+            )
         return item
 
     def made(

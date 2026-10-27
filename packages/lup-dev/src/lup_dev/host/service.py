@@ -50,7 +50,7 @@ import shutil
 import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Self, override
@@ -114,7 +114,7 @@ from lup_dev.host.protocol import (
 )
 from lup_dev.host.pushes import Pushes
 from lup_dev.host.rooms import SERVER, LaunchTools, RoomRoute, RoomTools, summaries
-from lup_dev.host.watch import Changes
+from lup_dev.host.watch import Changes, Touched
 from lup_dev.host.workers import (
     Called,
     Calling,
@@ -217,7 +217,7 @@ class Reading[R: Request](Handler[R], ABC):
 
 
 class Route(Model, arbitrary_types_allowed=True):
-    """A handler as the service dispatches to it: its kind, its answer to the JSON, and, for a kind that only reads, its answer to a room."""
+    """A handler as the service dispatches to it: its kind, its answer to the JSON, for a kind that only reads its answer to a room, and how it's watched where it says so."""
 
     kind: str
     answer: Callable[[str], Awaitable[Reply]]
@@ -225,6 +225,10 @@ class Route(Model, arbitrary_types_allowed=True):
     """Its answer to a room of the repository whose git directory it's given,
     where its kind only reads (`Reading.scoped`); none for one that writes,
     which a room never reaches."""
+    watch: Callable[[str], AsyncIterator[Reply]] | None = None
+    """Its replies to one request watched, at once then each time it's answered
+    again, at triggers of its own (`host/views.py`); none answers it again at
+    each change, as the service's own kinds are."""
 
     @classmethod
     def to[R: Request](cls, handler: Handler[R]) -> Route:
@@ -248,8 +252,12 @@ class Route(Model, arbitrary_types_allowed=True):
         return cls(kind=kind, answer=answered)
 
     @classmethod
-    def reading[R: Request](cls, handler: Reading[R]) -> Route:
-        """Route the requests of `handler`'s kind to it, each read as its model: a kind that only reads, which each launch's room is served for its repository alone.
+    def reading[R: Request](
+        cls,
+        handler: Reading[R],
+        watch: Callable[[R], AsyncIterator[Reply]] | None = None,
+    ) -> Route:
+        """Route the requests of `handler`'s kind to it, each read as its model: a kind that only reads, which each launch's room is served for its repository alone, and which `watch` watches where it's given.
 
         A kind that writes is refused, since it would serve a room what acts.
         """
@@ -265,7 +273,18 @@ class Route(Model, arbitrary_types_allowed=True):
         async def scoped(raw: str, repository: Path) -> Reply:
             return await handler.scoped(model.model_validate_json(raw), repository)
 
-        return cls(kind=kind, answer=answered, scoped=scoped)
+        def watched(raw: str) -> AsyncIterator[Reply]:
+            if watch is None:
+                message = f"`{kind}` is watched at each change"
+                raise TypeError(message)
+            return watch(model.model_validate_json(raw))
+
+        return cls(
+            kind=kind,
+            answer=answered,
+            scoped=scoped,
+            watch=None if watch is None else watched,
+        )
 
 
 def confined(route: Route, launch: Register) -> Route | None:
@@ -324,18 +343,26 @@ class Dispatcher(Model, arbitrary_types_allowed=True):
     async def watching(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
-        """Answer one request, its line read, at once and again at each change where its reply differs, one JSON line each, until its sender closes the connection.
+        """Answer one request, its line read, at once and again where its reply differs, one JSON line each, until its sender closes the connection: at each change, or at its route's own triggers (`Route.watch`).
 
         A refusal is the last line. The sender keeps its side open while it
-        watches, so its closing is heard, and the watch ends with it.
+        watches, so its closing is heard, and the watch ends with it, its
+        route's watch closed.
         """
         raw = (await reader.readline()).decode()
         gone = asyncio.ensure_future(reader.read())
+        replies = self.replies(raw)
+        coming: asyncio.Future[Reply | None] | None = None
         sent = ""
         try:
             while not gone.done():
-                seen = self.changes.count
-                reply = await self.answered(raw)
+                coming = asyncio.ensure_future(anext(replies, None))
+                await asyncio.wait([coming, gone], return_when=asyncio.FIRST_COMPLETED)
+                if not coming.done():
+                    return
+                reply = coming.result()
+                if reply is None:
+                    return
                 line = reply.model_dump_json()
                 if line != sent:
                     writer.write(f"{line}\n".encode())
@@ -343,21 +370,45 @@ class Dispatcher(Model, arbitrary_types_allowed=True):
                     sent = line
                 if isinstance(reply, Refused):
                     return
-                changed = asyncio.ensure_future(self.changes.after(seen))
-                await asyncio.wait([changed, gone], return_when=asyncio.FIRST_COMPLETED)
-                changed.cancel()
         except ConnectionError as left:
             self.say(f"a watch's sender left: {left}")
         finally:
             gone.cancel()
+            # The next reply, still awaited as the watch ends, is cancelled
+            # before its replies are closed, which can't close while it runs.
+            if coming is not None and not coming.done():
+                coming.cancel()
+                await asyncio.wait([coming])
+            await replies.aclose()
             writer.close()
 
-    async def answered(self, raw: str) -> Reply:
-        """Answer one request with the route its kind names.
+    async def replies(self, raw: str) -> AsyncGenerator[Reply]:
+        """Yield the replies to one request watched: its answer at once, then again at each change, or as its route's own watch yields them (`Route.watch`), a refusal last.
 
-        A request that doesn't parse, or of no kind routed, is refused, as is one
-        its handler refuses or fails on; a failure is said with its traceback.
+        A route's watch that refuses or fails is refused as an answer is
+        (`answered`).
         """
+        routed = self.routed(raw)
+        if isinstance(routed, Refused):
+            yield routed
+            return
+        watch = routed.watch
+        if watch is not None:
+            try:
+                async for reply in watch(raw):
+                    yield reply
+            except (HostError, ValidationError) as failure:
+                yield self.refused(str(failure))
+            except Exception as failure:
+                yield self.failed(routed.kind, failure)
+            return
+        while True:
+            seen = self.changes.count
+            yield await self.answered(raw)
+            await self.changes.after(seen)
+
+    def routed(self, raw: str) -> Route | Refused:
+        """Return the route one request's kind names, or refuse a request that doesn't parse, or of no kind routed."""
         try:
             kind = Request.model_validate_json(raw).kind
         except ValidationError as failure:
@@ -368,14 +419,29 @@ class Dispatcher(Model, arbitrary_types_allowed=True):
             return self.refused(
                 f"no handler for `{kind}`; {self.answering} answers {known}"
             )
+        return route
+
+    async def answered(self, raw: str) -> Reply:
+        """Answer one request with the route its kind names.
+
+        A request that doesn't parse, or of no kind routed, is refused, as is one
+        its handler refuses or fails on; a failure is said with its traceback.
+        """
+        route = self.routed(raw)
+        if isinstance(route, Refused):
+            return route
         try:
             return await route.answer(raw)
         except (HostError, ValidationError) as failure:
             return self.refused(str(failure))
         except Exception as failure:
-            told = "".join(traceback.format_exception(failure))
-            self.say(f"the `{kind}` handler failed:\n{told}")
-            return self.refused(f"the `{kind}` handler failed: {failure!r}")
+            return self.failed(route.kind, failure)
+
+    def failed(self, kind: str, failure: Exception) -> Refused:
+        """Refuse a request whose handler failed, saying the failure with its traceback."""
+        told = "".join(traceback.format_exception(failure))
+        self.say(f"the `{kind}` handler failed:\n{told}")
+        return self.refused(f"the `{kind}` handler failed: {failure!r}")
 
     def refused(self, error: str) -> Refused:
         """Refuse a request, saying why."""
@@ -568,13 +634,17 @@ class Bearings(ABC):
 
 
 class Spoken(Model):
-    """What a hook prints, what it tells the conversation from its inbox, and the title it gives the session's runtime."""
+    """What a hook prints, what it tells the conversation from its inbox, the title it gives the session's runtime, and the conversation it touched."""
 
     answer: str
     posted: Posted = Posted()
     titled: Titled | None = None
     """The title the answer gives the session's runtime, kept as the one lup
     left it with once the answer is written; none where it gives none."""
+    touched: list[Touched] = []
+    """The conversation the hook is of, at its event, told to `Changes` once
+    it's answered, so a view of it watched is answered again; none for a hook
+    lup couldn't read, or of one of the runtime's own agents."""
 
 
 class Served(Model, arbitrary_types_allowed=True):
@@ -1030,7 +1100,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             unanswered = self.answerer.unanswered(request.runtime, payload, failed)
             spoken = Spoken(answer=unanswered)
-        self.changes.changed()
+        self.changes.changed(spoken.touched)
         answer = spoken.answer if spoken.answer.strip() else UNDECIDED
         try:
             writer.write(answer.encode())
@@ -1103,6 +1173,15 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         write_model(self.layout.conversations(request.launch), conversations)
         if conversation.internal:
             return Spoken(answer="")
+        touched = [
+            Touched(
+                repository=request.repository,
+                runtime=request.runtime,
+                session=heard.session,
+                agent=heard.agent,
+                by=heard.event.named(),
+            )
+        ]
         if heard.event.named() in self.served[request.launch].offered.events:
             happening = Happening(
                 launch=request, event=heard.event, conversation=conversation
@@ -1152,9 +1231,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 f"lup couldn't add to it: {unread}"
             )
             self.returned(posted)
-            return Spoken(answer=answer)
+            return Spoken(answer=answer, touched=touched)
         titled = None if title is None else Titled(session=heard.session, title=title)
-        return Spoken(answer=told, posted=posted, titled=titled)
+        return Spoken(answer=told, posted=posted, titled=titled, touched=touched)
 
     async def judgement(
         self, request: Register, payload: str, writer: asyncio.StreamWriter

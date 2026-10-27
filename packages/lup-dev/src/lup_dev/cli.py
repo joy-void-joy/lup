@@ -114,6 +114,7 @@ from lup_dev.host.pushes import Pushes
 from lup_dev.host.records import Called, Recorded
 from lup_dev.host.rooms import OwnLaunch, OwnLaunches, RoomRoute, ShowOwnLaunch
 from lup_dev.host.service import Answerer, Companion, HostService, Naming, Route
+from lup_dev.host.views import ModuleViews
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import WorkerJudge, Workers, WorkersAsking
 from lup_dev.inbox.bearings import RepositoryBearings
@@ -496,12 +497,14 @@ def control_routes(
     recorded: dict[str, Recorded],
     dashboard: DashboardProcess | None,
     layout: Layout,
+    views: ModuleViews | None = None,
 ) -> list[Route]:
-    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; and the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`."""
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
     return [
         *inbox_routes(delivery, recorded),
         Route.to(dashboard_shown(dashboard)),
         *since_routes(delivery, layout, LupDevSettings().lup_integration_branch),
+        *([] if views is None else [Route.reading(views, watch=views.watched)]),
     ]
 
 
@@ -545,6 +548,7 @@ def host_serve(context: typer.Context) -> None:
         approval=partial(approval_of, layout),
         approved=partial(approved_command, layout),
     )
+    asking = WorkersAsking(workers=workers)
     sweeping = Sweeping(
         layout=layout,
         host=host_client(),
@@ -565,7 +569,13 @@ def host_serve(context: typer.Context) -> None:
         bearings=RepositoryBearings(
             delivery=delivery, integration=settings.lup_integration_branch
         ),
-        routes=control_routes(delivery, recorded(), dashboard, layout),
+        routes=control_routes(
+            delivery,
+            recorded(),
+            dashboard,
+            layout,
+            ModuleViews(asking=asking, changes=changes, say=typer.echo),
+        ),
         tools=room_tools(delivery, layout, remotes, workers),
         room_routes=[
             *remote_routes(remotes),
@@ -573,7 +583,7 @@ def host_serve(context: typer.Context) -> None:
             RoomRoute.to(OwnLaunches()),
         ],
         modules=workers,
-        asking=WorkersAsking(workers=workers),
+        asking=asking,
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
         podman=podman,

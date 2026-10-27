@@ -9,6 +9,7 @@ service does.
 import asyncio
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -44,7 +45,15 @@ from lup_dev.host.protocol import Limits, Register, Reply, Request
 from lup_dev.host.records import Call as RecordedCall
 from lup_dev.host.records import Reader as RecordsReader
 from lup_dev.host.records import Record, Recorded, Records, Transcript
-from lup_dev.host.workers import Called, Calling, Happening, Sent, Viewing, Workers
+from lup_dev.host.workers import (
+    Called,
+    Calling,
+    Happening,
+    Sent,
+    Viewing,
+    Watching,
+    Workers,
+)
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import HostLayout, Layout
@@ -840,7 +849,10 @@ class ViewerServing(ModuleServing):
 
     module: Viewer
 
-    @lup.view(place=lup.Drawer(letter="w", called="the greeting", colour="cyan"))
+    @lup.view(
+        place=lup.Drawer(letter="w", called="the greeting", colour="cyan"),
+        watch=lup.Watch(on=[lup.TurnEnded], longest=timedelta(minutes=1)),
+    )
     async def greeting(self, viewed: lup.OfAgent) -> lup.Blocks:
         """Greet the agent."""
         line = lup.Line.of("1", f"hello {viewed.session}", "warm")
@@ -850,6 +862,11 @@ class ViewerServing(ModuleServing):
     async def wrong(self, viewed: Shown) -> lup.Blocks:
         """Name a tone nobody declares."""
         return lup.Blocks(blocks=[lup.Line.of("1", viewed.what, "nobody's")])
+
+    @lup.view
+    async def plain(self, viewed: Shown) -> lup.Blocks:
+        """Show what it's given, of no agent."""
+        return lup.Blocks(blocks=[lup.Line.of("1", viewed.what)])
 
     @lup.command
     async def greet(self, asked: Greeting, by: Operator) -> str:
@@ -895,24 +912,63 @@ def test_the_repository_s_process_says_how_its_views_look_as_it_lists_them(
     assert modules.offered().looks == modules.resolved.looks
 
 
-def test_the_repository_s_process_answers_a_view_for_the_operator(
+def test_the_repository_s_process_answers_a_view_for_the_operator_with_when_it_s_answered_again(
     tmp_path: Path,
 ) -> None:
     asked = Viewing(
-        module="viewer", view="greeting", argument={"runtime": "r", "session": "s1"}
+        repository=tmp_path / ".git",
+        module="viewer",
+        view="greeting",
+        argument={"runtime": "r", "session": "s1"},
     )
-    blocks = asyncio.run(viewing(tmp_path).view(asked))
-    assert blocks.text() == "greeting\nhello s1"
+    viewed = asyncio.run(viewing(tmp_path).view(asked))
+    assert viewed.blocks.text() == "greeting\nhello s1"
+    assert viewed.watch == Watching(
+        of=lup.OfAgent(runtime="r", session="s1"),
+        on=["turn-ended"],
+        longest=timedelta(minutes=1),
+    )
+
+
+def test_a_view_of_no_agent_is_watched_at_nothing_of_one(tmp_path: Path) -> None:
+    asked = Viewing(
+        repository=tmp_path / ".git",
+        module="viewer",
+        view="plain",
+        argument={"what": "hi"},
+    )
+    assert asyncio.run(viewing(tmp_path).view(asked)).watch == Watching()
+
+
+def test_a_view_of_another_repository_is_refused(tmp_path: Path) -> None:
+    asked = Viewing(
+        repository=tmp_path / "other.git",
+        module="viewer",
+        view="greeting",
+        argument={"runtime": "r", "session": "s1"},
+    )
+    with pytest.raises(LupDevError, match="was asked of"):
+        asyncio.run(viewing(tmp_path).view(asked))
 
 
 def test_a_view_naming_a_tone_nobody_declares_is_refused(tmp_path: Path) -> None:
-    asked = Viewing(module="viewer", view="wrong", argument={"what": "hi"})
+    asked = Viewing(
+        repository=tmp_path / ".git",
+        module="viewer",
+        view="wrong",
+        argument={"what": "hi"},
+    )
     with pytest.raises(LupDevError, match="names tones no module declares: nobody's"):
         asyncio.run(viewing(tmp_path).view(asked))
 
 
 def test_a_view_given_what_it_doesn_t_take_is_refused(tmp_path: Path) -> None:
-    asked = Viewing(module="viewer", view="greeting", argument={"what": "hi"})
+    asked = Viewing(
+        repository=tmp_path / ".git",
+        module="viewer",
+        view="greeting",
+        argument={"what": "hi"},
+    )
     with pytest.raises(LupDevError, match="doesn't take what it was given"):
         asyncio.run(viewing(tmp_path).view(asked))
 
