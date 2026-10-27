@@ -278,6 +278,7 @@ class Judged(Model):
 
     path: Path
     blob: str
+    """The content's object id in the store, empty where it's the file's deletion, as a hold keeps one (`HeldFile.blob`)."""
     agent: str = ""
     """The conversation that wrote it: empty for the session's own, else a subagent's."""
     told: bool = False
@@ -1067,7 +1068,7 @@ class Snapshot(Model):
         after = decoded(store.content(self.taken, path))
         baseline = decoded(store.content(self.start, path))
         accepted = decoded(store.content(self.accepted, path))
-        if prior is not None and prior.blob == blob:
+        if prior is not None and prior.blob == (blob or ""):
             change = Change(path=path, before=accepted, after=after, baseline=baseline)
             return Planned(path=path, change=change, decide=False, told=prior.told)
         if self.move is not None and path in self.move.paths:
@@ -1871,11 +1872,13 @@ def orphaned(
 def approve(
     worktree: Worktree, hold: Hold, held: HeldFile, accepted: str | None
 ) -> bool:
-    """Keep one file of an approved hold no call waits on any more, making a file tool's write that never landed where the file is still as it was accepted; say whether the content approved is on disk."""
+    """Keep one file of an approved hold no call waits on any more, making a file tool's write that never landed where the file is still as it was accepted; say whether the content approved is on disk, a deletion approved being on disk where the file is gone."""
     store = worktree.store
     there = worktree.root / held.path
-    content = store.object(held.blob) if held.blob else None
     current = there.read_bytes() if there.is_file() else None
+    if not held.blob:
+        return current is None
+    content = store.object(held.blob)
     left = store.content(accepted, held.path) if accepted else None
     if hold.proposed and content is not None and current == left:
         there.parent.mkdir(parents=True, exist_ok=True)
