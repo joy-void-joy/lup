@@ -231,3 +231,20 @@ def test_nothing_is_queued_for_a_session_whose_record_isn_t_here(
 ) -> None:
     queues = ClaudeQueues(records=ClaudeRecords(directory=tmp_path / "absent"))
     assert queues.queued("s1", None) == []
+
+
+def test_a_record_gone_from_where_it_was_found_is_looked_for_again(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / ".claude"
+    first = home / "projects" / "-w" / "s1.jsonl"
+    append(first, {"type": "user"})
+    queues = ClaudeQueues(records=ClaudeRecords(directory=home))
+    before = queues.queued("s1", None)
+    moved = home / "projects" / "-x" / "s1.jsonl"
+    moved.parent.mkdir(parents=True)
+    first.rename(moved)
+    append(moved, queued_line("enqueue", "Still here?"))
+    after = queues.queued("s1", None)
+    assert before == []
+    assert [each.kind for each in after] == ["typed"]

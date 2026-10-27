@@ -2677,14 +2677,15 @@ class ClaudeQueues(MutableModel, Queues, arbitrary_types_allowed=True):
         return [queued for each in pending if (queued := held(each)) is not None]
 
     def record(self, session: str, agent: str | None) -> Path | None:
-        """Return conversation `agent`'s record of session `session`, the session's own for none, found once; none where it isn't on this machine."""
+        """Return conversation `agent`'s record of session `session`, the session's own for none, found once and looked for again where it's gone; none where it isn't on this machine."""
         key = f"{session}/{agent}"
-        if key not in self.found:
-            record = self.records.conversation(session, agent)
-            if record is None:
-                return None
+        kept = self.found.get(key)
+        if kept is not None and kept.is_file():
+            return kept
+        record = self.records.conversation(session, agent)
+        if record is not None:
             self.found = {**self.found, key: record}
-        return self.found[key]
+        return record
 
     def following(self, record: Path, *, sidechains: bool) -> Following:
         """Return `record` as read so far, read on from where the last look left off to the end of its last whole line; read anew where it shrank, written again. `sidechains` says whether its lines marked a subagent's are its own: in a subagent's record they all are, and in a session's an earlier release kept its subagents' there."""
