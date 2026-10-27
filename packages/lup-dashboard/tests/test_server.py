@@ -9,13 +9,16 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import JsonValue, TypeAdapter
 
+from lup.blocks import Fold, Load, OfAgent
 from lup_dashboard.demo import Demo, files
 from lup_dashboard.host import Host
 from lup_dashboard.server import Access, application
 from lup_dev.clock import Clock
 from lup_dev.host.protocol import HostError, Listed, ListLaunches, Refused
 from lup_dev.host.records import Called
+from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox.protocol import (
     Calls,
     Conversed,
@@ -42,8 +45,6 @@ from lup_dev.inbox.store import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-
-    from pydantic import JsonValue
 
     from lup_dashboard.api import Asked, Replied
 
@@ -404,6 +405,63 @@ def test_the_demo_serves_its_stand_in_launches_and_refuses_the_rest(page: Path) 
         "kind": "refused",
         "error": "the demo doesn't answer `inbox-show`",
     }
+
+
+def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_stand_ins(
+    page: Path,
+) -> None:
+    served = client(Demo(clock=Fixed(), size=0), page)
+    lup = Path("/home/op/lup.git")
+    parser = OfAgent(runtime="claude", session="s1", agent="a02")
+
+    def viewed(view: str, argument: JsonValue) -> Viewed | Refused:
+        asked = Viewing(
+            repository=lup, module="transcripts", view=view, argument=argument
+        )
+        answered = served.post(
+            "/api/ask", json=asked.model_dump(mode="json"), headers=bearing()
+        )
+        return TypeAdapter[Viewed | Refused](Viewed | Refused).validate_python(
+            answered.json()
+        )
+
+    listed = Listed.model_validate(
+        served.post(
+            "/api/ask", json=ListLaunches().model_dump(), headers=bearing()
+        ).json()
+    )
+    drawer = viewed("conversation", parser.model_dump(mode="json"))
+    assert isinstance(drawer, Viewed)
+    # The module's own layout: its summary, its folds, its items woven in, each
+    # call read whole as its fold opens, from its own view.
+    lines = drawer.blocks.text().splitlines()
+    assert lines[0].startswith("conversation · ")
+    assert "▸ → @51 question to you · waiting on you" in lines
+    [loaded] = [
+        each.content
+        for each in drawer.blocks.blocks
+        if isinstance(each, Fold)
+        and isinstance(each.content, Load)
+        and each.content.view == "call"
+        and each.content.argument.get("id") == "call-51"
+    ]
+    assert drawer.watch.of == parser
+    assert "call-finished" in drawer.watch.on
+    call = viewed("call", loaded.argument)
+    assert isinstance(call, Viewed)
+    assert "Which way should the reader read each kind of line?" in call.blocks.text()
+    assert call.watch.on == ["call-finished"]
+    # How every repository's views look, for the page to draw them by.
+    assert [
+        (each.module, each.view, each.place.letter)
+        for each in listed.looks[lup].drawers
+    ] == [("transcripts", "conversation", "v")]
+    assert {"earlier", "calls", "items", "call"} <= {
+        each.name for each in listed.looks[lup].folds
+    }
+    refused = viewed("nowhere", parser.model_dump(mode="json"))
+    assert isinstance(refused, Refused)
+    assert "has a view `nowhere`" in refused.error
 
 
 def test_the_demo_lists_a_conversations_items_a_message_sent_from_the_page_among_them(

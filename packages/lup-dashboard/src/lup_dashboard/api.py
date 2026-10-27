@@ -22,6 +22,7 @@ from lup_dev.host.protocol import (
     Renamed,
     SetHolding,
 )
+from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox.protocol import (
     AnswerApproval,
     AnswerItem,
@@ -79,7 +80,8 @@ type Asked = Annotated[
     | ShowTalk
     | KeepTalk
     | ShowSince
-    | ReviewSince,
+    | ReviewSince
+    | Viewing,
     Field(discriminator="kind"),
 ]
 """A request the page may send: the launches served and their conversations,
@@ -89,8 +91,9 @@ and sent, an approval or a held change answered and the files it changes read,
 an item's moment in its sender's conversation read, a whole conversation read
 from where the page left it, calls of it read whole, the items a conversation sent and was sent listed,
 the operator's draft reply shown, kept and sent, where their review lays out
-its groups shown and kept, what they write on a conversation shown and kept, and what an agent's branch changed since they
-last saw it read and its files marked reviewed."""
+its groups shown and kept, what they write on a conversation shown and kept, what an agent's branch changed since they
+last saw it read and its files marked reviewed, and a module's view, which the
+page draws from its blocks (`docs/host.md`, *The views the dashboard shows*)."""
 
 type Replied = Annotated[
     Listed
@@ -110,6 +113,7 @@ type Replied = Annotated[
     | Reviewed
     | Since
     | SinceReviewed
+    | Viewed
     | Refused,
     Field(discriminator="kind"),
 ]

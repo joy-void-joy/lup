@@ -8,14 +8,18 @@ lands. Its data are the host's own models, so it shows what the page would show.
 import asyncio
 import hashlib
 from datetime import datetime, timedelta
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
-from pydantic import Field, JsonValue
+from pydantic import Field, JsonValue, ValidationError
 
+from lup.blocks import OfAgent
 from lup.types import Model, MutableModel
 from lup_dashboard.host import Host
+from lup_dashboard.standins import StandInViews
 from lup_dev.clock import Clock, SystemClock
+from lup_dev.errors import LupDevError
 from lup_dev.host.protocol import (
     Activity,
     Holding,
@@ -27,7 +31,8 @@ from lup_dev.host.protocol import (
     SetHolding,
     Talker,
 )
-from lup_dev.host.records import Call, Called, Entry, Said, Task, Usage
+from lup_dev.host.records import Call, Called, Entry, Said, Task, Transcript, Usage
+from lup_dev.host.workers import Viewed, Viewing
 from lup_dev.inbox.citations import resolved
 from lup_dev.inbox.delivery import body, written
 from lup_dev.inbox.parts import PartId
@@ -46,6 +51,7 @@ from lup_dev.inbox.protocol import (
     ListInbox,
     ListItems,
     Ordered,
+    Pathed,
     Reviewed,
     SendDraft,
     SendItem,
@@ -313,6 +319,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return self.since(conversation, seen)
             case ReviewSince(conversation=conversation, files=viewed, seen=seen):
                 return self.reviewed(conversation, viewed, seen)
+            case Viewing() as viewing:
+                return await self.viewed(viewing)
             case _:
                 return Refused(error=f"the demo doesn't answer `{request.kind}`")
 
@@ -333,6 +341,36 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     async def settle(self, number: int) -> None:
         """Install nothing: the demo's approvals are stand-ins."""
         del number
+
+    @cached_property
+    def views(self) -> StandInViews:
+        """Return the modules' views over the demo's stand-ins, made once asked."""
+        return StandInViews(runtimes=self.runtimes, exchanged=self.exchanged)
+
+    async def viewed(self, viewing: Viewing) -> Viewed | Refused:
+        """Answer a module's view with its module's own layout over the demo's stand-ins (`lup_dashboard/standins.py`), the conversation it's of written as its record first, as it stands: the parser subagent's a step longer each time its drawer is asked, as when the page reads it (`ShowConversation`); a view the module refuses, refused, saying why."""
+        try:
+            of = OfAgent.model_validate(viewing.argument)
+        except ValidationError:
+            of = None
+        if of is not None:
+            if (of.session, of.agent, viewing.view) == ("s1", "a02", "conversation"):
+                self.grown += 1
+            recorded = self.recorded(of.session, of.agent)
+            standing = self.standing(of.session, of.agent)
+            transcript = Transcript(
+                runtime=of.runtime,
+                session=of.session,
+                entries=steps(recorded),
+                usage=standing.usage,
+                tasks=standing.tasks,
+            )
+            wholes = [each.whole for each in recorded if isinstance(each, StandIn)]
+            self.views.record(of, transcript, wholes)
+        try:
+            return await self.views.view(viewing)
+        except LupDevError as refused:
+            return Refused(error=str(refused))
 
     def typed(self) -> None:
         """End the reading of the approval's types: its files carry their whole reading, and each watch answers again."""
@@ -676,8 +714,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ),
             ],
         }
+        launches = [lup, voice, zoetrope, waiting]
         return Listed(
-            launches=[lup, voice, zoetrope, waiting],
+            launches=launches,
             sessions={"s1": "lup-impl", "s2": "guidance-voice", "s3": "main"},
             talkers={
                 launch: [
@@ -686,6 +725,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 ]
                 for launch, conversations in talkers.items()
             },
+            looks={each.repository: self.views.looks() for each in launches},
         )
 
     def holds(self, talker: Talker) -> bool:
@@ -776,7 +816,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Shown(item=item)
 
     def exchanged(self, conversation: Conversation) -> Exchanged:
-        """Return the stand-in items `conversation` sent, as it wrote them, and those it was sent, as it's told them."""
+        """Return the stand-in items `conversation` sent, as it wrote them, and those it was sent, as it's told them, and each conversation among their parties by its path, as the listing has it."""
         items = [
             each
             for each in self.every()
@@ -796,7 +836,33 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             received=[
                 Exchange(item=each, text=body(each)) for each in items if told(each)
             ],
+            paths=[
+                each
+                for each in self.paths()
+                if any(
+                    each.conversation in (item.sender, item.recipient, item.addressed)
+                    for item in items
+                )
+            ],
         )
+
+    def paths(self) -> list[Pathed]:
+        """Return each stand-in conversation the listing has, with its path."""
+        listed = self.listed()
+        launches = {each.launch: each for each in listed.launches}
+        return [
+            Pathed(
+                conversation=Conversation(
+                    repository=launches[launch].repository,
+                    runtime=launches[launch].runtime,
+                    session=talker.session,
+                    agent=talker.agent,
+                ),
+                path=talker.path,
+            )
+            for launch, talkers in listed.talkers.items()
+            for talker in talkers
+        ]
 
     def every(self) -> list[Item]:
         """Return every stand-in item, by number: those waiting for the operator; the parser subagent's note they replied to, at the call that sent it; an ended subagent's note whose reply went to its session; the voice session's note the operator reviewed, edited since, and their review, which its turn's last words answer (`answer`); the parser subagent's late question, once it has arrived (`arrives`); and the messages sent from the page. Each a draft sent covered is done."""

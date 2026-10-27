@@ -44,6 +44,7 @@ describe("launches", () => {
             kind: "listed" as const,
             launches: [registered("one", "w"), registered("two", "x")],
             sessions: {},
+            looks: {},
             talkers: {
                 one: [
                     talker("w", null, 0),
@@ -77,6 +78,7 @@ describe("running", () => {
             kind: "listed" as const,
             launches: [registered("one", "w"), registered("two", "x"), registered("three", "y")],
             sessions: {},
+            looks: {},
             talkers: {
                 one: [
                     { ...talker("w", null, 0), activity: null },
