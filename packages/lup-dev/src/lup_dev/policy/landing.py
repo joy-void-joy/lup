@@ -39,11 +39,12 @@ gated branch, `dev` by default:
 7. each branch it landed is cleaned up after: its copy on the remote deleted,
    as `delete-merged` deletes one (`Remotes.merged`); its worktree removed where
    it's clean and nobody works in it; then the local branch deleted;
-8. each flagged write still waiting on a branch whose flags hold it, on a file
-   it leaves unchanged, is withdrawn from the operator's inbox where nothing's
-   left for it to hold (`Lander.withdrawn`): its branch is gone since, or the
-   file stands as the flag keeps it, landed before. It's left unread, so it's
-   no version they saw (`Withdrawn`). One on a branch still there whose file
+8. each flagged write still waiting that's left nothing to hold is withdrawn
+   from the operator's inbox (`Lander.withdrawn`): one on a branch gone, the
+   cleanup's or any deleted earlier, landed or not; and one on a branch whose
+   flags hold the landing, on a file it leaves unchanged, where the file
+   stands as the flag keeps it, landed before. It's left unread, so it's no
+   version they saw (`Withdrawn`). One on a branch still there whose file
    stands otherwise may be a write not committed yet, and waits;
 9. the answer ends on what's still running or waiting to land (`going`): the
    subagents of the session landing that lup hasn't heard end, and the local
@@ -757,9 +758,9 @@ class Lander(Model, arbitrary_types_allowed=True):
         what they approved stays approved. Once landed, it cleans up after each
         branch it landed: deletes its copy on the remote, removes its worktree
         where it's clean and nobody works in it, and deletes the local branch.
-        A flagged write still waiting on a branch it landed, on a file it
-        doesn't change, it withdraws from the operator's inbox where nothing's
-        left for it to hold, saying which.
+        A flagged write still waiting that's left nothing to hold, on a branch
+        gone or on a file a branch it landed leaves unchanged, it withdraws
+        from the operator's inbox, saying which.
         The branches it landed are the one you gave, and each other merged
         into `dev` whose tip no other branch shares; a branch made from the
         one you gave, at its tip, is left alone, worktree and all, as is each
@@ -1295,38 +1296,39 @@ class Lander(Model, arbitrary_types_allowed=True):
         branches: list[str],
         changed: list[Path],
     ) -> list[Flag]:
-        """Withdraw each flagged write still waiting for the operator on one of `branches`, those the landing of `tip` on `onto` holds on, whose file it doesn't change, `changed` being those it does, where nothing's left for it to hold; return those withdrawn.
+        """Withdraw each flagged write still waiting for the operator that's left nothing to hold, once the landing of `tip` on `onto` has landed and cleaned up; return those withdrawn.
 
-        Nothing is where its branch is gone since, the landing's cleanup
-        having deleted it, or where the file stands at `tip` as the flag keeps
-        it, landed before. On a branch still there, a file standing otherwise
-        may be a write not committed yet, which the branch's next landing holds
-        on: that flag waits.
+        Nothing is left where its branch is gone, the landing's cleanup having
+        deleted it, or any branch deleted earlier, landed or not: it holds no
+        landing. Nor, on one of `branches`, those whose flags hold this landing,
+        on a file it doesn't change, `changed` being those it does, where the
+        file stands at `tip` as the flag keeps it, landed before. On a branch
+        still there, a file standing otherwise may be a write not committed
+        yet, which the branch's next landing holds on: that flag waits.
         """
         names = [short(ref) for ref in branches]
         inbox = self.delivery.inbox
         waiting = [
             Flag(number=item.number, flagged=item.reason)
             for item in self.baseline.about
-            if isinstance(item.reason, Flagged)
-            and item.reason.branch in names
-            and item.reason.path not in changed
-            and isinstance(item.state, Waiting)
+            if isinstance(item.reason, Flagged) and isinstance(item.state, Waiting)
         ]
         gone = [
             branch
-            for branch in names
-            if await asyncio.to_thread(git.commit, f"refs/heads/{branch}") is None
+            for branch in dict.fromkeys(each.flagged.branch for each in waiting)
+            if branch is not None
+            and await asyncio.to_thread(git.commit, f"refs/heads/{branch}") is None
         ]
         name = short(onto)
 
         async def why(flag: Flag) -> str | None:
             path, branch = flag.flagged.path, flag.flagged.branch
+            if branch in gone and branch in names:
+                return f"`{branch}` landed on `{name}` at {tip}, and is gone since"
             if branch in gone:
-                return (
-                    f"`{branch}` landed on `{name}` at {tip} leaving the file as it "
-                    "was, and is gone since"
-                )
+                return f"`{branch}` is gone, so it holds no landing"
+            if branch not in names or path in changed:
+                return None
             try:
                 files = inbox.files(flag.number)
             except InboxError:
@@ -1793,11 +1795,11 @@ def approvals(waited: Waited) -> list[str]:
 
 
 def withdrawals(onto: str, flags: list[Flag]) -> list[str]:
-    """Say which flagged writes a landing on `onto` withdrew from the operator's inbox, their files left as they were with nothing more to hold; nothing where it withdrew none.
+    """Say which flagged writes a landing on `onto` withdrew from the operator's inbox, left nothing to hold; nothing where it withdrew none.
 
     >>> flagged = Flagged(text="", summary="", worktree=Path("/r"), path=Path("a.py"), branch="feat")
     >>> withdrawals("dev", [Flag(number=12, flagged=flagged)])
-    ["Withdrew from the operator's inbox the flagged writes on files it leaves as `dev` had them, which hold nothing more: @12 (`a.py` on `feat`)."]
+    ["Withdrew from the operator's inbox the flagged writes left nothing to hold, on branches gone or on files it leaves as `dev` had them: @12 (`a.py` on `feat`)."]
     """
     if not flags:
         return []
@@ -1807,8 +1809,9 @@ def withdrawals(onto: str, flags: list[Flag]) -> list[str]:
     )
     return [
         (
-            "Withdrew from the operator's inbox the flagged writes on files it leaves "
-            f"as `{onto}` had them, which hold nothing more: {named}."
+            "Withdrew from the operator's inbox the flagged writes left nothing to "
+            f"hold, on branches gone or on files it leaves as `{onto}` had them: "
+            f"{named}."
         )
     ]
 

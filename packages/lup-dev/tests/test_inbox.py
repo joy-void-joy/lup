@@ -7481,6 +7481,7 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_as_a_hold_and_lan
     rooms, hall = '"""Rooms."""\n', '"""Hall."""\n'
     landings.wrote(landings.feat, "src/pkg/rooms.py", rooms)
     landings.wrote(landings.feat, "src/pkg/hall.py", hall)
+    landings.shell.git(landings.repository, "branch", "other", "main")
     old = landings.on_forge("refs/heads/dev")
     tip = landings.merged()
     session = lander(landings, runtime)
@@ -7546,20 +7547,19 @@ def test_a_landing_waits_on_each_file_flagged_on_what_it_lands_as_a_hold_and_lan
         "Cleaned up after it:\n"
     )
     assert (
-        "Withdrew from the operator's inbox the flagged writes on files it leaves as "
-        f"`dev` had them, which hold nothing more: @{flags[3]} (`src/pkg/gone.py` on "
-        "`feat`).\n"
+        "Withdrew from the operator's inbox the flagged writes left nothing to hold, "
+        "on branches gone or on files it leaves as `dev` had them: "
+        f"@{flags[3]} (`src/pkg/gone.py` on `feat`).\n"
     ) in answer
     assert landings.on_forge("refs/heads/dev") == tip
     approved = Decided(at=clock.now(), approved=True)
     withdrawn = Withdrawn(
-        at=clock.now(),
-        why=f"`feat` landed on `dev` at {tip} leaving the file as it was, and is gone since",
+        at=clock.now(), why=f"`feat` landed on `dev` at {tip}, and is gone since"
     )
     assert states == [approved, approved, Waiting(), withdrawn, approved]
 
 
-def test_land_withdraws_a_flag_on_a_file_it_leaves_unchanged_where_nothing_s_left_to_hold_and_no_later_landing_holds_on_it(
+def test_land_withdraws_each_flag_left_nothing_to_hold_on_a_branch_gone_or_a_file_it_leaves_unchanged_and_no_later_landing_holds_on_it(
     landings: Landings,
     machine: Layout,
     clock: FakeClock,
@@ -7590,8 +7590,10 @@ def test_land_withdraws_a_flag_on_a_file_it_leaves_unchanged_where_nothing_s_lef
             # perhaps not committed yet.
             landings.flag("src/pkg/draft.py", notes, session, branch="dev"),
             landings.flag("src/pkg/notes.py", notes, session, branch="kept"),
-            # Withdrawn: `feat` is gone once it landed.
+            # Withdrawn: `feat` is gone once it landed, and `quiet` was gone
+            # before, holding no landing.
             landings.flag("src/pkg/gone.py", notes, session),
+            landings.flag("src/pkg/quiet.py", notes, session, branch="quiet"),
         ]
         answer, error = call(machine.host.launch("one").mcp, "land", {})
         states = [delivery.inbox.item(each).state for each in flags]
@@ -7617,9 +7619,11 @@ def test_land_withdraws_a_flag_on_a_file_it_leaves_unchanged_where_nothing_s_lef
         f"- the worktree {kept}: `git worktree remove`: fatal: '{kept}' contains "
         "modified or untracked files, use --force to delete it\n"
         f"- the local branch `kept`, checked out in {kept}\n"
-        "Withdrew from the operator's inbox the flagged writes on files it leaves as "
-        f"`dev` had them, which hold nothing more: @{flags[0]} (`src/pkg/hall.py` on "
-        f"`dev`), @{flags[3]} (`src/pkg/gone.py` on `feat`).\n{NOTHING_GOING}"
+        "Withdrew from the operator's inbox the flagged writes left nothing to hold, "
+        "on branches gone or on files it leaves as `dev` had them: "
+        f"@{flags[0]} (`src/pkg/hall.py` on `dev`), "
+        f"@{flags[3]} (`src/pkg/gone.py` on `feat`), "
+        f"@{flags[4]} (`src/pkg/quiet.py` on `quiet`).\n{NOTHING_GOING}"
     )
     assert states == [
         Withdrawn(
@@ -7629,12 +7633,9 @@ def test_land_withdraws_a_flag_on_a_file_it_leaves_unchanged_where_nothing_s_lef
         Waiting(),
         Waiting(),
         Withdrawn(
-            at=clock.now(),
-            why=(
-                f"`feat` landed on `dev` at {tip} leaving the file as it was, and is "
-                "gone since"
-            ),
+            at=clock.now(), why=f"`feat` landed on `dev` at {tip}, and is gone since"
         ),
+        Withdrawn(at=clock.now(), why="`quiet` is gone, so it holds no landing"),
     ]
     assert "withdrawn at " in shown
     assert f"by lup: the file stands on `dev` at {tip}" in shown
