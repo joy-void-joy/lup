@@ -5,20 +5,21 @@
 ## The command
 
 ```
-lup-dev launch claude|codex [--name NAME] [--mount DIR|MODULE]… [--mount-rw DIR]… [<the runtime's own arguments>]
+lup-dev launch claude|codex [--name NAME] [--profile PROFILE] [--account ACCOUNT] [--mount DIR|MODULE]… [--mount-rw DIR]… [<the runtime's own arguments>] [-- <the runtime's own arguments>]
 lup-dev mount [--rw] [--launch LAUNCH] DIR|MODULE
 lup-dev rename LAUNCH NAME
 lup-dev sessions [--all]
 ```
 
-- **A launch starts in the worktree it's run from,** and passes every argument it doesn't know to the CLI, so `--resume`, `-p` and `--model` reach it. It exits with the CLI's status, and refuses to run inside an agent's session.
+- **A launch starts in the worktree it's run from,** and passes every argument it doesn't know to the CLI, so `--resume`, `-p` and `--model` reach it, and every one after `--`, so the runtime's own flag of a name lup takes reaches it there: `lup-dev launch codex -- --profile fast` hands Codex its own profile. It exits with the CLI's status, and refuses to run inside an agent's session.
+- **`--profile`** chooses the profile the launch runs on, and **`--account`** the account its runtime logs in with, in place of the profile's (*Accounts and profiles*).
 - **`--mount`** lends a directory to this launch alone, read-only, at its own path, and `--mount-rw` writable; the guidance lists each under *Lent to this launch*. `--mount transcripts` lends a module's data instead. A repository every session should read belongs in the person's own layer (*Related repositories*).
 - **`lup-dev mount`** lends a directory to a room that's already running, under its `/lent`, and tells the session where through the inbox.
 - **`rename` and `sessions`** name and list the launches (*Names*).
 
 **What a launch does,** in order (`launched`, `cli.py`):
 1. checks the code the host runs against the copy the operator approved, and asks where it changed (`docs/trust.md`);
-2. reads the declaration at the approved commit, exported from git's objects, so neither a branch nor an edit made in a room changes the room a launch runs in;
+2. reads the declaration at the approved commit, exported from git's objects, so neither a branch nor an edit made in a room changes the room a launch runs in, and chooses its profile and account from the person's profiles approved with it, refusing a name that's neither (*Accounts and profiles*);
 3. checks the host's requirements: podman and git, and `gh`, `notify-send`, a clipboard program and `qrencode`, each optional and said where missing; and names the repository on GitHub;
 4. starts the host service where none answers, and fetches the runtime's latest CLI where a newer one is out (*The CLIs*);
 5. finds the related repositories and the operator's editor, builds the list of values never published (`docs/private.md`), and makes the room, refusing what can't be mounted safely before an image build that may take minutes;
@@ -45,6 +46,7 @@ A launch has an id, which never changes and under which everything of it is file
 
 - **An account** is a login per runtime, kept by its name at `~/.local/share/lup/accounts/<name>/`, a directory per runtime holding the file that runtime's sign-in writes (`AccountLayout`, `layout.py`). It's kept by the account's name, never a project's, so every room on an account shares one login, and a sign-in in one is every room's.
 - **A profile** is the whole setting a room runs with, its account among it, declared by the person in `~/.config/lup/profiles.py` (`docs/declaration.md`, *Profiles*).
+- **A launch's profile** is `--profile`'s, else the one the person's layer chooses for the repository, else `default`; its runtime's account is `--account`'s, else the profile's for that runtime. A launch runs the profiles approved with the repository's zone (`docs/trust.md`, *Trusted by its content*), and says which profile and account it runs on where either isn't `default`.
 - **Rooms don't run on them yet:** a room still mounts the operator's own login and history (*Your login and history*) until rooms get homes of their own (#324).
 
 ## The room

@@ -39,6 +39,7 @@ from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.catalog.room import SessionDefaults
 from lup_dev.codescan.contract import Examples, Rule
 from lup_dev.codescan.engine import EngineError
+from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.forge.github import GitHubError, Visibility
@@ -404,10 +405,13 @@ class Machine:
         missing: list[str] | None = None,
         unnamed: str | None = None,
         local: str | None = None,
+        profiles: str | None = None,
     ) -> None:
         self.events = Events()
         self.unnamed = unnamed
         self.local = local
+        self.profiles = profiles
+        """The person's profiles file approved, which the launch runs."""
         self.listed_for: list[list[Selected]] = []
         """The rule selections the launch asked the engine to list, in order."""
         self.refusing: str | None = None
@@ -483,6 +487,7 @@ class Machine:
             ),
             time=self.host.clock.now(),
             local=self.local,
+            profiles=self.profiles,
         )
         write_model(self.layout.approved(common), approval)
         return Unchanged(commit=commit, approval=approval)
@@ -1204,6 +1209,106 @@ def test_the_command_passes_every_argument_it_doesnt_know_to_the_cli(
 
     assert result.exit_code == 7, result.output
     assert machine.engine.run()[-5:] == ["--resume", "--model", "opus", "-p", "hi"]
+
+
+PROFILES = """
+from lup_dev import Profile, Profiles
+
+profiles = Profiles().add(
+    Profile(name="work", account="work", accounts={"codex": "home"}),
+    Profile(name="spare"),
+)
+"""
+"""A person's profiles file, as trust on launch approved it."""
+
+WORKING = "This launch runs on the profile `work`, with the account `work`."
+"""What a launch on the profile `work` says, on its own account."""
+
+
+def profiles_said(machine: Machine) -> list[str]:
+    """What the launch said of its profile and account."""
+    return [each for each in machine.events.said if "the profile" in each]
+
+
+def test_a_launch_on_default_says_nothing_of_its_profile(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock, profiles=PROFILES)
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+    assert profiles_said(machine) == []
+
+
+def test_profile_and_account_choose_what_the_launch_runs_on(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock, profiles=PROFILES)
+    status = cli.launched(
+        machine.adapter, [], project, machine.launcher, profile="work"
+    )
+    assert status == 7
+    assert profiles_said(machine) == [WORKING]
+    spare = Machine(tmp_path / "spare", clock, profiles=PROFILES)
+    cli.launched(
+        spare.adapter, [], project, spare.launcher, profile="work", account="spare"
+    )
+    assert profiles_said(spare) == [
+        "This launch runs on the profile `work`, with the account `spare`."
+    ]
+
+
+def test_the_person_s_layer_chooses_the_profile_and_profile_outranks_it(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    layer = 'from lup_dev import Project\n\nproject = Project(profile="work")\n'
+    machine = Machine(tmp_path, clock, local=layer, profiles=PROFILES)
+    cli.launched(machine.adapter, [], project, machine.launcher)
+    assert profiles_said(machine) == [WORKING]
+    flagged = Machine(tmp_path / "flagged", clock, local=layer, profiles=PROFILES)
+    cli.launched(flagged.adapter, [], project, flagged.launcher, profile="spare")
+    assert profiles_said(flagged) == [
+        "This launch runs on the profile `spare`, with the account `default`."
+    ]
+
+
+def test_a_launch_runs_the_profiles_approved_never_the_file(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    declared = machine.layout.profiles.declared
+    declared.parent.mkdir(parents=True)
+    declared.write_text(PROFILES)
+    with pytest.raises(ProjectError) as unknown:
+        cli.launched(machine.adapter, [], project, machine.launcher, profile="work")
+    assert str(unknown.value) == (
+        "no profile is called `work`: the profiles are `default`"
+    )
+
+
+def test_an_unknown_profile_refuses_before_the_host_service_or_the_image(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock, profiles=PROFILES)
+    with pytest.raises(ProjectError, match="no profile is called `home`"):
+        cli.launched(machine.adapter, [], project, machine.launcher, profile="home")
+    assert "host" not in machine.events.said
+    assert not [each for each in machine.engine.processes if each.arguments[1] == "run"]
+
+
+def test_lup_s_profile_is_the_command_s_and_the_runtime_s_goes_after_the_separator(
+    project: Path, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    machine = Machine(tmp_path, clock, profiles=PROFILES)
+    monkeypatch.setattr(cli, "adapters", stubbed(machine))
+    monkeypatch.setattr(cli, "launching", machine.launching)
+
+    result = runner.invoke(
+        cli.app,
+        ["launch", "claude", "--profile", "work", "--", "--profile", "fast"],
+    )
+
+    assert result.exit_code == 7, result.output
+    assert machine.engine.run()[-2:] == ["--profile", "fast"]
+    assert profiles_said(machine) == [WORKING]
 
 
 def test_the_command_lends_each_directory_it_s_given_and_lists_it_in_the_guidance(
