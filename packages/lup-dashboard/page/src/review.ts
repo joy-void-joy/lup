@@ -1,36 +1,38 @@
 // The review: everything waiting for the operator laid out as one text to read
 // and move through, in groups, one per agent, every agent running having one,
 // empty or not; their comments in it, each under the line it's on, and their
-// messages to each agent under its banner. Under an approval or a held change,
-// each file it changes, whole (`code.ts`), its lines commented on as the item's
-// own are, the lines that matter in it, by the judge's reading, kept in order
-// for the keys to walk; under each item its context. Under each agent's
-// banner, before its items, its drawers (`docs/dashboard.md`, *The drawers*):
-// its task list, what its branch changed since they approved it, each file laid
-// out as an item's, and its whole conversation (`conversation.ts`), its latest
-// part open, each a fold of its own kind under a short label, one under the
-// other, folded until opened in place; a comment in the conversation or on the
-// changed files is a remark to the agent, the one on code recording the version
-// it was written on. A subagent's group under its parent's, each group folding
-// whole under its banner.
-// Its groups and items in the order they arrived, never sorted again, so what
-// the operator reads stays put as items come; their kind's rank, which the host
-// gives, says only which `]a` and `[a` stop at. Each fold has a kind: the item
-// whole, a file, a function's or a class's body, a run of unchanged lines, the
-// context, a drawer. What's folded by default: the context, each run of a file's
-// unchanged lines away from its changes and the lines that matter, so every
-// change shows, never a changed line among unchanged ones; a test and a data
-// file whole under its header, and each file of a first approval (`Folded`);
-// an item marked read or left for later, and each drawer but "since you
-// approved"; a body is open, but
-// a new module's in its drawer,
-// which shows its design. Each fold is named by what it hides, so an item or a
-// drawer laid out again keeps the folds the operator left; and where the cursor
-// is, said in the header over the review, is the group, the item or the drawer
-// and the folds it's in. Pure: the editor (`Review.tsx`) draws it, folds it and
-// lets what's written be edited, and the host keeps the draft
-// (`docs/dashboard.md`, *The review*). What it shares with a conversation's
-// text is in `comments.ts`.
+// messages to each agent under its banner. A tree (`laid`, `Laid.nodes`): the
+// core lays out the frame, the groups in the order they arrived, never sorted
+// again, each banner, each item's header and what's around its body (the
+// operator's words an answer answers, its edits, its citations' passages, the
+// replies kept from before, its context) and the comments; inside it, each
+// module's view (`views.ts`): an item's body is its kind's view of it, its text
+// and its files, each file whole (`code.ts`), its lines commented on as the
+// item's own are, the lines that matter in it, by the judge's reading
+// (`views/judge.ts`), kept in order for the keys to walk; under each agent's
+// banner, before its items, each drawer its repository's looks place
+// (`docs/dashboard.md`, *The drawers*), its task list, what its branch changed
+// since they approved it, each file laid out as an item's, and its whole
+// conversation (`conversation.ts`), each a fold of its own kind under a short
+// label, one under the other, folded until opened in place; a comment in the
+// conversation or on the changed files is a remark to the agent, the one on
+// code recording the version it was written on. A subagent's group under its
+// parent's, each group folding whole under its banner. Each part keeps an id
+// across layouts. Their kind's rank, which the host gives, says only which
+// `]a` and `[a` stop at. Each fold has a kind: the item whole, a file, a
+// function's or a class's body, a run of unchanged lines, the context, a
+// drawer's, a module's own. What's folded by default: the context, each run of
+// a file's unchanged lines away from its changes and the lines that matter, so
+// every change shows, never a changed line among unchanged ones; a file its
+// view folds whole, as a test, a data file and each file of a first approval;
+// an item marked read or left for later, and each drawer; a body is open, but
+// a new module's in its drawer, which shows its design. Each fold is named by
+// what it hides, so an item or a drawer laid out again keeps the folds the
+// operator left; and where the cursor is, said in the header over the review,
+// is the group, the item or the drawer and the folds it's in. Pure: the editor
+// (`Review.tsx`) draws it, folds it and lets what's written be edited, and the
+// host keeps the draft (`docs/dashboard.md`, *The review*). What it shares
+// with a conversation's text is in `comments.ts`.
 import { since } from "./agents";
 import { shownOnce, type Body, type ChangedFile, type Filed, type Matter, type Row } from "./code";
 import {
@@ -243,7 +245,7 @@ export interface Coded extends Span {
  * What folds in an item or a drawer, by its kind (`FoldKind`): the item whole under its header, folded where it's
  * marked read or left for later; a drawer under its summary line, folded until opened, but "since you approved", open;
  * each file it changes under its
- * header, folded where it's automatic, asking nothing held or flagged, a test, data, or a first approval's (`Folded`); a function's or a class's body under the
+ * header, folded where its view folds it whole, automatic, asking nothing held or flagged, a test, data, or a first approval's; a function's or a class's body under the
  * line declaring it, open but in a new module of a drawer; a run of a file's unchanged lines under a summary line,
  * folded; and its context, folded. Each sits whole inside another or beside it. It hides `from` to `to`, from the end
  * of its summary line to the end of its last; a file's and a body's from the end of the comments on their first line,
