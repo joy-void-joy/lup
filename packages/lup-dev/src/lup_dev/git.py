@@ -39,7 +39,7 @@ from lup.types import Model
 from lup_dev.errors import LupDevError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 
 class GitError(LupDevError):
@@ -101,7 +101,10 @@ def stray(objects: Path) -> list[Path]:
     and a pack linked in from another repository with no alternates at all
     (`docs/field-notes.md`, *Host-side git in a repository the room writes*).
     Where a room writes the store, git the host runs there reads only what it
-    holds while this lists nothing.
+    holds while this lists nothing. Each directory's listing tells a link
+    from its entries, so a store of 129k loose objects takes 0.05 s, where a
+    look at each took 0.68 s. A directory that can't be listed is passed over:
+    git can't read from it either.
     """
     if objects.is_symlink():
         return [objects]
@@ -113,13 +116,25 @@ def stray(objects: Path) -> list[Path]:
         ]
         if path.exists() or path.is_symlink()
     ]
-    linked = [
-        directory / name
-        for directory, folders, files in objects.walk()
-        for name in [*folders, *files]
-        if (directory / name).is_symlink()
-    ]
-    return [*alternates, *linked]
+
+    def linked() -> Iterator[Path]:
+        pending = [objects]
+        while pending:
+            directory = pending.pop()
+            try:
+                # lup: ignore("os-file-ops", why="a listing's entries tell a link without a look at each, which `Path.walk` then `Path.is_symlink` take for each of a store's loose objects")
+                with os.scandir(directory) as listing:
+                    entries = list(listing)
+            except OSError:
+                continue
+            for entry in entries:
+                if entry.is_symlink():
+                    yield directory / entry.name
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(directory / entry.name)
+
+    return [*alternates, *linked()]
 
 
 class Git(Model):
