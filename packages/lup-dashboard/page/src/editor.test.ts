@@ -1,7 +1,7 @@
 import { foldEffect, foldState, unfoldEffect } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import type { CodeMirrorV } from "@replit/codemirror-vim";
+import { Vim, type CodeMirrorV } from "@replit/codemirror-vim";
 import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
@@ -12,6 +12,7 @@ import {
     closedAs,
     deadPressed,
     deadTyped,
+    INDENTING,
     keptFolds,
     nextWritten,
     openedSaid,
@@ -444,5 +445,24 @@ describe("the chords Space leads", () => {
             const leads = [...mapped.keys()].some((each) => each.startsWith(keys) && each !== keys);
             expect([keys, mapped.has(keys) || leads]).toEqual([keys, true]);
         }
+    });
+});
+
+describe("Tab and Shift+Tab in a comment", () => {
+    // What vim names a browser's keydown of Tab, with Shift or without.
+    const named = (shiftKey: boolean) =>
+        Vim.vimKeyFromEvent({ key: "Tab", code: "Tab", shiftKey, ctrlKey: false, altKey: false, metaKey: false } as KeyboardEvent);
+
+    it("are vim's own Ctrl+T and Ctrl+D, under the names vim gives the keys a browser sends it", () => {
+        expect(INDENTING).toEqual([
+            [named(false), "<C-t>"],
+            [named(true), "<C-d>"],
+        ]);
+    });
+
+    it("are in the list of keys, just before Ctrl+T and Ctrl+D", () => {
+        const writing = REVIEW_KEYS.find((part) => part.title === "Writing a comment")?.keys.map((key) => key.keys) ?? [];
+        expect(writing).toContain("Tab ⇧Tab");
+        expect(writing.indexOf("^t ^d")).toBe(writing.indexOf("Tab ⇧Tab") + 1);
     });
 });

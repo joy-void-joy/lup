@@ -35,9 +35,10 @@
 // Markdown, shown as such, its lists written in a comment as neovim's Markdown
 // writes them: Enter, `o` and `O` open a line at the indentation of the one
 // they're on, with no bullet, taken back where nothing's typed after it, and
-// `>>` and `<<`, Ctrl+T and Ctrl+D in insert mode, move a line in and out by the
-// list's indentation (`markdown.ts`, `shifting`); each view says which
-// stretches of its text those are, in the transaction that lays the text out.
+// `>>` and `<<`, Ctrl+T and Ctrl+D in insert mode, and Tab and Shift+Tab as those
+// (`INDENTING`), move a line in and out by the list's indentation (`markdown.ts`,
+// `shifting`); each view says which stretches of its text those are, in the
+// transaction that lays the text out.
 // Each view says what else its keys do, lays
 // its own text out and draws it, and may paint the lines in view as well, as the
 // review paints a changed file's, and draw its folds' marks and bars in the
@@ -373,6 +374,17 @@ export const AROUND: readonly (readonly [keys: string, action: string])[] = FOLD
     ({ kind, letter }) => [`zf${letter}`, `lupFoldAround-${kind}`] as const,
 );
 
+/**
+ * Tab and Shift+Tab in insert mode, as vim's keymap writes them, and the keys of vim's they are: Ctrl+T and Ctrl+D,
+ * which move the line in and out by the list's indentation (`shifting`). A browser tab keeps Ctrl+T to open a tab,
+ * never giving it to the page, and Tab reaches it; unmapped, Tab in a comment took the keyboard out of the editor,
+ * insert mode left waiting. Outside insert mode Tab stays the browser's, moving the keyboard through the page.
+ */
+export const INDENTING: readonly (readonly [keys: string, as: string])[] = [
+    ["<Tab>", "<C-t>"],
+    ["<S-Tab>", "<C-d>"],
+];
+
 let mapped = false;
 
 /** Map the shared keys into vim's keymap, once: user mappings go before its own, and act on the editor the key is pressed in. */
@@ -474,6 +486,10 @@ function mapKeys(): void {
     map("zm", "lupFoldCloseLevel", "normal");
     for (const [keys, name] of AROUND) {
         map(keys, name, "normal");
+    }
+    // As `inoremap <Tab> <C-t>` would: vim's own Ctrl+T and Ctrl+D, whatever else is mapped.
+    for (const [keys, as] of INDENTING) {
+        Vim.noremap(keys, as, "insert");
     }
     const motions = { zj: "lupNextFold", zk: "lupPreviousFold", "[z": "lupFoldStart", "]z": "lupFoldEnd" };
     for (const [keys, name] of Object.entries(motions)) {
@@ -664,9 +680,9 @@ export function chordOf(cm: CodeMirrorV): string {
 
 /**
  * Make vim's indenting move lines by the list's indentation (`shifted`): `>>` and `<<`, `>` and `<` with a motion or
- * a selection, and Ctrl+T and Ctrl+D in insert mode. Vim does each through its editor's `indentMore` and `indentLess`,
- * on the lines of the selection, which CodeMirror's own commands would move by a fixed unit; a block selection's, which
- * vim moves itself at the block's column, stays vim's.
+ * a selection, and Ctrl+T and Ctrl+D in insert mode, which Tab and Shift+Tab are (`INDENTING`). Vim does each through
+ * its editor's `indentMore` and `indentLess`, on the lines of the selection, which CodeMirror's own commands would move
+ * by a fixed unit; a block selection's, which vim moves itself at the block's column, stays vim's.
  */
 function shifting(view: EditorView): void {
     const cm = getCM(view);
