@@ -1355,6 +1355,18 @@ describe("the draft", () => {
         expect(pruned({ ...draft, comments: [{ item: 53, text: "x \n\n" }] }).comments).toEqual([{ item: 53, text: "x" }]);
         expect(toggled(toggled(EMPTY, "done", 52), "done", 52).done).toEqual([]);
     });
+
+    it("marks a parked item read by taking it off the later list, so it's sent, and parks a read one unmarked", () => {
+        const parked = toggled(EMPTY, "parked", 52);
+        const read = toggled(parked, "done", 52);
+        expect(read.parked).toEqual([]);
+        expect(covered(read)).toEqual([52]);
+        const later = toggled(read, "parked", 52);
+        expect(later.done).toEqual([]);
+        expect(covered(later)).toEqual([]);
+        const both = { ...EMPTY, done: [52], parked: [52] };
+        expect(covered(toggled(both, "done", 52))).toEqual([52]);
+    });
 });
 
 describe("waited and fresh", () => {
