@@ -437,9 +437,6 @@ WHY = (
 WHOLE = "Show the whole diff?"
 """The question before the diff, which only a yes shows."""
 
-PROFILES = "~/.config/lup/profiles.py"
-"""How the summary names the person's profiles file, wherever `XDG_CONFIG_HOME` puts it."""
-
 
 class Change(Model):
     """What the operator reads before approving the tip's host zone."""
@@ -518,10 +515,7 @@ class Change(Model):
         )
         profiles = (
             [
-                (
-                    f"Your profiles, `{PROFILES}`, which no repository holds, "
-                    "changed since approved:"
-                ),
+                "Your profiles, which no repository holds, changed since approved:",
                 *self.profiles.diff.splitlines(),
             ]
             if self.profiles.diff

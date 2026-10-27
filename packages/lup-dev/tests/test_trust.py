@@ -1345,8 +1345,7 @@ def test_the_person_s_profiles_are_approved_by_their_content_shown_whole(
     assert outcome.approval.local is None
     summary = summarised(trust)
     heading = summary.index(
-        "Your profiles, `~/.config/lup/profiles.py`, which no repository holds, "
-        "changed since approved:"
+        "Your profiles, which no repository holds, changed since approved:"
     )
     assert summary[heading + 1 : heading + 3] == [
         "diff --git yours/profiles.py yours/profiles.py",
