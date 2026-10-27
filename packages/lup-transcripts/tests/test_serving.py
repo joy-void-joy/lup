@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import lup
+from lup.doors import served
 from lup.programs import run
 from lup_dev.declaration.serving import Lup, Publisher
 from lup_dev.host.protocol import Limits, Register
@@ -166,3 +167,11 @@ def test_a_conversation_beside_is_called_by_the_path_its_exchange_gives_else_by_
     beside = serving.beside(exchanged)
     assert beside.named(named) == "one/parser"
     assert beside.named(unnamed) == "claude s1 / a2"
+
+
+def test_a_call_read_whole_is_answered_again_as_a_call_of_its_agent_s_finishes() -> (
+    None
+):
+    door = served(TranscriptsServing)["call"].viewing()
+    assert door is not None
+    assert door.watch == lup.Watch(on=[lup.CallFinished])
