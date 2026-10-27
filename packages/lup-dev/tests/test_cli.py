@@ -244,6 +244,22 @@ def test_rules_check_leaves_out_a_file_linking_out_of_the_worktree_and_names_it(
     assert not any("s3cret" in (source.content or "") for source in sent)
 
 
+def test_rules_check_names_a_path_given_outside_the_worktree_and_reads_nothing_else(
+    fakes: Kit, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scratch = tmp_path / "scratch" / "probe.py"
+    scratch.parent.mkdir()
+    scratch.write_text("x = 1  # BAD regex\n")
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check", str(scratch)])
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        f"lup didn't read {scratch}: each resolves outside the worktree.",
+        "lup checked no files.",
+    ]
+    assert fakes.engine.checked == []
+
+
 def test_rules_check_lifts_an_exempt_rule_from_its_paths(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
