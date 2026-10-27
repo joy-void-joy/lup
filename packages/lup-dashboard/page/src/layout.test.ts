@@ -158,7 +158,7 @@ describe("the drawers under the banner", () => {
             ["conversation", true],
         ]);
         expect(out.drawers.map((each) => each.waiting)).toEqual([false, false]);
-        const [group] = stickies(out, [0]);
+        const [group] = stickies(out);
         expect(group!.children.map((each) => each.kind)).toEqual(["drawer", "drawer", "item"]);
         // Left out where there's nothing for one to hold.
         expect(laid([note(4, PARENT)], [PARENT], banner, header, EMPTY, NOTHING, [], new Map([[whose(PARENT), UNREAD]])).text.split("\n").slice(0, 2)).toEqual(["━━ s1 ━━", "── @4 note ──"]);
@@ -201,7 +201,7 @@ function geometry(text: string, top: number): Geometry {
 describe("the header stack", () => {
     const items = [note(1, PARENT), note(2, PARENT), note(3, OTHER)];
     const out = laid(items, [], banner, header, EMPTY, NOTHING);
-    const roots = stickies(out, out.groups.map((each) => each.depth));
+    const roots = stickies(out);
     const shown = (top: number) => pinned(roots, geometry(out.text, top)).map((each) => `${each.offset} ${out.text.slice(each.sticky.header.from, each.sticky.header.to)}`);
 
     it("pins the headers of the scopes the top of the view is inside once their own lines are scrolled off, the next pushing each up as its scope ends", () => {
@@ -223,7 +223,7 @@ describe("the header stack", () => {
 
     it("pins a subagent's banner under its parent's, then its item's header", () => {
         const nestedOut = laid([note(1, CHILD), note(4, PARENT)], [PARENT, CHILD], banner, header, EMPTY, NOTHING, [], new Map(), undefined, { parents: PARENTS });
-        const nestedRoots = stickies(nestedOut, nestedOut.groups.map((each) => each.depth));
+        const nestedRoots = stickies(nestedOut);
         const deep = nestedOut.text.indexOf("Second line.", nestedOut.text.indexOf("@1"));
         const lines = nestedOut.text.slice(0, deep).split("\n").length - 1;
         // The line under the stack is @1's second line: the parent's banner, the subagent's, @1's header.

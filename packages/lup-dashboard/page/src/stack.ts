@@ -9,7 +9,7 @@
 // and the innermost scope within it. Pure: the review measures and draws it
 // (`Stack.tsx`).
 import type { Span } from "./comments";
-import { codeFrom, isDrawer, type Laid } from "./review";
+import type { Laid, Placed } from "./review";
 
 /** One scope a header is pinned for: where its header line is, how far it reaches, what it is, and the scopes in it. */
 export interface Sticky {
@@ -23,41 +23,46 @@ export interface Sticky {
 }
 
 /**
- * Return the scopes of `laidOut` a header is pinned for, outermost first, each holding those in it: each group to the
- * next one as deep or shallower, a subagent's inside its parent's where they nest (`depth`); each item and drawer to
- * the next scope or group; each file of an item or a drawer over its lines.
+ * Return the scopes of `laidOut` a header is pinned for, outermost first, each holding those in it, read from its tree
+ * (`Laid.nodes`): each group, a subagent's inside its parent's, to the next one as deep or shallower; each of its
+ * drawers and items to the next scope or group; each file of an item or a drawer over its lines.
  */
-export function stickies(laidOut: Laid, depths: number[]): Sticky[] {
+export function stickies(laidOut: Laid): Sticky[] {
     const end = Math.max(laidOut.text.length - 1, 0);
-    const scopes = [...laidOut.regions, ...laidOut.drawers].sort((a, b) => a.header.from - b.header.from);
-    const banners = laidOut.groups.map((each) => each.banner.from);
     const flat: Sticky[] = [];
-    laidOut.groups.forEach((group, at) => {
-        const depth = depths[at] ?? 0;
-        const next = laidOut.groups.findIndex((each, after) => after > at && (depths[after] ?? 0) <= depth);
-        flat.push({
-            kind: "group",
-            header: group.banner,
-            from: group.banner.from,
-            to: next < 0 ? end : (laidOut.groups[next]?.banner.from ?? end + 1) - 1,
-            children: [],
-        });
-    });
-    scopes.forEach((scope, at) => {
-        const nextScope = scopes[at + 1]?.header.from ?? Infinity;
-        const nextGroup = banners.find((each) => each > scope.header.from) ?? Infinity;
-        const stop = Math.min(nextScope, nextGroup);
-        flat.push({
-            kind: isDrawer(scope) ? "drawer" : "item",
-            header: scope.header,
-            from: scope.header.from,
-            to: stop === Infinity ? end : stop - 1,
-            children: [],
-        });
-        for (const file of scope.filed) {
-            const line = scope.code[codeFrom(scope.code, file.from)];
-            flat.push({ kind: "file", header: { from: file.from, to: line?.to ?? file.from }, from: file.from, to: file.to, children: [] });
+    const scopes: { kind: "item" | "drawer"; part: Placed }[] = [];
+    const banners: number[] = [];
+    const files = (part: Placed) => {
+        for (const each of part.children) {
+            if (each.kind === "block" && (each.block?.block === "diff" || each.block?.block === "code")) {
+                flat.push({ kind: "file", header: each.header, from: each.from, to: each.to, children: [] });
+            }
+            files(each);
         }
+    };
+    const walk = (parts: readonly Placed[]) => {
+        for (const part of parts) {
+            if (part.kind !== "group") {
+                continue;
+            }
+            banners.push(part.from);
+            flat.push({ kind: "group", header: part.header, from: part.from, to: Math.min(part.to, end), children: [] });
+            for (const each of part.children) {
+                if (each.kind === "view" || each.kind === "item") {
+                    scopes.push({ kind: each.kind === "view" ? "drawer" : "item", part: each });
+                    files(each);
+                }
+            }
+            walk(part.children);
+        }
+    };
+    walk(laidOut.nodes);
+    scopes.sort((a, b) => a.part.from - b.part.from);
+    scopes.forEach(({ kind, part }, at) => {
+        const nextScope = scopes[at + 1]?.part.from ?? Infinity;
+        const nextGroup = banners.find((each) => each > part.from) ?? Infinity;
+        const stop = Math.min(nextScope, nextGroup);
+        flat.push({ kind, header: part.header, from: part.from, to: stop === Infinity ? end : stop - 1, children: [] });
     });
     flat.sort((a, b) => a.from - b.from || b.to - a.to);
     const roots: Sticky[] = [];

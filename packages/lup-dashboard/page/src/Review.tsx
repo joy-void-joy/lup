@@ -687,7 +687,7 @@ export function Review({
         [items, agents, banner, called, draft, around, drawers, reviewed, now, arranging, order],
     );
     // The scopes the header stack pins the headers of.
-    const roots = useMemo(() => stickies(laidOut, laidOut.groups.map((each) => each.depth)), [laidOut]);
+    const roots = useMemo(() => stickies(laidOut), [laidOut]);
     const laidFor = useMemo(
         () => ({
             text: laidOut.text,
@@ -1134,7 +1134,6 @@ export function Review({
      */
     const labelOf = (kind: FoldKind | Sticky["kind"], from: number): Labelled | null => {
         const plain = (text: string): Labelled => ({ text, state: null, draft: null, fresh: false });
-        const header = laidOut.text.slice(from, laidOut.text.indexOf("\n", from));
         switch (kind) {
             case "group": {
                 const group = laidOut.groups.find((each) => each.banner.from === from);
@@ -1161,18 +1160,22 @@ export function Review({
                 };
             }
             case "drawer": {
+                // A drawer by its view's name, the conversation's shorter, marked where it holds what waits on the operator, as its view says.
                 const drawer = laidOut.drawers.find((each) => each.header.from === from);
-                const which = drawer?.kind ?? "since";
-                const waiting = which === "since" && / to review| flagged/.test(header);
-                return { ...plain(which === "conversation" ? "talk" : which), state: waiting ? { glyph: "◇", mark: "to-review" } : null };
+                const which = drawer?.kind ?? "";
+                return { ...plain(which === "conversation" ? "talk" : which), state: drawer?.waiting === true ? { glyph: "◇", mark: "to-review" } : null };
             }
             case "file": {
-                const path = header.split(" · ")[0] ?? "";
+                // A file by its name, flagged where a line in it matters, folded where its view folds it whole, else to review.
                 const scope = scopeAt(laidOut, from);
                 const filed = scope?.filed.find((each) => each.from === from);
-                const matters = filed !== undefined && scope !== undefined && scope.stops.some((each) => each >= filed.from && each <= filed.to);
-                const automatic = /· (automatic|test|data|first approval)/.test(header);
-                const state = matters ? { glyph: "⚑", mark: "flagged" } : automatic ? { glyph: "·", mark: "folded" } : { glyph: "◇", mark: "to-review" };
+                if (filed === undefined || scope === undefined) {
+                    return null;
+                }
+                const path = filed.file.path;
+                const matters = scope.stops.some((each) => each >= filed.from && each <= filed.to);
+                const folded = !(filed.file.open ?? true);
+                const state = matters ? { glyph: "⚑", mark: "flagged" } : folded ? { glyph: "·", mark: "folded" } : { glyph: "◇", mark: "to-review" };
                 return { ...plain(path.split("/").at(-1) ?? path), state };
             }
             default:
