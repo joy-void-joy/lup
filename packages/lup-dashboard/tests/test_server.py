@@ -127,6 +127,7 @@ def test_ask_relays_a_request_to_the_host_and_returns_its_reply(page: Path) -> N
         "talkers": {},
         "running": None,
         "looks": {},
+        "standing": {"folds": [], "tones": [], "drawers": [], "banners": []},
     }
     assert host.asked == [ListLaunches()]
 
@@ -194,6 +195,7 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
             "talkers": {},
             "running": None,
             "looks": {},
+            "standing": {"folds": [], "tones": [], "drawers": [], "banners": []},
         },
     }
     # Watch 1, stopped, sends nothing more: not even its end.
@@ -455,7 +457,12 @@ def test_the_demo_answers_a_module_s_view_with_the_module_s_own_layout_over_its_
     assert [
         (each.module, each.view, each.place.letter)
         for each in listed.looks[lup].drawers
-    ] == [("transcripts", "conversation", "v")]
+    ] == [
+        ("adapters", "tasks", "t"),
+        ("judge", "since", "s"),
+        ("transcripts", "conversation", "v"),
+    ]
+    assert listed.standing == listed.looks[lup]
     assert {"earlier", "calls", "items", "call"} <= {
         each.name for each in listed.looks[lup].folds
     }
