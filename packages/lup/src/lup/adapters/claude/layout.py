@@ -45,6 +45,11 @@ class ClaudeLayout(Model):
         return self.directory / "settings.json"
 
     @property
+    def credentials(self) -> Path:
+        """The login, as Claude Code's sign-in keeps it in a file in the directory."""
+        return self.directory / ".credentials.json"
+
+    @property
     def state(self) -> Path:
         """The operator's state file: onboarding, folder trust, and the like."""
         return (

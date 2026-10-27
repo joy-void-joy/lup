@@ -38,6 +38,7 @@ from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.rooms.engine import stopped
 from lup.types import JsonObject, Model, MutableModel
 from lup_dev import commanding
+from lup_dev.accounts import AccountError, Accounts, RuntimeLogin
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import Adapter, claude, codex
@@ -272,10 +273,15 @@ private = typer.Typer(
     no_args_is_help=True,
     help="What never leaves under your name: the `Private` module's values.",
 )
+account = typer.Typer(
+    no_args_is_help=True,
+    help="The accounts rooms log in with, each a login per runtime.",
+)
 app.add_typer(rules, name="rules")
 app.add_typer(host, name="host")
 app.add_typer(inbox, name="inbox")
 app.add_typer(private, name="private")
+app.add_typer(account, name="account")
 
 
 def engine(environments: Path | None = None) -> Checker:
@@ -2159,6 +2165,54 @@ def launch(
         account=account,
     )
     raise typer.Exit(code=status)
+
+
+def machine_accounts() -> Accounts:
+    """Return every account on this machine, by the runtimes lup knows, as the settings place them."""
+    return Accounts(
+        layout=Layout.of(LupDevSettings()).accounts,
+        runtimes=[
+            RuntimeLogin(name=each.runtime.name(), login=each.login)
+            for each in adapters()
+        ],
+    )
+
+
+@account.command("list")
+def account_list() -> None:
+    """List every account, `default` first, and the runtimes each holds a login for.
+
+    Each is kept at `~/.local/share/lup/accounts/<name>/`, a directory per
+    runtime; `default` is listed whether or not anything signed in to it yet.
+    """
+    for line in machine_accounts().listed():
+        typer.echo(line)
+
+
+@account.command("logout")
+def account_logout(
+    name: Annotated[str, typer.Argument(help="The account, by its name.")],
+    runtime: Annotated[
+        str | None,
+        typer.Argument(
+            help="The runtime to log it out of, by its name; by default, every one."
+        ),
+    ] = None,
+) -> None:
+    """Log an account out of a runtime, or of every one: its login file is emptied in place, which a room's own logout can't do through a mount.
+
+    Run it yourself, in your own terminal. The login is forgotten on this
+    machine alone: it isn't revoked with the provider.
+    """
+    inside = [each.name() for each in runtimes() if each.inside()]
+    if inside:
+        message = (
+            f"this runs inside a {inside[0]} session: log an account out from your "
+            "own terminal"
+        )
+        raise AccountError(message)
+    for line in machine_accounts().logout(name, runtime):
+        typer.echo(line)
 
 
 @app.command("mount")

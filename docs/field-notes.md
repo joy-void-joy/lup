@@ -427,6 +427,13 @@ Read-only, on the operator's machine, logged in as the operator, for `forge/` (`
   - `--network=private` ran; its manual says it makes a namespace of the container's own, through pasta for rootless podman.
 - **Renaming.** `podman rename` renamed a launch's running `--rm` container, and its hooks were answered after (seen in the host's log, 2026-10-19).
 
+### Claude Code's sign-in through a single-file mount (Claude Code 2.1.311, measured on the host 2026-10-28)
+
+An account's `.credentials.json`, empty and mode 600, bind-mounted alone at `$CLAUDE_CONFIG_DIR/.credentials.json` in a container of the room's image (#324, M7):
+- **Signing in writes through.** After the sign-in and `/exit`, the account's file on the host held `claudeAiOauth`, and no temporary file was left in the directory. A second run on the same mount was signed in at once.
+- **`/logout` leaves the login in the file.** It reports no error and the session is logged out, but the file still holds `claudeAiOauth`: the binary's logout removes the file, which a mount refuses. Whether the token is revoked with the provider isn't known.
+- **Podman makes a missing landing itself:** the mount's target inside the home appeared on the host as an empty file owned by uid 100000.
+
 ### The CLIs' release channels (2026-10-13)
 
 Read in each vendor's installer and docs, then fetched once each through `launch/clis.py` into a scratch cache: Claude Code 2.1.296 and Codex 0.162.1, each checked against its published checksum, each answering `--version` on the host. Fetching both took 6 s here; with both current, a launch makes one request each.
