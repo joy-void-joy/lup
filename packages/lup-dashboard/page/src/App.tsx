@@ -21,11 +21,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { doing, everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
-import { useNow, useSame, useWatched } from "./hooks";
+import { useNow, useSame, useViews, useWatched } from "./hooks";
 import { REVIEW_PLACES, reviewKeys, type ReviewPlace } from "./keys";
 import { Keys } from "./Keys";
 import { adopt, merged } from "./looks";
-import type { Remote } from "./views";
+import { instanceOf, type Instance } from "./views";
+import { producerOf } from "./views/index";
 import { useNarrow } from "./Outline";
 import { Palette } from "./Palette";
 import { Review, type DrawerKind, type Jump } from "./Review";
@@ -265,8 +266,25 @@ export function App() {
         useMemo(() => new Map(live.map((agent) => [agent.key, { launch: agent.launch.launch, holding: agent.talker.holding === true }])), [live]),
         (map) => JSON.stringify([...map]),
     );
-    // What the host answered of each view the page doesn't lay out itself, by its instance's id.
-    const remote = useMemo<Remote>(() => new Map(), []);
+    // Each view of an agent's the page doesn't lay out itself, a drawer its repository's modules place, asked of the
+    // host for each agent running; and each a fold of theirs reads as it opens, once opened.
+    const [loads, setLoads] = useState<Instance[]>([]);
+    const placed = useMemo(
+        () =>
+            live.flatMap(({ conversation }) =>
+                looks.drawers(conversation.repository).flatMap((each) =>
+                    producerOf(each.module, each.view) === undefined
+                        ? [{ repository: conversation.repository, module: each.module, view: each.view, argument: { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null } }]
+                        : [],
+                ),
+            ),
+        [live, looks],
+    );
+    const remote = useViews(useMemo(() => [...placed, ...loads], [placed, loads]));
+    const load = useCallback((view: Instance) => {
+        const id = instanceOf(view.repository, view.module, view.view, view.argument);
+        setLoads((before) => (before.some((each) => instanceOf(each.repository, each.module, each.view, each.argument) === id) ? before : [...before, view]));
+    }, []);
     // What the banner says of an agent beyond its name: where it is and what it's doing, the core's; what it's working on,
     // its context and whether its flagged writes are held are its banner's parts, which its views say (`views/`).
     const banner = useCallback(
@@ -877,6 +895,7 @@ export function App() {
                         looks={looks}
                         running={runningNow}
                         remote={remote}
+                        load={load}
                     />
                     <div className="status">
                         {!replying ? (

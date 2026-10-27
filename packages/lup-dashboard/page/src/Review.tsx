@@ -121,7 +121,7 @@ import {
     type Written,
 } from "./review";
 import { freshRows, type Fresh } from "./since";
-import type { Offer, Remote, Running } from "./views";
+import type { Instance, Offer, Remote, Running } from "./views";
 
 /** Where the page asks the review to go: an agent's group, by its conversation, numbered so the same one asked twice goes twice. */
 export interface Jump {
@@ -191,6 +191,8 @@ interface Props {
     running: ReadonlyMap<string, Running>;
     /** What the host answered of each view the page doesn't lay out itself, by its instance's id (`views.ts`). */
     remote: Remote;
+    /** Told each view a fold reads as it opens, its module's, as the operator opens it, so the page asks it of the host. */
+    load: (view: Instance) => void;
 }
 
 /** Return the classes a line under an item or in a drawer is drawn with: what it shows, and whether it's set in under a summary or a file's header, as a file's reviewed line isn't. */
@@ -467,6 +469,10 @@ function decorations(
     for (const scope of scopesOf(laidOut)) {
         if (isDrawer(scope)) {
             marks.push({ from: scope.header.from, to: scope.header.from, value: Decoration.line({ class: drawerClasses(scope) }) });
+            // A view its module answers, each span in the look of its tone (`looks.ts`).
+            for (const span of scope.toned) {
+                marks.push({ from: span.from, to: span.to, value: marked(`tone-${span.tone}`) });
+            }
         } else {
             const region = scope as Region;
             const number = region.item.number;
@@ -648,6 +654,7 @@ export function Review({
     looks,
     running,
     remote,
+    load,
 }: Props) {
     // Where the cursor is, and whether a comment is being written: what the header says.
     const [head, setHead] = useState(0);
@@ -727,6 +734,14 @@ export function Review({
             const drawer = laidOut.drawers.find((each) => each.folds.some((own) => foldKey(own) === fold.key && own.kind === each.kind));
             if (drawer !== undefined) {
                 told(drawer.conversation, drawer.kind);
+            }
+            // A fold of a module's view's, read from another of its views as it opens.
+            for (const each of laidOut.drawers) {
+                for (const [name, view] of each.loads) {
+                    if (each.folds.some((own) => own.name === name && foldKey(own) === fold.key)) {
+                        load(view);
+                    }
+                }
             }
             // A call's input and output, read as its fold opens.
             for (const each of laidOut.drawers) {

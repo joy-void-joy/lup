@@ -159,20 +159,25 @@ function look(tone: Tone, tones: ReadonlyMap<string, Tone>, seen: Set<string> = 
     return { colour: tone.colour ?? taken.colour, weight: tone.weight ?? taken.weight };
 }
 
+/** Return `name` as CSS writes it in a selector or a variable's name: each character but a letter, a digit, `-` and `_` escaped by its code. */
+function ident(name: string): string {
+    return name.replace(/[^A-Za-z0-9_-]/g, (char) => `\\${(char.codePointAt(0) ?? 0).toString(16)} `);
+}
+
 /** Return the CSS the looks are drawn by: each kind's colour as a variable, and its class; each tone's class, its colour and weight. */
 export function styled(looks: Merged): string {
     const rules: string[] = [];
-    const variables = looks.kinds.map((each) => `--fold-${CSS.escape(each.name)}: var(--${CSS.escape(each.colour)});`);
+    const variables = looks.kinds.map((each) => `--fold-${ident(each.name)}: var(--${ident(each.colour)});`);
     rules.push(`:root { ${variables.join(" ")} }`);
     for (const each of looks.kinds) {
-        const name = CSS.escape(each.name);
+        const name = ident(each.name);
         rules.push(`.fold-${name}, .buffer .cm-editor .cm-foldPlaceholder.fold-${name} { color: var(--fold-${name}); }`);
     }
     const tones = new Map(looks.tones.map((each) => [each.name, each]));
     for (const tone of looks.tones) {
         const { colour, weight } = look(tone, tones);
-        const said = [colour === null ? null : `color: var(--${CSS.escape(colour)});`, weight === "bold" ? "font-weight: 700;" : weight === "dim" ? "opacity: 0.7;" : null];
-        rules.push(`.tone-${CSS.escape(tone.name)} { ${said.filter((each) => each !== null).join(" ")} }`);
+        const said = [colour === null ? null : `color: var(--${ident(colour)});`, weight === "bold" ? "font-weight: 700;" : weight === "dim" ? "opacity: 0.7;" : null];
+        rules.push(`.tone-${ident(tone.name)} { ${said.filter((each) => each !== null).join(" ")} }`);
     }
     return rules.join("\n");
 }

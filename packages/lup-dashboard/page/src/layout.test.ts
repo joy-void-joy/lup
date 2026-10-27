@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
 import { EMPTY, laid, nested, ownerOf, rowLabel, whose, UNREAD, type AgentDrawers, type Around, type Conversation, type Head, type Item, type Placed } from "./review";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
-import { blockId, instanceOf } from "./views";
+import { STANDING } from "./fixtures/looks";
+import { merged } from "./looks";
+import { blockId, instanceOf, type Blocks } from "./views";
 
 const AT = "2026-10-17T12:00:00Z";
 const WAITING: Item["rank"] = { name: "waiting on you", order: 0, notifies: true };
@@ -140,6 +142,56 @@ describe("the review's tree", () => {
         // Laid out again, as a comment's key is typed, each part keeps its id.
         const again = laid([note(4, PARENT), note(1, CHILD)], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS });
         expect(ids(again.nodes)).toEqual(ids(out.nodes));
+    });
+});
+
+describe("a drawer its module answers itself", () => {
+    // A repository whose module places a drawer of its own, which the page lays out from what the host answers.
+    const notes = { module: "notes", view: "notes", place: { under: "agent" as const, letter: "n", called: "the notes", colour: "ok" as const } };
+    const looks = merged({ "/r/lup.git": { ...STANDING, drawers: [...(STANDING.drawers ?? []), notes], tones: [...(STANDING.tones ?? []), { name: "warm", colour: "orange" }] } }, STANDING);
+    const argument = { runtime: "claude", session: "s1", agent: null };
+    const id = instanceOf("/r/lup.git", "notes", "notes", argument);
+    const more = { runtime: "claude", session: "s1", agent: null, page: 2 };
+    const answer: Blocks = {
+        summary: [{ text: "notes · 2", tone: "plain" }],
+        waiting: true,
+        count: 2,
+        offers: [],
+        blocks: [
+            { block: "line", id: "1", version: null, offers: [], spans: [{ text: "warm ", tone: "warm" }, { text: "words", tone: "plain" }] },
+            { block: "fold", id: "older", version: null, offers: [], kind: "notes", summary: [{ text: "older notes", tone: "muted" }], open: false, barred: false, content: { view: "older", argument: more } },
+        ],
+    };
+    const drawers = new Map([[whose(PARENT), TASKED]]);
+
+    it("is drawn from what the host answered of it, its spans in their tones, a fold read as it opens saying so until it is", () => {
+        const out = laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { looks, remote: new Map([[id, answer]]) });
+        const drawer = out.drawers.find((each) => each.kind === "notes")!;
+        expect(out.text.slice(drawer.header.from)).toBe("notes · 2\nwarm words\nolder notes\nreading…\n\n");
+        expect(drawer.waiting).toBe(true);
+        expect(drawer.toned.map((each) => [out.text.slice(each.from, each.to), each.tone])).toEqual([
+            ["warm ", "warm"],
+            ["words", "plain"],
+            ["older notes", "muted"],
+        ]);
+        expect([...drawer.loads]).toEqual([["older", { repository: "/r/lup.git", module: "notes", view: "older", argument: more }]]);
+        expect(drawer.folds.map((each) => [each.kind, each.name, each.closed])).toEqual([
+            ["notes", "older", true],
+            ["notes", "", true],
+        ]);
+        // Read, the fold holds what its view answered.
+        const older: Blocks = { summary: [], waiting: false, count: 0, offers: [], blocks: [{ block: "line", id: "o1", version: null, offers: [], spans: [{ text: "an old note", tone: "plain" }] }] };
+        const read = laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, {
+            looks,
+            remote: new Map([
+                [id, answer],
+                [instanceOf("/r/lup.git", "notes", "older", more), older],
+            ]),
+        });
+        expect(read.text).toContain("older notes\nan old note\n");
+        // Not answered yet, it isn't shown; nor where the page lays it out itself, as its own drawers' toned spans aren't marked.
+        expect(laid([], [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { looks }).drawers.map((each) => each.kind)).toEqual(["tasks", "conversation"]);
+        expect(out.drawers.find((each) => each.kind === "tasks")?.toned).toEqual([]);
     });
 });
 

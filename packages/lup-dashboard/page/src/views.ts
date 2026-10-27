@@ -139,5 +139,13 @@ export function blockId(instance: string, block: string): string {
     return `${instance} ${block}`;
 }
 
+/** A view of a module's, of a repository, by its module's name and its own, of what it's given: what the page asks of the host (`module-view`). */
+export interface Instance {
+    repository: string;
+    module: string;
+    view: string;
+    argument: unknown;
+}
+
 /** What a remote view answered, by its instance's id, as the host keeps the page told (`module-view`). */
 export type Remote = ReadonlyMap<string, Blocks>;

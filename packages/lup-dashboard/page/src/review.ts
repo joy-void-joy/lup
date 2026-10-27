@@ -68,12 +68,14 @@ import { adopted, kindOf, type Merged } from "./looks";
 import {
     blockId,
     conversationOf,
+    instanceOf,
     whose,
     UNREAD,
     type AgentDrawers,
     type Answered,
     type Block as ViewBlock,
     type Drawers,
+    type Instance,
     type Mounted,
     type Offer,
     type Remote,
@@ -354,6 +356,10 @@ export interface Drawer extends Scope {
     view: Mounted;
     /** Each file it shows, by its path, as its view shows it. */
     diffs: ReadonlyMap<string, Filed>;
+    /** Each of its folds read from another view as it opens, by the fold's name, and that view. */
+    loads: ReadonlyMap<string, Instance>;
+    /** Each span of a view its module answers, in the tone it names: what's drawn in its look. */
+    toned: (Span & { tone: string })[];
     talk: Talk | null;
     /** What its "since you approved" shows, by file, where it's that drawer. */
     files: SinceFile[];
@@ -1285,6 +1291,19 @@ export function laid(
         const reviewed: ReviewedLine[] = [];
         let settled: Span | null = null;
         const diffs = new Map<string, Filed>();
+        const loads = new Map<string, Instance>();
+        const toned: (Span & { tone: string })[] = [];
+        // A view its module answers is drawn in its tones; the page's own views' lines in what the review draws them as.
+        const remotely = producerOf(view.module, view.view) === undefined;
+        const tones = (from: number, spans: readonly { text: string; tone?: string }[]) => {
+            let at = from;
+            for (const each of spans) {
+                if (remotely && each.text !== "") {
+                    toned.push({ from: at, to: at + each.text.length, tone: each.tone ?? "plain" });
+                }
+                at += each.text.length;
+            }
+        };
         const children: Placed[] = [];
         const summary = w.line(label);
         if (answer.talk !== undefined) {
@@ -1338,6 +1357,7 @@ export function laid(
                             const line = lineOfView(block);
                             const aside = { kind: line.kind, ...w.line(line.text) };
                             into.asides.push(aside);
+                            tones(aside.from, block.spans ?? []);
                             const file = answer.files?.get(block.id);
                             if (file !== undefined) {
                                 reviewed.push({ from: aside.from, to: aside.to, file });
@@ -1357,9 +1377,22 @@ export function laid(
                             const line = lineOfView({ spans: block.summary });
                             const head = { kind: line.kind, ...w.line(line.text) };
                             into.asides.push(head);
-                            const content = Array.isArray(block.content) ? block.content : [];
+                            tones(head.from, block.summary);
                             const inner: Placed[] = [];
-                            layBlocks(content, false, inner);
+                            if (Array.isArray(block.content)) {
+                                layBlocks(block.content, false, inner);
+                            } else {
+                                // Read from another of its module's views as it opens: what the host answered of it, or a
+                                // line saying it's being read, which opening the fold asks for.
+                                const loaded: Instance = { repository: view.repository, module: view.module, view: block.content.view, argument: block.content.argument };
+                                loads.set(block.id, loaded);
+                                const read = remote.get(instanceOf(loaded.repository, loaded.module, loaded.view, loaded.argument));
+                                if (read === undefined) {
+                                    into.asides.push({ kind: "plain", ...w.line("reading…") });
+                                } else {
+                                    layBlocks(read.blocks ?? [], false, inner);
+                                }
+                            }
                             const last = w.at - 1;
                             if (top && block.kind === "lines") {
                                 settled = { from: head.from, to: head.to };
@@ -1390,6 +1423,8 @@ export function laid(
             conversation,
             view,
             diffs,
+            loads,
+            toned,
             talk,
             files: since?.files ?? [],
             reviewed,
