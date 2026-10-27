@@ -5,9 +5,13 @@
 // agent's words or a comment, is read on its own by `@codemirror/lang-markdown`'s
 // GFM parser, mounted in the buffer's syntax tree where the stretch is
 // (`language`), the comments under an item's lines left out of the item's text,
-// so a table or a list goes on past them; so the tree knows the list item at
-// the cursor, and Enter in a comment continues it (`continued`), as `o` and
-// `O` on one of its items open the next item or the one before (`openedLine`).
+// so a table or a list goes on past them. A comment's lists are written as
+// neovim's Markdown writes them: Enter, `o` and `O` open a line at the
+// indentation of the one they're on, never with a list's bullet or number
+// (`brokenLine`, `openedLine`), an indentation nothing's typed after taken back
+// as the writing ends (`unindented`), and vim's `>>` and `<<`, as Ctrl+T and Ctrl+D,
+// move a line in and out by the list's indentation, nesting it under the item
+// above as the tree reads it (`shifted`).
 // From the tree: emphasis, strong, code, headings and links highlighted by
 // their tags, as a changed file's code is; the marks of each hidden, but on the
 // line the cursor is on in a comment, where they're shown to be edited, as
@@ -15,18 +19,28 @@
 // up, by decorations and never text, so a row stays one line of the buffer, vim
 // moves over it as one, and a comment on it quotes its source (`decorate`;
 // `docs/dashboard.md`, *The review*).
-import { insertNewlineContinueMarkupCommand, markdownLanguage } from "@codemirror/lang-markdown";
-import { Language, ParseContext, defineLanguageFacet, languageDataProp, syntaxHighlighting, syntaxTree } from "@codemirror/language";
+import { markdownLanguage } from "@codemirror/lang-markdown";
 import {
+    Language,
+    ParseContext,
+    defineLanguageFacet,
+    getIndentUnit,
+    indentString,
+    languageDataProp,
+    syntaxHighlighting,
+    syntaxTree,
+} from "@codemirror/language";
+import {
+    EditorSelection,
     StateEffect,
     StateField,
+    countColumn,
     type ChangeDesc,
-    type ChangeSpec,
     type EditorState,
     type Extension,
+    type Line,
     type Range,
     type Text,
-    type Transaction,
     type TransactionSpec,
 } from "@codemirror/state";
 import { Decoration, ViewPlugin, WidgetType, type DecorationSet, type EditorView, type ViewUpdate } from "@codemirror/view";
@@ -212,134 +226,147 @@ class Sourced extends Parser {
 /** The text's language: its sources read as Markdown, each in a tree of its own, the rest of the text plain. */
 export const language = new Language(own, new Sourced(), [], "sources");
 
-/**
- * Enter in a comment: the next item of the list the cursor is in, at its indentation, with its bullet or the next
- * number, or the quote mark of the quote it's in; on an empty item, the list's end. A plain line break elsewhere.
- */
-export const continued = insertNewlineContinueMarkupCommand({ nonTightLists: false });
-
-/** The marks a line of Markdown begins its blocks with: a quote's `>`, a list item's bullet or number, a task's box. */
-const BLOCK_MARKS = new Set(["QuoteMark", "ListMark", "TaskMarker"]);
-
-/** The blocks a line's marks continue: a list's item, a quote. */
-const CONTINUED = new Set(["ListItem", "Blockquote"]);
-
-/**
- * What a line of a comment begins with, which a line opened beside it takes: its marks and the space around them, up
- * to its words (`prefix`); the list item it begins, if any, with its number where its list is numbered, and where that
- * number is written in `prefix`; and whether nothing follows its marks, as on an item just begun.
- */
-interface Markup {
-    prefix: string;
-    item: SyntaxNode | null;
-    number: { value: number; from: number; to: number } | null;
-    blank: boolean;
-}
-
-/** Return whether the character at `at` of `state`'s text is a space or a tab. */
-function spaceAt(state: EditorState, at: number): boolean {
-    const character = state.doc.sliceString(at, at + 1);
-    return character === " " || character === "\t";
+/** Return the indentation `text`, a line, begins with: its spaces and tabs before anything else. */
+function indentationOf(text: string): string {
+    return /^[ \t]*/.exec(text)?.[0] ?? "";
 }
 
 /**
- * Return what the line `line` of `state` begins with (`Markup`), read from the Markdown tree: its marks, a task's box
- * unticked; none where it's in no list and no quote, or in a block of code, whose lines carry no marks.
+ * Return what Enter does in a comment, as neovim's Markdown has it: a line break, the new line at the indentation of
+ * the one it's broken from, and never a list's bullet or number, which the operator types where they want an item
+ * (`- `, `1. `). As vim's `autoindent` has it, the spaces after the cursor go, so what follows starts at that
+ * indentation, and a line left holding nothing but spaces is emptied.
  */
-function markupOf(state: EditorState, line: Span): Markup | null {
-    const tree = syntaxTree(state);
-    let at = line.from;
-    let prefix = "";
-    let item: SyntaxNode | null = null;
-    let number: Markup["number"] = null;
-    for (;;) {
-        const from = at;
-        while (at < line.to && spaceAt(state, at)) {
-            at += 1;
-        }
-        prefix += state.sliceDoc(from, at);
-        const mark = at < line.to ? tree.resolveInner(at, 1) : null;
-        if (mark === null || mark.from !== at || !BLOCK_MARKS.has(mark.name)) {
-            break;
-        }
-        const written = state.sliceDoc(mark.from, mark.to);
-        if (mark.name === "ListMark") {
-            item = mark.parent;
-            // A numbered item's mark is its number, then `.` or `)`.
-            const value = Number.parseInt(written, 10);
-            number = item?.parent?.name === "OrderedList" ? { value, from: prefix.length, to: prefix.length + written.length - 1 } : null;
-        }
-        prefix += mark.name === "TaskMarker" ? "[ ]" : written;
-        at = mark.to;
-    }
-    let inside = false;
-    for (let node: SyntaxNode | null = tree.resolveInner(at, at < line.to ? 1 : -1); node !== null; node = node.parent) {
-        if (CODE_BLOCKS.has(node.name)) {
-            return null;
-        }
-        inside ||= CONTINUED.has(node.name);
-    }
-    return inside || item !== null ? { prefix, item, number, blank: at >= line.to } : null;
-}
-
-/** Return the marks of `markup` with its item's number written as `value`, where it has one. */
-function numbered(markup: Markup, value: number): string {
-    const number = markup.number;
-    return number === null ? markup.prefix : `${markup.prefix.slice(0, number.from)}${value}${markup.prefix.slice(number.to)}`;
-}
-
-/**
- * Return the changes that number each item of a numbered list from `first` on one more, as long as they're numbered one
- * after another from `from`, as Enter does once it adds an item before them.
- */
-function renumbered(state: EditorState, first: SyntaxNode | null, from: number): ChangeSpec[] {
-    const changes: ChangeSpec[] = [];
-    let expected = from;
-    for (let node = first; node !== null; node = node.nextSibling) {
-        const mark = node.name === "ListItem" ? node.getChild("ListMark") : null;
-        if (mark === null) {
-            continue;
-        }
-        if (Number.parseInt(state.sliceDoc(mark.from, mark.to), 10) !== expected) {
-            break;
-        }
-        changes.push({ from: mark.from, to: mark.to - 1, insert: `${expected + 1}` });
-        expected += 1;
-    }
-    return changes;
+export function brokenLine(state: EditorState): TransactionSpec {
+    return state.changeByRange((range) => {
+        const line = state.doc.lineAt(range.from);
+        const indentation = indentationOf(line.text);
+        const before = state.sliceDoc(line.from, range.from);
+        const from = indentationOf(before) === before ? line.from : range.from;
+        const end = state.doc.lineAt(range.to);
+        const to = range.to + indentationOf(state.sliceDoc(range.to, end.to)).length;
+        const insert = `\n${indentation}`;
+        return { changes: { from, to, insert }, range: EditorSelection.cursor(from + insert.length) };
+    });
 }
 
 /**
  * Return what `o` (`below`) or `O` does on the line of a comment at `position`: a line opened below it or above it,
- * the cursor at its end. Below a list's item, the next item, as Enter at the line's end starts it (`continued`); above
- * one, the item before it, at its indentation, with its bullet, or with its number, the items from it on numbered one
- * more; beside a quote's line, its quote mark; beside an item's further line, its indentation. On an item just begun,
- * where Enter would end the list, `o` starts the next all the same, since it never changes the line it's on. A plain
- * line elsewhere.
+ * at its indentation, the cursor at its end, and never a list's bullet or number, as neovim's Markdown opens one.
  */
 export function openedLine(state: EditorState, position: number, below: boolean): TransactionSpec {
     const line = state.doc.lineAt(position);
-    const markup = markupOf(state, line);
-    if (below && (markup === null || !markup.blank)) {
-        const made: Transaction[] = [];
-        const atEnd = state.update({ selection: { anchor: line.to } }).state;
-        const done = continued({ state: atEnd, dispatch: (transaction) => made.push(transaction) }) ? made[0] : undefined;
-        if (done === undefined) {
-            return { changes: { from: line.to, insert: "\n" }, selection: { anchor: line.to + 1 } };
-        }
-        return { changes: done.changes, selection: done.selection };
-    }
-    if (markup === null) {
-        return { changes: { from: line.from, insert: "\n" }, selection: { anchor: line.from } };
-    }
-    const value = markup.number?.value ?? 0;
+    const indentation = indentationOf(line.text);
     if (below) {
-        const prefix = numbered(markup, value + 1);
-        const later = markup.number === null ? [] : renumbered(state, markup.item?.nextSibling ?? null, value + 1);
-        return { changes: [{ from: line.to, insert: `\n${prefix}` }, ...later], selection: { anchor: line.to + 1 + prefix.length } };
+        return { changes: { from: line.to, insert: `\n${indentation}` }, selection: { anchor: line.to + 1 + indentation.length } };
     }
-    const later = markup.number === null ? [] : renumbered(state, markup.item, value);
-    return { changes: [{ from: line.from, insert: `${markup.prefix}\n` }, ...later], selection: { anchor: line.from + markup.prefix.length } };
+    return { changes: { from: line.from, insert: `${indentation}\n` }, selection: { anchor: line.from + indentation.length } };
+}
+
+/**
+ * Return what ending insert mode does to the line of a comment at `position`: emptied where it holds nothing but its
+ * indentation, as vim's `autoindent` takes back an indentation nothing was typed after; none elsewhere.
+ */
+export function unindented(state: EditorState, position: number): TransactionSpec | null {
+    const line = state.doc.lineAt(position);
+    return line.length > 0 && indentationOf(line.text) === line.text ? { changes: { from: line.from, to: line.to } } : null;
+}
+
+/** Where a line that begins a list's item begins, and where the item's words begin, in columns. */
+interface Item {
+    indentation: number;
+    words: number;
+}
+
+/**
+ * Return where the line `line` of `state` begins a list's item (`Item`), its bullet or number read from the Markdown
+ * tree, right after its indentation; none where it begins none, as in a block of code. An item's words begin one column
+ * past its mark where nothing follows it, or where what follows is indented as code is, five columns or more past it,
+ * as Markdown reads them.
+ */
+function itemOf(state: EditorState, line: Line): Item | null {
+    const indentation = indentationOf(line.text);
+    const at = line.from + indentation.length;
+    const mark = at < line.to ? syntaxTree(state).resolveInner(at, 1) : null;
+    if (mark === null || mark.name !== "ListMark" || mark.from !== at) {
+        return null;
+    }
+    const marked = line.text.slice(0, mark.to - line.from);
+    const spaces = indentationOf(line.text.slice(marked.length));
+    const column = countColumn(marked, state.tabSize);
+    const gap = countColumn(marked + spaces, state.tabSize) - column;
+    const empty = marked.length + spaces.length === line.length;
+    return { indentation: countColumn(indentation, state.tabSize), words: column + (empty || gap > 4 ? 1 : gap) };
+}
+
+/**
+ * Return the column the line `number` of `state` goes to as it's moved in (`inward`) or out, from `column`, its
+ * indentation, by the list's indentation, read from the lines above it in its comment: in, to where the words of the
+ * nearest item above at its indentation or less begin, which nests it under that item as Markdown nests one; out, to
+ * where the words of the nearest item above indented less begin, where the line is past them, else to where that item
+ * begins. One indent unit where no item above says, or where the line is in past that item's words already.
+ */
+function shiftedTo(state: EditorState, number: number, column: number, inward: boolean): number {
+    const from = state.doc.line(number).from;
+    const comment = (state.field(sources, false) ?? []).find((each) => each.kind === "comment" && from >= each.from && from <= each.to);
+    const first = comment === undefined ? number : state.doc.lineAt(comment.from).number;
+    for (let above = number - 1; above >= first; above -= 1) {
+        const item = itemOf(state, state.doc.line(above));
+        if (item === null || (inward ? item.indentation > column : item.indentation >= column)) {
+            continue;
+        }
+        if (inward) {
+            return item.words > column ? item.words : column + getIndentUnit(state);
+        }
+        return item.words < column ? item.words : item.indentation;
+    }
+    return Math.max(0, column + (inward ? 1 : -1) * getIndentUnit(state));
+}
+
+/**
+ * Return what vim's `>` and `<` do to the lines of `state`'s selection, `>>` and `<<` to the cursor's line, as Ctrl+T
+ * and Ctrl+D do in insert mode: the first of them moved in (`inward`) or out by the list's indentation (`shiftedTo`),
+ * and each other by as much, so an item's own items go with it; an empty line stays empty, but the cursor's, as on a
+ * line just begun. The cursor stays on what it was on, or after the indentation where it was in it. None where nothing
+ * moves.
+ */
+export function shifted(state: EditorState, inward: boolean): TransactionSpec | null {
+    const numbers = new Set<number>();
+    for (const range of state.selection.ranges) {
+        const last = state.doc.lineAt(range.to);
+        // A selection of whole lines ends at the start of the line after them.
+        const end = !range.empty && range.to === last.from && last.number > 1 ? last.number - 1 : last.number;
+        for (let number = state.doc.lineAt(range.from).number; number <= end; number += 1) {
+            if (range.empty || state.doc.line(number).length > 0) {
+                numbers.add(number);
+            }
+        }
+    }
+    const lines = [...numbers].sort((a, b) => a - b).map((number) => state.doc.line(number));
+    const top = lines[0];
+    if (top === undefined) {
+        return null;
+    }
+    const columnOf = (text: string) => countColumn(indentationOf(text), state.tabSize);
+    const step = shiftedTo(state, top.number, columnOf(top.text), inward) - columnOf(top.text);
+    const moving = lines.flatMap((line) => {
+        const was = indentationOf(line.text);
+        const now = indentString(state, Math.max(0, columnOf(line.text) + step));
+        return now === was ? [] : [{ line, from: line.from, to: line.from + was.length, insert: now }];
+    });
+    if (moving.length === 0) {
+        return null;
+    }
+    const changes = state.changes(moving.map(({ from, to, insert }) => ({ from, to, insert })));
+    const carried = (position: number) => {
+        const moved = moving.find(({ line }) => position >= line.from && position <= line.to);
+        return moved !== undefined && position <= moved.to ? changes.mapPos(moved.to, 1) : changes.mapPos(position, 1);
+    };
+    const selection = EditorSelection.create(
+        state.selection.ranges.map((range) => EditorSelection.range(carried(range.anchor), carried(range.head))),
+        state.selection.mainIndex,
+    );
+    return { changes, selection };
 }
 
 /** Return the Markdown tree's root of `each`, in `tree`, where it's been read; none before it has. */
