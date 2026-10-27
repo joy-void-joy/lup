@@ -1967,11 +1967,21 @@ function remarkedAt(drawer: Drawer, remark: Remark): number | undefined {
     return drawer.lines.length === 0 ? undefined : shownAt(drawer, lastOf(remark.quote));
 }
 
-/** Return `draft` with `number` in `list` if it wasn't, and out of it if it was. */
+/**
+ * Return `draft` with `number` in `list` if it wasn't, and out of it if it was. Put in one list, it leaves the other:
+ * an item marked read is no longer left for later, which would keep it out of what's sent (`covered`), and an item
+ * left for later is no longer marked read. One a draft kept from before holds in both is taken out of the other alone,
+ * so the key does what it says the first time.
+ */
 export function toggled(draft: Draft, list: "done" | "parked", number: number): Draft {
     const present = draft[list] ?? [];
-    const next = present.includes(number) ? present.filter((each) => each !== number) : [...present, number];
-    return { ...draft, [list]: next };
+    const other = list === "done" ? "parked" : "done";
+    const elsewhere = draft[other] ?? [];
+    if (present.includes(number) && !elsewhere.includes(number)) {
+        return { ...draft, [list]: present.filter((each) => each !== number) };
+    }
+    const kept = present.includes(number) ? present : [...present, number];
+    return { ...draft, [list]: kept, [other]: elsewhere.filter((each) => each !== number) };
 }
 
 /** Return the items a draft answers: each with a comment that says something, or marked done, but the parked ones. */
