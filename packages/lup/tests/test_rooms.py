@@ -148,11 +148,11 @@ def test_a_run_carries_the_wall_the_terminal_the_variables_and_the_mounts() -> N
         "--env=TERM=xterm-256color",
         "--env=LANG=en_US.UTF-8",
         "--env=HOME=/home/op",
-        "--mount=type=tmpfs,destination=/home/op,tmpfs-mode=0700,U=true",
-        "--mount=type=tmpfs,destination=/home/op/.cache,tmpfs-mode=0700,U=true",
-        "--mount=type=tmpfs,destination=/home/op/.local,tmpfs-mode=0700,U=true",
-        "--mount=type=tmpfs,destination=/home/op/.local/share,tmpfs-mode=0700,U=true",
-        "--mount=type=tmpfs,destination=/home/op/.local/share/uv,tmpfs-mode=0700,U=true",
+        "--mount=type=tmpfs,destination=/home/op,tmpfs-mode=0700,U=true,notmpcopyup",
+        "--mount=type=tmpfs,destination=/home/op/.cache,tmpfs-mode=0700,U=true,notmpcopyup",
+        "--mount=type=tmpfs,destination=/home/op/.local,tmpfs-mode=0700,U=true,notmpcopyup",
+        "--mount=type=tmpfs,destination=/home/op/.local/share,tmpfs-mode=0700,U=true,notmpcopyup",
+        "--mount=type=tmpfs,destination=/home/op/.local/share/uv,tmpfs-mode=0700,U=true,notmpcopyup",
         "--mount=type=bind,source=/srv/lup.git,destination=/srv/lup.git",
         "--mount=type=bind,source=/srv/lup.git/config,destination=/srv/lup.git/config,ro=true",
         "--mount=type=tmpfs,destination=/srv/lup.git/tree/other,notmpcopyup",
@@ -281,7 +281,42 @@ def test_a_mount_at_a_directory_inside_the_home_isnt_a_tmpfs_too() -> None:
         if argument.startswith("--mount=type=tmpfs")
     ]
 
-    assert owned == ["--mount=type=tmpfs,destination=/home/op,tmpfs-mode=0700,U=true"]
+    assert owned == [
+        "--mount=type=tmpfs,destination=/home/op,tmpfs-mode=0700,U=true,notmpcopyup"
+    ]
+
+
+def test_a_directory_inside_a_bind_mount_in_the_home_isnt_a_tmpfs() -> None:
+    engine, _ = podman()
+    repository = Path("/home/op/work/lup.git")
+    invocation = Invocation(
+        container=Container(
+            image=IMAGE,
+            mounts=[
+                Mount(source=repository),
+                Mount(
+                    source=Path("/home/op/.lup/hidden"),
+                    target=repository / "tree/dev/.venv",
+                    read_only=True,
+                ),
+                Mask(target=repository / "tree/other/tmp"),
+            ],
+        ),
+        command=["true"],
+        workdir=repository / "tree/dev",
+        home=Path("/home/op"),
+    )
+
+    owned = [
+        argument
+        for argument in engine.command(invocation)
+        if argument.startswith("--mount=type=tmpfs") and "U=true" in argument
+    ]
+
+    assert owned == [
+        "--mount=type=tmpfs,destination=/home/op,tmpfs-mode=0700,U=true,notmpcopyup",
+        "--mount=type=tmpfs,destination=/home/op/work,tmpfs-mode=0700,U=true,notmpcopyup",
+    ], "a tmpfs over the worktree would cover it with a copy of it"
 
 
 def test_ensure_builds_a_missing_image_with_its_projects_label() -> None:
