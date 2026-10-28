@@ -16,9 +16,12 @@
 // conversation (`conversation.ts`), each a fold of its own kind under a short
 // label, one under the other, folded until opened in place; a comment in the
 // conversation or on the changed files is a remark to the agent, the one on
-// code recording the version it was written on. A subagent's group under its
-// parent's, each group folding whole under its banner. Each part keeps an id
-// across layouts. Their kind's rank, which the host gives, says only which
+// code recording the version it was written on. Each comment goes under the
+// last line it quotes of the block it's on, followed there as the block
+// changes (`anchors.ts`). A subagent's group under its parent's, each group
+// folding whole under its banner. Each part keeps an id across layouts, and
+// each line is the innermost part's laid out on it, which the editor keeps the
+// buffer by (`reconcile.ts`). Their kind's rank, which the host gives, says only which
 // `]a` and `[a` stop at. Each fold has a kind: the item whole, a file, a
 // function's or a class's body, a run of unchanged lines, the context, a
 // drawer's, a module's own. What's folded by default: the context, each run of

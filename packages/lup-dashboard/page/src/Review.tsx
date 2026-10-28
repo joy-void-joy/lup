@@ -29,8 +29,12 @@
 // written, whom it goes to; at its end, how many items are to answer and how
 // many are new; under it, the stack pins the headers the top of the view is in
 // (`Stack.tsx`); beside the review, the overview (`Outline.tsx`). As what
-// it shows changes, the cursor's line stays where it is on screen, so nothing
-// arriving above moves what the operator reads. An agent's answer shows the
+// it shows changes, the buffer is changed by the fewest changes that keep each
+// part's lines its own (`reconcile.ts`), the cursor, a selection and the folds
+// carried through them, each line that came flashing, and the cursor's line
+// stays where it is on screen, so nothing arriving above moves what the
+// operator reads; what ticks or measures is drawn beside the text
+// (`ticking.ts`). An agent's answer shows the
 // operator's words it answers above it, each of its citations of them as its
 // id, the passage it cites folded under its line, opened by a click on the id,
 // and the passage it answers marked among the operator's words, a click there
