@@ -1961,7 +1961,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Context(number=number, entries=entries, anchor=5)
 
     def long_conversation(self, length: int = 300) -> list[Said | StandIn]:
-        """Return the first worker's conversation, `length` steps after its brief, as a day's work reads: what it's on, then a run of calls reading a module, changing a function, running its tests and reading them, in turn; the operator's word every hundred steps, from the fiftieth."""
+        """Return the first worker's conversation, `length` steps after its brief, as a day's work reads: what it's on, then a run of calls reading a module, changing a function, running its tests and reading them, in turn. A subagent never has the operator's typed words after its brief, so its whole run is one exchange, its drawer keeping only the agent's last words open (`EARLIER_KIND.keeps_open`)."""
         tree = worker_worktree(1)
 
         def step(at: int) -> Said | StandIn:
@@ -1969,12 +1969,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             module = f"packages/lup/src/lup/worker1/step_{k}.py"
             tests = f"packages/lup/tests/test_step_{k}.py"
             when = self.ago(400 - at)
-            if at % 100 == 50:
-                return Said(
-                    by="operator",
-                    text=f"Good. Carry on from step {k}.",
-                    at=when,
-                )
             match at % 5:
                 case 0:
                     return Said(
