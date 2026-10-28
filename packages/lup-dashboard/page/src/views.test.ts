@@ -13,7 +13,7 @@ type Since = components["schemas"]["Since"];
 /**
  * What a fixture gives a view, as JSON, so its module's Python, once it answers the view itself, is given the same:
  * the items waiting, each item's files as the host answered them, each agent's data, each conversation running, and
- * each conversation's path as the operator reads it named.
+ * each conversation's path as the operator reads them named.
  */
 interface Given {
     items?: Item[];
@@ -138,7 +138,7 @@ const CASES: Record<string, Case[]> = {
     "inbox message": [
         { name: "a note", repository: REPOSITORY, argument: { number: 62 }, given: { items: [item(62, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Read the records.\n\nFour kinds." })] } },
         {
-            name: "a message to another conversation, named by its path",
+            name: "a message to another conversation, named by their path",
             repository: REPOSITORY,
             argument: { number: 65 },
             given: {
@@ -180,7 +180,7 @@ const CASES: Record<string, Case[]> = {
     ],
     "adapters banner": [
         {
-            name: "an agent at work, its context measured",
+            name: "an agent at work, their context measured",
             repository: REPOSITORY,
             argument: AGENT,
             given: { drawers: { [whose(PARSER)]: { tasks: [{ id: "2", subject: "Write the reader", status: "in_progress", active: "Writing the reader" }], usage: { used: 112_000, window: 1_000_000, model: "opus" } } } },

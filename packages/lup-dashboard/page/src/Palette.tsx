@@ -1,4 +1,4 @@
-// The command palette: every agent the host serves, typed for, each going to its
+// The command palette: every agent the host serves, typed for, each going to their
 // group in the review. Ctrl+K opens it, Escape closes it.
 import { Command } from "cmdk";
 import { useEffect } from "react";
@@ -9,7 +9,7 @@ interface Props {
     open: boolean;
     setOpen: (open: boolean) => void;
     agents: Agent[];
-    /** Go to an agent's group, by its conversation's path. */
+    /** Go to an agent's group, by their conversation's path. */
     select: (path: string) => void;
     now: Date;
 }

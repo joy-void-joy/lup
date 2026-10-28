@@ -161,7 +161,7 @@ function theirs(item: Item): string {
     }
 }
 
-/** Return the text an agent's item holds of its own words, which an edit changes: a message's, a question's, a friction's, how it felt's, a stop's; none of any other. */
+/** Return the text an agent's item holds of their own words, which an edit changes: a message's, a question's, a friction's, how it felt's, a stop's; none of any other. */
 export function ownText(item: Item): string | null {
     const reason = item.reason;
     switch (reason.reason) {
@@ -209,7 +209,7 @@ export function outdated(item: Item | undefined, quote: Quote | Offsets | null |
 /**
  * Return the lines of the operator's words that `item`, an agent's, answers (`Message.answers`), above its own: for
  * each of their items it answers, who wrote it and what it is, then what of it was the agent's: a review's message and
- * remarks to it and its comments on the agent's own items, each after what it's on, a comment on a passage an edit
+ * remarks to them and its comments on the agent's own items, each after what it's on, a comment on a passage an edit
  * changed said to be outdated; a message's words; an answer's rulings, each after its decision, then its comment. The
  * operator's items are read from `answers`, the agent's they're on from `commented`; none where the item answers
  * nothing.

@@ -90,9 +90,9 @@ describe("subagents nested under their parent", () => {
             ["━━ a1 ━━", 1],
             ["━━ a2 ━━", 2],
         ]);
-        // After the parent's items and its drawers.
+        // After the parent's items and their drawers.
         expect(out.text.indexOf("━━ a1")).toBeGreaterThan(out.text.indexOf("conversation · 2 steps"));
-        // A subagent whose parent has no group goes under its grandparent's.
+        // A subagent whose parent has no group goes under their grandparent's.
         const skipped = nested(
             [
                 { key: whose(GRANDCHILD), conversation: GRANDCHILD, head: { conversation: GRANDCHILD }, items: [] },
@@ -108,7 +108,7 @@ describe("subagents nested under their parent", () => {
 });
 
 describe("groups folding whole", () => {
-    it("folds each group under its banner up to the next as deep or shallower, a subagent's inside its parent's", () => {
+    it("folds each group under its banner up to the next as deep or shallower, a subagent's inside their parent's", () => {
         const items = [note(1, CHILD), note(4, PARENT), note(2, OTHER)];
         const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], new Map(), undefined, { parents: PARENTS });
         const folds = out.groups.map((each) => each.fold);
@@ -331,7 +331,7 @@ describe("the header stack", () => {
         expect(shown(91)).toEqual(["0 ━━ s2 ━━", "10 ── @3 note ──"]);
     });
 
-    it("pins a subagent's banner under its parent's, then its item's header", () => {
+    it("pins a subagent's banner under their parent's, then their item's header", () => {
         const nestedOut = laid([note(1, CHILD), note(4, PARENT)], [PARENT, CHILD], banner, header, EMPTY, NOTHING, [], new Map(), undefined, { parents: PARENTS });
         const nestedRoots = stickies(nestedOut);
         const deep = nestedOut.text.indexOf("Second line.", nestedOut.text.indexOf("@1"));
@@ -364,7 +364,7 @@ describe("the overview", () => {
     const said = (rows: ReturnType<typeof outlineOf>) =>
         rows.map((each) => `${"  ".repeat(each.depth)}${each.text} [${each.marks.join(",")}]${each.draft.length === 0 ? "" : ` {${each.draft.join(",")}}`}`);
 
-    it("lists each agent and its items in the review's own order, nested as the review nests them, each marked", () => {
+    it("lists each agent and their items in the review's own order, nested as the review nests them, each marked", () => {
         const out = laid(items, [PARENT], banner, header, EMPTY, NOTHING, [], drawers, undefined, { parents: PARENTS, remote: TALKED });
         const rows = outlineOf(out, reading);
         // How each stands, then, apart, what the draft does with it on the next Ctrl+Enter.

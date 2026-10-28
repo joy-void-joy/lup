@@ -536,7 +536,7 @@ kbd {
     color: var(--info);
 }
 
-/* What a verb acts on where it isn't what the cursor is on, as the agent from one of its items. */
+/* What a verb acts on where it isn't what the cursor is on, as the agent from one of their items. */
 .keys-on {
     color: var(--info);
 }
@@ -669,8 +669,8 @@ kbd {
     font-weight: 700;
 }
 
-/* A conversation's lines in its drawer: an item of lup's inbox it sent the
-   operator, in the orange of the call that made it, and one it was sent, in
+/* A conversation's lines in their drawer: an item of lup's inbox they sent the
+   operator, in the orange of the call that made it, and one they were sent, in
    the blue of the operator's words; each item's text under its line, set off
    by a bar. */
 .aside-item-from {

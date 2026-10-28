@@ -1,5 +1,5 @@
 // The overview beside the review (`outline.ts`; `docs/dashboard.md`, *The
-// review*): every agent, a subagent under its parent, and its items, each
+// review*): every agent, a subagent under their parent, and their items, each
 // marked by how it stands and what the draft does with it, live; what's in
 // view bracketed and the cursor's entry highlighted as the view moves, the pane
 // scrolling to keep them shown, where the margin is the structure of what's in
