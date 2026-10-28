@@ -514,6 +514,13 @@ Codex run from the room's terminal on a scratch `CODEX_HOME` under the worktree,
 - **`$CODEX_HOME/.env` reaches what Codex runs:** with `LUP_DOTENV_PROBE=from-codex-home` in it, `codex sandbox -- /usr/bin/env` printed that variable. The binary carries `dotenvy`, and has `sqlite_home` and `CODEX_SQLITE_HOME` placing its SQLite state.
 - **Claude Code** keeps `shell-snapshots/` and `session-env/` in its directory, and its credential storage has a `refused-symlink` outcome beside `corrupt` and `read_failed_skip_write`, with `lastCredentialsMtimeMs` reloading the file when it changes (the 2.1.311 binary's strings). Its state file is `.config.json` in its directory where that's a file that isn't empty, in place of `.claude.json` (the binary's `h_()`: `N(Ne(),".config.json")`, taken where `statSync(t).isFile()&&(_.size>0||…)`).
 
+### Auto memory on a home of the rooms' own (Claude Code 2.1.312, measured in a room 2026-10-28)
+
+Claude Code run with `-p` on a scratch `CLAUDE_CONFIG_DIR`, `--setting-sources user`, a dummy API key and `ANTHROPIC_BASE_URL` naming a local stand-in for the API that kept each request's body and answered 400, with `autoMemoryEnabled: true` in the user settings and a `MEMORY.md` naming a marker planted in `projects/<the working directory's folder>/memory/`, where auto memory is kept by default:
+- **With nothing else set,** the marker was in each of the six requests' system prompt (the first and its retries).
+- **With `--settings` setting `autoMemoryDirectory`** to a directory of the launch's own, it was in none, and the prompt's memory section named that directory: auto memory stayed on, kept there.
+- **With the user settings' own `autoMemoryDirectory` naming the planted folder** as well, it was in none: `--settings`' value holds. The binary's `q_()` reads the key from policy settings, then `--settings`', then local and project settings where they load, then user settings, the first that sets it; its schema says a project's is ignored "for security".
+
 ### A tmpfs inside a bind mount (podman 6.1.4, crun 1.30.1, Linux 7.2.11, measured on the host 2026-10-27)
 
 - A scratch tree bound at its path, and `--mount type=tmpfs,destination=<tree>/tree,tmpfs-mode=0700,U=true` inside it: the tmpfs held a copy of the host's `tree/`, its 1 MB file among it (`df`: 984 KiB used), where the host's own directory was meant to be seen. With `notmpcopyup` it was empty. `podman-run(1)` says the copy is the default, and is made from the parent mount where the tmpfs is inside one.

@@ -110,9 +110,10 @@ class ClaudeHome(Model):
         Item(name="paste-cache"),
         Item(name="history.jsonl", directory=False),
     ]
-    """The history the rooms given the home share: the conversations' records
-    and their auto memory, what `/rewind` restores, task lists and plans, and
-    the prompts typed, which a resumed conversation reads."""
+    """The history the rooms given the home share: the conversations' records,
+    what `/rewind` restores, task lists and plans, and the prompts typed, which
+    a resumed conversation reads. Auto memory, which Claude Code keeps beside
+    the records by default, is the launch's own (`memory`)."""
     blocked: dict[str, Why] = {
         "env": "credential",
         "apiKeyHelper": "command",
@@ -152,6 +153,18 @@ class ClaudeHome(Model):
     def credentials(self) -> Path:
         """Where Claude Code reads its login: the account's file, mounted there."""
         return self.directory / ".credentials.json"
+
+    @property
+    def memory(self) -> Path:
+        """Where Claude Code keeps its auto memory, as the launch's settings place it (`autoMemoryDirectory`): in the launch's own directory, gone with it.
+
+        By default it's `projects/<folder>/memory/`, inside the history the
+        rooms share, and where auto memory is on Claude Code loads its
+        `MEMORY.md` into every new session of the project: one room's notes
+        there would steer every later room unseen, on any profile and
+        account, where history is read only when a conversation is resumed.
+        """
+        return self.directory / "memory"
 
 
 class ClaudeLaunch(Model):
