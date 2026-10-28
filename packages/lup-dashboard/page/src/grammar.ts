@@ -12,7 +12,7 @@
 import { newId } from "./anchors";
 import type { components } from "./generated/api";
 import { cited } from "./comments";
-import { news, type Conversation, type Draft, type Group, type Laid, type Placed, type Region } from "./review";
+import { news, writtenId, type Conversation, type Draft, type Group, type Item, type Laid, type Placed, type Region } from "./review";
 import type { Block as ViewBlock, Offer } from "./views";
 
 export type Verb = components["schemas"]["Verb"];
@@ -35,9 +35,35 @@ export type Act =
 /** Where a verb lands at the cursor: what it's on, as the line of keys names it, the part of the review it is, what it does there, and its acts; or why nothing there takes it. */
 export type Reach = { on: string; node: Placed; says: string; acts: Act[] } | { on: null; says: null; why: string };
 
-/** How the walk names what a verb lands on: an agent, by its conversation as it's called. */
+/** How the walk names what a verb lands on, an agent by its conversation as it's called, and whether an item is new to the operator, its group not seen since it came (`fresh`): none new where it doesn't say. */
 export interface Naming {
     called: (conversation: Conversation) => string;
+    fresh?: (item: Item) => boolean;
+}
+
+/** The core's module, whose review mark an agent's group's is (`lup_dev.inbox.marks.CORE`). */
+export const CORE_MODULE = "core";
+
+/**
+ * Return marking `conversation`'s group seen up to item `upTo`, shown on its banner, `block`: the core's review mark on
+ * it, moved as the reply is sent (`review-mark`), so its items after it are new to the operator.
+ */
+export function seenAct(conversation: Conversation, block: string, upTo: number): Act {
+    const offer: Offer = {
+        action: "review-mark",
+        argument: {
+            repository: conversation.repository,
+            module: CORE_MODULE,
+            key: { runtime: conversation.runtime, session: conversation.session, agent: conversation.agent ?? null },
+            up_to: String(upTo),
+        },
+        verb: CORE.done,
+        chord: null,
+        runs: "send",
+        commented: false,
+        says: "mark it seen",
+    };
+    return { kind: "mark", offer, block, version: null };
 }
 
 /** The core's verbs, by name, which apply to anything (`lup.SHELL_VERBS`). */
@@ -164,8 +190,8 @@ function actsOf(blocks: readonly Placed[], verb: Verb, conversation: Conversatio
  * - **An item:** what its kind's view offers, as approving or declining an approval; else the core's, done marking it
  *   read, send leaving it for later, comment opening a comment on it whole.
  * - **An agent's group,** on its banner or anywhere in it nothing nearer takes the verb: what its banner's parts offer,
- *   as hold; done reaching its own news and drawers, its subagents' left as they are, and an item asking something,
- *   which marking done would answer, left too; comment a message to it.
+ *   as hold; done marking it seen and reaching its own news and drawers, its subagents' left as they are, and an item
+ *   asking something, which marking done would answer, left too; comment a message to it.
  */
 export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): Reach {
     const chain = chainAt(laidOut.nodes, at);
@@ -258,10 +284,11 @@ function itemReach(region: Region, node: Placed, verb: Verb): Reach | null {
 }
 
 /**
- * Return where `verb` lands on `group`, laid out at `node`: what its banner's parts offer, as hold; done marking each
- * of its own news read, and every block of its drawers offering done, its subagents' groups left as they are, and each
- * item asking something, a question, an approval or a held change, left and named; comment, a message to its agent. None where nothing of it takes the verb, as on
- * lup's approvals, which no agent is.
+ * Return where `verb` lands on `group`, laid out at `node`: what its banner's parts offer, as hold; done marking it
+ * seen where it holds an item new to the operator, each of its own news read, and every block of its drawers offering
+ * done, or each drawer whole where none in it does, its subagents' groups left as they are, and each item asking
+ * something, a question, an approval or a held change, left and named; comment, a message to its agent. None where
+ * nothing of it takes the verb, as on lup's approvals, which no agent is.
  */
 function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, naming: Naming): Reach | null {
     const conversation = group.conversation;
@@ -285,12 +312,28 @@ function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, namin
                 return reached === null || reached.on === null ? [] : reached.acts;
             });
             const left = regions.filter(({ region }) => !news(region.item)).map(({ region }) => cited(region.item.number));
+            // Each drawer's blocks offering done, as the files of "since you approved"; else what the drawer offers as a
+            // whole, as a conversation marked read.
             const drawers = group.drawers.flatMap((drawer) => {
                 const placed = node.children.find((child) => child.id === drawer.view.id);
-                return placed === undefined ? [] : actsOf(offering(placed, verb), verb, drawer.conversation);
+                if (placed === undefined) {
+                    return [];
+                }
+                const within = actsOf(offering(placed, verb), verb, drawer.conversation);
+                const own = answering(drawer.view.answer?.blocks.offers, verb)[0];
+                return within.length > 0 || own === undefined ? within : [actOf(own, placed.id, null, drawer.conversation)];
             });
-            const acts = [...items, ...drawers];
-            const what = [...(items.length === 0 ? [] : ["its news read"]), ...(drawers.length === 0 ? [] : ["its drawers done"])].join(", ");
+            // Its group seen, where it holds an item new to the operator: up to the last item the review shows, so
+            // what comes after it is new to them, those it leaves among what's seen.
+            const newest = Math.max(0, ...laidOut.regions.map((each) => each.item.number));
+            const unseen = conversation !== null && regions.some(({ region }) => naming.fresh?.(region.item) === true);
+            const seen = unseen && conversation !== null ? [seenAct(conversation, node.id, newest)] : [];
+            const acts = [...seen, ...items, ...drawers];
+            const what = [
+                ...(seen.length === 0 ? [] : ["it seen"]),
+                ...(items.length === 0 ? [] : ["its news read"]),
+                ...(drawers.length === 0 ? [] : ["its drawers done"]),
+            ].join(", ");
             const leaving = left.length === 0 ? "" : `, ${left.join(" ")} left`;
             return acts.length === 0 ? null : { on, node, says: `mark ${what}${leaving}`, acts };
         }
@@ -378,6 +421,70 @@ function offered(draft: Draft, act: Extract<Act, { kind: "mark" }>, verb: string
         version: act.version,
     };
     return { ...draft, marks: [...marks, made] };
+}
+
+/**
+ * Return the marks the operator's comments imply, a comment counting as a review (`Offer.commented`): for each comment
+ * or remark written on a block offering what a comment on it implies, as a file of "since you approved" offers marking
+ * it reviewed, that offer marked by its verb on the block, at the version the comment was written on, the latest
+ * written on it; none where the draft marks the block by that offer already, the operator's own mark the later word.
+ * Shown as the draft's own marks are, and kept in the draft as it's sent, so Ctrl+Enter applies them with the rest.
+ */
+export function implied(laidOut: Laid, draft: Draft): Marked[] {
+    const found = new Map<string, Marked>();
+    for (const each of laidOut.written) {
+        const quote = "quote" in each ? each.quote : null;
+        const block = quote?.block ?? "";
+        if (block === "" || each.text.trim() === "") {
+            continue;
+        }
+        const offers = findNode(laidOut.nodes, block)?.block?.offers ?? [];
+        for (const offer of offers) {
+            const verb = offer.verb ?? null;
+            if (offer.commented !== true || verb === null) {
+                continue;
+            }
+            if ((draft.marks ?? []).some((mark) => mark.block === block && mark.action === offer.action && mark.verb === verb)) {
+                continue;
+            }
+            found.set(`${block} ${offer.action}`, {
+                id: `implied ${writtenId(each)}`,
+                action: offer.action,
+                argument: offer.argument ?? {},
+                verb,
+                says: offer.says,
+                block,
+                version: quote?.version ?? null,
+            });
+        }
+    }
+    return [...found.values()];
+}
+
+/** What moving a review mark is given (`MoveMarks`, one of its marks): the repository, the module, its key and how far. */
+export interface Moved {
+    repository: string;
+    module: string;
+    key: Record<string, unknown>;
+    up_to?: string | null;
+}
+
+/**
+ * Say what moving the review mark `mark` does, in the line under the review and once sent: an agent's group seen, the
+ * core's; any other on what its key names, an agent where it names one, as its offer says it (`lup-impl/parser: mark it
+ * read`).
+ */
+export function movedSaid(mark: Marked, called: (conversation: Conversation) => string): string {
+    const argument = mark.argument as unknown as Moved;
+    const key = argument.key;
+    const agent =
+        typeof key.runtime === "string" && typeof key.session === "string"
+            ? called({ party: "conversation", repository: argument.repository, runtime: key.runtime, session: key.session, agent: typeof key.agent === "string" ? key.agent : null })
+            : null;
+    if (argument.module === CORE_MODULE && agent !== null) {
+        return `${agent} seen`;
+    }
+    return agent === null ? mark.says : `${agent}: ${mark.says}`;
 }
 
 /** Return the marks of `draft` shown on the block `block`. */

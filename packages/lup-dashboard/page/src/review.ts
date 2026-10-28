@@ -754,9 +754,38 @@ export function waited(made: string, now: Date): string {
     return now.getTime() - at.getTime() < 60_000 ? "just in" : `waiting ${since(at, now)}`;
 }
 
-/** Say whether an item is new to the operator: made after they last settled one of theirs, `reviewed`; none before their first. */
-export function fresh(item: Item, reviewed: string | null | undefined): boolean {
-    return reviewed != null && new Date(item.made) > new Date(reviewed);
+/**
+ * How far the operator has seen what waits on them (`docs/dashboard.md`, *Review marks*): each agent's group up to the
+ * last of its items they'd seen as they marked it, Space d on its banner, by `whose` its conversation is (`Items.seen`);
+ * and the items they commented on in a reply already sent, a comment counting as a review.
+ */
+export interface Seeing {
+    groups: ReadonlyMap<string, number>;
+    commented: ReadonlySet<number>;
+}
+
+/** Nothing seen: every item new. */
+export const UNSEEN: Seeing = { groups: new Map(), commented: new Set() };
+
+/** Return how far the operator has seen what the inbox's listing `items` holds: each group's mark, and the items their replies sent commented on (`Items.answers`). */
+export function seeingOf(items: components["schemas"]["Items"] | null): Seeing {
+    if (items === null) {
+        return UNSEEN;
+    }
+    const groups = new Map((items.seen ?? []).map((each) => [whose(each.conversation), each.item]));
+    const commented = new Set(
+        (items.answers ?? []).flatMap((each) => (each.reason.reason === "review" ? (each.reason.comments ?? []).map((comment) => comment.item) : [])),
+    );
+    return { groups, commented };
+}
+
+/** Say whether an item is new to the operator: they haven't seen its group since it came, nor commented on it in a reply they sent. */
+export function fresh(item: Item, seeing: Seeing): boolean {
+    if (seeing.commented.has(item.number)) {
+        return false;
+    }
+    const seen = item.sender.party === "conversation" ? seeing.groups.get(whose(item.sender)) : undefined;
+    return seen === undefined || item.number > seen;
 }
 
 /** Say how many of a thing there are: `1 step`, `5 steps`. */
@@ -1897,8 +1926,13 @@ export function laid(
             drawnAt.length = drawnBefore;
             return null;
         }
-        // Folded until opened, a line under the banner.
-        into.folds.push({ of, kind, name: "", label, closed: true, summary, from: summary.to, to: last, scope: true });
+        // Folded until opened, a line under the banner; marked done, as a conversation marked read, it folds however
+        // the operator left it, but where it holds what they wrote.
+        const drawerFold: Fold = { of, kind, name: "", label, closed: true, summary, from: summary.to, to: last, scope: true };
+        into.folds.push(drawerFold);
+        if (markedDone.has(view.id) && into.blocks.length === 0) {
+            byMarks.add(drawerFold);
+        }
         const node = part(view.id, "view", summary.from, last, { view, children });
         const since = answer.since;
         return {
@@ -2035,17 +2069,17 @@ export function answerAfter(laidOut: Laid, draft: Draft, head: number, forward: 
 
 /**
  * Say what waits below, for the header over the review, so the operator knows without the text moving to show it: how
- * many items are to answer (`toAnswer`), and how many are new since they last sent (`fresh`) among those neither
- * marked read nor left for later; nothing where no item waits.
+ * many items are to answer (`toAnswer`), and how many are new to them, their groups not seen since (`fresh`), among
+ * those neither marked read nor left for later; nothing where no item waits.
  */
-export function tallied(items: Item[], draft: Draft, reviewed: string | null | undefined): string {
+export function tallied(items: Item[], draft: Draft, seeing: Seeing): string {
     if (items.length === 0) {
         return "";
     }
     const settled = [...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])];
     const open = items.filter((each) => !settled.includes(each.number));
     const answering = open.filter((each) => toAnswer(each, draft)).length;
-    const arrived = open.filter((each) => fresh(each, reviewed)).length;
+    const arrived = open.filter((each) => fresh(each, seeing)).length;
     return [`${answering} to answer`, ...(arrived === 0 ? [] : [`${arrived} new`])].join(" · ");
 }
 

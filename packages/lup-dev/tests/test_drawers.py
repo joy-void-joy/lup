@@ -437,7 +437,7 @@ def test_what_the_operator_last_saw_of_a_file_is_the_later_of_its_mark_and_an_it
     delivery = alone(tmp_path, clock)
     repository = tmp_path / "proj.git"
     party = Conversation(repository=repository, runtime="claude", session="s1")
-    reviews = Reviews(layout=Layout(state=tmp_path / "state").reviewed(repository))
+    reviews = Reviews.of(Layout(state=tmp_path / "state"), repository)
     baseline = Baseline(inbox=delivery.inbox, repository=repository, reviews=reviews)
     path = Path("src/a.py")
     assert baseline.saw(path, ["feat"]) is None

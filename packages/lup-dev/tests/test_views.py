@@ -39,7 +39,7 @@ from lup_dev.host.protocol import (
 )
 from lup_dev.host.service import Answerer, HostService, Route
 from lup_dev.host.views import ModuleViews
-from lup_dev.host.watch import Changes, Touched
+from lup_dev.host.watch import Changes, Remarked, Touched
 from lup_dev.host.workers import (
     Holder,
     RepositoryAsking,
@@ -172,6 +172,33 @@ def test_a_watched_view_is_answered_again_at_its_agent_s_events_it_names_and_its
 
     assert asyncio.run(exercised()) == [("zero", 1), ("one", 2), ("two", 3)]
     assert asked.held == [f"held {REPOSITORY}", f"let go {REPOSITORY}"]
+
+
+def test_a_watched_view_is_answered_again_as_a_review_mark_it_read_moves_alone(
+    clock: FakeClock,
+) -> None:
+    read = Remarked(repository=REPOSITORY, module="shown", key='{"session":"s1"}')
+    asked = Asked(Watching(marks=[read]))
+    changes = Changes()
+
+    async def exercised() -> list[str]:
+        watched = views(asked, changes, [], clock).watched(viewing())
+        seen = [texts(await anext(watched))]
+        coming = asyncio.ensure_future(anext(watched))
+        asked.text = "moved"
+        # Another key of the module's, another module's mark of the same key, and
+        # the same mark of another repository: none answers it.
+        changes.changed([read.model_copy(update={"key": '{"session":"s2"}'})])
+        changes.changed([read.model_copy(update={"module": "other"})])
+        changes.changed([read.model_copy(update={"repository": Path("/other/.git")})])
+        await settled()
+        assert not coming.done()
+        changes.changed([read])
+        seen.append(texts(await asyncio.wait_for(coming, PATIENCE)))
+        await watched.aclose()
+        return seen
+
+    assert asyncio.run(exercised()) == ["zero", "moved"]
 
 
 def test_a_change_while_a_view_is_answered_answers_it_again_after(
@@ -326,6 +353,7 @@ from lup.tools.serving import Answer
 from lup_dev import Core, Module, Modules, ModuleServing, Project, Serving
 from lup_dev.declaration.resolve import resolve
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import StoredMarks
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import Layout
 from lup_dev.worker import RepositoryModules, routes, serve
@@ -376,6 +404,7 @@ modules = RepositoryModules(
     recorded={{}},
     layout=Layout(state=Path({data!r}), data=Path({data!r})),
     exchanges=Unexchanged(),
+    marks=StoredMarks(layout=Layout(state=Path({data!r}), data=Path({data!r}))),
 )
 asyncio.run(
     serve(routes(modules, judge, called), Path(sys.argv[2]), Path(sys.argv[3]), said)

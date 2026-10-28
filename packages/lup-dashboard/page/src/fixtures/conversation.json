@@ -87,6 +87,7 @@
                 "session": "s1",
                 "agent": "a1",
                 "step": 0,
+                "through": null,
                 "until_last": null
               }
             }
@@ -134,7 +135,7 @@
         ],
         "summary": [
           {
-            "text": "conversation · 7 steps",
+            "text": "conversation · 7 steps · 2 new",
             "tone": "plain",
             "conversation": null,
             "item": null,
@@ -144,7 +145,26 @@
         ],
         "waiting": false,
         "count": 0,
-        "offers": []
+        "offers": [
+          {
+            "action": "review-mark",
+            "argument": {
+              "repository": "/r/.git",
+              "module": "transcripts",
+              "key": {
+                "runtime": "claude",
+                "session": "s1",
+                "agent": "a1"
+              },
+              "up_to": "6"
+            },
+            "verb": "done",
+            "chord": null,
+            "runs": "send",
+            "commented": false,
+            "says": "mark it read"
+          }
+        ]
       }
     },
     {
@@ -154,6 +174,7 @@
         "session": "s1",
         "agent": "a1",
         "step": 0,
+        "through": null,
         "until_last": null
       },
       "answer": {

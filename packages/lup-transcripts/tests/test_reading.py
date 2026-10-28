@@ -22,7 +22,9 @@ from lup_dev.host.records import (
     Transcript,
 )
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import MarkStore, ReviewMark, ReviewMarks, StoredMarks, keyed
 from lup_dev.inbox.protocol import Exchanged
+from lup_dev.layout import Layout
 from lup_transcripts.environment.conversation import OfCall, OfExchange
 from lup_transcripts.environment.module import Transcripts
 from lup_transcripts.environment.serving import (
@@ -53,6 +55,16 @@ def session(name: str) -> Transcript:
             Said(by="operator", text="Now land it.", at=AT),
             Said(by="agent", text="Landed.", at=AT),
         ],
+    )
+
+
+def unmarked() -> ReviewMarks:
+    """Transcripts' review marks, none made: kept where nothing is."""
+    nowhere = Layout(state=Path("/nowhere"), data=Path("/nowhere"))
+    return ReviewMarks(
+        marks=StoredMarks(layout=nowhere),
+        repository=Path("/r/.git"),
+        module="transcripts",
     )
 
 
@@ -113,7 +125,9 @@ class Unpublished(Publisher):
         raise AssertionError
 
 
-def serving(tmp_path: Path, *sessions: Transcript) -> TranscriptsServing:
+def serving(
+    tmp_path: Path, *sessions: Transcript, marks: ReviewMarks | None = None
+) -> TranscriptsServing:
     reader = Kept(list(sessions))
     return TranscriptsServing(
         module=Transcripts(),
@@ -122,6 +136,7 @@ def serving(tmp_path: Path, *sessions: Transcript) -> TranscriptsServing:
         related=[],
         publisher=Unpublished(),
         exchanges=Exchanging(Exchanged(sent=[], received=[])),
+        marks=unmarked() if marks is None else marks,
     )
 
 
@@ -163,6 +178,50 @@ def test_the_conversation_view_reads_the_live_record(tmp_path: Path) -> None:
     assert text.startswith("conversation · 5 steps")
     assert "▸ you: Make the drawer a view.  [exchange step=0]" in text
     assert "you: Now land it." in text
+
+
+def test_the_drawer_offers_marking_it_read_to_its_last_step_and_folds_what_its_mark_says_was_read(
+    tmp_path: Path,
+) -> None:
+    viewed = OfAgent(runtime="claude", session="first-0000")
+    layout = Layout(state=tmp_path / "state", data=tmp_path / "data")
+    repository = Path("/r/.git")
+
+    def marks() -> ReviewMarks:
+        return ReviewMarks(
+            marks=StoredMarks(layout=layout),
+            repository=repository,
+            module="transcripts",
+        )
+
+    # Read up to their last words, typed: what came after is new.
+    unread = asyncio.run(
+        serving(tmp_path, session("first"), marks=marks()).conversation(viewed)
+    )
+    assert unread.text().splitlines()[0] == "conversation · 5 steps · 1 new"
+    key = {"runtime": "claude", "session": "first-0000", "agent": None}
+    [offer] = unread.offers
+    assert offer.argument == {
+        "repository": str(repository),
+        "module": "transcripts",
+        "key": key,
+        "up_to": "4",
+    }
+    MarkStore(layout=layout.marks(repository)).moved(
+        "transcripts", [ReviewMark(key=key, up_to="4", at=AT)]
+    )
+    reading = marks()
+    read = asyncio.run(
+        serving(tmp_path, session("first"), marks=reading).conversation(viewed)
+    )
+    assert read.text().splitlines() == [
+        "conversation · 5 steps",
+        "▸ you: Make the drawer a view.  [exchange step=0]",
+        "you: Now land it.",
+        "▸ 1 earlier step  [exchange step=3 through=4]",
+    ]
+    assert read.offers == []
+    assert [each.key for each in reading.read] == [keyed(key)]
 
 
 def test_an_earlier_exchange_and_a_call_are_views_of_their_own(tmp_path: Path) -> None:

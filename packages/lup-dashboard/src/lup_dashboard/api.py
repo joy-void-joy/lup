@@ -23,6 +23,7 @@ from lup_dev.host.protocol import (
     SetHolding,
 )
 from lup_dev.host.workers import Viewed, Viewing
+from lup_dev.inbox.marks import MarksMoved, MoveMarks
 from lup_dev.inbox.protocol import (
     AnswerApproval,
     AnswerItem,
@@ -75,6 +76,7 @@ type Asked = Annotated[
     | KeepTalk
     | ShowSince
     | ReviewSince
+    | MoveMarks
     | Viewing,
     Field(discriminator="kind"),
 ]
@@ -86,8 +88,9 @@ an item's moment in its sender's conversation read, a conversation's record read
 from where the page left it for its task list and its context, the operator's
 draft reply shown, kept and sent, where their review lays out
 its groups shown and kept, what they write on a conversation shown and kept, what an agent's branch changed since they
-last saw it read and its files marked reviewed, and a module's view, which the
-page draws from its blocks (`docs/host.md`, *The views the dashboard shows*)."""
+last saw it read and its files marked reviewed, review marks moved as a reply
+is sent, and a module's view, which the page draws from its blocks
+(`docs/host.md`, *The views the dashboard shows*)."""
 
 type Replied = Annotated[
     Listed
@@ -105,6 +108,7 @@ type Replied = Annotated[
     | Reviewed
     | Since
     | SinceReviewed
+    | MarksMoved
     | Viewed
     | Refused,
     Field(discriminator="kind"),

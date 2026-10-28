@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import "./fixtures/looks";
-import { chainAt, isMarked, listed, marking, type Act } from "./grammar";
-import { EMPTY, type Placed } from "./review";
+import { chainAt, isMarked, listed, marking, movedSaid, seenAct, type Act } from "./grammar";
+import { EMPTY, type Conversation, type Placed } from "./review";
 import type { Offer } from "./views";
 
 const HOLD: Offer = { action: "set-holding", argument: { launch: "l1", session: "s1", agent: null, on: true }, verb: "hold", chord: null, runs: "send", commented: false, says: "hold its flagged writes" };
@@ -57,5 +57,35 @@ describe("the parts the cursor is in", () => {
         // Past the last group, the review's last lines are its.
         expect(chainAt(nodes, 50).map((each) => each.id)).toEqual(["group a"]);
         expect(chainAt([part("group b", "group", 10, 20)], 5)).toEqual([]);
+    });
+});
+
+describe("review marks", () => {
+    const parser: Conversation = { party: "conversation", repository: "/r/.git", runtime: "claude", session: "s1", agent: "a1" };
+    const called = (each: Conversation) => (each.agent === null ? each.session : `${each.session}/${each.agent}`);
+
+    it("marks an agent's group seen up to an item, the core's mark, said in the line under the review as its agent seen", () => {
+        const act = seenAct(parser, "group 0", 57);
+        const draft = marking(EMPTY, [act], "done");
+        const [mark] = draft.marks ?? [];
+        expect(mark).toMatchObject({ action: "review-mark", verb: "done", block: "group 0", says: "mark it seen" });
+        expect(mark?.argument).toEqual({ repository: "/r/.git", module: "core", key: { runtime: "claude", session: "s1", agent: "a1" }, up_to: "57" });
+        expect(movedSaid(mark!, called)).toBe("s1/a1 seen");
+    });
+
+    it("says any other module's mark on an agent by the agent and its offer's words, one on nothing of an agent's by its words alone", () => {
+        const read: Offer = {
+            action: "review-mark",
+            argument: { repository: "/r/.git", module: "transcripts", key: { runtime: "claude", session: "s1", agent: null }, up_to: "40" },
+            verb: "done",
+            chord: null,
+            runs: "send",
+            commented: false,
+            says: "mark it read",
+        };
+        const [mark] = marking(EMPTY, [{ kind: "mark", offer: read, block: "drawer", version: null }], "done").marks ?? [];
+        expect(movedSaid(mark!, called)).toBe("s1: mark it read");
+        const other = { ...mark!, argument: { ...mark!.argument, key: { page: "a" } } };
+        expect(movedSaid(other, called)).toBe("mark it read");
     });
 });

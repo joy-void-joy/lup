@@ -47,6 +47,7 @@ from lup_dev.host.protocol import Limits, Register, Reply, Request
 from lup_dev.host.records import Call as RecordedCall
 from lup_dev.host.records import Reader as RecordsReader
 from lup_dev.host.records import Record, Recorded, Records, Transcript
+from lup_dev.host.watch import Remarked
 from lup_dev.host.workers import (
     Called,
     Calling,
@@ -57,13 +58,14 @@ from lup_dev.host.workers import (
     Workers,
 )
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import MarkStore, ReviewMark, StoredMarks
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.stored import write_model
 from lup_dev.worker import RepositoryModules
 
 if TYPE_CHECKING:
-    from conftest import Kit
+    from conftest import FakeClock, Kit
 
     from lup.blocks import OfAgent
 
@@ -238,6 +240,7 @@ def serving(tmp_path: Path, volume: int = 1) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path)),
     )
 
 
@@ -603,6 +606,7 @@ def listening(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
     )
 
 
@@ -672,6 +676,7 @@ def test_each_launch_s_hooks_read_its_own_runtime_s_records(tmp_path: Path) -> N
         },
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
     )
     one = launch(tmp_path)
     two = one.model_copy(update={"launch": "two", "runtime": "codex"})
@@ -754,6 +759,7 @@ def guarding(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
     )
 
 
@@ -870,6 +876,17 @@ class ViewerServing(ModuleServing):
         """Show what it's given, of no agent."""
         return lup.Blocks(blocks=[lup.Line.of("1", viewed.what)])
 
+    @lup.view
+    async def remembered(self, viewed: lup.OfAgent) -> lup.Blocks:
+        """Say how far the operator read the agent, by its review mark, and offer reading it all."""
+        key = {"session": viewed.session}
+        mark = await self.marks.mark(key)
+        said = "nothing read" if mark is None else f"read to {mark.up_to}"
+        return lup.Blocks(
+            blocks=[lup.Line.of("1", said)],
+            offers=[self.marks.offer(key, "9", "mark it read")],
+        )
+
     @lup.view(place=lup.Banner())
     async def mood(self, viewed: lup.OfAgent) -> lup.Blocks:
         """Say the agent's mood on its banner."""
@@ -904,6 +921,7 @@ def viewing(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path)),
     )
 
 
@@ -982,6 +1000,35 @@ def test_the_repository_s_process_answers_a_view_for_the_operator_with_when_it_s
         on=["turn-ended"],
         longest=timedelta(minutes=1),
     )
+
+
+def test_a_view_reads_its_module_s_review_marks_watched_as_each_it_read_moves(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    repository = tmp_path / ".git"
+    asked = Viewing(
+        repository=repository,
+        module="viewer",
+        view="remembered",
+        argument={"runtime": "r", "session": "s1"},
+    )
+    unread = asyncio.run(viewing(tmp_path).view(asked))
+    assert unread.blocks.text() == "nothing read"
+    read = Remarked(repository=repository, module="viewer", key='{"session":"s1"}')
+    assert unread.watch.marks == [read]
+    [offer] = unread.blocks.offers
+    assert (offer.action, offer.argument["module"], offer.argument["up_to"]) == (
+        "review-mark",
+        "viewer",
+        "9",
+    )
+    marks = MarkStore(layout=Layout(state=tmp_path, data=tmp_path).marks(repository))
+    marks.moved(
+        "viewer", [ReviewMark(key={"session": "s1"}, up_to="4", at=clock.now())]
+    )
+    # Another module's mark of the same key is its own.
+    marks.moved("other", [ReviewMark(key={"session": "s1"}, up_to="8", at=clock.now())])
+    assert asyncio.run(viewing(tmp_path).view(asked)).blocks.text() == "read to 4"
 
 
 def test_a_view_of_no_agent_is_watched_at_nothing_of_one(tmp_path: Path) -> None:

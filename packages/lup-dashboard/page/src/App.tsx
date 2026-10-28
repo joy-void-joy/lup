@@ -23,7 +23,7 @@ import { everyone, launches, ring, running, type Activity, type Agent, type Runn
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useViews, useWatched } from "./hooks";
-import type { Marked } from "./grammar";
+import { movedSaid, type Marked, type Moved } from "./grammar";
 import { feed } from "./editor";
 import { reviewKeys, type Here } from "./keys";
 import { Keys } from "./Keys";
@@ -43,6 +43,7 @@ import {
     messages,
     pruned,
     remarks,
+    seeingOf,
     whose,
     type AgentDrawers,
     type Answered,
@@ -112,6 +113,10 @@ export function App() {
         }
     }, [narrow]);
     const [draft, setDraft] = useState<Draft>(EMPTY);
+    // What the operator's comments imply, a comment counting as a review, as the review last laid it out: shown and
+    // sent with the draft's own marks.
+    const [implied, setImplied] = useState<readonly Marked[]>([]);
+    const implying = useCallback((marks: Marked[]) => setImplied((before) => (JSON.stringify(before) === JSON.stringify(marks) ? before : marks)), []);
     // Whether the draft has been asked for, answered or not: with the inbox, the conversations running and the order,
     // what the review is laid out from, none of which it's laid out without, lest it tell the host its groups are gone.
     const [draftRead, setDraftRead] = useState(false);
@@ -121,6 +126,8 @@ export function App() {
     const answers = useMemo(() => (inbox.reply?.kind === "inbox-items" ? (inbox.reply.answers ?? []) : []), [inbox.reply]);
     const onItems = useMemo(() => (inbox.reply?.kind === "inbox-items" ? (inbox.reply.commented ?? []) : []), [inbox.reply]);
     const around = useMemo(() => ({ contexts, files, answers, commented: onItems }), [contexts, files, answers, onItems]);
+    // How far the operator has seen each group, and the items they commented on in a reply sent: what's new to them.
+    const seeing = useMemo(() => seeingOf(inbox.reply?.kind === "inbox-items" ? inbox.reply : null), [inbox.reply]);
     // What the host has answered of each agent, for its banner and its drawers, by its conversation.
     const [drawers, setDrawers] = useState<Drawers>(new Map());
     // The items whose context, and whose files, were asked for, so each is asked once: an approval's files once
@@ -641,6 +648,7 @@ export function App() {
         const applied: string[] = [];
         const said: string[] = [];
         const reviews = new Map<string, { conversation: InboxConversation; files: Viewed[]; ids: string[] }>();
+        const moving = new Map<string, { repository: string; module: string; marks: { key: Record<string, unknown>; up_to: string | null }[]; ids: string[] }>();
         for (const mark of marks) {
             switch (mark.action) {
                 case "policy-review-since": {
@@ -648,7 +656,17 @@ export function App() {
                     const key = whose(argument.conversation);
                     const was = reviews.get(key) ?? { conversation: argument.conversation, files: [], ids: [] };
                     const paths = new Set(was.files.map((each) => each.path));
-                    reviews.set(key, { ...was, files: [...was.files, ...argument.files.filter((each) => !paths.has(each.path))], ids: [...was.ids, mark.id] });
+                    // One file marked, at the version its mark says: a comment's, the version it was written on.
+                    const version = mark.version ?? null;
+                    const files = argument.files.length === 1 && version !== null ? argument.files.map((each) => ({ ...each, version })) : argument.files;
+                    reviews.set(key, { ...was, files: [...was.files, ...files.filter((each) => !paths.has(each.path))], ids: [...was.ids, mark.id] });
+                    break;
+                }
+                case "review-mark": {
+                    const argument = mark.argument as unknown as Moved;
+                    const key = JSON.stringify([argument.repository, argument.module]);
+                    const was = moving.get(key) ?? { repository: argument.repository, module: argument.module, marks: [], ids: [] };
+                    moving.set(key, { ...was, marks: [...was.marks, { key: argument.key, up_to: argument.up_to ?? null }], ids: [...was.ids, mark.id] });
                     break;
                 }
                 case "set-holding": {
@@ -670,6 +688,17 @@ export function App() {
                 applied.push(...each.ids);
             }
         }
+        // Each module's review marks of a repository moved together, as the host keeps them.
+        for (const each of moving.values()) {
+            const request: Asked = { kind: "review-mark", repository: each.repository, module: each.module, marks: each.marks };
+            const reply = await answered(request, (answer) => (answer.kind === "review-moved" ? answer : null));
+            if ("refused" in reply) {
+                said.push(`not marked: ${reply.refused}`);
+            } else {
+                applied.push(...each.ids);
+                said.push(...marks.filter((mark) => each.ids.includes(mark.id)).map((mark) => movedSaid(mark, called)));
+            }
+        }
         return { applied, said };
     }
 
@@ -683,8 +712,9 @@ export function App() {
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
         }
-        // What's sent is what the host keeps: a draft it refuses to keep isn't sent, lest the last one kept go instead.
-        const now = pruned(draft);
+        // What's sent is what the host keeps: a draft it refuses to keep isn't sent, lest the last one kept go instead;
+        // the marks the operator's comments imply among its own, applied with them.
+        const now = pruned(implied.length === 0 ? draft : { ...draft, marks: [...(draft.marks ?? []), ...implied] });
         const kept = await ask({ kind: "inbox-keep-draft", draft: now });
         if (kept.kind === "refused") {
             setSaid(kept.error);
@@ -729,7 +759,11 @@ export function App() {
         [live],
     );
 
-    const going = toSend(draft, waiting, { called, named, holder: (argument) => holderOf(argument)?.talker.path ?? null });
+    const going = toSend(implied.length === 0 ? draft : { ...draft, marks: [...(draft.marks ?? []), ...implied] }, waiting, {
+        called,
+        named,
+        holder: (argument) => holderOf(argument)?.talker.path ?? null,
+    });
     return (
         <div className="layout">
             <header className="bar">
@@ -775,7 +809,8 @@ export function App() {
                         placed={setHere}
                         pending={setChord}
                         list={openList}
-                        reviewed={inbox.reply?.kind === "inbox-items" ? (inbox.reply.reviewed ?? null) : null}
+                        seeing={seeing}
+                        implying={implying}
                         activities={activities}
                         parents={parents}
                         states={states}
@@ -899,6 +934,8 @@ export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): 
             const argument = mark.argument as { launch?: string; session?: string; agent?: string | null; on?: boolean };
             const who = naming.holder(argument) ?? "an agent no longer running";
             marked.push(argument.on === true ? `holding ${who}'s flagged writes` : `letting ${who}'s flagged writes land`);
+        } else if (mark.action === "review-mark") {
+            marked.push(movedSaid(mark, naming.called));
         } else {
             marked.push(mark.says);
         }
