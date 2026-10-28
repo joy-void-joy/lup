@@ -99,7 +99,7 @@ Every collection a module holds is a selection (`Selection`, `declaration/gramma
 | Kind | Entries | Held by |
 |---|---|---|
 | `Rules` | rule ids | `CodeRules` |
-| `Paths` | a `Layer` of patterns per role (`protected`, `secret`, `operator_documents`, `excluded`, `tests`, `scratch`, `docs`, `data`, `source_trees`, `python`, `conftest`), the verbs taking roles as keywords. `secret` names the files that hold secrets: a room never reads one its worktree's commit doesn't hold as it is (`docs/launch.md`, *Files with a secret's name*), and every write to one asks, as a protected path's does | `Core`, `Python` |
+| `Paths` | a `Layer` of patterns per role (`protected`, `secret`, `operator_documents`, `excluded`, `tests`, `scratch`, `docs`, `data`, `source_trees`, `python`, `conftest`), the verbs taking roles as keywords. `secret` names the files that hold secrets: a room never reads one whose content its repository's git objects don't hold (`docs/launch.md`, *Files with a secret's name*), and every write to one asks, as a protected path's does | `Core`, `Python` |
 | `Gate` | `Step`s, by name | `Python`, `Private` |
 | `Exemptions` | an `Exemption` per rule, listing every path it lifts the rule from | `CodeRules` |
 | `TestRoots` | `Pytest` roots | `Python` |

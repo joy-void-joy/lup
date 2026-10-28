@@ -84,8 +84,9 @@ class CorePaths(Model):
         "**/.streamlit/secrets.toml",
     ]
     """Files that hold secrets, by the names tools give them. A room never reads
-    one its worktree's commit doesn't hold as it is: an ignored one, an untracked
-    one, or one changed since (`docs/launch.md`, *Files with a secret's name*).
+    one whose content its repository's git objects don't hold: an ignored one, an
+    untracked one, or one changed to content git never held (`docs/launch.md`,
+    *Files with a secret's name*).
     Every write to one asks the operator, as a protected path's does, since the
     host's tools read them.
 

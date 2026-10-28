@@ -78,9 +78,9 @@ class Paths(Layer, extra="forbid"):
     protected: Patterns = Patterns()
     """Every write to these asks the operator."""
     secret: Patterns = Patterns()
-    """Files that hold secrets: a room never reads one its worktree's commit
-    doesn't hold as it is, and every write to one asks, as a protected path's
-    does."""
+    """Files that hold secrets: a room never reads one whose content its
+    repository's git objects don't hold, and every write to one asks, as a
+    protected path's does."""
     operator_documents: Patterns = Patterns()
     """The operator's documents: changing one is a design decision, so it asks."""
     excluded: Patterns = Patterns()

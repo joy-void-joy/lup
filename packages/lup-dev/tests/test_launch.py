@@ -1019,8 +1019,8 @@ def test_files_with_a_secret_s_name_are_hidden_and_said_as_the_room_starts_and_e
     said = machine.events.said
     assert said[said.index("image") + 1] == (
         "Hidden from the room, each reading as an empty file: the files with a "
-        "secret's name no commit holds as they are (`docs/launch.md`, *Files with a "
-        f"secret's name*):\n  {project / '.env.local'}\n"
+        "secret's name whose content their repository's git objects don't hold "
+        f"(`docs/launch.md`, *Files with a secret's name*):\n  {project / '.env.local'}\n"
         f"  {here / 'profile' / '.credentials.json'}"
     )
     assert said[-1] == (

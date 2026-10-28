@@ -266,6 +266,23 @@ class Git(Model):
 
         return [read(each) for each in objects]
 
+    def blobs(self, objects: list[str]) -> list[str]:
+        """Return those of `objects`, by id and in order, that the repository's store holds as blobs, asked of one `git cat-file`.
+
+        Never fetched (`--no-lazy-fetch`): a partial clone would ask its
+        promisor remote for each object it left out, sending it the id.
+        """
+        if not objects:
+            return []
+        asked = "".join(f"{each}\n" for each in objects).encode()
+        answered = self.run(
+            "--no-lazy-fetch", "cat-file", "--batch-check=%(objecttype)", stdin=asked
+        )
+        kinds = answered.output.decode().splitlines()
+        return [
+            each for each, kind in zip(objects, kinds, strict=True) if kind == "blob"
+        ]
+
     def export(
         self,
         commit: str,
