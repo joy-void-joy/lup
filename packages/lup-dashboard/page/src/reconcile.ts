@@ -138,7 +138,7 @@ export function reconcile(doc: Text, before: readonly string[], text: string, af
         }
     }
     const kept = heaviest(pairs.sort((x, y) => x.old - y.old), now.length);
-    return made(old, now, after, kept);
+    return made(old, now, before, after, kept);
 }
 
 /** Return the most weighed of `pairs`, in their old order, that stay in order in the new one too, of `count` lines: by a tree of the best found up to each new line. */
@@ -199,19 +199,99 @@ function startsOf(lines: readonly string[]): number[] {
     return starts;
 }
 
-/** Return the changes that make lines `old` into lines `now`, `kept` kept, and what arrived, whose each new line is by `after`. */
-function made(old: readonly string[], now: readonly string[], after: readonly string[], kept: readonly Pair[]): Reconciled {
-    const before = old.join("\n");
+/** A run of lines of one part's, by their places, from `from` up to `to`. */
+interface Owned {
+    owner: string;
+    from: number;
+    to: number;
+}
+
+/** Return the runs of lines `from` up to `to`, each of one part's by `owners`. */
+function ownedIn(owners: readonly string[], from: number, to: number): Owned[] {
+    const runs: Owned[] = [];
+    for (let line = from; line < to; line += 1) {
+        const owner = owners[line] ?? "";
+        const last = runs.at(-1);
+        if (last !== undefined && last.owner === owner) {
+            last.to = line + 1;
+        } else {
+            runs.push({ owner, from: line, to: line + 1 });
+        }
+    }
+    return runs;
+}
+
+/** The most pairs of runs two stretches are matched over, past which they're changed as one, as a stretch of a review laid out anew whole. */
+const MOST_RUNS = 250_000;
+
+/** Return which of runs `a` are the same part's as which of runs `b`, the most of them in order (their longest common sequence by owner); none past `MOST_RUNS`. */
+function matchedRuns(a: readonly Owned[], b: readonly Owned[]): [number, number][] {
+    if (a.length * b.length > MOST_RUNS || a.length === 0 || b.length === 0) {
+        return [];
+    }
+    const width = b.length + 1;
+    const table = new Int32Array((a.length + 1) * width);
+    for (let i = a.length - 1; i >= 0; i -= 1) {
+        for (let j = b.length - 1; j >= 0; j -= 1) {
+            table[i * width + j] =
+                a[i]?.owner === b[j]?.owner ? (table[(i + 1) * width + j + 1] ?? 0) + 1 : Math.max(table[(i + 1) * width + j] ?? 0, table[i * width + j + 1] ?? 0);
+        }
+    }
+    const pairs: [number, number][] = [];
+    let i = 0;
+    let j = 0;
+    while (i < a.length && j < b.length) {
+        if (a[i]?.owner === b[j]?.owner) {
+            pairs.push([i, j]);
+            i += 1;
+            j += 1;
+        } else if ((table[(i + 1) * width + j] ?? 0) >= (table[i * width + j + 1] ?? 0)) {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    return pairs;
+}
+
+/**
+ * Return the changes that make lines `old` into lines `now`, `kept` kept, and what arrived, whose each line is by
+ * `before` and `after`: between two lines kept, each part's lines there that both have are changed apart, by their own
+ * diff, and the rest, a part's that went or came, replaced together, so a change of one part's lines never takes in
+ * another's, nor a cursor in one lands in another.
+ */
+function made(old: readonly string[], now: readonly string[], before: readonly string[], after: readonly string[], kept: readonly Pair[]): Reconciled {
+    const text = old.join("\n");
     const oldStarts = startsOf(old);
     const newStarts = startsOf(now);
     const changes: ChangeSpec[] = [];
     const arrived: { from: number; to: number }[] = [];
-    // The lines between two kept, by their own diff: what's the same in them kept too, whose ever they are.
     const gap = (fromOld: number, toOld: number, fromNew: number, toNew: number) => {
-        const was = old.slice(fromOld, toOld);
-        const is = now.slice(fromNew, toNew);
-        for (const hunk of hunks(was, is)) {
-            changed(shifted(hunk, fromOld, fromNew));
+        const was = ownedIn(before, fromOld, toOld);
+        const is = ownedIn(after, fromNew, toNew);
+        let o = fromOld;
+        let n = fromNew;
+        for (const [i, j] of matchedRuns(was, is)) {
+            const a = was[i];
+            const b = is[j];
+            if (a === undefined || b === undefined) {
+                continue;
+            }
+            stretch(o, a.from, n, b.from);
+            for (const hunk of hunks(old.slice(a.from, a.to), now.slice(b.from, b.to))) {
+                changed(shifted(hunk, a.from, b.from));
+            }
+            o = a.to;
+            n = b.to;
+        }
+        stretch(o, toOld, n, toNew);
+    };
+    // Lines no part has on both sides, replaced together: by their own diff, so what's the same in them is kept.
+    const stretch = (fromOld: number, toOld: number, fromNew: number, toNew: number) => {
+        if (toOld > fromOld || toNew > fromNew) {
+            for (const hunk of hunks(old.slice(fromOld, toOld), now.slice(fromNew, toNew))) {
+                changed(shifted(hunk, fromOld, fromNew));
+            }
         }
     };
     const changed = (hunk: Hunk) => {
@@ -240,7 +320,7 @@ function made(old: readonly string[], now: readonly string[], after: readonly st
             }
             return;
         }
-        changes.push(lineChange(before, old.length, oldStarts, hunk.from, hunk.to, now.slice(hunk.into, hunk.until)));
+        changes.push(lineChange(text, old.length, oldStarts, hunk.from, hunk.to, now.slice(hunk.into, hunk.until)));
     };
     let lastOld = -1;
     let lastNew = -1;

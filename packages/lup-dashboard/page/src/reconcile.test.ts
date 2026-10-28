@@ -95,6 +95,16 @@ describe("a layout made from what the editor holds", () => {
         expect(made.arrived.map((each) => after.text.slice(each.from, each.to))).toEqual(["three"]);
     });
 
+    it("changes each part's lines apart between two kept, so a cursor in a part gone lands where what replaced it is, not in a part changed beside it", () => {
+        // A file marked reviewed: its drawer's summary says so, and a line of its own stands where the file was.
+        const doc = layout("banner:━━ parser ━━", "summary:since · 1 flagged", "file:reader.py · created", "file:class Reader:", "reviewed:", "end:");
+        const after = layout("banner:━━ parser ━━", "summary:since · 1 reviewed", "line:reader.py · reviewed", "reviewed:", "end:");
+        const made = laidOver(doc, after);
+        expect(made.doc).toBe(after.text);
+        expect(after.text.slice(made.changes.mapPos(doc.text.indexOf("reader.py · created")))).toMatch(/^reader\.py · reviewed/);
+        expect(after.text.slice(made.changes.mapPos(doc.text.indexOf("1 flagged")))).toMatch(/^1 reviewed/);
+    });
+
     it("says what arrived but the operator's own words", () => {
         const after = layout("file:a = 1", "file:b = 2", "written c1:Why b?", "written c2:And c?", "file:c = 3", "end:");
         expect(laidOver(before, after).arrived).toEqual([]);
