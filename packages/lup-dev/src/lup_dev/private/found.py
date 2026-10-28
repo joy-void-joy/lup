@@ -14,6 +14,12 @@
   ASCII case, each value's occurrences counted.
 
 A value escaped, encoded or split across lines isn't found.
+
+**In prose,** a commit's message or a post's part, an item of lup's inbox cited
+by its number (`@1505`) is found too where the list withholds one
+(`Withheld.numbers`), by its shape, where Markdown reads text
+(`lup_dev.inbox.numbers`): what a reader on GitHub reads there as a mention.
+A file isn't prose: the notation is at home in one, a test's or a doc's.
 """
 
 from bisect import bisect_right
@@ -23,6 +29,7 @@ from itertools import accumulate
 from typing import TYPE_CHECKING
 
 from lup.types import Model
+from lup_dev.inbox.numbers import numbered
 from lup_dev.private.withheld import Held, Withheld
 
 if TYPE_CHECKING:
@@ -154,6 +161,27 @@ def found(text: str, withheld: Withheld) -> list[Found]:
         )
 
     return [at(span) for span in spans(text, withheld)]
+
+
+def in_prose(text: str, withheld: Withheld) -> list[Found]:
+    r"""Return every value of `withheld` in `text`, read as prose, and each item's number it cites where `withheld` withholds them, in the order they come.
+
+    >>> held = Withheld(held=[Held(kind="user", text="op")])
+    >>> [(each.held.text, each.line, each.column) for each in in_prose("op saw @1505\nnot `@7`", held)]
+    [('op', 1, 1), ('@1505', 1, 8)]
+    """
+    numbers = [
+        Found(
+            held=Held(kind="item-number", text=each.said),
+            line=each.line,
+            column=each.column,
+            end=each.column + len(each.said),
+        )
+        for each in (numbered(text) if withheld.numbers else [])
+    ]
+    return sorted(
+        [*found(text, withheld), *numbers], key=lambda each: (each.line, each.column)
+    )
 
 
 def masked(text: str, withheld: Withheld) -> str:

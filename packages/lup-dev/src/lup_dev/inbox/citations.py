@@ -38,13 +38,22 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
     from markdown_it.rules_inline import StateInline
-    from markdown_it.token import Token
 
 
-class Written(Model):
-    """A citation as it's written: the citation whole, what it names, and its words; where it is in the text it's in, once it's placed (`written`)."""
+class Said(Model):
+    """What an inline rule read, as it's written; where it is in the text it's in, once it's placed (`placed`)."""
 
     said: str
+    before: int = 0
+    """How many times the same is written before it in the inline text it's
+    read in, code among it, which places it in the text whole."""
+    start: int = 0
+    end: int = 0
+
+
+class Written(Said):
+    """A citation as it's written: the citation whole, what it names, and its words; where it is in the text it's in, once it's placed (`written`)."""
+
     item: int
     part: int | None = None
     words: str | None = None
@@ -52,11 +61,6 @@ class Written(Model):
     """Its words before an ellipsis, or its words whole where there's none."""
     last: str = ""
     """Its words after an ellipsis; none where there's none."""
-    before: int = 0
-    """How many times the same citation is written before it in the inline
-    text it's read in, code among it, which places it in the text whole."""
-    start: int = 0
-    end: int = 0
 
 
 class Parted(Model):
@@ -187,18 +191,26 @@ CITING = reader()
 def written(text: str) -> list[Written]:
     """Return each citation of the operator's words in `text`, in order, where it's written: one with words between brackets, or a part's id alone; none in code.
 
-    Each inline text Markdown reads is found where its first line is, from the
-    lines its block spans on, and each citation in it where it's written the
-    same number of times after that as in the inline text.
-
     >>> [(each.said, each.start) for each in written("On @820.9[why … it], @820[all], @414.3 and @7: `@1.2`.")]
     [('@820.9[why … it]', 3), ('@820[all]', 21), ('@414.3', 32)]
     """
+    return placed(text, CITING, "citation", Written)
+
+
+def placed[S: Said](
+    text: str, reading: MarkdownIt, kind: str, read: type[S]
+) -> list[S]:
+    """Return what the inline rule of `reading` leaves in `text` as tokens of `kind`, each read as `read`, in order, where it's written.
+
+    Each inline text Markdown reads is found where its first line is, from the
+    lines its block spans on, and each token in it where what it says is
+    written the same number of times after that as in the inline text.
+    """
     lines = Lines.of(text)
 
-    def made() -> Generator[Written]:
+    def made() -> Generator[S]:
         cursor = 0
-        for token in CITING.parse(text):
+        for token in reading.parse(text):
             if token.type != "inline" or token.map is None or not token.content:
                 continue
             first, until = token.map
@@ -208,21 +220,16 @@ def written(text: str) -> list[Written]:
             if found < 0:
                 continue
             cursor = found + len(opening)
-            for child in inline(token):
-                cited = Written.model_validate(child.meta)
+            for child in token.children or []:
+                if child.type != kind:
+                    continue
+                each = read.model_validate(child.meta)
                 at = found
-                for _ in range(cited.before + 1):
-                    at = text.find(cited.said, at, bound) + len(cited.said)
-                yield cited.model_copy(
-                    update={"start": at - len(cited.said), "end": at}
-                )
+                for _ in range(each.before + 1):
+                    at = text.find(each.said, at, bound) + len(each.said)
+                yield each.model_copy(update={"start": at - len(each.said), "end": at})
 
     return list(made())
-
-
-def inline(token: Token) -> list[Token]:
-    """Return the citations an inline token's children hold, in order."""
-    return [each for each in token.children or [] if each.type == "citation"]
 
 
 def straight(char: str) -> str:

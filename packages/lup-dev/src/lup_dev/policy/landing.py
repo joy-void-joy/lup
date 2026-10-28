@@ -8,7 +8,11 @@ lup's tools can, as `ask` with `wait` does (`docs/inbox.md`, *Holding a call*).
 So `land`, a tool the host service serves each launched session, moves the
 gated branch, `dev` by default:
 1. the gated branch's tip on the remote is fetched, writing no ref, so git can
-   tell what holds it;
+   tell what holds it; then the messages the landing would publish, the merge
+   commit's and each commit's beyond what the remote holds, are read for an
+   inbox item's number, which `Private`'s door refuses at the push, and a
+   landing citing one is refused before anything merges, where the list kept
+   for the repository withholds them (`Lander.numbers`);
 2. given a branch and a message, the branch is merged (`Lander.merge`): in the
    launch's room, by `lup-dev merge` behind the project's runner as the launch
    recorded it (`Register.runner`), the message on its standard input, the
@@ -124,6 +128,7 @@ from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 import lup
 from lup.doors import bound, declared
 from lup.programs import Ran
+from lup.publishing import Place, Refusal
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused, ToolSpec
 from lup.types import Model, MutableModel
@@ -160,6 +165,12 @@ from lup_dev.merging import Conflicted, Failed, Merged, Merging
 from lup_dev.policy.holds import unified
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.worktrees import SessionIndex
+from lup_dev.private.found import in_prose
+from lup_dev.private.history import Commit, Spot
+from lup_dev.private.module import Private
+from lup_dev.private.refusing import refused as refusals_of
+from lup_dev.private.withheld import Withheld
+from lup_dev.private.withheld import kept as listed_at
 from lup_dev.remote.protocol import (
     Pushed,
     PushHandler,
@@ -815,6 +826,11 @@ class Lander(Model, arbitrary_types_allowed=True):
         refs = await self.remotes.listed(self.launch, remote, push=True)
         old = next((ref.object for ref in refs if ref.name == onto), None)
         await self.fetched(remote, onto, old)
+        numbers = await self.numbers(
+            git, tip, refs, landing.message if merging else None
+        )
+        if numbers:
+            return numbers_refused(numbers)
         made = Made(tip=tip)
         if merging:
             merged = await self.merge(
@@ -880,6 +896,23 @@ class Lander(Model, arbitrary_types_allowed=True):
                 *going,
             ]
         )
+
+    async def numbers(
+        self, git: Git, tip: str, refs: list[Ref], message: str | None
+    ) -> list[Refusal]:
+        """Refuse each inbox item's number in the messages the landing would publish, `message` the merge commit's where it makes one, before anything merges: where the list kept for the repository withholds them; none where none is kept, which the door builds at the push.
+
+        At the push, after the merge, the local branch's move and the
+        operator's answers, a refusal would leave the branch to rewrite beneath
+        a merge already made.
+        """
+        data = self.layout.module_data(Private.name, self.launch.repository)
+        held = read_model(listed_at(data), Withheld)
+        if held is None or not held.numbers:
+            return []
+        has = [ref.object for ref in refs]
+        commits = await asyncio.to_thread(git.walked, [tip], has)
+        return await asyncio.to_thread(item_numbers, git, commits, message)
 
     async def fetched(self, remote: str, onto: str, old: str | None) -> None:
         """Fetch `old`, `onto`'s tip on `remote`, into the store, writing no ref, so git can tell what holds it; nothing where `onto` isn't there yet.
@@ -1705,6 +1738,49 @@ def gate_failed(asked: Merge, commit: str, report: str) -> str:
                 "it there, run the gate, and call `land` again. The gate's report:"
             ),
             report.rstrip(),
+        ]
+    )
+
+
+def item_numbers(git: Git, commits: list[str], message: str | None) -> list[Refusal]:
+    """Refuse each inbox item's number in the messages a landing would publish: the merge commit's, `message`, where it makes one, then each of `commits`', oldest first, as `Private`'s door refuses one at the push (`docs/private.md`, *An item's number*)."""
+    withholding = Withheld(numbers=True)
+
+    def spots(within: str, text: str) -> list[Spot]:
+        return [
+            Spot(
+                held=each.held,
+                place=Place(within=within, line=each.line, column=each.column),
+            )
+            for each in in_prose(text, withholding)
+        ]
+
+    merge = [] if message is None else spots("the merge commit's message", message)
+    read = [Commit.read(git, each) for each in commits]
+    published = [
+        spot for each in read for spot in spots(f"{each.short}'s message", each.message)
+    ]
+    return refusals_of([*merge, *published])
+
+
+def numbers_refused(refusals: list[Refusal]) -> str:
+    """Say that nothing landed, since a message it would publish cites an inbox item's number: each where, and how each is rewritten."""
+    return "\n".join(
+        [
+            (
+                "Not landed: a message it would publish cites an inbox item's "
+                "number, which `Private` refuses at the push, so nothing was "
+                "merged and nothing has changed."
+            ),
+            *(line for each in refusals for line in each.lines()),
+            (
+                "Rewrite each, then call `land` again. The merge commit's is the "
+                "`message` you give `land`. A commit of the branch, which isn't "
+                "pushed, is rewritten with `git commit --amend` where it's the "
+                "branch's tip, and below it by a rebase that needs no editor: "
+                "`GIT_SEQUENCE_EDITOR=\"sed -i '1s/^pick/edit/'\" git rebase -i "
+                "<commit>~`, then `git commit --amend` and `git rebase --continue`."
+            ),
         ]
     )
 

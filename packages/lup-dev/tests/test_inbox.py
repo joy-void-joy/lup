@@ -196,6 +196,8 @@ from lup_dev.policy.landing import LandingTools
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
+from lup_dev.private.withheld import Withheld
+from lup_dev.private.withheld import kept as listed_at
 from lup_dev.remote.protocol import Remotes
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
@@ -8519,6 +8521,73 @@ def test_land_where_the_gate_fails_on_the_merge_answers_its_report_changing_noth
     assert shell.git(dev, "rev-parse", "HEAD") == old
     assert landings.on_forge("refs/heads/dev") == old
     assert feat.is_dir()
+
+
+def test_land_refuses_a_merge_message_or_a_commit_citing_an_item_before_it_merges(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    (feat / "src/pkg").mkdir(parents=True, exist_ok=True)
+    (feat / "src/pkg/rooms.py").write_text('"""Rooms."""\n')
+    shell.commit(feat, "fix(rooms): what @1505 found\n\nAs `@270` reads.")
+    cited = shell.git(feat, "rev-parse", "--short", "HEAD")
+    old = moved_on(landings)
+    write_model(
+        listed_at(machine.module_data("private", landings.repository)), Withheld()
+    )
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp, "Merge: as @1477.2")
+    steer = (
+        "      steer: on GitHub `@` mentions a user, and the number means nothing "
+        "there: say in words what the item was about, or cite the issue it "
+        "concerns as `#123`; where you mean the notation itself, write it as code\n"
+    )
+    assert answer == (
+        "Not landed: a message it would publish cites an inbox item's number, "
+        "which `Private` refuses at the push, so nothing was merged and nothing "
+        "has changed.\n"
+        f"  the merge commit's message:1:11 - an inbox item's number, `@1477.2`\n"
+        f"{steer}"
+        f"  {cited}'s message:1:18 - an inbox item's number, `@1505`\n"
+        f"{steer}"
+        "Rewrite each, then call `land` again. The merge commit's is the `message` "
+        "you give `land`. A commit of the branch, which isn't pushed, is rewritten "
+        "with `git commit --amend` where it's the branch's tip, and below it by a "
+        'rebase that needs no editor: `GIT_SEQUENCE_EDITOR="sed -i '
+        "'1s/^pick/edit/'\" git rebase -i <commit>~`, then `git commit --amend` "
+        "and `git rebase --continue`."
+    )
+    assert shell.git(dev, "rev-parse", "HEAD") == old
+    assert landings.on_forge("refs/heads/dev") == old
+    assert landings.gate.ran == []
+    assert feat.is_dir()
+
+
+def test_land_merges_a_message_citing_an_item_where_the_list_doesn_t_withhold_them(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    moved_on(landings)
+    write_model(
+        listed_at(machine.module_data("private", landings.repository)),
+        Withheld(numbers=False),
+    )
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp, "Merge: as @1505")
+    merge = landings.on_forge("refs/heads/dev")
+    assert answer.startswith(f"Merged `feat` onto `dev` as {merge}, ")
 
 
 def test_land_leaves_dev_where_uncommitted_work_is_in_the_way_and_lands_once_it_s_gone(

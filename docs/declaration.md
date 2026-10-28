@@ -255,7 +255,7 @@ A module's commands come under its name on the command line, `lup-dev transcript
 | `CodeRules` | every rule but those `catalog/rules.py` leaves out, each with its reason (`runtime-mention` alone today); no exemptions; guidance `code-rules`. Requires Node `>=22.18` for the engine |
 | `GitHub` | the GitHub tools; the answer to a room's gate asking an issue's state |
 | `Transcripts` | copying the session records of each runtime's homes, the project's and each related repository's, when a launch opens and stops and before a room reads them; its data, mounted in every room; its commands reading them; each agent's conversation, live, as a view; guidance `transcripts` (`packages/lup-transcripts/README.md`) |
-| `Private` | what lup reads on the host never published, and the person's own values; refusing at `publishing`; the gate's `private` step; guidance `private` (`docs/private.md`) |
+| `Private` | what lup reads on the host never published, an inbox item's number in a commit's message or a post, and the person's own values; refusing at `publishing`; the gate's `private` step; guidance `private` (`docs/private.md`) |
 
 - **`Core` is every project's,** the part of the core a project can change. `Python` and `CodeRules` stay apart from it so each is one line to drop: dropping `CodeRules` turns off all of lup's code rules.
 - **`Core`, `Python` and `CodeRules` are data,** read from the catalog (`catalog/`), made of the same entry types a project writes; their guidance sections are files `lup_dev` ships. `GitHub` and `Private` live beside their machinery; `Transcripts` is a distribution of its own, `packages/lup-transcripts/`, its environment side in a subpackage its library side never imports (`packages/lup-transcripts/README.md`, *Layout*).

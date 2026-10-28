@@ -1297,10 +1297,37 @@ def test_a_comment_and_a_draft_carrying_a_value_are_refused_before_gh_runs(
     assert gh.calls() == []
 
 
+def test_a_post_citing_an_item_is_refused_naming_it_and_one_in_code_goes(
+    gh: Gh, tmp_path: Path
+) -> None:
+    refused = called(
+        "comment",
+        {"number": 66, "body": "Fixed.\n\nIt was @1505, the stale flag."},
+        launch(tmp_path),
+    )
+    assert refused.error
+    assert (
+        "  the body:3:8 - an inbox item's number, `@1505`\n"
+        "      steer: on GitHub `@` mentions a user, and the number means nothing "
+        "there: say in words what the item was about, or cite the issue it "
+        "concerns as `#123`; where you mean the notation itself, write it as code"
+    ) in refused.text
+    assert gh.calls() == []
+    link = "https://github.com/joy-void-joy/lup/issues/66#issuecomment-1"
+    gh.answer("issue comment", f"{link}\n")
+    went = called(
+        "comment",
+        {"number": 66, "body": "An item is cited `@270`, a part `@270.3`."},
+        launch(tmp_path),
+    )
+    assert went == Answer(text=f"Commented: {link}")
+
+
 @pytest.mark.parametrize(
     ("name", "arguments", "place"),
     [
         ("edit_issue", {"number": 7, "title": "From Kestrel Labs"}, "the title:1:6"),
+        ("edit_issue", {"number": 7, "title": "Since @1505"}, "the title:1:7"),
         ("edit_issue", {"number": 7, "add_labels": ["forge-op"]}, "the label:1:1"),
         (
             "file_issue",

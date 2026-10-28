@@ -24,6 +24,11 @@ The details, each read on the host through `Facts`, which tests stub:
   can't answer, its answer at the last launch stands, and a repository it never
   answered for is left out, said.
 
+One isn't read anywhere, and isn't a value: `item-number`, an item of lup's
+inbox cited by its number (`@1505`), found by its shape in a commit's message
+and a post alone (`lup_dev.inbox.numbers`), never in a file, where the notation
+is at home. A launch keeps whether it's chosen (`Withheld.numbers`).
+
 The person's own values are plain strings, given in their own layer
 (`lup_project.local.py`), which git ignores: one written in a committed
 declaration is published by its commit.
@@ -49,20 +54,27 @@ if TYPE_CHECKING:
     from lup_dev.declaration.kinds import Repository
 
 type Detail = Literal[
-    "home", "user", "hostname", "alias", "repository-path", "private-repository"
+    "home",
+    "user",
+    "hostname",
+    "alias",
+    "repository-path",
+    "private-repository",
+    "item-number",
 ]
-"""A kind of detail lup reads on the host, each never published."""
+"""A kind of detail lup withholds by default, each never published: read on the
+host, but an item's number, found by its shape."""
 
 type Kind = Detail | Literal["value"]
-"""What a value never published is: a detail of the host's, or one of the
-person's own."""
+"""What a value never published is: a detail of the host's, an item's number,
+or one of the person's own."""
 
 DETAILS: list[Detail] = list(get_args(Detail.__value__))
-"""Every detail lup reads, in the order a refusal prefers them."""
+"""Every detail lup withholds, in the order a refusal prefers them."""
 
 
 class Said(Model):
-    """What a refusal or a finding says of a value of one kind: never the value."""
+    """What a refusal or a finding says of a value of one kind: never the value, but an item's number (`said_of`)."""
 
     what: str
     steer: str
@@ -108,6 +120,16 @@ def said(kind: Kind) -> Said:
                     "it has no copy there"
                 ),
             )
+        case "item-number":
+            return Said(
+                what="an inbox item's number",
+                steer=(
+                    "on GitHub `@` mentions a user, and the number means nothing "
+                    "there: say in words what the item was about, or cite the issue "
+                    "it concerns as `#123`; where you mean the notation itself, "
+                    "write it as code"
+                ),
+            )
         case "value":
             return Said(
                 what="one of the operator's private values",
@@ -125,6 +147,21 @@ class Held(Model):
     text: str
 
 
+def said_of(held: Held) -> Said:
+    """Say what `held` is, and how it's written instead, as a refusal tells it: by its kind, never its value, but an item's number by itself too.
+
+    An item's number is no secret, the room having written it, and it's what
+    to look for on the line the place names, beside any other there.
+
+    >>> said_of(Held(kind="item-number", text="@1505")).what, said_of(Held(kind="user", text="op")).what
+    ("an inbox item's number, `@1505`", "the operator's user name")
+    """
+    kind = said(held.kind)
+    if held.kind != "item-number":
+        return kind
+    return kind.model_copy(update={"what": f"{kind.what}, `{held.text}`"})
+
+
 class Seen(Model):
     """GitHub's word on who reads a repository, kept for a launch it can't answer."""
 
@@ -140,6 +177,10 @@ class Withheld(Model):
     """Each value, the longest first, none twice."""
     seen: list[Seen] = []
     """GitHub's last word on each related repository it has a copy of."""
+    numbers: bool = True
+    """Whether an item's number is withheld, in a commit's message and a post
+    (`in_prose`): it is unless the declaration drops `item-number`, and in a
+    list kept before that was a detail."""
 
 
 def kept(data: Path) -> Path:
@@ -408,7 +449,10 @@ async def built(
         *(unread if hosts.unread else []),
         *(each.note for each in read if each.note is not None),
     ]
-    return Built(withheld=Withheld(held=longest, seen=seen), notes=notes)
+    return Built(
+        withheld=Withheld(held=longest, seen=seen, numbers="item-number" in details),
+        notes=notes,
+    )
 
 
 def own_paths(repository: Path) -> list[Path]:
