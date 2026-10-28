@@ -502,18 +502,49 @@ class Flagged(Model):
 
 
 class Quote(Model):
-    """A passage of an item the operator commented on: the text they selected, and where it is in the item as the page shows it."""
+    """What a comment of the operator's is on, and where: lines of one block of a view the review showed them, as that block stood when they wrote it, and the passage of those lines as the agent reads it.
+
+    Every comment and remark is anchored so (`docs/dashboard.md`, *The
+    review*): the page keeps it under the last line it quotes as the block
+    changes, following the block's own lines from one version to the next,
+    and says it's outdated where the lines it quotes aren't what stands there.
+    One kept from a draft written before quotes named their block, `block`
+    empty, has `start` and `end` counted in its item's text whole as the page
+    showed it then, its files' lines among it: the page places it once by
+    them, and names its block, or, where nothing it shows is there, keeps it
+    on its item whole.
+    """
 
     text: str
+    """The passage as the agent reads it: the words selected; a changed
+    file's lines under its path and their numbers, each marked as a diff
+    marks it."""
+    block: str = ""
+    """The block it's on, by its id: its view instance's and its own
+    (`blockId`, `page/src/views.ts`), which the block keeps across layouts."""
+    version: str = ""
+    """The block's version as it was written on: the block's own where it
+    says one, as git names a file's content; else what the page made of its
+    lines."""
+    line: int = 0
+    """The block's first line it's on, counted from 0 in that version."""
+    lines: list[str] = []
+    """The block's lines it's on, each whole, in order, as that version held
+    them: the comment is under the last."""
     start: int
-    """Where it starts in the item's text as the page shows it, which the page
-    places the comment by; the host keeps it, and reads only `text`."""
+    """Where the passage starts, counted in those lines joined by line
+    breaks."""
     end: int
+    """Where it ends, counted in those lines joined."""
 
 
 class Comment(Model):
     """A comment of the operator's on an item: on a passage of it, one of its decisions among them, or on it whole; or, in a thread, on a reply the agent made to an earlier comment."""
 
+    id: str = ""
+    """What names it among what's drafted, which the page gives it as it's
+    opened and keeps it by; empty for one drafted before what's drafted had
+    ids, which the page names as it reads the draft."""
     item: int
     quote: Quote | None = None
     """The passage it's on; none for a comment on the item whole. On a reply
@@ -528,6 +559,8 @@ class Comment(Model):
 class Letter(Model):
     """The operator's message to one conversation, written under its agent's banner in the review and sent with the rest of the reply."""
 
+    id: str = ""
+    """What names it among what's drafted, as a comment's does (`Comment.id`)."""
     to: Conversation
     text: str
 
@@ -549,13 +582,17 @@ class Quoted(Model):
 class Remark(Model):
     """A comment of the operator's in one of an agent's drawers in the review (`docs/dashboard.md`, *The drawers*): on a passage of its conversation, or on lines of its branch's code since they approved it, as they stood when it was written."""
 
+    id: str = ""
+    """What names it among what's drafted, as a comment's does (`Comment.id`)."""
     to: Conversation
     quote: Quote
-    """The passage, and where it is in the drawer as the page shows it."""
+    """The passage, and where it is: the block of the drawer's view it's on,
+    one of the agent's words or a file."""
     text: str
     step: int | None = None
-    """The step of the conversation the passage is of, for a comment on its
-    words; none for one on code."""
+    """The step of the conversation the passage is of, for a remark on its
+    words drafted before quotes named their block (`Quote.block`), which the
+    page places it by once; none for any other."""
     code: Quoted | None = None
     """The lines of the file the passage is, and their version, for a comment
     on code; none for one on the conversation's words."""

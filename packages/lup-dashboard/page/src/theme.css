@@ -716,6 +716,26 @@ kbd {
     font-weight: 700;
 }
 
+/* A line a layout put in or changed as it arrived while the operator reads: a
+   moment's tint, fading, so what came is seen to come (`reconcile.ts`,
+   `arriving`); a bar at its end where motion is reduced. */
+.buffer .cm-line.arrived {
+    animation: arrived 1.5s ease-out;
+}
+
+@keyframes arrived {
+    from {
+        background-color: var(--selection);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .buffer .cm-line.arrived {
+        animation: none;
+        box-shadow: inset -3px 0 0 var(--info);
+    }
+}
+
 .buffer .cm-line.code-gap {
     border-top: 1px dashed var(--fold-since);
 }

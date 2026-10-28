@@ -18,7 +18,7 @@
 // drawers*).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { doing, everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
+import { everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useViews, useWatched } from "./hooks";
@@ -98,10 +98,6 @@ export function App() {
         (places) => JSON.stringify(places),
     );
     const now = useNow();
-    // The review's ages are told to the minute, so it's laid out again once a minute, not every second; the banners'
-    // durations every five seconds, which lays the whole review out again, its drawers among it.
-    const minute = useNow(60_000);
-    const soon = useNow(5000);
     const [palette, setPalette] = useState(false);
     // Whether the overview pane is shown: beside the review, hidden by `\`; over it on a narrow screen, opened by `gO`.
     const narrow = useNarrow();
@@ -254,10 +250,15 @@ export function App() {
     );
 
     // What each agent's banner says, by its conversation, kept the same object while every banner says the same
-    // (`useSame`): a hook that changed nothing a banner says, or a record read that changed no task or ring, lays
-    // nothing out anew; one that did changes the banner's words, which the text holds, so the review is laid out.
+    // (`useSame`): where it is, which changes only as it moves, so the review is laid out anew for it alone then.
     const bannered = useSame(
-        useMemo(() => new Map(live.map((agent) => [agent.key, bannerOf(agent, soon)])), [live, soon]),
+        useMemo(() => new Map(live.map((agent) => [agent.key, bannerOf(agent)])), [live]),
+        (map) => JSON.stringify([...map]),
+    );
+    // What each agent's doing, by its conversation, which its banner draws beside its words as the time passes
+    // (`ticking.ts`): a hook changes it, and lays nothing out.
+    const activities = useSame(
+        useMemo(() => new Map(live.map((agent) => [agent.key, agent.talker.activity ?? null])), [live]),
         (map) => JSON.stringify([...map]),
     );
 
@@ -285,8 +286,8 @@ export function App() {
         const id = instanceOf(view.repository, view.module, view.view, view.argument);
         setLoads((before) => (before.some((each) => instanceOf(each.repository, each.module, each.view, each.argument) === id) ? before : [...before, view]));
     }, []);
-    // What the banner says of an agent beyond its name: where it is and what it's doing, the core's; what it's working on,
-    // its context and whether its flagged writes are held are its banner's parts, which its views say (`views/`).
+    // What the banner says of an agent beyond its name: where it is, the core's, what it's doing drawn after it; what it's
+    // working on, its context and whether its flagged writes are held are its banner's parts, which its views say (`views/`).
     const banner = useCallback(
         (head: Head) => {
             if ("conversation" in head) {
@@ -885,7 +886,7 @@ export function App() {
                         pending={setChord}
                         list={openList}
                         reviewed={inbox.reply?.kind === "inbox-items" ? (inbox.reply.reviewed ?? null) : null}
-                        now={minute}
+                        activities={activities}
                         parents={parents}
                         states={states}
                         overview={overview}
@@ -949,9 +950,9 @@ function last(path: string): string {
     return name.endsWith(".git") ? name.slice(0, -".git".length) : name;
 }
 
-/** Say what the core says of an agent on its banner: where it is, and what it's doing as of `now`; its banner's parts, which its views say, come after. */
-function bannerOf(agent: Live, now: Date): string {
-    return [[last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · "), doing(agent.talker.activity, now)].join(" · ");
+/** Say what the core says of an agent on its banner: where it is; what it's doing and for how long, drawn after it (`Review.tsx`), and its banner's parts, which its views say, come after. */
+function bannerOf(agent: Live): string {
+    return [last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · ");
 }
 
 /** Say what marking files reviewed came to: how many, the flagged writes approved with them, and those that changed since the version shown, whose flags wait. */

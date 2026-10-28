@@ -58,6 +58,7 @@ import {
 import { Vim, getCM, vim, type CodeMirror, type CodeMirrorV } from "@replit/codemirror-vim";
 import { useEffect, useRef, type RefObject } from "react";
 
+import { newId } from "./anchors";
 import { defineClipboard, shownBelow } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, aroundOf, foldEdge, levelled, nextFold } from "./folds";
@@ -1214,7 +1215,7 @@ export function uncovered(closed: Folding[], head: number): number {
  * Where the cursor goes once the text is laid out again: into a comment just opened, onto an item, to a place in the
  * text as it was, carried with the text's changes, or nowhere in particular.
  */
-export type Landing = { comment: number } | { item: number } | { at: number } | null;
+export type Landing = { comment: string } | { item: number } | { at: number } | null;
 
 /** What a view lays out for the editor: its text, the comments in it, and what folds. */
 export interface Shown {
@@ -1298,10 +1299,10 @@ export interface Editor<D, C> {
     kept: RefObject<Map<string, boolean>>;
     /** The draft as it was last rendered. */
     latest: RefObject<D>;
-    /** Whether a comment is being written. */
-    writing: () => boolean;
     /** Change the draft as one step `u` undoes. */
     record: (next: D) => void;
+    /** Change the draft as it stands, as what's written is anchored anew, in place of the state it's in: no step `u` undoes. */
+    rewrite: (next: D) => void;
     /** Draw the text: `decorations` replace those drawn before. */
     draw: (decorations: DecorationSet) => void;
     /** Go into the comment just opened, in insert mode, once the text holds it. */
@@ -1314,7 +1315,7 @@ export interface Editor<D, C> {
  * The editor a view draws into `parent`: made once, its keys bound at each render to what the view laid out. The
  * view lays its text into it itself, once it changes, keeping what it must of where the reader is.
  */
-export function useEditor<D, C extends { text: string }>(config: Config<D, C>): Editor<D, C> {
+export function useEditor<D, C extends { id: string; text: string }>(config: Config<D, C>): Editor<D, C> {
     const { shown, comments, withComments, change } = config;
     const parent = useRef<HTMLDivElement>(null);
     const view = useRef<EditorView | null>(null);
@@ -1468,10 +1469,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
         change(next);
     }
 
-    function added(comment: C) {
+    function added(opening: C) {
+        // Named as it's opened, which it's kept by from then on.
+        const comment = opening.id === "" ? { ...opening, id: newId() } : opening;
         const next = withComments(latest.current, [...comments(latest.current), comment]);
-        // Its place in the list the draft keeps, which may hold what's written in more lists than one.
-        landing.current = { comment: comments(next).indexOf(comment) };
+        landing.current = { comment: comment.id };
         opener.current = keyed.from;
         record(next);
         writing.current = true;
@@ -1542,7 +1544,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                 const present = comments(latest.current);
                 const kept = saying(present);
                 const block = blockAt(head());
-                const written = block === undefined ? undefined : present[block.comment];
+                const written = block === undefined ? undefined : present.find((each) => each.id === block.comment);
                 if (block !== undefined && written !== undefined && !kept.includes(written)) {
                     const back = opener.current ?? own.about(written, block, null);
                     landing.current = back === undefined ? null : { at: back };
@@ -1556,7 +1558,7 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
             finish: (cm) => {
                 const editor = view.current;
                 const block = blockAt(head());
-                const comment = block === undefined ? undefined : comments(latest.current)[block.comment];
+                const comment = block === undefined ? undefined : comments(latest.current).find((each) => each.id === block.comment);
                 const back = block === undefined || comment === undefined ? undefined : own.about(comment, block, opener.current);
                 Vim.exitInsertMode(cm, true);
                 if (editor === null || back === undefined) {
@@ -1674,9 +1676,10 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
                     const from = update.changes.mapPos(block.from, -1);
                     const to = update.changes.mapPos(block.to, 1);
                     const text = update.state.doc.sliceString(from, to);
-                    const before = next[block.comment];
+                    const at = next.findIndex((each) => each.id === block.comment);
+                    const before = next[at];
                     if (before !== undefined && before.text !== text) {
-                        next[block.comment] = { ...before, text };
+                        next[at] = { ...before, text };
                     }
                 }
                 record(withComments(latest.current, keyed.inserting ? next : saying(next)));
@@ -1691,8 +1694,11 @@ export function useEditor<D, C extends { text: string }>(config: Config<D, C>): 
         landing,
         kept,
         latest,
-        writing: () => keyed.inserting,
         record,
+        rewrite: (next) => {
+            history.current = rewritten(history.current, next);
+            change(next);
+        },
         draw: (decorations) => view.current?.dispatch({ effects: drawn.of(decorations) }),
         enter: () => {
             const editor = view.current;

@@ -15,16 +15,14 @@ import {
     calls,
     cited,
     kept,
-    lastOf,
+    lineOf,
     passage,
     shownIn,
     spoken,
     starts as startsOf,
-    under,
     type Block,
     type Folding,
     type Line,
-    type Quote,
     type Span,
 } from "./comments";
 import type { components } from "./generated/api";
@@ -37,10 +35,25 @@ export type Call = components["schemas"]["Call"];
 type Called = components["schemas"]["Called"];
 type Party = components["schemas"]["Conversation"];
 
-/** A comment of the operator's on a line or a passage of what the agent said at step `step`: what the review's remark on the conversation holds of it (`Remark`, `review.ts`). */
+/** A comment of the operator's on what the agent said at step `step`, under line `line` of its words, counted among them from 0, blank ones among them: what the review's remark on the conversation holds of it, by its id (`Remark`, `review.ts`). */
 export interface Remark {
+    id: string;
     step: number;
-    quote: Quote;
+    line: number;
+    text: string;
+}
+
+/**
+ * A passage of what the agent said at step `step`, as a remark quotes it: its words' lines, the first and last of them
+ * it's on, where it starts and ends in those joined, and its text.
+ */
+export interface Passage {
+    step: number;
+    lines: string[];
+    first: number;
+    last: number;
+    start: number;
+    end: number;
     text: string;
 }
 
@@ -427,11 +440,10 @@ export function laid(entries: Entry[], beside: Beside, talk: Talk): Laid {
         folds.push(made);
         return made;
     };
-    const comments = talk.comments.map((comment, at) => ({ comment, at }));
-    const writeBlocks = (mine: { comment: Remark; at: number }[]) => {
-        for (const { comment, at } of mine) {
+    const writeBlocks = (mine: Remark[]) => {
+        for (const comment of mine) {
             const span = write(comment.text);
-            blocks.push({ comment: at, ...span });
+            blocks.push({ comment: comment.id, ...span });
         }
     };
 
@@ -523,18 +535,19 @@ export function laid(entries: Entry[], beside: Beside, talk: Talk): Laid {
         // The agent's words, which are most of it, unlabelled.
         const lines = kept(entry.text, true);
         const own = lines.join("\n");
-        const lineStarts = startsOf(lines);
-        const mine = comments.filter(({ comment }) => comment.step === step);
+        const mine = talk.comments.filter((comment) => comment.step === step);
         const said: Words = { step, own, lines: [], blocks: [] };
         const before = blocks.length;
-        spoken(null, entry.text, true).forEach((row, at) => {
+        const rows = spoken(null, entry.text, true);
+        rows.forEach((row, at) => {
             const span = write(row.text);
             if (row.blank) {
                 asides.push({ kind: "agent", ...span });
-                return;
+            } else {
+                said.lines.push({ from: span.from + row.words, to: span.to, own: row.own, start: span.from });
             }
-            said.lines.push({ from: span.from + row.words, to: span.to, own: row.own, start: span.from });
-            writeBlocks(mine.filter(({ comment }) => (under(lineStarts, comment.quote) ?? 0) === at));
+            // Under the line it's on, one past the words' last under their last.
+            writeBlocks(mine.filter((comment) => Math.min(comment.line, rows.length - 1) === at));
         });
         said.blocks = blocks.slice(before);
         words.push(said);
@@ -560,35 +573,58 @@ export function blockAt(laidOut: Laid, position: number): Block | undefined {
     return laidOut.blocks.find((each) => position >= each.from && position <= each.to);
 }
 
-/** Return where a comment opened on the line at `position` goes: on that line of the agent's words; none on any other line. */
-export function opened(laidOut: Laid, position: number): Remark | undefined {
+/** Return the lines of what the agent said at one step, blank ones among them, as a remark counts them. */
+export function linesOfWords(words: Words): string[] {
+    return words.own.split("\n");
+}
+
+/** Return the passage a comment opened on the line at `position` is on: that line of the agent's words; none on any other line. */
+export function opened(laidOut: Laid, position: number): Passage | undefined {
     const found = lineAt(laidOut, position);
     if (found === undefined) {
         return undefined;
     }
     const { words, line } = found;
+    const lines = linesOfWords(words);
+    const at = lineOf(startsOf(lines), line.own);
     const text = laidOut.text.slice(line.from, line.to);
-    return { step: words.step, quote: { text, start: line.own, end: line.own + text.length }, text: "" };
+    return { step: words.step, lines, first: at, last: at, start: 0, end: text.length, text };
 }
 
-/** Return a comment on the passage `from` to `to` selects, counted in what the agent said; none where it isn't all inside one step of its words. */
-export function quoted(laidOut: Laid, from: number, to: number): Remark | undefined {
+/** Return the passage a comment on what `from` to `to` selects is on, counted in what the agent said; none where it isn't all inside one step of its words. */
+export function quoted(laidOut: Laid, from: number, to: number): Passage | undefined {
     const first = lineAt(laidOut, from);
     const last = lineAt(laidOut, Math.max(to - 1, from));
     if (first === undefined || last === undefined || first.words !== last.words || to <= from) {
         return undefined;
     }
     const quote = passage(first.words.own, first.line, last.line, from, to);
-    return quote.end > quote.start ? { step: first.words.step, quote, text: "" } : undefined;
+    if (quote.end <= quote.start) {
+        return undefined;
+    }
+    const lines = linesOfWords(first.words);
+    const starts = startsOf(lines);
+    const top = lineOf(starts, quote.start);
+    const bottom = lineOf(starts, quote.end - 1);
+    const start = starts[top] ?? 0;
+    return { step: first.words.step, lines, first: top, last: bottom, start: quote.start - start, end: quote.end - start, text: quote.text };
 }
 
-/** Return where a comment on the agent's words is about, in the text: the last character of what it quotes; none where its step isn't laid out. */
-export function aboutAt(laidOut: Laid, comment: Remark): number | undefined {
-    const words = laidOut.words.find((each) => each.step === comment.step);
+/** Return where a passage of the words of step `step`, from `start` to `end` in its lines from `first` on, is in the text; none where its step isn't laid out. */
+export function passageAt(laidOut: Laid, step: number, first: number, start: number, end: number): Span | undefined {
+    const words = laidOut.words.find((each) => each.step === step);
     if (words === undefined) {
         return undefined;
     }
-    return shownIn(words.lines, lastOf(comment.quote), words.lines[0]?.start ?? 0);
+    const offset = startsOf(linesOfWords(words))[first] ?? 0;
+    const none = words.lines[0]?.start ?? 0;
+    return { from: shownIn(words.lines, offset + start, none), to: shownIn(words.lines, offset + end, none) };
+}
+
+/** Return where a comment on such a passage is about, in the text: its last character, where reading carries on; none where its step isn't laid out. */
+export function aboutAt(laidOut: Laid, step: number, first: number, start: number, end: number): number | undefined {
+    const shown = passageAt(laidOut, step, first, Math.max(end - 1, start), Math.max(end - 1, start));
+    return shown?.from;
 }
 
 /** Return `laidOut` moved by `by` in the text: each span of it where it is once the conversation is laid out after `by` characters, as a drawer lays it; its text is still its own, which the drawer replaces by the whole once that's laid out. */
