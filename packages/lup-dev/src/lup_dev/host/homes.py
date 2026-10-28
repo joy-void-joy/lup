@@ -73,7 +73,7 @@ def translated(layout: Layout, path: Path) -> Found | None:
     for each in found:
         try:
             registered = Register.model_validate_json(each.read_text())
-        except (OSError, ValidationError):
+        except OSError, ValidationError:
             continue
         if registered.own is None or registered.home is None:
             continue
