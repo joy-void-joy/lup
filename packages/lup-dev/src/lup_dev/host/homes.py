@@ -26,6 +26,7 @@ from lup.types import Model
 from lup_dev.host.protocol import Register
 
 if TYPE_CHECKING:
+    from lup_dev.host.records import Records
     from lup_dev.layout import HostLayout, Layout
 
 
@@ -36,16 +37,28 @@ class Found(Model):
     root: Path
 
 
-def kept(layout: HostLayout, runtime: str, session: str, home: Path) -> None:
-    """Keep `home` as where the record of session `session` of `runtime` is, where nothing is kept for it yet: the first launch the host service hears it from holds it, so a room naming another's session, or the operator's own, later reads nothing of theirs.
+def kept(
+    layout: HostLayout,
+    runtime: str,
+    session: str,
+    home: Path,
+    operators: Records | None = None,
+) -> None:
+    """Keep `home` as where the record of session `session` of `runtime` is, where nothing is kept for it yet and the operator's own directory holds none of it (`operators`, the runtime's records): the first launch the host service hears it from holds it, so a room naming another's session later, or the operator's own, reads nothing of theirs.
 
     An id that isn't a plain name is kept nowhere: a hook's payload, which a
-    room writes, gives it.
+    room writes, gives it. A session the operator ran on the host is kept
+    nowhere either, so its record stays read from their directory, though a
+    room's hook names it first. Where lup itself moves or copies a session's
+    record into a home, on the host, it keeps that home without `operators`,
+    since it knows where the record went.
     """
     if not plain(session) or not plain(runtime):
         return
     place = layout.home_of(runtime, session)
     if place.exists():
+        return
+    if operators is not None and operators.held(session):
         return
     place.parent.mkdir(parents=True, exist_ok=True)
     place.write_text(str(home))

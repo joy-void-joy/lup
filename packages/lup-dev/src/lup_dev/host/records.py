@@ -48,6 +48,10 @@ class Records(ABC):
         any other's in the operator's own directory alone (`lup_dev.host.homes`).
         """
 
+    @abstractmethod
+    def held(self, session: str) -> bool:
+        """Say whether the operator's own directory holds a record of session `session`: a session of theirs, which no launch's home may claim (`lup_dev.host.homes.kept`)."""
+
 
 class Said(Model):
     """Something said in a session: the operator's words, or the agent's."""

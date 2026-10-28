@@ -814,6 +814,9 @@ class NoRecords(Records):
     def kept(self, under: list[Path]) -> list[Record]:
         return []
 
+    def held(self, session: str) -> bool:
+        return False
+
     def conversation(self, session: str, agent: str | None) -> Found | None:
         return None
 

@@ -114,6 +114,7 @@ from lup_dev.host.protocol import (
     handle,
 )
 from lup_dev.host.pushes import Pushes
+from lup_dev.host.records import Records
 from lup_dev.host.rooms import SERVER, LaunchTools, RoomRoute, RoomTools, summaries
 from lup_dev.host.watch import Changes, Touched
 from lup_dev.host.workers import (
@@ -781,6 +782,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     spawns: Spawns | None = None
     """How each runtime recorded its subagents' spawns; none reads nothing, so
     subagents go without names until they rename themselves."""
+    operators: dict[str, Records] = {}
+    """Each runtime's records on this machine, by its name: a session whose
+    record the operator's own directory holds is never kept as a launch's
+    (`lup_dev.host.homes.kept`). A runtime missing here is checked for none."""
     bearings: Bearings | None = None
     """What a new main session is told of where its repository stands as it
     starts; none tells nothing."""
@@ -1163,7 +1168,13 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             return Spoken(answer=await self.judgement(request, payload, writer))
         if request.home is not None:
-            kept(self.layout, request.runtime, heard.session, request.home)
+            kept(
+                self.layout,
+                request.runtime,
+                heard.session,
+                request.home,
+                self.operators.get(request.runtime),
+            )
         conversation = conversations.named(heard.session, heard.agent)
         noted = self.spawning(request, conversations, conversation, heard, payload)
         conversation, said = noted.conversation, noted.said
@@ -1912,6 +1923,9 @@ class HostService(Model, arbitrary_types_allowed=True):
     spawns: Spawns | None = None
     """How each runtime recorded its subagents' spawns, read once at a
     subagent's first hook (`cli.py`'s adapters); none reads nothing."""
+    operators: dict[str, Records] = {}
+    """Each runtime's records on this machine, by its name, for whether the
+    operator's own directory holds a session (`Launches.operators`)."""
     bearings: Bearings | None = None
     """What a new main session is told of where its repository stands as it
     starts (`inbox/bearings.py`, which `cli.py` gives); none tells nothing."""
@@ -2004,6 +2018,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             say=self.say,
             names=Names(path=self.layout.names),
             spawns=self.spawns,
+            operators=self.operators,
             bearings=self.bearings,
             refresh=self.refresh,
             podman=self.podman,

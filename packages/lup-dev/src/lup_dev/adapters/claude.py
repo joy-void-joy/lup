@@ -1770,6 +1770,16 @@ class ClaudeRecords(Model, Records):
         )
 
     @override
+    def held(self, session: str) -> bool:
+        """Say whether the operator's own directory holds a record of session `session`, a regular file inside it, opened as every read is (`lup.rooms.homes.opened`)."""
+        found = self.model_copy(update={"host": None}).conversation(session, None)
+        reading = None if found is None else opened(found.root, found.record)
+        if reading is None:
+            return False
+        reading.close()
+        return True
+
+    @override
     def kept(self, under: list[Path]) -> list[Record]:
         projects = self.directory / "projects"
         folders = sorted(projects.iterdir()) if projects.is_dir() else []

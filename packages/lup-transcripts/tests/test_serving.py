@@ -109,6 +109,9 @@ class Held(Records):
         self.record = record
         self.asked: list[list[Path]] = []
 
+    def held(self, session: str) -> bool:
+        return False
+
     def conversation(self, session: str, agent: str | None) -> Found | None:
         return None
 

@@ -580,6 +580,7 @@ def host_serve(context: typer.Context) -> None:
         courier=couriers,
         judge=WorkerJudge(modules=workers),
         spawns=SpawnRecords(adapters=known, layout=layout),
+        operators={name: each.records for name, each in recorded().items()},
         post=delivery,
         bearings=RepositoryBearings(
             delivery=delivery, integration=settings.lup_integration_branch

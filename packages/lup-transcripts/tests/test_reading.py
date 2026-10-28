@@ -89,6 +89,9 @@ class Live(Records):
         del under
         return []
 
+    def held(self, session: str) -> bool:
+        return False
+
     def conversation(self, session: str, agent: str | None) -> Found | None:
         record = self.home / f"{session}.jsonl"
         record.parent.mkdir(parents=True, exist_ok=True)

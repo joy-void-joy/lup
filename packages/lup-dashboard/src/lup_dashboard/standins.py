@@ -53,6 +53,10 @@ class StandInRecords(Model, Records):
         return []
 
     @override
+    def held(self, session: str) -> bool:
+        return False
+
+    @override
     def conversation(self, session: str, agent: str | None) -> Found | None:
         record = self.place(session, agent)
         return Found(record=record, root=self.directory) if record.is_file() else None
