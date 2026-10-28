@@ -25,7 +25,7 @@ from lup_dev.host.homes import Found, home_of
 from lup_dev.host.homes import kept as hostkept
 from lup_dev.host.protocol import Limits, Register
 from lup_dev.host.records import Record
-from lup_dev.host.written import Places
+from lup_dev.host.written import Checked, Places
 from lup_dev.layout import Layout
 from lup_dev.migration import (
     HostRuntime,
@@ -395,7 +395,13 @@ def test_a_repository_s_sessions_move_into_its_rooms_home_and_the_rest_stay(
         "codex: ~/.codex isn't there, so nothing of it moves.",
     ]
     assert not home.exists()
+    assert not state.told.migrated(bare, "claude").exists()
     moved = migrating.said(move=True)
+    # Moved, the repository's records are marked so, so a launch doesn't offer
+    # to move what a host session writes there after; Codex's, with no
+    # directory to move from, aren't.
+    assert state.told.migrated(bare, "claude").is_file()
+    assert not state.told.migrated(bare, "codex").exists()
     assert moved[0] == (
         f"claude: 2 records of this repository's sessions, 2 files and {size} B, "
         f"moved from ~/.claude into {home}, where its rooms resume them:"
@@ -556,7 +562,7 @@ def test_claude_code_s_directory_is_checked_for_what_a_host_session_acts_on(
     )
     written(directory / ".credentials.json", '{"claudeAiOauth": {}}')
     places = Places(home=home, written=[directory, Path("/w/lup.git")])
-    assert ClaudeWritten(directory=directory).checked(places) == [
+    assert ClaudeWritten(directory=directory).checked(places).said() == [
         (
             "`settings.json` runs on the host `notify-send done`; "
             f"`bash {worktree}/hooks/start.sh` (it names a directory rooms write: a "
@@ -613,16 +619,64 @@ def test_claude_code_s_directory_is_checked_for_what_a_host_session_acts_on(
     ]
 
 
-def test_settings_that_run_nothing_say_so(tmp_path: Path) -> None:
+def test_settings_that_run_nothing_say_so_as_nothing_to_act_on(tmp_path: Path) -> None:
     directory = tmp_path / ".claude"
     written(directory / "settings.json", json.dumps({"model": "opus", "theme": "dark"}))
+    (directory / "plugins").mkdir()
     places = Places(home=tmp_path, written=[directory])
-    assert ClaudeWritten(directory=directory).checked(places) == [
+    assert ClaudeWritten(directory=directory).checked(places) == Checked(
+        fine=[
+            (
+                "`settings.json`: nothing in it runs a command, sets a variable, or "
+                "lets a session act without asking."
+            ),
+            (
+                "`plugins/`: none is turned on in `settings.json`, so none loads in a "
+                "host session."
+            ),
+        ]
+    )
+
+
+def test_settings_asking_before_a_call_are_to_check_though_they_run_nothing(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / ".claude"
+    written(
+        directory / "settings.json",
+        json.dumps({"permissions": {"allow": [], "ask": ["Bash"], "deny": []}}),
+    )
+    checked = ClaudeWritten(directory=directory).checked(
+        Places(home=tmp_path, written=[directory])
+    )
+    assert checked.fine == []
+    assert checked.found == [
         (
-            "`settings.json`: nothing in it runs a command, sets a variable, or lets "
-            "a session act without asking."
+            "`settings.json`: nothing in it runs a command, sets a variable, or lets a "
+            "session act without asking. It asks before 1 kind of call and denies 0: "
+            "a room could have taken one out, so check each you set is there."
         )
     ]
+
+
+def test_the_host_login_is_said_apart_from_what_s_found(tmp_path: Path) -> None:
+    claude_directory = tmp_path / ".claude"
+    written(claude_directory / ".credentials.json", '{"claudeAiOauth": {}}')
+    codex_home = tmp_path / ".codex"
+    written(codex_home / "auth.json", "{}")
+    written(codex_home / "hooks.json", json.dumps({"hooks": {}}))
+    places = Places(home=tmp_path, written=[claude_directory, codex_home])
+    claude_checked = ClaudeWritten(directory=claude_directory).checked(places)
+    codex_checked = CodexWritten(home=codex_home).checked(places)
+    assert (claude_checked.found, claude_checked.fine) == ([], [])
+    assert claude_checked.login is not None
+    assert claude_checked.login.startswith("Your host login, `.credentials.json`")
+    assert (codex_checked.found, codex_checked.fine) == (
+        [],
+        ["`hooks.json`: no command in it."],
+    )
+    assert codex_checked.login is not None
+    assert codex_checked.login.startswith("Your host login, `auth.json`")
 
 
 def test_codex_s_home_is_checked_for_what_a_host_session_acts_on(
@@ -651,7 +705,7 @@ def test_codex_s_home_is_checked_for_what_a_host_session_acts_on(
     written(directory / "tmp" / "arg0" / "apply_patch", "#!/bin/sh")
     written(directory / "auth.json", "{}")
     places = Places(home=home, written=[directory])
-    assert CodexWritten(home=directory).checked(places) == [
+    assert CodexWritten(home=directory).checked(places).said() == [
         (
             "`config.toml` runs on the host its `notify`, `bash '~/.codex/notify.sh'` "
             "(it names a directory rooms write: a room could change what it runs); "

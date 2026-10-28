@@ -17,7 +17,7 @@ from lup.tools.serving import Notice
 from lup.types import JsonObject, Model
 from lup_dev.host.courier import Heard, Spawned, Telling
 from lup_dev.host.records import Queues, Reader, Records
-from lup_dev.host.written import Places
+from lup_dev.host.written import Checked, Places
 from lup_dev.launch.clis import Channel
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench
@@ -81,11 +81,11 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """The operator's own directory for it, where it keeps their history and
     login, and the records `records` finds; every room on it mounted it
     read-write before rooms had homes of their own."""
-    written: Callable[[Places], list[str]]
+    written: Callable[[Places], Checked]
     """Checks what a host session of it acts on in `directory`, which rooms
     could have written: the directories rooms write in, a line out for each
     thing there that runs, loads or acts without asking on the host, what of it
-    looks planted, and what to do, its login among them
+    looks planted, and what to do, and how to replace its login apart
     (`lup_dev.host.written`)."""
     recorded: Callable[[PurePosixPath], str | None]
     """Says whose own record is at a place in one of its homes: the session's

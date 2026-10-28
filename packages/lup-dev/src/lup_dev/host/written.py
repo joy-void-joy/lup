@@ -81,6 +81,38 @@ class Places(Model):
         )
 
 
+class Checked(Model):
+    """What a check of one runtime's directory found, a line each: what to check or clear, what needs nothing done, and how to replace the host login, said apart since a launch says it once."""
+
+    found: list[str] = []
+    """Each thing to check or clear, saying what to do."""
+    fine: list[str] = []
+    """Each thing looked at that needs nothing done as it stands."""
+    login: str | None = None
+    """How to replace the host login every room could read, where there's one."""
+
+    def said(self) -> list[str]:
+        """Say every line of it, what to act on first and the login last.
+
+        >>> Checked(found=["`memory.md`: check it"], fine=["`plugins/`: none on"], login="log in again").said()
+        ['`memory.md`: check it', '`plugins/`: none on', 'log in again']
+        """
+        return [*self.found, *self.fine, *([] if self.login is None else [self.login])]
+
+    @classmethod
+    def of(cls, parts: list[Checked], login: str | None = None) -> Checked:
+        """Join what each part of a check found, in order, with the login's line.
+
+        >>> Checked.of([Checked(found=["a"]), Checked(fine=["b"]), Checked(found=["c"])]).found
+        ['a', 'c']
+        """
+        return cls(
+            found=[line for each in parts for line in each.found],
+            fine=[line for each in parts for line in each.fine],
+            login=login,
+        )
+
+
 class Linked(Model):
     """A link found in the operator's directory, and where it's aimed, never followed."""
 

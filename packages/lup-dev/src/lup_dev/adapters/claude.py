@@ -3047,20 +3047,25 @@ class ClaudeWritten(Model):
     ]
     """Where Claude Code makes no link itself: one found there is said."""
 
-    def checked(self, places: written.Places) -> list[str]:
-        """Say what a host session acts on in the directory, a line each: what's there, what of it looks planted, and what to do."""
+    def checked(self, places: written.Places) -> written.Checked:
+        """Say what a host session acts on in the directory, a line each: what's there, what of it looks planted, and what to do, the login apart."""
         settings = self.settings()
-        return [
-            *self.read_settings(settings, places),
-            *self.memory(),
-            *self.skills(),
-            *self.plugins(settings),
-            *self.links(places),
-            *self.run_before(places),
-            *self.supervisor(),
-            *self.folders(),
-            *self.login(),
-        ]
+        return written.Checked.of(
+            [
+                self.read_settings(settings, places),
+                written.Checked(found=[*self.memory(), *self.skills()]),
+                self.plugins(settings),
+                written.Checked(
+                    found=[
+                        *self.links(places),
+                        *self.run_before(places),
+                        *self.supervisor(),
+                        *self.folders(),
+                    ]
+                ),
+            ],
+            login=self.login(),
+        )
 
     def settings(self) -> HostSettings | str | None:
         """Read the operator's settings, or say why they couldn't be; none where there are none."""
@@ -3080,13 +3085,13 @@ class ClaudeWritten(Model):
 
     def read_settings(
         self, settings: HostSettings | str | None, places: written.Places
-    ) -> list[str]:
-        """Say what the settings have a host session run, set, and do without asking, the commands flagged where they name a directory rooms write."""
+    ) -> written.Checked:
+        """Say what the settings have a host session run, set, and do without asking, the commands flagged where they name a directory rooms write; fine where they do none of it."""
         match settings:
             case None:
-                return []
+                return written.Checked()
             case str():
-                return [settings]
+                return written.Checked(found=[settings])
             case HostSettings():
                 pass
         runs = [written.quoted(each, places) for each in settings.runs()]
@@ -3132,7 +3137,9 @@ class ClaudeWritten(Model):
             if permissions.ask or permissions.deny
             else ""
         )
-        return [f"{first}{kept}"]
+        if said or kept:
+            return written.Checked(found=[f"{first}{kept}"])
+        return written.Checked(fine=[first])
 
     def memory(self) -> list[str]:
         """Say the memory every host session reads, and each directory whose files it loads."""
@@ -3189,25 +3196,29 @@ class ClaudeWritten(Model):
             )
         ]
 
-    def plugins(self, settings: HostSettings | str | None) -> list[str]:
-        """Say which plugins load in a host session: those the settings turn on, whose code under `plugins/` a room could have changed."""
+    def plugins(self, settings: HostSettings | str | None) -> written.Checked:
+        """Say which plugins load in a host session: those the settings turn on, whose code under `plugins/` a room could have changed; fine where none is."""
         if not (self.directory / "plugins").is_dir():
-            return []
+            return written.Checked()
         enabled = settings.enabled() if isinstance(settings, HostSettings) else []
         if not enabled:
-            return [
+            return written.Checked(
+                fine=[
+                    (
+                        "`plugins/`: none is turned on in `settings.json`, so none "
+                        "loads in a host session."
+                    )
+                ]
+            )
+        return written.Checked(
+            found=[
                 (
-                    "`plugins/`: none is turned on in `settings.json`, so none loads in "
-                    "a host session."
+                    f"`plugins/`: {', '.join(f'`{name}`' for name in enabled)} turned "
+                    "on, whose code under `plugins/` runs in host sessions and a room "
+                    "could have changed: reinstall each (`/plugin`)."
                 )
             ]
-        return [
-            (
-                f"`plugins/`: {', '.join(f'`{name}`' for name in enabled)} turned on, "
-                "whose code under `plugins/` runs in host sessions and a room could have "
-                "changed: reinstall each (`/plugin`)."
-            )
-        ]
+        )
 
     def links(self, places: written.Places) -> list[str]:
         """Say each link among what a host session loads, where Claude Code makes none, flagged where it lands in a directory rooms write."""
@@ -3329,18 +3340,16 @@ class ClaudeWritten(Model):
             ),
         ]
 
-    def login(self) -> list[str]:
-        """Say how to replace the operator's own login, which every room could read."""
+    def login(self) -> str | None:
+        """Say how to replace the operator's own login, which every room could read; none where there's none."""
         if not written.held(self.directory / ".credentials.json"):
-            return []
-        return [
-            (
-                "Your host login, `.credentials.json`, was readable by every room: in a "
-                "Claude Code session on the host, run `/logout` then `/login`, so the "
-                "refresh token they could read is replaced. Whether `/logout` revokes "
-                "it with the provider isn't documented."
-            )
-        ]
+            return None
+        return (
+            "Your host login, `.credentials.json`, was readable by every room: in a "
+            "Claude Code session on the host, run `/logout` then `/login`, so the "
+            "refresh token they could read is replaced. Whether `/logout` revokes "
+            "it with the provider isn't documented."
+        )
 
 
 def login(directory: Path) -> Path:

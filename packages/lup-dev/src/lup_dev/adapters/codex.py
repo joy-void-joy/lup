@@ -1798,52 +1798,69 @@ class CodexWritten(Model):
     """What a session runs before its commands: its shell snapshot, and the
     helpers it puts first on their `PATH`."""
 
-    def checked(self, places: written.Places) -> list[str]:
-        """Say what a host session acts on in the home, a line each: what's there, what of it looks planted, and what to do."""
-        return [
-            *self.config(places),
-            *self.hooks(places),
-            *self.read_instructions(),
-            *self.loads(),
-            *self.links(places),
-            *self.run_before(places),
-            *self.login(),
-        ]
+    def checked(self, places: written.Places) -> written.Checked:
+        """Say what a host session acts on in the home, a line each: what's there, what of it looks planted, and what to do, the login apart."""
+        return written.Checked.of(
+            [
+                self.config(places),
+                self.hooks(places),
+                written.Checked(
+                    found=[
+                        *self.read_instructions(),
+                        *self.loads(),
+                        *self.links(places),
+                        *self.run_before(places),
+                    ]
+                ),
+            ],
+            login=self.login(),
+        )
 
-    def config(self, places: written.Places) -> list[str]:
-        """Say what the configuration has a host session run, set, send to and do without asking."""
+    def config(self, places: written.Places) -> written.Checked:
+        """Say what the configuration has a host session run, set, send to and do without asking; fine where it does none of it."""
         path = self.home / "config.toml"
         if not path.exists() and not path.is_symlink():
-            return []
+            return written.Checked()
         held = written.read(path)
         if held is None:
-            return [
-                (
-                    "`config.toml` isn't a regular file lup reads, or is past 4 MiB: "
-                    "look at it yourself."
-                )
-            ]
+            return written.Checked(
+                found=[
+                    (
+                        "`config.toml` isn't a regular file lup reads, or is past 4 "
+                        "MiB: look at it yourself."
+                    )
+                ]
+            )
         try:
             config = HostConfig.model_validate(tomllib.loads(held.decode()))
         except tomllib.TOMLDecodeError, UnicodeDecodeError, ValidationError:
-            return ["`config.toml` isn't configuration lup reads: look at it yourself."]
+            return written.Checked(
+                found=[
+                    "`config.toml` isn't configuration lup reads: look at it yourself."
+                ]
+            )
         said = config.said(places)
         if not said:
-            return [
-                (
-                    "`config.toml`: nothing in it runs a command, sets a variable, sends "
-                    "requests elsewhere, or lets a session act without asking."
-                )
+            return written.Checked(
+                fine=[
+                    (
+                        "`config.toml`: nothing in it runs a command, sets a variable, "
+                        "sends requests elsewhere, or lets a session act without "
+                        "asking."
+                    )
+                ]
+            )
+        return written.Checked(
+            found=[
+                f"`config.toml` {'; it '.join(said)}. Each is yours only if you set it."
             ]
-        return [
-            f"`config.toml` {'; it '.join(said)}. Each is yours only if you set it."
-        ]
+        )
 
-    def hooks(self, places: written.Places) -> list[str]:
-        """Say each command the hooks have a host session run."""
+    def hooks(self, places: written.Places) -> written.Checked:
+        """Say each command the hooks have a host session run; fine where they hold none."""
         path = self.home / "hooks.json"
         if not path.exists() and not path.is_symlink():
-            return []
+            return written.Checked()
         held = written.read(path)
         try:
             hooked = (
@@ -1854,15 +1871,19 @@ class CodexWritten(Model):
         except ValidationError:
             hooked = None
         if hooked is None:
-            return ["`hooks.json` isn't hooks lup reads: look at it yourself."]
+            return written.Checked(
+                found=["`hooks.json` isn't hooks lup reads: look at it yourself."]
+            )
         commands = written.commands(hooked)
         if not commands:
-            return ["`hooks.json`: no command in it."]
-        return [
-            "`hooks.json` runs on the host "
-            + "; ".join(written.quoted(each, places) for each in commands)
-            + ". Each is yours only if you set it."
-        ]
+            return written.Checked(fine=["`hooks.json`: no command in it."])
+        return written.Checked(
+            found=[
+                "`hooks.json` runs on the host "
+                + "; ".join(written.quoted(each, places) for each in commands)
+                + ". Each is yours only if you set it."
+            ]
+        )
 
     def read_instructions(self) -> list[str]:
         """Say the instructions every host session reads."""
@@ -1918,18 +1939,16 @@ class CodexWritten(Model):
             + "; a session makes its own as it starts."
         ]
 
-    def login(self) -> list[str]:
-        """Say how to replace the operator's own login, which every room on Codex could read."""
+    def login(self) -> str | None:
+        """Say how to replace the operator's own login, which every room on Codex could read; none where there's none."""
         if not written.held(self.home / "auth.json"):
-            return []
-        return [
-            (
-                "Your host login, `auth.json`, was readable by every room on Codex: on "
-                "the host, run `codex logout` then `codex login`, so the refresh token "
-                "they could read is replaced. Whether `codex logout` revokes it with "
-                "the provider isn't documented."
-            )
-        ]
+            return None
+        return (
+            "Your host login, `auth.json`, was readable by every room on Codex: on "
+            "the host, run `codex logout` then `codex login`, so the refresh token "
+            "they could read is replaced. Whether `codex logout` revokes it with "
+            "the provider isn't documented."
+        )
 
 
 def login(directory: Path) -> Path:
