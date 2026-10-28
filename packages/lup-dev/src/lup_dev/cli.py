@@ -1664,8 +1664,6 @@ def swept(
                 podman.discard(each.container)
             released(podman, own, say)
             vacated(own)
-            if own.directory.is_dir():
-                shutil.rmtree(own.directory)
             rooms = layout.rooms(each.repository)
             removed(rooms.home, rooms.launch(each.launch))
             say(
@@ -2040,7 +2038,7 @@ def launched(
 
 
 def ended(launcher: Launcher, launch: str) -> None:
-    """End a launch's registration, and remove its directory and its room's home.
+    """End a launch's registration, and remove its directory and its room's home (`vacated`).
 
     Where the host service can't end it, that's said, and the launch's record
     stays for the sweep.
@@ -2055,8 +2053,6 @@ def ended(launcher: Launcher, launch: str) -> None:
     own = launcher.layout.launch(launch)
     released(launcher.podman, own, launcher.say)
     vacated(own)
-    if own.directory.is_dir():
-        shutil.rmtree(own.directory)
 
 
 def released(podman: Podman, launch: LaunchLayout, say: Callable[[str], None]) -> None:
