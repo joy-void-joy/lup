@@ -87,7 +87,8 @@ sender, which a review's comment answers as any message's.
 **A subagent's end, and what it says of its work,** reach the conversation that
 spawned it (`Whereabouts.parent`): which subagent ended and how, with its last
 message where its runtime doesn't hand that on (`ended`); a copy of each
-`friction` and `how_it_felt`. Each is quiet (`Item.quiet`): told at the
+`friction`, and of each `how_it_felt` where lup passes those on
+(`Speaker.how_it_felt_reaches`). Each is quiet (`Item.quiet`): told at the
 parent's next call, its turn's or session's start, or by `wait_inbox`, but never
 holding a turn's end nor waking an idle session, since its runtime wakes an idle
 parent for its subagent's end already, and each end would otherwise cost the

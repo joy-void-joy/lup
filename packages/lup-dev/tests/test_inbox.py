@@ -81,6 +81,7 @@ from lup_dev.host.workers import (
     WorkerJudge,
     Workers,
 )
+from lup_dev.inbox import tools
 from lup_dev.inbox.bearings import Repository, RepositoryBearings, Unlanded
 from lup_dev.inbox.delivery import SEPARATOR, Delivery, Waking, clocked, opening
 from lup_dev.inbox.marks import CORE, MarksMoved, MoveMarks, Moving, StoredMarks, seen
@@ -172,7 +173,7 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.store import Asked as Ask
 from lup_dev.inbox.store import Stop as Stopped
 from lup_dev.inbox.threads import spoken
-from lup_dev.inbox.tools import specs
+from lup_dev.inbox.tools import Reach, Speaker, specs
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.room import RoomError
 from lup_dev.layout import GitDirectoryLayout, InboxLayout, Layout
@@ -1895,19 +1896,23 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
         listed = inbox()
         shown = inbox("show", "1")
         replied = inbox("answer", "1", "--comment", "The rebuild is fixed.")
-        reply = delivery.inbox.item(9)
+        reply = delivery.inbox.item(8)
         done = inbox("done", "3")
         passed = delivery.inbox.item(2)
-        copy = delivery.inbox.item(7)
+        felt = [
+            each
+            for each in delivery.inbox.items.values()
+            if isinstance(each.reason, HowItFelt)
+        ]
     # Each subagent has a parent, its session's own conversation, which gets a
-    # copy of its friction (@2) and of how it felt (@7).
+    # copy of its friction (@2); how it felt reaches the operator alone.
     assert [text for text, _ in answers] == [
         "Thanks: your friction is with the operator, @1, and your parent has it too. You can carry on.",
-        "Thank you for telling them. The operator will read it as you wrote it, @3.",
+        "Thank you for telling them. It's with the operator alone, as you wrote it, @3.",
         "The operator will read why you stopped, @4. You can end your turn now.",
         "Thanks: your friction is with the operator, @5. You can carry on.",
-        "Thank you for telling them. The operator will read it as you wrote it, @6, and your parent has it too.",
-        "The operator will read why you stopped, @8. You can end your turn now.",
+        "Thank you for telling them. It's with the operator alone, as you wrote it, @6.",
+        "The operator will read why you stopped, @7. You can end your turn now.",
     ]
     assert not any(error for _, error in answers)
     # The parts a friction once had are refused: it's one text.
@@ -1927,7 +1932,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
         (4, claude_session, Operator(), "s1"),
         (5, codex_session, Operator(), "c1"),
         (6, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c2"),
-        (8, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c3"),
+        (7, codex_session.model_copy(update={"agent": "b1"}), Operator(), "c3"),
     ]
     friction = Friction.model_validate(jammed)
     assert (passed.reason, passed.recipient, passed.quiet) == (
@@ -1935,11 +1940,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
         claude_session,
         True,
     )
-    assert (copy.reason, copy.recipient, copy.quiet) == (
-        HowItFelt.model_validate(went),
-        codex_session,
-        True,
-    )
+    assert [each.recipient for each in felt] == [Operator(), Operator()]
     assert [each.reason for each in waiting] == [
         friction,
         HowItFelt.model_validate(quiet),
@@ -1961,7 +1962,7 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
         "`uv run lup-dev check` printed: engine stale\n"
         "I was running the gate; saying the rebuild's time first would help.\n"
     )
-    assert replied == f"Replied to @1: your reply, @9, is for `{tmp_path.name}/a1`.\n"
+    assert replied == f"Replied to @1: your reply, @8, is for `{tmp_path.name}/a1`.\n"
     assert reply.reason == Message(kind="note", text="The rebuild is fixed.", of=1)
     assert reply.recipient == claude_session.model_copy(update={"agent": "a1"})
     assert done.startswith("@3")
@@ -3152,9 +3153,21 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_with_its_last_message_on_
     assert after == ""
 
 
-def test_a_subagents_friction_and_how_it_felt_reach_its_parent_whole_on_each_runtime(
-    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+@pytest.mark.parametrize("reach", ["operator", "operator and parent"])
+def test_a_subagents_friction_reaches_its_parent_whole_and_how_it_felt_where_lup_passes_it_on(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    tmp_path: Path,
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    reach: Reach,
 ) -> None:
+    class Speaking(Speaker):
+        how_it_felt_reaches: Reach = reach
+
+    monkeypatch.setattr(tools, "Speaker", Speaking)
     records = Subagents(tmp_path)
     rollouts = Rollouts(tmp_path)
     jammed: dict[str, JsonValue] = {
@@ -3178,29 +3191,44 @@ def test_a_subagents_friction_and_how_it_felt_reach_its_parent_whole_on_each_run
         how = rollouts.lup((hook2, mcp2), "how_it_felt", went, "th1")
         ended = send(hook, claude("Stop", stop_hook_active=False))
         told = context(send(hook, bash("m1")))
-        told2 = context(send(hook2, codex_bash("d1")))
+        heard2 = send(hook2, codex_bash("d1"))
         operators = [each.number for each in delivery.inbox.waiting(Operator())]
-        copies = [delivery.inbox.item(number) for number in [2, 4]]
+        items = list(delivery.inbox.items.values())
+        described = next(
+            each.description for each in specs() if each.name == "how_it_felt"
+        )
     friction = Friction.model_validate(jammed)
     how_it_felt = HowItFelt.model_validate(went)
     assert jam == (
         "Thanks: your friction is with the operator, @1, and your parent has it too. You can carry on.",
         False,
     )
-    assert how == (
-        "Thank you for telling them. The operator will read it as you wrote it, @3, and your parent has it too.",
-        False,
-    )
     assert ended == ""
     assert told.startswith('<item item="2" from="w/parser" kind="friction">')
     assert friction.text in told
-    assert told2.startswith('<item item="4" from="v/lexer" kind="how it felt">')
-    assert how_it_felt.text in told2
     assert operators == [1, 3]
-    assert [(each.reason, each.quiet) for each in copies] == [
-        (friction, True),
-        (how_it_felt, True),
+    copies = [
+        (each.reason, each.quiet) for each in items if each.recipient != Operator()
     ]
+    if reach == "operator":
+        # How it felt reaches the operator alone, and its description says so.
+        assert how == (
+            "Thank you for telling them. It's with the operator alone, as you wrote it, @3.",
+            False,
+        )
+        assert heard2 == ""
+        assert copies == [(friction, True)]
+        assert described.endswith("\n\nIt reaches the operator alone, as you wrote it.")
+    else:
+        assert how == (
+            "Thank you for telling them. It's with the operator, and your parent has it too, as you wrote it, @3.",
+            False,
+        )
+        told2 = context(heard2)
+        assert told2.startswith('<item item="4" from="v/lexer" kind="how it felt">')
+        assert how_it_felt.text in told2
+        assert copies == [(friction, True), (how_it_felt, True)]
+        assert described.endswith("your parent too, whole, at their next call.")
 
 
 def to_parent(text: str, kind: str = "note") -> dict[str, JsonValue]:
