@@ -10,14 +10,14 @@ was kept in (`host/`, `rooms/`, `shared/`), so a room's record and the host's
 never meet, laid out as the runtime lays them out. Each repository the
 declaration names beside the project has its sessions' copies under
 `related/<its name>/`, laid out the same (`TranscriptsServing.places`). A file
-is copied where the
-copy is missing, or differs in size or time from the record, so what the
-runtime has added or grown since the last copy is copied, and what's unchanged
-isn't read again; a room's file matching the host's copy at the same place, as
-a record moved or copied into a room's home from the operator's directory does,
-is that copy, and nothing a room's home holds moves or changes one of the
-host's (`copied`). A runtime only adds to its records, so a copy taken when a
-launch opens catches whatever an earlier launch that never stopped left.
+is copied where the copy is missing, or differs in size or time from the
+record, so what the runtime has added or grown since the last copy is copied,
+and what's unchanged isn't read again; a room's file matching the host's copy
+at the same place, as a record moved or copied into a room's home from the
+operator's directory does, is that copy, and nothing a room's home holds moves
+or changes one of the host's (`copied`). A runtime only adds to its records,
+so a copy taken when a launch opens catches whatever an earlier launch that
+never stopped left.
 
 Its commands read the copies (`packages/lup-transcripts/README.md`, *Reading
 them*): `list` every kept session, `show` one, the operator's words first,
