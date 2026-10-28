@@ -269,6 +269,7 @@ from lup_dev.host.records import (
     Call,
     Called,
     Entry,
+    Home,
     Queued,
     Queues,
     Queuing,
@@ -281,6 +282,9 @@ from lup_dev.host.records import (
     Usage,
     first,
     gist,
+    head,
+    homes,
+    reached,
     within,
 )
 from lup_dev.host.records import Said as Spoken
@@ -1706,8 +1710,8 @@ class ClaudeRecords(Model, Records):
     A launched session's is in its room's home (`homes`), which rooms write, so
     one found there is read only where it resolves inside that home: a room
     can leave a link aimed at another home's record, or at the operator's
-    own. The records a module copies (`kept`) are the operator's directory's
-    alone.
+    own. The records a module copies (`kept`) are each home's: the
+    operator's directory's, the repository's rooms' and the shared one's.
     """
 
     directory: Path
@@ -1743,43 +1747,54 @@ class ClaudeRecords(Model, Records):
         )
 
     @override
-    def kept(self, under: list[Path]) -> list[Record]:
-        projects = self.directory / "projects"
-        folders = sorted(projects.iterdir()) if projects.is_dir() else []
-        ours = [
-            folder
-            for folder in folders
-            if folder.is_dir() and (ran := ran_in(folder)) and within(ran, under)
-        ]
-        histories = [
-            self.directory / "file-history" / session.stem
-            for folder in ours
-            for session in sorted(folder.glob("*.jsonl"))
-        ]
-        return [
-            *(
-                Record(source=folder, place=PurePosixPath("projects", folder.name))
-                for folder in ours
-            ),
-            *(
-                Record(source=each, place=PurePosixPath("file-history", each.name))
-                for each in histories
-                if each.is_dir()
-            ),
-        ]
+    def kept(self, under: list[Path], repository: Path) -> list[Record]:
+        """Return the folders of `projects/` whose sessions ran under `under`, and each of their sessions' file history, in each home keeping the repository's records: each only where it's reached from its home without a link, a folder's directory read off its records' heads."""
+        held = homes(self.directory, self.homes, repository, Claude().name())
+        return [record for home in held for record in kept_in(home, under)]
+
+
+def kept_in(home: Home, under: list[Path]) -> list[Record]:
+    """Return the records in one of Claude Code's homes of the sessions that ran under `under`: each folder of `projects/` they ran in, and each of their sessions' `file-history/`."""
+    directory = home.directory
+    projects = directory / "projects"
+    if not reached(directory, projects) or not projects.is_dir():
+        return []
+    ours = [
+        folder
+        for folder in sorted(projects.iterdir())
+        if folder.is_dir(follow_symlinks=False)
+        and (ran := ran_in(folder)) is not None
+        and within(ran, under)
+    ]
+    histories = [
+        directory / "file-history" / session.stem
+        for folder in ours
+        for session in sorted(folder.glob("*.jsonl"))
+    ]
+
+    def record(place: PurePosixPath) -> Record:
+        return Record(home=directory, whose=home.whose, place=place)
+
+    return [
+        *(record(PurePosixPath("projects", folder.name)) for folder in ours),
+        *(
+            record(PurePosixPath("file-history", each.name))
+            for each in histories
+            if reached(directory, each) and each.is_dir()
+        ),
+    ]
 
 
 def ran_in(folder: Path) -> Path | None:
-    """Return the directory the sessions recorded in `folder` ran in, read off their first line naming one; none where none does."""
+    """Return the directory the sessions recorded in `folder` ran in, read off their first line naming one, within each record's head (`head`); none where none does."""
     for record in sorted(folder.glob("*.jsonl")):
-        with record.open(encoding="utf-8", errors="replace") as lines:
-            for line in lines:
-                try:
-                    located = Located.model_validate_json(line)
-                except ValidationError:
-                    continue
-                if located.cwd is not None:
-                    return located.cwd
+        for line in head(record):
+            try:
+                located = Located.model_validate_json(line)
+            except ValidationError:
+                continue
+            if located.cwd is not None:
+                return located.cwd
     return None
 
 

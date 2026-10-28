@@ -76,7 +76,7 @@ SETTLED = "https://github.com/joy-void-joy/lup/issues/50#issuecomment-6121797670
 class Nothing(Records):
     """A runtime that keeps no records."""
 
-    def kept(self, under: list[Path]) -> list[Record]:
+    def kept(self, under: list[Path], repository: Path) -> list[Record]:
         return []
 
     def conversation(self, session: str, agent: str | None) -> Path | None:

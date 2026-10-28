@@ -2,18 +2,24 @@
 
 The launch's runtime says which of its records are the repository's sessions'
 (`Records.kept`), from the directories they ran in: the repository's git
-directory, and each of its worktrees. Each record is copied into the module's own
-data directory for the repository, under the runtime's name, laid out as the
-runtime lays them out: a file is copied where the copy is missing, or differs in
-size or time from the record, so what the runtime has added or grown since the
-last copy is copied, and what's unchanged isn't read again. A runtime only adds
-to its records, so a copy taken when a launch opens catches whatever an earlier
-launch that never stopped left.
+directory, and each of its worktrees; and in which of its homes each is: the
+operator's own directory, the repository's rooms' home, or the one every
+project's rooms share. Each record is copied into the module's own data
+directory for the repository, under the runtime's name and then whose home it
+was kept in (`host/`, `rooms/`, `shared/`), so a room's record and the host's
+never meet, laid out as the runtime lays them out. A file is copied where the
+copy is missing, or differs in size or time from the record, so what the
+runtime has added or grown since the last copy is copied, and what's unchanged
+isn't read again; a room's file matching the host's copy at the same place, as
+a record moved or copied into a room's home from the operator's directory does,
+is that copy, and nothing a room's home holds moves or changes one of the
+host's (`copied`). A runtime only adds to its records, so a copy taken when a
+launch opens catches whatever an earlier launch that never stopped left.
 
 Its commands read the copies (`packages/lup-transcripts/README.md`, *Reading
 them*): `list` every kept session, `show` one, the operator's words first,
 `search` what the operator said; each through its runtime's reading of its
-records, for the operator or a room.
+records, for the operator or a room, saying whose home each was kept from.
 
 Its views read a conversation live, from the runtime's own record as it grows
 (`conversation`, the drawer under each agent's banner; `exchange`, one earlier
@@ -29,8 +35,9 @@ agent's finishes, so one still running shows what it returned once it has.
 
 import asyncio
 import os
+import shutil
 from datetime import timedelta
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, get_args
 
 from pydantic import Field
 
@@ -41,6 +48,7 @@ from lup_dev.confined import Confined
 from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Room
 from lup_dev.git import Git
 from lup_dev.host.protocol import HostError
+from lup_dev.host.records import Home, Whose
 from lup_dev.inbox.context import Recording
 from lup_transcripts.environment import views
 from lup_transcripts.environment.conversation import (
@@ -56,7 +64,7 @@ from lup_transcripts.environment.conversation import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from lup_dev.host.records import Record, Transcript
+    from lup_dev.host.records import Record
     from lup_transcripts.environment.module import Transcripts
 
 
@@ -85,6 +93,11 @@ class Chosen(Model, populate_by_name=True):
         alias="all",
         description="Everything said, the agent's words too, each run of tool calls a line.",
     )
+    home: Whose | None = Field(
+        default=None,
+        alias="from",
+        description="Whose home its record was kept from, where it was kept from several: `host`, `rooms` or `shared`.",
+    )
 
 
 class Searched(Model):
@@ -97,6 +110,10 @@ class Searched(Model):
     )
 
 
+WHOSE: list[Whose] = list(get_args(Whose.__value__))
+"""Each home a record is kept from, in the order its copies are read."""
+
+
 def stale(source: Path, copy: Path) -> bool:
     """Say whether `copy` is missing, or differs in size or time from `source`."""
     if not copy.is_file():
@@ -105,8 +122,17 @@ def stale(source: Path, copy: Path) -> bool:
     return (held.st_size, held.st_mtime_ns) != (kept.st_size, kept.st_mtime_ns)
 
 
-def copied(records: list[Record], target: Path) -> int:
+def copied(
+    records: list[Record], target: Path, besides: list[Path] | None = None
+) -> int:
     """Copy each file of `records` into `target` where it's stale, and return how many were copied.
+
+    A file is kept already where the copy at its place under any of `besides`
+    isn't stale either: what's copied from a room's home is kept already where
+    the host's copy matches it, as a record moved into the home from the
+    operator's directory, its time kept, or copied there from the host does,
+    so it's kept once, as the host's, until a room changes it. Nothing under
+    `besides` is ever changed.
 
     A room writes the records copied, and every room of the project reads the
     copies, so a link a room left there would copy what it names, a key in
@@ -120,11 +146,11 @@ def copied(records: list[Record], target: Path) -> int:
     link a resumed session's subagents to the session it resumed, is copied as
     the file it names. Each copy keeps its file's time, which `stale` compares.
     """
+    others = besides or []
     count = 0
     for record in records:
         source = record.source
-        home = source.parents[len(record.place.parts) - 1]
-        if source.resolve() != home.resolve().joinpath(*record.place.parts):
+        if source.resolve() != record.home.resolve().joinpath(*record.place.parts):
             continue
         whole = source.is_dir(follow_symlinks=False)
         folder = Confined(root=source if whole else source.parent)
@@ -138,9 +164,12 @@ def copied(records: list[Record], target: Path) -> int:
             else [source]
         )
         for each in files:
-            copy = target / record.place / each.relative_to(source)
+            place = record.place / each.relative_to(source)
+            copy = target / place
             try:
-                if not stale(each, copy):
+                if not stale(each, copy) or any(
+                    not stale(each, other / place) for other in others
+                ):
                     continue
                 held = each.stat()
             except OSError:
@@ -155,6 +184,46 @@ def copied(records: list[Record], target: Path) -> int:
     return count
 
 
+def moved(entry: Path, to: Path) -> None:
+    """Move `entry` to `to`, a directory into one there already entry by entry; a file there already is the later copy, and `entry`'s is dropped."""
+    if not to.exists():
+        to.parent.mkdir(parents=True, exist_ok=True)
+        entry.rename(to)
+        return
+    if entry.is_dir() and to.is_dir():
+        for each in sorted(entry.iterdir()):
+            moved(each, to / each.name)
+        entry.rmdir()
+        return
+    if entry.is_dir():
+        shutil.rmtree(entry)
+        return
+    entry.unlink()
+
+
+def relaid(copies: Path) -> None:
+    """Move what's kept at `copies` itself, a runtime's copies as they were kept before each home's had its own place, under `host/`: they were all copied from the operator's own directory."""
+    if not copies.is_dir():
+        return
+    for entry in sorted(copies.iterdir()):
+        if entry.name not in WHOSE:
+            moved(entry, copies / "host" / entry.name)
+
+
+def into(records: list[Record], copies: Path) -> int:
+    """Copy `records`, a runtime's, into `copies`, each under whose home it's kept in, where it's stale; a room's where the host's copy is stale too. Return how many files were copied."""
+    relaid(copies)
+    host = copies / "host"
+    return sum(
+        copied(
+            [each for each in records if each.whose == whose],
+            copies / whose,
+            besides=[] if whose == "host" else [host],
+        )
+        for whose in WHOSE
+    )
+
+
 class TranscriptsServing(ModuleServing):
     """Keeping the repository's sessions' records: what the runtime added or grew, when a launch opens and when it stops."""
 
@@ -163,28 +232,46 @@ class TranscriptsServing(ModuleServing):
     """Each conversation's record as last read, kept across calls in the
     repository's process, so a record unchanged since isn't read again."""
 
+    def keeping(self, repository: Path, runtimes: list[str]) -> int:
+        """Copy what each of `runtimes` added or grew of its records of the repository whose git directory is `repository` since the last copy; return how many files were copied."""
+        under = [repository, *Git.pinned(repository).worktrees()]
+        return sum(
+            into(
+                self.recorded[runtime].records.kept(under, repository),
+                self.data / runtime,
+            )
+            for runtime in runtimes
+        )
+
     @lup.on(lup.Launched)
     @lup.on(lup.Stopped)
     async def keep(self, event: lup.Launched | lup.Stopped, by: Lup) -> None:
         """Copy every record of the repository's sessions the launch's runtime added or grew since the last copy."""
         del event
         launch = by.launch
-        under = [launch.repository, *Git.pinned(launch.repository).worktrees()]
-        records = self.recorded[launch.runtime].records.kept(under)
-        target = self.data / launch.runtime
-        await asyncio.to_thread(copied, records, target)
+        await asyncio.to_thread(self.keeping, launch.repository, [launch.runtime])
 
-    def kept(self) -> list[Transcript]:
-        """Read every session kept of the repository, of every runtime whose records the module reads."""
+    def kept(self) -> list[views.Session]:
+        """Read every session kept of the repository, of every runtime whose records the module reads, each with whose home its record was kept from: under its runtime's name and whose home it was kept in, or kept there as each runtime's were before each home's had its own place, as the host's."""
+
+        def held(runtime: str) -> list[Home]:
+            folder = self.data / runtime
+            return [
+                *(Home(directory=folder / whose, whose=whose) for whose in WHOSE),
+                # lup: defer(issue=324, why="copies an approved copy from before kept flat are read as the host's, from a room on newer code, until that host keeps them by home (`relaid`)")
+                Home(directory=folder, whose="host"),
+            ]
+
         return [
-            each.reader.read(record)
+            views.Session(transcript=each.reader.read(record), whose=home.whose)
             for runtime, each in self.recorded.items()
-            for record in each.reader.sessions(self.data / runtime)
+            for home in held(runtime)
+            for record in each.reader.sessions(home.directory)
         ]
 
     @lup.command
     async def list(self, asked: Every, by: Operator | Room) -> str:
-        """List this repository's kept sessions, newest first: when each started, its name and id, how often you spoke, where it ran."""
+        """List this repository's kept sessions, newest first: when each started, its name and id, how often you spoke, where it ran, and whose home its record was kept from."""
         del asked, by
         lines = views.listed(await asyncio.to_thread(self.kept))
         return (
@@ -203,11 +290,13 @@ class TranscriptsServing(ModuleServing):
         can't be asked, the last line says so.
         """
         del by
-        chosen = views.chosen(await asyncio.to_thread(self.kept), asked.session)
+        kept = await asyncio.to_thread(self.kept)
+        chosen = views.chosen(kept, asked.session, asked.home)
         said = views.whole(chosen) if asked.everything else views.answered(chosen)
+        session = chosen.transcript
         try:
             exchanged = await self.exchanges.exchanged(
-                OfAgent(runtime=chosen.runtime, session=chosen.session)
+                OfAgent(runtime=session.runtime, session=session.session)
             )
         except HostError as unasked:
             return (
@@ -217,7 +306,7 @@ class TranscriptsServing(ModuleServing):
         items = len(exchanged.sent) + len(exchanged.received)
         if not items:
             return said
-        command = f"lup-dev inbox --conversation {chosen.session} --every --whole"
+        command = f"lup-dev inbox --conversation {session.session} --every --whole"
         counted = "1 item" if items == 1 else f"{items} items"
         return (
             f"{said}\nIts exchange with you through lup, which this leaves out, is "

@@ -1,22 +1,28 @@
 """The kept sessions as `lup-dev transcripts` prints them: the operator's words each after what it answered, the whole conversation, a search, and a session chosen."""
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
-from lup_dev.host.records import Called, Said, Transcript
+from lup_dev.host.records import Called, Said, Transcript, Whose
 from lup_transcripts.environment import views
 
 
 def session(
-    entries: list[Said | Called], *, title: str | None = "lup-impl"
-) -> Transcript:
-    return Transcript(
+    entries: list[Said | Called],
+    *,
+    title: str | None = "lup-impl",
+    whose: Whose = "host",
+) -> views.Session:
+    transcript = Transcript(
         runtime="claude",
         session="c0fa70bc",
         title=title,
+        directory=Path("/w/lup.git/tree/dev"),
         entries=entries,
     )
+    return views.Session(transcript=transcript, whose=whose)
 
 
 def at(minute: int) -> datetime:
@@ -69,7 +75,8 @@ def test_found_gives_each_time_the_operator_said_every_word() -> None:
 
 
 def test_a_session_is_chosen_by_its_id_its_ids_start_or_its_name() -> None:
-    other = TALK.model_copy(update={"session": "c0ffee", "title": "other"})
+    renamed = TALK.transcript.model_copy(update={"session": "c0ffee", "title": "other"})
+    other = TALK.model_copy(update={"transcript": renamed})
     sessions = [TALK, other]
     assert views.chosen(sessions, "c0fa") == TALK
     assert views.chosen(sessions, "other") == other
@@ -77,3 +84,24 @@ def test_a_session_is_chosen_by_its_id_its_ids_start_or_its_name() -> None:
         views.chosen(sessions, "c0f")
     with pytest.raises(views.TranscriptError, match="no kept session is `zz`"):
         views.chosen(sessions, "zz")
+
+
+def test_each_session_says_whose_home_its_record_was_kept_from() -> None:
+    room = session([Said(by="operator", text="Land it.", at=at(5))], whose="rooms")
+    shared = room.model_copy(update={"whose": "shared"})
+    lines = views.listed([TALK, room, shared])
+    assert lines[0].endswith("in /w/lup.git/tree/dev, kept from the home rooms share")
+    assert lines[1].endswith("in /w/lup.git/tree/dev, kept from a room's home")
+    assert lines[2].endswith("in /w/lup.git/tree/dev, kept from your own directory")
+    assert ", kept from a room's home, which rooms write\n" in views.answered(room)
+    assert ", kept from your own directory\n" in views.whole(TALK)
+    assert ", kept from a room's home\n" in views.found([room], ["land"])
+
+
+def test_a_session_kept_from_two_homes_is_two_and_one_is_chosen_by_its_home() -> None:
+    room = TALK.model_copy(update={"whose": "rooms"})
+    with pytest.raises(views.TranscriptError, match="`--from host`"):
+        views.chosen([TALK, room], "c0fa")
+    assert views.chosen([TALK, room], "c0fa", "rooms") == room
+    with pytest.raises(views.TranscriptError, match="no kept session is `c0fa`"):
+        views.chosen([TALK, room], "c0fa", "shared")

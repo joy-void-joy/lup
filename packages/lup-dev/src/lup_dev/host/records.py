@@ -1,41 +1,137 @@
 """Where a runtime keeps each session's record on this machine, as lup finds the ones of a repository.
 
 Each runtime keeps its sessions' records in its own home, laid out its own way,
-so only its adapter knows where they are and which session ran where. Given the
-directories a repository's sessions run in, `Records.kept` answers which of the
-runtime's records are theirs: each a file or a directory, and where it goes in a
-copy, so a copy keeps the runtime's own layout. A record's session is read off
-the record itself, the directory it says it ran in, never guessed from where the
-runtime filed it.
+so only its adapter knows where they are and which session ran where. A
+runtime has several homes here (`homes`): the operator's own directory, and the
+homes of the rooms' own, the repository's and the one every project's rooms
+share. Given the directories a repository's sessions run in, `Records.kept`
+answers which of the runtime's records in each are theirs: each a file or a
+directory, the home it's in and whose that is, and where it goes in a copy, so
+a copy keeps the runtime's own layout under each home. A record's session is
+read off the record itself, the directory it says it ran in, never guessed from
+where the runtime filed it.
+
+A room writes a home of the rooms' own, and wrote the operator's directory
+while rooms mounted it, so what the host reads there is data alone, read as
+the host reads a worktree's file (`lup_dev.confined`): a record only where it's
+reached from its home without a link and resolves inside its folder, a regular
+file, never waited on as a pipe would be, and its first lines only where that's
+all that's wanted (`head`).
 """
 
 import json
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import Field, JsonValue, ValidationInfo, field_validator
 
 from lup.blocks import Drawer, Tone, Verb
 from lup.types import JsonObject, Model
+from lup_dev.confined import Confined
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from lup_dev.layout import HomesLayout
+
+type Whose = Literal["host", "rooms", "shared"]
+"""Whose home a runtime keeps a record in: `host`, the operator's own
+directory; `rooms`, the home a repository's rooms keep theirs in; `shared`,
+the one every project's rooms share, where their profile chooses it
+(`HomesLayout`). A room writes the last two, so what a record kept there says
+is a room's word."""
+
+
+class Home(Model):
+    """One of the homes a runtime keeps its records in on this machine: its directory, and whose it is."""
+
+    directory: Path
+    whose: Whose
+
+
+def homes(
+    own: Path, rooms: HomesLayout | None, repository: Path, runtime: str
+) -> list[Home]:
+    """Return each home runtime `runtime` keeps the records of the repository whose git directory is `repository` in: the operator's own directory, `own`, then, where `rooms` places the rooms' own homes, the repository's and the one every project shares.
+
+    >>> from lup_dev.layout import HomesLayout
+    >>> [(each.whose, str(each.directory)) for each in homes(Path("/o"), HomesLayout(home=Path("/h")), Path("/r.git"), "agent")][::2]
+    [('host', '/o'), ('shared', '/h/shared/agent')]
+    """
+    if rooms is None:
+        return [Home(directory=own, whose="host")]
+    return [
+        Home(directory=own, whose="host"),
+        Home(directory=rooms.project(repository, runtime), whose="rooms"),
+        Home(directory=rooms.shared(runtime), whose="shared"),
+    ]
+
+
+def reached(home: Path, path: Path) -> bool:
+    """Say whether `path`, inside `home`, is there and reached from it without a link: none of its parts below `home` is one, while what's above it, the operator's own, may be.
+
+    >>> import tempfile
+    >>> with tempfile.TemporaryDirectory() as scratch:
+    ...     home = Path(scratch)
+    ...     (home / "projects").mkdir()
+    ...     (home / "linked").symlink_to(home / "projects")
+    ...     [reached(home, home / each) for each in ["projects", "linked", "missing"]]
+    [True, False, False]
+    """
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError:
+        return False
+    return resolved == home.resolve() / path.relative_to(home)
+
+
+def head(file: Path, reach: int = 4 * 1024 * 1024) -> Iterator[str]:
+    """Yield the lines of the first `reach` bytes of the record `file`, as text, a byte that isn't UTF-8 replaced, each as it's read, where it's a regular file resolving inside its folder (`Confined`); none where it isn't.
+
+    A room may have written it, so it's read only so far: a line with no end
+    would take the host's memory, where what's read of a record's head, the
+    directory its session ran in, is on its first few lines, and a reader
+    stops at the line it wants. The last line may be cut at `reach`, and then
+    reads as no line a runtime writes.
+    """
+    with Confined(root=file.parent).opened(Path(file.name)) as reading:
+        if reading is None:
+            return
+        left = reach
+        while left > 0 and (line := reading.readline(left)):
+            left -= len(line)
+            yield line.decode(errors="replace")
 
 
 class Record(Model):
-    """One of a runtime's records: a file or a directory it keeps, and where it goes in a copy."""
+    """One of a runtime's records: a file or a directory it keeps in one of its homes, and where it goes in a copy of that home's records."""
 
-    source: Path
+    home: Path
+    """The directory of the home it's kept in."""
+    whose: Whose
+    """Whose home that is: what a copy keeps it under, and says of it."""
     place: PurePosixPath
-    """Where it goes, under the copy of the runtime's records: its path in the
-    runtime's own home."""
+    """Its path in that home, as the runtime lays it out: where it goes under
+    the copy of that home's records."""
+
+    @property
+    def source(self) -> Path:
+        """Where it is on this machine."""
+        return self.home / self.place
 
 
 class Records(ABC):
     """A runtime's records of its sessions on this machine."""
 
     @abstractmethod
-    def kept(self, under: list[Path]) -> list[Record]:
-        """Return each record of a session the runtime ran in one of `under`, or in a directory inside one."""
+    def kept(self, under: list[Path], repository: Path) -> list[Record]:
+        """Return each record of a session the runtime ran in one of `under`, or in a directory inside one, from each of its homes keeping the records of the repository whose git directory is `repository` (`homes`).
+
+        Read as data alone: a record only where it's reached from its home
+        without a link (`reached`), its head only as far as `head` reads.
+        """
 
     @abstractmethod
     def conversation(self, session: str, agent: str | None) -> Path | None:

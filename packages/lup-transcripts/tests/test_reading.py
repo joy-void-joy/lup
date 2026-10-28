@@ -57,12 +57,14 @@ def session(name: str) -> Transcript:
 
 
 class Kept(Reader):
-    """A runtime whose copies and live records hold the sessions given, each a file named for it."""
+    """A runtime whose copies of the operator's directory's records, and whose live records, hold the sessions given, each a file named for it."""
 
     def __init__(self, sessions: list[Transcript]) -> None:
         self.held = {each.session: each for each in sessions}
 
     def sessions(self, copies: Path) -> list[Path]:
+        if copies.name != "host":
+            return []
         return [copies / f"{name}.jsonl" for name in self.held]
 
     def read(self, record: Path) -> Transcript:
@@ -82,8 +84,8 @@ class Live(Records):
     def __init__(self, home: Path) -> None:
         self.home = home
 
-    def kept(self, under: list[Path]) -> list[Record]:
-        del under
+    def kept(self, under: list[Path], repository: Path) -> list[Record]:
+        del under, repository
         return []
 
     def conversation(self, session: str, agent: str | None) -> Path | None:
