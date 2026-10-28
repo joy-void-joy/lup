@@ -58,18 +58,36 @@ def read(item: Item, recorded: dict[str, Recorded]) -> Moment:
     item, lup can't read its runtime's records, the record isn't on this
     machine, or it doesn't hold the call.
     """
+    return anchored(item, sent(item, recorded))
+
+
+def sent(item: Item, recorded: dict[str, Recorded]) -> Read:
+    """Read the record of the conversation whose call made `item`, as it stands, the directory its session ran in among what it holds.
+
+    The session is the one the sender's hook named, which a room writes, so a
+    room's item can name any session: a reader answering a room checks where
+    the record says it ran (`Transcript.directory`) before it says anything
+    of it. Raise `InboxError` saying why where there's none: no agent's call
+    made the item, lup can't read its runtime's records, or the record isn't
+    on this machine.
+    """
     match item:
-        case Item(sender=Conversation() as sender, call=str() as call):
+        case Item(sender=Conversation() as sender, call=str()):
             pass
         case _:
             message = f"{cited(item.number)} was made by no agent's call"
             raise InboxError(message)
-    read = Recording().read(recorded, sender.runtime, sender.session, sender.agent)
-    found = moment(read.transcript, call)
+    return Recording().read(recorded, sender.runtime, sender.session, sender.agent)
+
+
+def anchored(item: Item, read: Read) -> Moment:
+    """Return `item`'s moment in `read`, its sender's record: the steps around the call that made it. Raise `InboxError` where no call made it, or the record doesn't hold the call."""
+    if item.call is None:
+        message = f"{cited(item.number)} was made by no agent's call"
+        raise InboxError(message)
+    found = moment(read.transcript, item.call)
     if found is None:
-        message = (
-            f"{read.record} doesn't hold call {call}, which made {cited(item.number)}"
-        )
+        message = f"{read.record} doesn't hold call {item.call}, which made {cited(item.number)}"
         raise InboxError(message)
     return found
 

@@ -266,6 +266,25 @@ class Git(Model):
 
         return [read(each) for each in objects]
 
+    def walked(self, sources: list[str], has: list[str]) -> list[str]:
+        """Return each commit `sources` reach that `has` don't, oldest first: what a push of `sources` publishes to a remote holding `has`.
+
+        An object the store lacks is skipped (`--ignore-missing`), so a listing
+        naming one the room never fetched checks more, never less.
+        """
+        asked = "".join(
+            [*(f"{each}\n" for each in sources), *(f"^{each}\n" for each in has)]
+        )
+        listed = self.run(
+            "rev-list",
+            "--reverse",
+            "--topo-order",
+            "--ignore-missing",
+            "--stdin",
+            stdin=asked.encode(),
+        )
+        return listed.output.decode().splitlines()
+
     def blobs(self, objects: list[str]) -> list[str]:
         """Return those of `objects`, by id and in order, that the repository's store holds as blobs, asked of one `git cat-file`.
 

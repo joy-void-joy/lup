@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING
 
 from lup.publishing import Part, Place, Post, Published, Push, Refusal
 from lup_dev.git import Git
-from lup_dev.private.found import found
+from lup_dev.private.found import in_prose
 from lup_dev.private.history import Spot, pushed
-from lup_dev.private.withheld import said
+from lup_dev.private.withheld import said_of
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,23 +23,23 @@ if TYPE_CHECKING:
 
 
 def posted(parts: list[Part], held: Withheld) -> list[Spot]:
-    """Find every value never published in a post's parts."""
+    """Find every value never published in a post's parts, each read as prose, where an item's number is found too (`in_prose`)."""
     return [
         Spot(
             held=each.held,
             place=Place(within=f"the {part.name}", line=each.line, column=each.column),
         )
         for part in parts
-        for each in found(part.text, held)
+        for each in in_prose(part.text, held)
     ]
 
 
 def refused(spots: list[Spot]) -> list[Refusal]:
-    """Say each value found as a refusal: its kind and its place, never the value."""
+    """Say each value found as a refusal: its kind and its place, never the value, but an item's number (`said_of`)."""
     return [
-        Refusal(what=said(spot.held.kind).what, place=spot.place, steer=steer)
+        Refusal(what=telling.what, place=spot.place, steer=telling.steer)
         for spot in spots
-        for steer in [said(spot.held.kind).steer]
+        for telling in [said_of(spot.held)]
     ]
 
 

@@ -269,16 +269,22 @@ def blocked(path: list[str]) -> Why | None:
     whose `env` often holds a credential named otherwise, and `notify`, a
     command run at each turn's end, would run in the room; the variables
     `shell_environment_policy` sets in every command's environment, and the
-    headers of any `otel` exporter, which carry its key whatever they're
-    named, would hand the room a credential.
+    headers of any `otel` exporter or model provider, which carry its key
+    whatever they're named, would hand the room a credential. A provider's
+    `env_http_headers` name the variables its headers are read from, holding
+    none, and stay.
 
-    >>> [blocked(path) for path in [["mcp_servers"], ["notify"], ["otel", "exporter", "otlp-http", "headers"], ["model"]]]
-    ['command', 'command', 'credential', None]
+    >>> [blocked(path) for path in [["mcp_servers"], ["notify"], ["otel", "exporter", "otlp-http", "headers"], ["model_providers", "corp", "http_headers"], ["model"]]]
+    ['command', 'command', 'credential', 'credential', None]
     """
     match path:
         case ["mcp_servers"] | ["notify"]:
             return "command"
-        case ["shell_environment_policy", "set"] | ["otel", *_, "headers"]:
+        case (
+            ["shell_environment_policy", "set"]
+            | ["otel", *_, "headers"]
+            | ["model_providers", _, "http_headers"]
+        ):
             return "credential"
         case _:
             return None

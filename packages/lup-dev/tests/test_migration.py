@@ -447,10 +447,8 @@ def test_a_move_waits_on_each_launch_of_the_repository_still_running(
     state: Layout,
     operator: Path,
     hosts: list[HostRuntime],
-    tmp_path: Path,
 ) -> None:
     ours = sessions_of(bare, operator)
-    state = state.model_copy(update={"runtime": tmp_path / "runtime"})
     registered = Register(
         launch="main",
         runtime="claude",
@@ -483,7 +481,6 @@ def test_the_command_is_the_operator_s_in_their_own_terminal_on_an_approved_repo
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sessions_of(bare, operator)
-    monkeypatch.setenv("XDG_RUNTIME_DIR", str(operator.parent / "run"))
     monkeypatch.chdir(bare / "tree" / "main")
     monkeypatch.setattr(cli, "adapters", lambda: adapters)
     unapproved = runner.invoke(cli.app, ["account", "migrate"])

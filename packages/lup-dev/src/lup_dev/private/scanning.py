@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from lup.publishing import Place
 from lup_dev.git import Git
 from lup_dev.private.found import counted, found, masked, textual
-from lup_dev.private.history import Spot, in_commits, remotes_hold, walked
+from lup_dev.private.history import Spot, in_commits, remotes_hold
 from lup_dev.private.protocol import Scanned
 from lup_dev.private.refusing import refused
 
@@ -91,7 +91,7 @@ def scanned(
                 "so which commits are new wasn't known"
             ),
         )
-    commits = walked(git, [head], remotes.objects)
+    commits = git.walked([head], remotes.objects)
     return Scanned(
         found=refused([*in_files, *in_commits(git, commits, held)]),
         commits=len(commits),

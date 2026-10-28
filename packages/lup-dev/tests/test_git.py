@@ -147,6 +147,19 @@ def test_a_revision_naming_no_commit_is_none(repo: Path, shell: Shell) -> None:
     assert git.commit("refs/heads/nowhere") is None
 
 
+def test_the_commits_a_push_publishes_are_those_beyond_what_the_remote_holds(
+    repo: Path, shell: Shell
+) -> None:
+    held = shell.git(repo, "rev-parse", "HEAD")
+    committed(repo, {"one.md": "one\n"}, shell)
+    first = shell.git(repo, "rev-parse", "HEAD")
+    tip = committed(repo, {"two.md": "two\n"}, shell)
+    git = Git.pinned(repo / ".git")
+    assert git.walked([tip], [held]) == [first, tip]
+    assert git.walked([tip], [held, "0" * 40]) == [first, tip]
+    assert git.walked([tip], [tip]) == []
+
+
 def test_the_store_says_which_objects_it_holds_as_blobs(
     repo: Path, shell: Shell
 ) -> None:

@@ -30,7 +30,7 @@ from lup_dev.host.service import Answerer, HostService
 from lup_dev.host.workers import LaunchJudge
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.private import serving as private_serving
-from lup_dev.private.found import added_lines, counted, found, textual
+from lup_dev.private.found import added_lines, counted, found, in_prose, textual
 from lup_dev.private.module import Details
 from lup_dev.private.serving import PrivateServing
 from lup_dev.private.withheld import (
@@ -40,6 +40,7 @@ from lup_dev.private.withheld import (
     built,
     kept,
     said,
+    said_of,
 )
 from lup_dev.stored import read_model, write_model
 
@@ -122,6 +123,31 @@ def test_only_lines_a_change_adds_count_for_a_push() -> None:
 def test_what_a_refusal_says_of_a_kind_never_holds_a_value() -> None:
     assert said("value").what == "one of the operator's private values"
     assert said("home").steer.startswith("write it as `~`")
+
+
+def test_an_item_s_number_is_found_in_prose_alone_and_told_by_itself() -> None:
+    message = "fix: OP saw @1505 again\n\nas `@1505` says, and @1477.2.\n"
+    assert [
+        (each.held.kind, each.held.text, each.line, each.column)
+        for each in in_prose(message, WITHHELD)
+    ] == [
+        ("user", "op", 1, 6),
+        ("item-number", "@1505", 1, 13),
+        ("item-number", "@1477.2", 3, 22),
+    ]
+    assert places(message) == [("user", 1, 6)]
+    assert said_of(Held(kind="item-number", text="@1505")).what == (
+        "an inbox item's number, `@1505`"
+    )
+    assert said_of(USER) == said("user")
+
+
+def test_a_list_that_doesn_t_withhold_numbers_finds_none_and_one_kept_before_does() -> (
+    None
+):
+    dropped = WITHHELD.model_copy(update={"numbers": False})
+    assert [each.held.kind for each in in_prose("op saw @1505", dropped)] == ["user"]
+    assert Withheld.model_validate({"held": [], "seen": []}).numbers
 
 
 # Building the list on the host
@@ -223,6 +249,31 @@ def test_a_detail_dropped_isn_t_read(demo: Path, stub_facts: type[StubFacts]) ->
     facts = stub_facts(home=demo.parents[1], aliases={"forge-op": "github.com"})
     held, _, _ = building(facts, demo, details=["user", "home"])
     assert [kind for kind, _ in held] == ["home", "user"]
+
+
+def test_an_item_s_number_is_withheld_unless_its_detail_is_dropped(
+    demo: Path, stub_facts: type[StubFacts]
+) -> None:
+    facts = stub_facts(home=demo.parents[1])
+
+    def withholds(chosen: Private) -> bool:
+        made = asyncio.run(
+            built(
+                facts,
+                demo,
+                own=[demo],
+                related=[],
+                details=chosen.chosen_details(),
+                values=[],
+                last=None,
+            )
+        )
+        return made.withheld.numbers
+
+    assert withholds(Private())
+    assert not withholds(
+        Private(details=Details.all().drop("item-number", why="no forge here"))
+    )
 
 
 def test_a_related_repository_that_isn_t_public_is_kept_by_its_names(
@@ -370,6 +421,26 @@ def test_the_gate_on_the_host_fails_on_a_value_in_a_file_or_a_new_commit(
     assert result.output.endswith("1 commit for values never published: 2 found.\n")
     assert "Kestrel" not in result.output
     assert "/home/op" not in result.output
+
+
+def test_the_gate_on_the_host_fails_on_an_item_s_number_in_a_new_commit_s_message(
+    forged: Path, shell: Shell, state: Layout
+) -> None:
+    (forged / "docs").mkdir()
+    (forged / "docs" / "inbox.md").write_text("Cited as @12, in a file.\n")
+    shell.git(forged, "add", "docs/inbox.md")
+    shell.git(forged, "commit", "-q", "-m", "docs: as @1505 found\n\nNot `@7`.")
+    short = shell.git(forged, "rev-parse", "--short", "HEAD").strip()
+    write_model(kept(state.module_data("private", forged.parents[1])), GATED)
+    result = runner.invoke(cli.app, ["private", "check"])
+    assert result.exit_code == 1
+    assert result.output.startswith(
+        f"{short}'s message:1:10 - private: an inbox item's number, `@1505`\n"
+        "    steer: on GitHub `@` mentions a user, and the number means nothing "
+        "there: say in words what the item was about, or cite the issue it "
+        "concerns as `#123`; where you mean the notation itself, write it as code\n"
+    )
+    assert result.output.endswith("1 commit for values never published: 1 found.\n")
 
 
 def test_the_gate_on_a_machine_no_launch_ran_on_says_so_and_passes(

@@ -50,7 +50,9 @@ account. The history `ClaudeHome.shared` names is a link each into the home
 the rooms share, mounted read-write at its path, so a conversation resumes in
 any room on it; everything else Claude Code writes, its shell snapshots and
 `.config.json` among it, is the launch's alone, and no room leaves another
-anything to load.
+anything to load. So is auto memory, which lup's settings file places in the
+launch's directory (`autoMemoryDirectory`, `ClaudeHome.memory`): by default
+it's inside the shared `projects/`, and loaded into every new session.
 
 **The session settings** go in lup's settings file, which outranks the
 home's user settings: each one the settings impose (`TerminalSettings.session`),
@@ -190,7 +192,15 @@ its 2.1.294, 2.1.296 and 2.1.301 binaries:
 - a single file mounted into the room can't be replaced by a rename ("Device or
   resource busy"), and Claude Code's writer falls back to writing in place
   ("in-place fallback write", in the binary), so the mounted state file stays
-  writable.
+  writable;
+- `autoMemoryDirectory` is read from the highest source setting it, policy
+  settings then `--settings`' then user settings, and ignored in a project's
+  (its schema's description, and the 2.1.312 binary's `q_()`); measured on
+  2.1.312 against a local stand-in for the API, a `MEMORY.md` planted in
+  `projects/<folder>/memory/` reached the request's system prompt with auto
+  memory on, and didn't with `--settings` placing the directory elsewhere,
+  user settings pointing it back there or not (`docs/field-notes.md`, *Auto
+  memory on a home of the rooms' own*).
 """
 
 import json
@@ -335,6 +345,12 @@ class LaunchSettings(Wire):
     """`accept` delivers each message reaching the session's messaging socket,
     which a session bypassing permission prompts would hold for approval; none
     leaves it to the operator's own settings."""
+    auto_memory_directory: str | None = None
+    """Where auto memory is kept, on a home of the rooms' own: the launch's own
+    directory (`ClaudeHome.memory`), whether auto memory is on or off, which
+    stays the session settings'. This file outranks the home's user settings
+    for it, so a person's own `autoMemoryDirectory` can't place it back in
+    the shared history; none leaves it where Claude Code puts it."""
     skip_dangerous_mode_permission_prompt: bool = True
 
 
@@ -543,6 +559,9 @@ def compiled(
         if session.account_connectors is None
         else not session.account_connectors,
         cross_session_inbound=None if settings.messages is None else "accept",
+        auto_memory_directory=None
+        if settings.home is None
+        else str(ClaudeHome(directory=settings.home.directory).memory),
     )
     servers = Servers(
         mcp_servers={

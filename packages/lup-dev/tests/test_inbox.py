@@ -200,6 +200,8 @@ from lup_dev.policy.landing import LandingTools
 from lup_dev.policy.reviewed import Mark, Reviews
 from lup_dev.policy.tools import JudgeTools, stands
 from lup_dev.policy.verdicts import Verdict, VerdictLog
+from lup_dev.private.withheld import Withheld
+from lup_dev.private.withheld import kept as listed_at
 from lup_dev.remote.protocol import Remotes
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
@@ -391,10 +393,11 @@ class Watched(Delivery):
         until: Callable[[], bool],
         *,
         on: list[Waking],
+        home: Path | None,
         within: timedelta | None = None,
     ) -> str:
         self.holding.set()
-        return await super().held(party, until, on=on, within=within)
+        return await super().held(party, until, on=on, home=home, within=within)
 
 
 @pytest.fixture
@@ -478,7 +481,7 @@ def inboxed(
         layout=machine.host,
         answerer=known,
         courier=couriers,
-        spawns=spawns or cli.SpawnRecords(adapters=known, layout=machine),
+        spawns=spawns or cli.SpawnRecords(adapters=known),
         operators={name: each.records for name, each in (recorded or {}).items()},
         post=delivery,
         bearings=(
@@ -821,7 +824,7 @@ TYPED_WORDS = holding(
 
 
 def queued_in(home: Path) -> dict[str, Queues]:
-    """What Claude Code holds for each conversation, read from its home at `home`."""
+    """What Claude Code holds for each conversation, read from its home at `home`, which the test's launch registers as its own (`launched` at `home / "w"`)."""
     return {"claude": ClaudeQueues(records=ClaudeRecords(directory=home))}
 
 
@@ -831,7 +834,7 @@ def test_wait_inbox_returns_for_the_operator_s_typed_words_whatever_on_says(
     home = tmp_path / ".claude"
     records = Subagents(home / "projects")
     with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
-        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, home / "w", "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -842,6 +845,48 @@ def test_wait_inbox_returns_for_the_operator_s_typed_words_whatever_on_says(
     assert returned == (TYPED_WORDS, False)
 
 
+def test_wait_inbox_reads_no_queue_of_a_session_its_room_claims_from_another_home(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A room's hook names whatever session it likes, a host session's or another project's room's among them: a held call reads its conversation's queue in the home its own launch registered alone, so what another session's runtime holds never reaches it."""
+    operators = tmp_path / "claude"
+    gate = 'Background command "gate" completed (exit code 0)'
+    for home, session in [(operators, "s9"), (tmp_path / "b", "s8")]:
+        appended(
+            home / "projects" / "-w" / f"{session}.jsonl",
+            background("m1", backgroundTaskId="b1"),
+            {**enqueued(notified("b1", "m1", gate)), "sessionId": session},
+        )
+    records = ClaudeRecords(directory=operators, host=machine.host)
+    recorded = {"claude": Recorded(records=records, reader=ClaudeTranscripts())}
+    queues: dict[str, Queues] = {"claude": ClaudeQueues(records=records)}
+    with inboxed(machine, clock, notices, said, recorded, queues=queues) as delivery:
+        launched(machine, clock, tmp_path / "a" / "w", "one", "claude")
+        launched(machine, clock, tmp_path / "b" / "w", "two", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(machine.host.launch("two").hook, claude("SessionStart", session_id="s8"))
+        returned: list[tuple[str, bool]] = []
+        for session in ["s9", "s8"]:
+            send(hook, claude("SessionStart", source="startup", session_id=session))
+            waiting: dict[str, JsonValue] = {"within": "PT1M"}
+            calling = lup_call(
+                "wait_inbox", waiting, f"w-{session}", session_id=session
+            )
+            stamped = json.loads(send(hook, calling))["hookSpecificOutput"][
+                "updatedInput"
+            ]
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                delivery.holding.clear()
+                held = pool.submit(call, mcp, "wait_inbox", stamped)
+                assert delivery.holding.wait(timeout=60)
+                clock.sleep(60)
+                returned.append(held.result(timeout=60))
+    assert returned == [
+        ("Nothing reached you within PT1M, this call's `within`.", False),
+        ("Nothing reached you within PT1M, this call's `within`.", False),
+    ]
+
+
 def test_wait_inbox_returns_for_a_task_of_its_own_and_never_for_its_subagent_s(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
@@ -850,7 +895,7 @@ def test_wait_inbox_returns_for_a_task_of_its_own_and_never_for_its_subagent_s(
     gate = 'Background command "gate" completed (exit code 0)'
     probe = 'Background command "probe" completed (exit code 0)'
     with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
-        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, home / "w", "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         sockets = (hook, mcp)
         send(hook, claude("SessionStart", source="startup"))
@@ -951,7 +996,7 @@ def test_what_the_runtime_holds_is_told_by_one_held_call(
     home = tmp_path / ".claude"
     records = Subagents(home / "projects")
     with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
-        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, home / "w", "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         appended(records.transcript, enqueued("Stop the gate, it hangs."))
@@ -975,7 +1020,7 @@ def test_ask_with_wait_returns_for_the_operator_s_typed_words_its_question_open(
     records = Subagents(home / "projects")
     asking: dict[str, JsonValue] = {"question": "Which parser?", "wait": True}
     with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
-        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, home / "w", "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -2810,7 +2855,7 @@ class Unguided(Spawns):
     """Says every subagent, of either runtime, was named after its id and reads none of its session's guidance."""
 
     @override
-    def spawned(self, runtime: str, payload: str) -> Spawned | None:
+    def spawned(self, launch: Register, payload: str) -> Spawned | None:
         agent = json.loads(payload).get("agent_id")
         return None if agent is None else Spawned(name=f"sub-{agent}")
 
@@ -2885,6 +2930,32 @@ def test_a_claude_fork_and_a_codex_subagent_read_the_guidance_and_are_told_nothi
     assert introduction() not in forked
     assert codex_told.startswith("lup: you're `other/subagent·b1` for now")
     assert introduction() not in codex_told
+
+
+def test_a_record_a_hook_names_under_another_launch_s_own_directory_is_read_nowhere(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """The service reads a record a hook names only as the launch it heard the hook on has it, by its socket: a room naming its subagent's record under another launch's own runtime directory, where that launch's home holds one naming it, has its subagent go unnamed, as one whose record isn't written yet. The launch whose own directory it is reads it."""
+    theirs = Subagents(tmp_path / "one")
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "one" / "first", "one", "claude")
+        launched(machine, clock, tmp_path / "two" / "second", "two", "claude")
+        hook, hook2 = machine.host.launch("one").hook, machine.host.launch("two").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, claude("SessionStart", source="startup", session_id="s2"))
+        theirs.recorded("a1", "Explore", "t1", name="parser")
+        planted = bash(
+            "c1",
+            session_id="s2",
+            agent_id="a1",
+            agent_type="Explore",
+            transcript_path=str(theirs.transcript),
+        )
+        told = context(send(hook2, planted))
+        own = context(send(hook, theirs.call("a1", "Explore", "c2")))
+    assert told.startswith(introduction())
+    assert "lup: this subagent is `second/Explore·a1` for now" in told
+    assert own == introduction()
 
 
 class Rollouts:
@@ -3888,6 +3959,59 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
         "what the operator writes on a conversation is theirs until they send it",
         "the operator's review is theirs, across every repository",
     ]
+
+
+def test_a_room_reads_no_moment_of_a_session_it_claims_from_another_repository(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
+    *,
+    tmp_path: Path,
+) -> None:
+    """A room's hook names whatever session it likes, so its items can claim a host session's or another project's room's: the moment of each is read only where its record ran in the asker's repository."""
+    operators = tmp_path / "claude"
+    elsewhere = tmp_path / "elsewhere"
+    theirs = tmp_path / "b" / "other"
+    theirs.mkdir(parents=True)
+    recording(repo.parent, "s1", repo, "n1")
+    recording(operators, "s9", elsewhere, "n9")
+    recording(theirs.parent, "s8", theirs, "n8")
+    recorded = {
+        "claude": Recorded(
+            records=ClaudeRecords(directory=operators, host=machine.host),
+            reader=ClaudeTranscripts(),
+        )
+    }
+    with inboxed(machine, clock, notices, said, recorded):
+        launched(machine, clock, repo, "one", "claude")
+        launched(machine, clock, theirs, "two", "claude")
+        hook = machine.host.launch("one").hook
+        send(machine.host.launch("two").hook, claude("SessionStart", session_id="s8"))
+        for session, key in [("s1", "n1"), ("s9", "n9"), ("s8", "n8")]:
+            send(hook, claude("SessionStart", source="startup", session_id=session))
+            stamped = json.loads(
+                send(hook, lup_call("note", {"remark": key}, key, session_id=session))
+            )["hookSpecificOutput"]["updatedInput"]
+            call(machine.host.launch("one").mcp, "note", stamped)
+        room = RoomClient(socket=machine.host.launch("one").request)
+        mine = room.ask(ShowContext(number=1), Context)
+        refusals: list[str] = []
+        for number in [2, 3]:
+            with pytest.raises(HostError) as refusal:
+                room.ask(ShowContext(number=number), Context)
+            refusals.append(str(refusal.value))
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        operator = [host.ask(ShowContext(number=number), Context) for number in [2, 3]]
+    assert [each.text for each in mine.entries if isinstance(each, Said)] == [
+        "Note it."
+    ]
+    assert refusals == [
+        "the conversation isn't one of this repository's",
+        "the conversation isn't one of this repository's",
+    ]
+    assert [each.anchor for each in operator] == [1, 1]
 
 
 def test_a_room_is_told_how_far_the_operator_has_seen_its_repositorys_groups_alone(
@@ -8552,6 +8676,73 @@ def test_land_where_the_gate_fails_on_the_merge_answers_its_report_changing_noth
     assert shell.git(dev, "rev-parse", "HEAD") == old
     assert landings.on_forge("refs/heads/dev") == old
     assert feat.is_dir()
+
+
+def test_land_refuses_a_merge_message_or_a_commit_citing_an_item_before_it_merges(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    feat, dev, shell = landings.feat, landings.dev, landings.shell
+    (feat / "src/pkg").mkdir(parents=True, exist_ok=True)
+    (feat / "src/pkg/rooms.py").write_text('"""Rooms."""\n')
+    shell.commit(feat, "fix(rooms): what @1505 found\n\nAs `@270` reads.")
+    cited = shell.git(feat, "rev-parse", "--short", "HEAD")
+    old = moved_on(landings)
+    write_model(
+        listed_at(machine.module_data("private", landings.repository)), Withheld()
+    )
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp, "Merge: as @1477.2")
+    steer = (
+        "      steer: on GitHub `@` mentions a user, and the number means nothing "
+        "there: say in words what the item was about, or cite the issue it "
+        "concerns as `#123`; where you mean the notation itself, write it as code\n"
+    )
+    assert answer == (
+        "Not landed: a message it would publish cites an inbox item's number, "
+        "which `Private` refuses at the push, so nothing was merged and nothing "
+        "has changed.\n"
+        f"  the merge commit's message:1:11 - an inbox item's number, `@1477.2`\n"
+        f"{steer}"
+        f"  {cited}'s message:1:18 - an inbox item's number, `@1505`\n"
+        f"{steer}"
+        "Rewrite each, then call `land` again. The merge commit's is the `message` "
+        "you give `land`. A commit of the branch, which isn't pushed, is rewritten "
+        "with `git commit --amend` where it's the branch's tip, and below it by a "
+        'rebase that needs no editor: `GIT_SEQUENCE_EDITOR="sed -i '
+        "'1s/^pick/edit/'\" git rebase -i <commit>~`, then `git commit --amend` "
+        "and `git rebase --continue`."
+    )
+    assert shell.git(dev, "rev-parse", "HEAD") == old
+    assert landings.on_forge("refs/heads/dev") == old
+    assert landings.gate.ran == []
+    assert feat.is_dir()
+
+
+def test_land_merges_a_message_citing_an_item_where_the_list_doesn_t_withhold_them(
+    landings: Landings,
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+) -> None:
+    landings.wrote(landings.feat, "src/pkg/rooms.py", '"""Rooms."""\n')
+    moved_on(landings)
+    write_model(
+        listed_at(machine.module_data("private", landings.repository)),
+        Withheld(numbers=False),
+    )
+    with inboxed(machine, clock, notices, said, rooms=landings.room):
+        landings.launched("claude")
+        send(machine.host.launch("one").hook, started("claude"))
+        answer = merging(landings, machine.host.launch("one").mcp, "Merge: as @1505")
+    merge = landings.on_forge("refs/heads/dev")
+    assert answer.startswith(f"Merged `feat` onto `dev` as {merge}, ")
 
 
 def test_land_leaves_dev_where_uncommitted_work_is_in_the_way_and_lands_once_it_s_gone(

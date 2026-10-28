@@ -1818,13 +1818,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         until: Callable[[], bool],
         *,
         on: list[Waking],
+        home: Path | None,
         within: timedelta | None = None,
     ) -> str:
         """Hold a call of `party`'s until `until()`, checked again at each arrival; until its runtime holds for it news of whoever `on` names; or until `within` passes, by the delivery's clock, where it's given. Then tell it everything waiting, and what its runtime holds for it.
 
         What the runtime holds is looked at each `glance`, and as the call
         returns, and told once: it reaches the agent from the runtime as the
-        call returns, so the call says only what it is (`queue`). Where its
+        call returns, so the call says only what it is (`queue`). It's read
+        in `home` alone, the home `party`'s launch registered, since its hook
+        named the session (`Queues.queued`). Where its
         turn ended while the call held, nothing is counted told: it says what
         waits reaches the agent at its next call. A call cancelled while it
         holds, its connection gone, leaves everything waiting.
@@ -1842,7 +1845,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         glances = asyncio.create_task(glancing())
         try:
             while not until():
-                held = await self.queued(party)
+                held = await self.queued(party, home)
                 if any(waking(each.kind) in on for each in held):
                     break
                 if deadline is not None and self.clock.now() >= deadline:
@@ -1857,7 +1860,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 "Your turn ended while this call waited, so what reached your inbox "
                 "reaches you at your next call instead."
             )
-        held = await self.queued(party)
+        held = await self.queued(party, home)
         presence.queued = [*presence.queued, *(each.id for each in held)]
         told = [self.whole(party, "held call"), *([queue(held)] if held else [])]
         said = SEPARATOR.join(each for each in told if each)
@@ -1865,8 +1868,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             return said
         return f"Nothing reached you within {spelled(within)}, this call's `within`."
 
-    async def queued(self, party: Conversation) -> list[Queued]:
-        """Return what `party`'s runtime holds for it that no held call told yet, oldest first: none where its runtime's records don't say (`queues`).
+    async def queued(self, party: Conversation, home: Path | None) -> list[Queued]:
+        """Return what `party`'s runtime holds for it that no held call told yet, oldest first: none where its runtime's records don't say (`queues`), or its record isn't in `home`, the one its launch registered (`Queues.queued`).
 
         What a call told is kept while the runtime holds it, and forgotten
         once it doesn't, so the list stays as short as the runtime's queue.
@@ -1874,7 +1877,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         queues = self.queues.get(party.runtime)
         if queues is None:
             return []
-        kept = await asyncio.to_thread(queues.queued, party.session, party.agent)
+        kept = await asyncio.to_thread(queues.queued, party.session, party.agent, home)
         presence = self.presence(party)
         presence.queued = [each.id for each in kept if each.id in presence.queued]
         return [each for each in kept if each.id not in presence.queued]

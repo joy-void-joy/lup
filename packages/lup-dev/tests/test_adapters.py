@@ -67,12 +67,18 @@ def running(kit: Kit, repo: Path) -> list[str]:
 
 @pytest.fixture
 def on_claude(kit: Kit) -> Bench:
-    return Bench(runtime=claude.Claude(), services=kit.bench.services)
+    """A bench for Claude Code's hooks of a launched room, the kit's launch's (`Kit.launch`)."""
+    return Bench(
+        runtime=claude.Claude(), services=kit.bench.services, launch=kit.launch()
+    )
 
 
 @pytest.fixture
 def on_codex(kit: Kit) -> Bench:
-    return Bench(runtime=codex.Codex(), services=kit.bench.services)
+    """A bench for Codex's hooks of a launched room, the kit's launch's (`Kit.launch`)."""
+    return Bench(
+        runtime=codex.Codex(), services=kit.bench.services, launch=kit.launch("codex")
+    )
 
 
 def test_claude_session_start_prints_nothing(
@@ -1433,6 +1439,55 @@ def test_claude_leaves_a_call_running_when_a_prompt_arrives_mid_turn(
     assert running(kit, repo) == ["c1"]
 
 
+def test_claude_reads_no_record_a_hook_names_under_another_launch_s_own_directory(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    """The room writes the payload, so it can name a path under another launch's
+    own runtime directory: that launch's home holds the call's result, but the
+    record is read only as the launch whose room ran the hook has it, so the
+    call stays counted. Answered for that other launch, the same prompt reads
+    the record and clears the call."""
+    other = kit.registered(launch="l2")
+    transcript = other.named / "records" / "s1.jsonl"
+    in_room(payload(repo, "SessionStart", source="startup"), on_claude)
+    in_room(pre_tool_use(repo, "Bash", {"command": "sleep 10"}, "lost"), on_claude)
+    results(transcript, "lost")
+    prompt = payload(
+        repo, "UserPromptSubmit", prompt="Go on.", transcript_path=str(transcript)
+    )
+    assert in_room(prompt, on_claude) == ""
+    assert running(kit, repo) == ["lost"]
+    assert in_room(prompt, on_claude.model_copy(update={"launch": other.launch})) == ""
+    assert running(kit, repo) == []
+
+
+def test_claude_reads_no_record_a_hook_names_where_no_launch_asks(
+    on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    """A hook no launch is said to have run, as a host service from before
+    hooks carried their launch (`JudgeHook.launch`) puts one, has no path it
+    names read, one under a launch's own runtime directory among them: the
+    call stays counted to its conversation's turn's end, and a subagent's
+    spawn goes unread."""
+    unasked = on_claude.model_copy(update={"launch": None})
+    transcript = kit.registered().named / "records" / "s1.jsonl"
+    in_room(payload(repo, "SessionStart", source="startup"), unasked)
+    in_room(pre_tool_use(repo, "Bash", {"command": "sleep 10"}, "lost"), unasked)
+    results(transcript, "lost")
+    meta = transcript.with_suffix("") / "subagents" / "agent-a1.meta.json"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(json.dumps({"agentType": "Explore", "toolUseId": "toolu_1"}))
+    prompt = payload(
+        repo, "UserPromptSubmit", prompt="Go on.", transcript_path=str(transcript)
+    )
+    assert in_room(prompt, unasked) == ""
+    assert running(kit, repo) == ["lost"]
+    assert claude.subagent_record(transcript, "a1", None) is None
+    spawned = claude.subagent_record(transcript, "a1", kit.launch())
+    assert spawned is not None
+    assert spawned.tool_use_id == "toolu_1"
+
+
 def test_claude_reads_without_reaching_the_judge(
     on_claude: Bench, repo: Path, kit: Kit
 ) -> None:
@@ -2277,7 +2332,6 @@ def test_codex_tells_what_came_due_as_a_session_starts_before_its_items(
 def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
     tmp_path: Path, homes: Homes
 ) -> None:
-    layout = homes.layout
     launch = homes.registered()
     transcript, kept = launch.record("projects/-w/s1.jsonl")
     records = kept.with_suffix("") / "subagents"
@@ -2317,20 +2371,20 @@ def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
             transcript_path=str(named),
         )
 
-    assert claude.spawned(subagent("a1", "Explore"), layout) == Spawned(
+    assert claude.spawned(subagent("a1", "Explore"), launch.launch) == Spawned(
         name="explore-auth", kind="Explore", handed=True
     )
-    assert claude.spawned(subagent("a2", "general-purpose"), layout) == Spawned(
+    assert claude.spawned(subagent("a2", "general-purpose"), launch.launch) == Spawned(
         parent="a1", kind="general-purpose", handed=True
     )
-    assert claude.spawned(subagent("a3", "Plan"), layout) == Spawned(
+    assert claude.spawned(subagent("a3", "Plan"), launch.launch) == Spawned(
         kind="Plan", handed=True
     )
-    assert claude.spawned(subagent("a4", "fork"), layout) == Spawned(
+    assert claude.spawned(subagent("a4", "fork"), launch.launch) == Spawned(
         kind="fork", guided=True, handed=True
     )
     # Claude Code's own agents, a prompt's suggestion among them: no type, no record.
-    assert claude.spawned(subagent("a5", ""), layout) == Spawned(
+    assert claude.spawned(subagent("a5", ""), launch.launch) == Spawned(
         internal=True, handed=True
     )
     # A progress summary's fork calling a tool, as 2.1.309 hooks it: no type at all.
@@ -2343,9 +2397,11 @@ def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
         agent_id="a6",
         transcript_path=str(transcript),
     )
-    assert claude.spawned(fork, layout) == Spawned(internal=True, handed=True)
+    assert claude.spawned(fork, launch.launch) == Spawned(internal=True, handed=True)
     assert (
-        claude.spawned(pre_tool_use(Path("/w"), "Bash", {"command": "ls"}), layout)
+        claude.spawned(
+            pre_tool_use(Path("/w"), "Bash", {"command": "ls"}), launch.launch
+        )
         is None
     )
 
@@ -2354,7 +2410,6 @@ def test_claude_reads_a_record_a_hook_names_in_its_launch_s_home_alone_never_thr
     tmp_path: Path, homes: Homes
 ) -> None:
     """The room writes its launch's own runtime directory, links into the home among it, so a link it repoints there, or a path it names elsewhere, has the host read nothing it planted."""
-    layout = homes.layout
     launch = homes.registered()
     transcript, _ = launch.record("projects/-w/s1.jsonl")
     planted = tmp_path / "planted" / "-w" / "s1" / "subagents"
@@ -2377,15 +2432,79 @@ def test_claude_reads_a_record_a_hook_names_in_its_launch_s_home_alone_never_thr
         )
 
     told = Spawned(kind="Explore", handed=True)
-    assert claude.spawned(subagent(transcript), layout) == told
-    assert claude.spawned(subagent(elsewhere), layout) == told
-    assert claude.spawned(subagent(launch.named / ".." / "x.jsonl"), layout) == told
+    assert claude.spawned(subagent(transcript), launch.launch) == told
+    assert claude.spawned(subagent(elsewhere), launch.launch) == told
+    assert (
+        claude.spawned(subagent(launch.named / ".." / "x.jsonl"), launch.launch) == told
+    )
+
+
+def test_each_runtime_reads_no_record_a_hook_names_under_another_launch_s_own_directory(
+    homes: Homes,
+) -> None:
+    """A hook's payload, which the room writes, can name a record under another
+    launch's own runtime directory, by that launch's id: its home holds the
+    record, but the host reads a path only as the launch whose room ran the hook
+    has it, so the subagent is said by its type alone, as where nothing's
+    recorded. Heard from the launch whose own directory it is, it's read."""
+    asking = homes.registered("claude", "l1")
+    other = homes.registered("claude", "l2", own=True)
+    transcript, kept = other.record("projects/-w/s1.jsonl")
+    meta = kept.with_suffix("") / "subagents" / "agent-a1.meta.json"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(
+        json.dumps({"agentType": "Explore", "name": "explore-auth", "toolUseId": "t1"})
+    )
+    planted = payload(
+        Path("/w"),
+        "PreToolUse",
+        tool_name="Bash",
+        tool_input={"command": "ls"},
+        tool_use_id="c1",
+        agent_id="a1",
+        agent_type="Explore",
+        transcript_path=str(transcript),
+    )
+    assert claude.spawned(planted, asking.launch) == Spawned(
+        kind="Explore", handed=True
+    )
+    assert claude.spawned(planted, other.launch) == Spawned(
+        name="explore-auth", kind="Explore", handed=True
+    )
+
+    asking = homes.registered("codex", "c1")
+    other = homes.registered("codex", "c2", own=True)
+    rollout, written = other.record("sessions/rollout-th-a1.jsonl")
+    written.parent.mkdir(parents=True)
+    thread = {
+        "id": "th-a1",
+        "session_id": "root",
+        "parent_thread_id": "root",
+        "agent_path": "/root/explore_auth",
+        "agent_role": "explorer",
+    }
+    written.write_text(json.dumps({"type": "session_meta", "payload": thread}) + "\n")
+    planted = json.dumps(
+        {
+            "session_id": "root",
+            "cwd": "/w",
+            "hook_event_name": "PreToolUse",
+            "agent_id": "th-a1",
+            "agent_type": "explorer",
+            "transcript_path": str(rollout),
+        }
+    )
+    assert codex.spawned(planted, asking.launch) == Spawned(
+        kind="explorer", guided=True
+    )
+    assert codex.spawned(planted, other.launch) == Spawned(
+        name="explore_auth", kind="explorer", guided=True, handed=True
+    )
 
 
 def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
     tmp_path: Path, homes: Homes
 ) -> None:
-    layout = homes.layout
     launch = homes.registered("codex")
 
     def rollout(thread: str, parent: str, path: str | None) -> Path:
@@ -2443,25 +2562,27 @@ def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
         + "\n"
     )
 
-    assert codex.spawned(subagent("th-a1", child), layout) == Spawned(
+    assert codex.spawned(subagent("th-a1", child), launch.launch) == Spawned(
         name="explore_auth", kind="explorer", guided=True, handed=True
     )
     grandchilds = Spawned(
         name="grep_tokens", parent="th-a1", kind="explorer", guided=True, handed=True
     )
-    assert codex.spawned(subagent("th-a2", grandchild), layout) == grandchilds
+    assert codex.spawned(subagent("th-a2", grandchild), launch.launch) == grandchilds
     # First heard at its end, which names its parent's rollout and its own.
-    assert codex.spawned(ended("th-a2", grandchild, child), layout) == grandchilds
+    assert (
+        codex.spawned(ended("th-a2", grandchild, child), launch.launch) == grandchilds
+    )
     explorer = Spawned(kind="explorer", guided=True)
-    assert codex.spawned(subagent("th-a3", unnamed), layout) == explorer
-    assert codex.spawned(subagent("th-a4", None), layout) == explorer
-    assert codex.spawned(subagent("th-a1", roots), layout) == explorer
+    assert codex.spawned(subagent("th-a3", unnamed), launch.launch) == explorer
+    assert codex.spawned(subagent("th-a4", None), launch.launch) == explorer
+    assert codex.spawned(subagent("th-a1", roots), launch.launch) == explorer
     # A rollout named outside the launch's own directory isn't read.
     elsewhere = tmp_path / "rollout-th-a1.jsonl"
     elsewhere.write_text(written.read_text())
-    assert codex.spawned(subagent("th-a1", elsewhere), layout) == explorer
+    assert codex.spawned(subagent("th-a1", elsewhere), launch.launch) == explorer
     captured = (CAPTURED / "6-pre-tool-use-bash.json").read_text()
-    assert codex.spawned(captured, layout) is None
+    assert codex.spawned(captured, launch.launch) is None
 
 
 @pytest.mark.parametrize(

@@ -449,7 +449,9 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 whose(each) == "operator" for each in inbox.waiting(self.party)
             )
 
-        told = await self.delivery.held(self.party, answered, on=["operator"])
+        told = await self.delivery.held(
+            self.party, answered, on=["operator"], home=self.launch.home
+        )
         if not isinstance(inbox.item(number).state, Answered):
             return self.answered(
                 f"{told}\n\nYour question {cited(number)} is still open: its answer "
@@ -643,7 +645,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             return any(whose(each) in on for each in inbox.waiting(self.party))
 
         told = await self.delivery.held(
-            self.party, arrived, on=on, within=awaiting.within
+            self.party, arrived, on=on, home=self.launch.home, within=awaiting.within
         )
         return Said(text=told)
 

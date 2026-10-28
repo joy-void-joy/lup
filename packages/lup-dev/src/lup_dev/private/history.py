@@ -2,10 +2,11 @@
 
 `docs/private.md`, *The door*. What the remote holds is what its refs reach, as the
 host listed them; what a push publishes is every commit its updates reach
-beyond that (`git rev-list --ignore-missing`, so an object the store lacks, as a
-stale listing may name, is skipped and more is checked, never less), and the
-name of each ref it updates. In each new commit:
-- its message;
+beyond that (`Git.walked`, so an object the store lacks, as a stale listing
+may name, is skipped and more is checked, never less), and the name of each
+ref it updates. In each new commit:
+- its message, read as prose, where an item's number is found too
+  (`in_prose`);
 - the path of each file it adds or changes against every parent, since a
   file's name is published;
 - the lines it adds to each such file, found with `difflib` against each
@@ -28,7 +29,14 @@ from typing import TYPE_CHECKING
 
 from lup.publishing import Place, Updating
 from lup.types import Model
-from lup_dev.private.found import added_lines, counted, found, masked, textual
+from lup_dev.private.found import (
+    added_lines,
+    counted,
+    found,
+    in_prose,
+    masked,
+    textual,
+)
 from lup_dev.private.withheld import Held, Withheld
 
 if TYPE_CHECKING:
@@ -42,26 +50,6 @@ class Spot(Model):
 
     held: Held
     place: Place
-
-
-def walked(repository: Git, sources: list[str], has: list[str]) -> list[str]:
-    """Return each commit `sources` reach that `has` don't, oldest first.
-
-    An object the store lacks is skipped (`--ignore-missing`), so a listing
-    naming one the room never fetched checks more, never less.
-    """
-    asked = "".join(
-        [*(f"{each}\n" for each in sources), *(f"^{each}\n" for each in has)]
-    )
-    listed = repository.run(
-        "rev-list",
-        "--reverse",
-        "--topo-order",
-        "--ignore-missing",
-        "--stdin",
-        stdin=asked.encode(),
-    )
-    return listed.output.decode().splitlines()
 
 
 class Commit(Model):
@@ -161,7 +149,7 @@ def in_commit(
                 within=f"{read.short}'s message", line=each.line, column=each.column
             ),
         )
-        for each in found(read.message, held)
+        for each in in_prose(read.message, held)
     ]
     named = [
         Spot(
@@ -217,7 +205,7 @@ def pushed(
         for update in updates
         for each in found(update.destination, held)
     ]
-    commits = walked(repository, [update.source for update in updates], has)
+    commits = repository.walked([update.source for update in updates], has)
     return [*refs, *in_commits(repository, commits, held)]
 
 
