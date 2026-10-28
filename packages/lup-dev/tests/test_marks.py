@@ -9,6 +9,7 @@ import pytest
 
 from lup_dev.host.watch import Changes, Remarked
 from lup_dev.inbox.marks import (
+    CORE,
     MarksMoved,
     MarksMoving,
     MarksRead,
@@ -206,3 +207,28 @@ def test_a_module_s_marks_are_read_by_its_key_each_recorded_as_read(
         "key": key,
         "up_to": "9",
     }
+
+
+def test_a_group_is_seen_up_to_an_item_by_its_number_alone(
+    tmp_path: Path, clock: FakeClock
+) -> None:
+    moving = MarksMoving(layout=layout(tmp_path), clock=clock)
+    key = {"runtime": "claude", "session": "s1", "agent": None}
+    with pytest.raises(InboxError, match="seen up to an item, by its number"):
+        asyncio.run(
+            moving.answer(
+                MoveMarks(
+                    repository=REPOSITORY,
+                    module=CORE,
+                    marks=[Moving(key=key, up_to="later")],
+                )
+            )
+        )
+    moved = asyncio.run(
+        moving.answer(
+            MoveMarks(
+                repository=REPOSITORY, module=CORE, marks=[Moving(key=key, up_to="57")]
+            )
+        )
+    )
+    assert isinstance(moved, MarksMoved)

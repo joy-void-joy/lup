@@ -262,6 +262,19 @@ class MarksMoving(Model, Handler[MoveMarks], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: MoveMarks) -> Reply:
+        """Move the marks, refusing one of the core's that isn't up to an item, by its number, which the inbox's listing reads it as."""
+        unnumbered = [
+            each
+            for each in request.marks
+            if request.module == CORE
+            and (each.up_to is None or not each.up_to.isdecimal())
+        ]
+        if unnumbered:
+            message = (
+                "an agent's group is seen up to an item, by its number, not "
+                f"{', '.join(repr(each.up_to) for each in unnumbered)}"
+            )
+            raise InboxError(message)
         at = self.clock.now()
         marks = [
             ReviewMark(key=each.key, up_to=each.up_to, at=at) for each in request.marks
