@@ -20,24 +20,24 @@ whole diff (`ShowDiff`), and the dashboard each file it changes, whole
 flagged (`AskFlag`, joining the item `ShowGathering` finds gathering the
 conversation's flagged writes to the file).
 
-The dashboard reads a conversation whole: its steps, as its runtime records
-them (`ShowConversation`), each call a line saying what it did, each call's
-input and output whole once its fold is opened (`ShowCalls`), and the items it
-sent and was sent, in every state (`ListItems`), which its page places among
-them.
+The dashboard reads a conversation's steps as its runtime records them
+(`ShowConversation`), for its task list and its context; the conversation it
+shows is `Transcripts`' view of it. A conversation's items, those it sent and
+was sent in every state, each with its line (`ListItems`, `inbox/lines.py`),
+are what a module's view of it weaves in, read through the core.
 """
 
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, override
+from typing import TYPE_CHECKING, Literal, override
 
+from lup import blocks
 from lup.types import Model
 from lup_dev.git import Git
 from lup_dev.host.names import Names
 from lup_dev.host.protocol import LaunchId, Reply, Request
 from lup_dev.host.records import (
-    Call,
     Entry,
     Recorded,
     Task,
@@ -46,7 +46,7 @@ from lup_dev.host.records import (
     within,
 )
 from lup_dev.host.service import Handler, Reading, Route
-from lup_dev.inbox import context
+from lup_dev.inbox import context, lines
 from lup_dev.inbox.delivery import Delivery, written
 from lup_dev.inbox.reading import Narrowing, Reader, Spelling
 from lup_dev.inbox.store import (
@@ -66,11 +66,13 @@ from lup_dev.inbox.store import (
     Review,
     Ruling,
     Talk,
-    Unresolved,
     Waiting,
     cited,
 )
 from lup_dev.listing import Span
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class ListInbox(Request, Span, reads=True):
@@ -301,20 +303,6 @@ class ShowConversation(Request, reads=True):
     """How many of its steps the asker has already: only those after are sent."""
 
 
-class ShowCalls(Request, reads=True):
-    """Read calls of one conversation whole, as its runtime records them: each one's input, and what it returned."""
-
-    kind: Literal["inbox-show-calls"] = "inbox-show-calls"
-    runtime: str
-    session: str
-    """The runtime's id for the session."""
-    agent: str | None = None
-    """The runtime's id for the subagent; none for the session's own conversation."""
-    calls: list[str]
-    """The runtime's ids for the calls, as the conversation's steps carry them
-    (`Called.id`)."""
-
-
 class ShowContext(Request, reads=True):
     """Read an item's moment in the conversation that sent it: what led to the call that made it, and what came after."""
 
@@ -449,13 +437,6 @@ class Conversed(Reply):
     """Its task list as it stands; empty where it keeps none."""
 
 
-class Calls(Reply):
-    """Calls of one conversation whole, in the order asked: each its record holds, with its input and what it returned."""
-
-    kind: Literal["inbox-calls"] = "inbox-calls"
-    calls: list[Call]
-
-
 class Context(Reply):
     """An item's moment in the conversation that sent it, read from its runtime's record: from the operator's last words before the call that made it, through the call, to their next words or the record's end."""
 
@@ -467,10 +448,22 @@ class Context(Reply):
 
 
 class Exchange(Model):
-    """One item a conversation sent or was sent, with its text whole: as the conversation wrote it, or as it's told it."""
+    """One item a conversation sent or was sent, with its text whole, as the conversation wrote it or as it's told it, and its line as a view of the conversation shows it, which the core words (`inbox/lines.py`)."""
 
     item: Item
     text: str
+    line: list[blocks.Span]
+    """Its line: `→ @51 question to you · answered by @53`, what its kind says
+    of it, then whom it went to or came from, and where it stands; each
+    conversation it names a span of its own, said by its path, referring to it
+    by its runtime's ids (`Span.conversation`)."""
+    at: datetime
+    """When it reached the conversation: when it was told it, else made."""
+    comment: str = ""
+    """The operator's comment on deciding it, where they decided it with one."""
+    echoes: bool = False
+    """Whether it repeats the conversation's own words, which a view of it shows
+    already: a turn's last words, which lup made a note of."""
 
 
 class Pathed(Model):
@@ -501,6 +494,44 @@ class Exchanged(Reply):
             (each.path for each in self.paths if each.conversation == conversation),
             None,
         )
+
+
+def exchanged(
+    party: Conversation,
+    items: list[Item],
+    *,
+    written: Callable[[Item], str],
+    told: Callable[[Item], str],
+    paths: list[Pathed],
+) -> Exchanged:
+    """Return `items`, those `party` sent, with their text as it wrote it (`written`), and those it was sent, as it's told them (`told`), lup's word on its citations among those, though it's its own item; each with its line as a view of `party` shows it (`lines.lined`), each conversation it names called by its path among `paths`, else by its runtime's ids."""
+
+    def named(conversation: Conversation) -> str:
+        path = next(
+            (each.path for each in paths if each.conversation == conversation), None
+        )
+        if path is not None:
+            return path
+        own = f"{conversation.runtime} {conversation.session}"
+        return own if conversation.agent is None else f"{own} / {conversation.agent}"
+
+    def exchange(each: lines.Lined) -> Exchange:
+        item = each.item
+        return Exchange(
+            item=item,
+            text=written(item) if each.sent else told(item),
+            line=each.line,
+            at=each.at,
+            comment=each.comment,
+            echoes=each.echoes,
+        )
+
+    shown = lines.lined(party, items, named)
+    return Exchanged(
+        sent=[exchange(each) for each in shown if each.sent],
+        received=[exchange(each) for each in shown if not each.sent],
+        paths=paths,
+    )
 
 
 def owned(item: Item, repository: Path) -> Item:
@@ -889,11 +920,7 @@ class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
         return self.exchanged(party, [each for each in items if each.of(repository)])
 
     def exchanged(self, party: Conversation, items: list[Item]) -> Exchanged:
-        """Return `items` as `party` sent them, as it wrote them, and as it was sent them, as it's told them: lup's word on its citations that named no passage among those it was sent, though it's its own item, being lup's to it (`Unresolved`); and each conversation among their parties by its path, as the operator's `inbox` names it."""
-
-        def told(item: Item) -> bool:
-            return item.sender != party or isinstance(item.reason, Unresolved)
-
+        """Return `items` as `party` sent them, as it wrote them, and as it was sent them, as it's told them, each with its line (`exchanged`); and each conversation among their parties by its path, as the operator's `inbox` names it."""
         reader = Reader(
             delivery=self.delivery,
             reader=Operator(),
@@ -906,22 +933,13 @@ class ItemsListing(Model, Reading[ListItems], arbitrary_types_allowed=True):
             for each in [item.sender, item.recipient, item.addressed]
             if isinstance(each, Conversation)
         )
-        return Exchanged(
-            sent=[
-                Exchange(item=each, text=written(each))
-                for each in items
-                if not told(each)
-            ],
-            received=[
-                Exchange(item=each, text=self.delivery.words(each))
-                for each in items
-                if told(each)
-            ],
-            paths=[
-                Pathed(conversation=each, path=path)
-                for each in parties
-                if (path := reader.path(each, every)) is not None
-            ],
+        paths = [
+            Pathed(conversation=each, path=path)
+            for each in parties
+            if (path := reader.path(each, every)) is not None
+        ]
+        return exchanged(
+            party, items, written=written, told=self.delivery.words, paths=paths
         )
 
 
@@ -976,47 +994,6 @@ class ConversationShowing(
             usage=transcript.usage,
             tasks=transcript.tasks,
         )
-
-
-class CallsShowing(Model, Reading[ShowCalls], arbitrary_types_allowed=True):
-    """Answers `ShowCalls`: calls of one conversation read whole from its record as it stands, for a room only from a record that ran in its repository, as `ConversationShowing` answers."""
-
-    recorded: dict[str, Recorded]
-    """Each runtime's records on this machine, and how they're read, by its name."""
-    recording: context.Recording = context.Recording()
-
-    @override
-    def request(self) -> type[ShowCalls]:
-        return ShowCalls
-
-    @override
-    async def answer(self, request: ShowCalls) -> Reply:
-        read = await asyncio.to_thread(self.read, request)
-        return await self.calls(request, read.record)
-
-    @override
-    async def scoped(self, request: ShowCalls, repository: Path) -> Reply:
-        """Answer only where the record says it ran in the repository's git directory or one of its worktrees."""
-        read = await asyncio.to_thread(self.read, request)
-        under = await asyncio.to_thread(
-            lambda: [repository, *Git.pinned(repository).worktrees()]
-        )
-        ran = read.transcript.directory
-        if ran is None or not within(ran, under):
-            message = "the conversation isn't one of this repository's"
-            raise InboxError(message)
-        return await self.calls(request, read.record)
-
-    def read(self, request: ShowCalls) -> context.Read:
-        """Read the conversation's record as it stands: kept as last read where it hasn't changed."""
-        return self.recording.read(
-            self.recorded, request.runtime, request.session, request.agent
-        )
-
-    async def calls(self, request: ShowCalls, record: Path) -> Calls:
-        """Return the calls asked for, read whole from `record`, off the event loop."""
-        reader = self.recorded[request.runtime].reader
-        return Calls(calls=await asyncio.to_thread(reader.calls, record, request.calls))
 
 
 class DiffShowing(Model, Reading[ShowDiff], arbitrary_types_allowed=True):
@@ -1203,7 +1180,6 @@ def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
         Route.reading(FilesShowing(delivery=delivery)),
         Route.reading(ContextShowing(delivery=delivery, recorded=recorded)),
         Route.reading(ConversationShowing(recorded=recorded, recording=recording)),
-        Route.reading(CallsShowing(recorded=recorded, recording=recording)),
         Route.reading(ItemsListing(delivery=delivery)),
         Route.reading(DraftShowing(delivery=delivery)),
         Route.to(DraftKeeping(delivery=delivery)),

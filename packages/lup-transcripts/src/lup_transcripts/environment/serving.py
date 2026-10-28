@@ -19,28 +19,33 @@ Its views read a conversation live, from the runtime's own record as it grows
 (`conversation`, the drawer under each agent's banner; `exchange`, one earlier
 exchange; `call`, one call read whole), laid out in lup's blocks
 (`environment/conversation.py`), each record read again only once it changed
-(`Recording`). Shown, the drawer is answered again at its agent's turns and
-calls and a minute apart at most; a call read whole, open in it, as a call of
-the agent's finishes, so one still running shows what it returned once it has.
+(`Recording`). The drawer keeps open at most the agent's last words its fold
+kind of what came earlier keeps (`FoldKind.keeps_open`, 20 unless a person's
+layer says), as the module's layers leave it. Shown, the drawer and each
+exchange opened in it are answered again at their agent's turns and calls and
+a minute apart at most; a call read whole, open in it, as a call of the
+agent's finishes, so one still running shows what it returned once it has.
 """
 
 import asyncio
-import shutil
+import os
 from datetime import timedelta
 from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import Field
 
 import lup
-from lup.blocks import OfAgent
+from lup.blocks import FoldKind, OfAgent
 from lup.types import Model
+from lup_dev.confined import Confined
 from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Room
 from lup_dev.git import Git
 from lup_dev.host.protocol import HostError
 from lup_dev.inbox.context import Recording
 from lup_transcripts.environment import views
 from lup_transcripts.environment.conversation import (
-    Beside,
+    EARLIER_KIND,
+    FOLD_KINDS,
     OfCall,
     OfExchange,
     call_blocks,
@@ -52,9 +57,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup_dev.host.records import Record, Transcript
-    from lup_dev.inbox.protocol import Exchanged
-    from lup_dev.inbox.store import Conversation
     from lup_transcripts.environment.module import Transcripts
+
+
+GROWING = lup.Watch(
+    on=[lup.TurnStarted, lup.CallFinished, lup.TurnEnded, lup.ConversationEnded],
+    longest=timedelta(minutes=1),
+)
+"""When a view of a conversation as it grows is answered again, shown: at its
+agent's turns and calls, and a minute apart at most. The drawer's, and an
+exchange's, since what came before the agent's last words in the latest one
+moves on with each of its words."""
 
 
 class Every(Model):
@@ -93,21 +106,53 @@ def stale(source: Path, copy: Path) -> bool:
 
 
 def copied(records: list[Record], target: Path) -> int:
-    """Copy each file of `records` into `target` where it's stale, and return how many were copied."""
-    pairs = [
-        (each, target / record.place / each.relative_to(record.source))
-        for record in records
-        for each in (
-            [record.source]
-            if record.source.is_file()
-            else sorted(path for path in record.source.rglob("*") if path.is_file())
+    """Copy each file of `records` into `target` where it's stale, and return how many were copied.
+
+    A room writes the records copied, and every room of the project reads the
+    copies, so a link a room left there would copy what it names, a key in
+    `~/.ssh` say, where every room reads it. So each file is read as the host
+    reads a worktree's (`Confined`): a regular file, opened without waiting on
+    a pipe, only where it resolves inside its record's folder; a record reached
+    through a link below the runtime's home, the part a room writes, is left
+    out whole, while a link in the home's own path (a home kept in a dotfiles
+    checkout, `/home` itself a link) is the machine's and is followed. A link
+    the runtime made between its own files in the folder, as a runtime may
+    link a resumed session's subagents to the session it resumed, is copied as
+    the file it names. Each copy keeps its file's time, which `stale` compares.
+    """
+    count = 0
+    for record in records:
+        source = record.source
+        home = source.parents[len(record.place.parts) - 1]
+        if source.resolve() != home.resolve().joinpath(*record.place.parts):
+            continue
+        whole = source.is_dir(follow_symlinks=False)
+        folder = Confined(root=source if whole else source.parent)
+        files = (
+            sorted(
+                each
+                for each in source.rglob("*")
+                if not each.is_dir(follow_symlinks=False)
+            )
+            if whole
+            else [source]
         )
-    ]
-    stale_pairs = [(source, copy) for source, copy in pairs if stale(source, copy)]
-    for source, copy in stale_pairs:
-        copy.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, copy)
-    return len(stale_pairs)
+        for each in files:
+            copy = target / record.place / each.relative_to(source)
+            try:
+                if not stale(each, copy):
+                    continue
+                held = each.stat()
+            except OSError:
+                continue
+            content = folder.read(each.relative_to(folder.root))
+            if content is None:
+                continue
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            copy.write_bytes(content)
+            os.utime(copy, ns=(held.st_atime_ns, held.st_mtime_ns))
+            count += 1
+    return count
 
 
 class TranscriptsServing(ModuleServing):
@@ -186,29 +231,17 @@ class TranscriptsServing(ModuleServing):
         sessions = await asyncio.to_thread(self.kept)
         return views.found(sessions, asked.words, whole=asked.whole)
 
-    def beside(self, exchanged: Exchanged) -> Beside:
-        """Return what a conversation shows beside its steps: the items of lup's inbox it exchanged, each conversation among their parties called by its path as the core gives it, else by its runtime's ids."""
-
-        def named(party: Conversation) -> str:
-            path = exchanged.path(party)
-            if path is not None:
-                return path
-            own = f"{party.runtime} {party.session}"
-            return own if party.agent is None else f"{own} / {party.agent}"
-
-        return Beside(exchanged=exchanged, named=named)
+    def earlier(self) -> FoldKind:
+        """Return the fold kind of what came earlier in a conversation as the module's layers leave it: how many of the agent's last words it keeps open (`FoldKind.keeps_open`), a person's layer setting more or fewer."""
+        kinds = self.module.folds.resolve(FOLD_KINDS, FOLD_KINDS)
+        return next(
+            (each.entry for each in kinds if each.entry.name == EARLIER_KIND.name),
+            EARLIER_KIND,
+        )
 
     @lup.view(
         place=lup.Drawer(letter="v", called="the conversation", colour="cyan"),
-        watch=lup.Watch(
-            on=[
-                lup.TurnStarted,
-                lup.CallFinished,
-                lup.TurnEnded,
-                lup.ConversationEnded,
-            ],
-            longest=timedelta(minutes=1),
-        ),
+        watch=GROWING,
     )
     async def conversation(self, viewed: OfAgent) -> lup.Blocks:
         """Show an agent's whole conversation from its runtime's record, live: everything since your last words open, each earlier exchange folded under your words that opened it, each run of calls under one line, and the items of lup's inbox it sent and was sent where they happened."""
@@ -223,14 +256,15 @@ class TranscriptsServing(ModuleServing):
         return conversation_blocks(
             viewed,
             read.transcript.entries,
-            self.beside(exchanged),
+            exchanged,
             exchange=TranscriptsServing.exchange,
             call=TranscriptsServing.call,
+            earlier=self.earlier(),
         )
 
-    @lup.view
+    @lup.view(watch=GROWING)
     async def exchange(self, viewed: OfExchange) -> lup.Blocks:
-        """Show one earlier exchange of an agent's conversation, from your words that opened it to your next."""
+        """Show one earlier exchange of an agent's conversation, from your words that opened it to your next; or, with `--until-last`, what came in it before the agent's last words that many."""
         read = await asyncio.to_thread(
             self.recording.read,
             self.recorded,
@@ -242,8 +276,10 @@ class TranscriptsServing(ModuleServing):
         return exchange_blocks(
             viewed,
             read.transcript.entries,
-            self.beside(exchanged),
+            exchanged,
+            exchange=TranscriptsServing.exchange,
             call=TranscriptsServing.call,
+            earlier=self.earlier(),
         )
 
     @lup.view(watch=lup.Watch(on=[lup.CallFinished]))

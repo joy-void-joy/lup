@@ -10,7 +10,8 @@
       "colour": "cyan",
       "chord": true,
       "whole": true,
-      "counts": true
+      "counts": true,
+      "keeps_open": null
     },
     {
       "name": "item",
@@ -22,7 +23,8 @@
       "colour": "orange",
       "chord": false,
       "whole": true,
-      "counts": true
+      "counts": true,
+      "keeps_open": null
     },
     {
       "name": "file",
@@ -34,7 +36,8 @@
       "colour": "info",
       "chord": true,
       "whole": false,
-      "counts": true
+      "counts": true,
+      "keeps_open": null
     },
     {
       "name": "body",
@@ -46,7 +49,8 @@
       "colour": "purple",
       "chord": true,
       "whole": false,
-      "counts": true
+      "counts": true,
+      "keeps_open": null
     },
     {
       "name": "lines",
@@ -58,7 +62,8 @@
       "colour": "muted",
       "chord": true,
       "whole": false,
-      "counts": false
+      "counts": false,
+      "keeps_open": null
     },
     {
       "name": "context",
@@ -70,19 +75,21 @@
       "colour": "cyan",
       "chord": true,
       "whole": false,
-      "counts": false
+      "counts": false,
+      "keeps_open": null
     },
     {
       "name": "earlier",
       "letter": "e",
-      "called": "earlier exchanges",
-      "one": "the earlier exchange",
+      "called": "earlier exchanges and steps",
+      "one": "what came earlier",
       "level": 1,
       "opens": "back",
       "colour": "ok",
       "chord": true,
       "whole": false,
-      "counts": true
+      "counts": true,
+      "keeps_open": 20
     },
     {
       "name": "calls",
@@ -94,7 +101,8 @@
       "colour": "purple",
       "chord": true,
       "whole": false,
-      "counts": false
+      "counts": false,
+      "keeps_open": null
     },
     {
       "name": "items",
@@ -106,7 +114,8 @@
       "colour": "cyan",
       "chord": true,
       "whole": false,
-      "counts": false
+      "counts": false,
+      "keeps_open": null
     },
     {
       "name": "call",
@@ -118,7 +127,8 @@
       "colour": "orange",
       "chord": true,
       "whole": false,
-      "counts": true
+      "counts": true,
+      "keeps_open": null
     }
   ],
   "tones": [

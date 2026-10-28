@@ -1,14 +1,13 @@
 // The views the page lays out itself, each named after the module it'll move to (`views.ts`): the core's, lup's
-// approvals; the judge's, its items, "since you approved" and its banner part; the agent-facing inbox's items; the
-// runtime adapters' task list and banner part; and `Transcripts`' conversation. And where each item's body is: its
-// kind's view, by the module that kind will be (#113, step 4).
+// approvals; the judge's, its items, "since you approved" and its banner part; the agent-facing inbox's items; and the
+// runtime adapters' task list and banner part. `Transcripts`' conversation is its own view, asked of the host. And
+// where each item's body is: its kind's view, by the module that kind will be (#113, step 4).
 import type { components } from "../generated/api";
 import { instanceOf, type Answer, type Blocks, type Mounted, type Remote, type Shown, type View } from "../views";
 import { BANNER as WORKING, TASKS } from "./adapters";
 import { APPROVAL } from "./core";
 import { ANSWER, ENDED, FRICTION, HOW_IT_WENT, MESSAGE, QUESTION, REVIEW, STOP, UNRESOLVED } from "./inbox";
 import { BANNER as HOLDING, FLAGGED, HELD, SINCE } from "./judge";
-import { CONVERSATION } from "./transcripts";
 
 type Item = components["schemas"]["Item"];
 
@@ -30,7 +29,6 @@ const PRODUCERS: readonly View<never>[] = [
     REVIEW,
     TASKS,
     WORKING,
-    CONVERSATION,
 ] as readonly View<never>[];
 
 /** Return the producer of `module`'s `view`, where the page lays it out itself; none for a view its module serves. */

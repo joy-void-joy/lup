@@ -70,7 +70,7 @@ from lup_dev.host.protocol import (
     Stop,
 )
 from lup_dev.host.pushes import Pushes
-from lup_dev.host.records import Call, Called, Queues, Recorded, Said
+from lup_dev.host.records import Called, Queues, Recorded, Said
 from lup_dev.host.service import UNDECIDED, HostService, Naming, Program, executed
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import (
@@ -88,7 +88,6 @@ from lup_dev.inbox.protocol import (
     AnswerApproval,
     AskApproval,
     AskFlag,
-    Calls,
     Context,
     Conversed,
     Drafted,
@@ -106,7 +105,6 @@ from lup_dev.inbox.protocol import (
     SendDraft,
     SendItem,
     Settled,
-    ShowCalls,
     ShowContext,
     ShowConversation,
     ShowDraft,
@@ -3831,15 +3829,11 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         room = RoomClient(socket=machine.host.launch("one").request)
         read = room.ask(ShowConversation(runtime="claude", session="s1"), Conversed)
-        called = room.ask(
-            ShowCalls(runtime="claude", session="s1", calls=["n1"]), Calls
-        )
         items = room.ask(ListItems(conversation=mine), Exchanged)
         holding = room.ask(ShowHolding(runtime="claude", session="s1"), Holding)
         refusals: list[str] = []
         for request in [
             ShowConversation(runtime="claude", session="s9"),
-            ShowCalls(runtime="claude", session="s9", calls=["n9"]),
             ListItems(conversation=elsewhere),
             ShowGathering(sender=elsewhere, worktree=other, path=Path("a.py")),
             ShowDraft(),
@@ -3850,11 +3844,9 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
                 room.ask(request, Conversed)
             refusals.append(str(refusal.value))
     assert read.total == 2
-    assert called == Calls(calls=[Call(id="n1", input={})])
     assert items == Exchanged(sent=[], received=[])
     assert holding == Holding(on=False)
     assert refusals == [
-        "the conversation isn't one of this repository's",
         "the conversation isn't one of this repository's",
         "the conversation isn't one of this repository's",
         "the conversation isn't one of this repository's",
@@ -5900,17 +5892,6 @@ def test_a_conversation_is_read_from_its_record_from_where_the_asker_left_it(
             ShowConversation(runtime="claude", session="s1", since=first.total),
             Conversed,
         )
-        running = host.ask(
-            ShowCalls(runtime="claude", session="s1", calls=["b1", "b9"]), Calls
-        )
-        with record.open("a") as grown:
-            result = {"type": "tool_result", "tool_use_id": "b1", "content": "a.py"}
-            grown.write(
-                line(type="user", message={"role": "user", "content": [result]}) + "\n"
-            )
-        returned = host.ask(
-            ShowCalls(runtime="claude", session="s1", calls=["b1"]), Calls
-        )
         with pytest.raises(HostError) as missing:
             host.ask(ShowConversation(runtime="claude", session="s9"), Conversed)
     when = datetime(2026, 10, 17, 12, tzinfo=UTC)
@@ -5920,10 +5901,6 @@ def test_a_conversation_is_read_from_its_record_from_where_the_asker_left_it(
     ]
     assert (after.since, after.total) == (2, 3)
     assert after.entries == [Called(tool="Bash", gist="ls", id="b1", at=when)]
-    assert running == Calls(calls=[Call(id="b1", input={"command": "ls"})])
-    assert returned == Calls(
-        calls=[Call(id="b1", input={"command": "ls"}, output="a.py")]
-    )
     assert str(missing.value) == "the record of claude session s9 isn't on this machine"
 
 
@@ -7045,7 +7022,15 @@ def test_a_conversations_items_are_listed_in_every_state_as_it_wrote_and_was_tol
         (4, "It was stopped before it ended its turn."),
     ]
     assert theirs.sent[0].item.state == Done(at=clock.now())
-    assert theirs.received == mains.received[2:]
+    passed = [(each.item, each.text) for each in mains.received[2:]]
+    assert [(each.item, each.text) for each in theirs.received] == passed
+    # Each says it as its own view does: whose it was, or where it went on to.
+    said = [
+        "".join(span.text for span in each.line)
+        for each in [mains.received[2], theirs.received[0]]
+    ]
+    assert said[0].endswith(", which had ended")
+    assert ", this one having ended" in said[1]
 
 
 def test_a_sent_draft_approves_what_it_marks_read_and_held_changes_commented_on(
