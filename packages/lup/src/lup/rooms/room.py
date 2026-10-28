@@ -7,11 +7,13 @@
     )
     status = room.launch(arguments=["--resume"], settings=settings)
 
-A launch compiles the agent for a terminal (`Declaration.terminal`), writes the
-files it needs, builds the room's image if it's missing, and runs the CLI in the
-container in the foreground, in the directory it's launched from, with the
-room's home the directory it's given, mounted at the host's home path. It
-returns the CLI's exit status.
+A launch compiles the agent for a terminal (`Declaration.terminal`), prepares
+what it needs (`Terminal.prepare`: its files, directories and copies, and what
+each mount inside the runtime's home lands on), builds the room's image if it's
+missing, and runs the CLI in the container in the foreground, in the directory
+it's launched from, with the room's home the directory it's given, mounted at
+the host's home path. It returns the CLI's exit status; what the runtime saved
+that a launch carries back (`Terminal.preferences`) is the launch's to carry.
 """
 
 import sys
@@ -82,9 +84,7 @@ class Room(Model, arbitrary_types_allowed=True):
                 "from inside a mount"
             )
             raise ContainerError(message)
-        for path, text in terminal.files.items():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
+        terminal.prepare()
         self.engine.ensure(container.image)
         return self.engine.run(
             Invocation(

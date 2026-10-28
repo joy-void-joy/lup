@@ -12,8 +12,10 @@ from where it last read, so a conversation growing as the agent works is read
 again only from its record's latest change (`Recording`).
 """
 
+import os
 from pathlib import Path
 
+from lup.rooms.homes import opened
 from lup.types import Model, MutableModel
 from lup_dev.host.records import Called, Entry, Recorded, Said, Transcript
 from lup_dev.inbox.store import Conversation, InboxError, Item, cited
@@ -80,6 +82,9 @@ class Read(Model):
     changed: int
     """Its modification time, in nanoseconds."""
     transcript: Transcript
+    root: Path | None = None
+    """The directory it's read inside, a room's home or the operator's own,
+    which a read of what's beside it stays inside too."""
 
 
 class Recording(MutableModel):
@@ -103,14 +108,17 @@ class Recording(MutableModel):
         if reading is None:
             message = f"lup can't read the records of {runtime}"
             raise InboxError(message)
-        record = reading.records.conversation(session, agent)
-        if record is None:
-            whose = f"{runtime} session {session}" + (
-                "" if agent is None else f", subagent {agent},"
-            )
+        found = reading.records.conversation(session, agent)
+        whose = f"{runtime} session {session}" + (
+            "" if agent is None else f", subagent {agent},"
+        )
+        opening = None if found is None else opened(found.root, found.record)
+        if found is None or opening is None:
             message = f"the record of {whose} isn't on this machine"
             raise InboxError(message)
-        stat = record.stat()
+        with opening:
+            stat = os.fstat(opening.fileno())
+        record = found.record
         last = self.kept.get(record)
         if (
             last is not None
@@ -122,7 +130,8 @@ class Recording(MutableModel):
             record=record,
             size=stat.st_size,
             changed=stat.st_mtime_ns,
-            transcript=reading.reader.read(record),
+            transcript=reading.reader.read(record, found.root),
+            root=found.root,
         )
         self.kept = {**self.kept, record: read}
         return read

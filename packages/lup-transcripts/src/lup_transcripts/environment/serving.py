@@ -308,5 +308,7 @@ class TranscriptsServing(ModuleServing):
             viewed.agent,
         )
         reader = self.recorded[viewed.runtime].reader
-        found = await asyncio.to_thread(reader.calls, read.record, [viewed.id])
+        found = await asyncio.to_thread(
+            reader.calls, read.record, [viewed.id], read.root
+        )
         return call_blocks(viewed, found[0] if found else None)

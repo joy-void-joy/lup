@@ -38,7 +38,7 @@ from lup.rooms import ContainerError, Mount, Podman, Room
 from lup.rooms.engine import stopped
 from lup.types import JsonObject, Model, MutableModel
 from lup_dev import commanding
-from lup_dev.accounts import AccountError, Accounts, RuntimeLogin
+from lup_dev.accounts import AccountError, Accounts, Login, RuntimeLogin
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import Adapter, claude, codex
@@ -181,6 +181,7 @@ from lup_dev.inbox.tools import InboxTools
 from lup_dev.inbox.typed import TypeReader
 from lup_dev.launch.clis import CliCache
 from lup_dev.launch.hidden import removed
+from lup_dev.launch.homes import LaunchHome
 from lup_dev.launch.images import build
 from lup_dev.launch.room import (
     QRENCODE,
@@ -362,13 +363,14 @@ class Adapters(Model, Answerer):
 
 
 class SpawnRecords(Model, Spawns):
-    """How every runtime lup knows recorded its subagents' spawns, as its adapter reads them."""
+    """How every runtime lup knows recorded its subagents' spawns, as its adapter reads them, in the home each launch registered (`lup_dev.host.homes.translated`)."""
 
     adapters: Adapters
+    layout: Layout
 
     @override
     def spawned(self, runtime: str, payload: str) -> Spawned | None:
-        return self.adapters.named(runtime).spawned(payload)
+        return self.adapters.named(runtime).spawned(payload, self.layout)
 
 
 class Couriers(Model, Courier):
@@ -579,7 +581,8 @@ def host_serve(context: typer.Context) -> None:
         answerer=known,
         courier=couriers,
         judge=WorkerJudge(modules=workers),
-        spawns=SpawnRecords(adapters=known),
+        spawns=SpawnRecords(adapters=known, layout=layout),
+        operators={name: each.records for name, each in recorded().items()},
         post=delivery,
         bearings=RepositoryBearings(
             delivery=delivery, integration=settings.lup_integration_branch
@@ -1667,8 +1670,6 @@ def swept(
                 podman.discard(each.container)
             released(podman, own, say)
             vacated(own)
-            if own.directory.is_dir():
-                shutil.rmtree(own.directory)
             rooms = layout.rooms(each.repository)
             removed(rooms.home, rooms.launch(each.launch))
             say(
@@ -1782,7 +1783,9 @@ def launched(
     layer approved beside it; the launch's profile, `profile` or else the one
     the person's layer chooses, and its runtime's account, `account` or else
     the profile's, from the person's profiles approved with it, said where
-    either isn't `default` (`chosen`); the rules its selection runs, which the
+    either isn't `default` (`chosen`); the home of the rooms' own the runtime
+    runs on, the profile's choice of one, with the account's login and the
+    profile's configuration over the operator's (`LaunchHome`); the rules its selection runs, which the
     engine resolves for the guidance; the host's requirements, each optional
     one off said; the repository named on GitHub, or why not said; the host
     service; the latest CLI, a fallback said; the other repositories the
@@ -1793,15 +1796,19 @@ def launched(
     repository's `config` checked for the room's git; the files with a secret's
     name whose content their repository's git objects don't hold, in the
     project's tree and each related repository mounted, found as late as can be
-    and said
-    (`lup_dev.launch.secrets`); the sweep, and the
+    and said (`lup_dev.launch.secrets`), with a home not made yet, an account
+    holding no login for the runtime, and what of the configuration copied in
+    was left out where that changed; the sweep, and the
     environments a launch that crashed left, then the launch registered, under
     its launcher's lock; the room's git configuration and helper, the
     clipboard's programs, the package managers' settings, the environments'
     program and places, what the hidden files are mounted from, and the
-    editor's link written; the CLI in the room, behind the start making the
-    worktree's environment, with `arguments` after lup's own.
-    The registration ends, and the launch's directory and environments go,
+    editor's link written, and the account's login made where there's none;
+    the CLI in the room, behind the start making the worktree's environment,
+    with `arguments` after lup's own. What the session saved of its
+    preferences is carried back to the profile, and the first change seen of
+    the account's login said, each said; then the registration ends, and the
+    launch's directory and environments go,
     with each of the host's environments that appeared in a worktree while the
     room ran, whatever the CLI did; each file with a secret's name that
     appeared or changed in the project's tree meanwhile is said, and left.
@@ -1827,7 +1834,6 @@ def launched(
     with approved_declaration(
         worktree, approval.commit, local=approval.local
     ) as declared:
-        # lup: defer(issue=324, why="the room runs on the profile's setting and logs in with the account once rooms have homes of their own (room-homes)")
         choice = chosen(
             declared_profiles(approval.profiles, launcher.layout.profiles.declared),
             runtime,
@@ -1887,6 +1893,19 @@ def launched(
             place.mkdir(parents=True, exist_ok=True)
         launch = secrets.token_hex(8)
         own = launcher.layout.launch(launch)
+        homing = LaunchHome.of(
+            launcher.layout,
+            own,
+            repository,
+            runtime,
+            choice=choice,
+            login=Login(
+                runtime=runtime,
+                path=adapter.login(
+                    launcher.layout.accounts.account(choice.account).runtime(runtime)
+                ),
+            ),
+        )
         environments = RoomEnvironments.of(
             declared.resolved.runner, worktree, launcher.layout, launch, launcher.tools
         )
@@ -1918,7 +1937,9 @@ def launched(
             shared=shared,
             lent=lending,
             rules=running,
+            home=homing.home,
         )
+        compiled = adapter.agent().terminal(settings)
         gating = Gating(
             command=declared.resolved.runner.command(["lup-dev", "check", "--at"]),
             refs=declared.resolved.limits.gated,
@@ -1926,7 +1947,7 @@ def launched(
         git = room_git(
             repository,
             own,
-            [*room.mounts, *ages.mounts, *adapter.agent().terminal(settings).mounts],
+            [*room.mounts, *ages.mounts, *compiled.mounts],
             gating,
         )
         registered = Register(
@@ -1941,6 +1962,8 @@ def launched(
             exact=name is not None,
             runner=declared.resolved.runner.command([]),
             environments=environments.own,
+            home=homing.home.shared,
+            own=homing.home.directory,
         )
         hiding = RoomSecrets.of(
             Search(
@@ -1955,7 +1978,11 @@ def launched(
             ],
             own,
         )
-        for line in hiding.said():
+        for line in [
+            *hiding.said(),
+            *homing.said(),
+            *homing.left(compiled.left_out),
+        ]:
             launcher.say(line)
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -1971,6 +1998,7 @@ def launched(
                 served = launcher.host.register(registered)
                 sockets = served.directory
                 launcher.say(f"This launch is `{served.name}`.")
+                before: str | None = None
                 try:
                     cleared(launcher.podman, served.container, launcher.say)
                     git.write()
@@ -1981,6 +2009,7 @@ def launched(
                     hiding.write()
                     editor.link(own)
                     receives = receiving(launcher.podman, own)
+                    before = homing.ready()
                     walled = room.model_copy(
                         update={
                             "name": served.container,
@@ -2004,6 +2033,12 @@ def launched(
                     )
                     return opened.launch(arguments=arguments, settings=settings)
                 finally:
+                    carried = compiled.preferences
+                    for line in [
+                        *([] if carried is None else carried.carried()),
+                        *([] if before is None else homing.ended(before)),
+                    ]:
+                        launcher.say(line)
                     ended(launcher, launch)
                     for line in [*environments.end(), *hiding.end()]:
                         launcher.say(line)
@@ -2012,7 +2047,7 @@ def launched(
 
 
 def ended(launcher: Launcher, launch: str) -> None:
-    """End a launch's registration, and remove its directory and its room's home.
+    """End a launch's registration, and remove its directory and its room's home (`vacated`).
 
     Where the host service can't end it, that's said, and the launch's record
     stays for the sweep.
@@ -2027,8 +2062,6 @@ def ended(launcher: Launcher, launch: str) -> None:
     own = launcher.layout.launch(launch)
     released(launcher.podman, own, launcher.say)
     vacated(own)
-    if own.directory.is_dir():
-        shutil.rmtree(own.directory)
 
 
 def released(podman: Podman, launch: LaunchLayout, say: Callable[[str], None]) -> None:

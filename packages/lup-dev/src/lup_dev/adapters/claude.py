@@ -242,6 +242,7 @@ Its release channel (`ClaudeChannel`) is the one its native installer reads
 """
 
 import io
+import os
 import shlex
 import threading
 from abc import ABC, abstractmethod
@@ -259,11 +260,13 @@ from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.adapters.claude.terminal import own_settings
 from lup.adapters.claude.windows import catalogued, reach
+from lup.rooms.homes import inside, lines, opened, plain
 from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, MutableModel, Settings
 from lup_dev.adapters import Adapter, Pushing
 from lup_dev.host.courier import Failure, Heard, Spawned, Telling
+from lup_dev.host.homes import Found, home_of, translated
 from lup_dev.host.records import (
     Call,
     Called,
@@ -294,6 +297,7 @@ from lup_dev.launch.clis import (
     executable,
     text,
 )
+from lup_dev.layout import HostLayout, Layout
 from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     Bench,
@@ -312,6 +316,7 @@ from lup_dev.policy.checkpoint import (
 from lup_dev.policy.report import judge_failed, sections
 from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.worktrees import Apart, Making
+from lup_dev.settings import LupDevSettings
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -658,7 +663,7 @@ class SessionStart(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self),
+            spawned_by=spawned_by(self, bench.services.layout),
             forgotten=self.source in get_args(ForgettingStart.__value__),
         ).apply(bench)
         if not reply.context:
@@ -714,9 +719,15 @@ class UserPromptSubmit(Payload):
 
         A call still running has no result recorded, so a prompt arriving
         mid-turn leaves it counted. A record that lags leaves a call counted
-        until its conversation's turn ends, as before.
+        until its conversation's turn ends, as before. The records are read in
+        the home the launch registered, where the payload names them under the
+        launch's own runtime directory, and nowhere else.
         """
-        transcript = self.transcript_path
+        transcript = (
+            None
+            if self.transcript_path is None
+            else translated(bench.services.layout, self.transcript_path)
+        )
         left = [] if transcript is None else counted(bench, self.session_id)
         over = (
             []
@@ -725,8 +736,9 @@ class UserPromptSubmit(Payload):
                 key
                 for agent in dict.fromkeys(call.agent for call in left)
                 for key in resulted(
-                    recorded(transcript, agent),
+                    recorded(transcript.record, agent),
                     [call.key for call in left if call.agent == agent],
+                    transcript.root,
                 )
             ]
         )
@@ -734,7 +746,7 @@ class UserPromptSubmit(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self),
+            spawned_by=spawned_by(self, bench.services.layout),
             over=over,
         ).apply(bench)
         return None
@@ -867,8 +879,8 @@ class PreToolUse(Payload):
         path = written.file_path or written.notebook_path
         return None if path is None else self.cwd / path
 
-    def started(self) -> CallStarted:
-        """Return the event of this call starting.
+    def started(self, layout: Layout) -> CallStarted:
+        """Return the event of this call starting, the spawn of its subagent read in the home `layout` has its launch's in.
 
         A call running a subagent (`Agent`) isn't counted: its own calls are.
         One asking `isolation: "worktree"` asks for its conversation to work
@@ -880,7 +892,7 @@ class PreToolUse(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self),
+            spawned_by=spawned_by(self, layout),
             call=self.tool_use_id,
             tool=self.tool_name,
             spawns=spawns,
@@ -952,7 +964,7 @@ class PreToolUse(Payload):
         worktree Claude Code names as its working directory, another
         conversation's, refused, saying the path in its own (`apart`).
         """
-        started = self.started()
+        started = self.started(bench.services.layout)
         if started.spawns:
             return self.spawn(bench, started)
         away = apart(bench, started, self.writes())
@@ -1062,7 +1074,7 @@ class PostToolUse(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self),
+            spawned_by=spawned_by(self, bench.services.layout),
             call=self.tool_use_id,
             tool=self.tool_name,
             spawns=self.tool_name in get_args(Spawning.__value__),
@@ -1132,7 +1144,7 @@ class Stop(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self),
+            spawned_by=spawned_by(self, bench.services.layout),
             after_block=self.stop_hook_active,
         )
         reply = ended.apply(bench)
@@ -1206,7 +1218,7 @@ class SubagentStop(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self),
+            spawned_by=spawned_by(self, bench.services.layout),
             final=self.stopped,
         )
         reply = ended.apply(bench)
@@ -1282,7 +1294,7 @@ class StopFailure(Payload):
                 session=self.session_id,
                 agent=self.agent_id,
                 cwd=self.cwd,
-                spawned_by=spawned_by(self),
+                spawned_by=spawned_by(self, bench.services.layout),
                 final=True,
             ).apply(bench)
         return None
@@ -1399,23 +1411,40 @@ main session" (the `sub-agents` docs, *Fork the current conversation*), so it
 reads the session's guidance, which the system prompt carries."""
 
 
-def subagent_record(transcript: Path | None, agent: str) -> SubagentRecord | None:
-    """Return what Claude Code records of subagent `agent` beside the session's `transcript`; none where it records nothing, or not yet."""
-    if transcript is None or not agent:
+def subagent_record(
+    transcript: Path | None, agent: str, layout: Layout, largest: int = 1024 * 1024
+) -> SubagentRecord | None:
+    """Return what Claude Code records of subagent `agent` beside the session's `transcript`, a path a hook's payload names; none where it records nothing, or not yet, or where the path isn't under a launch's own runtime directory, which is the only place the host reads one, in the home the launch registered (`lup_dev.host.homes.translated`).
+
+    It's read confined to that home, at most `largest` bytes, since a room
+    writes it.
+    """
+    if transcript is None or not plain(agent):
         return None
-    record = transcript.with_suffix("") / "subagents" / f"agent-{agent}.meta.json"
-    if not record.is_file():
+    found = translated(layout, transcript)
+    if found is None:
         return None
-    return SubagentRecord.model_validate_json(record.read_text())
+    meta = found.record.with_suffix("") / "subagents" / f"agent-{agent}.meta.json"
+    reading = opened(found.root, meta)
+    if reading is None:
+        return None
+    with reading:
+        text = reading.read(largest + 1)
+    if len(text) > largest:
+        return None
+    try:
+        return SubagentRecord.model_validate_json(text)
+    except ValidationError:
+        return None
 
 
-def spawned_by(payload: Payload) -> str | None:
+def spawned_by(payload: Payload, layout: Layout) -> str | None:
     """Return the id of the call that spawned the subagent `payload` is of, as its record says; none for the session's own conversation, or before the record is written, at `SubagentStart`."""
-    record = subagent_record(payload.transcript_path, payload.agent_id)
+    record = subagent_record(payload.transcript_path, payload.agent_id, layout)
     return None if record is None else record.tool_use_id
 
 
-def spawned(raw: str) -> Spawned | None:
+def spawned(raw: str, layout: Layout) -> Spawned | None:
     """Return how the subagent a Claude Code hook fires for was spawned, from its record beside the session's transcript; none for the session's own conversation.
 
     A subagent whose record isn't there is said by its type alone; one with
@@ -1445,7 +1474,7 @@ def spawned(raw: str) -> Spawned | None:
     if not payload.agent_id:
         return None
     kind = payload.agent_type or None
-    kept = subagent_record(payload.transcript_path, payload.agent_id)
+    kept = subagent_record(payload.transcript_path, payload.agent_id, layout)
     if kept is None:
         return Spawned(
             kind=kind, guided=kind == FORK, internal=kind is None, handed=True
@@ -1699,21 +1728,56 @@ class ClaudeRecords(Model, Records):
 
     A folder's directory is read off its records' own lines, the first naming one,
     never from the folder's name.
+
+    A launched session's is in the home its launch registered alone, as the
+    host service kept it (`lup_dev.host.homes`), and any other's in the
+    operator's directory alone, so a room can't have one read from its own
+    home under another session's id. Rooms write a home, so the record is
+    read inside it alone (`Found.root`). The records a module copies (`kept`)
+    are the operator's directory's alone.
     """
 
     directory: Path
     """The operator's Claude Code directory, `~/.claude` or `CLAUDE_CONFIG_DIR`."""
+    host: HostLayout | None = None
+    """Where the host service keeps each launched session's home; none looks
+    in the operator's directory alone."""
 
     @override
-    def conversation(self, session: str, agent: str | None) -> Path | None:
-        projects = self.directory / "projects"
+    def conversation(self, session: str, agent: str | None) -> Found | None:
+        """Return the record of one conversation, in its launch's home or the operator's directory, with that directory; none for an id that isn't a plain name, as a hook's payload, which a room writes, may give, or for what isn't a file there."""
+        if not plain(session) or (agent is not None and not plain(agent)):
+            return None
         name = (
             f"{session}.jsonl"
             if agent is None
             else f"{session}/subagents/agent-{agent}.jsonl"
         )
-        found = sorted(projects.glob(f"*/{name}")) if projects.is_dir() else []
-        return next(iter(found), None)
+        home = (
+            None if self.host is None else home_of(self.host, Claude().name(), session)
+        )
+        root = self.directory if home is None else home
+        projects = root / "projects"
+        if not projects.is_dir():
+            return None
+        return next(
+            (
+                Found(record=each, root=root)
+                for each in sorted(projects.glob(f"*/{name}"))
+                if inside(root, each) and each.is_file()
+            ),
+            None,
+        )
+
+    @override
+    def held(self, session: str) -> bool:
+        """Say whether the operator's own directory holds a record of session `session`, a regular file inside it, opened as every read is (`lup.rooms.homes.opened`)."""
+        found = self.model_copy(update={"host": None}).conversation(session, None)
+        reading = None if found is None else opened(found.root, found.record)
+        if reading is None:
+            return False
+        reading.close()
+        return True
 
     @override
     def kept(self, under: list[Path]) -> list[Record]:
@@ -2134,6 +2198,11 @@ class ClaudeTranscripts(Model, Reader):
     """The operator's own settings file, whose `env` may turn the long window
     off for every session it starts; none reads nothing of it, as for a copy
     of the records."""
+    layout: Layout | None = None
+    """Where lup keeps the rooms' homes and launches: a session recorded in a
+    home ran in a room, whose settings carry nothing of the operator's `env`,
+    and a call's saved output is named under its launch's own runtime
+    directory; none where neither is read."""
     window: int = 200_000
     """The standard context window, in tokens."""
     long: str = "[1m]"
@@ -2151,8 +2220,8 @@ class ClaudeTranscripts(Model, Reader):
         return sorted(projects.glob("*/*.jsonl")) if projects.is_dir() else []
 
     @override
-    def read(self, record: Path) -> Transcript:
-        lines = list(parsed(record))
+    def read(self, record: Path, root: Path | None = None) -> Transcript:
+        lines = list(parsed(record, root))
         ran = [each.cwd for each in lines if isinstance(each, UserLine) and each.cwd]
         # A subagent's own record, `<session>/subagents/agent-<id>.jsonl`, is all
         # sidechain; a session's own is its main line.
@@ -2170,19 +2239,21 @@ class ClaudeTranscripts(Model, Reader):
             entries=[
                 entry for each in lines for entry in entries(each, sidechain=sidechain)
             ],
-            usage=self.usage(own),
+            usage=self.usage(own, record),
             tasks=tasks(lines),
         )
 
     @override
-    def calls(self, record: Path, ids: list[str]) -> list[Call]:
+    def calls(
+        self, record: Path, ids: list[str], root: Path | None = None
+    ) -> list[Call]:
         """Read calls whole: each one's input from the `tool_use` part calling it, and its output from the `tool_result` answering it, or from the file Claude Code saved a command's whole output to, where that's in the session's own folder.
 
         A saved output is read only from the session's folder, as Claude Code
         writes it there, so a record naming a file elsewhere, written in a room,
         reads nothing outside the records.
         """
-        lines = list(parsed(record))
+        lines = list(parsed(record, root))
         inputs = {
             block.id: block.input
             for line in lines
@@ -2194,7 +2265,7 @@ class ClaudeTranscripts(Model, Reader):
             block.tool_use_id: Call(
                 id=block.tool_use_id,
                 input=None,
-                output=saved(record, line) or block.said(),
+                output=saved(record, line, root, self.layout) or block.said(),
                 failed=block.is_error,
             )
             for line in lines
@@ -2210,8 +2281,8 @@ class ClaudeTranscripts(Model, Reader):
             if each in inputs
         ]
 
-    def usage(self, own: list[AssistantLine]) -> Usage | None:
-        """Return what the context held at the last of `own`, the conversation's replies, that a model made and that counted its input; none where none did."""
+    def usage(self, own: list[AssistantLine], record: Path) -> Usage | None:
+        """Return what the context held at the last of `own`, the conversation's replies in `record`, that a model made and that counted its input; none where none did."""
         counted = [
             each
             for each in own
@@ -2222,7 +2293,7 @@ class ClaudeTranscripts(Model, Reader):
         last = counted[-1]
         return Usage(
             used=last.message.usage.used() if last.message.usage is not None else 0,
-            window=self.windowed(last, shortened=self.shortened()),
+            window=self.windowed(last, shortened=self.shortened(record)),
             model=last.message.model,
         )
 
@@ -2257,8 +2328,11 @@ class ClaudeTranscripts(Model, Reader):
             case "standard", _:
                 return self.window
 
-    def shortened(self) -> bool | None:
-        """Return whether the operator's settings turn the long window off for the sessions they start, as the file stands at this reading; none where it doesn't read.
+    def shortened(self, record: Path) -> bool | None:
+        """Return whether the operator's settings turn the long window off for the session of `record`, as the file stands at this reading; none where it doesn't read.
+
+        A session recorded in a room's home started with none of it: a room's
+        settings leave the operator's `env` out (`ClaudeHome.blocked`).
 
         A session applies its settings' `env` as it starts, so a change made
         after reads here before the session has it. `/model` never writes it, as it
@@ -2267,7 +2341,10 @@ class ClaudeTranscripts(Model, Reader):
         variable only from that file: lup's own settings and its environment
         never set it, and the operator's shell doesn't reach the room.
         """
-        if self.settings is None:
+        roomed = self.layout is not None and record.is_relative_to(
+            self.layout.homes.home
+        )
+        if self.settings is None or roomed:
             return False
         try:
             return own_settings(self.settings).shortened()
@@ -2361,37 +2438,54 @@ def updated(kept: dict[str, Task], change: TaskUpdated) -> dict[str, Task]:
     return {**kept, change.task_id: changed}
 
 
-def parsed(record: Path) -> Iterator[Line]:
-    """Yield each line of `record` lup reads, passing over the others and any that isn't JSON."""
+def parsed(record: Path, root: Path | None = None) -> Iterator[Line]:
+    """Yield each line of `record` lup reads, passing over the others, any that isn't JSON, and any too long to hold (`lup.rooms.homes.lines`); with `root`, read only where, opened, the record is inside it, nothing otherwise."""
     reading = TypeAdapter[Line](Line)
-    with record.open(encoding="utf-8", errors="replace") as written:
-        for raw in written:
+    written = record.open("rb") if root is None else opened(root, record)
+    if written is None:
+        return
+    with written:
+        for raw in lines(written):
             try:
-                yield reading.validate_json(raw)
+                yield reading.validate_json(raw.decode(errors="replace"))
             except ValidationError:
                 continue
 
 
-def saved(record: Path, line: UserLine) -> str | None:
+def saved(
+    record: Path, line: UserLine, root: Path | None = None, layout: Layout | None = None
+) -> str | None:
     """Return the whole output Claude Code saved of the call whose result `line` carries, where it saved one in the session's own folder beside `record`; none where it saved none, or the file isn't there.
 
     The session's folder is `<session>/` beside its record, and a subagent's
-    record is in its `subagents/` folder, so it's the folder holding that.
+    record is in its `subagents/` folder, so it's the folder holding that. A
+    room's session names its saved output under its launch's own runtime
+    directory, which is read as the same place in the home it registered
+    (`lup_dev.host.homes.translated`). The output is read only from inside the
+    session's folder, as the line names it, and only where, opened, it's
+    inside `root`, or inside the folder holding the record without one, so a
+    record naming a file elsewhere, or a folder a room swapped for a link,
+    reads nothing outside the records.
     """
     match line.tool_use_result:
-        case ToolResulted(persisted_output_path=Path() as path):
+        case ToolResulted(persisted_output_path=Path() as named):
             pass
         case _:
             return None
+    found = None if layout is None else translated(layout, named)
+    path = named if found is None else found.record
     folder = (
         record.parent.parent
         if record.parent.name == "subagents"
         else record.with_suffix("")
-    ).resolve()
-    whole = path.resolve()
-    if not whole.is_relative_to(folder) or not whole.is_file():
+    )
+    if not path.is_relative_to(folder) or ".." in path.relative_to(folder).parts:
         return None
-    return whole.read_text(encoding="utf-8", errors="replace")
+    reading = opened(record.parent if root is None else root, path)
+    if reading is None:
+        return None
+    with reading:
+        return reading.read().decode(errors="replace")
 
 
 def recorded(transcript: Path, agent: str) -> Path:
@@ -2401,7 +2495,7 @@ def recorded(transcript: Path, agent: str) -> Path:
     return transcript.with_suffix("") / "subagents" / f"agent-{agent}.jsonl"
 
 
-def resulted(record: Path, calls: list[str]) -> list[str]:
+def resulted(record: Path, calls: list[str], root: Path | None = None) -> list[str]:
     """Return those of `calls` whose result `record` holds; none where there's no record.
 
     Claude Code records a result for every call, an interrupted one's or one the
@@ -2413,7 +2507,7 @@ def resulted(record: Path, calls: list[str]) -> list[str]:
         return []
     found = [
         block.tool_use_id
-        for line in parsed(record)
+        for line in parsed(record, root)
         if isinstance(line, UserLine) and not isinstance(line.message.content, str)
         for block in line.message.content
         if isinstance(block, ToolResult)
@@ -2636,8 +2730,11 @@ class ClaudeQueues(MutableModel, Queues, arbitrary_types_allowed=True):
     followed: dict[Path, Following] = {}
     """Each record as read so far, by its path, so a look reads only what it
     gained since."""
-    found: dict[str, Path] = {}
+    found: dict[str, Found] = {}
     """Each conversation's record, by `session/agent`, once found."""
+    largest: int = 64 * 1024 * 1024
+    """The longest line held: a longer one, which a room's record could hold,
+    is read past."""
     reading: threading.Lock = Field(default_factory=threading.Lock)
     """Held while a look reads, since held calls look from threads of their own."""
 
@@ -2676,33 +2773,50 @@ class ClaudeQueues(MutableModel, Queues, arbitrary_types_allowed=True):
 
         return [queued for each in pending if (queued := held(each)) is not None]
 
-    def record(self, session: str, agent: str | None) -> Path | None:
+    def record(self, session: str, agent: str | None) -> Found | None:
         """Return conversation `agent`'s record of session `session`, the session's own for none, found once and looked for again where it's gone; none where it isn't on this machine."""
         key = f"{session}/{agent}"
         kept = self.found.get(key)
-        if kept is not None and kept.is_file():
+        if kept is not None and kept.record.is_file():
             return kept
-        record = self.records.conversation(session, agent)
-        if record is not None:
-            self.found = {**self.found, key: record}
-        return record
+        found = self.records.conversation(session, agent)
+        if found is not None:
+            self.found = {**self.found, key: found}
+        return found
 
-    def following(self, record: Path, *, sidechains: bool) -> Following:
-        """Return `record` as read so far, read on from where the last look left off to the end of its last whole line; read anew where it shrank, written again. `sidechains` says whether its lines marked a subagent's are its own: in a subagent's record they all are, and in a session's an earlier release kept its subagents' there."""
+    def following(self, found: Found, *, sidechains: bool) -> Following:
+        """Return the record `found` as read so far, read on from where the last look left off to the end of its last whole line; read anew where it shrank, written again. `sidechains` says whether its lines marked a subagent's are its own: in a subagent's record they all are, and in a session's an earlier release kept its subagents' there.
+
+        It's read through what was opened, confined to its home
+        (`lup.rooms.homes.opened`), a line at a time, a line past `largest`
+        read past without being held.
+        """
+        record = found.record
         kept = self.followed.get(record, Following())
-        size = record.stat().st_size
-        if size < kept.read:
-            kept = Following()
-        if size > kept.read:
-            with record.open("rb") as written:
-                written.seek(kept.read)
-                grown = written.read(size - kept.read)
+        reading = opened(found.root, record)
+        if reading is None:
+            return kept
+        with reading:
+            size = os.fstat(reading.fileno()).st_size
+            if size < kept.read:
+                kept = Following()
+            reading.seek(kept.read)
             at = kept.read
-            for raw in io.BytesIO(grown):
+            while at < size:
+                raw = reading.readline(self.largest + 1)
+                if raw.endswith(b"\n") and len(raw) <= self.largest:
+                    followed(kept, raw, at, sidechains=sidechains)
+                    at += len(raw)
+                    continue
+                if len(raw) <= self.largest:
+                    break
+                past = len(raw)
+                while raw and not raw.endswith(b"\n"):
+                    raw = reading.readline(self.largest)
+                    past += len(raw)
                 if not raw.endswith(b"\n"):
                     break
-                followed(kept, raw, at, sidechains=sidechains)
-                at += len(raw)
+                at += past
             kept.read = at
         self.followed = {**self.followed, record: kept}
         return kept
@@ -2757,7 +2871,8 @@ def login(directory: Path) -> Path:
 def adapter() -> Adapter:
     """Return what lup needs of Claude Code: its hooks answered, and its launch."""
     layout = ClaudeLayout.of(ClaudeSettings())
-    records = ClaudeRecords(directory=layout.directory)
+    machine = Layout.of(LupDevSettings())
+    records = ClaudeRecords(directory=layout.directory, host=machine.host)
     return Adapter(
         runtime=Claude(),
         hook=hook,
@@ -2772,6 +2887,6 @@ def adapter() -> Adapter:
         agent=agent,
         login=login,
         records=records,
-        reader=ClaudeTranscripts(settings=layout.settings),
+        reader=ClaudeTranscripts(settings=layout.settings, layout=machine),
         queues=ClaudeQueues(records=records),
     )

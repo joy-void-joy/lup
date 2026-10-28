@@ -941,22 +941,25 @@ def unlent(podman: Podman, launch: LaunchLayout) -> None:
 
 
 def vacated(launch: LaunchLayout) -> None:
-    """Remove a launch's room's home, with what the room wrote there, once its room is gone.
+    """Remove a launch's room's home and the launch's own directory, with what the room wrote in either, once its room is gone.
 
-    Each directory in it is made its owner's to write first, since a room leaves
-    read-only ones, as Go's module cache is, which `shutil.rmtree` can't empty.
-    No link is followed: `Path.walk` lists one among the files, and
-    `shutil.rmtree` removes the link, not what it points at. Nothing writes the
-    home by then, so its paths hold still while they're read.
+    The room writes its home, and, in the launch's directory, what its session
+    writes for itself alone, mounted from there into its runtime's home
+    (`lup.sessions.configuration.HomeLaunch.own`). Each directory in them is
+    made its owner's to write first, since a room leaves read-only ones, as
+    Go's module cache is, which `shutil.rmtree` can't empty. No link is
+    followed: `Path.walk` lists one among the files, and `shutil.rmtree`
+    removes the link, not what it points at. Nothing writes either by then,
+    so its paths hold still while they're read.
     """
-    home = launch.room_home
-    if home.is_symlink() or not home.is_dir():
-        return
-    home.chmod(0o700)
-    for directory, inside, _ in home.walk():
-        for name in inside:
-            (directory / name).chmod(0o700)
-    shutil.rmtree(home)
+    for each in [launch.room_home, launch.directory]:
+        if each.is_symlink() or not each.is_dir():
+            continue
+        each.chmod(0o700)
+        for directory, inside, _ in each.walk():
+            for name in inside:
+                (directory / name).chmod(0o700)
+        shutil.rmtree(each)
 
 
 def programs(launch: LaunchLayout) -> dict[Path, str]:

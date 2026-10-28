@@ -119,31 +119,30 @@ class Profile(Layer, extra="forbid"):
     """Per runtime, by its name as `lup-dev launch` takes it, the account its
     sessions log in with in place of `account`. A launch refuses a runtime's
     name no runtime has."""
-    # lup: defer(issue=324, why="a launch's lending reads the profile's directories once rooms run on a profile's setting (room-homes)")
+    # lup: defer(issue=324, why="a launch's lending reads the profile's directories (profile-settings)")
     lent: Lending = Lending()
     """The directories lent to every launch on it, each at its host path and
     listed in the guidance as `--mount`'s are."""
-    # lup: defer(issue=324, why="each runtime's terminal takes the profile's model and effort once rooms run on a profile's setting (room-homes)")
+    # lup: defer(issue=324, why="each runtime's terminal takes the profile's model and effort, once it's settled whether they sit below or above the operator's own (profile-settings)")
     defaults: dict[str, RuntimeDefaults] = {}
     """Per runtime, by its name, the defaults its sessions on it start with:
     the model and effort."""
-    # lup: defer(issue=324, why="the launch's guidance renders the profile's section once rooms run on a profile's setting (room-homes)")
+    # lup: defer(issue=324, why="the launch's guidance renders the profile's section (profile-settings)")
     guidance: Path | None = None
     """A section of guidance of its own, after the person's `AGENTS.local.md`,
     on both runtimes: the file holding its text, from the profile's own
     directory (`~/.config/lup/profiles/<name>/`), or absolute; none for none."""
-    # lup: defer(issue=324, why="a room's runtime configuration is layered from the operator's and the profile's once rooms have homes of their own (room-homes)")
     operator_configuration: bool = True
     """Whether the operator's own runtime configuration is the layer below the
     profile's own (`~/.config/lup/profiles/<name>/<runtime>/`), credentials left
-    out; off, the profile's own is the whole of it."""
-    # lup: defer(issue=324, why="a launch mounts the rooms' home the profile chooses once rooms have homes of their own (room-homes)")
+    out; off, the profile's own is the whole of it. What a session saves of its
+    preferences is carried back into the profile's own."""
     rooms_home: Literal["project", "global"] = "project"
     """Where its rooms keep their history and state: in a home of each
-    project's own, which the project's rooms share across worktrees
-    (`project`), or in one home the rooms of every project on the profile
-    share (`global`)."""
-    # lup: defer(issue=324, why="a launch layers the profile's project over the person's once rooms run on a profile's setting (room-homes)")
+    project's own, which the project's rooms share across worktrees and
+    profiles (`project`), or in one home the rooms of every project share,
+    whichever profile chooses it (`global`)."""
+    # lup: defer(issue=324, why="a launch layers the profile's project over the person's, once it's settled whether that changes what trust approves (profile-settings)")
     layer: Project | None = None
     """A layer on each repository's project for its launches on the profile,
     over the person's own layer, in the same grammar; none for none."""

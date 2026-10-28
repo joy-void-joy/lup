@@ -248,10 +248,12 @@ import lup
 from lup import events
 from lup.adapters.codex.layout import CodexLayout
 from lup.adapters.codex.settings import CodexSettings
+from lup.rooms.homes import inside, lines, opened, plain
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
 from lup_dev.host.courier import Heard, Spawned, Telling
+from lup_dev.host.homes import Found, home_of, translated
 from lup_dev.host.records import (
     Call,
     Called,
@@ -277,6 +279,7 @@ from lup_dev.launch.clis import (
     download,
     extract,
 )
+from lup_dev.layout import HostLayout, Layout
 from lup_dev.policy.checkpoint import (
     Bench,
     CallFinished,
@@ -289,6 +292,7 @@ from lup_dev.policy.checkpoint import (
 )
 from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
+from lup_dev.settings import LupDevSettings
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -874,7 +878,7 @@ class Subagented(Model, extra="ignore"):
     its parent's."""
 
 
-def spawned(raw: str) -> Spawned | None:
+def spawned(raw: str, layout: Layout, largest: int = 1024 * 1024) -> Spawned | None:
     """Return how the subagent a Codex hook fires for was spawned, from its own rollout's first line; none for the session's own conversation.
 
     A subagent's hooks name its own rollout (`transcript_path`), whose
@@ -915,10 +919,16 @@ def spawned(raw: str) -> Spawned | None:
         return None
     kind = payload.agent_type or None
     rollout = payload.agent_transcript_path or payload.transcript_path
-    if rollout is None or not rollout.is_file():
+    found = None if rollout is None else translated(layout, rollout)
+    reading = None if found is None else opened(found.root, found.record)
+    if reading is None:
         return Spawned(kind=kind, guided=True)
-    with rollout.open() as lines:
-        first = MetaLine.model_validate_json(lines.readline())
+    with reading:
+        line = reading.readline(largest + 1)
+    try:
+        first = MetaLine.model_validate_json(line)
+    except ValidationError:
+        return Spawned(kind=kind, guided=True)
     meta = first.payload
     if meta.id != payload.agent_id:
         return Spawned(kind=kind, guided=True)
@@ -1092,22 +1102,53 @@ class Started(Model, extra="ignore"):
 
 
 class CodexRecords(Model, Records):
-    """Codex's records: a rollout per session under `sessions/`, its first line saying where it ran."""
+    """Codex's records: a rollout per session under `sessions/`, its first line saying where it ran.
+
+    A launched session's is in the home its launch registered alone, as the
+    host service kept it (`lup_dev.host.homes`), and any other's in the
+    operator's home alone, so a room can't have one read from its own home
+    under another thread's id. Rooms write a home, so the rollout is read
+    inside it alone (`Found.root`). The records a module copies (`kept`) are
+    the operator's home's alone.
+    """
 
     home: Path
     """The operator's Codex home, `~/.codex` or `CODEX_HOME`."""
+    host: HostLayout | None = None
+    """Where the host service keeps each launched session's home; none looks
+    in the operator's home alone."""
 
     @override
-    def conversation(self, session: str, agent: str | None) -> Path | None:
-        # A subagent is a thread of its own, its id its rollout's, as a session's is.
-        sessions = self.home / "sessions"
+    def conversation(self, session: str, agent: str | None) -> Found | None:
+        """Return the rollout of one conversation, in its launch's home or the operator's home, with that home; none for an id that isn't a plain name, or for what isn't a file there. A subagent is a thread of its own, its id its rollout's, as a session's is, filed under its session's home."""
         thread = session if agent is None else agent
-        found = (
-            sorted(sessions.rglob(f"rollout-*-{thread}.jsonl"))
-            if sessions.is_dir()
-            else []
+        if not plain(thread) or not plain(session):
+            return None
+        home = (
+            None if self.host is None else home_of(self.host, Codex().name(), session)
         )
-        return next(iter(found), None)
+        root = self.home if home is None else home
+        sessions = root / "sessions"
+        if not sessions.is_dir():
+            return None
+        return next(
+            (
+                Found(record=each, root=root)
+                for each in sorted(sessions.rglob(f"rollout-*-{thread}.jsonl"))
+                if inside(root, each) and each.is_file()
+            ),
+            None,
+        )
+
+    @override
+    def held(self, session: str) -> bool:
+        """Say whether the operator's own directory holds a record of session `session`, a regular file inside it, opened as every read is (`lup.rooms.homes.opened`)."""
+        found = self.model_copy(update={"host": None}).conversation(session, None)
+        reading = None if found is None else opened(found.root, found.record)
+        if reading is None:
+            return False
+        reading.close()
+        return True
 
     @override
     def kept(self, under: list[Path]) -> list[Record]:
@@ -1424,8 +1465,8 @@ class CodexTranscripts(Model, Reader):
         return [each for each in rollouts if spawned_by(each) is None]
 
     @override
-    def read(self, record: Path) -> Transcript:
-        lines = list(rolled(record))
+    def read(self, record: Path, root: Path | None = None) -> Transcript:
+        lines = list(rolled(record, root))
         metas = [each.payload for each in lines if isinstance(each, MetaRecord)]
         names = [
             each.payload.thread_name
@@ -1444,9 +1485,11 @@ class CodexTranscripts(Model, Reader):
         )
 
     @override
-    def calls(self, record: Path, ids: list[str]) -> list[Call]:
+    def calls(
+        self, record: Path, ids: list[str], root: Path | None = None
+    ) -> list[Call]:
         """Read calls whole: each one's input from the `response_item` calling it, and its output from the one answering it, by the call's id; Codex keeps no mark of a call that failed beside its output."""
-        lines = list(rolled(record))
+        lines = list(rolled(record, root))
         given: dict[str, JsonValue] = {
             payload.call_id: (
                 payload.given() if isinstance(payload, ToolCalled) else payload.action
@@ -1527,13 +1570,16 @@ def planned(lines: list[Rolled]) -> list[Task]:
     return plans[-1] if plans else []
 
 
-def rolled(record: Path) -> Iterator[Rolled]:
-    """Yield each line of a rollout lup reads, passing over the others and any that isn't JSON."""
+def rolled(record: Path, root: Path | None = None) -> Iterator[Rolled]:
+    """Yield each line of a rollout lup reads, passing over the others, any that isn't JSON, and any too long to hold (`lup.rooms.homes.lines`); with `root`, read only where, opened, the rollout is inside it, nothing otherwise."""
     reading = TypeAdapter[Rolled](Rolled)
-    with record.open(encoding="utf-8", errors="replace") as written:
-        for raw in written:
+    written = record.open("rb") if root is None else opened(root, record)
+    if written is None:
+        return
+    with written:
+        for raw in lines(written):
             try:
-                yield reading.validate_json(raw)
+                yield reading.validate_json(raw.decode(errors="replace"))
             except ValidationError:
                 continue
 
@@ -1580,6 +1626,7 @@ def login(directory: Path) -> Path:
 
 def adapter() -> Adapter:
     """Return what lup needs of Codex: its hooks answered, and its launch."""
+    machine = Layout.of(LupDevSettings())
     return Adapter(
         runtime=Codex(),
         hook=hook,
@@ -1593,7 +1640,9 @@ def adapter() -> Adapter:
         channel=CodexChannel(),
         agent=agent,
         login=login,
-        records=CodexRecords(home=CodexLayout.of(CodexSettings()).operator_home),
+        records=CodexRecords(
+            home=CodexLayout.of(CodexSettings()).operator_home, host=machine.host
+        ),
         reader=CodexTranscripts(),
         queues=None,
     )

@@ -3,14 +3,17 @@
 The operator's directory, `~/.claude` (or `CLAUDE_CONFIG_DIR`), holds their login,
 settings and history; their state file, `~/.claude.json` (or `.claude.json` inside
 `CLAUDE_CONFIG_DIR`), holds onboarding and folder trust. A launched session uses
-the directory as it is, and a state file of the launch's own in place of theirs.
+neither: it runs in a directory of the launch's own on a home of the rooms'
+own (`ClaudeHome`), its configuration copied from theirs.
 """
 
 from importlib.util import find_spec
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from lup.sessions.configuration import Item
 from lup.sessions.errors import RuntimeMissingError
+from lup.sessions.terminal import Preference, Why
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -69,6 +72,86 @@ class ClaudeLayout(Model):
             )
             raise RuntimeMissingError(message)
         return cli
+
+
+class ClaudeHome(Model):
+    """What Claude Code keeps in its directory, as a launch lays it out on a home of the rooms' own (`lup.sessions.terminal.RuntimeHome`).
+
+    The directory is the launch's own: every file Claude Code reads there as
+    configuration or state is the launch's, `.config.json` among them, which
+    the 2.1.311 binary prefers over `.claude.json` and whose `env` it applies.
+    Only `shared` is linked into the home the rooms share. Read in the
+    `claude-directory` docs (2026-10-27) and the 2.1.311 binary.
+    """
+
+    directory: Path
+    configuration: list[Item] = [
+        Item(name="CLAUDE.md", directory=False),
+        Item(name="rules"),
+        Item(name="skills"),
+        Item(name="commands"),
+        Item(name="agents"),
+        Item(name="output-styles"),
+        Item(name="workflows"),
+        Item(name="plugins", leaving=["data"]),
+        Item(name="keybindings.json", directory=False),
+        Item(name="themes"),
+    ]
+    """Each item of configuration copied in from the layers. Plugins' `data/`
+    is theirs, not configuration, and may hold their tokens; `agent-memory/`
+    is left out, since the operator's subagents' memories hold what they
+    learnt in every project."""
+    shared: list[Item] = [
+        Item(name="projects"),
+        Item(name="file-history"),
+        Item(name="tasks"),
+        Item(name="todos"),
+        Item(name="plans"),
+        Item(name="paste-cache"),
+        Item(name="history.jsonl", directory=False),
+    ]
+    """The history the rooms given the home share: the conversations' records
+    and their auto memory, what `/rewind` restores, task lists and plans, and
+    the prompts typed, which a resumed conversation reads."""
+    blocked: dict[str, Why] = {
+        "env": "credential",
+        "apiKeyHelper": "command",
+        "awsAuthRefresh": "command",
+        "awsCredentialExport": "command",
+        "otelHeadersHelper": "command",
+        "hooks": "command",
+        "statusLine": "command",
+    }
+    """Settings left out of the copy, beside any named like a credential and
+    any table holding a `command`: the variables Claude Code sets at start;
+    the commands it runs to fetch a credential; and the operator's hooks and
+    status line, commands set up for the host, where rooms run lup's own."""
+    preferences: list[Preference] = [
+        Preference(keys=["model"]),
+        Preference(keys=["effortLevel"]),
+        Preference(keys=["modelSettings"]),
+        Preference(keys=["outputStyle"]),
+        Preference(keys=["theme"]),
+        Preference(keys=["editorMode"]),
+        Preference(keys=["alwaysThinkingEnabled"]),
+    ]
+    """What a session saves in its settings that a launch carries back:
+    `/model`, `/effort`, `/output-style`, `/theme` and the like."""
+
+    @property
+    def settings(self) -> Path:
+        """Where Claude Code reads its user settings and saves its preferences."""
+        return self.directory / "settings.json"
+
+    @property
+    def state(self) -> Path:
+        """Where Claude Code keeps its state file with its directory moved."""
+        return self.directory / ".claude.json"
+
+    @property
+    def credentials(self) -> Path:
+        """Where Claude Code reads its login: the account's file, mounted there."""
+        return self.directory / ".credentials.json"
 
 
 class ClaudeLaunch(Model):

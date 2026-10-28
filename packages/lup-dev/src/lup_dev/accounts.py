@@ -14,6 +14,8 @@ is no login, as a missing one is. Nothing is revoked with the provider: the
 login is forgotten here alone.
 """
 
+import hashlib
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -45,6 +47,20 @@ class Login(Model):
     def held(self) -> bool:
         """Say whether it holds a login: a file that isn't empty."""
         return self.path.is_file() and self.path.stat().st_size > 0
+
+    def made(self) -> None:
+        """Make the login where there's none: an empty file, the operator's alone to read, in a directory of the account's that's theirs alone too, for the runtime's own sign-in in a room to write through its mount."""
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            os.close(os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        except FileExistsError:
+            return
+
+    def fingerprint(self) -> str:
+        """Return what the login holds, as a digest: two that differ say it was written between them."""
+        return hashlib.sha256(
+            self.path.read_bytes() if self.path.is_file() else b""
+        ).hexdigest()
 
 
 class Account(Model):

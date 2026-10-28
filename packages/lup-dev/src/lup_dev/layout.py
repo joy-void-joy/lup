@@ -16,8 +16,10 @@ The homes:
   `lup-dev`, which trust on launch installs and its process runs; and each
   repository's rooms' own directory, their package cache, each launch's
   environments and pyright's source at a release a room's image doesn't carry,
-  which its rooms mount read-write (`RoomsLayout`); and each account's logins,
-  one per runtime (`AccountsLayout`);
+  which its rooms mount read-write (`RoomsLayout`); the rooms' own homes, each
+  runtime's history and state, a project's or one every project shares, apart
+  from every directory a room writes (`HomesLayout`); and each account's
+  logins, one per runtime (`AccountsLayout`);
 - the person's own configuration, under `$XDG_CONFIG_HOME/lup/`: their profiles
   file, and each profile's runtime configuration (`ProfilesLayout`);
 - lup's cache, what can be fetched again, under `$XDG_CACHE_HOME/lup/`: pyright's
@@ -561,6 +563,10 @@ class HostLayout(Model):
         """The name each session last had, by the runtime's id for it, kept in lup's state so a session resumed in a later launch takes it back."""
         return self.state / "session-names.json"
 
+    def home_of(self, runtime: str, session: str) -> Path:
+        """Say where the home a launched session of `runtime` keeps its record in is kept, by the runtime's id for the session: written once, from the launch the service first heard the session from, so a room naming another's session later can't move it (`lup_dev.launch.homes.kept`)."""
+        return self.state / "homes" / runtime / session
+
     @property
     def dashboard_token(self) -> Path:
         """The token the dashboard's API wants (`host/dashboard.py`), kept in lup's state, which no room mounts, so a page left open outlasts a restart."""
@@ -719,6 +725,11 @@ class LaunchLayout(Model):
         return self.directory / "home"
 
     @property
+    def runtime_home(self) -> Path:
+        """The runtime's own directory for the launch, which its variable names, inside the launch's directory, mounted read-write at its path: its configuration, settings and state, gone with the launch, and links into the history its rooms share (`docs/launch.md`, *A home of the rooms' own*)."""
+        return self.directory / "runtime-home"
+
+    @property
     def room_home(self) -> Path:
         """The room's home itself, mounted read-write at the operator's home path, so what the room writes there is on disk (`Room.home_source`): beside the launch's directory, which the room mounts, rather than in it; removed when the launch ends (`vacated`)."""
         return self.directory.with_name(f"{self.directory.name}.home")
@@ -763,6 +774,45 @@ class RoomsLayout(Model):
     def pyright(self) -> PyrightLayout:
         """Where the engine's build in a room fetches pyright's source at a release the room's image doesn't carry, once for the project's rooms; never read on the host."""
         return PyrightLayout(home=self.home / "pyright")
+
+
+class HomesLayout(Model):
+    """The rooms' own homes for each runtime, in place of the operator's own directories: each project's, and the one shared by every project whose profile chooses it (`docs/launch.md`, *A home of the rooms' own*).
+
+    A runtime's rooms share their history in one, which each mounts read-write
+    at its path, the runtime's own directory for the launch linking into it
+    (`LaunchLayout.runtime_home`). Each sits apart from every directory a room
+    writes, the project's rooms' own directory among them, and only the home
+    itself is mounted: a mount point can't be moved from inside a room, but a
+    directory above one can, and the host follows a link in a mount's source.
+    Under the rooms' directory, a running room could move the directory
+    holding a home aside and leave a link to the operator's own runtime
+    directory in its place, which the next launch would mount read-write.
+    """
+
+    home: Path
+
+    def project(self, repository: Path, runtime: str) -> Path:
+        """Say where the rooms of the repository whose git directory is `repository` keep runtime `runtime`'s home: shared by its worktrees and its profiles, by the adapter's name for the runtime."""
+        return self.home / "projects" / digest(repository) / runtime
+
+    def shared(self, runtime: str) -> Path:
+        """Say where runtime `runtime`'s home every project shares is, for a profile choosing one home across projects."""
+        return self.home / "shared" / runtime
+
+
+class ToldLayout(Model):
+    """What a launch told the operator once, so a later launch doesn't tell it again: each account's login seen to change, and what was last left out of each profile's configuration."""
+
+    home: Path
+
+    def login(self, account: str, runtime: str) -> Path:
+        """Say where it's marked that the operator was told what a change of account `account`'s login for runtime `runtime` means."""
+        return self.home / "logins" / account / runtime
+
+    def left_out(self, profile: str, runtime: str) -> Path:
+        """Say where what was last left out of profile `profile`'s configuration for runtime `runtime` is kept."""
+        return self.home / "left-out" / profile / f"{runtime}.json"
 
 
 class AccountLayout(Model):
@@ -882,6 +932,26 @@ class Layout(Model):
     def accounts(self) -> AccountsLayout:
         """Where every account keeps its logins: `~/.local/share/lup/accounts/<name>/`."""
         return AccountsLayout(home=self.data / "accounts")
+
+    @property
+    def told(self) -> ToldLayout:
+        """What a launch told the operator once, in lup's state."""
+        return ToldLayout(home=self.state / "told")
+
+    @property
+    def homes(self) -> HomesLayout:
+        """Where the rooms keep each runtime's history and state: `~/.local/share/lup/homes/`."""
+        return HomesLayout(home=self.data / "homes")
+
+    def room_home(self, repository: Path, runtime: str, *, shared: bool) -> Path:
+        """Say where a launch in the repository whose git directory is `repository` keeps runtime `runtime`'s history and state: the one rule placing a room's home, which the launch mounts and the host reads a launched session's record from.
+
+        The project's own home, or, `shared`, the one every project shares,
+        as the launch's profile chooses (`Profile.rooms_home`).
+        """
+        if shared:
+            return self.homes.shared(runtime)
+        return self.homes.project(repository, runtime)
 
     @property
     def profiles(self) -> ProfilesLayout:

@@ -767,6 +767,29 @@ def test_a_room_s_home_is_removed_with_what_it_left_read_only_following_no_link(
     outside.chmod(0o755)
 
 
+def test_a_launch_s_directory_goes_with_what_its_session_wrote_there_read_only(
+    tmp_path: Path,
+) -> None:
+    launch = LaunchLayout(directory=tmp_path / "launch")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside.chmod(0o555)
+    # What a session writes for itself alone is mounted from the launch's
+    # directory, so the room writes there too.
+    snapshots = launch.directory / "runtime" / "launch" / "shell-snapshots"
+    locked = snapshots / "locked"
+    locked.mkdir(parents=True)
+    (locked / "snapshot.sh").touch()
+    locked.chmod(0)
+    (snapshots / "elsewhere").symlink_to(outside)
+
+    vacated(launch)
+
+    assert not launch.directory.exists()
+    assert outside.stat().st_mode & 0o777 == 0o555, "a link's target is left as it is"
+    outside.chmod(0o755)
+
+
 def test_hx_is_linked_to_helix_among_the_launch_s_commands(tmp_path: Path) -> None:
     launch = LaunchLayout(directory=tmp_path / "launch")
 

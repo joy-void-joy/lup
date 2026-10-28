@@ -6,11 +6,14 @@ is `Transcripts`' (`packages/lup-transcripts/tests/`).
 """
 
 import json
+import os
 from pathlib import Path, PurePosixPath
 
 from lup_dev.adapters.claude import ClaudeQueues, ClaudeRecords
 from lup_dev.adapters.codex import CodexRecords
+from lup_dev.host.homes import Found, kept
 from lup_dev.host.records import Queued, Record
+from lup_dev.layout import HomesLayout, HostLayout
 
 
 def lines(path: Path, *records: dict[str, object]) -> None:
@@ -248,3 +251,103 @@ def test_a_record_gone_from_where_it_was_found_is_looked_for_again(
     after = queues.queued("s1", None)
     assert before == []
     assert [each.kind for each in after] == ["typed"]
+
+
+def test_a_launched_session_s_record_is_read_from_its_launch_s_home_alone(
+    tmp_path: Path,
+) -> None:
+    host = HostLayout(sockets=tmp_path / "run", state=tmp_path / "state")
+    homes = HomesLayout(home=tmp_path / "homes")
+    operators = tmp_path / ".claude"
+    room = homes.project(tmp_path / "work" / ".git", "claude")
+    other = homes.project(tmp_path / "other" / ".git", "claude")
+    folder = room / "projects" / "-work"
+    launched = folder / "s1.jsonl"
+    subagent = folder / "s1" / "subagents" / "agent-a1.jsonl"
+    subagent.parent.mkdir(parents=True)
+    launched.write_text("{}\n")
+    subagent.write_text("{}\n")
+    kept(host, "claude", "s1", room)
+    host_session = operators / "projects" / "-work" / "s0.jsonl"
+    host_session.parent.mkdir(parents=True)
+    host_session.write_text("{}\n")
+    # A room plants records under the operator's session and another room's.
+    (folder / "s0.jsonl").write_text('{"forged": true}\n')
+    planted = other / "projects" / "-other"
+    planted.mkdir(parents=True)
+    (planted / "s1.jsonl").write_text('{"forged": true}\n')
+    secret = tmp_path / "secret.jsonl"
+    secret.write_text("{}\n")
+    (folder / "s2.jsonl").symlink_to(secret)
+    kept(host, "claude", "s2", room)
+    records = ClaudeRecords(directory=operators, host=host)
+
+    assert records.conversation("s1", None) == Found(record=launched, root=room)
+    assert records.conversation("s1", "a1") == Found(record=subagent, root=room)
+    assert records.conversation("s0", None) == Found(
+        record=host_session, root=operators
+    )
+    assert records.conversation("s2", None) is None
+    kept(host, "claude", "s1", other)
+    assert records.conversation("s1", None) == Found(record=launched, root=room)
+
+
+def test_a_launched_codex_thread_s_rollout_is_read_from_its_launch_s_home(
+    tmp_path: Path,
+) -> None:
+    host = HostLayout(sockets=tmp_path / "run", state=tmp_path / "state")
+    shared = HomesLayout(home=tmp_path / "homes").shared("codex")
+    day = shared / "sessions" / "2026" / "10" / "28"
+    rollout = day / "rollout-x-t1.jsonl"
+    child = day / "rollout-x-c1.jsonl"
+    day.mkdir(parents=True)
+    rollout.write_text("{}\n")
+    child.write_text("{}\n")
+    (day / "rollout-x-t2.jsonl").symlink_to(tmp_path / "nowhere.jsonl")
+    kept(host, "codex", "t1", shared)
+    kept(host, "codex", "t2", shared)
+    records = CodexRecords(home=tmp_path / ".codex", host=host)
+
+    assert records.conversation("t1", None) == Found(record=rollout, root=shared)
+    assert records.conversation("t1", "c1") == Found(record=child, root=shared)
+    assert records.conversation("t2", None) is None
+    assert records.conversation("t9", None) is None
+
+
+def test_an_id_that_isn_t_a_plain_name_or_a_record_that_isn_t_a_file_finds_nothing(
+    tmp_path: Path,
+) -> None:
+    host = HostLayout(sockets=tmp_path / "run", state=tmp_path / "state")
+    room = HomesLayout(home=tmp_path / "homes").project(
+        tmp_path / "w" / ".git", "claude"
+    )
+    folder = room / "projects" / "-work"
+    folder.mkdir(parents=True)
+    (folder / "s1.jsonl").write_text("{}\n")
+    os.mkfifo(folder / "s2.jsonl")
+    kept(host, "claude", "s2", room)
+    kept(host, "claude", "*", room)
+    records = ClaudeRecords(directory=room, host=host)
+    rollouts = CodexRecords(home=tmp_path / ".codex", host=host)
+
+    assert records.conversation("*", None) is None
+    assert records.conversation("s1", "../../s1") is None
+    assert records.conversation("s2", None) is None
+    assert rollouts.conversation("*", None) is None
+    assert not host.home_of("claude", "*").exists()
+
+
+def test_a_line_too_long_to_hold_is_read_past_and_what_follows_is_queued(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / ".claude"
+    session = home / "projects" / "-w" / "s1.jsonl"
+    session.parent.mkdir(parents=True)
+    long = json.dumps({"type": "user", "pad": "x" * 5000})
+    session.write_text(f"{long}\n")
+    append(session, queued_line("enqueue", "Hello."))
+    queues = ClaudeQueues(records=ClaudeRecords(directory=home), largest=1024)
+
+    queued = queues.queued("s1", None)
+
+    assert queued == [Queued(id=str(len(long) + 1), kind="typed")]

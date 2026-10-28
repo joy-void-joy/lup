@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from lup.blocks import OfAgent
 from lup_dev.declaration.serving import Operator, Publisher
+from lup_dev.host.homes import Found
 from lup_dev.host.records import (
     Call,
     Called,
@@ -77,10 +78,12 @@ class Kept(Reader):
     def sessions(self, copies: Path) -> list[Path]:
         return [copies / f"{name}.jsonl" for name in self.held]
 
-    def read(self, record: Path) -> Transcript:
+    def read(self, record: Path, root: Path | None = None) -> Transcript:
         return self.held[record.stem]
 
-    def calls(self, record: Path, ids: list[str]) -> list[Call]:
+    def calls(
+        self, record: Path, ids: list[str], root: Path | None = None
+    ) -> list[Call]:
         del record
         return [
             Call(id=each, input={"command": "uv run pytest"}, output="2 passed")
@@ -98,11 +101,14 @@ class Live(Records):
         del under
         return []
 
-    def conversation(self, session: str, agent: str | None) -> Path | None:
+    def held(self, session: str) -> bool:
+        return False
+
+    def conversation(self, session: str, agent: str | None) -> Found | None:
         record = self.home / f"{session}.jsonl"
         record.parent.mkdir(parents=True, exist_ok=True)
         record.touch()
-        return record
+        return Found(record=record, root=self.home)
 
 
 class Exchanging(Exchanges):

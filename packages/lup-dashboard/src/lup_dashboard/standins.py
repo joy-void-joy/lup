@@ -23,6 +23,7 @@ from pydantic import Field
 from lup.types import Model, MutableModel
 from lup_dev import Project
 from lup_dev.declaration.resolve import Resolved, resolve
+from lup_dev.host.homes import Found
 from lup_dev.host.records import Call, Reader, Record, Recorded, Records, Transcript
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.marks import StoredMarks
@@ -54,9 +55,13 @@ class StandInRecords(Model, Records):
         return []
 
     @override
-    def conversation(self, session: str, agent: str | None) -> Path | None:
+    def held(self, session: str) -> bool:
+        return False
+
+    @override
+    def conversation(self, session: str, agent: str | None) -> Found | None:
         record = self.place(session, agent)
-        return record if record.is_file() else None
+        return Found(record=record, root=self.directory) if record.is_file() else None
 
     def place(self, session: str, agent: str | None) -> Path:
         """Return where the record of `session`, or of its subagent `agent`, is written."""
@@ -71,11 +76,13 @@ class StandInReader(Model, Reader):
         return []
 
     @override
-    def read(self, record: Path) -> Transcript:
+    def read(self, record: Path, root: Path | None = None) -> Transcript:
         return StoodIn.model_validate_json(record.read_text()).transcript
 
     @override
-    def calls(self, record: Path, ids: list[str]) -> list[Call]:
+    def calls(
+        self, record: Path, ids: list[str], root: Path | None = None
+    ) -> list[Call]:
         wholes = {
             each.id: each
             for each in StoodIn.model_validate_json(record.read_text()).calls

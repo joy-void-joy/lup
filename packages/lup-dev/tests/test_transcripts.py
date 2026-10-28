@@ -15,6 +15,7 @@ from lup_dev.adapters.claude import ClaudeRecords, ClaudeTranscripts, resulted
 from lup_dev.adapters.codex import CodexRecords, CodexTranscripts
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.serving import Operator
+from lup_dev.host.homes import Found
 from lup_dev.host.records import Call, Called, Entry, Said, Transcript
 from lup_dev.inbox.context import moment
 from lup_dev.inbox.exchanges import Exchanges
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import typer
-    from conftest import Shell
+    from conftest import Homes, Shell
 
     from lup.blocks import OfAgent
 
@@ -417,8 +418,10 @@ def test_claude_finds_one_conversations_record_and_reads_a_subagents_own_steps(
     )
     records = ClaudeRecords(directory=home)
     reader = ClaudeTranscripts()
-    assert records.conversation("s1", None) == folder / "s1.jsonl"
-    assert records.conversation("s1", "a1") == subagent
+    assert records.conversation("s1", None) == Found(
+        record=folder / "s1.jsonl", root=home
+    )
+    assert records.conversation("s1", "a1") == Found(record=subagent, root=home)
     assert records.conversation("s9", None) is None
     when = datetime(2026, 10, 17, 12, tzinfo=UTC)
     assert reader.read(folder / "s1.jsonl").entries[1] == Called(
@@ -440,8 +443,10 @@ def test_codex_finds_a_threads_rollout_a_subagents_by_its_own_thread(
     spawned = day / "rollout-2026-10-17T12-01-00-th-3.jsonl"
     spawned.write_text(meta("th-3", "legacy", parent="th-1") + "\n")
     records = CodexRecords(home=tmp_path / "codex")
-    assert records.conversation("th-1", None) == own
-    assert records.conversation("th-1", "th-3") == spawned
+    assert records.conversation("th-1", None) == Found(record=own, root=records.home)
+    assert records.conversation("th-1", "th-3") == Found(
+        record=spawned, root=records.home
+    )
     assert records.conversation("th-9", None) is None
 
 
@@ -668,6 +673,26 @@ def test_claude_codes_window_is_the_standard_one_where_the_operators_env_turns_t
     assert read.usage is not None
     assert read.usage.window is None
     read = ClaudeTranscripts(settings=tmp_path / "none.json").read(record)
+    assert read.usage is not None
+    assert read.usage.window == 1_000_000
+
+
+def test_a_room_s_session_keeps_the_long_window_the_operators_env_would_turn_off(
+    tmp_path: Path,
+) -> None:
+    """A room's settings carry nothing of the operator's `env`, so a session recorded in a room's home ran with the long window wherever its model has one."""
+    layout = Layout(state=tmp_path / "state", data=tmp_path / "data")
+    record = (
+        layout.homes.project(tmp_path / "work" / ".git", "claude")
+        / "projects"
+        / "w"
+        / "s1.jsonl"
+    )
+    record.parent.mkdir(parents=True)
+    record.write_text(reply("claude-opus-5-5", 1_000, "claude-opus-5-5[1m]") + "\n")
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}}))
+    read = ClaudeTranscripts(settings=settings, layout=layout).read(record)
     assert read.usage is not None
     assert read.usage.window == 1_000_000
 
@@ -1271,3 +1296,43 @@ def test_codexs_calls_read_as_a_line_each_and_whole_on_asking(tmp_path: Path) ->
         Call(id="c3", input={"command": ["bash", "-lc", "ls -la"]}),
         Call(id="c4", input="not json"),
     ]
+
+
+def test_a_saved_output_is_read_in_its_home_never_through_a_folder_a_room_repointed(
+    tmp_path: Path, homes: Homes
+) -> None:
+    """A room's session names a call's saved output under its launch's own runtime directory: the host reads it as the same place in the home, and nothing through a session's folder the room swapped for a link."""
+    launch = homes.registered()
+    named, record = launch.record("projects/-w/s1.jsonl")
+    saved = record.with_suffix("") / "tool-results"
+    saved.mkdir(parents=True)
+    (saved / "b1.txt").write_text("the whole output\n")
+    outside = tmp_path / "outside" / "tool-results"
+    outside.mkdir(parents=True)
+    (outside / "b2.txt").write_text("the operator's own file")
+    (record.parent / "s2").symlink_to(outside.parent)
+    preview = "<persisted-output>\nOutput too large.\n</persisted-output>"
+
+    def result(id_: str, path: Path) -> str:
+        block = {"type": "tool_result", "tool_use_id": id_, "content": preview}
+        return line(
+            type="user",
+            message={"role": "user", "content": [block]},
+            toolUseResult={"persistedOutputPath": str(path)},
+        )
+
+    def call(id_: str) -> str:
+        return agent({"type": "tool_use", "id": id_, "name": "Bash", "input": {}})
+
+    in_room = named.with_suffix("") / "tool-results" / "b1.txt"
+    record.write_text(f"{call('t1')}\n{result('t1', in_room)}\n")
+    other = record.with_name("s2.jsonl")
+    swapped = record.parent / "s2" / "tool-results" / "b2.txt"
+    other.write_text(f"{call('t2')}\n{result('t2', swapped)}\n")
+    reader = ClaudeTranscripts(layout=homes.layout)
+
+    [whole] = reader.calls(record, ["t1"], launch.kept)
+    [refused] = reader.calls(other, ["t2"], launch.kept)
+
+    assert whole.output == "the whole output\n"
+    assert refused.output == preview

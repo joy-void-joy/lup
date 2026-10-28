@@ -3,10 +3,11 @@
 lup's settings reach the session as flags and files of the launch's own, never
 written into the operator's directory or the repository (`docs/launch.md`, *The
 settings compiled for each runtime*):
-- `--settings <launch>/settings.json` with `--setting-sources user`: the operator's
-  `~/.claude/settings.json` loads, and the repository's `.claude/settings.json`,
-  `.mcp.json`, skills and `CLAUDE.md` don't. lup's file holds the hooks, the
-  session settings (below) and `skipDangerousModePermissionPrompt`;
+- `--settings <launch>/settings.json` with `--setting-sources user`: the user
+  settings of the home the session runs on load (below), and the repository's
+  `.claude/settings.json`, `.mcp.json`, skills and `CLAUDE.md` don't. lup's
+  file holds the hooks, the session settings (below) and
+  `skipDangerousModePermissionPrompt`;
 - `--permission-mode bypassPermissions`: the room is the wall;
 - lup's tool servers, where it gives any, with `--mcp-config <launch>/mcp.json`
   and `--strict-mcp-config`, so they're the session's only MCP servers (below);
@@ -26,16 +27,35 @@ settings compiled for each runtime*):
   too, and carries this launch's guidance;
 - the variables: `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` so a held call isn't
   moved to the background after two minutes, `DISABLE_AUTOUPDATER` since the
-  CLI's file is read-only, and `CLAUDE_CONFIG_DIR` where the operator set it;
-- the room's own state file, onboarding done and the trusted paths accepted,
-  mounted read-write where the operator's would be, so concurrent starts can't
-  race on theirs; and the operator's directory, mounted read-write at its path,
-  for their login, settings and history.
+  CLI's file is read-only, and `CLAUDE_CONFIG_DIR` naming the home;
+- the launch's own state file, onboarding done and the trusted paths accepted,
+  mounted read-write where Claude Code reads it, so concurrent starts can't
+  race on one;
+- the home (below), or, with none, the room's own home, gone with the launch.
+
+**The home** (`TerminalSettings.home`, `at_home`): Claude Code's directory is
+the launch's own, made fresh, mounted read-write at its path, and gone with
+the launch; nothing of the operator's directory is mounted. Into it go the
+items of configuration `ClaudeHome` names, copied from the layers holding
+them, the operator's directory and then the home's own; `settings.json`, the
+layers' settings merged with what would hand the room a credential or run a
+command in it left out (`lup.sessions.configuration`), so `/model` saves there
+and what changed of its preferences is carried back into the home's own layer
+at the launch's end (`Terminal.preferences`); the state file; and
+`.credentials.json`, the account's login, mounted alone, read-write. Claude
+Code refuses a login file that's a link ("refused-symlink", in the 2.1.311
+binary), so it's a mount; it reloads the file when it changes
+(`lastCredentialsMtimeMs`), so a sign-in in one room reaches every room on the
+account. The history `ClaudeHome.shared` names is a link each into the home
+the rooms share, mounted read-write at its path, so a conversation resumes in
+any room on it; everything else Claude Code writes, its shell snapshots and
+`.config.json` among it, is the launch's alone, and no room leaves another
+anything to load.
 
 **The session settings** go in lup's settings file, which outranks the
-operator's own: each one the settings impose (`TerminalSettings.session`), and
-each of lup's defaults their own file doesn't set (`OwnSettings.sets`, read once
-at launch), so theirs outrank lup's defaults:
+home's user settings: each one the settings impose (`TerminalSettings.session`),
+and each of lup's defaults the user settings don't set (`OwnSettings.sets`, read
+from the layers once at launch), so theirs outrank lup's defaults:
 - the subagents' cache lifetime as `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, and
   auto memory as `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, both in the file's `env`: a
   variable there outranks the same variable in their file's `env`, and each
@@ -173,6 +193,7 @@ its 2.1.294, 2.1.296 and 2.1.301 binaries:
   writable.
 """
 
+import json
 from datetime import timedelta
 from shlex import join
 from typing import TYPE_CHECKING, Literal, get_args
@@ -180,7 +201,7 @@ from typing import TYPE_CHECKING, Literal, get_args
 from pydantic import JsonValue, ValidationError
 from pydantic.alias_generators import to_camel
 
-from lup.adapters.claude.layout import ClaudeLaunch, ClaudeLayout
+from lup.adapters.claude.layout import ClaudeHome, ClaudeLaunch, ClaudeLayout
 from lup.events import (
     CallFinished,
     CallStarted,
@@ -191,7 +212,15 @@ from lup.events import (
     WorktreeAsked,
 )
 from lup.rooms.container import Mount
-from lup.sessions.terminal import Cli, Terminal, TerminalError
+from lup.sessions.configuration import Homed, configured, layered, linked
+from lup.sessions.terminal import (
+    Cli,
+    Preferences,
+    Setting,
+    Terminal,
+    TerminalError,
+    Why,
+)
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -199,7 +228,12 @@ if TYPE_CHECKING:
 
     from lup.adapters.claude import Effort
     from lup.events import SessionEvent
-    from lup.sessions.terminal import Hook, TerminalSettings, ToolServer
+    from lup.sessions.terminal import (
+        Hook,
+        RuntimeHome,
+        TerminalSettings,
+        ToolServer,
+    )
 
 # lup: defer(issue=52, why="Claude Code's variable, shared with an ask, a module constant until a `Spellings` each adapter implements gives it its home")
 AUTO_MEMORY_OFF = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
@@ -380,6 +414,81 @@ def spelled(event: type[SessionEvent]) -> list[str]:
     return spellings[event]
 
 
+class AtHome(Model):
+    """What a terminal session of Claude Code gets on a home of the rooms' own: its own directory, what's in it, the history it links to, and the operator's settings as it reads them."""
+
+    homed: Homed
+    theirs: OwnSettings
+    """The settings the session reads as its user settings, layered, what
+    would hand it a credential or run a command left out, as lup reads which
+    session settings they set."""
+    preferences: Preferences | None
+
+
+def at_home(home: RuntimeHome, layout: ClaudeLayout, state: State) -> AtHome:
+    """Return what a session of Claude Code gets on the home `home`, its layers below it the operator's directory where `home` keeps it, then `home`'s own.
+
+    Its directory is the launch's own: the layers' configuration copied in,
+    the settings, layered with what `ClaudeHome.blocked` names, any key named
+    like a credential and any table holding a command left out of each, and
+    the state `state`, each written there; the account's login mounted where
+    Claude Code reads it; and a link into the home's history for each item
+    `ClaudeHome.shared` names. At the end, the launch carries what changed of
+    the preferences into `home`'s own layer, where it has one. Raise
+    `TerminalError` where a layer's settings don't read.
+    """
+    room = ClaudeHome(directory=home.directory)
+    layers = [
+        *([layout.directory] if home.operators else []),
+        *([] if home.layer is None else [home.layer]),
+    ]
+
+    def blocked(path: list[str]) -> Why | None:
+        match path:
+            case [key] if key in room.blocked:
+                return room.blocked[key]
+            case _:
+                return None
+
+    settings = layered(layers, "settings.json", "json", blocked)
+    try:
+        theirs = OwnSettings.model_validate(settings.table)
+    except ValidationError as failed:
+        message = f"the settings layered for the room don't read: {failed}"
+        raise TerminalError(message) from failed
+    copied = configured(room.configuration, layers, room.directory)
+    history = linked(room.shared, room.directory, home.shared)
+    return AtHome(
+        homed=Homed(
+            copies=copied.copies,
+            files={
+                room.settings: json.dumps(settings.table, indent=2),
+                room.state: state.model_dump_json(by_alias=True, indent=2),
+            },
+            links=history.links,
+            mounts=[
+                Mount(source=home.directory),
+                Mount(source=home.shared),
+                Mount(source=home.login, target=room.credentials),
+            ],
+            shared=history.shared,
+            left=[*settings.left, *copied.left],
+        ),
+        theirs=theirs,
+        preferences=None
+        if home.layer is None
+        else Preferences(
+            saved=room.settings,
+            into=home.layer / "settings.json",
+            syntax="json",
+            written=[
+                Setting(preference=each, value=each.held(settings.table))
+                for each in room.preferences
+            ],
+        ),
+    )
+
+
 def compiled(
     model: str | None,
     system_prompt: str | None,
@@ -390,7 +499,13 @@ def compiled(
     """Return the terminal session of Claude Code for a declaration's fields, with lup's settings."""
     launch = ClaudeLaunch(directory=settings.directory)
     cli = Cli(program=layout.bundled) if settings.cli is None else settings.cli
-    session = settings.passed(own_settings(layout.settings).sets())
+    state = State(
+        projects={str(path): Trusted() for path in settings.trusted},
+    )
+    home = None if settings.home is None else at_home(settings.home, layout, state)
+    session = settings.passed(
+        OwnSettings().sets() if home is None else home.theirs.sets()
+    )
 
     def group(hook: Hook) -> HookGroup:
         timeout = None if hook.timeout is None else int(hook.timeout.total_seconds())
@@ -429,9 +544,6 @@ def compiled(
         else not session.account_connectors,
         cross_session_inbound=None if settings.messages is None else "accept",
     )
-    state = State(
-        projects={str(path): Trusted() for path in settings.trusted},
-    )
     servers = Servers(
         mcp_servers={
             server.name: bridged(server, settings) for server in settings.servers
@@ -439,7 +551,7 @@ def compiled(
     )
     pushing = [f"server:{server.name}" for server in settings.servers if server.pushes]
     channels = ["--dangerously-load-development-channels", *pushing] if pushing else []
-    moved = {} if layout.configured is None else {CONFIG_DIR: str(layout.configured)}
+    moved = {} if settings.home is None else {CONFIG_DIR: str(settings.home.directory)}
     prompt = {} if system_prompt is None else {launch.system_prompt: system_prompt}
     guidance = {} if settings.guidance is None else {launch.guidance: settings.guidance}
     served = (
@@ -451,15 +563,22 @@ def compiled(
         if settings.servers
         else {}
     )
+    homed = Homed() if home is None else home.homed
+    own_state = (
+        {launch.state: state.model_dump_json(by_alias=True, indent=2)}
+        if settings.home is None
+        else {}
+    )
     files: dict[Path, str] = {
         launch.settings: lup_settings.model_dump_json(
             by_alias=True, exclude_none=True, indent=2
         ),
-        launch.state: state.model_dump_json(by_alias=True, indent=2),
+        **own_state,
         **served,
         **settings.bridges(),
         **prompt,
         **guidance,
+        **homed.files,
     }
     return Terminal(
         command=[
@@ -506,10 +625,24 @@ def compiled(
         ],
         env={KEEP_CALLS: "0", NO_UPDATES: "1", **moved},
         files=files,
+        copies=homed.copies,
+        links=homed.links,
         mounts=[
-            Mount(source=layout.directory),
             cli.mount,
             Mount(source=settings.directory, read_only=True),
-            Mount(source=launch.state, target=layout.state),
+            *(
+                [
+                    Mount(
+                        source=launch.state, target=ClaudeLayout(home=layout.home).state
+                    )
+                ]
+                if settings.home is None
+                else []
+            ),
+            *homed.mounts,
         ],
+        home=None if settings.home is None else settings.home.directory,
+        shared=homed.shared,
+        left_out=homed.left,
+        preferences=None if home is None else home.preferences,
     )

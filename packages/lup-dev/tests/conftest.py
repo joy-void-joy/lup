@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 from lup.programs import run
-from lup.types import MutableModel
+from lup.types import Model, MutableModel
 from lup_dev import Project, cli, environments
 from lup_dev.clock import Clock
 from lup_dev.codescan.contract import (
@@ -53,7 +53,7 @@ from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.declaration.serving import Room
 from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import RoomClient
-from lup_dev.host.protocol import HostError
+from lup_dev.host.protocol import HostError, Register
 from lup_dev.host.records import Call, Reader, Record, Recorded, Records, Transcript
 from lup_dev.host.workers import (
     Called,
@@ -87,7 +87,8 @@ if TYPE_CHECKING:
     from lup_dev.declaration.resolve import Selected
     from lup_dev.declaration.runner import Runner
     from lup_dev.forge.github import Visibility
-    from lup_dev.host.protocol import GitHubRepository, Register, Reply, Request
+    from lup_dev.host.homes import Found
+    from lup_dev.host.protocol import GitHubRepository, Reply, Request
     from lup_dev.inbox.store import ChangedFile
 
 
@@ -680,6 +681,12 @@ class Flags(Flagging):
 class Kit:
     """A bench with its fakes, for one test."""
 
+    def registered(
+        self, runtime: str = "claude", launch: str = "l1", *, own: bool = True
+    ) -> Registered:
+        """Register launch `launch` of `runtime` on a home in the kit's layout (`registered`), by default its own runtime directory."""
+        return registered(self.layout, runtime, launch, own=own)
+
     def __init__(
         self,
         state: Path,
@@ -780,11 +787,13 @@ class Unread(Reader):
         del copies
         return []
 
-    def read(self, record: Path) -> Transcript:
+    def read(self, record: Path, root: Path | None = None) -> Transcript:
         message = f"no session is kept at {record}"
         raise FileNotFoundError(message)
 
-    def calls(self, record: Path, ids: list[str]) -> list[Call]:
+    def calls(
+        self, record: Path, ids: list[str], root: Path | None = None
+    ) -> list[Call]:
         del record, ids
         return []
 
@@ -806,7 +815,10 @@ class NoRecords(Records):
     def kept(self, under: list[Path]) -> list[Record]:
         return []
 
-    def conversation(self, session: str, agent: str | None) -> Path | None:
+    def held(self, session: str) -> bool:
+        return False
+
+    def conversation(self, session: str, agent: str | None) -> Found | None:
         return None
 
 
@@ -951,3 +963,58 @@ class StubFacts(Facts):
 def stub_facts() -> type[StubFacts]:
     """A host a test describes, with made-up values."""
     return StubFacts
+
+
+class Registered(Model):
+    """A launch the host service registered on a home of the rooms' own: where its hooks name a conversation's record, under the launch's own runtime directory, and where the host reads it, in the home."""
+
+    named: Path
+    kept: Path
+
+    def record(self, relative: str) -> tuple[Path, Path]:
+        """Return a record's path as a hook names it, and where it's kept, by its place in the home."""
+        return self.named / relative, self.kept / relative
+
+
+def registered(
+    layout: Layout, runtime: str = "claude", launch: str = "l1", *, own: bool = False
+) -> Registered:
+    """Register launch `launch` of `runtime` on a home, as the host service records a launch's registration, and return where its hooks name records and where they're kept: the one every project shares, or, `own`, the launch's own runtime directory, so the two are one place for a test that reads nothing else of it."""
+    home = layout.launch(launch).runtime_home if own else layout.homes.shared(runtime)
+    home.mkdir(parents=True, exist_ok=True)
+    record = Register(
+        launch=launch,
+        runtime=runtime,
+        worktree=Path("/w"),
+        repository=Path("/w/.git"),
+        judge=Path("/j"),
+        limits=resolve(Project()).limits,
+        github=None,
+        home=home,
+        own=layout.launch(launch).runtime_home,
+    )
+    layout.host.record(launch).parent.mkdir(parents=True, exist_ok=True)
+    layout.host.record(launch).write_text(record.model_dump_json())
+    return Registered(named=layout.launch(launch).runtime_home, kept=home)
+
+
+class Homes(Model):
+    """lup's layout under a test's directory, on which the test registers launches on homes of the rooms' own."""
+
+    layout: Layout
+
+    def registered(
+        self, runtime: str = "claude", launch: str = "l1", *, own: bool = False
+    ) -> Registered:
+        """Register launch `launch` of `runtime` on a home (`registered`)."""
+        return registered(self.layout, runtime, launch, own=own)
+
+
+@pytest.fixture
+def homes(tmp_path: Path) -> Homes:
+    """lup's layout under the test's directory, to register launches on homes in."""
+    return Homes(
+        layout=Layout(
+            state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path / "data"
+        )
+    )

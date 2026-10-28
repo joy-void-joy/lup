@@ -44,7 +44,7 @@ from lup_dev.stored import read_model, write_model
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from conftest import Kit
+    from conftest import Homes, Kit
 
     from lup.events import SessionEvent
     from lup.types import JsonObject
@@ -1390,7 +1390,7 @@ def test_claude_clears_an_interrupted_call_at_the_next_turns_start(
     """The record holds an interrupted call's result, the session's own or a
     subagent's, though no hook reported its end, so the next prompt clears it,
     and the turn's first call's finish judges what it wrote."""
-    transcript = tmp_path / "records" / "s1.jsonl"
+    transcript = kit.registered().named / "records" / "s1.jsonl"
     in_room(payload(repo, "SessionStart", source="startup"), on_claude)
     sed: dict[str, object] = {"command": "sed -i …"}
     in_room(pre_tool_use(repo, "Bash", sed, "lost"), on_claude)
@@ -1421,7 +1421,7 @@ def test_claude_leaves_a_call_running_when_a_prompt_arrives_mid_turn(
     """A channel's message fires `UserPromptSubmit` while the call it waits on
     still runs (Claude Code 2.1.304, `docs/field-notes.md`, *Channels*): the
     record holds no result for it, so it stays counted."""
-    transcript = tmp_path / "records" / "s1.jsonl"
+    transcript = kit.registered().named / "records" / "s1.jsonl"
     results(transcript)
     in_room(payload(repo, "SessionStart", source="startup"), on_claude)
     in_room(pre_tool_use(repo, "Bash", {"command": "sleep 10"}, "c1"), on_claude)
@@ -2275,10 +2275,12 @@ def test_codex_tells_what_came_due_as_a_session_starts_before_its_items(
 
 
 def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
-    tmp_path: Path,
+    tmp_path: Path, homes: Homes
 ) -> None:
-    transcript = tmp_path / "s1.jsonl"
-    records = tmp_path / "s1" / "subagents"
+    layout = homes.layout
+    launch = homes.registered()
+    transcript, kept = launch.record("projects/-w/s1.jsonl")
+    records = kept.with_suffix("") / "subagents"
     records.mkdir(parents=True)
     (records / "agent-a1.meta.json").write_text(
         json.dumps(
@@ -2303,7 +2305,7 @@ def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
         )
     )
 
-    def subagent(agent: str, kind: str) -> str:
+    def subagent(agent: str, kind: str, named: Path = transcript) -> str:
         return payload(
             Path("/w"),
             "PreToolUse",
@@ -2312,21 +2314,25 @@ def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
             tool_use_id="c1",
             agent_id=agent,
             agent_type=kind,
-            transcript_path=str(transcript),
+            transcript_path=str(named),
         )
 
-    assert claude.spawned(subagent("a1", "Explore")) == Spawned(
+    assert claude.spawned(subagent("a1", "Explore"), layout) == Spawned(
         name="explore-auth", kind="Explore", handed=True
     )
-    assert claude.spawned(subagent("a2", "general-purpose")) == Spawned(
+    assert claude.spawned(subagent("a2", "general-purpose"), layout) == Spawned(
         parent="a1", kind="general-purpose", handed=True
     )
-    assert claude.spawned(subagent("a3", "Plan")) == Spawned(kind="Plan", handed=True)
-    assert claude.spawned(subagent("a4", "fork")) == Spawned(
+    assert claude.spawned(subagent("a3", "Plan"), layout) == Spawned(
+        kind="Plan", handed=True
+    )
+    assert claude.spawned(subagent("a4", "fork"), layout) == Spawned(
         kind="fork", guided=True, handed=True
     )
     # Claude Code's own agents, a prompt's suggestion among them: no type, no record.
-    assert claude.spawned(subagent("a5", "")) == Spawned(internal=True, handed=True)
+    assert claude.spawned(subagent("a5", ""), layout) == Spawned(
+        internal=True, handed=True
+    )
     # A progress summary's fork calling a tool, as 2.1.309 hooks it: no type at all.
     fork = payload(
         Path("/w"),
@@ -2337,13 +2343,51 @@ def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
         agent_id="a6",
         transcript_path=str(transcript),
     )
-    assert claude.spawned(fork) == Spawned(internal=True, handed=True)
-    assert claude.spawned(pre_tool_use(Path("/w"), "Bash", {"command": "ls"})) is None
+    assert claude.spawned(fork, layout) == Spawned(internal=True, handed=True)
+    assert (
+        claude.spawned(pre_tool_use(Path("/w"), "Bash", {"command": "ls"}), layout)
+        is None
+    )
+
+
+def test_claude_reads_a_record_a_hook_names_in_its_launch_s_home_alone_never_through_its_links(
+    tmp_path: Path, homes: Homes
+) -> None:
+    """The room writes its launch's own runtime directory, links into the home among it, so a link it repoints there, or a path it names elsewhere, has the host read nothing it planted."""
+    layout = homes.layout
+    launch = homes.registered()
+    transcript, _ = launch.record("projects/-w/s1.jsonl")
+    planted = tmp_path / "planted" / "-w" / "s1" / "subagents"
+    planted.mkdir(parents=True)
+    (planted / "agent-a1.meta.json").write_text(json.dumps({"name": "forged"}))
+    launch.named.mkdir(parents=True)
+    (launch.named / "projects").symlink_to(tmp_path / "planted")
+    elsewhere = tmp_path / "planted" / "-w" / "s1.jsonl"
+
+    def subagent(named: Path) -> str:
+        return payload(
+            Path("/w"),
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "ls"},
+            tool_use_id="c1",
+            agent_id="a1",
+            agent_type="Explore",
+            transcript_path=str(named),
+        )
+
+    told = Spawned(kind="Explore", handed=True)
+    assert claude.spawned(subagent(transcript), layout) == told
+    assert claude.spawned(subagent(elsewhere), layout) == told
+    assert claude.spawned(subagent(launch.named / ".." / "x.jsonl"), layout) == told
 
 
 def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
-    tmp_path: Path,
+    tmp_path: Path, homes: Homes
 ) -> None:
+    layout = homes.layout
+    launch = homes.registered("codex")
+
     def rollout(thread: str, parent: str, path: str | None) -> Path:
         meta: dict[str, object] = {
             "id": thread,
@@ -2353,13 +2397,14 @@ def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
         }
         if path is not None:
             meta["agent_path"] = path
-        written = tmp_path / f"rollout-{thread}.jsonl"
+        named, written = launch.record(f"sessions/rollout-{thread}.jsonl")
+        written.parent.mkdir(parents=True, exist_ok=True)
         lines = [
             json.dumps({"type": "session_meta", "payload": meta}),
             json.dumps({"type": "turn_context", "payload": {}}),
         ]
         written.write_text("\n".join(lines) + "\n")
-        return written
+        return named
 
     def subagent(thread: str, transcript: Path | None) -> str:
         return json.dumps(
@@ -2390,28 +2435,33 @@ def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
     child = rollout("th-a1", "root", "/root/explore_auth")
     grandchild = rollout("th-a2", "th-a1", "/root/explore_auth/grep_tokens")
     unnamed = rollout("th-a3", "root", None)
-    roots = tmp_path / "rollout-root.jsonl"
-    roots.write_text(
+    roots, written = launch.record("sessions/rollout-root.jsonl")
+    written.write_text(
         json.dumps(
             {"type": "session_meta", "payload": {"id": "root", "session_id": "root"}}
         )
         + "\n"
     )
 
-    assert codex.spawned(subagent("th-a1", child)) == Spawned(
+    assert codex.spawned(subagent("th-a1", child), layout) == Spawned(
         name="explore_auth", kind="explorer", guided=True, handed=True
     )
     grandchilds = Spawned(
         name="grep_tokens", parent="th-a1", kind="explorer", guided=True, handed=True
     )
-    assert codex.spawned(subagent("th-a2", grandchild)) == grandchilds
+    assert codex.spawned(subagent("th-a2", grandchild), layout) == grandchilds
     # First heard at its end, which names its parent's rollout and its own.
-    assert codex.spawned(ended("th-a2", grandchild, child)) == grandchilds
+    assert codex.spawned(ended("th-a2", grandchild, child), layout) == grandchilds
     explorer = Spawned(kind="explorer", guided=True)
-    assert codex.spawned(subagent("th-a3", unnamed)) == explorer
-    assert codex.spawned(subagent("th-a4", None)) == explorer
-    assert codex.spawned(subagent("th-a1", roots)) == explorer
-    assert codex.spawned((CAPTURED / "6-pre-tool-use-bash.json").read_text()) is None
+    assert codex.spawned(subagent("th-a3", unnamed), layout) == explorer
+    assert codex.spawned(subagent("th-a4", None), layout) == explorer
+    assert codex.spawned(subagent("th-a1", roots), layout) == explorer
+    # A rollout named outside the launch's own directory isn't read.
+    elsewhere = tmp_path / "rollout-th-a1.jsonl"
+    elsewhere.write_text(written.read_text())
+    assert codex.spawned(subagent("th-a1", elsewhere), layout) == explorer
+    captured = (CAPTURED / "6-pre-tool-use-bash.json").read_text()
+    assert codex.spawned(captured, layout) is None
 
 
 @pytest.mark.parametrize(
@@ -2716,8 +2766,9 @@ def updated(answer: str) -> JsonObject:
 
 
 @pytest.fixture
-def transcript(tmp_path: Path) -> Path:
-    return tmp_path / "projects" / "s1.jsonl"
+def transcript(kit: Kit) -> Path:
+    """The session's record as its hooks name it, under its launch's own runtime directory, where the host reads it."""
+    return kit.registered().named / "projects" / "s1.jsonl"
 
 
 def told_apart(root: Path, head: str, beside: Path, *, made: bool = True) -> str:

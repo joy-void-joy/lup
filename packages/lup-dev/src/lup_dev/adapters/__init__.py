@@ -18,6 +18,7 @@ from lup.types import JsonObject, Model
 from lup_dev.host.courier import Heard, Spawned, Telling
 from lup_dev.host.records import Queues, Reader, Records
 from lup_dev.launch.clis import Channel
+from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench
 from lup_dev.policy.runtime import Runtime
 
@@ -49,9 +50,11 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """Adds to a hook's answer: the payload, the answer (the judge's, or none)
     and what to add in, what the hook prints out instead; none where nothing is
     added, so the answer goes out as it is."""
-    spawned: Callable[[str], Spawned | None]
+    spawned: Callable[[str, Layout], Spawned | None]
     """Reads how the subagent one of its hooks fires for was spawned, as the
-    runtime recorded it: the payload in; none for the session's own
+    runtime recorded it: the payload in, and where lup keeps each launch's
+    home, the only place it reads a record a payload names
+    (`lup_dev.host.homes.translated`); none for the session's own
     conversation, or where nothing's recorded."""
     woken: Callable[[str, str], str] | None
     """Starts a turn of an idle session: its id and what to tell it in, the line

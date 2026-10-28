@@ -6,9 +6,11 @@ service, or reads the clock; the hook command runs under `sh` with a stand-in
 `socat`, against a stand-in service where it must reach one.
 """
 
+import csv
 import io
 import json
 import shlex
+import stat
 import subprocess
 import sys
 import tomllib
@@ -28,6 +30,7 @@ from lup.rooms.engine import Podman, Process
 from lup.sessions.bridge import Bridge
 from lup.sessions.terminal import (
     Cli,
+    RuntimeHome,
     SessionSettings,
     TerminalError,
     TerminalSettings,
@@ -66,7 +69,7 @@ from lup_dev.launch.session import (
     trusted,
 )
 from lup_dev.launch.trust import Outcome, Unchanged
-from lup_dev.layout import Layout
+from lup_dev.layout import Layout, digest
 from lup_dev.policy.worktrees import Making
 from lup_dev.private.withheld import Facts, Withheld
 from lup_dev.private.withheld import Machine as PrivateMachine
@@ -406,6 +409,7 @@ class Machine:
         unnamed: str | None = None,
         local: str | None = None,
         profiles: str | None = None,
+        settled: bool = True,
     ) -> None:
         self.events = Events()
         self.unnamed = unnamed
@@ -460,6 +464,20 @@ class Machine:
         self.adapter = claude.adapter().model_copy(
             update={"channel": Offline(events=self.events)}
         )
+        if settled:
+            self.settle()
+
+    def settle(self, account: str = "default") -> None:
+        """Make each runtime's home of the project's rooms, and sign `account` in to each, as an earlier launch would have."""
+        repository = self.layout.homes.home.parent.parent / "repos" / "work" / ".git"
+        for each in [claude.adapter(), codex.adapter()]:
+            runtime = each.runtime.name()
+            self.layout.room_home(repository, runtime, shared=False).mkdir(
+                parents=True, exist_ok=True
+            )
+            login = each.login(self.layout.accounts.account(account).runtime(runtime))
+            login.parent.mkdir(parents=True, exist_ok=True)
+            login.write_text("{}")
 
     def trust(self, root: Path) -> Outcome:
         self.events.record("trust")
@@ -636,6 +654,8 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
         github=GitHubRepository(owner="someone", name="work"),
         name="dev",
         runner=[],
+        home=machine.layout.room_home(project / ".git", "claude", shared=False),
+        own=machine.layout.launch(launch).runtime_home,
     )
     run = machine.engine.run()
     assert f"--name={container}" in run
@@ -1825,6 +1845,11 @@ def test_a_launch_imposes_what_the_project_declares_and_its_defaults_yield_to_th
         cli=Cli(program=Path("/opt/cli")),
         session=parts.declared,
         defaults=parts.defaults,
+        home=RuntimeHome(
+            directory=tmp_path / "launch" / "runtime-home",
+            shared=tmp_path / "homes" / "room",
+            login=tmp_path / "login",
+        ),
     )
 
     on_claude = json.loads(lup.Claude().terminal(given).files[launch / "settings.json"])
@@ -1896,3 +1921,274 @@ def test_a_launch_whose_declaration_drops_private_keeps_no_list(
     )
     assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
     assert not kept.exists()
+
+
+# A home of the rooms' own
+
+
+def mounted(run: list[str]) -> dict[str, str]:
+    """Each bind mount of a run, by where it lands in the room: its source, with `:ro` after it where it's read-only."""
+    found: dict[str, str] = {}
+    for each in run:
+        if not each.startswith("--mount=type=bind,"):
+            continue
+        [record] = csv.reader([each.removeprefix("--mount=")])
+        fields = {
+            key: value for key, _, value in (each.partition("=") for each in record)
+        }
+        read_only = ":ro" if fields.get("ro") == "true" else ""
+        found[fields["destination"]] = f"{fields['source']}{read_only}"
+    return found
+
+
+def runtime_directory(running: list[str]) -> Path:
+    """Return the runtime's own directory for a run, as its variable names it."""
+    [named] = [
+        each.split("=", 2)[2]
+        for each in running
+        if each.startswith(("--env=CLAUDE_CONFIG_DIR=", "--env=CODEX_HOME="))
+    ]
+    return Path(named)
+
+
+def test_a_launch_runs_in_its_own_directory_on_the_project_s_home_never_the_operator_s(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    theirs = tmp_path / "home" / ".claude"
+    (theirs / "skills" / "review").mkdir(parents=True)
+    (theirs / "settings.json").write_text(json.dumps({"model": "sonnet"}))
+    (theirs / ".credentials.json").write_text('{"claudeAiOauth": {}}')
+    machine = Machine(tmp_path, clock)
+    seen: dict[str, Path] = {}
+
+    def during() -> None:
+        own = runtime_directory(machine.engine.processes[-1].arguments)
+        seen["own"] = own
+        seen["projects"] = (own / "projects").readlink()
+        assert (own / "skills" / "review").is_dir()
+
+    machine.engine.during = during
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    run = machine.engine.run()
+    room = machine.layout.room_home(project / ".git", "claude", shared=False)
+    login = (
+        machine.layout.accounts.account("default").runtime("claude")
+        / ".credentials.json"
+    )
+    mounts = mounted(run)
+    own = seen["own"]
+    assert room == (
+        tmp_path / "data" / "homes" / "projects" / digest(project / ".git") / "claude"
+    )
+    assert own.name == "runtime-home"
+    assert own.parent.parent == machine.layout.launches
+    assert mounts[str(own)] == str(own)
+    assert mounts[str(room)] == str(room)
+    assert mounts[str(own / ".credentials.json")] == str(login)
+    assert seen["projects"] == room / "projects"
+    assert (room / "projects").is_dir()
+    assert not [
+        source
+        for source in mounts.values()
+        if Path(source.removesuffix(":ro")).is_relative_to(theirs)
+    ]
+    # The launch's own directory goes with it.
+    assert not own.exists()
+
+
+def test_a_first_launch_says_its_home_is_new_and_makes_the_account_s_login_empty(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock, settled=False)
+    room = machine.layout.room_home(project / ".git", "claude", shared=False)
+    login = (
+        machine.layout.accounts.account("default").runtime("claude")
+        / ".credentials.json"
+    )
+    new = (
+        f"This launch makes {room}, where claude's sessions in this project's "
+        "rooms keep their history and state from now on, apart from your own: a "
+        "session from before it doesn't resume in a room."
+    )
+    unheld = (
+        "The account `default` holds no claude login yet: sign in when claude "
+        "asks in the room, and every room on the account is signed in with it."
+    )
+
+    cli.launched(machine.adapter, [], project, machine.launcher)
+    cli.launched(machine.adapter, [], project, machine.launcher)
+
+    assert machine.events.said.count(new) == 1
+    assert machine.events.said.count(unheld) == 2
+    assert room.is_dir()
+    assert login.read_bytes() == b""
+    assert stat.S_IMODE(login.stat().st_mode) == 0o600
+    assert stat.S_IMODE(login.parent.stat().st_mode) == 0o700
+
+
+SHARING = """
+from lup_dev import Profile, Profiles
+
+profiles = Profiles().add(
+    Profile(name="everywhere", rooms_home="global", operator_configuration=False),
+)
+"""
+"""A person's profiles file holding one profile on the home every project shares, without the operator's configuration below its own."""
+
+
+def test_a_profile_s_shared_home_is_the_one_every_project_s_rooms_mount(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    (tmp_path / "home" / ".claude" / "skills" / "theirs").mkdir(parents=True)
+    machine = Machine(tmp_path, clock, profiles=SHARING)
+    own = machine.layout.profiles.profile("everywhere").runtime("claude")
+    (own / "agents").mkdir(parents=True)
+    copied: dict[str, bool] = {}
+
+    def during() -> None:
+        directory = runtime_directory(machine.engine.processes[-1].arguments)
+        copied.update(
+            {name: (directory / name).is_dir() for name in ["agents", "skills"]}
+        )
+
+    machine.engine.during = during
+
+    cli.launched(machine.adapter, [], project, machine.launcher, profile="everywhere")
+
+    shared = machine.layout.homes.shared("claude")
+    mounts = mounted(machine.engine.run())
+    assert machine.layout.room_home(project / ".git", "claude", shared=True) == shared
+    assert mounts[str(shared)] == str(shared)
+    # Off the operator's configuration, their skills aren't copied; the
+    # profile's own agents are.
+    assert copied == {"agents": True, "skills": False}
+
+
+def test_what_s_left_out_of_the_configuration_is_said_where_it_changed(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    theirs = tmp_path / "home" / ".claude" / "settings.json"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_text(json.dumps({"env": {"ANTHROPIC_API_KEY": "sk"}}))
+    machine = Machine(tmp_path, clock)
+
+    def left() -> list[str]:
+        return [each for each in machine.events.said if each.startswith("Left out")]
+
+    cli.launched(machine.adapter, [], project, machine.launcher)
+    cli.launched(machine.adapter, [], project, machine.launcher)
+    theirs.write_text(json.dumps({"env": {}, "apiKeyHelper": "~/bin/key"}))
+    cli.launched(machine.adapter, [], project, machine.launcher)
+
+    assert left() == [
+        (
+            "Left out of the claude configuration this room copies from yours and "
+            "the profile's, as each would hand the room's code a credential or "
+            f"isn't followed: `env` in {theirs}."
+        ),
+        (
+            "Left out of the claude configuration this room copies from yours and "
+            "the profile's, as each would run a command in the room, where rooms "
+            f"run lup's own hooks: `apiKeyHelper` in {theirs}."
+        ),
+    ]
+
+
+def saving(machine: Machine, name: str, text: str) -> None:
+    """Have the room write `text` to `name` in its runtime's own directory while it runs, as the runtime saves there, through what's mounted there where something is."""
+
+    def during() -> None:
+        running = machine.engine.processes[-1].arguments
+        destination = runtime_directory(running) / name
+        source = mounted(running).get(str(destination), str(destination))
+        Path(source).write_text(text)
+
+    machine.engine.during = during
+
+
+def test_what_the_session_saved_of_its_preferences_is_carried_to_the_profile_alone(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    theirs = tmp_path / "home" / ".claude" / "settings.json"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_text(json.dumps({"model": "sonnet", "theme": "dark"}))
+    machine = Machine(tmp_path, clock)
+    saving(
+        machine,
+        "settings.json",
+        json.dumps({"model": "opus", "theme": "dark", "verbose": True}),
+    )
+    profile = (
+        machine.layout.profiles.profile("default").runtime("claude") / "settings.json"
+    )
+
+    cli.launched(machine.adapter, [], project, machine.launcher)
+
+    assert json.loads(profile.read_text()) == {"model": "opus"}
+    assert json.loads(theirs.read_text()) == {"model": "sonnet", "theme": "dark"}
+    assert f'Kept `model` = "opus" in {profile}, as the session saved it.' in (
+        machine.events.said
+    )
+
+
+def test_the_first_change_seen_of_an_account_s_login_is_said_once(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    told = (
+        "The account `default`'s claude login changed while this room ran, by a "
+        "sign-in or a refresh: it's one login every room on the account shares, "
+        "so a sign-in in one signs in every room on it, and `lup-dev account "
+        "logout default claude` logs them all out."
+    )
+
+    cli.launched(machine.adapter, [], project, machine.launcher)
+    saving(machine, ".credentials.json", '{"claudeAiOauth": {"a": 1}}')
+    cli.launched(machine.adapter, [], project, machine.launcher)
+    saving(machine, ".credentials.json", '{"claudeAiOauth": {"a": 2}}')
+    cli.launched(machine.adapter, [], project, machine.launcher)
+
+    assert machine.events.said.count(told) == 1
+
+
+def test_a_codex_launch_runs_in_its_own_home_with_the_account_s_auth_json(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    theirs = tmp_path / "home" / ".codex"
+    (theirs / "prompts").mkdir(parents=True)
+    (theirs / ".env").write_text("PATH=/tmp/theirs\n")
+    machine = Machine(tmp_path, clock)
+    kept = machine.layout.clis("codex").version("0.163.0")
+    kept.mkdir(parents=True)
+    (kept / "cli").write_text("")
+    adapter = codex.adapter().model_copy(
+        update={"channel": Offline(events=machine.events)}
+    )
+    seen: dict[str, bool] = {}
+
+    def during() -> None:
+        own = runtime_directory(machine.engine.processes[-1].arguments)
+        seen["prompts"] = (own / "prompts").is_dir()
+        seen["env"] = (own / ".env").exists()
+        seen["sessions"] = (own / "sessions").is_symlink()
+
+    machine.engine.during = during
+
+    cli.launched(adapter, [], project, machine.launcher)
+
+    run = machine.engine.run()
+    room = machine.layout.room_home(project / ".git", "codex", shared=False)
+    login = machine.layout.accounts.account("default").runtime("codex") / "auth.json"
+    own = runtime_directory(run)
+    mounts = mounted(run)
+    assert 'cli_auth_credentials_store="file"' in run
+    assert mounts[str(own / "auth.json")] == str(login)
+    assert mounts[str(room)] == str(room)
+    assert seen == {"prompts": True, "env": False, "sessions": True}
+    assert not [
+        source
+        for source in mounts.values()
+        if Path(source.removesuffix(":ro")).is_relative_to(theirs)
+    ]

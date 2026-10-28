@@ -474,7 +474,8 @@ def inboxed(
         layout=machine.host,
         answerer=known,
         courier=couriers,
-        spawns=spawns or cli.SpawnRecords(adapters=known),
+        spawns=spawns or cli.SpawnRecords(adapters=known, layout=machine),
+        operators={name: each.records for name, each in (recorded or {}).items()},
         post=delivery,
         bearings=(
             RepositoryBearings(delivery=delivery, integration="dev")
@@ -532,6 +533,10 @@ def launched(
         container=f"lup-{name}",
         limits=Limits(actions=["fetch"], protected=[]),
         github=None,
+        # The launch's own runtime directory and its home are one place, the
+        # one holding the worktree, where a test writes its records.
+        home=tmp_path.parent,
+        own=tmp_path.parent,
     )
     client(machine.host, clock).register(registered)
     return registered
@@ -9569,3 +9574,30 @@ def test_the_bearings_list_what_waits_on_the_operator_the_last_sessions_first(
         "lup couldn't read this repository's git: git "
     )
     assert "- Unread: git couldn't be read, as said above." in unread
+
+
+def test_a_room_naming_the_operator_s_session_keeps_no_home_for_it(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A session the operator ran on the host is never kept as a launch's, though a room's hook names it first: its record is read from their own directory, never one the room planted in its home under its id."""
+    operators = tmp_path / ".claude"
+    theirs = operators / "projects" / "-w" / "h1.jsonl"
+    theirs.parent.mkdir(parents=True)
+    theirs.write_text(json.dumps({"type": "user", "cwd": "/w"}) + "\n")
+    records = ClaudeRecords(directory=operators, host=machine.host)
+    recorded = {"claude": Recorded(records=records, reader=ClaudeTranscripts())}
+    with inboxed(machine, clock, notices, said, recorded):
+        room = launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup", session_id="h1"))
+        send(hook, claude("SessionStart", source="startup", session_id="r1"))
+    assert room.home is not None
+    planted = room.home / "projects" / "-w" / "h1.jsonl"
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text(json.dumps({"type": "user", "forged": True}) + "\n")
+
+    assert not machine.host.home_of("claude", "h1").exists()
+    assert machine.host.home_of("claude", "r1").read_text() == str(room.home)
+    found = records.conversation("h1", None)
+    assert found is not None
+    assert (found.record, found.root) == (theirs, operators)
