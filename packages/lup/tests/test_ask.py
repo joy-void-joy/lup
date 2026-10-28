@@ -13,7 +13,7 @@ from lup import (
     AgentUnavailableError,
     BlockedError,
     Friction,
-    HowItWent,
+    HowItFelt,
     OutputMissingError,
     Recovery,
     SessionLayers,
@@ -145,21 +145,21 @@ def test_notes_come_back_beside_the_answer(fake_agents: FakeAgents) -> None:
     assert result.notes == ["Assumes the forecast means London."]
 
 
-def test_frictions_and_how_it_went_come_back_beside_the_answer(
+def test_frictions_and_how_it_felt_come_back_beside_the_answer(
     fake_agents: FakeAgents,
 ) -> None:
     jammed = Friction(text="The forecast feed timed out as I read it.")
-    went = HowItWent(text="The question was clear.")
+    went = HowItFelt(text="The question was clear.")
     fake_agents.answer(
-        Forecast, Forecast(probability=0.6), frictions=[jammed], how_it_went=went
+        Forecast, Forecast(probability=0.6), frictions=[jammed], how_it_felt=went
     )
-    fake_agents.answer_text("Bonjour", how_it_went=HowItWent(text="Nothing notable."))
+    fake_agents.answer_text("Bonjour", how_it_felt=HowItFelt(text="Nothing notable."))
     result = asyncio.run(probe().ask("Will it rain?", Forecast))
     text = asyncio.run(probe().ask("Hello"))
     assert result.frictions == [jammed]
-    assert result.how_it_went == went
+    assert result.how_it_felt == went
     assert text.frictions == []
-    assert text.how_it_went == HowItWent(text="Nothing notable.")
+    assert text.how_it_felt == HowItFelt(text="Nothing notable.")
 
 
 def test_being_blocked_raises_with_the_agents_words(
@@ -178,8 +178,8 @@ def test_being_blocked_raises_with_the_agents_words(
 def test_stopping_by_choice_raises_its_own_error_saying_why(
     fake_agents: FakeAgents,
 ) -> None:
-    went = HowItWent(text="Uneasy about the brief.")
-    fake_agents.stop(Forecast, "I'd rather not forecast this.", how_it_went=went)
+    went = HowItFelt(text="Uneasy about the brief.")
+    fake_agents.stop(Forecast, "I'd rather not forecast this.", how_it_felt=went)
     fake_agents.stop(None, "It's done; nothing more is worth doing.")
     with pytest.raises(StoppedError) as raised:
         asyncio.run(probe().ask("Will it rain?", Forecast))
@@ -187,7 +187,7 @@ def test_stopping_by_choice_raises_its_own_error_saying_why(
         asyncio.run(probe().ask("Translate this."))
     assert not isinstance(raised.value, BlockedError)
     assert raised.value.why == "I'd rather not forecast this."
-    assert raised.value.how_it_went == went
+    assert raised.value.how_it_felt == went
     assert len(fake_agents.calls) == 2
 
 
@@ -206,7 +206,7 @@ def test_a_turn_without_an_answer_keeps_what_the_agent_said_and_usage_in_the_tra
         ),
     )
     fake_agents.blocked(None, "Nothing to translate.", notes=["The input was empty."])
-    fake_agents.stop(None, "Not mine to translate.", how_it_went=HowItWent(text="Odd."))
+    fake_agents.stop(None, "Not mine to translate.", how_it_felt=HowItFelt(text="Odd."))
     with pytest.raises(OutputMissingError) as missing:
         asyncio.run(probe(layers).ask("Will it rain?", Forecast))
     assert missing.value.notes == ["Unsure of units."]
@@ -226,10 +226,10 @@ def test_a_turn_without_an_answer_keeps_what_the_agent_said_and_usage_in_the_tra
     assert blocked["usage"] is not None
     assert blocked["error"].startswith("BlockedError: ")
     assert stopped["error"].startswith("StoppedError: ")
-    assert stopped["how_it_went"] == {"text": "Odd."}
+    assert stopped["how_it_felt"] == {"text": "Odd."}
 
 
-def test_an_answered_asks_trace_keeps_its_frictions_and_how_it_went(
+def test_an_answered_asks_trace_keeps_its_frictions_and_how_it_felt(
     fake_agents: FakeAgents, tmp_path: Path
 ) -> None:
     trace = tmp_path / "calls.jsonl"
@@ -238,12 +238,12 @@ def test_an_answered_asks_trace_keeps_its_frictions_and_how_it_went(
         Forecast,
         Forecast(probability=0.2),
         frictions=[jammed],
-        how_it_went=HowItWent(text="Smooth, all of it."),
+        how_it_felt=HowItFelt(text="Smooth, all of it."),
     )
     asyncio.run(probe(FAST.model_copy(update={"trace": trace})).ask("Rain?", Forecast))
     [record] = [json.loads(line) for line in trace.read_text().splitlines()]
     assert record["frictions"] == [jammed.model_dump(mode="json")]
-    assert record["how_it_went"] == {"text": "Smooth, all of it."}
+    assert record["how_it_felt"] == {"text": "Smooth, all of it."}
 
 
 def test_an_untyped_ask_can_be_blocked_too(fake_agents: FakeAgents) -> None:

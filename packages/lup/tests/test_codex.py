@@ -26,7 +26,7 @@ from lup import (
     AuthMissingError,
     BlockedError,
     Friction,
-    HowItWent,
+    HowItFelt,
     OutputMissingError,
     Recovery,
     SessionLayers,
@@ -505,13 +505,13 @@ def test_an_answered_turn_ends_at_once(tmp_path: Path) -> None:
     assert len(rig.client.sent["turn/start"]) == 1
 
 
-def test_a_friction_and_how_it_went_reach_the_toolbox_and_end_nothing(
+def test_a_friction_and_how_it_felt_reach_the_toolbox_and_end_nothing(
     tmp_path: Path,
 ) -> None:
     jammed: JsonObject = {"text": "The feed timed out as I read it."}
     turn: list[Step] = [
         calling("friction", jammed, call="call-1"),
-        calling("how_it_went", {"text": "The question was clear."}, call="call-2"),
+        calling("how_it_felt", {"text": "The question was clear."}, call="call-2"),
         *ANSWERED,
     ]
     rig = Rig(tmp_path, [turn])
@@ -521,7 +521,7 @@ def test_a_friction_and_how_it_went_reach_the_toolbox_and_end_nothing(
     assert taken["success"] is True
     assert went["success"] is True
     assert tools.frictions() == [Friction(text="The feed timed out as I read it.")]
-    assert tools.how_it_went() == HowItWent(text="The question was clear.")
+    assert tools.how_it_felt() == HowItFelt(text="The question was clear.")
     assert len(rig.client.sent["turn/start"]) == 1
 
 

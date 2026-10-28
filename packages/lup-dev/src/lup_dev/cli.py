@@ -159,7 +159,7 @@ from lup_dev.inbox.store import (
     Flagged,
     Friction,
     HeldChange,
-    HowItWent,
+    HowItFelt,
     Inbox,
     InboxError,
     Item,
@@ -882,7 +882,7 @@ def shown(item: Item) -> str:
         case (
             Message(text=text)
             | Friction(text=text)
-            | HowItWent(text=text)
+            | HowItFelt(text=text)
             | Stop(text=text)
             | Ended(text=text)
         ):
@@ -953,7 +953,7 @@ def prompted(item: Item) -> AnswerItem:
     """Ask the operator their answer to a question, each decision in turn, then a comment on the whole; a plain question, or a reply to a message, in words."""
     typer.echo(shown(item))
     match item.reason:
-        case Message() | Friction() | HowItWent() | Stop() | Flagged():
+        case Message() | Friction() | HowItFelt() | Stop() | Flagged():
             words = typer.prompt("Your reply")
             return AnswerItem(number=item.number, comment=words)
         case Question(decisions=[]):

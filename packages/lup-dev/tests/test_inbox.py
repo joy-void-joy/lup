@@ -137,7 +137,7 @@ from lup_dev.inbox.store import (
     Found,
     Friction,
     HeldChange,
-    HowItWent,
+    HowItFelt,
     Inbox,
     InboxError,
     Item,
@@ -1816,7 +1816,7 @@ def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
     assert notices.raised[1].startswith("lup: a disagreement from claude session s1")
 
 
-def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_subagent(
+def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_subagent(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     other = tmp_path / "other"
@@ -1869,7 +1869,7 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
                 ),
             ),
             call(
-                mcp, "how_it_went", stamped(hook, lup_call("how_it_went", quiet, "h1"))
+                mcp, "how_it_felt", stamped(hook, lup_call("how_it_felt", quiet, "h1"))
             ),
             call(mcp, "stop", stamped(hook, lup_call("stop", stopping, "s1"))),
             call(
@@ -1877,8 +1877,8 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
             ),
             call(
                 mcp2,
-                "how_it_went",
-                stamped(hook2, codex_call("how_it_went", went, "c2", agent_id="b1")),
+                "how_it_felt",
+                stamped(hook2, codex_call("how_it_felt", went, "c2", agent_id="b1")),
             ),
             call(
                 mcp2,
@@ -1896,13 +1896,13 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         passed = delivery.inbox.item(2)
         copy = delivery.inbox.item(7)
     # Each subagent has a parent, its session's own conversation, which gets a
-    # copy of its friction (@2) and of how it went (@7).
+    # copy of its friction (@2) and of how it felt (@7).
     assert [text for text, _ in answers] == [
         "Your friction is with the operator, @1 and your parent. Carry on.",
-        "How it went is with the operator, @3.",
+        "How it felt is with the operator, @3.",
         "Your stop is with the operator, @4. End your turn.",
         "Your friction is with the operator, @5. Carry on.",
-        "How it went is with the operator, @6 and your parent.",
+        "How it felt is with the operator, @6 and your parent.",
         "Your stop is with the operator, @8. End your turn.",
     ]
     assert not any(error for _, error in answers)
@@ -1932,16 +1932,16 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         True,
     )
     assert (copy.reason, copy.recipient, copy.quiet) == (
-        HowItWent.model_validate(went),
+        HowItFelt.model_validate(went),
         codex_session,
         True,
     )
     assert [each.reason for each in waiting] == [
         friction,
-        HowItWent.model_validate(quiet),
+        HowItFelt.model_validate(quiet),
         Stopped.model_validate(stopping),
         friction,
-        HowItWent.model_validate(went),
+        HowItFelt.model_validate(went),
         Stopped.model_validate(stopping),
     ]
     first = listed.splitlines()[0]
@@ -1950,7 +1950,7 @@ def test_friction_how_it_went_and_stop_reach_the_operator_from_each_runtime_and_
         f"(subagent a1 of claude session s1) in {tmp_path}: "
         "`uv run lup-dev check` printed: engine stale"
     )
-    assert "how the work went from" in listed.splitlines()[1]
+    assert "how it felt from" in listed.splitlines()[1]
     assert listed.splitlines()[1].endswith(": Nothing notable.")
     assert "a stop by choice from" in listed.splitlines()[2]
     assert shown.endswith(
@@ -2383,7 +2383,7 @@ def introduction() -> str:
         "of these, this subagent is one of them."
     )
     direct = (
-        "`friction` and `how_it_went` reach the operator directly, whatever your "
+        "`friction` and `how_it_felt` reach the operator directly, whatever your "
         "parent passes on."
     )
     lines = [f"- `{spec.name}`: {spec.summary}" for spec in served]
@@ -3146,7 +3146,7 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_with_its_last_message_on_
     assert after == ""
 
 
-def test_a_subagents_friction_and_how_it_went_reach_its_parent_whole_on_each_runtime(
+def test_a_subagents_friction_and_how_it_felt_reach_its_parent_whole_on_each_runtime(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     records = Subagents(tmp_path)
@@ -3169,19 +3169,19 @@ def test_a_subagents_friction_and_how_it_went_reach_its_parent_whole_on_each_run
         records.recorded("a1", "Explore", "t1", name="parser")
         rollouts.recorded("th1", "t1", "/root/lexer")
         jam = records.lup((hook, mcp), "friction", jammed, "a1", "Explore")
-        how = rollouts.lup((hook2, mcp2), "how_it_went", went, "th1")
+        how = rollouts.lup((hook2, mcp2), "how_it_felt", went, "th1")
         ended = send(hook, claude("Stop", stop_hook_active=False))
         told = context(send(hook, bash("m1")))
         told2 = context(send(hook2, codex_bash("d1")))
         operators = [each.number for each in delivery.inbox.waiting(Operator())]
         copies = [delivery.inbox.item(number) for number in [2, 4]]
     friction = Friction.model_validate(jammed)
-    how_it_went = HowItWent.model_validate(went)
+    how_it_felt = HowItFelt.model_validate(went)
     assert jam == (
         "Your friction is with the operator, @1 and your parent. Carry on.",
         False,
     )
-    assert how == ("How it went is with the operator, @3 and your parent.", False)
+    assert how == ("How it felt is with the operator, @3 and your parent.", False)
     assert ended == ""
     assert told.startswith(
         '<item item="2" from="subagent a1 of claude session s1" name="parser" '
@@ -3190,13 +3190,13 @@ def test_a_subagents_friction_and_how_it_went_reach_its_parent_whole_on_each_run
     assert friction.text in told
     assert told2.startswith(
         '<item item="4" from="subagent th1 of codex session t1" name="lexer" '
-        'kind="how it went">'
+        'kind="how it felt">'
     )
-    assert how_it_went.text in told2
+    assert how_it_felt.text in told2
     assert operators == [1, 3]
     assert [(each.reason, each.quiet) for each in copies] == [
         (friction, True),
-        (how_it_went, True),
+        (how_it_felt, True),
     ]
 
 
@@ -3981,7 +3981,7 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "stop",
         "note",
         "friction",
-        "how_it_went",
+        "how_it_felt",
         "ask",
         "send",
         "wait_inbox",
@@ -4106,7 +4106,7 @@ def test_an_items_kind_ranks_it_where_it_comes_and_whether_it_notifies() -> None
         Message(kind="note", text="I assumed UTF-8."),
         Message(kind="note", text="Done.", ending=True),
         Friction(text="The gate hung."),
-        HowItWent(text="Nothing notable."),
+        HowItFelt(text="Nothing notable."),
         Stopped(why="Nothing more is worth doing."),
         Ended(name="parser", said="Done."),
     ]
@@ -4136,7 +4136,7 @@ def test_a_stored_item_that_doesnt_read_is_named(tmp_path: Path) -> None:
         Inbox.opened(layout)
 
 
-def test_a_friction_and_how_it_went_kept_in_labelled_parts_read_as_the_one_text_shown(
+def test_a_friction_and_how_it_felt_kept_in_labelled_parts_or_as_how_it_went_read_as_shown(
     tmp_path: Path,
 ) -> None:
     layout = InboxLayout(home=tmp_path / "inbox")
@@ -4161,6 +4161,7 @@ def test_a_friction_and_how_it_went_kept_in_labelled_parts_read_as_the_one_text_
             "would_change": "",
             "felt": "",
         },
+        {"reason": "how it went", "text": "Heavy toward the end."},
     ]
     for number, reason in enumerate(labelled, start=1):
         item = Item(
@@ -4176,22 +4177,27 @@ def test_a_friction_and_how_it_went_kept_in_labelled_parts_read_as_the_one_text_
         layout.items.mkdir(parents=True, exist_ok=True)
         layout.item(number).write_text(json.dumps(stored))
     inbox = Inbox.opened(layout)
-    read = [inbox.item(number) for number in (1, 2, 3)]
+    read = [inbox.item(number) for number in (1, 2, 3, 4)]
     assert [each.reason for each in read] == [
         Friction(text="`ls` printed: Permission denied\nTrying: look for the config"),
-        HowItWent(
+        HowItFelt(
             text="Got in the way: The judge, twice.\nSmooth: The brief.\nFelt: Steady."
         ),
-        HowItWent(text="Nothing notable."),
+        HowItFelt(text="Nothing notable."),
+        HowItFelt(text="Heavy toward the end."),
     ]
-    # Kept again, it's kept as the one text, and reads back as it was.
+    # Kept again, each is kept as the one text, of its kind as it's called now,
+    # and reads back as it was.
     inbox.kept(read[0])
+    inbox.kept(read[3])
     rewritten = json.loads(layout.item(1).read_text())["reason"]
     assert rewritten == {
         "reason": "friction",
         "text": "`ls` printed: Permission denied\nTrying: look for the config",
     }
-    assert Inbox.opened(layout).item(1) == read[0]
+    renamed = json.loads(layout.item(4).read_text())["reason"]
+    assert renamed == {"reason": "how it felt", "text": "Heavy toward the end."}
+    assert [Inbox.opened(layout).item(each) for each in (1, 4)] == [read[0], read[3]]
 
 
 def test_a_desktop_notice_goes_through_notify_send_where_its_installed(
@@ -9505,7 +9511,7 @@ def test_the_bearings_list_what_waits_on_the_operator_the_last_sessions_first(
         (Question(text="Which parser?"), last),
         (flag("parser"), last),
         (flag("parser"), worker),
-        (HowItWent(text="Calm."), worker),
+        (HowItFelt(text="Calm."), worker),
         (flag("lexer"), worker),
         (Message(kind="note", text="Header first."), worker),
         (Question(text="Which lexer?"), other),
@@ -9549,7 +9555,7 @@ def test_the_bearings_list_what_waits_on_the_operator_the_last_sessions_first(
         ),
         "- @1 a question from claude session s1: Which parser?",
         (
-            "- News, by kind: 1 `how it went`, 1 `note` (`inbox` with those `kinds` "
+            "- News, by kind: 1 `how it felt`, 1 `note` (`inbox` with those `kinds` "
             "lists them)."
         ),
         (

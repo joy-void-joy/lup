@@ -302,7 +302,7 @@ describe("laid", () => {
         const went: Item = {
             ...NOTE,
             number: 62,
-            reason: { reason: "how it went", text: "Good." },
+            reason: { reason: "how it felt", text: "Good." },
             rank: NEWS,
         };
         const out = laid([flagged(50, from("s2")), flagged(71, from("s4")), went, NOTE, ended], [], banner, header, EMPTY, NOTHING);
@@ -395,7 +395,7 @@ describe("laid", () => {
         expect(tallied([], EMPTY, UNSEEN)).toBe("");
     });
 
-    it("shows a friction, how the work went and a stop as written", () => {
+    it("shows a friction, how it felt and a stop as written", () => {
         const friction: Item = {
             ...NOTE,
             number: 62,
@@ -404,7 +404,7 @@ describe("laid", () => {
         const went: Item = {
             ...NOTE,
             number: 63,
-            reason: { reason: "how it went", text: "The brief was clear, and it felt good." },
+            reason: { reason: "how it felt", text: "The brief was clear, and it felt good." },
         };
         const stopped: Item = { ...NOTE, number: 65, reason: { reason: "stop", why: "Nothing more is worth doing." } };
         expect(body(friction)).toBe("`uv run lup-dev check` printed: engine stale\nI was running the gate.");

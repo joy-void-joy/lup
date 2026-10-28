@@ -6,7 +6,7 @@ import type { components } from "../generated/api";
 import { instanceOf, type Answer, type Blocks, type Mounted, type Remote, type Shown, type View } from "../views";
 import { BANNER as WORKING, TASKS } from "./adapters";
 import { APPROVAL } from "./core";
-import { ANSWER, ENDED, FRICTION, HOW_IT_WENT, MESSAGE, QUESTION, REVIEW, STOP, UNRESOLVED } from "./inbox";
+import { ANSWER, ENDED, FRICTION, HOW_IT_FELT, MESSAGE, QUESTION, REVIEW, STOP, UNRESOLVED } from "./inbox";
 import { BANNER as HOLDING, FLAGGED, HELD, SINCE } from "./judge";
 
 type Item = components["schemas"]["Item"];
@@ -21,7 +21,7 @@ const PRODUCERS: readonly View<never>[] = [
     MESSAGE,
     QUESTION,
     FRICTION,
-    HOW_IT_WENT,
+    HOW_IT_FELT,
     STOP,
     ENDED,
     UNRESOLVED,
@@ -44,7 +44,7 @@ const KINDS: Record<Item["reason"]["reason"], { module: string; view: string }> 
     message: { module: "inbox", view: "message" },
     question: { module: "inbox", view: "question" },
     friction: { module: "inbox", view: "friction" },
-    "how it went": { module: "inbox", view: "how_it_went" },
+    "how it felt": { module: "inbox", view: "how_it_felt" },
     stop: { module: "inbox", view: "stop" },
     ended: { module: "inbox", view: "ended" },
     unresolved: { module: "inbox", view: "unresolved" },

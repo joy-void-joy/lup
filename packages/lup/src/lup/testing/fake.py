@@ -2,7 +2,7 @@
 
 A test's declaration goes through the real `ask`: its layers, the output tool
 and its guard, the record. Only the turn is scripted. A typed answer, and what
-the agent says beside it or instead (a note, a friction, how it went, being
+the agent says beside it or instead (a note, a friction, how it felt, being
 blocked, stopping), go through the real tools, so validation and `before` hooks
 run as they would on a real turn.
 
@@ -16,8 +16,8 @@ from pydantic import BaseModel, JsonValue
 from lup.errors import LupError
 from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest
 from lup.sessions.declaration import Declaration
-from lup.sessions.results import Friction, HowItWent, Usage
-from lup.tools.speaking import blocked, friction, how_it_went, note, stop
+from lup.sessions.results import Friction, HowItFelt, Usage
+from lup.tools.speaking import blocked, friction, how_it_felt, note, stop
 from lup.types import Model, MutableModel
 
 
@@ -30,7 +30,7 @@ class Saying(Model):
 
     notes: list[str] = []
     frictions: list[Friction] = []
-    how_it_went: HowItWent | None = None
+    how_it_felt: HowItFelt | None = None
 
 
 class Submitting(Saying):
@@ -86,7 +86,7 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
     """Scripted answers for a test's asks, and every ask made, in order.
 
     Each script but `fail` takes what the agent says before it: `notes`,
-    `frictions` and `how_it_went`.
+    `frictions` and `how_it_felt`.
     """
 
     queued: list[Queued] = []
@@ -99,14 +99,14 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         frictions: list[Friction] | None = None,
-        how_it_went: HowItWent | None = None,
+        how_it_felt: HowItFelt | None = None,
     ) -> None:
         """Queue `value` as the accepted answer to the next ask for `output`, after what the agent says."""
         submitting = Submitting(
             submissions=[value.model_dump(mode="json")],
             notes=notes or [],
             frictions=frictions or [],
-            how_it_went=how_it_went,
+            how_it_felt=how_it_felt,
         )
         self.queue(output, submitting)
 
@@ -116,14 +116,14 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         frictions: list[Friction] | None = None,
-        how_it_went: HowItWent | None = None,
+        how_it_felt: HowItFelt | None = None,
     ) -> None:
         """Queue `text` as the answer to the next untyped ask, after what the agent says."""
         texting = Texting(
             text=text,
             notes=notes or [],
             frictions=frictions or [],
-            how_it_went=how_it_went,
+            how_it_felt=how_it_felt,
         )
         self.queue(None, texting)
 
@@ -145,14 +145,14 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         frictions: list[Friction] | None = None,
-        how_it_went: HowItWent | None = None,
+        how_it_felt: HowItFelt | None = None,
     ) -> None:
         """Queue the agent saying it's blocked, instead of an answer, for the next ask of `output`."""
         blocking = Blocking(
             problem=problem,
             notes=notes or [],
             frictions=frictions or [],
-            how_it_went=how_it_went,
+            how_it_felt=how_it_felt,
         )
         self.queue(output, blocking)
 
@@ -163,14 +163,14 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         frictions: list[Friction] | None = None,
-        how_it_went: HowItWent | None = None,
+        how_it_felt: HowItFelt | None = None,
     ) -> None:
         """Queue the agent stopping by choice, instead of an answer, for the next ask of `output`."""
         stopping = Stopping(
             why=why,
             notes=notes or [],
             frictions=frictions or [],
-            how_it_went=how_it_went,
+            how_it_felt=how_it_felt,
         )
         self.queue(output, stopping)
 
@@ -224,9 +224,9 @@ class FakeAdapter(Model, Adapter, arbitrary_types_allowed=True):
             await toolbox.call(note.name, {"remark": remark})
         for each in script.frictions:
             await toolbox.call(friction.name, each.model_dump(mode="json"))
-        if script.how_it_went is not None:
-            went = script.how_it_went.model_dump(mode="json")
-            await toolbox.call(how_it_went.name, went)
+        if script.how_it_felt is not None:
+            went = script.how_it_felt.model_dump(mode="json")
+            await toolbox.call(how_it_felt.name, went)
         match script:
             case Texting(text=text):
                 return RawTurn(text=text, usage=Usage(), session_id=session)

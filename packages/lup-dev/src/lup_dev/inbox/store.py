@@ -9,7 +9,7 @@ in a launch of its own finds what waited for it there.
 An item has a number, one sequence per user, cited `@12` wherever it's named
 (`cited`), so the operator answers `@12`, or `12`; a reason (a message with its
 kind, a question with its numbered decisions, an answer, an approval asked yes
-or no; a friction, how a piece of work went, or a stop by choice, each as the
+or no; a friction, how it felt, or a stop by choice, each as the
 agent's tool took it; a change held, or a write that landed flagged, as the
 judge put it), whose kind ranks it (`ranked`); a sender and a recipient; when
 it was made; and its state: waiting, told (when, and how), answered, done, or
@@ -160,10 +160,10 @@ def labelled(opening: str, parts: dict[str, str]) -> str:
 
 
 class Labelled(Model):
-    """A friction or how it went as the inbox kept it before each was one text in the agent's own words: each part in a field of its own, which the operator read after its label.
+    """A friction or how it felt as the inbox kept it before each was one text in the agent's own words: each part in a field of its own, which the operator read after its label.
 
     Items kept then still read: each is read as the one text it was shown as
-    (`Friction.unlabelled`, `HowItWent.unlabelled`).
+    (`Friction.unlabelled`, `HowItFelt.unlabelled`).
     """
 
     got_in_the_way: str = ""
@@ -177,8 +177,8 @@ class Labelled(Model):
         parts = {"Trying": self.trying, "Would change": self.would_change}
         return labelled(self.got_in_the_way, parts)
 
-    def how_it_went(self) -> str:
-        """Say how it went as the operator read it: each part the agent filled, after its label; "Nothing notable." where it filled none."""
+    def how_it_felt(self) -> str:
+        """Say how it felt as the operator read it: each part the agent filled, after its label; "Nothing notable." where it filled none."""
         parts = {
             "Got in the way": self.got_in_the_way,
             "Smooth": self.smooth,
@@ -210,22 +210,22 @@ class Friction(results.Friction):
                 return stored
 
 
-class HowItWent(results.HowItWent):
-    """How a piece of work went as a whole, and how it felt, as a conversation told the operator once near its end (`how_it_went`), in its own words: news to read."""
+class HowItFelt(results.HowItFelt):
+    """How a piece of work went as a whole, and how it felt, as a conversation told the operator once near its end (`how_it_felt`), in its own words: news to read."""
 
-    reason: Literal["how it went"] = "how it went"
+    reason: Literal["how it felt"] = "how it felt"
 
     @model_validator(mode="before")
     @classmethod
     def unlabelled(cls, stored: JsonValue) -> JsonValue:
-        """Read one kept before how it went was one text, its parts each in a field of its own, as the one text the operator read (`Labelled.how_it_went`).
+        """Read one kept before how it felt was one text, its parts each in a field of its own, as the one text the operator read (`Labelled.how_it_felt`).
 
-        >>> HowItWent.model_validate({"got_in_the_way": "", "felt": "Calm."}).text
+        >>> HowItFelt.model_validate({"got_in_the_way": "", "felt": "Calm."}).text
         'Felt: Calm.'
         """
         match stored:
             case {"got_in_the_way": str()} if "text" not in stored:
-                return {"text": Labelled.model_validate(stored).how_it_went()}
+                return {"text": Labelled.model_validate(stored).how_it_felt()}
             case _:
                 return stored
 
@@ -619,7 +619,7 @@ class Review(Model):
 type Reason = Annotated[
     Message
     | Friction
-    | HowItWent
+    | HowItFelt
     | Stop
     | Ended
     | Unresolved
@@ -876,7 +876,7 @@ def ranked(reason: Reason) -> Rank:
     | Rank | Kinds | Order | Notice |
     |---|---|---|---|
     | waiting on you | a question, a held change, an approval, a problem (`blocked`), a disagreement, a question sent as a message | first | yes |
-    | news | a note, a turn's last words among them, a friction, how the work went, a stop by choice, a subagent's end, lup's word on citations that didn't resolve, the operator's copy of a message between conversations | next | no |
+    | news | a note, a turn's last words among them, a friction, how it felt, a stop by choice, a subagent's end, lup's word on citations that didn't resolve, the operator's copy of a message between conversations | next | no |
     | flag | a write that landed flagged | last | no |
 
     A message to the operator ranks by its kind, whichever tool sent it: a note
@@ -897,7 +897,7 @@ def ranked(reason: Reason) -> Rank:
             Message(kind="note")
             | Message(to=Conversation())
             | Friction()
-            | HowItWent()
+            | HowItFelt()
             | Stop()
             | Ended()
             | Unresolved()
@@ -963,6 +963,24 @@ class Item(Model):
     costs no turn of its own."""
     made: datetime
     state: State = Waiting()
+
+    @model_validator(mode="before")
+    @classmethod
+    def felt(cls, stored: JsonValue) -> JsonValue:
+        """Read an item kept while `how_it_felt` was `how_it_went`, its reason `how it went`, as how it felt: its reason's kind names the model it's read as, before that model reads it.
+
+        >>> from datetime import UTC, datetime
+        >>> kept = {"number": 7, "reason": {"reason": "how it went", "text": "Calm."},
+        ...     "sender": {"party": "operator"}, "recipient": {"party": "operator"},
+        ...     "made": datetime(2026, 1, 1, tzinfo=UTC)}
+        >>> Item.model_validate(kept).reason
+        HowItFelt(text='Calm.', reason='how it felt')
+        """
+        match stored:
+            case {"reason": {"reason": "how it went", **reason}}:
+                return {**stored, "reason": {**reason, "reason": "how it felt"}}
+            case _:
+                return stored
 
     @computed_field
     @property

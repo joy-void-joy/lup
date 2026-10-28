@@ -157,7 +157,7 @@ const CASES: Record<string, Case[]> = {
         },
     ],
     "inbox friction": [{ name: "a friction", repository: REPOSITORY, argument: { number: 57 }, given: { items: [item(57, { reason: "friction", text: "The gate printed nothing for four minutes." })] } }],
-    "inbox how_it_went": [{ name: "how the work went", repository: REPOSITORY, argument: { number: 58 }, given: { items: [item(58, { reason: "how it went", text: "Steady." })] } }],
+    "inbox how_it_felt": [{ name: "how it felt", repository: REPOSITORY, argument: { number: 58 }, given: { items: [item(58, { reason: "how it felt", text: "Steady." })] } }],
     "inbox stop": [{ name: "a stop by choice", repository: REPOSITORY, argument: { number: 67 }, given: { items: [item(67, { reason: "stop", why: "Nothing more is worth doing." })] } }],
     "adapters tasks": [
         {

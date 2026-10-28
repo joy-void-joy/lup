@@ -2,12 +2,12 @@
 
 `docs/inbox.md`, *lup's tools*. Each is a function of the conversation
 calling (`Speaker`), served as a `RoomTools` through the launch's `mcp.sock`:
-- `blocked`, `stop`, `note`, `friction` and `how_it_went` are the library's
+- `blocked`, `stop`, `note`, `friction` and `how_it_felt` are the library's
   speaking tools (`lup.tools.speaking`), their names and input models taken
   from them, so an agent's habit carries between an ask from code and a
   launched session; their functions and descriptions are the inbox's, since
   in a launched session whoever asked is the operator, and each lands in their
-  inbox, a subagent's too; a subagent's `friction` and `how_it_went` reach its
+  inbox, a subagent's too; a subagent's `friction` and `how_it_felt` reach its
   parent as well, whole and quiet (`Item.quiet`), so it can file what got in
   the way, or learn its brief misled;
 - `ask` puts a question to the operator, its decisions numbered, each with the
@@ -76,7 +76,7 @@ from lup_dev.inbox.store import (
     Conversation,
     Decision,
     Friction,
-    HowItWent,
+    HowItFelt,
     InboxError,
     Item,
     Kind,
@@ -239,7 +239,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
     """The runtime's id for the call speaking, which each item it makes keeps."""
 
     async def said(
-        self, reason: Message | Friction | HowItWent | Stop | Question
+        self, reason: Message | Friction | HowItFelt | Stop | Question
     ) -> Item:
         """Put `reason` in the operator's inbox, from this conversation, and return it as kept, its citations of their words read (`Delivery.cited`)."""
         return await self.delivery.posted(
@@ -252,7 +252,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         told = unresolved(item.citations, item.number)
         return Said(text=text if not told else f"{text}\n\n{inside(told)}")
 
-    async def passed_up(self, reason: Friction | HowItWent) -> bool:
+    async def passed_up(self, reason: Friction | HowItFelt) -> bool:
         """Put a copy of `reason` in the inbox of the conversation that spawned this one, quietly (`Item.quiet`), and say whether there's one."""
         parent = self.delivery.parent(self.party)
         if parent is None:
@@ -330,7 +330,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             item,
         )
 
-    async def how_it_went(self, said: results.HowItWent) -> Said:
+    async def how_it_felt(self, said: results.HowItFelt) -> Said:
         """Tell the operator how the work went and felt.
 
         Call it once, near the end of a piece of work: how it went and how it
@@ -339,11 +339,11 @@ class Speaker(Model, arbitrary_types_allowed=True):
         and, where you're a subagent, in your parent's too, whole, at its next
         call. Your work goes on.
         """
-        went = HowItWent.model_validate(said.model_dump())
+        went = HowItFelt.model_validate(said.model_dump())
         item = await self.said(went)
         parent = " and your parent" if await self.passed_up(went) else ""
         return self.answered(
-            f"How it went is with the operator, {cited(item.number)}{parent}.", item
+            f"How it felt is with the operator, {cited(item.number)}{parent}.", item
         )
 
     def asked(self) -> int | None:
@@ -584,7 +584,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         - `agents`: a message your parent or one of your subagents sent you;
           one of your own subagents ending its turn, stopped, or failed on an
           error from the model's API, which names it; a subagent's `friction`
-          or `how_it_went`; another session's message;
+          or `how_it_felt`; another session's message;
         - `tasks`: a command you run in the background ending, or a Monitor's
           event.
 
@@ -748,7 +748,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         """Edit what you sent the operator.
 
         A message, a note, your turn's last words, a question's text, a
-        friction, how it went or a stop: one you sent the operator, by its
+        friction, how it felt or a stop: one you sent the operator, by its
         number. Give `old`, a passage of its text exactly as it stands, found
         there once, and `new`, what replaces it, as a file's edit does; or
         `new` alone, its text whole. They see it marked edited, with what
@@ -774,7 +774,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
             speaking.stop.name: self.stop,
             speaking.note.name: self.note,
             speaking.friction.name: self.friction,
-            speaking.how_it_went.name: self.how_it_went,
+            speaking.how_it_felt.name: self.how_it_felt,
         }
         speaking_tools = [
             tool.model_copy(
@@ -788,7 +788,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
                 speaking.stop,
                 speaking.note,
                 speaking.friction,
-                speaking.how_it_went,
+                speaking.how_it_felt,
             ]
         ]
         return [*speaking_tools, *bound(self)]

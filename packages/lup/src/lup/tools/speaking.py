@@ -1,4 +1,4 @@
-"""The tools every ask serves, so the agent can speak to its caller: `blocked`, `stop`, `note`, `friction` and `how_it_went`.
+"""The tools every ask serves, so the agent can speak to its caller: `blocked`, `stop`, `note`, `friction` and `how_it_felt`.
 
 They act on nothing, so they're served even where an agent has no other tool:
 - `blocked` stops the turn without an answer because the work can't go on: the
@@ -14,13 +14,13 @@ They act on nothing, so they're served even where an agent has no other tool:
   `TurnResult.notes`;
 - `friction` says what got in the agent's way, at the moment it does, without
   ending the turn, read in `TurnResult.frictions`;
-- `how_it_went` says how the work went as a whole, once near its end, read in
-  `TurnResult.how_it_went`.
+- `how_it_felt` says how the work went as a whole, once near its end, read in
+  `TurnResult.how_it_felt`.
 """
 
 from pydantic import BaseModel, Field
 
-from lup.sessions.results import Friction, HowItWent
+from lup.sessions.results import Friction, HowItFelt
 from lup.tools.tool import AgentTool, Tool
 from lup.types import Model
 
@@ -126,18 +126,18 @@ friction = Tool[Friction, Heard](
 )
 """Says what got in the agent's way, when it did."""
 
-how_it_went = Tool[HowItWent, Heard](
-    name="how_it_went",
+how_it_felt = Tool[HowItFelt, Heard](
+    name="how_it_felt",
     description=(
         "Say how the work went and felt, once.\n\n"
         "Near the end of a piece of work: how it went and how it felt, whatever's "
         'present for you, in your own words. "Nothing notable" is a fine '
         "answer. Your caller reads it beside your answer; your turn doesn't end."
     ),
-    input=HowItWent,
+    input=HowItFelt,
     function=told,
 )
 """Says how the work went as a whole, and how it felt."""
 
-SPEAKING: list[AgentTool] = [blocked, stop, note, friction, how_it_went]
+SPEAKING: list[AgentTool] = [blocked, stop, note, friction, how_it_felt]
 """Every speaking tool, in the order an ask serves them."""

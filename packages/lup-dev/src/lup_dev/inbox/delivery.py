@@ -87,7 +87,7 @@ sender, which a review's comment answers as any message's.
 **A subagent's end, and what it says of its work,** reach the conversation that
 spawned it (`Whereabouts.parent`): which subagent ended and how, with its last
 message where its runtime doesn't hand that on (`ended`); a copy of each
-`friction` and `how_it_went`. Each is quiet (`Item.quiet`): told at the
+`friction` and `how_it_felt`. Each is quiet (`Item.quiet`): told at the
 parent's next call, its turn's or session's start, or by `wait_inbox`, but never
 holding a turn's end nor waking an idle session, since its runtime wakes an idle
 parent for its subagent's end already, and each end would otherwise cost the
@@ -163,7 +163,7 @@ from lup_dev.inbox.store import (
     Friction,
     HeldChange,
     How,
-    HowItWent,
+    HowItFelt,
     Inbox,
     InboxError,
     Item,
@@ -235,8 +235,8 @@ def what(item: Item) -> str:
             return f"a {kind}"
         case Friction():
             return "a friction"
-        case HowItWent():
-            return "how the work went"
+        case HowItFelt():
+            return "how it felt"
         case Stop():
             return "a stop by choice"
         case Ended(stopped=True):
@@ -267,7 +267,7 @@ def opening(item: Item) -> str:
         case (
             Message(text=text)
             | Friction(text=text)
-            | HowItWent(text=text)
+            | HowItFelt(text=text)
             | Stop(text=text)
             | Ended(text=text)
             | Question(text=text)
@@ -297,7 +297,7 @@ def body(item: Item) -> str:
         case (
             Message(text=text)
             | Friction(text=text)
-            | HowItWent(text=text)
+            | HowItFelt(text=text)
             | Stop(text=text)
             | Ended(text=text)
             | Approval(text=text)
@@ -381,7 +381,7 @@ type ItemKind = Literal[
     "disagreement",
     "question as a message",
     "friction",
-    "how it went",
+    "how it felt",
     "stop",
     "ended",
     "unresolved",
@@ -415,8 +415,8 @@ def kind(item: Item) -> ItemKind:
             return said
         case Friction():
             return "friction"
-        case HowItWent():
-            return "how it went"
+        case HowItFelt():
+            return "how it felt"
         case Stop():
             return "stop"
         case Ended():
@@ -495,7 +495,7 @@ def reviewable(item: Item) -> None:
             sender=Conversation(),
             reason=Message()
             | Friction()
-            | HowItWent()
+            | HowItFelt()
             | Stop()
             | Question()
             | Flagged(),
@@ -674,7 +674,7 @@ def answered_hold(item: Item, did: str, comment: str) -> str:
 
 
 def editable(item: Item, party: Conversation) -> str:
-    """Return the text of `item` its sender `party` may edit (`Delivery.edited`): its own words to the operator, a message's, a question's, a friction's, how it went's or a stop's; refuse any other, saying why."""
+    """Return the text of `item` its sender `party` may edit (`Delivery.edited`): its own words to the operator, a message's, a question's, a friction's, how it felt's or a stop's; refuse any other, saying why."""
     match item:
         case Item(sender=sender) if sender != party:
             message = f"{cited(item.number)} is {what(item)} from {who(sender)}: only its sender edits it"
@@ -696,7 +696,7 @@ def editable(item: Item, party: Conversation) -> str:
             reason=Message(text=text)
             | Question(text=text)
             | Friction(text=text)
-            | HowItWent(text=text)
+            | HowItFelt(text=text)
             | Stop(text=text),
         ):
             return text
@@ -708,7 +708,7 @@ def editable(item: Item, party: Conversation) -> str:
 def rewritten(reason: Reason, text: str) -> Reason:
     """Return `reason` with `text` for its words, where it's one an edit takes (`editable`); as it is for any other."""
     match reason:
-        case Message() | Question() | Friction() | HowItWent():
+        case Message() | Question() | Friction() | HowItFelt():
             return reason.model_copy(update={"text": text})
         case Stop():
             return reason.model_copy(update={"why": text})
@@ -1145,7 +1145,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case Item(
                 sender=Conversation() as sender,
                 recipient=Operator(),
-                reason=Message() | Friction() | HowItWent() | Stop() | Question(),
+                reason=Message() | Friction() | HowItFelt() | Stop() | Question(),
             ):
                 citations = resolved(body(item), self.said_to(sender))
                 if citations or item.citations:
@@ -1377,7 +1377,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
             case (
                 Friction()
-                | HowItWent()
+                | HowItFelt()
                 | Stop()
                 | Question()
                 | Approval()
@@ -2089,7 +2089,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         item = self.inbox.item(number)
         match item:
             case Item(
-                reason=Message() | Friction() | HowItWent() | Stop() | Flagged(),
+                reason=Message() | Friction() | HowItFelt() | Stop() | Flagged(),
                 sender=Conversation() as sender,
             ):
                 return await self.replied(item, sender, rulings, comment)
@@ -2209,7 +2209,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 approved = Decided(at=self.clock.now(), approved=True)
                 return self.inbox.kept(item.model_copy(update={"state": approved}))
             case Item(
-                reason=Message() | Friction() | HowItWent() | Stop(),
+                reason=Message() | Friction() | HowItFelt() | Stop(),
                 recipient=Operator(),
                 state=Waiting(),
             ):
@@ -2248,7 +2248,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 )
                 raise InboxError(message)
             case Item(
-                reason=Message() | Friction() | HowItWent() | Stop() | Question(),
+                reason=Message() | Friction() | HowItFelt() | Stop() | Question(),
                 recipient=Operator(),
                 state=Waiting(),
             ) if item.sender == party:

@@ -1,6 +1,6 @@
 [
   {
-    "name": "how the work went",
+    "name": "how it felt",
     "repository": "/r/lup.git",
     "argument": {
       "number": 58
@@ -10,7 +10,7 @@
         {
           "number": 58,
           "reason": {
-            "reason": "how it went",
+            "reason": "how it felt",
             "text": "Steady."
           },
           "sender": {
@@ -40,11 +40,11 @@
       ]
     },
     "module": "inbox",
-    "view": "how_it_went",
+    "view": "how_it_felt",
     "answer": {
       "summary": [
         {
-          "text": "how it went",
+          "text": "how it felt",
           "tone": "plain"
         }
       ],

@@ -1,5 +1,5 @@
 // The views of the items the agent-facing inbox carries (#113, step 4; `views.ts`): a message, a turn's last words
-// among them, a question with its decisions, a friction, how the work went, a stop by choice, a subagent's end, lup's
+// among them, a question with its decisions, a friction, how it felt, a stop by choice, a subagent's end, lup's
 // word on citations that named no passage, and the operator's own answers and reviews, which the review shows above
 // an agent's answer to them. Each a summary, what it is and, for a message between conversations, whom it went to; and
 // a body, its text as written, a question's decisions numbered with their leans. Pure.
@@ -23,7 +23,7 @@ function what(item: Item): string {
 }
 
 /**
- * Return an item's own text as the review shows it: a message's, a friction's or how the work went's words as written,
+ * Return an item's own text as the review shows it: a message's, a friction's or how it felt's words as written,
  * a question's with its decisions; a subagent's end's last message, where lup passed it on; lup's word on citations,
  * what each said; an answer's comment; a review's messages and comments.
  */
@@ -32,7 +32,7 @@ export function body(item: Item): string {
     switch (reason.reason) {
         case "message":
         case "friction":
-        case "how it went":
+        case "how it felt":
             return reason.text;
         case "stop":
             return reason.why;
@@ -89,7 +89,7 @@ function itemView(name: string, reason: Item["reason"]["reason"]): View<OfItem> 
 export const MESSAGE = itemView("message", "message");
 export const QUESTION = itemView("question", "question");
 export const FRICTION = itemView("friction", "friction");
-export const HOW_IT_WENT = itemView("how_it_went", "how it went");
+export const HOW_IT_FELT = itemView("how_it_felt", "how it felt");
 export const STOP = itemView("stop", "stop");
 export const ENDED = itemView("ended", "ended");
 export const UNRESOLVED = itemView("unresolved", "unresolved");
