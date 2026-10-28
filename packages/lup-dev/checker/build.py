@@ -9,7 +9,8 @@
    directory. Where none holds it, fetch it there, once: clone the release and
    install its dependencies with pnpm, from its lockfile, held to the package age
    pnpm's own settings keep.
-3. Link that source beside the engine as `pyright`, and install the engine's bundler.
+3. Link that source beside the engine as `pyright`, and install the engine's bundler
+   with pnpm, from its own lockfile.
 4. Type-check the engine and the rule table (`lup_dev/catalog/rules.ts`).
 5. Bundle them into `lup_dev/codescan/bundle/engine.js`, with the standard-library
    stubs at the same release beside it.
@@ -24,8 +25,9 @@ from pathlib import Path
 
 from filelock import FileLock
 
-from lup.programs import ProgramFailedError, run
+from lup.programs import ProgramFailedError, ProgramMissingError, run
 from lup.types import Model
+from lup_dev.declaration.package_managers.pnpm import PnpmManager
 from lup_dev.layout import Bundle, CheckoutLayout, Layout
 from lup_dev.pyright_source import Fetching, PyrightSourceError, Sources, pinned
 from lup_dev.settings import LupDevSettings
@@ -65,8 +67,7 @@ def fetch(sources: Sources, release: str) -> Path:
 
     The fetch holds the place's lock, so two builds fetching at once, a room's
     two worktrees or two rooms of the project, don't clone over each other: the
-    second finds the first's. pnpm is an optional requirement, needed only here,
-    so its absence is said here.
+    second finds the first's.
     """
     place = sources.fetched
     source = place.release(release)
@@ -75,12 +76,6 @@ def fetch(sources: Sources, release: str) -> Path:
         if place.installed(release).is_file():
             return source
         log.info("%s", sources.why(release))
-        if shutil.which("pnpm") is None:
-            message = (
-                f"build: pnpm 11 or later installs pyright {release}'s dependencies, "
-                "and isn't on the `PATH`: install it (https://pnpm.io/installation)"
-            )
-            raise SystemExit(message)
         fetching = Fetching(release=release)
         if not source.is_dir():
             partial = place.partial(release)
@@ -106,13 +101,18 @@ def link(places: Places, source: Path) -> None:
 
 
 def install_bundler(places: Places) -> None:
-    """Install the engine's own tools from its lockfile, when they're missing or old."""
-    lock = places.checker / "package-lock.json"
-    installed = places.checker / "node_modules" / ".package-lock.json"
-    if installed.is_file() and installed.stat().st_mtime >= lock.stat().st_mtime:
+    """Install the engine's own tools from its lockfile, where they're missing or older than it or its settings.
+
+    From scratch, its packages removed first (`PnpmManager.stale`): pnpm leaves
+    in place what it didn't install, another package manager's say, which would
+    resolve an import its lockfile doesn't hold.
+    """
+    pnpm = PnpmManager()
+    if not pnpm.stale(places.checker):
         return
     log.info("installing the engine's bundler")
-    run("npm", "ci", "--no-audit", "--no-fund", cwd=places.checker)
+    shutil.rmtree(places.checker / pnpm.modules, ignore_errors=True)
+    run(*pnpm.install(), cwd=places.checker)
 
 
 def bundle(places: Places, source: Path) -> None:
@@ -159,7 +159,7 @@ def main() -> None:
         link(places, source)
         install_bundler(places)
         bundle(places, source)
-    except PyrightSourceError as failure:
+    except (PyrightSourceError, ProgramMissingError) as failure:
         message = f"build: {failure}"
         raise SystemExit(message) from failure
     except ProgramFailedError as failure:

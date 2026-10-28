@@ -250,9 +250,9 @@ class PackageAge(Model):
     A release published with stolen credentials is usually found and pulled
     within hours: litellm 1.107.0's wheels were on PyPI for under two hours
     (2026-10-21). Three days lets that happen before a room installs one. The
-    launch writes it into npm's and uv's own user-level settings in the room's
-    home, which a project's own setting outranks either way (`docs/launch.md`,
-    *The package age gate*).
+    launch writes it into the user-level settings of each package manager the
+    room's image holds, in the room's home, which a project's own setting
+    outranks either way (`docs/launch.md`, *The package age gate*).
     """
 
     minimum: timedelta = timedelta(days=3)

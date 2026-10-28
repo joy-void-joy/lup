@@ -29,6 +29,17 @@ class PnpmManager(PackageManager):
     settings: ClassVar[Path] = Path(".config/pnpm/config.yaml")
     """Where pnpm reads its user-level settings, from the home, where no
     `XDG_CONFIG_HOME` says otherwise."""
+    lockfile: ClassVar[Path] = Path("pnpm-lock.yaml")
+    """A workspace's lockfile, from its root."""
+    workspace: ClassVar[Path] = Path("pnpm-workspace.yaml")
+    """A workspace's own settings, from its root: its package age, which
+    outranks the user's, among them."""
+    modules: ClassVar[Path] = Path("node_modules")
+    """Where a workspace's packages are installed, from its root."""
+    installed: ClassVar[Path] = modules / ".pnpm" / "lock.yaml"
+    """pnpm's copy of the lockfile a workspace's packages were installed from,
+    from its root: written by an install that changes them, and left as it was
+    by one finding them up to date."""
 
     @override
     def aged(self, root: Path, age: timedelta) -> HomeSettings | Ungated:
@@ -53,3 +64,20 @@ class PnpmManager(PackageManager):
         ['pnpm', 'install', '--frozen-lockfile', '--filter', 'core']
         """
         return ["pnpm", "install", "--frozen-lockfile", *arguments]
+
+    def stale(self, root: Path) -> bool:
+        """Say whether the workspace at `root` needs installing: its packages missing, or installed before its lockfile or its settings last changed.
+
+        An install finding the packages up to date leaves pnpm's copy of the
+        lockfile as it was, so a build reinstalls from scratch, its packages
+        removed first, for the copy to be newer than both.
+        """
+        installed = root / self.installed
+        if not installed.is_file():
+            return True
+        since = installed.stat().st_mtime
+        return any(
+            each.stat().st_mtime > since
+            for each in [root / self.lockfile, root / self.workspace]
+            if each.is_file()
+        )

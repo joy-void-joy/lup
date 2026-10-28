@@ -662,6 +662,19 @@ No podman in a room, so the image step's commands were measured outside one: `fe
 - **A room's fetch:** `build.py` run with `LUP_ROOM_PYRIGHT` naming a scratch directory, and a home holding the settings `PnpmManager` writes, said once what it fetched and why, and took 13.8 s to fetch, install, type-check and bundle. It left the release and its lock alone in that directory. The next build found it and fetched nothing.
 - **The pin:** `uv.lock` has pinned pyright 1.1.414 since the workspace began, 2026-10-07.
 
+## lup's own Node projects under pnpm (pnpm 11.3.0 and 12.15.0, npm 12.0.2, Node 26.7.0, measured in a room 2026-10-27)
+
+The engine's bundler (`packages/lup-dev/checker/`) and the dashboard's page (`packages/lup-dashboard/page/`), in scratch copies, with their own XDG directories; Arch's pnpm 11.3.0 unless said.
+- **`pnpm import`** turned each `package-lock.json` into a `pnpm-lock.yaml` (lockfile 9.0) holding the same entries at the same versions and integrity hashes: the engine's 27 in 1.7 s, the page's 168 in 7.3 s. It wrote the same bytes with the project's `pnpm-workspace.yaml` there or not, and changed neither manifest.
+- **A frozen install:** the engine's 2 packages in 0.5 s; the page's 143 in 8 s with the store empty, 5.2 s of it checking its 168 entries against the age, and 0.9 s with the store full. A check passed is kept in `$XDG_CACHE_HOME/pnpm/lockfile-verified.jsonl`, and the same lockfile under the same policy isn't checked again.
+- **The package age holds a frozen lockfile:** at five years in a project's `pnpm-workspace.yaml`, 11.3.0, running as itself, refused both projects with its cache empty or full ("The lockfile contains entries that the active policies reject"), status 1, installing nothing; 12.15.0 the same.
+- **Install scripts:** 11.3.0 and 12.15.0 fail an install where a package has a script it's told neither to run nor to skip (`strictDepBuilds`, on by default): "ERR_PNPM_IGNORED_BUILDS: Ignored build scripts: esbuild@0.28.2", status 1, after installing. `allowBuilds: {esbuild: false}` lets it through, and esbuild 0.28.2 runs without its script, from its platform's package (`@esbuild/linux-x64`). No package of the page has a script.
+- **`saveExact: true`** in `pnpm-workspace.yaml` held: `pnpm add -D is-number` wrote `"7.0.0"`.
+- **The page built on pnpm's `node_modules`:** its types generated, type-checked, its 215 tests passed, and vite's build was byte-identical to one built on npm's `node_modules`. npm's held the lock's packages but the other platforms' optional ones.
+- **What an install leaves:** a frozen install over npm's `node_modules` passed and left npm's packages hoisted beside pnpm's links, with its `.package-lock.json`: an import the lockfile doesn't hold would resolve. An install finding the packages up to date rewrites neither `node_modules/.pnpm/lock.yaml` nor `node_modules/.modules.yaml`, so a lockfile touched since stays newer than both. One installed against another store was "Already up to date".
+- **pnpm 12.15.0** (published 2026-10-21) was run through 11.3.0's switch to the release a manifest's `packageManager` names: it checked the engine's 27 entries in 0.4 s and the page's 168 in 1.3 s. The switch put a document of its own before the lockfile's, naming the release; past it, both lockfiles were as written.
+- **Arch's `pnpm` 11.3.0 depends on `node-gyp`, not npm,** and nothing else in lup's room image requires npm.
+
 ## Tools (ruff 0.16.10, pyright 1.1.414, 2026-10-07)
 
 - ruff 0.16.10 and pyright 1.1.414 resolve an extended base's relative paths from the base's own directory, so a base under `.lup/settings/` writes `../../`;

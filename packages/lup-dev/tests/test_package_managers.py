@@ -1,5 +1,6 @@
 """Each package manager lup knows: its package, and the user-level settings keeping the package age, from the project's own files."""
 
+import os
 import tomllib
 from datetime import timedelta
 from pathlib import Path
@@ -56,6 +57,59 @@ def test_pnpm_keeps_the_age_in_minutes_in_its_config_whatever_the_project(
     written = settings(PnpmManager().aged(tmp_path, age))
     assert written.path == Path(".config/pnpm/config.yaml")
     assert written.text.splitlines()[1:] == [line]
+
+
+def installed_at(root: Path, times: dict[Path, int]) -> None:
+    """Write each of a workspace's files at `root`, last changed at its time, in seconds."""
+    for path, seconds in times.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text("")
+        os.utime(root / path, (seconds, seconds))
+
+
+@pytest.mark.parametrize(
+    ("times", "stale"),
+    [
+        pytest.param({PnpmManager.lockfile: 1}, True, id="never-installed"),
+        pytest.param(
+            {
+                PnpmManager.lockfile: 1,
+                PnpmManager.workspace: 1,
+                PnpmManager.installed: 2,
+            },
+            False,
+            id="installed-after-both",
+        ),
+        pytest.param(
+            {PnpmManager.lockfile: 1, PnpmManager.installed: 1},
+            False,
+            id="installed-as-it-changed",
+        ),
+        pytest.param(
+            {
+                PnpmManager.lockfile: 3,
+                PnpmManager.workspace: 1,
+                PnpmManager.installed: 2,
+            },
+            True,
+            id="lockfile-changed-since",
+        ),
+        pytest.param(
+            {
+                PnpmManager.lockfile: 1,
+                PnpmManager.workspace: 3,
+                PnpmManager.installed: 2,
+            },
+            True,
+            id="settings-changed-since",
+        ),
+    ],
+)
+def test_a_pnpm_workspace_is_stale_where_installed_before_its_lockfile_or_settings(
+    tmp_path: Path, times: dict[Path, int], *, stale: bool
+) -> None:
+    installed_at(tmp_path, times)
+    assert PnpmManager().stale(tmp_path) is stale
 
 
 @pytest.mark.parametrize(

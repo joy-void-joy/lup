@@ -204,15 +204,12 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
     [selected] = resolved.rules
     lups = selected.rules.operations[len(selected.default.operations) :]
     assert [operation.verb for operation in lups] == ["add"]
-    assert ("lup-development", "npm") in [
-        (each.module, each.requirement.tool) for each in resolved.requirements
-    ]
-    assert [each.name for each in resolved.packages][-4:] == [
-        "nodejs",
-        "npm",
-        "pnpm",
-        "uv",
-    ]
+    assert [
+        (each.requirement.tool, each.requirement.optional)
+        for each in resolved.requirements
+        if each.module == "lup-development"
+    ] == [("pnpm", False)]
+    assert [each.name for each in resolved.packages][-3:] == ["nodejs", "pnpm", "uv"]
     assert resolved.pyright_source is not None
     assert [each.name for each in resolved.guidance] == [
         "core",

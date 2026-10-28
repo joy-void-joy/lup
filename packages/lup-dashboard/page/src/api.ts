@@ -1,5 +1,5 @@
 // The dashboard's API as the page calls it: the host's requests, asked or watched.
-// Their types are generated from the server's own description (`npm run types`),
+// Their types are generated from the server's own description (`pnpm run types`),
 // itself made from the host's models, so the page and the host can't disagree.
 import type { paths } from "./generated/api";
 
