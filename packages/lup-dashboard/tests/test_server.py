@@ -572,7 +572,9 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
         "kept": [],
     }
     assert left.json()["draft"] == {
-        "comments": [{"item": 53, "quote": None, "on": None, "text": "Later."}],
+        "comments": [
+            {"id": "", "item": 53, "quote": None, "on": None, "text": "Later."}
+        ],
         "letters": [],
         "remarks": [],
         "done": [],

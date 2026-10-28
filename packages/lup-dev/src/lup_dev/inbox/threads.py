@@ -160,17 +160,28 @@ def cue(text: str, longest: int = 80) -> str:
 
 
 def located(parts: list[Part], text: str, quote: Quote) -> Part | None:
-    r"""Return the part of `text`, split into `parts`, that `quote` starts in: by its offsets where they read `quote.text` there, as the dashboard showed the text; else by its first line, where one part alone holds it; none where neither finds it.
+    r"""Return the part of `text`, split into `parts`, that `quote` starts in: by where it is, where that reads `quote.text` there, as the dashboard showed the text; else by its first line, where one part alone holds it; none where neither finds it.
+
+    Where it is: its lines' place in `text`, the block it names being the
+    item's text, where those lines stand there, and where it starts in them
+    (`starting`); a quote naming no block, kept from before quotes did, by
+    its offsets.
 
     >>> parts = blocks("One.\n\nTwo.\n", 4)
     >>> located(parts, "One.\n\nTwo.\n", Quote(text="Two.", start=6, end=10)).id
     PartId(item=4, part=2)
+    >>> on = Quote(text="Two.", block="b text", line=2, lines=["Two."], start=0, end=4)
+    >>> located(parts, "One.\n\nTwo.\n", on).id
+    PartId(item=4, part=2)
     >>> located(parts, "One.\n\nTwo.\n", Quote(text="a.py:7\n+L7", start=6, end=10))
     """
-    if text.startswith(quote.text, quote.start) and quote.end == quote.start + len(
-        quote.text
+    start = starting(text, quote)
+    if (
+        start is not None
+        and text.startswith(quote.text, start)
+        and quote.end - quote.start == len(quote.text)
     ):
-        return next((each for each in parts if each.end > quote.start), None)
+        return next((each for each in parts if each.end > start), None)
     line = next(iter(quote.text.splitlines()), "")
     holding = [each for each in parts if line and line in each.text]
     match holding:
@@ -178,6 +189,21 @@ def located(parts: list[Part], text: str, quote: Quote) -> Part | None:
             return found
         case _:
             return None
+
+
+def starting(text: str, quote: Quote) -> int | None:
+    r"""Return where `quote` starts in `text`: after the lines before its first, where its lines stand there, a quote naming its block; at its offset, one naming none; none where its lines don't stand there.
+
+    >>> starting("a\nbc\nd", Quote(text="c", block="b", line=1, lines=["bc"], start=1, end=2))
+    3
+    >>> starting("a\nxx", Quote(text="c", block="b", line=1, lines=["bc"], start=1, end=2))
+    """
+    if not quote.block:
+        return quote.start
+    lines = text.splitlines()
+    if lines[quote.line : quote.line + len(quote.lines)] != quote.lines:
+        return None
+    return sum(len(each) + 1 for each in lines[: quote.line]) + quote.start
 
 
 def parts_of(item: Item, text: str) -> list[Part]:
