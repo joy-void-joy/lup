@@ -2287,6 +2287,7 @@ def account_migrate(
                 directory=each.directory,
                 records=each.records,
                 written=each.written,
+                recorded=each.recorded,
             )
             for each in adapters()
         ],

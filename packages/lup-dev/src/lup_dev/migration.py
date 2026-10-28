@@ -42,6 +42,7 @@ from lup.types import Model
 from lup_dev.errors import LupDevError
 from lup_dev.gate import running
 from lup_dev.git import Git
+from lup_dev.host.homes import kept
 from lup_dev.host.protocol import Register
 from lup_dev.host.records import Record, Records
 from lup_dev.host.written import Places, counted
@@ -97,6 +98,8 @@ class Moved(Model):
     """The bytes its files hold."""
     links: int = 0
     left: list[Left] = []
+    placed: list[PurePosixPath] = []
+    """Each file of it moved, or that would be, at its place in the home."""
 
     def said(self) -> str:
         """Say what of the record moves, in a line.
@@ -118,6 +121,7 @@ class Moved(Model):
             files=sum(1 for each in steps if each.kind == "file"),
             size=sum(each.size for each in steps if each.kind == "file"),
             links=sum(1 for each in steps if each.kind == "link"),
+            placed=[each.place for each in steps if each.kind == "file"],
             left=[
                 Left(place=each.place, why=each.why or "left")
                 for each in steps
@@ -524,6 +528,9 @@ class HostRuntime(Model, arbitrary_types_allowed=True):
     directory: Path
     records: Records
     written: Callable[[Places], list[str]]
+    recorded: Callable[[PurePosixPath], str | None]
+    """The session whose own record is at a place, by the runtime's name for
+    it there; none for any other place."""
 
 
 class Migrating(Model, arbitrary_types_allowed=True):
@@ -648,6 +655,24 @@ class Migrating(Model, arbitrary_types_allowed=True):
         size = sum(each.size for each in moved)
         left = [part for each in moved for part in each.left]
         done = "moved" if move else "would move"
+        sessions = [
+            session
+            for each in moved
+            for place in each.placed
+            if (session := adapter.recorded(place)) is not None
+        ]
+        if move:
+            for session in sessions:
+                kept(self.layout.host, runtime, session, home, adapter.records)
+        reads = "The host reads" if move else "The host would read"
+        theirs = (
+            "its session there from then on, as a room resuming it does."
+            if len(sessions) == 1
+            else (
+                f"its {len(sessions)} sessions there from then on, as a room "
+                "resuming one does."
+            )
+        )
         return [
             (
                 f"{runtime}: {counted(len(records), 'record', 'records')} of this "
@@ -656,6 +681,7 @@ class Migrating(Model, arbitrary_types_allowed=True):
                 "where its rooms resume them:"
             ),
             *(f"- {each.said()}" for each in moved),
+            *([f"{reads} {theirs}"] if sessions else []),
             *(
                 [
                     f"Left in {shown}, {counted(len(left), 'thing', 'things')}:",

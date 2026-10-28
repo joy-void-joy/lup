@@ -237,6 +237,7 @@ unavailable; a launch runs what's kept instead.
 
 import shlex
 import tomllib
+import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -1167,6 +1168,28 @@ class CodexRecords(Model, Records):
         return [record for home in held for record in kept_in(home, under)]
 
 
+def session_at(place: PurePosixPath) -> str | None:
+    """Return the thread whose own rollout is at `place` in one of Codex's homes, `sessions/…/rollout-<time>-<thread id>.jsonl`, the id a UUID, as `CodexRecords.conversation` finds it; none for any other place.
+
+    >>> session_at(PurePosixPath("sessions/2026/10/28/rollout-2026-10-28T09-00-00-019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b.jsonl"))
+    '019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b'
+    >>> session_at(PurePosixPath("sessions/2026/10/28/rollout-x.jsonl")) is None
+    True
+    """
+    match place.parts:
+        case ("sessions", *_, file) if PurePosixPath(file).suffix == ".jsonl":
+            stem = PurePosixPath(file).stem
+        case _:
+            return None
+    # lup: ignore("string-slice", why="Codex names a rollout by its time and its thread's id, a UUID's 36 characters at the end of the name, which `uuid.UUID` then reads")
+    thread = stem[-36:]
+    try:
+        uuid.UUID(thread)
+    except ValueError:
+        return None
+    return thread if stem.endswith(f"-{thread}") else None
+
+
 def kept_in(home: Home, under: list[Path]) -> list[Record]:
     """Return the rollouts in one of Codex's homes of the sessions that ran under `under`, each by its path under `sessions/`.
 
@@ -1934,6 +1957,7 @@ def adapter() -> Adapter:
         records=CodexRecords(home=home, host=machine.host, homes=machine.homes),
         directory=home,
         written=CodexWritten(home=home).checked,
+        recorded=session_at,
         reader=CodexTranscripts(),
         queues=None,
     )

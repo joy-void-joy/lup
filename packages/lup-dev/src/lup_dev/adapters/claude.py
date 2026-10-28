@@ -1802,6 +1802,21 @@ class ClaudeRecords(Model, Records):
         return [record for home in held for record in kept_in(home, under)]
 
 
+def session_at(place: PurePosixPath) -> str | None:
+    """Return the session whose own record is at `place` in one of Claude Code's homes, `projects/<folder>/<id>.jsonl`, as `ClaudeRecords.conversation` finds it; none for any other place.
+
+    >>> session_at(PurePosixPath("projects/-w/8f2c.jsonl")), session_at(PurePosixPath("projects/-w/8f2c/subagents/agent-a.jsonl"))
+    ('8f2c', None)
+    """
+    match place.parts:
+        case ("projects", _, name) if PurePosixPath(name).suffix == ".jsonl" and plain(
+            PurePosixPath(name).stem
+        ):
+            return PurePosixPath(name).stem
+        case _:
+            return None
+
+
 def kept_in(home: Home, under: list[Path]) -> list[Record]:
     """Return the records in one of Claude Code's homes of the sessions that ran under `under`: each folder of `projects/` they ran in, named for the directory its sessions say (`filed`), and each of their sessions' `file-history/`."""
     directory = home.directory
@@ -3356,6 +3371,7 @@ def adapter() -> Adapter:
         records=records,
         directory=layout.directory,
         written=ClaudeWritten(directory=layout.directory).checked,
+        recorded=session_at,
         reader=ClaudeTranscripts(settings=layout.settings, layout=machine),
         queues=ClaudeQueues(records=records),
     )

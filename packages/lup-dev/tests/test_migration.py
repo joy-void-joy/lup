@@ -21,6 +21,8 @@ from lup_dev.adapters import Adapter, claude, codex
 from lup_dev.adapters.claude import ClaudeRecords, ClaudeWritten, folder_named
 from lup_dev.adapters.codex import CodexRecords, CodexWritten
 from lup_dev.approval import Approval, ReleaseTool
+from lup_dev.host.homes import Found, home_of
+from lup_dev.host.homes import kept as hostkept
 from lup_dev.host.protocol import Limits, Register
 from lup_dev.host.records import Record
 from lup_dev.host.written import Places
@@ -77,8 +79,16 @@ def test_a_dry_run_says_what_would_move_and_changes_nothing(
     home = tmp_path / "home"
     moved = migration(directory, home).moved(dry=True)
     assert moved == [
-        Moved(place=FOLDER, files=2, size=34),
-        Moved(place=HISTORY, files=1, size=6),
+        Moved(
+            place=FOLDER,
+            files=2,
+            size=34,
+            placed=[
+                FOLDER / "s1" / "subagents" / "agent-a1.jsonl",
+                FOLDER / "s1.jsonl",
+            ],
+        ),
+        Moved(place=HISTORY, files=1, size=6, placed=[HISTORY / "f@v1"]),
     ]
     assert not home.exists()
     assert (directory / FOLDER / "s1.jsonl").is_file()
@@ -338,6 +348,7 @@ def hosts(adapters: list[Adapter]) -> list[HostRuntime]:
             directory=each.directory,
             records=each.records,
             written=each.written,
+            recorded=each.recorded,
         )
         for each in adapters
     ]
@@ -367,7 +378,7 @@ def test_a_repository_s_sessions_move_into_its_rooms_home_and_the_rest_stay(
         "every room could write those too, so a session resumed from one on the "
         "host resumes what a room may have changed."
     )
-    assert dry[:6] == [
+    assert dry[:7] == [
         (
             "A dry run: nothing moves until `lup-dev account migrate --move`. End "
             "every session of this repository first, in a room or on the host: one "
@@ -379,6 +390,7 @@ def test_a_repository_s_sessions_move_into_its_rooms_home_and_the_rest_stay(
         ),
         f"- projects/{ours.name}: 1 file, {size - 6} B",
         "- file-history/s1: 1 file, 6 B",
+        "The host would read its session there from then on, as a room resuming it does.",
         stays,
         "codex: ~/.codex isn't there, so nothing of it moves.",
     ]
@@ -396,9 +408,32 @@ def test_a_repository_s_sessions_move_into_its_rooms_home_and_the_rest_stay(
     assert (home / "file-history" / "s1" / "f@v1").read_text() == "before"
     assert (operator / ".claude" / "projects" / "-w-other" / "s2.jsonl").is_file()
     assert not ours.exists()
-    # Moved, the operator's directory holds none of the session, so the host
-    # keeps the home a room's hook first names for it (`lup_dev.host.homes`).
+    # Moved, the operator's directory holds none of the session, and the
+    # migration keeps its home, so the host reads it there, as a room resuming
+    # it has it, and a room of another project naming it first can't claim it.
     assert not ClaudeRecords(directory=operator / ".claude").held("s1")
+    assert ClaudeRecords(directory=operator / ".claude", host=state.host).conversation(
+        "s1", None
+    ) == Found(record=home / "projects" / ours.name / "s1.jsonl", root=home)
+    elsewhere = state.homes.project(Path("/w/other.git"), "claude")
+    hostkept(state.host, "claude", "s1", elsewhere)
+    assert home_of(state.host, "claude", "s1") == home
+
+
+def test_a_session_whose_record_stays_with_the_operator_keeps_no_home(
+    bare: Path, state: Layout, operator: Path, hosts: list[HostRuntime]
+) -> None:
+    ours = sessions_of(bare, operator)
+    home = state.room_home(bare, "claude", shared=False)
+    written(home / "projects" / ours.name / "s1.jsonl", "a room's own\n")
+    Migrating(layout=state, repository=bare, runtimes=hosts, home=operator).said(
+        move=True
+    )
+    assert (ours / "s1.jsonl").is_file()
+    assert home_of(state.host, "claude", "s1") is None
+    assert ClaudeRecords(directory=operator / ".claude", host=state.host).conversation(
+        "s1", None
+    ) == Found(record=ours / "s1.jsonl", root=operator / ".claude")
 
 
 def test_a_move_waits_on_each_launch_of_the_repository_still_running(

@@ -8,7 +8,7 @@ them.
 
 from collections.abc import Callable
 from datetime import timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from lup.events import SessionEvent
 from lup.sessions.declaration import Declaration
@@ -87,6 +87,11 @@ class Adapter(Model, arbitrary_types_allowed=True):
     thing there that runs, loads or acts without asking on the host, what of it
     looks planted, and what to do, its login among them
     (`lup_dev.host.written`)."""
+    recorded: Callable[[PurePosixPath], str | None]
+    """Says whose own record is at a place in one of its homes: the session's
+    id, by the name it files the record under there, as `records` finds it;
+    none for any other place. What lup moves into a home on the host keeps
+    that home for each session it moved (`lup_dev.migration`)."""
     reader: Reader
     """Reads the copies of its records: which are sessions, and what was said in each."""
     queues: Queues | None
