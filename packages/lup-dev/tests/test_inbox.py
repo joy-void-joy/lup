@@ -2954,7 +2954,7 @@ def test_a_record_a_hook_names_under_another_launch_s_own_directory_is_read_nowh
         told = context(send(hook2, planted))
         own = context(send(hook, theirs.call("a1", "Explore", "c2")))
     assert told.startswith(introduction())
-    assert "lup: this subagent is `second/Explore·a1` for now" in told
+    assert "lup: you're `second/Explore·a1` for now" in told
     assert own == introduction()
 
 
