@@ -88,9 +88,11 @@ def test_a_session_is_chosen_by_its_id_its_ids_start_or_its_name() -> None:
 
 def test_each_session_says_whose_home_its_record_was_kept_from() -> None:
     room = session([Said(by="operator", text="Land it.", at=at(5))], whose="rooms")
-    shared = room.model_copy(update={"whose": "shared"})
-    lines = views.listed([TALK, room, shared])
-    assert lines[0].endswith("in /w/lup.git/tree/dev, kept from the home rooms share")
+    related = room.model_copy(update={"repository": "atlas", "whose": "shared"})
+    lines = views.listed([TALK, room, related])
+    assert lines[0].endswith(
+        "in /w/lup.git/tree/dev (atlas), kept from the home rooms share"
+    )
     assert lines[1].endswith("in /w/lup.git/tree/dev, kept from a room's home")
     assert lines[2].endswith("in /w/lup.git/tree/dev, kept from your own directory")
     assert ", kept from a room's home, which rooms write\n" in views.answered(room)

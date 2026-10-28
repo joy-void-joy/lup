@@ -5,7 +5,8 @@ come first: a past session is read for what they said and what they were
 answering, which is where a design's reasons are; the whole conversation, the
 agent's text with each run of tool calls folded to a line, is there for what
 happened between. Each says whose home its record was kept from, since what a
-room's says is the room's word for it.
+room's says is the room's word for it, and which other repository it's of,
+where it's one the declaration names beside the project.
 """
 
 from datetime import UTC, datetime
@@ -21,10 +22,13 @@ class TranscriptError(LupTranscriptsError):
 
 
 class Session(Model):
-    """A kept session: what its record says, and whose home it was kept from."""
+    """A kept session: what its record says, whose home it was kept from, and the other repository it's of, where it's one the declaration names beside the project."""
 
     transcript: Transcript
     whose: Whose
+    repository: str | None = None
+    """The related repository's name, as its copies are kept under; none for
+    the project's own."""
 
 
 def kept_from(whose: Whose) -> str:
@@ -43,8 +47,15 @@ def kept_from(whose: Whose) -> str:
 
 
 def where(session: Session) -> str:
-    """Say where a session ran; `?` where its record doesn't say."""
-    return f"{session.transcript.directory or '?'}"
+    """Say where a session ran, and of which other repository, where it's a related one's; `?` where its record doesn't say.
+
+    >>> where(Session(transcript=Transcript(runtime="r", session="s"), whose="host", repository="atlas"))
+    '? (atlas)'
+    """
+    directory = f"{session.transcript.directory or '?'}"
+    if session.repository is None:
+        return directory
+    return f"{directory} ({session.repository})"
 
 
 def when(at: datetime | None) -> str:

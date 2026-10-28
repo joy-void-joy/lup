@@ -18,7 +18,7 @@ from lup.programs import run
 from lup_dev import Modules, Project
 from lup_dev.declaration.kinds import Folds
 from lup_dev.declaration.resolve import resolve
-from lup_dev.declaration.serving import Lup, Operator, Publisher, Room
+from lup_dev.declaration.serving import Lup, Operator, Publisher, Related, Room
 from lup_dev.host.client import FromRoom, RoomClient
 from lup_dev.host.protocol import HostError, Limits, Register, Reply, Request
 from lup_dev.host.records import Call as RecordedCall
@@ -263,6 +263,7 @@ class Asked(RoomClient):
 def transcripts(
     data: Path,
     records: dict[str, Records],
+    related: list[Related] | None = None,
     room: RoomClient | None = None,
 ) -> TranscriptsServing:
     asking = FromRoom(room=room or Asked(refusal="no host here"))
@@ -273,7 +274,7 @@ def transcripts(
             for runtime, each in records.items()
         },
         data=data,
-        related=[],
+        related=related or [],
         publisher=Unpublished(),
         exchanges=Unexchanged(),
         room=asking,
@@ -338,6 +339,31 @@ def test_a_room_s_file_the_host_s_copy_matches_is_kept_once_until_the_room_chang
     assert (
         "the room's" in (copies / "rooms" / "projects" / "p" / "s1.jsonl").read_text()
     )
+
+
+def test_each_related_repository_s_sessions_are_kept_under_its_name(
+    repo: Path, tmp_path: Path
+) -> None:
+    atlas = tmp_path / "atlas.git"
+    atlas.mkdir()
+    ours = folder(tmp_path / "own" / "projects" / "p")
+    theirs = folder(tmp_path / "elsewhere" / "projects" / "q")
+    lines(ours.source / "s1.jsonl", {"n": 1})
+    lines(theirs.source / "s2.jsonl", {"n": 2})
+    held = Held(ours, theirs)
+    related = [
+        Related(name="atlas", path=Path("/elsewhere"), github=None),
+        Related(name="../odd", path=atlas, github=None),
+    ]
+    data = tmp_path / "data"
+    serving = transcripts(data, {"claude": held}, related=related)
+    asyncio.run(serving.keep(lup.Launched(), by=Lup(launch=launched(repo, tmp_path))))
+    copy = data / "related" / "atlas" / "claude" / "host" / "projects" / "q"
+    assert (copy / "s2.jsonl").is_file()
+    assert held.repositories[1:] == [Path("/elsewhere"), atlas]
+    assert held.asked[1] == [Path("/elsewhere"), Path("/elsewhere")]
+    [odd] = [each.name for each in (data / "related").iterdir() if each.name != "atlas"]
+    assert len(odd) == 64
 
 
 class Every2(RecordsReader):

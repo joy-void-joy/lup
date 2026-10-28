@@ -1,4 +1,4 @@
-"""What `Transcripts` serves: copying each session's record of the repository when a launch opens, when it stops and before a room reads them, and reading the copies.
+"""What `Transcripts` serves: copying each session's record of the repository and of each related repository when a launch opens, when it stops and before a room reads them, and reading the copies.
 
 The launch's runtime says which of its records are the repository's sessions'
 (`Records.kept`), from the directories they ran in: the repository's git
@@ -7,7 +7,10 @@ operator's own directory, the repository's rooms' home, or the one every
 project's rooms share. Each record is copied into the module's own data
 directory for the repository, under the runtime's name and then whose home it
 was kept in (`host/`, `rooms/`, `shared/`), so a room's record and the host's
-never meet, laid out as the runtime lays them out. A file is copied where the
+never meet, laid out as the runtime lays them out. Each repository the
+declaration names beside the project has its sessions' copies under
+`related/<its name>/`, laid out the same (`TranscriptsServing.places`). A file
+is copied where the
 copy is missing, or differs in size or time from the record, so what the
 runtime has added or grown since the last copy is copied, and what's unchanged
 isn't read again; a room's file matching the host's copy at the same place, as
@@ -39,20 +42,23 @@ import asyncio
 import os
 import shutil
 from datetime import timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Literal, get_args
 
 from pydantic import Field
 
 import lup
 from lup.blocks import FoldKind, OfAgent
+from lup.rooms.homes import plain
 from lup.types import Model
 from lup_dev.confined import Confined
-from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Room
-from lup_dev.git import Git
+from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Related, Room
+from lup_dev.git import Git, GitError
 from lup_dev.host.client import FromRoom, RoomClient
 from lup_dev.host.protocol import HostError, Reply, Request
 from lup_dev.host.records import Home, Whose
 from lup_dev.inbox.context import Recording
+from lup_dev.layout import digest
 from lup_transcripts.environment import views
 from lup_transcripts.environment.conversation import (
     EARLIER_KIND,
@@ -65,9 +71,7 @@ from lup_transcripts.environment.conversation import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from lup_dev.host.records import Record
+    from lup_dev.host.records import Record, Records
     from lup_transcripts.environment.module import Transcripts
 
 
@@ -240,8 +244,38 @@ def into(records: list[Record], copies: Path) -> int:
     )
 
 
+class Place(Model):
+    """A repository whose sessions' records are kept, and where their copies go."""
+
+    repository: Path
+    """Its git directory."""
+    under: list[Path]
+    """The directories its sessions run in: its git directory and each of its
+    worktrees."""
+    copies: Path
+    """Where its records' copies are kept, a directory per runtime."""
+
+
+def related_place(other: Related, copies: Path) -> Place:
+    """Return where the records of `other`, a repository the declaration names beside the project, are kept: under `copies`, by its name where that's a plain name, else by its path's digest.
+
+    Its git directory is its `.git` where it's a clone's working tree, else
+    its own directory, as a bare repository's is. Where git can't list its
+    worktrees, as for one that isn't on the host, its sessions are those that
+    ran under its path, which the records the host still holds of it may name.
+    """
+    dotted = other.path / ".git"
+    repository = dotted if dotted.is_dir() else other.path
+    try:
+        under = [repository, *Git.pinned(repository).worktrees()]
+    except GitError:
+        under = [repository, other.path]
+    named = other.name if plain(other.name) else digest(other.path)
+    return Place(repository=repository, under=under, copies=copies / named)
+
+
 class TranscriptsServing(ModuleServing):
-    """Keeping the repository's sessions' records: what each runtime added or grew, when a launch opens, when it stops, and before a room reads them."""
+    """Keeping the repository's sessions' records, and each related repository's: what each runtime added or grew, when a launch opens, when it stops, and before a room reads them."""
 
     module: Transcripts
     room: FromRoom = Field(default_factory=lambda: FromRoom(room=RoomClient()))
@@ -252,28 +286,42 @@ class TranscriptsServing(ModuleServing):
     """Each conversation's record as last read, kept across calls in the
     repository's process, so a record unchanged since isn't read again."""
 
+    def places(self, repository: Path) -> list[Place]:
+        """Return the repository whose git directory is `repository`, and each the declaration names beside it, with where each one's copies go."""
+        own = Place(
+            repository=repository,
+            under=[repository, *Git.pinned(repository).worktrees()],
+            copies=self.data,
+        )
+        return [
+            own,
+            *(related_place(each, self.data / "related") for each in self.related),
+        ]
+
     def keeping(self, repository: Path, runtimes: list[str]) -> int:
-        """Copy what each of `runtimes` added or grew of its records of the repository whose git directory is `repository` since the last copy; return how many files were copied."""
-        under = [repository, *Git.pinned(repository).worktrees()]
+        """Copy what each of `runtimes` added or grew of its records of the repository whose git directory is `repository`, and of each related repository, since the last copy; return how many files were copied."""
+
+        def of(records: Records, place: Place, runtime: str) -> int:
+            kept = records.kept(place.under, place.repository)
+            return into(kept, place.copies / runtime)
+
         return sum(
-            into(
-                self.recorded[runtime].records.kept(under, repository),
-                self.data / runtime,
-            )
+            of(self.recorded[runtime].records, place, runtime)
+            for place in self.places(repository)
             for runtime in runtimes
         )
 
     @lup.on(lup.Launched)
     @lup.on(lup.Stopped)
     async def keep(self, event: lup.Launched | lup.Stopped, by: Lup) -> None:
-        """Copy every record of the repository's sessions the launch's runtime added or grew since the last copy."""
+        """Copy every record of the repository's sessions, and of each related repository's, the launch's runtime added or grew since the last copy."""
         del event
         launch = by.launch
         await asyncio.to_thread(self.keeping, launch.repository, [launch.runtime])
 
     @lup.request
     async def refresh(self, asked: Keep, by: Room) -> Kept:
-        """Copy what every runtime added or grew of the records of the room's repository's sessions, as a room asks before it reads the copies."""
+        """Copy what every runtime added or grew of the records of the room's repository's sessions, and of each related repository's, as a room asks before it reads the copies."""
         del asked
         runtimes = list(self.recorded)
         count = await asyncio.to_thread(self.keeping, by.launch.repository, runtimes)
@@ -297,10 +345,19 @@ class TranscriptsServing(ModuleServing):
         return ""
 
     def kept(self) -> list[views.Session]:
-        """Read every session kept of the repository, of every runtime whose records the module reads, each with whose home its record was kept from: under its runtime's name and whose home it was kept in, or kept there as each runtime's were before each home's had its own place, as the host's."""
+        """Read every session kept of the repository, and of each related repository, of every runtime whose records the module reads, each with whose home its record was kept from."""
+        related = self.data / "related"
+        others = sorted(related.iterdir()) if related.is_dir() else []
+        return [
+            *self.read(self.data, None),
+            *(each for other in others for each in self.read(other, other.name)),
+        ]
+
+    def read(self, copies: Path, repository: str | None) -> list[views.Session]:
+        """Read the sessions kept at `copies`, under each runtime's name and whose home each was kept in, and kept there as each runtime's were before each home's had its own place, as the host's; `repository` names the related repository they're of, none for the project's own."""
 
         def held(runtime: str) -> list[Home]:
-            folder = self.data / runtime
+            folder = copies / runtime
             return [
                 *(Home(directory=folder / whose, whose=whose) for whose in WHOSE),
                 # lup: defer(issue=324, why="copies an approved copy from before kept flat are read as the host's, from a room on newer code, until that host keeps them by home (`relaid`)")
@@ -308,7 +365,11 @@ class TranscriptsServing(ModuleServing):
             ]
 
         return [
-            views.Session(transcript=each.reader.read(record), whose=home.whose)
+            views.Session(
+                transcript=each.reader.read(record),
+                whose=home.whose,
+                repository=repository,
+            )
             for runtime, each in self.recorded.items()
             for home in held(runtime)
             for record in each.reader.sessions(home.directory)
@@ -316,7 +377,7 @@ class TranscriptsServing(ModuleServing):
 
     @lup.command
     async def list(self, asked: Every, by: Operator | Room) -> str:
-        """List this repository's kept sessions, newest first: when each started, its name and id, how often you spoke, where it ran, and whose home its record was kept from."""
+        """List this repository's kept sessions, and each related repository's, newest first: when each started, its name and id, how often you spoke, where it ran, and whose home its record was kept from."""
         del asked
         unkept = await self.fresh(by)
         lines = views.listed(await asyncio.to_thread(self.kept))
