@@ -350,10 +350,18 @@ class Queues(ABC):
     """What a runtime holds queued for each conversation of its sessions on this machine, read from their records as they grow."""
 
     @abstractmethod
-    def queued(self, session: str, agent: str | None) -> list[Queued]:
-        """Return what the runtime holds for session `session`'s own conversation, or for its subagent `agent`, to hand it once its running call returns, oldest first; none where nothing is, or the session's record isn't on this machine.
+    def queued(
+        self, session: str, agent: str | None, home: Path | None
+    ) -> list[Queued]:
+        """Return what the runtime holds for session `session`'s own conversation, or for its subagent `agent`, to hand it once its running call returns, oldest first; none where nothing is, or the session's record isn't on this machine, or isn't in `home`.
 
-        Each look reads only what the records gained since the last.
+        `home` is the one the asking conversation's launch registered
+        (`Register.home`), where its runtime keeps its own sessions' records:
+        a hook's payload, which a room writes, names the session, so a room
+        can name a host session's or another project's room's, whose record
+        is elsewhere. None, for a launch from before launches kept their home,
+        reads the record wherever it's found. Each look reads only what the
+        records gained since the last.
         """
 
 

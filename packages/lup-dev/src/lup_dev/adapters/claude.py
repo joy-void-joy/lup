@@ -2844,15 +2844,17 @@ class ClaudeQueues(MutableModel, Queues, arbitrary_types_allowed=True):
     """Held while a look reads, since held calls look from threads of their own."""
 
     @override
-    def queued(self, session: str, agent: str | None) -> list[Queued]:
+    def queued(
+        self, session: str, agent: str | None, home: Path | None
+    ) -> list[Queued]:
         with self.reading:
-            main = self.record(session, None)
+            main = self.record(session, None, home)
             if main is None:
                 return []
             queue = self.following(main, sidechains=False)
             own = queue
             if agent is not None:
-                record = self.record(session, agent)
+                record = self.record(session, agent, home)
                 own = (
                     Following()
                     if record is None
@@ -2878,15 +2880,21 @@ class ClaudeQueues(MutableModel, Queues, arbitrary_types_allowed=True):
 
         return [queued for each in pending if (queued := held(each)) is not None]
 
-    def record(self, session: str, agent: str | None) -> Found | None:
-        """Return conversation `agent`'s record of session `session`, the session's own for none, found once and looked for again where it's gone; none where it isn't on this machine."""
+    def record(
+        self, session: str, agent: str | None, home: Path | None
+    ) -> Found | None:
+        """Return conversation `agent`'s record of session `session`, the session's own for none, found once and looked for again where it's gone; none where it isn't on this machine, or is found in a home other than `home`, where one is given (`Queues.queued`)."""
         key = f"{session}/{agent}"
         kept = self.found.get(key)
-        if kept is not None and kept.record.is_file():
-            return kept
-        found = self.records.conversation(session, agent)
+        found = (
+            kept
+            if kept is not None and kept.record.is_file()
+            else self.records.conversation(session, agent)
+        )
         if found is not None:
             self.found = {**self.found, key: found}
+        if found is None or (home is not None and found.root != home):
+            return None
         return found
 
     def following(self, found: Found, *, sidechains: bool) -> Following:

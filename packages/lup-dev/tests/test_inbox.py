@@ -389,10 +389,11 @@ class Watched(Delivery):
         until: Callable[[], bool],
         *,
         on: list[Waking],
+        home: Path | None,
         within: timedelta | None = None,
     ) -> str:
         self.holding.set()
-        return await super().held(party, until, on=on, within=within)
+        return await super().held(party, until, on=on, home=home, within=within)
 
 
 @pytest.fixture
@@ -819,7 +820,7 @@ TYPED_WORDS = holding(
 
 
 def queued_in(home: Path) -> dict[str, Queues]:
-    """What Claude Code holds for each conversation, read from its home at `home`."""
+    """What Claude Code holds for each conversation, read from its home at `home`, which the test's launch registers as its own (`launched` at `home / "w"`)."""
     return {"claude": ClaudeQueues(records=ClaudeRecords(directory=home))}
 
 
@@ -829,7 +830,7 @@ def test_wait_inbox_returns_for_the_operator_s_typed_words_whatever_on_says(
     home = tmp_path / ".claude"
     records = Subagents(home / "projects")
     with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
-        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, home / "w", "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -840,6 +841,48 @@ def test_wait_inbox_returns_for_the_operator_s_typed_words_whatever_on_says(
     assert returned == (TYPED_WORDS, False)
 
 
+def test_wait_inbox_reads_no_queue_of_a_session_its_room_claims_from_another_home(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """A room's hook names whatever session it likes, a host session's or another project's room's among them: a held call reads its conversation's queue in the home its own launch registered alone, so what another session's runtime holds never reaches it."""
+    operators = tmp_path / "claude"
+    gate = 'Background command "gate" completed (exit code 0)'
+    for home, session in [(operators, "s9"), (tmp_path / "b", "s8")]:
+        appended(
+            home / "projects" / "-w" / f"{session}.jsonl",
+            background("m1", backgroundTaskId="b1"),
+            {**enqueued(notified("b1", "m1", gate)), "sessionId": session},
+        )
+    records = ClaudeRecords(directory=operators, host=machine.host)
+    recorded = {"claude": Recorded(records=records, reader=ClaudeTranscripts())}
+    queues: dict[str, Queues] = {"claude": ClaudeQueues(records=records)}
+    with inboxed(machine, clock, notices, said, recorded, queues=queues) as delivery:
+        launched(machine, clock, tmp_path / "a" / "w", "one", "claude")
+        launched(machine, clock, tmp_path / "b" / "w", "two", "claude")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        send(machine.host.launch("two").hook, claude("SessionStart", session_id="s8"))
+        returned: list[tuple[str, bool]] = []
+        for session in ["s9", "s8"]:
+            send(hook, claude("SessionStart", source="startup", session_id=session))
+            waiting: dict[str, JsonValue] = {"within": "PT1M"}
+            calling = lup_call(
+                "wait_inbox", waiting, f"w-{session}", session_id=session
+            )
+            stamped = json.loads(send(hook, calling))["hookSpecificOutput"][
+                "updatedInput"
+            ]
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                delivery.holding.clear()
+                held = pool.submit(call, mcp, "wait_inbox", stamped)
+                assert delivery.holding.wait(timeout=60)
+                clock.sleep(60)
+                returned.append(held.result(timeout=60))
+    assert returned == [
+        ("Nothing reached you within PT1M, this call's `within`.", False),
+        ("Nothing reached you within PT1M, this call's `within`.", False),
+    ]
+
+
 def test_wait_inbox_returns_for_a_task_of_its_own_and_never_for_its_subagent_s(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
@@ -848,7 +891,7 @@ def test_wait_inbox_returns_for_a_task_of_its_own_and_never_for_its_subagent_s(
     gate = 'Background command "gate" completed (exit code 0)'
     probe = 'Background command "probe" completed (exit code 0)'
     with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
-        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, home / "w", "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         sockets = (hook, mcp)
         send(hook, claude("SessionStart", source="startup"))
@@ -949,7 +992,7 @@ def test_what_the_runtime_holds_is_told_by_one_held_call(
     home = tmp_path / ".claude"
     records = Subagents(home / "projects")
     with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
-        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, home / "w", "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         appended(records.transcript, enqueued("Stop the gate, it hangs."))
@@ -973,7 +1016,7 @@ def test_ask_with_wait_returns_for_the_operator_s_typed_words_its_question_open(
     records = Subagents(home / "projects")
     asking: dict[str, JsonValue] = {"question": "Which parser?", "wait": True}
     with inboxed(machine, clock, notices, said, queues=queued_in(home)) as delivery:
-        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, home / "w", "one", "claude")
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -3864,6 +3907,59 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
         "what the operator writes on a conversation is theirs until they send it",
         "the operator's review is theirs, across every repository",
     ]
+
+
+def test_a_room_reads_no_moment_of_a_session_it_claims_from_another_repository(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
+    *,
+    tmp_path: Path,
+) -> None:
+    """A room's hook names whatever session it likes, so its items can claim a host session's or another project's room's: the moment of each is read only where its record ran in the asker's repository."""
+    operators = tmp_path / "claude"
+    elsewhere = tmp_path / "elsewhere"
+    theirs = tmp_path / "b" / "other"
+    theirs.mkdir(parents=True)
+    recording(repo.parent, "s1", repo, "n1")
+    recording(operators, "s9", elsewhere, "n9")
+    recording(theirs.parent, "s8", theirs, "n8")
+    recorded = {
+        "claude": Recorded(
+            records=ClaudeRecords(directory=operators, host=machine.host),
+            reader=ClaudeTranscripts(),
+        )
+    }
+    with inboxed(machine, clock, notices, said, recorded):
+        launched(machine, clock, repo, "one", "claude")
+        launched(machine, clock, theirs, "two", "claude")
+        hook = machine.host.launch("one").hook
+        send(machine.host.launch("two").hook, claude("SessionStart", session_id="s8"))
+        for session, key in [("s1", "n1"), ("s9", "n9"), ("s8", "n8")]:
+            send(hook, claude("SessionStart", source="startup", session_id=session))
+            stamped = json.loads(
+                send(hook, lup_call("note", {"remark": key}, key, session_id=session))
+            )["hookSpecificOutput"]["updatedInput"]
+            call(machine.host.launch("one").mcp, "note", stamped)
+        room = RoomClient(socket=machine.host.launch("one").request)
+        mine = room.ask(ShowContext(number=1), Context)
+        refusals: list[str] = []
+        for number in [2, 3]:
+            with pytest.raises(HostError) as refusal:
+                room.ask(ShowContext(number=number), Context)
+            refusals.append(str(refusal.value))
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        operator = [host.ask(ShowContext(number=number), Context) for number in [2, 3]]
+    assert [each.text for each in mine.entries if isinstance(each, Said)] == [
+        "Note it."
+    ]
+    assert refusals == [
+        "the conversation isn't one of this repository's",
+        "the conversation isn't one of this repository's",
+    ]
+    assert [each.anchor for each in operator] == [1, 1]
 
 
 def test_a_room_is_told_how_far_the_operator_has_seen_its_repositorys_groups_alone(
