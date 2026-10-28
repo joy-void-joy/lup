@@ -19,7 +19,7 @@ from lup_dev.host.records import Call, Called, Entry, Said, Transcript
 from lup_dev.inbox.context import moment
 from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.protocol import Exchanged
-from lup_dev.layout import Layout
+from lup_dev.layout import HomesLayout, Layout
 from lup_dev.settings import LupDevSettings
 from lup_dev.worker import RepositoryModules
 from lup_transcripts.environment.module import Transcripts
@@ -666,6 +666,26 @@ def test_claude_codes_window_is_the_standard_one_where_the_operators_env_turns_t
     assert read.usage is not None
     assert read.usage.window is None
     read = ClaudeTranscripts(settings=tmp_path / "none.json").read(record)
+    assert read.usage is not None
+    assert read.usage.window == 1_000_000
+
+
+def test_a_room_s_session_keeps_the_long_window_the_operators_env_would_turn_off(
+    tmp_path: Path,
+) -> None:
+    """A room's settings carry nothing of the operator's `env`, so a session recorded in a room's home ran with the long window wherever its model has one."""
+    homes = HomesLayout(home=tmp_path / "homes")
+    record = (
+        homes.project(tmp_path / "work" / ".git", "claude")
+        / "projects"
+        / "w"
+        / "s1.jsonl"
+    )
+    record.parent.mkdir(parents=True)
+    record.write_text(reply("claude-opus-5-5", 1_000, "claude-opus-5-5[1m]") + "\n")
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}}))
+    read = ClaudeTranscripts(settings=settings, homes=homes).read(record)
     assert read.usage is not None
     assert read.usage.window == 1_000_000
 

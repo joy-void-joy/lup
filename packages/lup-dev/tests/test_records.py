@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from lup_dev.adapters.claude import ClaudeQueues, ClaudeRecords
 from lup_dev.adapters.codex import CodexRecords
 from lup_dev.host.records import Queued, Record
+from lup_dev.layout import HomesLayout
 
 
 def lines(path: Path, *records: dict[str, object]) -> None:
@@ -248,3 +249,50 @@ def test_a_record_gone_from_where_it_was_found_is_looked_for_again(
     after = queues.queued("s1", None)
     assert before == []
     assert [each.kind for each in after] == ["typed"]
+
+
+def test_a_launched_session_s_record_is_read_from_its_room_s_home_and_no_link_out_of_it(
+    tmp_path: Path,
+) -> None:
+    homes = HomesLayout(home=tmp_path / "homes")
+    operators = tmp_path / ".claude"
+    room = homes.project(tmp_path / "work" / ".git", "claude")
+    launched = room / "projects" / "-work" / "s1.jsonl"
+    launched.parent.mkdir(parents=True)
+    launched.write_text("{}\n")
+    subagent = room / "projects" / "-work" / "s1" / "subagents" / "agent-a1.jsonl"
+    subagent.parent.mkdir(parents=True)
+    subagent.write_text("{}\n")
+    host = operators / "projects" / "-work" / "s0.jsonl"
+    host.parent.mkdir(parents=True)
+    host.write_text("{}\n")
+    (room / "projects" / "-work" / "s0.jsonl").symlink_to(host)
+    elsewhere = tmp_path / "secret.jsonl"
+    elsewhere.write_text("{}\n")
+    (room / "projects" / "-work" / "s2.jsonl").symlink_to(elsewhere)
+    records = ClaudeRecords(directory=operators, homes=homes)
+
+    assert records.conversation("s1", None) == launched
+    assert records.conversation("s1", "a1") == subagent
+    assert records.conversation("s0", None) == host
+    assert records.conversation("s2", None) is None
+    assert ClaudeRecords(directory=operators).conversation("s1", None) is None
+
+
+def test_a_launched_codex_thread_s_rollout_is_read_from_its_room_s_home(
+    tmp_path: Path,
+) -> None:
+    homes = HomesLayout(home=tmp_path / "homes")
+    shared = homes.shared("codex")
+    rollout = shared / "sessions" / "2026" / "10" / "28" / "rollout-x-t1.jsonl"
+    rollout.parent.mkdir(parents=True)
+    rollout.write_text("{}\n")
+    (shared / "sessions" / "2026" / "10" / "28" / "rollout-x-t2.jsonl").symlink_to(
+        tmp_path / "nowhere.jsonl"
+    )
+
+    records = CodexRecords(home=tmp_path / ".codex", homes=homes)
+
+    assert records.conversation("t1", None) == rollout
+    assert records.conversation("s", "t1") == rollout
+    assert records.conversation("t2", None) is None

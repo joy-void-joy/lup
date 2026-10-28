@@ -259,6 +259,7 @@ from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.adapters.claude.terminal import own_settings
 from lup.adapters.claude.windows import catalogued, reach
+from lup.rooms.homes import inside
 from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, MutableModel, Settings
@@ -294,6 +295,7 @@ from lup_dev.launch.clis import (
     executable,
     text,
 )
+from lup_dev.layout import HomesLayout, Layout
 from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     Bench,
@@ -312,6 +314,7 @@ from lup_dev.policy.checkpoint import (
 from lup_dev.policy.report import judge_failed, sections
 from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.worktrees import Apart, Making
+from lup_dev.settings import LupDevSettings
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -1699,21 +1702,43 @@ class ClaudeRecords(Model, Records):
 
     A folder's directory is read off its records' own lines, the first naming one,
     never from the folder's name.
+
+    A launched session's is in its room's home (`homes`), which rooms write, so
+    one found there is read only where it resolves inside that home: a room
+    can leave a link aimed at another home's record, or at the operator's
+    own. The records a module copies (`kept`) are the operator's directory's
+    alone.
     """
 
     directory: Path
     """The operator's Claude Code directory, `~/.claude` or `CLAUDE_CONFIG_DIR`."""
+    homes: HomesLayout | None = None
+    """The rooms' own homes, where a launched session keeps its record; none
+    looks in the operator's directory alone."""
 
     @override
     def conversation(self, session: str, agent: str | None) -> Path | None:
-        projects = self.directory / "projects"
+        """Return the record of one conversation: in a room's home first, where launched sessions keep theirs, then in the operator's directory."""
         name = (
             f"{session}.jsonl"
             if agent is None
             else f"{session}/subagents/agent-{agent}.jsonl"
         )
-        found = sorted(projects.glob(f"*/{name}")) if projects.is_dir() else []
-        return next(iter(found), None)
+        rooms = [] if self.homes is None else self.homes.every(Claude().name())
+
+        def found(home: Path) -> list[Path]:
+            projects = home / "projects"
+            if not projects.is_dir():
+                return []
+            return [
+                each
+                for each in sorted(projects.glob(f"*/{name}"))
+                if inside(home, each)
+            ]
+
+        return next(
+            (each for home in [*rooms, self.directory] for each in found(home)), None
+        )
 
     @override
     def kept(self, under: list[Path]) -> list[Record]:
@@ -2134,6 +2159,9 @@ class ClaudeTranscripts(Model, Reader):
     """The operator's own settings file, whose `env` may turn the long window
     off for every session it starts; none reads nothing of it, as for a copy
     of the records."""
+    homes: HomesLayout | None = None
+    """The rooms' own homes: a session recorded in one ran in a room, whose
+    settings carry nothing of the operator's `env`; none where none is."""
     window: int = 200_000
     """The standard context window, in tokens."""
     long: str = "[1m]"
@@ -2170,7 +2198,7 @@ class ClaudeTranscripts(Model, Reader):
             entries=[
                 entry for each in lines for entry in entries(each, sidechain=sidechain)
             ],
-            usage=self.usage(own),
+            usage=self.usage(own, record),
             tasks=tasks(lines),
         )
 
@@ -2210,8 +2238,8 @@ class ClaudeTranscripts(Model, Reader):
             if each in inputs
         ]
 
-    def usage(self, own: list[AssistantLine]) -> Usage | None:
-        """Return what the context held at the last of `own`, the conversation's replies, that a model made and that counted its input; none where none did."""
+    def usage(self, own: list[AssistantLine], record: Path) -> Usage | None:
+        """Return what the context held at the last of `own`, the conversation's replies in `record`, that a model made and that counted its input; none where none did."""
         counted = [
             each
             for each in own
@@ -2222,7 +2250,7 @@ class ClaudeTranscripts(Model, Reader):
         last = counted[-1]
         return Usage(
             used=last.message.usage.used() if last.message.usage is not None else 0,
-            window=self.windowed(last, shortened=self.shortened()),
+            window=self.windowed(last, shortened=self.shortened(record)),
             model=last.message.model,
         )
 
@@ -2257,8 +2285,11 @@ class ClaudeTranscripts(Model, Reader):
             case "standard", _:
                 return self.window
 
-    def shortened(self) -> bool | None:
-        """Return whether the operator's settings turn the long window off for the sessions they start, as the file stands at this reading; none where it doesn't read.
+    def shortened(self, record: Path) -> bool | None:
+        """Return whether the operator's settings turn the long window off for the session of `record`, as the file stands at this reading; none where it doesn't read.
+
+        A session recorded in a room's home started with none of it: a room's
+        settings leave the operator's `env` out (`ClaudeHome.blocked`).
 
         A session applies its settings' `env` as it starts, so a change made
         after reads here before the session has it. `/model` never writes it, as it
@@ -2267,7 +2298,10 @@ class ClaudeTranscripts(Model, Reader):
         variable only from that file: lup's own settings and its environment
         never set it, and the operator's shell doesn't reach the room.
         """
-        if self.settings is None:
+        roomed = self.homes is not None and any(
+            record.is_relative_to(home) for home in self.homes.every(Claude().name())
+        )
+        if self.settings is None or roomed:
             return False
         try:
             return own_settings(self.settings).shortened()
@@ -2757,7 +2791,8 @@ def login(directory: Path) -> Path:
 def adapter() -> Adapter:
     """Return what lup needs of Claude Code: its hooks answered, and its launch."""
     layout = ClaudeLayout.of(ClaudeSettings())
-    records = ClaudeRecords(directory=layout.directory)
+    homes = Layout.of(LupDevSettings()).homes
+    records = ClaudeRecords(directory=layout.directory, homes=homes)
     return Adapter(
         runtime=Claude(),
         hook=hook,
@@ -2772,6 +2807,6 @@ def adapter() -> Adapter:
         agent=agent,
         login=login,
         records=records,
-        reader=ClaudeTranscripts(settings=layout.settings),
+        reader=ClaudeTranscripts(settings=layout.settings, homes=homes),
         queues=ClaudeQueues(records=records),
     )

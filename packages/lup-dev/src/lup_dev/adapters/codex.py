@@ -248,6 +248,7 @@ import lup
 from lup import events
 from lup.adapters.codex.layout import CodexLayout
 from lup.adapters.codex.settings import CodexSettings
+from lup.rooms.homes import inside
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
@@ -277,6 +278,7 @@ from lup_dev.launch.clis import (
     download,
     extract,
 )
+from lup_dev.layout import HomesLayout, Layout
 from lup_dev.policy.checkpoint import (
     Bench,
     CallFinished,
@@ -289,6 +291,7 @@ from lup_dev.policy.checkpoint import (
 )
 from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
+from lup_dev.settings import LupDevSettings
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -1092,22 +1095,39 @@ class Started(Model, extra="ignore"):
 
 
 class CodexRecords(Model, Records):
-    """Codex's records: a rollout per session under `sessions/`, its first line saying where it ran."""
+    """Codex's records: a rollout per session under `sessions/`, its first line saying where it ran.
+
+    A launched session's is in its room's home (`homes`), which rooms write, so
+    one found there is read only where it resolves inside that home: a room
+    can leave a link aimed at another home's rollout, or at the operator's
+    own. The records a module copies (`kept`) are the operator's home's alone.
+    """
 
     home: Path
     """The operator's Codex home, `~/.codex` or `CODEX_HOME`."""
+    homes: HomesLayout | None = None
+    """The rooms' own homes, where a launched session keeps its rollout; none
+    looks in the operator's home alone."""
 
     @override
     def conversation(self, session: str, agent: str | None) -> Path | None:
-        # A subagent is a thread of its own, its id its rollout's, as a session's is.
-        sessions = self.home / "sessions"
+        """Return the rollout of one conversation: in a room's home first, where launched sessions keep theirs, then in the operator's home. A subagent is a thread of its own, its id its rollout's, as a session's is."""
         thread = session if agent is None else agent
-        found = (
-            sorted(sessions.rglob(f"rollout-*-{thread}.jsonl"))
-            if sessions.is_dir()
-            else []
+        rooms = [] if self.homes is None else self.homes.every(Codex().name())
+
+        def found(home: Path) -> list[Path]:
+            sessions = home / "sessions"
+            if not sessions.is_dir():
+                return []
+            return [
+                each
+                for each in sorted(sessions.rglob(f"rollout-*-{thread}.jsonl"))
+                if inside(home, each)
+            ]
+
+        return next(
+            (each for home in [*rooms, self.home] for each in found(home)), None
         )
-        return next(iter(found), None)
 
     @override
     def kept(self, under: list[Path]) -> list[Record]:
@@ -1593,7 +1613,10 @@ def adapter() -> Adapter:
         channel=CodexChannel(),
         agent=agent,
         login=login,
-        records=CodexRecords(home=CodexLayout.of(CodexSettings()).operator_home),
+        records=CodexRecords(
+            home=CodexLayout.of(CodexSettings()).operator_home,
+            homes=Layout.of(LupDevSettings()).homes,
+        ),
         reader=CodexTranscripts(),
         queues=None,
     )
