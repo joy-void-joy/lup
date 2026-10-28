@@ -263,11 +263,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 self.draft = draft
                 return Drafted(draft=draft)
             case SendDraft():
-                self.covered = [*self.covered, *self.draft.covered()]
-                self.draft = self.draft.kept()
-                self.changed.set()
-                self.changed = asyncio.Event()
-                return Reviewed(items=[])
+                return self.send()
             case ShowOrder():
                 return Ordered(order=self.order)
             case KeepOrder(places=places, gone=gone):
@@ -721,6 +717,43 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             looks={each.repository: self.views.looks() for each in launches},
             standing=self.views.looks(),
         )
+
+    def send(self) -> Reviewed:
+        """Send the draft as the host does, telling no agent: each item it covers taken off the list, the marks left drafted for the page to apply; saying what it read, approved and declined, as the host's reply does (`Delivery.reviewed`)."""
+        draft = self.draft
+        covered = draft.covered()
+        by_number = {each.number: each for each in self.every()}
+        commented = [each.item for each in draft.comments if each.text.strip()]
+        asked = [
+            by_number[each]
+            for each in covered
+            if each in by_number
+            and isinstance(by_number[each].reason, Approval | HeldChange)
+        ]
+        declined = [each for each in asked if each.number in draft.declined]
+        approved = [
+            each
+            for each in asked
+            if each not in declined
+            and (
+                each.number in draft.done
+                or each.number not in commented
+                or isinstance(each.reason, HeldChange)
+            )
+        ]
+        read = [
+            each
+            for each in covered
+            if each in by_number
+            and by_number[each] not in asked
+            and each not in commented
+            and not isinstance(by_number[each].reason, Question)
+        ]
+        self.covered = [*self.covered, *covered]
+        self.draft = draft.kept()
+        self.changed.set()
+        self.changed = asyncio.Event()
+        return Reviewed(items=[], read=read, approved=approved, declined=declined)
 
     def holds(self, talker: Talker) -> bool:
         """Say whether the operator holds each flagged write of `talker`."""

@@ -140,6 +140,7 @@ from lup_dev.inbox.store import (
     InboxError,
     Item,
     Letter,
+    Marked,
     Message,
     Operator,
     Passage,
@@ -7118,6 +7119,80 @@ def test_a_sent_draft_approves_what_it_marks_read_and_held_changes_commented_on(
     )
     assert sent.kept == [nobody.number]
     assert [each.item for each in left.comments] == [nobody.number]
+
+
+def test_a_sent_draft_answers_what_it_marks_done_or_declined_with_the_comments_under_each(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    pusher = Conversation(
+        repository=tmp_path / "p" / ".git", runtime="claude", session="s1"
+    )
+    mark = Marked(
+        id="m1",
+        action="policy-review-since",
+        argument={"files": [{"path": "a.py", "version": "abc"}]},
+        verb="done",
+        says="mark it reviewed",
+        block="since a.py",
+        version="abc",
+    )
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        stamped = json.loads(send(hook, lup_call("note", {"remark": "FYI."}, "n1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        call(machine.host.launch("one").mcp, "note", stamped)
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        yes = host.ask(asking_approval(tmp_path / "y", "zone", pusher), Shown).item
+        no = host.ask(asking_approval(tmp_path / "n", "zone", pusher), Shown).item
+        drafting(
+            machine,
+            clock,
+            Draft(
+                comments=[
+                    Comment(item=yes.number, text="Keep it small."),
+                    Comment(item=no.number, text="Not this zone."),
+                ],
+                done=[1, yes.number],
+                declined=[no.number],
+                marks=[mark],
+            ),
+        )
+        sent = host.ask(SendDraft(), Reviewed)
+        approved, declined = (
+            delivery.inbox.item(each).state for each in [yes.number, no.number]
+        )
+        left = delivery.inbox.draft()
+    # Marked done, an approval commented on is approved with the comment, where
+    # unmarked it would stay unanswered; marked declined, declined with it.
+    assert sent.read == [1]
+    assert [each.number for each in sent.approved] == [yes.number]
+    assert [each.number for each in sent.declined] == [no.number]
+    assert approved == Decided(at=clock.now(), approved=True, comment="Keep it small.")
+    assert declined == Decided(at=clock.now(), approved=False, comment="Not this zone.")
+    # The marks beyond the inbox's items stay drafted, for the page to apply.
+    assert left == Draft(marks=[mark])
+
+
+def test_a_draft_declining_what_isnt_an_approval_or_a_held_change_is_refused(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        stamped = json.loads(send(hook, lup_call("note", {"remark": "FYI."}, "n1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        call(machine.host.launch("one").mcp, "note", stamped)
+        drafting(machine, clock, Draft(declined=[1]))
+        with pytest.raises(HostError) as refusal:
+            sending(machine, clock)
+        state = delivery.inbox.item(1).state
+    assert "only an approval or a held change is declined" in str(refusal.value)
+    assert isinstance(state, Waiting | Told)
 
 
 # Landing a branch: `land`, waiting on what was flagged on it.

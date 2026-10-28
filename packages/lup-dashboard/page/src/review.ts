@@ -436,7 +436,7 @@ export interface Laid {
     drawn: Drawn[];
 }
 
-export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], parked: [] };
+export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], declined: [], parked: [], marks: [] };
 
 /** Return what names an item among the folds' owners: its number; a drawer: its kind and whose it is. */
 export function ownerOf(owner: { item: Item } | { drawer: DrawerKind; conversation: Conversation }): string {

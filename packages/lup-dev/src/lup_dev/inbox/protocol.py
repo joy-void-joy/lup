@@ -389,9 +389,14 @@ class Reviewed(Reply):
 
     kind: Literal["inbox-reviewed"] = "inbox-reviewed"
     items: list[Item]
+    read: list[int] = []
+    """The messages it took off the list marked read with nothing to add, by
+    number, which tells their senders nothing."""
     approved: list[Item] = []
     """The approvals and held changes it approved: an approval of a host zone
     among them is acted on as the operator's terminal acts on it."""
+    declined: list[Item] = []
+    """The approvals and held changes it declined."""
     noted: list[Item] = []
     """The notes it left with each session whose push asked an approval the
     operator commented on, which stays unanswered."""
@@ -1154,7 +1159,9 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
         dispatched = await self.delivery.reviewed()
         return Reviewed(
             items=dispatched.reviews,
+            read=dispatched.read,
             approved=dispatched.approved,
+            declined=dispatched.declined,
             noted=dispatched.noted,
             kept=dispatched.kept,
         )
