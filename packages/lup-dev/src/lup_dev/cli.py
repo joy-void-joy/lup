@@ -87,7 +87,7 @@ from lup_dev.gate import (
 )
 from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, nul_separated
-from lup_dev.host.client import Detached, HostClient, RoomClient
+from lup_dev.host.client import Detached, FromRoom, HostClient, RoomClient
 from lup_dev.host.courier import (
     Courier,
     Heard,
@@ -109,8 +109,6 @@ from lup_dev.host.protocol import (
     Listed,
     ListLaunches,
     Register,
-    Reply,
-    Request,
     Talker,
 )
 from lup_dev.host.pushes import Pushes
@@ -765,27 +763,6 @@ def answering(what: str = "the inbox") -> HostClient:
     client = host_client()
     client.ensure()
     return client
-
-
-class FromRoom(Model):
-    """Asks the host service from a room what only reads, on its launch's request socket: answered with what's of the launch's repository alone."""
-
-    room: RoomClient
-
-    def ask[R: Reply](self, request: Request, reply: type[R]) -> R:
-        """Send one request, and read its reply as `reply`; a service that doesn't know its kind is said to run a copy from before a room could ask it."""
-        try:
-            return self.room.ask(request, reply)
-        except HostError as refused:
-            # lup: ignore("error-text", why="a copy approved before refuses a kind it doesn't know only in words, which it can't be taught")
-            if not str(refused).startswith(f"no handler for `{request.kind}`"):
-                raise
-            message = (
-                f"the host service doesn't answer `{request.kind}` in a room yet: it "
-                "runs a copy of lup from before rooms could ask it, until the operator "
-                "approves a newer one"
-            )
-            raise HostError(message) from refused
 
 
 def reading() -> HostClient | FromRoom:
