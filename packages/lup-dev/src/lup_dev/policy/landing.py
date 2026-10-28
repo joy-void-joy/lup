@@ -104,9 +104,9 @@ that isn't there is said once, with its name, and each worktree named as left.
 Left alone, and said: the repository's main worktree, one where the conversation
 landing works, and one where a conversation of a launch still served works, as
 the judge's session index has it (`Holding.works`); the local branch it has
-checked out stays with it. The index places a subagent in a worktree once its
-file tools wrote there, or, in one lup made for it at its runtime's asking, from
-its first call, so a fresh worktree a worker made itself is kept by which
+checked out stays with it. The index places a subagent in a worktree once their
+file tools wrote there, or, in one lup made for them at their runtime's asking,
+from their first call, so a fresh worktree a worker made themselves is kept by which
 branches count as landed, not by this check (#240).
 
 The tool's docstring's first line is its summary, 50 characters at most, which
@@ -400,7 +400,7 @@ def landed_branches(
     `old`, where no given branch was given at that tip and no other branch
     points at it. The graph can't tell two branches at one commit apart:
     one at the tip a given branch was given at was made from it, as a worker
-    starts its next piece (`made`); several at a tip merged, none given, may
+    starts their next piece (`made`); several at a tip merged, none given, may
     be either (`shared`); each is left alone. The rest have nothing of their
     own in it, their tip being one of that line's own commits: a branch just
     made from the integration branch, say, whose worktree a session may be
@@ -1646,7 +1646,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         return Cleaned(done=[f"removed the worktree {root}"])
 
     def working(self, places: list[Whereabouts]) -> dict[Path, str]:
-        """Return the worktrees a conversation works in, each with who, as the cleanup leaves it: the conversation landing, then each launch still served of this repository where it started, then each of its conversations still going where the judge's session index has it work (`Holding.works`), each by the first found."""
+        """Return the worktrees a conversation works in, each with who, as the cleanup leaves it: the conversation landing, then each launch still served of this repository where it started, then each of its conversations still going where the judge's session index has them work (`Holding.works`), each by the first found."""
         index = SessionIndex(layout=self.layout)
         host = self.layout.host
         # Each launch's conversations are kept beside its record, and aren't a record.
@@ -1789,7 +1789,7 @@ def numbers_refused(refusals: list[Refusal]) -> str:
 
 
 def called(host: HostLayout, place: Whereabouts) -> str:
-    """Say the conversation at `place` as people call it, `dev/explore-auth`, from what the service keeps of its launch; by its runtime's ids where that names none."""
+    """Say the conversation at `place` as people call them, `dev/explore-auth`, from what the service keeps of their launch; by their runtime's ids where that names none."""
     record = recorded(host.record(place.launch))
     try:
         kept = read_model(host.conversations(place.launch), Conversations)
