@@ -231,6 +231,7 @@ from lup_dev.layout import (
 )
 from lup_dev.listing import given, latest, many, unlisted
 from lup_dev.merging import Merging, merged
+from lup_dev.migration import HostRuntime, Migrating
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.flags import InboxFlagging
 from lup_dev.policy.holds import InboxAnnouncing, Response, answer
@@ -2243,6 +2244,74 @@ def account_logout(
         )
         raise AccountError(message)
     for line in machine_accounts().logout(name, runtime):
+        typer.echo(line)
+
+
+@account.command("migrate")
+def account_migrate(
+    *,
+    move: Annotated[
+        bool,
+        typer.Option(
+            "--move",
+            help="Move them; without it, a dry run says what would move and changes nothing.",
+        ),
+    ] = False,
+    shared: Annotated[
+        bool,
+        typer.Option(
+            "--shared",
+            help=(
+                "Move them into the rooms' home every project shares, as a profile "
+                'with `rooms_home="global"` runs on, rather than this project\'s.'
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Move this repository's sessions from your own runtime directories into its rooms' home, so they resume in a room; a dry run without `--move`.
+
+    Run it yourself, in your own terminal, in the repository, every session of
+    it ended. Every room could write your own directories until rooms had
+    homes of their own, so every record of the repository's directories
+    moves, whoever wrote it, and the rest stay. It then says what a host
+    session acts on there that a room could have written, and how to replace
+    your host login, which every room could read.
+    """
+    inside = [each.name() for each in runtimes() if each.inside()]
+    if inside:
+        message = (
+            f"this runs inside a {inside[0]} session: move your sessions from "
+            "your own terminal"
+        )
+        raise AccountError(message)
+    layout = Layout.of(LupDevSettings())
+    repository = Path(
+        Git(cwd=Path.cwd()).text(
+            "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+    )
+    if approved(layout, repository) is None:
+        message = (
+            f"nothing is approved for {repository}, so no room has run in it: "
+            "nothing of it is to move"
+        )
+        raise AccountError(message)
+    migrating = Migrating(
+        layout=layout,
+        repository=repository,
+        runtimes=[
+            HostRuntime(
+                name=each.runtime.name(),
+                directory=each.directory,
+                records=each.records,
+                written=each.written,
+            )
+            for each in adapters()
+        ],
+        home=Path.home(),
+        shared=shared,
+    )
+    for line in migrating.said(move=move):
         typer.echo(line)
 
 

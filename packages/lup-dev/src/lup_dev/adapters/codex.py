@@ -236,6 +236,7 @@ unavailable; a launch runs what's kept instead.
 """
 
 import shlex
+import tomllib
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -252,6 +253,7 @@ from lup.rooms.homes import inside, plain, regular
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
+from lup_dev.host import written
 from lup_dev.host.courier import Heard, Spawned, Telling
 from lup_dev.host.records import (
     Call,
@@ -1603,6 +1605,275 @@ def stepped(line: Rolled) -> list[Entry]:
             return []
 
 
+class HostServer(Model, extra="ignore"):
+    """One of the operator's own MCP servers: the command a host session starts it with, or where it's reached."""
+
+    command: str | None = None
+    args: list[str] = []
+    url: str | None = None
+
+
+class HostEnvironment(Model, extra="ignore"):
+    """What the operator's configuration sets in every command's environment."""
+
+    variables: dict[str, JsonValue] = Field(default={}, alias="set")
+
+
+class HostProvider(Model, extra="ignore"):
+    """A model provider of the operator's: where a host session sends its requests."""
+
+    base_url: str | None = None
+
+
+class HostProject(Model, extra="ignore"):
+    """A project the operator's configuration names: whether it's trusted."""
+
+    trust_level: str | None = None
+
+
+class HostConfig(Model, extra="ignore"):
+    """What of the operator's own `config.toml`, or one of its profiles, a host session runs, sets, sends to or does without asking, read in Codex's `config` docs (2026-10-28) for the check of what rooms could have written there."""
+
+    notify: list[str] = []
+    mcp_servers: dict[str, HostServer] = {}
+    shell_environment_policy: HostEnvironment = HostEnvironment()
+    model_providers: dict[str, HostProvider] = {}
+    approval_policy: JsonValue = None
+    sandbox_mode: str | None = None
+    projects: dict[str, HostProject] = {}
+    profiles: dict[str, HostConfig] = {}
+
+    def said(self, places: written.Places) -> list[str]:
+        """Say what it has a host session run, set, send to and do without asking, its profiles' too, each command flagged where it names a directory rooms write."""
+        runs = [
+            *(
+                [f"its `notify`, {written.quoted(shlex.join(self.notify), places)}"]
+                if self.notify
+                else []
+            ),
+            *(
+                f"the MCP server `{name}`, "
+                + written.quoted(shlex.join([server.command, *server.args]), places)
+                for name, server in self.mcp_servers.items()
+                if server.command is not None
+            ),
+        ]
+        variables = self.shell_environment_policy.variables
+        sent = [
+            f"`{provider.base_url}` (the provider `{name}`)"
+            for name, provider in self.model_providers.items()
+            if provider.base_url is not None
+        ]
+        trusted = [
+            path
+            for path, project in self.projects.items()
+            if project.trust_level == "trusted"
+        ]
+        unasked = [
+            *(
+                [f"`approval_policy` is `{self.approval_policy}`"]
+                if self.approval_policy == "never"
+                else []
+            ),
+            *(
+                [f"`sandbox_mode` is `{self.sandbox_mode}`"]
+                if self.sandbox_mode == "danger-full-access"
+                else []
+            ),
+            *(
+                [f"trusts {written.counted(len(trusted), 'project', 'projects')}"]
+                if trusted
+                else []
+            ),
+        ]
+        return [
+            *([f"runs on the host {'; '.join(runs)}"] if runs else []),
+            *(
+                [
+                    "sets in every command's environment "
+                    + ", ".join(f"`{name}`" for name in variables)
+                ]
+                if variables
+                else []
+            ),
+            *([f"sends its requests to {', '.join(sent)}"] if sent else []),
+            *(
+                [f"lets a host session act without asking: {'; '.join(unasked)}"]
+                if unasked
+                else []
+            ),
+            *(
+                f"its profile `{name}` {each}"
+                for name, profile in self.profiles.items()
+                for each in profile.said(places)
+            ),
+        ]
+
+
+class CodexWritten(Model):
+    """What a host Codex session acts on in the operator's own Codex home, which every room on Codex could write before rooms had homes of their own, checked as it stands (`lup_dev.host.written`).
+
+    Each item read in Codex's docs (2026-10-28) and measured on 0.162.0
+    (`docs/field-notes.md`, *A home of the rooms' own*): its configuration,
+    hooks and instructions; what it loads; what it runs before its commands,
+    its shell snapshots and the helpers it puts first on their `PATH`; and the
+    login every room on Codex could read.
+    """
+
+    home: Path
+    """The operator's Codex home, `~/.codex` or `CODEX_HOME`."""
+    loaded: list[str] = ["rules", "prompts", "skills"]
+    """The directories whose files a host session loads; `rules/` can let it
+    run a command without asking."""
+    instructions: list[str] = ["AGENTS.md", "AGENTS.override.md"]
+    configuration: list[str] = [
+        "config.toml",
+        "hooks.json",
+        "AGENTS.md",
+        "AGENTS.override.md",
+        "rules",
+        "prompts",
+        "skills",
+    ]
+    """Where Codex makes no link itself: one found there is said."""
+    before: list[str] = ["shell_snapshots", "tmp"]
+    """What a session runs before its commands: its shell snapshot, and the
+    helpers it puts first on their `PATH`."""
+
+    def checked(self, places: written.Places) -> list[str]:
+        """Say what a host session acts on in the home, a line each: what's there, what of it looks planted, and what to do."""
+        return [
+            *self.config(places),
+            *self.hooks(places),
+            *self.read_instructions(),
+            *self.loads(),
+            *self.links(places),
+            *self.run_before(places),
+            *self.login(),
+        ]
+
+    def config(self, places: written.Places) -> list[str]:
+        """Say what the configuration has a host session run, set, send to and do without asking."""
+        path = self.home / "config.toml"
+        if not path.exists() and not path.is_symlink():
+            return []
+        held = written.read(path)
+        if held is None:
+            return [
+                (
+                    "`config.toml` isn't a regular file lup reads, or is past 4 MiB: "
+                    "look at it yourself."
+                )
+            ]
+        try:
+            config = HostConfig.model_validate(tomllib.loads(held.decode()))
+        except tomllib.TOMLDecodeError, UnicodeDecodeError, ValidationError:
+            return ["`config.toml` isn't configuration lup reads: look at it yourself."]
+        said = config.said(places)
+        if not said:
+            return [
+                (
+                    "`config.toml`: nothing in it runs a command, sets a variable, sends "
+                    "requests elsewhere, or lets a session act without asking."
+                )
+            ]
+        return [
+            f"`config.toml` {'; it '.join(said)}. Each is yours only if you set it."
+        ]
+
+    def hooks(self, places: written.Places) -> list[str]:
+        """Say each command the hooks have a host session run."""
+        path = self.home / "hooks.json"
+        if not path.exists() and not path.is_symlink():
+            return []
+        held = written.read(path)
+        try:
+            hooked = (
+                None
+                if held is None
+                else TypeAdapter[JsonValue](JsonValue).validate_json(held)
+            )
+        except ValidationError:
+            hooked = None
+        if hooked is None:
+            return ["`hooks.json` isn't hooks lup reads: look at it yourself."]
+        commands = written.commands(hooked)
+        if not commands:
+            return ["`hooks.json`: no command in it."]
+        return [
+            "`hooks.json` runs on the host "
+            + "; ".join(written.quoted(each, places) for each in commands)
+            + ". Each is yours only if you set it."
+        ]
+
+    def read_instructions(self) -> list[str]:
+        """Say the instructions every host session reads."""
+        return [
+            f"`{name}`, {written.counted(len(held.splitlines()), 'line', 'lines')}, "
+            "is read into every host session: check it's all yours."
+            for name in self.instructions
+            if (held := written.read(self.home / name)) is not None
+        ]
+
+    def loads(self) -> list[str]:
+        """Say each directory whose files a host session loads."""
+        loaded = [
+            f"`{name}/` ({written.counted(len(found), 'file', 'files')})"
+            for name in self.loaded
+            if (found := written.listed(self.home / name).files)
+        ]
+        if not loaded:
+            return []
+        return [
+            (
+                f"{', '.join(loaded)}: a host session loads each, and `rules/` can let "
+                "it run a command without asking: check they're yours."
+            )
+        ]
+
+    def links(self, places: written.Places) -> list[str]:
+        """Say each link among what a host session loads, where Codex makes none, flagged where it lands in a directory rooms write."""
+        return [
+            f"`{each.path.relative_to(self.home)}` is a link to `{each.aimed}`"
+            + (
+                ", in a directory rooms write"
+                if places.aims(each.path, each.aimed)
+                else ""
+            )
+            + ": Codex makes none there, so check it's yours."
+            for name in self.configuration
+            for each in written.listed(self.home / name).links
+        ]
+
+    def run_before(self, places: written.Places) -> list[str]:
+        """Say what a host session runs before its commands, which rooms could have written."""
+        shown = places.shown(self.home)
+        there = [name for name in self.before if written.listed(self.home / name).files]
+        if not there:
+            return []
+        return [
+            f"{' and '.join(f'`{name}/`' for name in there)}: a host session runs "
+            "its shell snapshot and the helpers it puts first on its commands' "
+            "`PATH` from them, and a room could have written any: with no host "
+            "session running, "
+            + "; ".join(f"`rm -r {shown}/{name}/*`" for name in there)
+            + "; a session makes its own as it starts."
+        ]
+
+    def login(self) -> list[str]:
+        """Say how to replace the operator's own login, which every room on Codex could read."""
+        if not written.held(self.home / "auth.json"):
+            return []
+        return [
+            (
+                "Your host login, `auth.json`, was readable by every room on Codex: on "
+                "the host, run `codex logout` then `codex login`, so the refresh token "
+                "they could read is replaced. Whether `codex logout` revokes it with "
+                "the provider isn't documented."
+            )
+        ]
+
+
 def login(directory: Path) -> Path:
     """Return where Codex keeps its login in a home of its own at `directory`, as `CODEX_HOME` names one: `auth.json` there, as in the operator's."""
     return CodexLayout(home=directory, operator_home=directory).operator_login
@@ -1610,6 +1881,7 @@ def login(directory: Path) -> Path:
 
 def adapter() -> Adapter:
     """Return what lup needs of Codex: its hooks answered, and its launch."""
+    home = CodexLayout.of(CodexSettings()).operator_home
     return Adapter(
         runtime=Codex(),
         hook=hook,
@@ -1623,10 +1895,9 @@ def adapter() -> Adapter:
         channel=CodexChannel(),
         agent=agent,
         login=login,
-        records=CodexRecords(
-            home=CodexLayout.of(CodexSettings()).operator_home,
-            homes=Layout.of(LupDevSettings()).homes,
-        ),
+        records=CodexRecords(home=home, homes=Layout.of(LupDevSettings()).homes),
+        directory=home,
+        written=CodexWritten(home=home).checked,
         reader=CodexTranscripts(),
         queues=None,
     )

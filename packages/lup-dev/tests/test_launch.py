@@ -1989,7 +1989,9 @@ def test_a_first_launch_says_its_home_is_new_and_makes_the_account_s_login_empty
     new = (
         f"This launch makes {room}, where claude's sessions in this project's "
         "rooms keep their history and state from now on, apart from your own: a "
-        "session from before it doesn't resume in a room."
+        "session from before it resumes in a room once you move it there, which "
+        "`lup-dev account migrate`, in your own terminal in the repository, says "
+        "how to."
     )
     unheld = (
         "The account `default` holds no claude login yet: sign in when claude "

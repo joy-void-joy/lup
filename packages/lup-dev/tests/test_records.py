@@ -82,7 +82,8 @@ def test_a_folder_saying_it_ran_in_the_repository_under_another_directory_s_name
         {"type": "user", "cwd": "/w/lup.git/tree/dev"},
     )
     lines(
-        home / "projects" / "-w-secret" / "s2.jsonl", {"type": "user", "cwd": "/w/secret"}
+        home / "projects" / "-w-secret" / "s2.jsonl",
+        {"type": "user", "cwd": "/w/secret"},
     )
     assert ClaudeRecords(directory=home).kept([Path("/w/lup.git")]) == []
 

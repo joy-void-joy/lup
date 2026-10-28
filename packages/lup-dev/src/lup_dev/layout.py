@@ -925,6 +925,11 @@ class Layout(Model):
         """Where the rooms keep each runtime's history and state: `~/.local/share/lup/homes/`."""
         return HomesLayout(home=self.data / "homes")
 
+    @property
+    def written(self) -> list[Path]:
+        """The directories of lup's data rooms write: every project's rooms' own directory, under `rooms/`, and the rooms' homes."""
+        return [self.data / "rooms", self.homes.home]
+
     def room_home(self, repository: Path, runtime: str, *, shared: bool) -> Path:
         """Say where a launch in the repository whose git directory is `repository` keeps runtime `runtime`'s history and state: the one rule placing a room's home, which the launch mounts and the host reads a launched session's record from.
 
