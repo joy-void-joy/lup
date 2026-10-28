@@ -63,7 +63,7 @@ class TurnResult[T](Model):
     rejected: list[Rejection] = []
     """The submissions refused before the accepted one, oldest first."""
     notes: list[str] = []
-    """The remarks the agent attached to its answer, oldest first."""
+    """The remarks the agent attached to their answer, oldest first."""
     frictions: list[Friction] = []
     """What got in the agent's way, each when it did, oldest first."""
     how_it_felt: list[HowItFelt] = []

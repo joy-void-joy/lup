@@ -34,11 +34,11 @@ class CallRecord(Model):
     """The error's type and message, where the ask failed."""
     rejected: list[Rejection] = []
     notes: list[str] = []
-    """The remarks the agent attached, whether it answered or not."""
+    """The remarks the agent attached, whether they answered or not."""
     frictions: list[Friction] = []
-    """What got in the agent's way, whether it answered or not."""
+    """What got in the agent's way, whether they answered or not."""
     how_it_felt: list[HowItFelt] = []
-    """Each time the agent said how it was for them, whether it answered or not."""
+    """Each time the agent said how it was for them, whether they answered or not."""
     usage: Usage | None = None
     """None where the ask failed before the runtime reported any."""
 
@@ -118,7 +118,7 @@ class Asked(Model):
         """Return the record of this ask failing with `error` after `duration`.
 
         A turn that ran without an answer keeps what the agent said beside it
-        (its notes, its frictions, how it felt) and what the turn used; a missing
+        (their notes, their frictions, how it felt) and what the turn used; a missing
         answer also keeps every rejected attempt.
         """
         match error:

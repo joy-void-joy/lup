@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 class Room(Model, arbitrary_types_allowed=True):
-    """An agent and the container it works in."""
+    """An agent and the container they work in."""
 
     agent: Declaration
     container: Container

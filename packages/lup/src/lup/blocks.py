@@ -186,10 +186,10 @@ class Span(Model):
     tone: str = "plain"
     """One of the shell's tones (`SHELL_TONES`), or one its module declares."""
     conversation: OfAgent | None = None
-    """The conversation its text names, by its runtime's ids, which never change
-    as it's renamed: its text says it as the core calls it, its path
-    (`lup-impl/parser`), and the page can go to it by these, whatever it's
-    called by then."""
+    """The conversation its text names, by their runtime's ids, which never
+    change as they're renamed: the text names them as the core calls them, by
+    their path (`lup-impl/parser`), and the page can go to them by these,
+    whatever they're called by then."""
     item: int | None = None
     """The item of lup's inbox its text names, by its number, as `@51` says it:
     the page can go to it."""
@@ -853,7 +853,7 @@ class Watch(Model):
 
 
 class OfAgent(Model):
-    """The agent a drawer under its banner is of: its runtime, its session, and its subagent where it's one.
+    """The agent a drawer under their banner is of: their runtime, their session, and which subagent they are where they're one.
 
     Each field's description is its help on a view's command line.
     """

@@ -27,8 +27,8 @@ class Submission(Model):
     """How many refusals a typed ask allows before it gives up.
 
     Rejected answers and refused endings count together, when the agent tries to
-    end its turn: past `attempts`, the guard lets the turn end, and the ask raises
-    `OutputMissingError` with every rejected attempt. An agent that keeps
+    end their turn: past `attempts`, the guard lets the turn end, and the ask raises
+    `OutputMissingError` with every rejected attempt. An agent who keeps
     submitting without trying to end is bounded by the timeout layer.
     """
 

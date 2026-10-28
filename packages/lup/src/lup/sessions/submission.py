@@ -2,7 +2,7 @@
 
 The toolbox is a `Toolset` (`lup.tools.serving`): an adapter serves its specs,
 routes each call the model makes to `Toolbox.call`, and asks `Toolbox.end` when
-the model tries to end its turn. The calls recorded are the one source of what
+the model tries to end their turn. The calls recorded are the one source of what
 the turn said: the last accepted call to the output tool is the answer, the
 refused ones are the rejections, the last `blocked` or `stop` call is why the
 turn ended without one, and the `note`, `friction` and `how_it_felt` calls are
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 
 class Call(Model):
-    """One call the model made: the tool it named, and what came of it."""
+    """One call the model made: the tool they named, and what came of it."""
 
     tool: str
     outcome: Accepted | Refused
@@ -111,7 +111,7 @@ class Toolbox(MutableModel, Toolset, arbitrary_types_allowed=True):
         ]
 
     def ending(self) -> Problem | Stop | None:
-        """Return why the agent ended without an answer, its last `blocked` or `stop` call, if it made one."""
+        """Return why the agent ended without an answer, their last `blocked` or `stop` call, if they made one."""
         endings = [
             call.outcome.value
             for call in self.calls
@@ -122,7 +122,7 @@ class Toolbox(MutableModel, Toolset, arbitrary_types_allowed=True):
         return last if isinstance(last, Problem | Stop) else None
 
     def notes(self) -> list[str]:
-        """Return the remarks the agent attached to its answer, oldest first."""
+        """Return the remarks the agent attached to their answer, oldest first."""
         return [
             taken.remark for taken in self.taken(note.name) if isinstance(taken, Remark)
         ]
