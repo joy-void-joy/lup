@@ -1453,6 +1453,11 @@ export function Review({
         send,
         paint: (from, to) => painted(laidOut, from, to, freshOf),
         level: (position, opening, all, closed) => levelled(scopeFolds(position), closed, opening, all),
+        // `zO` and `zC` within the item or the drawer the cursor is in; on a banner, its group's.
+        scope: (position) => {
+            const within = scopeFolds(position);
+            return within.length > 0 ? within : laidFor.folds.filter((each) => each.kind === "group");
+        },
         kind: (position, kind, closing, closed) => {
             // Space z f a opens every agent's group, Space z F a closes them, to their banners, wherever the cursor is.
             if (kind === "group") {

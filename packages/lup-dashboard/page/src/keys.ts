@@ -254,6 +254,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
                 short: "fold",
             },
             { keys: "zo zc", does: "open or close it", short: "open close" },
+            { keys: "zO zC", does: "open every fold the cursor is in and every one within the innermost, but calls' input and output; or close every fold the cursor is in, within the item or the drawer, as vim's do recursively", short: "recursively" },
             {
                 keys: "zr zm",
                 does: "open or close one more level of the item or the drawer the cursor is in: its files, then their bodies and unchanged lines, then its context; in a conversation, the exchange before those open, one further back each time, then its runs of calls",
@@ -262,10 +263,10 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
             { keys: "zR zM", does: "open or close every fold in the item or the drawer the cursor is in, but for calls' input and output, which za and ␣zfd open", short: "all of it" },
             {
                 keys: "zf",
-                does: "and a letter: close the fold of its kind the cursor is in, the file, the run of unchanged lines, the item, a drawer, or in a conversation an earlier exchange, a run of calls or a call's input and output, the cursor going to its summary line",
-                short: "close one",
+                does: "and a letter: open or close the fold of its kind the cursor is in, the file, the run of unchanged lines, the item, a drawer, or in a conversation an earlier exchange, a run of calls or a call's input and output, the cursor going to its summary line",
+                short: "toggle one",
             },
-            ...lettered.map((each) => ({ keys: `zf${each.letter}`, does: `close ${each.one} the cursor is in`, short: each.one })),
+            ...lettered.map((each) => ({ keys: `zf${each.letter}`, does: `open or close ${each.one} the cursor is in`, short: each.one })),
             {
                 keys: "␣z",
                 does: "f or F, then a letter: open or close every fold of its kind in the item or the drawer the cursor is in",

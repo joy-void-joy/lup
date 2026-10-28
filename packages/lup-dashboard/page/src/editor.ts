@@ -17,11 +17,11 @@
 // any change to the draft, `g-` and `g+` go through its history in the order it
 // was made (`History`). Each fold is folded or open as the view lays it out
 // until the operator opens or closes it, which is kept by its key: `za` opens or
-// closes the fold the cursor is in, `zo` and `zc` open and close it; `zr` and
+// closes the fold the cursor is in, `zo` and `zc` open and close it, `zO` and `zC` recursively; `zr` and
 // `zm` open or close a level more, `zR` and `zM` all of them, and Space `z` `f`
 // and a letter those of a kind, Space `z` `F` closing them, within what the view
 // says (in the review, the item the cursor is in; in a conversation,
-// everything); `zf` and a kind's letter closes the one of that kind the cursor
+// everything); `zf` and a kind's letter opens or closes the one of that kind the cursor
 // is in; `zj` and `zk` go to the next fold's start and the previous one's end,
 // `[z` and `]z` to the start and the end of the open fold the cursor is in
 // (`folds.ts`). A closed fold counts as its summary line: no motion opens it,
@@ -61,7 +61,7 @@ import { useEffect, useRef, type RefObject } from "react";
 import { newId } from "./anchors";
 import { defineClipboard, shownBelow } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
-import { around, aroundOf, foldEdge, levelled, nextFold } from "./folds";
+import { around, aroundOf, foldEdge, levelled, nextFold, recursive } from "./folds";
 import type { FoldKind } from "./keys";
 import { lettered, type Kind, type Verb } from "./looks";
 import { brokenLine, hiddenOn, markdown, openedLine, shifted, unindented } from "./markdown";
@@ -90,9 +90,11 @@ interface Actions {
     follow: () => void;
     list: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
+    /** `zO` and `zC`: open or close the folds the cursor is in recursively, as vim's do (`recursive`). */
+    foldRecursive: (opening: boolean) => void;
     foldLevel: (opening: boolean, all: boolean) => void;
     foldKind: (kind: FoldKind, closing: boolean) => void;
-    /** `zf` and a kind's letter: close the fold of that kind the cursor is in, the cursor going to its summary line. */
+    /** `zf` and a kind's letter: open or close the fold of that kind the cursor is in, the cursor going to its summary line. */
     foldAround: (kind: FoldKind) => void;
     /** Where `zj` and `zk` (`next`), or `[z` and `]z` (`edge`), go from the line starting at `line`. */
     foldMotion: (line: number, how: "next" | "edge", forward: boolean) => number | undefined;
@@ -505,6 +507,8 @@ function mapKeys(): void {
     action("lupFoldToggle", (actions) => actions.fold("toggle"));
     action("lupFoldOpen", (actions) => actions.fold("open"));
     action("lupFoldClose", (actions) => actions.fold("close"));
+    action("lupFoldOpenRecursive", (actions) => actions.foldRecursive(true));
+    action("lupFoldCloseRecursive", (actions) => actions.foldRecursive(false));
     action("lupFoldOpenAll", (actions) => actions.foldLevel(true, true));
     action("lupFoldCloseAll", (actions) => actions.foldLevel(false, true));
     action("lupFoldOpenLevel", (actions) => actions.foldLevel(true, false));
@@ -534,6 +538,8 @@ function mapKeys(): void {
     map("za", "lupFoldToggle", "normal");
     map("zo", "lupFoldOpen", "normal");
     map("zc", "lupFoldClose", "normal");
+    map("zO", "lupFoldOpenRecursive", "normal");
+    map("zC", "lupFoldCloseRecursive", "normal");
     map("zR", "lupFoldOpenAll", "normal");
     map("zM", "lupFoldCloseAll", "normal");
     map("zr", "lupFoldOpenLevel", "normal");
@@ -1284,6 +1290,8 @@ export interface Own<C> {
     paint?: (from: number, to: number) => Range<Decoration>[];
     /** The folds `zr` opens (`opening`) or `zm` closes from `position`, or with `all` `zR` and `zM`; where none's said, those of every fold (`levelled`). */
     level?: (position: number, opening: boolean, all: boolean, closed: (fold: Folding) => boolean) => Folding[];
+    /** The folds `zO` and `zC` reach from `position`, those of the item or the drawer it's in; every fold where none's said. */
+    scope?: (position: number) => Folding[];
     /** The folds Space `z` `f` and a letter opens, or Space `z` `F` and the letter closes, from `position`; none where none's said. */
     kind?: (position: number, kind: FoldKind, closing: boolean, closed: (fold: Folding) => boolean) => Folding[];
 }
@@ -1615,14 +1623,22 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 const folds = own.level?.(head(), opening, all, closed) ?? levelled(shown.folds, closed, opening, all);
                 foldEvery(folds, !opening);
             },
+            foldRecursive: (opening) => {
+                const editor = view.current;
+                if (editor === null) {
+                    return;
+                }
+                const at = head();
+                foldEvery(recursive(own.scope?.(at) ?? shown.folds, at, opening), !opening);
+            },
             foldAround: (kind) => {
                 const editor = view.current;
                 const fold = aroundOf(shown.folds, head(), kind);
                 if (editor === null || fold === undefined) {
                     return;
                 }
-                const effects = isFolded(editor.state, fold) ? [] : [folding(fold, true)];
-                editor.dispatch({ effects, selection: { anchor: fold.summary.from }, scrollIntoView: true });
+                // Toggled, as vim's `za` toggles the innermost: closed, it opens; open, it closes, the cursor on its summary line.
+                editor.dispatch({ effects: folding(fold, !isFolded(editor.state, fold)), selection: { anchor: fold.summary.from }, scrollIntoView: true });
             },
             foldKind: (kind, closing) => {
                 const editor = view.current;
