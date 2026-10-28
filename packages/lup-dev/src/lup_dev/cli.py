@@ -13,7 +13,7 @@ a room for the worktree (*The command*). `host` runs the host service, handed
 the inbox as what each conversation is told at its hooks, its tools and its
 requests; `inbox` is the operator's face on it (`docs/inbox.md`, *The operator's face*).
 `stage` stages the hunks of a file an agent names, which `git add -p` would ask
-at a terminal (`lup_dev/staging.py`).
+at a terminal (`docs/judging-writes.md`, *Staging part of a file*).
 """
 
 import asyncio
