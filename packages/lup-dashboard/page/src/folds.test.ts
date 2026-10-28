@@ -2,7 +2,7 @@ import { LOOKS, STANDING } from "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
-import { around, aroundOf, depths, foldEdge, levelled, nextFold, ofKind, recursive } from "./folds";
+import { around, aroundOf, depths, foldEdge, levelled, nextFold, recursive } from "./folds";
 import type { FoldKind } from "./keys";
 import { adopt, merged, type Looks } from "./looks";
 
@@ -177,13 +177,6 @@ describe("opening and closing one item's folds", () => {
         // `zm` closes the runs, then each exchange, the earliest first.
         expect([false, false, false].map(step)).toEqual([["run 1", "run 2", "run 3"], ["before"], ["first"]]);
         expect(levelled(talk, closed, true, true).map((each) => each.key)).not.toContain("call 1");
-        expect(ofKind(talk, (each) => each.key !== "drawer", "call", false).map((each) => each.key)).toEqual(["call 1"]);
     });
 
-    it("opens with Space z f and a letter each fold of a kind, and the item's own so they're seen; closes with Space z F and the letter", () => {
-        expect(ofKind(READ, closed, "lines", false).map((each) => each.key)).toEqual(["item", "lines"]);
-        expect(ofKind(READ, closed, "body", false).map((each) => each.key)).toEqual(["item"]);
-        expect(ofKind(READ, closed, "body", true).map((each) => each.key)).toEqual(["body"]);
-        expect(ofKind(READ, closed, "lines", true)).toEqual([]);
-    });
 });

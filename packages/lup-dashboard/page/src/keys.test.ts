@@ -41,12 +41,11 @@ describe("the palette's table", () => {
 describe("what may follow a chord", () => {
     const following = (pressed: string) => chords(REVIEW_KEYS, pressed).map((each) => `${each.keys.join(" ")} ${each.short}`);
 
-    it("lists the keys after Space, from the same table as the line of keys and the palette, once each: each verb, then the folds", () => {
-        expect(following("␣")).toEqual(["d done", "x decline", "s send to", "c comment", "h hold", "p pause", "z by kind"]);
+    it("lists the keys after Space, from the same table as the line of keys and the palette, once each: each verb, then the fold-wise selections", () => {
+        expect(following("␣")).toEqual(["d done", "x decline", "s send to", "c comment", "h hold", "p pause", "f select by kind", "F select every one"]);
     });
 
-    it("lists the keys after Space z, f opening by kind and F closing, then each kind of fold's letter, as vim's fold keys begin with z", () => {
-        expect(following("␣z")).toEqual(["f open by kind", "F close by kind"]);
+    it("lists the keys after Space f and Space F, each kind of fold's letter but the item's own", () => {
         const kinds = [
             "a agents' groups",
             "t the tasks",
@@ -61,9 +60,9 @@ describe("what may follow a chord", () => {
             "m items' text",
             "d calls' input and output",
         ];
-        expect(following("␣zf")).toEqual(kinds);
-        expect(following("␣zF")).toEqual(kinds);
-        expect(following("␣f")).toEqual([]);
+        expect(following("␣f")).toEqual(kinds);
+        expect(following("␣F")).toEqual(kinds);
+        expect(following("␣z")).toEqual([]);
         expect(following("␣x")).toEqual([]);
         expect(following("")).toEqual([]);
     });
@@ -86,13 +85,12 @@ describe("what may follow a chord", () => {
         ]);
     });
 
-    it("names each kind of fold by a letter of its own, Space z's beside every one but the item's own", () => {
+    it("names each kind of fold by a letter of its own, Space f's beside every one but the item's own", () => {
         const letters = KINDS.map((each) => each.letter);
         expect(new Set(letters).size).toBe(letters.length);
-        const spaced = following("␣zf").map((each) => each.split(" ")[0]);
-        expect(spaced).toEqual(KINDS.filter((each) => each.chord).map((each) => each.letter));
+        expect(following("␣f").map((each) => each.split(" ")[0])).toEqual(KINDS.filter((each) => each.chord).map((each) => each.letter));
         expect(following("zf").map((each) => each.split(" ")[0])).toEqual(letters);
-        // Space z leads the folds alone: z follows Space once.
-        expect(following("␣").filter((each) => each.startsWith("z "))).toEqual(["z by kind"]);
+        // Space f and Space F lead the fold-wise selections alone: f and F each follow Space once.
+        expect(following("␣").filter((each) => each.startsWith("f ") || each.startsWith("F "))).toEqual(["f select by kind", "F select every one"]);
     });
 });

@@ -54,6 +54,8 @@ describe("the parts the cursor is in", () => {
         expect(chainAt(nodes, 8).map((each) => each.id)).toEqual(["group a", "item 1", "item 1 header"]);
         expect(chainAt(nodes, 21).map((each) => each.id)).toEqual(["group a", "item 1"]);
         expect(chainAt(nodes, 30).map((each) => each.id)).toEqual(["group a"]);
-        expect(chainAt(nodes, 50)).toEqual([]);
+        // Past the last group, the review's last lines are its.
+        expect(chainAt(nodes, 50).map((each) => each.id)).toEqual(["group a"]);
+        expect(chainAt([part("group b", "group", 10, 20)], 5)).toEqual([]);
     });
 });

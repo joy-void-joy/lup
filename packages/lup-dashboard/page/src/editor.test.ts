@@ -397,26 +397,20 @@ describe("the chords Space leads", () => {
     // The kind of fold each letter's action finds as it's pressed.
     const kindOfAction = (action: string | undefined) => (action === undefined ? undefined : `${action.split("-")[0]}-${lettered(action.split("-")[1] ?? "")?.name}`);
 
-    it("opens the folds of a kind with Space z f and its letter, closing them with Space z F and the letter, as vim's fold keys begin with z", () => {
-        expect(["<Space>zff", "<Space>zfb", "<Space>zfu", "<Space>zfc", "<Space>zfs"].map((keys) => kindOfAction(mapped.get(keys)))).toEqual([
-            "lupFoldOpen-file",
-            "lupFoldOpen-body",
-            "lupFoldOpen-lines",
-            "lupFoldOpen-context",
-            "lupFoldOpen-since",
+    it("selects the folds of a kind fold-wise with Space f and its letter, Space F and it in the whole review, Space z leading nothing", () => {
+        expect(["<Space>ff", "<Space>fb", "<Space>fu", "<Space>fc", "<Space>fs"].map((keys) => kindOfAction(mapped.get(keys)))).toEqual([
+            "lupChoose-file",
+            "lupChoose-body",
+            "lupChoose-lines",
+            "lupChoose-context",
+            "lupChoose-since",
         ]);
-        expect(["<Space>zFf", "<Space>zFb", "<Space>zFu", "<Space>zFc", "<Space>zFs"].map((keys) => kindOfAction(mapped.get(keys)))).toEqual([
-            "lupFoldClose-file",
-            "lupFoldClose-body",
-            "lupFoldClose-lines",
-            "lupFoldClose-context",
-            "lupFoldClose-since",
-        ]);
-        // Space z, Space z f and Space z F lead, doing nothing of their own; a kind's letter right after Space z, Shift
-        // and the letter among them, and Space f, are no chord.
+        // The item's own fold isn't selected so: it's folded by za on its header, and marked from it.
+        expect(mapped.has("<Space>fi")).toBe(false);
+        expect(["<Space>Ff", "<Space>Fu", "<Space>Fd"].map((keys) => kindOfAction(mapped.get(keys)))).toEqual(["lupChooseAll-file", "lupChooseAll-lines", "lupChooseAll-call"]);
+        // Space f and Space F lead, doing nothing of their own; Space z leads nothing any more.
         const keys = [...mapped.keys()];
-        expect(keys.filter((each) => ["<Space>z", "<Space>zf", "<Space>zF"].includes(each) || each.startsWith("<Space>f"))).toEqual([]);
-        expect(keys.filter((each) => each.startsWith("<Space>z") && !each.startsWith("<Space>zf") && !each.startsWith("<Space>zF"))).toEqual([]);
+        expect(keys.filter((each) => ["<Space>f", "<Space>F"].includes(each) || each.startsWith("<Space>z"))).toEqual([]);
     });
 
     it("closes the fold of a kind the cursor is in with z f and its letter, every kind's, the item's own among them", () => {

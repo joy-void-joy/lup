@@ -1187,7 +1187,7 @@ def test_the_verbs_are_the_core_s_the_judge_s_and_the_runtime_s_then_each_module
     [
         (lup.Verb(name="tag", key="d", called="tag"), r"Verb keys: .*`d` from `core`"),
         (lup.Verb(name="hold", key="q", called="hold"), r"Verbs: .*`hold`"),
-        (lup.Verb(name="zoom", key="z", called="zoom"), r"Verb keys: .*`z`"),
+        (lup.Verb(name="find", key="f", called="find"), r"Verb keys: .*`f`"),
     ],
 )
 def test_a_verb_taking_a_key_or_a_name_another_has_fails_the_load(

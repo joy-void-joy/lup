@@ -668,9 +668,9 @@ class FoldKind(Model):
 
     name: str
     letter: str
-    """The key after `zf` closing the one the cursor is in, and after Space `z`
-    `f` opening every one: two kinds of a repository's modules taking one
-    letter fail the load."""
+    """The key after `zf` toggling the one the cursor is in, and after Space
+    `f` selecting every one, fold-wise: two kinds of a repository's modules
+    taking one letter fail the load."""
     called: str
     """What its folds are called together: `earlier exchanges`."""
     one: str
@@ -683,9 +683,10 @@ class FoldKind(Model):
     its own keys, since what it holds is read as it opens."""
     colour: Colour
     chord: bool = True
-    """Whether Space `z` `f` and its letter open every one of them in the scope
-    the cursor is in, Space `z` `F` and the letter closing them: an item's own
-    fold is folded by `za` on its header alone."""
+    """Whether Space `f` and its letter select every one of them in the scope
+    the cursor is in, fold-wise, Space `F` and the letter in the whole review:
+    an item's own fold is folded by `za` on its header, and marked from it,
+    alone."""
     whole: bool = False
     """Whether it's the fold holding its scope whole, as an item's or a group's
     does under its header: `zm` and `zM` never close it."""

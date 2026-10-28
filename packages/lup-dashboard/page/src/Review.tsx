@@ -24,7 +24,7 @@
 // line, in the column of its depth, each scope a bar its full height, labelled
 // (`rails.ts`); the context, each run of unchanged lines, each test, data and
 // first approval's file and each drawer, folded until opened, and `zr`, `zm`,
-// `zR`, `zM` and Space `z` act on the item or the drawer the cursor is in. The
+// `zR` and `zM` act on the item or the drawer the cursor is in, Space `f` and a letter selecting every fold of a kind there. The
 // header over the review says where the cursor is: the group, the item or the
 // drawer, the file and the folds it's in, and, while a comment is being
 // written, whom it goes to; at its end, how many items are to answer and how
@@ -48,7 +48,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { tokensOf, within, type Filed, type Matter, type Taken } from "./code";
 import { cited, type Block, type Folding, type Span } from "./comments";
-import { closedAs, folding, hiddenAt, isFolded, mapLetters, mapVerbs, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
+import { BARE, chosenKind, closedAs, folding, hiddenAt, isFolded, mapLetters, mapVerbs, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
 import { arrivedLines, arriving, owned, owning, ownersOf, reconcile, settling } from "./reconcile";
 import { clock, ticked, ticking, type Tick } from "./ticking";
 import { doing, since, type Activity } from "./agents";
@@ -59,8 +59,8 @@ import { redrawn, structureMargin, type Labelled, type Structured } from "./rail
 import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
-import { depths, levelled, ofKind } from "./folds";
-import { chainAt, findNode, isMarked, marking, marksOn, reachOf, type Act } from "./grammar";
+import { depths, levelled } from "./folds";
+import { chainAt, findNode, isMarked, marking, marksOn, reachOf, reachedIn, type Act } from "./grammar";
 import type { DrawerKind, FoldKind, Here } from "./keys";
 import { kindOf, type Merged } from "./looks";
 import { markerEnd, outdated, unfound } from "./exchange";
@@ -656,6 +656,8 @@ export function Review({
 }: Props) {
     // Where the cursor is, and whether a comment is being written: what the header says.
     const [head, setHead] = useState(0);
+    // The folds a fold-wise selection holds, while there's one: what the line of keys says the keys do to.
+    const choosing = useRef<readonly Folding[] | null>(null);
     const [commenting, setCommenting] = useState(false);
     // Where the groups go: as this page laid them out last, then as the host keeps them for those it didn't
     // (`ordered`), so each keeps its place, across reloads and on each page; and as it last told the host it laid
@@ -724,8 +726,14 @@ export function Review({
         say,
         moved: (at) => {
             setHead(at);
-            placed(hereAt(at));
+            if (choosing.current === null) {
+                placed(hereAt(at));
+            }
             left(at);
+        },
+        chosen: (folds) => {
+            choosing.current = folds;
+            placed(folds === null ? hereAt(editor.head()) : hereChosen(folds));
         },
         list,
         pending,
@@ -788,7 +796,7 @@ export function Review({
         // Made once, with the editor.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    // The keys each kind's letter takes, after `zf`, Space `z` `f` and `]`, and each verb's after Space, as the looks change.
+    // The keys each kind's letter takes, after `zf`, Space `f` and `F` and `]`, and each verb's after Space, as the looks change.
     useEffect(() => {
         mapLetters(looks.kinds);
         mapScopeKeys(looks.kinds);
@@ -1103,6 +1111,38 @@ export function Review({
         editor.record(next);
     }
 
+    /**
+     * Do what the verb named `name` does on each of `folds`, a visual selection's, as one mark (`reachedIn`): each thing
+     * one of them holds whole and the verb reaches, marked, or every mark taken off where each is marked already.
+     */
+    function verbOn(name: string, folds: readonly Folding[]) {
+        const known = looks.verbs.find((each) => each.name === name);
+        if (known === undefined) {
+            return;
+        }
+        const acts = reachedIn(laidOut, folds, known, { called });
+        if (acts.length === 0) {
+            say(`␣${known.key} ${known.called}: nothing selected takes it.`);
+            return;
+        }
+        for (const each of acts) {
+            if (each.kind === "once") {
+                act(each.offer, each.conversation);
+            }
+        }
+        const now = editor.latest.current;
+        const next = marking(now, acts, name);
+        if (next === now) {
+            return;
+        }
+        for (const each of acts) {
+            unkeep(each);
+        }
+        const off = acts.every((each) => isMarked(now, each, name));
+        say(`␣${known.key} ${known.called}: ${off ? "unmarked" : "marked"} ${acts.length}, sent with Ctrl+Enter.`);
+        editor.record(next);
+    }
+
     /** Forget how the operator left the fold of what `act` marks, an item's or a file's, so it folds as the layout says once marked or unmarked. */
     function unkeep(act: Act) {
         if (act.kind === "item") {
@@ -1146,6 +1186,23 @@ export function Review({
         const writtenOn = blockAt(laidOut, at) === undefined ? null : "your comment";
         const on = writtenOn ?? reached.find((each) => each.on !== null)?.on ?? "";
         return { on, reached: reached.map((each) => ({ ...each, on: each.on === on ? null : each.on })) };
+    }
+
+    /**
+     * Return what the line of keys says of a fold-wise selection of `folds`: how many of its kind, and what the fold keys
+     * and each verb would do to them, the verb's key alone with Space where it isn't a motion (`BARE`).
+     */
+    function hereChosen(folds: readonly Folding[]): Here {
+        const kind = view.current?.state.field(chosenKind) ?? null;
+        const what = kindOf(kind ?? undefined)?.called ?? "folds";
+        const verbs = looks.verbs.flatMap((each) => {
+            if (each.name === "comment") {
+                return [];
+            }
+            const acts = reachedIn(laidOut, folds, each, { called });
+            return acts.length === 0 ? [] : [{ keys: `␣${each.key}${BARE.has(each.key) ? ` ${each.key}` : ""}`, says: `${each.called} ${acts.length}`, on: null }];
+        });
+        return { on: `${what}: ${folds.length} selected`, reached: [{ keys: "za zo zc", says: "toggle, open or close them", on: null }, ...verbs] };
     }
 
     /**
@@ -1361,6 +1418,17 @@ export function Review({
         quoted: (from, to) => quoted(laidOut, from, to),
         about: (comment, block) => aboutAt(laidOut, comment, block),
         verb,
+        verbOn,
+        // Space f and a letter selects in the item or the drawer the cursor is in, or, on a banner, in its agent's group.
+        chooseIn: (position) => {
+            const scope = scopeAt(laidOut, position);
+            if (scope !== undefined) {
+                const own = scope.folds.find((each) => each.of === scope.of && kindOf(each.kind)?.whole === true);
+                return { from: scope.header.from, to: own?.to ?? scope.header.to };
+            }
+            const group = groupAt(laidOut, position);
+            return group === undefined ? undefined : { from: group.banner.from, to: group.fold?.to ?? group.banner.to };
+        },
         move: (forward) => {
             const current = view.current;
             if (current === null) {
@@ -1457,19 +1525,6 @@ export function Review({
         scope: (position) => {
             const within = scopeFolds(position);
             return within.length > 0 ? within : laidFor.folds.filter((each) => each.kind === "group");
-        },
-        kind: (position, kind, closing, closed) => {
-            // Space z f a opens every agent's group, Space z F a closes them, to their banners, wherever the cursor is.
-            if (kind === "group") {
-                return laidFor.folds.filter((each) => each.kind === "group" && closed(each) !== closing);
-            }
-            // On a banner, Space z and a drawer's letter opens that drawer of the agent's.
-            const group = groupAt(laidOut, position);
-            if (group !== undefined) {
-                const drawer = group.drawers.find((each) => each.kind === kind);
-                return drawer === undefined ? [] : laidFor.folds.filter((each) => each.of === drawer.of && each.kind === kind && closed(each) !== closing);
-            }
-            return ofKind(scopeFolds(position), closed, kind, closing);
         },
     });
 

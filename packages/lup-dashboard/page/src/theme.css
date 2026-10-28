@@ -307,6 +307,16 @@ kbd {
 
 /* The selection is drawn over the lines, lightening what's under it, so it shows on lines with a background of their
    own, a comment's and a changed file's, which hide what's drawn under them. */
+/* A fold-wise selection: the folds it selects drawn as a selection is, every line of each, the lines between them
+   not; the generic selection left undrawn while it's one (`chosenFolds`, `editor.ts`). */
+.buffer .cm-editor.is-choosing .cm-selectionLayer .cm-selectionBackground {
+    background: none !important;
+}
+
+.buffer .cm-line.fold-chosen {
+    background: var(--selection);
+}
+
 .buffer .cm-selectionLayer {
     z-index: 1 !important;
     mix-blend-mode: lighten;

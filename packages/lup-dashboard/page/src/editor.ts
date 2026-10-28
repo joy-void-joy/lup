@@ -18,10 +18,13 @@
 // was made (`History`). Each fold is folded or open as the view lays it out
 // until the operator opens or closes it, which is kept by its key: `za` opens or
 // closes the fold the cursor is in, `zo` and `zc` open and close it, `zO` and `zC` recursively; `zr` and
-// `zm` open or close a level more, `zR` and `zM` all of them, and Space `z` `f`
-// and a letter those of a kind, Space `z` `F` closing them, within what the view
+// `zm` open or close a level more, `zR` and `zM` all of them, within what the view
 // says (in the review, the item the cursor is in; in a conversation,
-// everything); `zf` and a kind's letter opens or closes the one of that kind the cursor
+// everything); Space `f` and a kind's letter selects every fold of the kind in
+// the item, the drawer or the agent's group, fold-wise, Space `F` and it in
+// the whole review, linewise in vim's visual mode, motions reshaping it, Esc
+// ending it, its folds drawn as selected (`chosenKind`), and `za`, `zo`, `zc`,
+// Space and a verb's key, or the key alone where it's no motion, act on them; `zf` and a kind's letter opens or closes the one of that kind the cursor
 // is in; `zj` and `zk` go to the next fold's start and the previous one's end,
 // `[z` and `]z` to the start and the end of the open fold the cursor is in
 // (`folds.ts`). A closed fold counts as its summary line: no motion opens it,
@@ -46,7 +49,7 @@
 // A fold may be inside another, as an item's text is inside what came before the
 // operator's last words: the fold keys act on the innermost the cursor is in.
 import { foldEffect, foldedRanges, syntaxTree, unfoldEffect } from "@codemirror/language";
-import { Annotation, EditorSelection, EditorState, Facet, Prec, StateEffect, StateField, type Range } from "@codemirror/state";
+import { Annotation, EditorSelection, EditorState, Facet, Prec, RangeSetBuilder, StateEffect, StateField, type Range } from "@codemirror/state";
 import {
     Decoration,
     EditorView,
@@ -63,7 +66,7 @@ import { defineClipboard, shownBelow } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, aroundOf, foldEdge, levelled, nextFold, recursive } from "./folds";
 import type { FoldKind } from "./keys";
-import { lettered, type Kind, type Verb } from "./looks";
+import { kindOf, lettered, type Kind, type Verb } from "./looks";
 import { brokenLine, hiddenOn, markdown, openedLine, shifted, unindented } from "./markdown";
 import { placeheld, type Margined } from "./margin";
 
@@ -93,7 +96,14 @@ interface Actions {
     /** `zO` and `zC`: open or close the folds the cursor is in recursively, as vim's do (`recursive`). */
     foldRecursive: (opening: boolean) => void;
     foldLevel: (opening: boolean, all: boolean) => void;
-    foldKind: (kind: FoldKind, closing: boolean) => void;
+    /** Space `f` and a kind's letter, or Space `F` and it (`whole`): select every fold of that kind, fold-wise. */
+    choose: (kind: FoldKind, whole: boolean) => void;
+    /** `za`, `zo` or `zc` in visual mode: toggle, open or close the folds selected. */
+    foldChosen: (how: "toggle" | "open" | "close") => void;
+    /** Space and a verb's key in visual mode, or the key alone in a fold-wise selection: do what the verb does on what's selected. */
+    verbChosen: (name: string) => void;
+    /** Told the folds a fold-wise selection holds, each time they change; none once it ends. */
+    chosen: (folds: readonly Folding[] | null) => void;
     /** `zf` and a kind's letter: open or close the fold of that kind the cursor is in, the cursor going to its summary line. */
     foldAround: (kind: FoldKind) => void;
     /** Where `zj` and `zk` (`next`), or `[z` and `]z` (`edge`), go from the line starting at `line`. */
@@ -363,6 +373,16 @@ export function verbKeys(verbs: readonly Verb[]): (readonly [keys: string, actio
 let verbed = new Map<string, string>();
 
 /**
+ * The verbs' keys that act alone in a fold-wise selection, without Space, as vim's operators follow a selection
+ * (`Space ff d`): those that are vim's operators editing the text in visual mode, which do nothing in a buffer the
+ * operator writes only comments in. A key that's a motion there, as `h`, stays one, narrowing the selection; `c`
+ * comments on it. Read ahead of vim (`keys`), each by the verb named.
+ */
+export const BARE: ReadonlySet<string> = new Set(["d", "x", "s", "p"]);
+const bare = BARE;
+const bareVerbs = new Map<string, string>();
+
+/**
  * Map the keys `verbs` take (`verbKeys`) into vim's keymap, as the verbs known change, the keys no verb takes now
  * unmapped, so a key never acts for a verb none declares.
  */
@@ -377,22 +397,29 @@ export function mapVerbs(verbs: readonly Verb[]): void {
     }
     for (const { name } of verbs) {
         action(`lupVerb-${name}`, (actions, cm) => (name === COMMENTING ? actions.comment(cm, "whole") : actions.verb(name)));
+        action(`lupVerbChosen-${name}`, (actions) => actions.verbChosen(name));
     }
     for (const [keys, named] of wanted) {
         if (verbed.get(keys) !== named) {
             Vim.mapCommand(keys, "action", named, {}, { context: "normal" });
+            // In visual mode, on what's selected; the comment verb's stays vim's there, `c` commenting on the selection.
+            if (!named.endsWith(`-${COMMENTING}`)) {
+                Vim.mapCommand(keys, "action", named.replace("lupVerb-", "lupVerbChosen-"), {}, { context: "visual" });
+            }
         }
     }
+    verbs.forEach((each) => (bare.has(each.key) ? bareVerbs.set(each.key, each.name) : null));
     verbed = wanted;
 }
 
 /**
  * Return the keys each kind's letter takes, as vim's keymap writes them, and the action each does, of `kinds`, the
- * kinds of fold known now (`looks.ts`): `zf` and the letter closing the fold of that kind the cursor is in, as vim's
+ * kinds of fold known now (`looks.ts`): `zf` and the letter toggling the fold of that kind the cursor is in, as vim's
  * fold keys begin with `z` and its own `zf`, making a fold, has nothing to do where the folds are laid out; and, for a
- * kind Space `z` `f` reaches, Space `z` `f` and the letter opening every fold of its kind in the item or the drawer,
- * Space `z` `F` and the letter closing them. Each action finds its kind by the letter as it's pressed. A kind with no
- * letter, another kind having taken it, takes none.
+ * kind Space `f` reaches (`Kind.chord`), Space `f` and the letter selecting every fold of its kind in the item, the drawer or the agent's group the cursor is in,
+ * fold-wise, Space `F` and the letter every one in the review, or, in visual mode, within the selection (`choose`).
+ * Each action finds its kind by the letter as it's pressed. A kind with no letter, another kind having taken it, takes
+ * none.
  */
 export function lettersOf(kinds: readonly Kind[]): (readonly [keys: string, action: string])[] {
     return kinds.flatMap(({ letter, chord }) =>
@@ -400,11 +427,14 @@ export function lettersOf(kinds: readonly Kind[]): (readonly [keys: string, acti
             ? []
             : [
                   [`zf${letter}`, `lupFoldAround-${letter}`] as const,
-                  ...(chord
-                      ? [[`<Space>zf${letter}`, `lupFoldOpen-${letter}`] as const, [`<Space>zF${letter}`, `lupFoldClose-${letter}`] as const]
-                      : []),
+                  ...(chord ? [[`<Space>f${letter}`, `lupChoose-${letter}`] as const, [`<Space>F${letter}`, `lupChooseAll-${letter}`] as const] : []),
               ],
     );
+}
+
+/** The contexts of vim's keymap a key a letter takes is mapped in: a fold-wise selection's in visual mode too, where it selects within the selection. */
+function contextsOf(keys: string): string[] {
+    return keys.startsWith("<Space>f") || keys.startsWith("<Space>F") ? ["normal", "visual"] : ["normal"];
 }
 
 /** The keys a kind's letter took in vim's keymap as last mapped (`mapLetters`), and the action each does. */
@@ -428,8 +458,8 @@ function letterActions(letter: string): void {
             act(kind);
         }
     };
-    action(`lupFoldOpen-${letter}`, (actions) => named((kind) => actions.foldKind(kind, false)));
-    action(`lupFoldClose-${letter}`, (actions) => named((kind) => actions.foldKind(kind, true)));
+    action(`lupChoose-${letter}`, (actions) => named((kind) => actions.choose(kind, false)));
+    action(`lupChooseAll-${letter}`, (actions) => named((kind) => actions.choose(kind, true)));
     action(`lupFoldAround-${letter}`, (actions) => named((kind) => actions.foldAround(kind)));
 }
 
@@ -443,7 +473,9 @@ export function mapLetters(kinds: readonly Kind[]): void {
     const unmap = Vim.unmap as (keys: string, context?: string) => boolean;
     for (const [keys, action] of letters) {
         if (wanted.get(keys) !== action) {
-            unmap(keys, "normal");
+            for (const context of contextsOf(keys)) {
+                unmap(keys, context);
+            }
         }
     }
     for (const { letter } of kinds) {
@@ -453,7 +485,9 @@ export function mapLetters(kinds: readonly Kind[]): void {
     }
     for (const [keys, named] of wanted) {
         if (letters.get(keys) !== named) {
-            Vim.mapCommand(keys, "action", named, {}, { context: "normal" });
+            for (const context of contextsOf(keys)) {
+                Vim.mapCommand(keys, "action", named, {}, { context });
+            }
         }
     }
     letters = wanted;
@@ -508,6 +542,9 @@ function mapKeys(): void {
     action("lupFoldOpen", (actions) => actions.fold("open"));
     action("lupFoldClose", (actions) => actions.fold("close"));
     action("lupFoldOpenRecursive", (actions) => actions.foldRecursive(true));
+    action("lupFoldChosenToggle", (actions) => actions.foldChosen("toggle"));
+    action("lupFoldChosenOpen", (actions) => actions.foldChosen("open"));
+    action("lupFoldChosenClose", (actions) => actions.foldChosen("close"));
     action("lupFoldCloseRecursive", (actions) => actions.foldRecursive(false));
     action("lupFoldOpenAll", (actions) => actions.foldLevel(true, true));
     action("lupFoldCloseAll", (actions) => actions.foldLevel(false, true));
@@ -539,6 +576,10 @@ function mapKeys(): void {
     map("zo", "lupFoldOpen", "normal");
     map("zc", "lupFoldClose", "normal");
     map("zO", "lupFoldOpenRecursive", "normal");
+    // In visual mode, on the folds selected: those of a fold-wise selection's kind, else every fold in it.
+    map("za", "lupFoldChosenToggle", "visual");
+    map("zo", "lupFoldChosenOpen", "visual");
+    map("zc", "lupFoldChosenClose", "visual");
     map("zC", "lupFoldCloseRecursive", "normal");
     map("zR", "lupFoldOpenAll", "normal");
     map("zM", "lupFoldCloseAll", "normal");
@@ -702,6 +743,13 @@ const keys = Prec.highest(
             if (event.target === view.contentDOM) {
                 keyed.searching = !modified && searches(cm, event.key);
             }
+            // In a fold-wise selection, a verb's key alone acts on it, as vim's operators follow a selection (`bare`).
+            const alone = !modified && !event.shiftKey ? bareVerbs.get(event.key) : undefined;
+            if (alone !== undefined && cm.state.vim.visualMode && view.state.field(chosenKind) !== null && cm.state.vim.inputState.keyBuffer.length === 0) {
+                bound.actions?.verbChosen(alone);
+                event.preventDefault();
+                return true;
+            }
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 if (cm.state.vim.insertMode) {
                     bound.actions?.finish(cm);
@@ -802,6 +850,78 @@ function searches(cm: CodeMirrorV, key: string): boolean {
 
 /** Marks a view's own replacing of its text, which isn't the operator's edit. */
 export const rebuilt = Annotation.define<boolean>();
+
+/** Begins a fold-wise selection of the kind named, or ends it (none). */
+const choosing = StateEffect.define<FoldKind | null>();
+
+/** The kind of fold a fold-wise selection selects, while vim's visual selection is one; none else. */
+export const chosenKind = StateField.define<FoldKind | null>({
+    create: () => null,
+    update: (kind, transaction) => transaction.effects.reduce((was, effect) => (effect.is(choosing) ? effect.value : was), kind),
+});
+
+/**
+ * Return the folds a visual selection from `from` to `to` holds, by their summary lines: of `kind`, in a fold-wise
+ * selection; else every fold, as vim's fold keys in visual mode act on the folds in it.
+ */
+export function chosenIn<F extends Pick<Folding, "summary" | "kind">>(folds: readonly F[], from: number, to: number, kind: FoldKind | null): F[] {
+    return folds.filter((each) => each.summary.from >= from && each.summary.from <= to && (kind === null || each.kind === kind));
+}
+
+/** Return the text's span vim's visual selection covers in `state`, whole lines, as a fold-wise selection is linewise; none outside visual mode. */
+function visualSpan(state: EditorState): { from: number; to: number } | null {
+    const range = state.selection.main;
+    if (range.empty) {
+        return null;
+    }
+    return { from: state.doc.lineAt(range.from).from, to: state.doc.lineAt(Math.max(range.to - 1, range.from)).to };
+}
+
+/**
+ * The folds a fold-wise selection holds, drawn as a visual selection is, every line of each, the generic selection
+ * left undrawn while it's one; told to the view each time they change, so what the keys do to them is said.
+ */
+const chosenFolds = ViewPlugin.fromClass(
+    class {
+        decorations: DecorationSet = Decoration.none;
+        told = "";
+
+        constructor(readonly view: EditorView) {}
+
+        update(update: ViewUpdate) {
+            const kind = update.state.field(chosenKind);
+            if (!update.selectionSet && !update.docChanged && kind === update.startState.field(chosenKind)) {
+                return;
+            }
+            const actions = boundOf(update.state).actions;
+            const span = kind === null ? null : visualSpan(update.state);
+            const folds = span === null || actions === null ? [] : chosenIn(actions.folds(), span.from, span.to, kind);
+            const builder = new RangeSetBuilder<Decoration>();
+            const lines = new Set<number>();
+            for (const fold of folds) {
+                for (let at = update.state.doc.lineAt(fold.summary.from).number; at <= update.state.doc.lineAt(fold.to).number; at += 1) {
+                    lines.add(update.state.doc.line(at).from);
+                }
+            }
+            for (const from of [...lines].sort((a, b) => a - b)) {
+                builder.add(from, from, CHOSEN);
+            }
+            this.decorations = builder.finish();
+            const said = kind === null ? "" : `${kind} ${folds.map((each) => each.summary.from).join(" ")}`;
+            if (said !== this.told) {
+                this.told = said;
+                queueMicrotask(() => actions?.chosen(kind === null ? null : folds));
+            }
+        }
+    },
+    { decorations: (plugin) => plugin.decorations },
+);
+
+/** A line of a fold a fold-wise selection holds. */
+const CHOSEN = Decoration.line({ class: "fold-chosen" });
+
+/** The editor's class while a fold-wise selection is one, which leaves the generic selection undrawn. */
+const choosingClass = EditorView.editorAttributes.compute([chosenKind], (state) => (state.field(chosenKind) === null ? {} : { class: "is-choosing" }));
 
 const drawn = StateEffect.define<DecorationSet>();
 
@@ -1258,6 +1378,8 @@ interface Config<D, C> {
     unfolded?: (fold: Folding) => void;
     /** Say something in the page's top line, as why a yank didn't reach the clipboard. */
     say?: (text: string) => void;
+    /** Told the folds a fold-wise selection holds and their kind each time they change, so the page says what the keys do to them; none once it ends. */
+    chosen?: (folds: readonly Folding[] | null) => void;
 }
 
 /** What a view's keys do with what it laid out. */
@@ -1292,8 +1414,10 @@ export interface Own<C> {
     level?: (position: number, opening: boolean, all: boolean, closed: (fold: Folding) => boolean) => Folding[];
     /** The folds `zO` and `zC` reach from `position`, those of the item or the drawer it's in; every fold where none's said. */
     scope?: (position: number) => Folding[];
-    /** The folds Space `z` `f` and a letter opens, or Space `z` `F` and the letter closes, from `position`; none where none's said. */
-    kind?: (position: number, kind: FoldKind, closing: boolean, closed: (fold: Folding) => boolean) => Folding[];
+    /** Where Space `f` and a letter selects at `position`: the item, the drawer or the agent's group it's in; none where it's in none. */
+    chooseIn?: (position: number) => { from: number; to: number } | undefined;
+    /** Do what the verb named `name` does on each of `folds`, a visual selection's, as one mark; none where the view has no verbs. */
+    verbOn?: (name: string, folds: readonly Folding[]) => void;
 }
 
 /** One editor, as a view uses it. */
@@ -1381,6 +1505,9 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                     placeheld(margined),
                     drawing,
                     painting,
+                    chosenKind,
+                    chosenFolds,
+                    choosingClass,
                     markdown(),
                     EditorView.updateListener.of((update) => {
                         const actions = bound.current.actions;
@@ -1420,6 +1547,10 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
         view.current = created;
         shifting(created);
         getCM(created)?.on("vim-mode-change", (event: { mode: string }) => {
+            // Leaving visual mode, as Esc does, ends a fold-wise selection.
+            if (event.mode !== "visual" && created.state.field(chosenKind) !== null) {
+                queueMicrotask(() => created.dispatch({ effects: choosing.of(null) }));
+            }
             const now = event.mode === "insert" || event.mode === "replace";
             const was = keyed.inserting;
             keyed.inserting = now;
@@ -1623,6 +1754,61 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 const folds = own.level?.(head(), opening, all, closed) ?? levelled(shown.folds, closed, opening, all);
                 foldEvery(folds, !opening);
             },
+            choose: (kind, whole) => {
+                const editor = view.current;
+                const cm = editor === null ? null : vimOf(editor);
+                if (editor === null || cm === null) {
+                    return;
+                }
+                // In visual mode, within the selection; else what the cursor is in, or the whole review, selected linewise.
+                if (!cm.state.vim.visualMode) {
+                    const span = whole ? { from: 0, to: editor.state.doc.length } : own.chooseIn?.(head());
+                    if (span === undefined) {
+                        config.say?.("Space f and a letter selects the folds of a kind in an item, a drawer or an agent's group: put the cursor in one, or Space F the whole review.");
+                        return;
+                    }
+                    editor.dispatch({ selection: { anchor: span.from } });
+                    Vim.handleKey(cm, "V", "mapping");
+                    editor.dispatch({ selection: EditorSelection.single(span.from, span.to) });
+                }
+                editor.dispatch({ effects: choosing.of(kind) });
+                const span = visualSpan(editor.state);
+                const found = span === null ? [] : chosenIn(shown.folds, span.from, span.to, kind);
+                if (found.length === 0) {
+                    config.say?.(`No ${kindOf(kind)?.called ?? kind} here.`);
+                }
+            },
+            foldChosen: (how) => {
+                const editor = view.current;
+                const cm = editor === null ? null : vimOf(editor);
+                if (editor === null || cm === null) {
+                    return;
+                }
+                const span = visualSpan(editor.state);
+                const folds = span === null ? [] : chosenIn(shown.folds, span.from, span.to, editor.state.field(chosenKind));
+                Vim.exitVisualMode(cm, false);
+                if (folds.length === 0) {
+                    return;
+                }
+                // Toggled as one: every one closed opens, else every one closes; opened, the folds around each open too, so it's seen.
+                const closing = how === "toggle" ? folds.some((each) => !isFolded(editor.state, each)) : how === "close";
+                const holding = closing ? [] : folds.flatMap((each) => around(shown.folds, each.summary.from).filter((one) => one !== each));
+                foldEvery([...new Set([...holding, ...folds])], closing);
+            },
+            verbChosen: (name) => {
+                const editor = view.current;
+                const cm = editor === null ? null : vimOf(editor);
+                if (editor === null || cm === null) {
+                    return;
+                }
+                const span = visualSpan(editor.state);
+                const kind = editor.state.field(chosenKind);
+                // A fold-wise selection's folds; a plain one's, each scope it holds the header of: groups, items, drawers, files.
+                const folds = span === null ? [] : chosenIn(shown.folds, span.from, span.to, kind).filter((each) => kind !== null || each.scope === true);
+                Vim.exitVisualMode(cm, false);
+                own.verbOn?.(name, folds);
+            },
+            chosen: (folds) => config.chosen?.(folds),
             foldRecursive: (opening) => {
                 const editor = view.current;
                 if (editor === null) {
@@ -1639,13 +1825,6 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 }
                 // Toggled, as vim's `za` toggles the innermost: closed, it opens; open, it closes, the cursor on its summary line.
                 editor.dispatch({ effects: folding(fold, !isFolded(editor.state, fold)), selection: { anchor: fold.summary.from }, scrollIntoView: true });
-            },
-            foldKind: (kind, closing) => {
-                const editor = view.current;
-                if (editor === null) {
-                    return;
-                }
-                foldEvery(own.kind?.(head(), kind, closing, (fold) => isFolded(editor.state, fold)) ?? [], closing);
             },
             foldMotion: (line, how, forward) => {
                 const editor = view.current;

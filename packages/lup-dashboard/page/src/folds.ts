@@ -2,7 +2,7 @@
 // the cursor is in, outermost first, which the review's margin bars and header
 // show, and those `zO` and `zC` open and close with them (`recursive`); within one item, the folds `zr` and `zm` open or close a level at a
 // time, a conversation's earlier exchanges one at a time, the latest first, and
-// those Space `z` `f` or `F` and a letter open or close by kind; and where `zj`,
+// and where `zj`,
 // `zk`, `[z` and `]z` go. Folds nest, each whole inside another or beside it
 // (`review.ts`, `code.ts`). Pure: the editor folds what these return
 // (`editor.ts`; `docs/dashboard.md`, *The keys*).
@@ -101,18 +101,6 @@ export function levelled<F extends Folded>(folds: readonly F[], closed: (fold: F
     const ordered = [...atLevel].sort((a, b) => a.summary.from - b.summary.from);
     const one = opening ? ordered.at(-1) : ordered[0];
     return one === undefined ? [] : [one];
-}
-
-/**
- * Return the folds of one item or drawer, `folds`, that Space `z` `f` and a letter opens, `closed` saying which are folded:
- * each of `kind` folded, and the own one where it's folded, so what opens is seen; or, `closing`, as Space `z` `F` and
- * the letter, each of `kind` open.
- */
-export function ofKind<F extends Folded>(folds: readonly F[], closed: (fold: F) => boolean, kind: FoldKind, closing: boolean): F[] {
-    if (closing) {
-        return folds.filter((each) => each.kind === kind && !closed(each));
-    }
-    return folds.filter((each) => (each.kind === kind || isOwn(each)) && closed(each));
 }
 
 /** Return whether `fold` is hidden in another one folded, its summary line among the lines that one hides. */

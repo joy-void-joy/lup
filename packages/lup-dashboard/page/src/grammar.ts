@@ -31,8 +31,8 @@ export type Act =
     | { kind: "once"; offer: Offer; conversation: Conversation | null }
     | { kind: "comment" };
 
-/** Where a verb lands at the cursor: what it's on, as the line of keys names it, what it does there, and its acts; or why nothing there takes it. */
-export type Reach = { on: string; says: string; acts: Act[] } | { on: null; says: null; why: string };
+/** Where a verb lands at the cursor: what it's on, as the line of keys names it, the part of the review it is, what it does there, and its acts; or why nothing there takes it. */
+export type Reach = { on: string; node: Placed; says: string; acts: Act[] } | { on: null; says: null; why: string };
 
 /** How the walk names what a verb lands on: an agent, by its conversation as it's called. */
 export interface Naming {
@@ -66,12 +66,16 @@ function whyNot(verb: Verb): string {
     }
 }
 
-/** Return the parts of `nodes` the position `at` is in, outermost first: an item's own blank line after it counting as the item's. */
+/**
+ * Return the parts of `nodes` the position `at` is in, outermost first: an item's own blank line after it counting as
+ * the item's, and the review's last lines, after its last group, that group's, as the header over the review has them.
+ */
 export function chainAt(nodes: readonly Placed[], at: number): Placed[] {
     const found: Placed[] = [];
     let level = nodes;
     for (;;) {
-        const inside = level.findLast((each) => at >= each.from && at <= each.to + (each.kind === "item" ? 1 : 0));
+        const holding = level.findLast((each) => at >= each.from && at <= each.to + (each.kind === "item" ? 1 : 0));
+        const inside = holding ?? (level === nodes ? level.findLast((each) => each.from <= at) : undefined);
         if (inside === undefined) {
             return found;
         }
@@ -178,10 +182,10 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
                 const own = answering(block.offers, verb)[0];
                 const within = block.block === "fold" ? offering(node, verb) : [];
                 if (within.length > 0) {
-                    return { on: blockNamed(block), says: own?.says ?? verb.called, acts: actsOf(within, verb, conversationOf()) };
+                    return { on: blockNamed(block), node, says: own?.says ?? verb.called, acts: actsOf(within, verb, conversationOf()) };
                 }
                 if (own !== undefined) {
-                    return { on: blockNamed(block), says: own.says, acts: [actOf(own, node.id, block.version ?? null, conversationOf())] };
+                    return { on: blockNamed(block), node, says: own.says, acts: [actOf(own, node.id, block.version ?? null, conversationOf())] };
                 }
                 break;
             }
@@ -195,10 +199,10 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
                 const within = offering(node, verb);
                 const label = laidOut.text.slice(drawer.header.from, drawer.header.to);
                 if (within.length > 0) {
-                    return { on: label, says: own?.says ?? verb.called, acts: actsOf(within, verb, drawer.conversation) };
+                    return { on: label, node, says: own?.says ?? verb.called, acts: actsOf(within, verb, drawer.conversation) };
                 }
                 if (own !== undefined) {
-                    return { on: label, says: own.says, acts: [actOf(own, node.id, null, drawer.conversation)] };
+                    return { on: label, node, says: own.says, acts: [actOf(own, node.id, null, drawer.conversation)] };
                 }
                 break;
             }
@@ -207,7 +211,7 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
                 if (region === undefined) {
                     break;
                 }
-                const found = itemReach(region, verb);
+                const found = itemReach(region, node, verb);
                 if (found !== null) {
                     return found;
                 }
@@ -231,21 +235,21 @@ export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): 
     return { on: null, says: null, why: whyNot(verb) };
 }
 
-/** Return where `verb` lands on `region`'s item: what its kind's view offers, else the core's done, send and comment; none where neither takes it. */
-function itemReach(region: Region, verb: Verb): Reach | null {
+/** Return where `verb` lands on `region`'s item, laid out at `node`: what its kind's view offers, else the core's done, send and comment; none where neither takes it. */
+function itemReach(region: Region, node: Placed, verb: Verb): Reach | null {
     const on = region.named;
     const number = region.item.number;
     const offered = answering(region.body.answer?.blocks.offers, verb)[0];
     if (offered !== undefined) {
-        return { on, says: offered.says, acts: [actOf(offered, region.body.id, null, null)] };
+        return { on, node, says: offered.says, acts: [actOf(offered, region.body.id, null, null)] };
     }
     switch (verb.name) {
         case CORE.done:
-            return { on, says: "mark it read", acts: [{ kind: "item", number, list: "done" }] };
+            return { on, node, says: "mark it read", acts: [{ kind: "item", number, list: "done" }] };
         case CORE.send:
-            return { on, says: "leave it for later", acts: [{ kind: "item", number, list: "parked" }] };
+            return { on, node, says: "leave it for later", acts: [{ kind: "item", number, list: "parked" }] };
         case CORE.comment:
-            return { on, says: "comment on it", acts: [{ kind: "comment" }] };
+            return { on, node, says: "comment on it", acts: [{ kind: "comment" }] };
         default:
             return null;
     }
@@ -263,14 +267,14 @@ function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, namin
     for (const part of group.parts) {
         const offer = answering(part.answer?.blocks.offers, verb)[0];
         if (offer !== undefined) {
-            return { on, says: offer.says, acts: [actOf(offer, part.id, null, conversation)] };
+            return { on, node, says: offer.says, acts: [actOf(offer, part.id, null, conversation)] };
         }
     }
     switch (verb.name) {
         case CORE.done: {
             const items = node.children.flatMap((child) => {
                 const region = child.kind === "item" ? laidOut.regions.find((each) => `item ${each.item.number}` === child.id) : undefined;
-                const reached = region === undefined ? null : itemReach(region, verb);
+                const reached = region === undefined ? null : itemReach(region, child, verb);
                 return reached === null || reached.on === null ? [] : reached.acts;
             });
             const drawers = group.drawers.flatMap((drawer) => {
@@ -278,13 +282,34 @@ function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, namin
                 return placed === undefined ? [] : actsOf(offering(placed, verb), verb, drawer.conversation);
             });
             const acts = [...items, ...drawers];
-            return acts.length === 0 ? null : { on, says: "mark its items and drawers done", acts };
+            return acts.length === 0 ? null : { on, node, says: "mark its items and drawers done", acts };
         }
         case CORE.comment:
-            return conversation === null ? null : { on, says: "write to it", acts: [{ kind: "comment" }] };
+            return conversation === null ? null : { on, node, says: "write to it", acts: [{ kind: "comment" }] };
         default:
             return null;
     }
+}
+
+/**
+ * Return the acts `verb` reaches on each of `folds`, a visual selection's, each from its summary line outward but never
+ * past it, so a run of unchanged lines reaches nothing where its file would: each act once, in their order.
+ */
+export function reachedIn(laidOut: Laid, folds: readonly { summary: { from: number }; to: number }[], verb: Verb, naming: Naming): Act[] {
+    const acts = new Map<string, Act>();
+    for (const fold of folds) {
+        const reach = reachOf(laidOut, fold.summary.from, verb, naming);
+        if (reach.on === null || reach.node.from < fold.summary.from || reach.node.to > fold.to + 1) {
+            continue;
+        }
+        for (const act of reach.acts) {
+            const key = act.kind === "item" ? `item ${act.number} ${act.list}` : act.kind === "mark" ? `mark ${act.block} ${act.offer.action}` : `${act.kind} ${acts.size}`;
+            if (!acts.has(key)) {
+                acts.set(key, act);
+            }
+        }
+    }
+    return [...acts.values()];
 }
 
 /** Return whether `act` is marked in `draft` already, by the verb `verb`. */

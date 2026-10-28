@@ -125,7 +125,7 @@ const VERBS: Readonly<Record<string, string>> = {
 
 /**
  * Return the review's keys, with the kinds of fold known now, outermost first (`kinds`, `looks.ts`): each kind's letter,
- * after `zf` closing the one the cursor is in, and after Space `z` `f` or `F` opening or closing every one; each
+ * after `zf` toggling the one the cursor is in, and after Space `f` or `F` selecting every one, fold-wise; each
  * drawer's after `]` and `[`. A kind with no letter, another kind having taken it, is reached by the generic keys
  * alone. And the verbs known now (`verbs`), each Space and its key, in the order declared, the core's first.
  */
@@ -260,7 +260,7 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
                 does: "open or close one more level of the item or the drawer the cursor is in: its files, then their bodies and unchanged lines, then its context; in a conversation, the exchange before those open, one further back each time, then its runs of calls",
                 short: "a level",
             },
-            { keys: "zR zM", does: "open or close every fold in the item or the drawer the cursor is in, but for calls' input and output, which za and ␣zfd open", short: "all of it" },
+            { keys: "zR zM", does: "open or close every fold in the item or the drawer the cursor is in, but for calls' input and output, which za opens, and those of a kind your layer keeps them from", short: "all of it" },
             {
                 keys: "zf",
                 does: "and a letter: open or close the fold of its kind the cursor is in, the file, the run of unchanged lines, the item, a drawer, or in a conversation an earlier exchange, a run of calls or a call's input and output, the cursor going to its summary line",
@@ -268,25 +268,30 @@ export function reviewKeys(kinds: readonly Kind[], verbs: readonly Verb[] = []):
             },
             ...lettered.map((each) => ({ keys: `zf${each.letter}`, does: `open or close ${each.one} the cursor is in`, short: each.one })),
             {
-                keys: "␣z",
-                does: "f or F, then a letter: open or close every fold of its kind in the item or the drawer the cursor is in",
-                short: "by kind",
+                keys: "␣f",
+                does: "and a letter: select every fold of its kind in the item, the drawer or the agent's group the cursor is in, fold-wise, each drawn as selected; in visual mode, those within the selection; motions reshape it, Esc ends it",
+                short: "select by kind",
             },
             {
-                keys: "␣zf",
-                does: "and a letter: open every fold of its kind in the item or the drawer the cursor is in, or, on a banner, that drawer of the agent's",
-                short: "open by kind",
-            },
-            {
-                keys: "␣zF",
-                does: "and a letter: close every fold of its kind in the item or the drawer the cursor is in, or, on a banner, that drawer of the agent's",
-                short: "close by kind",
+                keys: "␣F",
+                does: "and a letter: select every fold of its kind in the whole review, fold-wise",
+                short: "select every one",
             },
             ...lettered.filter((each) => each.chord).map((each) => ({
-                keys: `␣zf${each.letter} ␣zF${each.letter}`,
-                does: `open or close ${each.called}`,
+                keys: `␣f${each.letter} ␣F${each.letter}`,
+                does: `select ${each.called}, here or in the whole review`,
                 short: each.called,
             })),
+            {
+                keys: "v… za zo zc",
+                does: "in a selection, toggle, open or close every fold it holds, a fold-wise one's of its kind, those opened seen, the folds around them opening",
+                short: "fold them",
+            },
+            {
+                keys: "v… ␣d d",
+                does: "in a selection, Space and a verb's key on each thing it holds whole, as one mark: a fold-wise one's folds, else each item, drawer, file and agent's group whose line it holds; in a fold-wise one, the key alone too where it's no motion, d x s p",
+                short: "act on them",
+            },
             {
                 keys: "zj zk",
                 does: "to the start of the next fold, or the end of the one before, a folded one counting as its summary line",
