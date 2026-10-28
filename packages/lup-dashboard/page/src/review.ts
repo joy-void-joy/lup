@@ -1680,17 +1680,17 @@ export function laid(
         const read = (each: Instance) => remote.get(instanceOf(each.repository, each.module, each.view, each.argument));
         // Each block laid out of the view, given or read, by its id: each Markdown block's lines, which a remark on it
         // is placed by, and each line's, which says the step is no words of the agent's.
-        const spoken = new Map<string, string[]>();
-        const lined = new Set<string>();
+        const markdown = new Map<string, string[]>();
+        const lineBlocks = new Set<string>();
         const walk = (list: readonly ViewBlock[]) => {
             for (const block of list) {
                 const bid = blockId(view.id, block.id);
                 if (block.block === "markdown") {
                     const lines = block.text.split("\n");
-                    spoken.set(bid, lines);
+                    markdown.set(bid, lines);
                     blockLines.set(bid, linesOf(lines, block.version ?? null));
                 } else if (block.block === "line") {
-                    lined.add(bid);
+                    lineBlocks.add(bid);
                 } else if (block.block === "fold") {
                     walk(Array.isArray(block.content) ? block.content : (read(loaded(block.content))?.blocks ?? []));
                 }
@@ -1718,7 +1718,7 @@ export function laid(
         const onWords = new Map<string, Written[]>();
         const place = (rid: string, remark: Written, quote: Quote) => {
             const block = quote.block ?? "";
-            const lines = spoken.get(block);
+            const lines = markdown.get(block);
             if (lines === undefined) {
                 const line = seat(rid, quote, firstOf);
                 placed.set(line, [...(placed.get(line) ?? []), remark]);
@@ -1738,8 +1738,8 @@ export function laid(
             }
             if (remark.step != null) {
                 const block = blockId(view.id, `step ${remark.step}`);
-                const lines = spoken.get(block);
-                if (lines === undefined && !lined.has(block)) {
+                const lines = markdown.get(block);
+                if (lines === undefined && !lineBlocks.has(block)) {
                     // Its step isn't laid out now, under a fold not read yet: under the summary line, until it is.
                     placed.set(null, [...(placed.get(null) ?? []), remark]);
                     continue;
