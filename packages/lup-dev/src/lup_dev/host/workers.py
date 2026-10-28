@@ -49,6 +49,7 @@ from lup.tools.tool import ToolSpec
 from lup.types import JsonObject, Model, MutableModel
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import HostError, Looks, Refused, Register, Reply, Request
+from lup_dev.host.watch import Remarked
 from lup_dev.layout import HostLayout
 
 if TYPE_CHECKING:
@@ -177,7 +178,7 @@ class Viewing(Request, reads=True):
 
 
 class Watching(Model):
-    """When a view the page shows is answered again, as its door declares it (`lup.Watch`), and the agent it's of: at those events of that agent's, at an item of the inbox that agent sent or was sent changing, and that long apart at most."""
+    """When a view the page shows is answered again, as its door declares it (`lup.Watch`), and the agent it's of: at those events of that agent's, at an item of the inbox that agent sent or was sent changing, at a review mark it read moving, and that long apart at most."""
 
     of: OfAgent | None = None
     """The agent it's of, where what it takes is an agent's (`OfAgent`); none
@@ -185,6 +186,9 @@ class Watching(Model):
     on: list[EventName] = []
     """The events of that agent after which it's answered again, by their names
     (`lup.events`)."""
+    marks: list[Remarked] = []
+    """The review marks its answer read (`lup_dev.inbox.marks`), each answering
+    it again as it moves, as the operator's reply is sent."""
     longest: timedelta | None = None
     """The longest it goes unanswered; none waits for its agent alone."""
 

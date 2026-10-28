@@ -154,6 +154,7 @@ export const DRAFTED: Record<DraftMark, { glyph: string; word: string }> = {
     comment: { glyph: "»", word: "comment" },
     read: { glyph: "✓", word: "read" },
     approve: { glyph: "✔", word: "approve" },
+    decline: { glyph: "✗", word: "decline" },
 };
 
 /** Return the glyph an entry is marked with, by what it is and its first mark that has one. */
@@ -303,7 +304,7 @@ export function Outline({ following, laidOut, reading, narrow, open, setOpen, ju
                                 {row.tag}
                             </span>
                         )}
-                        {row.fresh ? <span className="outline-tag outline-fresh" title="new since you last sent">new</span> : null}
+                        {row.fresh ? <span className="outline-tag outline-fresh" title="new: its group not seen since it came">new</span> : null}
                         {row.draft.length === 0 ? null : (
                             <span className="outline-tag outline-draft" title={`in your reply, with the next Ctrl+Enter: ${row.draft.map((each) => DRAFTED[each].word).join(", ")}`}>
                                 {row.draft.map((each) => DRAFTED[each].glyph).join("")}

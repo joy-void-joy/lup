@@ -19,6 +19,7 @@ from lup_dev.host.homes import Found
 from lup_dev.host.records import Call, Called, Entry, Said, Transcript
 from lup_dev.inbox.context import moment
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import StoredMarks
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import Layout
 from lup_dev.settings import LupDevSettings
@@ -52,6 +53,7 @@ def transcripts(repository: Path, exchanges: Exchanges) -> typer.Typer:
         recorded=cli.recorded(),
         layout=Layout.of(LupDevSettings()),
         exchanges=exchanges,
+        marks=StoredMarks(layout=Layout.of(LupDevSettings())),
     )
     return commanding.commands(
         "transcripts", modules.resolved.served, modules.made, Operator

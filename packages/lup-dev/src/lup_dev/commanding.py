@@ -33,11 +33,12 @@ from lup_dev.declaration.serving import Asker, ModuleServing, ask
 from lup_dev.errors import LupDevError
 from lup_dev.host.client import RoomClient
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import Key, Marks, MarksRead, ReadMarks, ReviewMark
 from lup_dev.inbox.protocol import Exchanged, ListItems
 from lup_dev.inbox.store import Conversation as Party
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from pydantic import BaseModel
     from pydantic.fields import FieldInfo
@@ -181,6 +182,23 @@ def handed_over(words: list[str], command: Path | None, repository: Path) -> NoR
 def approved(running: Path, command: Path | None) -> bool:
     """Say whether the `lup-dev` running, by the path it was started as, is the repository's approved copy, its `command`, which runs a module's command itself rather than handing it over."""
     return command is not None and running.resolve() == command.resolve()
+
+
+class RoomMarks(Model, Marks, arbitrary_types_allowed=True):
+    """The review marks, as a room's command reads them: from the host service, on the launch's request socket, of its repository alone."""
+
+    room: RoomClient
+
+    @override
+    async def kept(
+        self, repository: Path, module: str, keys: Sequence[Key]
+    ) -> list[ReviewMark]:
+        """Ask the host service as the dashboard reads marks, off the event loop: a room is answered its own repository's alone."""
+        asked = ReadMarks(
+            repository=repository, module=module, keys=[dict(each) for each in keys]
+        )
+        read = await asyncio.to_thread(self.room.ask, asked, MarksRead)
+        return read.marks
 
 
 class RoomExchanges(Model, Exchanges, arbitrary_types_allowed=True):

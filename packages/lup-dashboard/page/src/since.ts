@@ -1,7 +1,7 @@
 // What the "since you approved" drawer shows beyond each changed file's own
 // lines (`docs/dashboard.md`, *The drawers*): the line a file standing as the
 // operator last saw it is said in, marked reviewed with the version where they
-// marked it so, each file Space `a` marks one at once, while the host marks it;
+// marked it so, each file Space `d` marked one at once as the reply is sent, while the host marks it;
 // and which lines of a file changed since they last looked at it, the version
 // shown when the cursor last left it, so what came in live is found at a
 // glance. Pure: the review lays the line out (`review.ts`), its editor paints

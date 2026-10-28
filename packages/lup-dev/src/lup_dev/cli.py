@@ -60,7 +60,7 @@ from lup_dev.codescan.directives import (
 from lup_dev.codescan.engine import EngineChecker, EngineError
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
-from lup_dev.commanding import RoomExchanges
+from lup_dev.commanding import RoomExchanges, RoomMarks
 from lup_dev.confined import Confined
 from lup_dev.copies import removable
 from lup_dev.declaration.load import declared_profiles, load, person_layer
@@ -129,6 +129,7 @@ from lup_dev.inbox.delivery import (
     what,
     who,
 )
+from lup_dev.inbox.marks import routes as marks_routes
 from lup_dev.inbox.notices import NotifySend
 from lup_dev.inbox.protocol import (
     AnswerApproval,
@@ -508,11 +509,12 @@ def control_routes(
     layout: Layout,
     views: ModuleViews | None = None,
 ) -> list[Route]:
-    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
+    """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`; the review marks, kept there; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
     return [
-        *inbox_routes(delivery, recorded),
+        *inbox_routes(delivery, recorded, layout),
         Route.to(dashboard_shown(dashboard)),
         *since_routes(delivery, layout, LupDevSettings().lup_integration_branch),
+        *marks_routes(layout, delivery.clock, delivery.inbox.changes),
         *([] if views is None else [Route.reading(views, watch=views.watched)]),
     ]
 
@@ -2916,7 +2918,12 @@ def module_ran(words: list[str]) -> None:
         root = Path(git.text("rev-parse", "--show-toplevel"))
         exchanges = RoomExchanges(room=room, repository=repository)
         modules = RepositoryModules.of_worktree(
-            root, repository, recorded(), layout, exchanges
+            root,
+            repository,
+            recorded(),
+            layout,
+            exchanges=exchanges,
+            marks=RoomMarks(room=room),
         )
 
         def asker() -> RoomAsker:

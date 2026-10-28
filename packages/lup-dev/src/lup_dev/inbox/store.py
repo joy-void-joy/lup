@@ -1058,8 +1058,34 @@ class Talk(Model):
     sent: list[Sent] = []
 
 
+class Marked(Model):
+    """What the operator marked in their draft beyond the inbox's own items, applied as the draft is sent: what a block offered (`lup.Offer`), by its action and what it's given, the verb that marked it, and the block it's shown on.
+
+    `docs/dashboard.md`, *The review*. A file of "since you approved" marked
+    reviewed, an agent's flagged writes held: each is shown on what it marks,
+    undone with `u` as any change to the draft is, and applied by Ctrl+Enter.
+    """
+
+    id: str
+    """What names it among the draft's marks, as the page gave it."""
+    action: str
+    """The action, by its name, as the block offered it: for a view the page
+    lays out itself until its module serves it, the request the page sends
+    (`policy-review-since`)."""
+    argument: dict[str, JsonValue] = {}
+    verb: str
+    """The verb whose key marked it, by its name (`lup.Verb`): `done`, `hold`."""
+    says: str
+    """What it does, as the line of keys said it: `mark it reviewed`."""
+    block: str
+    """The id of the block it's shown on, as the page keeps it."""
+    version: str | None = None
+    """The version of what it marked, where the block says one: a file's, as
+    git names its content."""
+
+
 class Draft(Model):
-    """The operator's reply as they build it while reading: their comments, their messages to agents, the items they took off their list and the ones they parked; kept until it's sent."""
+    """The operator's reply as they build it while reading: their comments, their messages to agents, the items they marked done, declined, or parked, and what else they marked; kept until it's sent."""
 
     comments: list[Comment] = []
     letters: list[Letter] = []
@@ -1069,11 +1095,19 @@ class Draft(Model):
     """Comments written in the agents' drawers, each to its agent, sent with
     the rest of the reply whatever's parked."""
     done: list[int] = []
-    """Items read and taken off the list when the draft is sent, with no
-    comment of their own."""
+    """Items marked done, taken off the list when the draft is sent: read, for
+    news; approved, for an approval or a held change, the comments under it
+    going with the yes."""
+    declined: list[int] = []
+    """Approvals and held changes marked declined, answered no when the draft
+    is sent, the comments under each going with the no."""
     parked: list[int] = []
     """Items left for a later reply: what's drafted on them stays drafted when
     the rest is sent."""
+    marks: list[Marked] = []
+    """What else is marked, each applied as the draft is sent, by the page
+    (`docs/dashboard.md`, *The review*): kept drafted once the inbox's part is
+    sent, until each is applied."""
 
     def written(self) -> list[Letter]:
         """Return the messages that say something, in order: those the draft sends."""
@@ -1084,16 +1118,21 @@ class Draft(Model):
         return [each for each in self.remarks if each.text.strip()]
 
     def covered(self) -> list[int]:
-        """Return the items the draft answers, in order: each with a comment or marked done, but for the parked ones."""
-        mentioned = [*(each.item for each in self.comments), *self.done]
+        """Return the items the draft answers, in order: each with a comment, marked done or declined, but for the parked ones."""
+        mentioned = [
+            *(each.item for each in self.comments),
+            *self.done,
+            *self.declined,
+        ]
         wanted = [each for each in mentioned if each not in self.parked]
         return sorted(dict.fromkeys(wanted))
 
     def kept(self) -> Draft:
-        """Return what stays drafted once the draft is sent: what's on the parked items."""
+        """Return what stays drafted once the inbox's part of the draft is sent: what's on the parked items, and the marks, which the page applies after."""
         return Draft(
             comments=[each for each in self.comments if each.item in self.parked],
             parked=self.parked,
+            marks=self.marks,
         )
 
 
@@ -1278,19 +1317,6 @@ class Inbox(MutableModel):
             for item in ordered
             if conversation in (item.sender, item.recipient, item.addressed)
         ]
-
-    def reviewed(self, repository: Path | None = None) -> datetime | None:
-        """Return when the operator last settled an item of theirs, read, answered or decided, from the review or a terminal, of `repository` alone where one's given (`Item.of`); none before they first did."""
-        return max(
-            (
-                item.state.at
-                for item in self.items.values()
-                if item.recipient == Operator()
-                and isinstance(item.state, Done | Answered | Decided)
-                and (repository is None or item.of(repository))
-            ),
-            default=None,
-        )
 
     def asking(self, repository: Path, fingerprint: str) -> Item | None:
         """Return the approval waiting for the operator about one zone: the repository's, at `fingerprint`; none where there's none."""

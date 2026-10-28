@@ -8,8 +8,8 @@ const OTHER: Looks = {
     ...STANDING,
     folds: [
         ...(STANDING.folds ?? []),
-        { name: "episodes", letter: "e", called: "episodes", one: "the episode", level: 1, opens: "together", colour: "ok", chord: true, whole: false, counts: true },
-        { name: "scenes", letter: "q", called: "scenes", one: "the scene", level: 2, opens: "together", colour: "purple", chord: true, whole: false, counts: true },
+        { name: "episodes", letter: "e", called: "episodes", one: "the episode", level: 1, opens: "together", colour: "ok", chord: true, whole: false, counts: true, by_all: true },
+        { name: "scenes", letter: "q", called: "scenes", one: "the scene", level: 2, opens: "together", colour: "purple", chord: true, whole: false, counts: true, by_all: true },
     ],
     drawers: [...(STANDING.drawers ?? []), { module: "reels", view: "reel", place: { under: "agent", letter: "r", called: "the reel", colour: "cyan" } }],
 };

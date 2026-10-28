@@ -49,6 +49,7 @@ from lup_dev.adapters.claude import (
     ClaudeTranscripts,
 )
 from lup_dev.codescan.engine import EngineError
+from lup_dev.commanding import RoomMarks
 from lup_dev.declaration.package_managers.uv import Uv
 from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.serving import Operator as OperatorAsker
@@ -82,6 +83,7 @@ from lup_dev.host.workers import (
 )
 from lup_dev.inbox.bearings import Repository, RepositoryBearings, Unlanded
 from lup_dev.inbox.delivery import SEPARATOR, Delivery, Waking, clocked, opening
+from lup_dev.inbox.marks import CORE, MarksMoved, MoveMarks, Moving, StoredMarks, seen
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.parts import PartId, blocks
 from lup_dev.inbox.protocol import (
@@ -93,7 +95,6 @@ from lup_dev.inbox.protocol import (
     Drafted,
     Exchanged,
     Files,
-    FinishItem,
     Items,
     KeepDraft,
     KeepOrder,
@@ -102,6 +103,7 @@ from lup_dev.inbox.protocol import (
     ListItems,
     Ordered,
     Reviewed,
+    Seen,
     SendDraft,
     SendItem,
     Settled,
@@ -140,6 +142,7 @@ from lup_dev.inbox.store import (
     InboxError,
     Item,
     Letter,
+    Marked,
     Message,
     Operator,
     Passage,
@@ -196,7 +199,7 @@ from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.remote.protocol import Remotes
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
-from lup_dev.worker import HostExchanges, RepositoryModules
+from lup_dev.worker import HostExchanges, HostMarks, RepositoryModules
 from lup_transcripts.environment.module import Transcripts
 
 if TYPE_CHECKING:
@@ -3861,7 +3864,7 @@ def test_a_room_reads_its_repositorys_conversations_alone_and_never_the_operator
     ]
 
 
-def test_a_room_is_told_when_the_operator_last_settled_its_repositorys_items_alone(
+def test_a_room_is_told_how_far_the_operator_has_seen_its_repositorys_groups_alone(
     machine: Layout,
     clock: FakeClock,
     notices: Raised,
@@ -3875,16 +3878,28 @@ def test_a_room_is_told_when_the_operator_last_settled_its_repositorys_items_alo
     with inboxed(machine, clock, notices, said):
         launched(machine, clock, repo, "one", "claude")
         launched(machine, clock, other, "two", "codex")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         send(machine.host.launch("two").hook, codex("SessionStart", source="startup"))
+        call(machine.host.launch("one").mcp, "note", {"remark": "Ours."})
         call(machine.host.launch("two").mcp, "note", {"remark": "Theirs."})
         host = client(machine.host, clock)
-        host.ask(FinishItem(number=1), Shown)
+        listed = host.ask(ListInbox(), Items)
+        for each in listed.items:
+            assert isinstance(each.sender, Conversation)
+            host.ask(
+                MoveMarks(
+                    repository=each.sender.repository,
+                    module=CORE,
+                    marks=[Moving(key=seen(each.sender), up_to=str(each.number))],
+                ),
+                MarksMoved,
+            )
         operator = host.ask(ListInbox(), Items)
         room = RoomClient(socket=machine.host.launch("one").request).ask(
             ListInbox(), Items
         )
-    assert operator.reviewed is not None
-    assert room.reviewed is None
+    assert [each.item for each in operator.seen] == [1, 2]
+    assert [each.item for each in room.seen] == [1]
 
 
 class Unknown(Request, reads=True):
@@ -6889,7 +6904,53 @@ def test_quiet_says_so_where_the_repositorys_approved_copy_predates_it(
     )
 
 
-def test_the_operators_list_says_when_they_last_settled_an_item(
+def test_review_marks_are_read_through_the_host_by_a_module_and_a_room_of_its_repository_alone(
+    machine: Layout,
+    clock: FakeClock,
+    notices: Raised,
+    said: list[str],
+    repo: Path,
+    *,
+    tmp_path: Path,
+) -> None:
+    key = {"runtime": "claude", "session": "s1", "agent": None}
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, repo, "one", "claude")
+        host = client(machine.host, clock)
+        common = repo / ".git"
+        host.ask(
+            MoveMarks(
+                repository=common,
+                module="transcripts",
+                marks=[Moving(key=key, up_to="7")],
+            ),
+            MarksMoved,
+        )
+        read = asyncio.run(
+            HostMarks(layout=machine.host, clock=clock).kept(
+                common, "transcripts", [key]
+            )
+        )
+        room = RoomClient(socket=machine.host.launch("one").request)
+        roomed = asyncio.run(RoomMarks(room=room).kept(common, "transcripts", [key]))
+        with pytest.raises(HostError, match="aren't this repository's"):
+            asyncio.run(
+                RoomMarks(room=room).kept(tmp_path / "other.git", "transcripts", [key])
+            )
+        with pytest.raises(HostError):
+            room.ask(
+                MoveMarks(
+                    repository=common,
+                    module="transcripts",
+                    marks=[Moving(key=key, up_to="9")],
+                ),
+                MarksMoved,
+            )
+    assert [each.up_to for each in read] == ["7"]
+    assert roomed == read
+
+
+def test_the_operators_list_says_how_far_they_have_seen_each_group_by_its_review_mark(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
     with inboxed(machine, clock, notices, said):
@@ -6897,15 +6958,24 @@ def test_the_operators_list_says_when_they_last_settled_an_item(
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
         mcp = machine.host.launch("one").mcp
         call(mcp, "note", {"remark": "First."})
-        call(mcp, "note", {"remark": "Second."})
         host = client(machine.host, clock)
         before = host.ask(ListInbox(), Items)
+        [first] = before.items
+        assert isinstance(first.sender, Conversation)
         clock.sleep(300)
-        inbox("done", "1")
+        host.ask(
+            MoveMarks(
+                repository=first.sender.repository,
+                module=CORE,
+                marks=[Moving(key=seen(first.sender), up_to="1")],
+            ),
+            MarksMoved,
+        )
+        call(mcp, "note", {"remark": "Second."})
         after = host.ask(ListInbox(), Items)
-    assert before.reviewed is None
-    assert [item.number for item in after.items] == [2]
-    assert after.reviewed == clock.now()
+    assert before.seen == []
+    assert [item.number for item in after.items] == [1, 2]
+    assert after.seen == [Seen(conversation=first.sender, item=1, at=clock.now())]
 
 
 def test_what_the_operator_writes_on_a_conversation_is_kept_on_the_host_for_it_alone(
@@ -7123,6 +7193,80 @@ def test_a_sent_draft_approves_what_it_marks_read_and_held_changes_commented_on(
     )
     assert sent.kept == [nobody.number]
     assert [each.item for each in left.comments] == [nobody.number]
+
+
+def test_a_sent_draft_answers_what_it_marks_done_or_declined_with_the_comments_under_each(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    pusher = Conversation(
+        repository=tmp_path / "p" / ".git", runtime="claude", session="s1"
+    )
+    mark = Marked(
+        id="m1",
+        action="policy-review-since",
+        argument={"files": [{"path": "a.py", "version": "abc"}]},
+        verb="done",
+        says="mark it reviewed",
+        block="since a.py",
+        version="abc",
+    )
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        stamped = json.loads(send(hook, lup_call("note", {"remark": "FYI."}, "n1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        call(machine.host.launch("one").mcp, "note", stamped)
+        host = HostClient(layout=machine.host, clock=clock, starter=Unstarted())
+        yes = host.ask(asking_approval(tmp_path / "y", "zone", pusher), Shown).item
+        no = host.ask(asking_approval(tmp_path / "n", "zone", pusher), Shown).item
+        drafting(
+            machine,
+            clock,
+            Draft(
+                comments=[
+                    Comment(item=yes.number, text="Keep it small."),
+                    Comment(item=no.number, text="Not this zone."),
+                ],
+                done=[1, yes.number],
+                declined=[no.number],
+                marks=[mark],
+            ),
+        )
+        sent = host.ask(SendDraft(), Reviewed)
+        approved, declined = (
+            delivery.inbox.item(each).state for each in [yes.number, no.number]
+        )
+        left = delivery.inbox.draft()
+    # Marked done, an approval commented on is approved with the comment, where
+    # unmarked it would stay unanswered; marked declined, declined with it.
+    assert sent.read == [1]
+    assert [each.number for each in sent.approved] == [yes.number]
+    assert [each.number for each in sent.declined] == [no.number]
+    assert approved == Decided(at=clock.now(), approved=True, comment="Keep it small.")
+    assert declined == Decided(at=clock.now(), approved=False, comment="Not this zone.")
+    # The marks beyond the inbox's items stay drafted, for the page to apply.
+    assert left == Draft(marks=[mark])
+
+
+def test_a_draft_declining_what_isnt_an_approval_or_a_held_change_is_refused(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        stamped = json.loads(send(hook, lup_call("note", {"remark": "FYI."}, "n1")))[
+            "hookSpecificOutput"
+        ]["updatedInput"]
+        call(machine.host.launch("one").mcp, "note", stamped)
+        drafting(machine, clock, Draft(declined=[1]))
+        with pytest.raises(HostError) as refusal:
+            sending(machine, clock)
+        state = delivery.inbox.item(1).state
+    assert "only an approval or a held change is declined" in str(refusal.value)
+    assert isinstance(state, Waiting | Told)
 
 
 # Landing a branch: `land`, waiting on what was flagged on it.
@@ -7995,7 +8139,7 @@ def test_a_hold_at_landing_starts_from_the_version_the_operator_marked_reviewed(
     landings.wrote(feat, path, first)
     version = landings.shell.git(feat, "rev-parse", f"HEAD:{path}")
     mark = Mark(path=Path(path), version=version, at=clock.now())
-    reviews = Reviews(layout=machine.reviewed(landings.repository))
+    reviews = Reviews.of(machine, landings.repository)
     reviews.marked("feat", [mark], {version: first.encode()})
     landings.wrote(feat, path, second)
     tip = landings.merged()
@@ -9024,6 +9168,7 @@ def test_lup_dev_transcripts_show_says_how_much_of_the_exchange_lups_inbox_holds
         recorded=cli.recorded(),
         layout=Layout.of(LupDevSettings()),
         exchanges=HostExchanges(repository=common, layout=machine.host, clock=clock),
+        marks=StoredMarks(layout=Layout.of(LupDevSettings())),
     )
     app = commanding.commands(
         "transcripts", modules.resolved.served, modules.made, OperatorAsker

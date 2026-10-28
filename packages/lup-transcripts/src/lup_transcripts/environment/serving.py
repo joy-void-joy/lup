@@ -30,7 +30,10 @@ Its views read a conversation live, from the runtime's own record as it grows
 (`conversation`, the drawer under each agent's banner; `exchange`, one earlier
 exchange; `call`, one call read whole), laid out in lup's blocks
 (`environment/conversation.py`), each record read again only once it changed
-(`Recording`). The drawer keeps open at most the agent's last words its fold
+(`Recording`). The drawer opens what came after the operator last read it,
+by its review mark (`self.marks`, keyed by the conversation's runtime's ids,
+`drawn`) or their own last words, and offers moving the mark to its last step,
+Space `d` on its line; it keeps open at most the agent's last words its fold
 kind of what came earlier keeps (`FoldKind.keeps_open`, 20 unless a person's
 layer says), as the module's layers leave it. Shown, the drawer and each
 exchange opened in it are answered again at their agent's turns and calls and
@@ -50,7 +53,7 @@ from pydantic import Field
 import lup
 from lup.blocks import FoldKind, OfAgent
 from lup.rooms.homes import plain
-from lup.types import Model
+from lup.types import JsonObject, Model
 from lup_dev.confined import Confined
 from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Related, Room
 from lup_dev.git import Git, GitError
@@ -83,6 +86,13 @@ GROWING = lup.Watch(
 agent's turns and calls, and a minute apart at most. The drawer's, and an
 exchange's, since what came before the agent's last words in the latest one
 moves on with each of its words."""
+
+
+def drawn(viewed: OfAgent) -> JsonObject:
+    """Return the key of the review mark on the conversation `viewed` names: its runtime's ids, which a rename never changes."""
+    return OfAgent(
+        runtime=viewed.runtime, session=viewed.session, agent=viewed.agent
+    ).model_dump(mode="json")
 
 
 class Every(Model):
@@ -441,7 +451,7 @@ class TranscriptsServing(ModuleServing):
         watch=GROWING,
     )
     async def conversation(self, viewed: OfAgent) -> lup.Blocks:
-        """Show an agent's whole conversation from its runtime's record, live: everything since your last words open, each earlier exchange folded under your words that opened it, each run of calls under one line, and the items of lup's inbox it sent and was sent where they happened."""
+        """Show an agent's whole conversation from its runtime's record, live: everything since you last read it open, by its review mark or your last words, each earlier exchange folded under your words that opened it, each run of calls under one line, and the items of lup's inbox it sent and was sent where they happened."""
         read = await asyncio.to_thread(
             self.recording.read,
             self.recorded,
@@ -450,13 +460,17 @@ class TranscriptsServing(ModuleServing):
             viewed.agent,
         )
         exchanged = await self.exchanges.exchanged(viewed)
+        entries = read.transcript.entries
+        key = drawn(viewed)
         return conversation_blocks(
             viewed,
-            read.transcript.entries,
+            entries,
             exchanged,
             exchange=TranscriptsServing.exchange,
             call=TranscriptsServing.call,
             earlier=self.earlier(),
+            mark=await self.marks.mark(key),
+            reading=self.marks.offer(key, str(len(entries) - 1), "mark it read"),
         )
 
     @lup.view(watch=GROWING)
@@ -477,6 +491,7 @@ class TranscriptsServing(ModuleServing):
             exchange=TranscriptsServing.exchange,
             call=TranscriptsServing.call,
             earlier=self.earlier(),
+            mark=await self.marks.mark(drawn(viewed)),
         )
 
     @lup.view(watch=lup.Watch(on=[lup.CallFinished]))

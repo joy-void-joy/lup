@@ -6,11 +6,12 @@ from typing import Annotated
 
 from pydantic import Field
 
-from lup.blocks import SHELL_VERBS
+from lup.blocks import SHELL_FOLDS, SHELL_VERBS
 from lup_dev.catalog.paths import CorePaths
 from lup_dev.catalog.room import PackageAge, StandardMachine
 from lup_dev.declaration.kinds import (
     Credentials,
+    Folds,
     Guidance,
     Package,
     Packages,
@@ -67,6 +68,11 @@ class Core(Module):
     it into the user-level settings of each package manager the room's image
     holds, which a project's own setting outranks (`docs/launch.md`, *The
     package age gate*)."""
+    folds: Folds = Folds.of(*SHELL_FOLDS)
+    """The shell's fold kinds, an agent's group, an item, its context, and a
+    file's, a body's and a run of unchanged lines', which every repository's
+    looks carry first: a person's layer changes how each starts and whether
+    `zR` and `zM` reach it, `Folds().replace("lines", …)`."""
     verbs: Verbs = Verbs.of(*SHELL_VERBS, HOLD, PAUSE)
     """The verbs the review's keys say, Space and a key: the shell's, done,
     decline, send to and comment, which apply to anything; the judge's, hold;

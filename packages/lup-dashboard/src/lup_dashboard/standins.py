@@ -6,8 +6,9 @@ repository's process does (`RepositoryModules`), from lup's default
 declaration, and asks them each view as the host would (`Viewing`). What a
 module reads is stood in for: each runtime's records are files the demo writes
 as its conversations stand, read back as written (`StandInRecords`,
-`StandInReader`), and the items a conversation exchanged are the demo's
-(`StandInExchanges`). So the page draws the view the real module answers, its
+`StandInReader`), the items a conversation exchanged are the demo's
+(`StandInExchanges`), and the review marks are kept as the host keeps them, in
+the demo's own directory (`StoredMarks`). So the page draws the view the real module answers, its
 layout, its fold kinds and its tones, over the demo's data.
 """
 
@@ -25,6 +26,7 @@ from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.host.homes import Found
 from lup_dev.host.records import Call, Reader, Record, Recorded, Records, Transcript
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import StoredMarks
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.inbox.store import Conversation
 from lup_dev.layout import Layout
@@ -124,6 +126,11 @@ class StandInViews(MutableModel, arbitrary_types_allowed=True):
         """Where the records and the modules' own data are."""
         return Path(self.kept.name)
 
+    @cached_property
+    def layout(self) -> Layout:
+        """Where the modules' own data is, and the review marks the demo keeps as the host does (`MarkStore`), moved as its drafts are sent."""
+        return Layout(state=self.directory, data=self.directory / "data")
+
     def records(self, runtime: str) -> StandInRecords:
         """Return `runtime`'s records."""
         return StandInRecords(directory=self.directory / "records" / runtime)
@@ -147,10 +154,11 @@ class StandInViews(MutableModel, arbitrary_types_allowed=True):
                 runtime: Recorded(records=self.records(runtime), reader=reader)
                 for runtime in self.runtimes
             },
-            layout=Layout(state=self.directory, data=self.directory / "data"),
+            layout=self.layout,
             exchanges=StandInExchanges(
                 repository=repository, exchanged_by=self.exchanged
             ),
+            marks=StoredMarks(layout=self.layout),
         )
         self.made = {**self.made, repository: made}
         return made

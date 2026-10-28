@@ -46,8 +46,9 @@ from lup_dev.host.records import (
     within,
 )
 from lup_dev.host.service import Handler, Reading, Route
-from lup_dev.inbox import context, lines
+from lup_dev.inbox import context, lines, marks
 from lup_dev.inbox.delivery import Delivery, written
+from lup_dev.inbox.marks import CORE, MarkStore
 from lup_dev.inbox.reading import Narrowing, Reader, Spelling
 from lup_dev.inbox.store import (
     Answer,
@@ -69,6 +70,7 @@ from lup_dev.inbox.store import (
     Waiting,
     cited,
 )
+from lup_dev.layout import Layout
 from lup_dev.listing import Span
 
 if TYPE_CHECKING:
@@ -317,14 +319,25 @@ class ListItems(Request, reads=True):
     conversation: Conversation
 
 
+class Seen(Model):
+    """How far the operator has seen an agent's group, as the core's review mark on it says (`lup_dev.inbox.marks`): its items up to `item` aren't new to them."""
+
+    conversation: Conversation
+    item: int
+    """The last item of the group they'd seen as they marked it."""
+    at: datetime
+    """When they marked it, as their reply was sent."""
+
+
 class Items(Reply):
-    """Items, oldest first, and when the operator last sent a reply."""
+    """Items, oldest first, and how far the operator has seen each group they're in."""
 
     kind: Literal["inbox-items"] = "inbox-items"
     items: list[Item]
-    reviewed: datetime | None = None
-    """When the operator's last reply was sent, from the review; none before
-    their first: what came after it is new to them."""
+    seen: list[Seen] = []
+    """How far the operator has seen the group of each conversation among the
+    items' senders, where they've marked it seen: an item after it is new to
+    them, unless they commented on it in a reply sent (`answers`)."""
     answers: list[Item] = []
     """The operator's own items about those listed: those a turn's end listed
     answers or cites, which the page lays out above it, and a review, a reply
@@ -389,9 +402,14 @@ class Reviewed(Reply):
 
     kind: Literal["inbox-reviewed"] = "inbox-reviewed"
     items: list[Item]
+    read: list[int] = []
+    """The messages it took off the list marked read with nothing to add, by
+    number, which tells their senders nothing."""
     approved: list[Item] = []
     """The approvals and held changes it approved: an approval of a host zone
     among them is acted on as the operator's terminal acts on it."""
+    declined: list[Item] = []
+    """The approvals and held changes it declined."""
     noted: list[Item] = []
     """The notes it left with each session whose push asked an approval the
     operator commented on, which stays unanswered."""
@@ -543,9 +561,11 @@ def owned(item: Item, repository: Path) -> Item:
 
 
 class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
-    """Answers `ListInbox`: the items waiting for the operator."""
+    """Answers `ListInbox`: the items waiting for the operator, and how far they've seen each group they're in."""
 
     delivery: Delivery
+    layout: Layout
+    """lup's state on the host, where each repository's review marks are kept."""
 
     @override
     def request(self) -> type[ListInbox]:
@@ -553,12 +573,11 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
 
     @override
     async def answer(self, request: ListInbox) -> Reply:
-        inbox = self.delivery.inbox
         waiting = self.waiting(request)
         answers = self.answering(waiting)
         return Items(
             items=waiting,
-            reviewed=inbox.reviewed(),
+            seen=self.seen(waiting),
             answers=answers,
             commented=self.commented(answers),
         )
@@ -569,10 +588,30 @@ class Listing(Model, Reading[ListInbox], arbitrary_types_allowed=True):
         answers = self.answering(waiting)
         return Items(
             items=waiting,
-            reviewed=self.delivery.inbox.reviewed(repository),
+            seen=self.seen(waiting),
             answers=answers,
             commented=self.commented(answers),
         )
+
+    def seen(self, items: list[Item]) -> list[Seen]:
+        """Return how far the operator has seen the group of each conversation among `items`' senders, by the core's review mark on it, each repository's marks read once; none for one never marked."""
+        senders = list(
+            dict.fromkeys(
+                each.sender for each in items if isinstance(each.sender, Conversation)
+            )
+        )
+        kept = {
+            repository: MarkStore(layout=self.layout.marks(repository)).kept(CORE)
+            for repository in dict.fromkeys(each.repository for each in senders)
+        }
+
+        def of(conversation: Conversation) -> Seen | None:
+            mark = kept[conversation.repository].of(marks.seen(conversation))
+            if mark is None or mark.up_to is None:
+                return None
+            return Seen(conversation=conversation, item=int(mark.up_to), at=mark.at)
+
+        return [found for each in senders if (found := of(each)) is not None]
 
     def waiting(self, request: ListInbox) -> list[Item]:
         """Return the items waiting for the operator, made within `request`'s window."""
@@ -1154,17 +1193,21 @@ class DraftSending(Model, Handler[SendDraft], arbitrary_types_allowed=True):
         dispatched = await self.delivery.reviewed()
         return Reviewed(
             items=dispatched.reviews,
+            read=dispatched.read,
             approved=dispatched.approved,
+            declined=dispatched.declined,
             noted=dispatched.noted,
             kept=dispatched.kept,
         )
 
 
-def routes(delivery: Delivery, recorded: dict[str, Recorded]) -> list[Route]:
-    """Route each of the inbox's kinds to its handler, over one delivery; an item's moment, a conversation and its calls read from the records `recorded`, a conversation's record read again only once it changed."""
+def routes(
+    delivery: Delivery, recorded: dict[str, Recorded], layout: Layout
+) -> list[Route]:
+    """Route each of the inbox's kinds to its handler, over one delivery; an item's moment, a conversation and its calls read from the records `recorded`, a conversation's record read again only once it changed; how far the operator has seen each group, from the review marks kept in lup's state at `layout`."""
     recording = context.Recording()
     return [
-        Route.reading(Listing(delivery=delivery)),
+        Route.reading(Listing(delivery=delivery, layout=layout)),
         Route.reading(InboxReading(delivery=delivery)),
         Route.reading(Showing(delivery=delivery)),
         Route.to(Answering(delivery=delivery)),

@@ -102,6 +102,14 @@ from lup_dev.host.workers import (
     Watching,
 )
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import (
+    Key,
+    Marks,
+    MarksRead,
+    ReadMarks,
+    ReviewMark,
+    ReviewMarks,
+)
 from lup_dev.inbox.protocol import Exchanged, ListItems
 from lup_dev.inbox.store import Conversation as Party
 from lup_dev.layout import HostLayout, Layout
@@ -109,6 +117,8 @@ from lup_dev.policy.checkpoint import Services, Worktree
 from lup_dev.private.withheld import related_of
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from lup_dev.host.courier import Conversation
 
 
@@ -206,6 +216,28 @@ class HostExchanges(Model, Exchanges, arbitrary_types_allowed=True):
         )
 
 
+class HostMarks(Model, Marks, arbitrary_types_allowed=True):
+    """The review marks as the host service keeps them, for one repository's modules."""
+
+    layout: HostLayout
+    clock: Clock
+
+    @override
+    async def kept(
+        self, repository: Path, module: str, keys: Sequence[Key]
+    ) -> list[ReviewMark]:
+        """Ask the host service, as the dashboard reads marks, off the event loop.
+
+        Raise `HostError` where it can't be reached, saying why.
+        """
+        asked = ReadMarks(
+            repository=repository, module=module, keys=[dict(each) for each in keys]
+        )
+        host = HostClient(layout=self.layout, clock=self.clock, starter=Detached())
+        read = await asyncio.to_thread(host.ask, asked, MarksRead)
+        return read.marks
+
+
 class RepositoryModules(Model, arbitrary_types_allowed=True):
     """A repository's modules, as its declaration resolves them: what they serve, and each answer, for whichever of its launches asks."""
 
@@ -219,6 +251,8 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
     """Where lup keeps its data, each module's own among it."""
     exchanges: Exchanges
     """Where its views read the items of lup's inbox a conversation exchanged."""
+    marks: Marks
+    """Where its views read their modules' review marks."""
 
     @classmethod
     def loaded(
@@ -239,6 +273,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
                 layout=services.layout.host,
                 clock=services.clock,
             ),
+            marks=HostMarks(layout=services.layout.host, clock=services.clock),
         )
 
     @classmethod
@@ -248,7 +283,9 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
         repository: Path,
         recorded: dict[str, Recorded],
         layout: Layout,
+        *,
         exchanges: Exchanges,
+        marks: Marks,
     ) -> RepositoryModules:
         """Load the declaration the worktree at `root` holds itself, as a room runs its modules' commands, the room containing them.
 
@@ -260,6 +297,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             recorded=recorded,
             layout=layout,
             exchanges=exchanges,
+            marks=marks,
         )
 
     def related(self) -> list[Related]:
@@ -296,6 +334,9 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
             recorded=self.recorded,
             publisher=Hooks(modules=self),
             exchanges=self.exchanges,
+            marks=ReviewMarks(
+                marks=self.marks, repository=self.repository, module=owner.module.name
+            ),
         )
 
     def serving(self, name: str) -> Served | None:
@@ -363,7 +404,8 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
         except ValidationError as wrong:
             message = f"`{viewing.view}` doesn't take what it was given: {wrong}"
             raise LupDevError(message) from wrong
-        blocks = await method.called(self.made(owner), argument, asker)
+        made = self.made(owner)
+        blocks = await method.called(made, argument, asker)
         if not isinstance(blocks, Blocks):
             message = f"`{viewing.view}` answered {blocks!r}, not blocks"
             raise LupDevError(message)
@@ -386,6 +428,7 @@ class RepositoryModules(Model, arbitrary_types_allowed=True):
         watch = Watching(
             of=of,
             on=[event.named() for event in declared.on],
+            marks=made.marks.read,
             longest=declared.longest,
         )
         return Viewed(blocks=blocks, watch=watch)

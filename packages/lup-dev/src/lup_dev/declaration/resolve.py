@@ -354,7 +354,7 @@ def looked(modules: list[Module], found: list[Served]) -> Looks:
     Raise `ProjectError` where two take one letter, a fold kind's or a drawer's,
     or one name, a fold kind's, a drawer's or a tone's, a module clashing with
     the core's among them; where two verbs take one name or one key, or a verb
-    takes `z`, which leads the fold keys after Space; where a tone takes a shell
+    takes `f` or `F`, which lead the fold-wise selections after Space; where a tone takes a shell
     tone's name, takes the look of a tone that's none of the shell's, the
     core's or the modules', or takes no look at all.
     """
@@ -365,7 +365,8 @@ def looked(modules: list[Module], found: list[Served]) -> Looks:
     distinct(
         "Verb keys",
         [
-            Owned(module="the core's fold keys", name="z"),
+            Owned(module="the core's fold-wise selections", name="f"),
+            Owned(module="the core's fold-wise selections", name="F"),
             *(
                 Owned(module=each.module, name=each.entry.key)
                 for each in entries(modules, Verbs)

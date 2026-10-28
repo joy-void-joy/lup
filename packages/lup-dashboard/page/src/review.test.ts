@@ -1,4 +1,5 @@
-import "./fixtures/looks";
+import { LOOKS, STANDING } from "./fixtures/looks";
+import { adopt, merged, type Looks } from "./looks";
 import { ANSWERED, DRAWER_ONLY } from "./fixtures/conversation";
 import { ChangeSet, Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
@@ -6,12 +7,12 @@ import { describe, expect, it } from "vitest";
 import { above, outdated, spokenOf } from "./exchange";
 import { levelled } from "./folds";
 import { reconcile, runsOf } from "./reconcile";
+import { findNode, implied, marking, reachOf } from "./grammar";
 import {
     EMPTY,
     aboutAt,
     answer,
     answerAfter,
-    answering,
     arrival,
     blockAt,
     blocksOf,
@@ -35,7 +36,6 @@ import {
     news,
     opened,
     ordered,
-    placeAt,
     plain,
     pruned,
     quoted,
@@ -48,7 +48,6 @@ import {
     tallied,
     threadsOf,
     toAnswer,
-    toggled,
     toKeep,
     waited,
     whose,
@@ -58,6 +57,9 @@ import {
     rowLabel,
     sinceSummary,
     UNREAD,
+    UNSEEN,
+    seeingOf,
+    type Seeing,
     type AgentDrawers,
     type Around,
     type ChangedFile,
@@ -76,6 +78,21 @@ import {
     type Since,
     type Written,
 } from "./review";
+
+/** The verb named `name`, as lup's default declaration's looks declare it. */
+function verb(name: string): (typeof LOOKS.verbs)[number] {
+    const found = LOOKS.verbs.find((each) => each.name === name);
+    if (found === undefined) {
+        throw new Error(`no verb ${name}`);
+    }
+    return found;
+}
+
+/** Say what the verb named `name` reaches at `at` in `out`, as the line of keys says it: what it's on and what it does; none where nothing takes it. */
+function reaches(out: Laid, at: number, name: string): string | null {
+    const reach = reachOf(out, at, verb(name), { called: (each) => each.session });
+    return reach.on === null ? null : `${reach.on}: ${reach.says}`;
+}
 
 const AT = "2026-10-17T12:00:00Z";
 
@@ -368,11 +385,14 @@ describe("laid", () => {
     it("counts what's to answer and what's new for the header over the review, those settled in the draft left out", () => {
         const friction: Item = { ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed" }, rank: NEWS };
         const items = [QUESTION, NOTE, friction, FLAGGED];
-        expect(tallied(items, EMPTY, null)).toBe("2 to answer");
-        expect(tallied(items, EMPTY, "2026-10-17T11:00:00Z")).toBe("2 to answer · 4 new");
-        expect(tallied(items, { ...EMPTY, done: [51], parked: [70] }, "2026-10-17T11:00:00Z")).toBe("1 to answer · 2 new");
-        expect(tallied([friction], EMPTY, "2026-10-17T13:00:00Z")).toBe("0 to answer");
-        expect(tallied([], EMPTY, "2026-10-17T11:00:00Z")).toBe("");
+        // Each group seen up to an item, as the operator marked it with Space d on its banner.
+        const seen = (upTo: number): Seeing => ({ groups: new Map([[whose(from("s1", "a1")), upTo], [whose(from("s2")), upTo]]), commented: new Set() });
+        expect(tallied(items, EMPTY, UNSEEN)).toBe("2 to answer · 4 new");
+        expect(tallied(items, EMPTY, seen(100))).toBe("2 to answer");
+        expect(tallied(items, EMPTY, seen(55))).toBe("2 to answer · 2 new");
+        expect(tallied(items, { ...EMPTY, done: [51], parked: [70] }, UNSEEN)).toBe("1 to answer · 2 new");
+        expect(tallied([friction], EMPTY, seen(60))).toBe("0 to answer");
+        expect(tallied([], EMPTY, UNSEEN)).toBe("");
     });
 
     it("shows a friction, how the work went and a stop as written", () => {
@@ -473,19 +493,31 @@ describe("laid", () => {
         expect(opened(out, head + 3)).toEqual({ id: "", item: 51, quote: null, text: "" });
     });
 
-    it("says where the cursor is, for the line of keys", () => {
+    it("says what each verb reaches where the cursor is, the innermost thing it applies to, from the cursor outward", () => {
         const draft: Draft = { ...EMPTY, comments: [{ id: "fine", item: 51, quote: null, text: "Fine." }] };
         const files: Around = { contexts: new Map([[51, { shown: CONTEXT }]]), files: new Map([[54, { shown: [CHANGED] }]]), answers: [], commented: [] };
         const out = laid([QUESTION, APPROVAL], [from("s3")], banner, header, draft, files);
         const at = (text: string) => out.text.indexOf(text);
-        expect(placeAt(out, at("Fine."))).toBe("written");
-        expect(placeAt(out, at("━━ s1"))).toBe("banner");
-        expect(placeAt(out, at("━━ lup"))).toBe("approvals");
-        expect(placeAt(out, at("Keep the cache"))).toBe("item");
-        expect(placeAt(out, at("Approve?"))).toBe("change");
-        expect(placeAt(out, at("a.py · changed"))).toBe("file");
-        expect(placeAt(out, at("context ·"))).toBe("aside");
-        expect(placeAt(laid([], [], banner, header, EMPTY, NOTHING), 0)).toBe("nothing");
+        // In a comment, what it's on; in an item, the item, done marking it read; an approval's kind saying what done and decline mean.
+        expect(reaches(out, at("Fine."), "done")).toBe("@51 question: mark it read");
+        expect(reaches(out, at("Keep the cache"), "done")).toBe("@51 question: mark it read");
+        expect(reaches(out, at("Keep the cache"), "decline")).toBeNull();
+        expect(reaches(out, at("Keep the cache"), "send")).toBe("@51 question: leave it for later");
+        expect(reaches(out, at("context ·"), "done")).toBe("@51 question: mark it read");
+        expect(reaches(out, at("Approve?"), "done")).toBe("@54 approval: approve");
+        expect(reaches(out, at("Approve?"), "decline")).toBe("@54 approval: decline");
+        // A file of an approval offers nothing of its own: the approval, whole.
+        expect(reaches(out, at("a.py · changed"), "done")).toBe("@54 approval: approve");
+        // On a banner, the agent: done reaching its own news, none here, a question and approvals asking something,
+        // which done would answer; hold where its banner offers it, none here, not running.
+        expect(reaches(out, at("━━ s1"), "done")).toBeNull();
+        expect(reaches(out, at("━━ s1"), "hold")).toBeNull();
+        expect(reaches(out, at("━━ lup"), "done")).toBeNull();
+        expect(reaches(out, at("━━ s3"), "done")).toBeNull();
+        expect(reaches(laid([], [], banner, header, EMPTY, NOTHING), 0, "done")).toBeNull();
+        // Pause is declared, and nothing offers it: its key says so.
+        const paused = reachOf(out, at("Keep the cache"), verb("pause"), { called: (each) => each.session });
+        expect(paused.on === null ? paused.why : "").toBe("not built yet: its host side is designed beside #157");
     });
 
     it("shows an approval's diff without git's colours", () => {
@@ -957,14 +989,11 @@ describe("comments on a changed file's lines", () => {
         expect(flagged.text.startsWith("━━ s2 ━━\n── #70 ──\na.py landed, flagged for the operator's review.\n")).toBe(true);
         expect(flagged.regions[0]!.code.length).toBeGreaterThan(0);
         expect(onItem(opened(flagged, line("L7")))).toEqual({ id: "", item: 70, quote: expect.objectContaining({ text: "a.py:7\n+L7", lines: ["L7"] }), text: "" });
-        expect(placeAt(flagged, line("L7"))).toBe("file");
-        expect(placeAt(flagged, flagged.text.indexOf("a.py landed"))).toBe("item");
+        // A flagged write is read, never declined, in its file as in its text.
+        expect(reaches(flagged, line("L7"), "done")).toBe("@70 landed, flagged: mark it read");
+        expect(reaches(flagged, flagged.text.indexOf("a.py landed"), "decline")).toBeNull();
     });
 
-    it("answers an approval or a held change with Space a and Space x, and nothing else", () => {
-        expect([answering(APPROVAL), answering(HELD)]).toEqual([{ kind: "answer" }, { kind: "answer" }]);
-        expect([answering(FLAGGED), answering(NOTE), answering(QUESTION)]).toEqual([{ kind: "nothing" }, { kind: "nothing" }, { kind: "nothing" }]);
-    });
 
     it("quotes a passage across a file's lines, and across files, each under its path and the span of its lines", () => {
         const from = at("l6");
@@ -1203,7 +1232,7 @@ describe("replies kept from before", () => {
         const [, note] = out.regions;
         expect(note!.asides.map((each) => each.kind)).toEqual(["by", "quoted", "you", "by", "agent", "agent"]);
         expect(opened(out, out.text.indexOf("A stray"))).toBeUndefined();
-        expect(placeAt(out, out.text.indexOf("A stray"))).toBe("aside");
+        expect(reaches(out, out.text.indexOf("A stray"), "done")).toBe("@52 note: mark it read");
     });
 
     it("puts a comment copies before kept on a reply under the item's header", () => {
@@ -1348,26 +1377,12 @@ describe("an answer in a turn's last words", () => {
 });
 
 describe("the draft", () => {
-    it("toggles done and parked, says what it covers, and drops comments that say nothing", () => {
-        let draft = toggled(EMPTY, "done", 52);
-        draft = { ...draft, comments: [{ id: "x", item: 53, text: "x" }, { id: "blank", item: 54, text: "  " }] };
-        expect(covered(draft)).toEqual([52, 53]);
-        expect(covered(toggled(draft, "parked", 53))).toEqual([52]);
+    it("says what it covers, items marked done or declined among it, but those parked, and drops comments that say nothing", () => {
+        const draft: Draft = { ...EMPTY, done: [52], declined: [55], comments: [{ id: "x", item: 53, text: "x" }, { id: "blank", item: 54, text: "  " }] };
+        expect(covered(draft)).toEqual([52, 53, 55]);
+        expect(covered({ ...draft, parked: [53] })).toEqual([52, 55]);
         expect(pruned(draft).comments).toEqual([{ id: "x", item: 53, text: "x" }]);
         expect(pruned({ ...draft, comments: [{ id: "x", item: 53, text: "x \n\n" }] }).comments).toEqual([{ id: "x", item: 53, text: "x" }]);
-        expect(toggled(toggled(EMPTY, "done", 52), "done", 52).done).toEqual([]);
-    });
-
-    it("marks a parked item read by taking it off the later list, so it's sent, and parks a read one unmarked", () => {
-        const parked = toggled(EMPTY, "parked", 52);
-        const read = toggled(parked, "done", 52);
-        expect(read.parked).toEqual([]);
-        expect(covered(read)).toEqual([52]);
-        const later = toggled(read, "parked", 52);
-        expect(later.done).toEqual([]);
-        expect(covered(later)).toEqual([]);
-        const both = { ...EMPTY, done: [52], parked: [52] };
-        expect(covered(toggled(both, "done", 52))).toEqual([52]);
     });
 });
 
@@ -1379,10 +1394,28 @@ describe("waited and fresh", () => {
         expect(waited("2026-10-15T14:00:00Z", now)).toBe("waiting 2d");
     });
 
-    it("marks what came after the operator last settled an item, and nothing before they first did", () => {
-        expect(fresh(QUESTION, "2026-10-17T11:00:00Z")).toBe(true);
-        expect(fresh(QUESTION, "2026-10-17T12:30:00Z")).toBe(false);
-        expect(fresh(QUESTION, null)).toBe(false);
+    it("marks what came after the operator last saw its group, and nothing they commented on in a reply sent", () => {
+        const group = (upTo: number): Seeing => ({ groups: new Map([[whose(from("s1", "a1")), upTo]]), commented: new Set() });
+        expect(fresh(QUESTION, UNSEEN)).toBe(true);
+        expect(fresh(QUESTION, group(50))).toBe(true);
+        expect(fresh(QUESTION, group(51))).toBe(false);
+        expect(fresh(QUESTION, { groups: new Map(), commented: new Set([51]) })).toBe(false);
+        // lup's approvals are of no agent's group: new until commented on, or answered.
+        expect(fresh(APPROVAL, group(100))).toBe(true);
+    });
+
+    it("reads how far the operator has seen from the inbox's listing: each group's mark, and the items a review sent commented on", () => {
+        const review: Item = {
+            ...NOTE,
+            number: 80,
+            sender: { party: "operator" },
+            recipient: from("s2"),
+            reason: { reason: "review", comments: [{ item: 52, text: "Why?", quote: null }], message: "", rulings: [] } as unknown as Item["reason"],
+        };
+        const seeing = seeingOf({ kind: "inbox-items", items: [NOTE], seen: [{ conversation: from("s1", "a1"), item: 51, at: "2026-10-17T12:00:00Z" }], answers: [review], commented: [] });
+        expect(seeing.groups.get(whose(from("s1", "a1")))).toBe(51);
+        expect([...seeing.commented]).toEqual([52]);
+        expect(seeingOf(null)).toBe(UNSEEN);
     });
 });
 
@@ -1437,7 +1470,7 @@ describe("the drawers under each agent's banner", () => {
         expect(texts[0]).toEqual(["tasks 1/3", "✓ Write the sampler", "▶ Writing the models", "· Measure"]);
         expect(texts[1]?.slice(0, 2)).toEqual(["since you approved · 1 to review · 1 flagged", "reader.py · created · 8 lines · new file"]);
         expect(texts[2]).toEqual([
-            "conversation · 7 steps",
+            "conversation · 7 steps · 2 new",
             "you: Build the reader.",
             "Reading the records.",
             "· Bash",
@@ -1461,7 +1494,7 @@ describe("the drawers under each agent's banner", () => {
         const talked = out.drawers[2]!;
         expect(talked.folds.map((each) => [each.kind, each.label, each.closed])).toEqual([
             ["earlier", "you: Build the reader.", true],
-            ["conversation", "conversation · 7 steps", true],
+            ["conversation", "conversation · 7 steps · 2 new", true],
         ]);
         expect(foldKey(talked.folds[0]!)).toBe(`conversation ${whose(S1)} earlier exchange 0`);
         expect([...talked.loads.values()].map((each) => [each.module, each.view, (each.argument as { step: number }).step])).toEqual([["transcripts", "exchange", 0]]);
@@ -1571,18 +1604,49 @@ describe("the drawers under each agent's banner", () => {
         expect(withWritten(EMPTY, remarks).remarks).toEqual(remarks);
     });
 
+    it("takes a comment sent on a file of since you approved as marking it reviewed, at the version it was written on, the operator's own mark the later word", () => {
+        const on = opened(out, at("        a = 1")) as Remark;
+        const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "why", text: "Why one?" }] };
+        const wrote = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote, previous: out });
+        const [mark, ...more] = implied(wrote, draft);
+        expect(more).toEqual([]);
+        expect(mark).toMatchObject({ id: "implied why", action: "policy-review-since", verb: "done", says: "mark it reviewed", version: "b1" });
+        expect(findNode(wrote.nodes, mark!.block)?.block?.block).toBe("diff");
+        // A comment that says nothing implies nothing.
+        const blank: Draft = { ...draft, remarks: [{ ...on, id: "why", text: "  " }] };
+        expect(implied(laid([QUESTION, NOTE], [S1], banner, header, blank, NOTHING, [], drawers, undefined, { remote }), blank)).toEqual([]);
+        // Marked by the operator's own Space d, it's their mark that's sent.
+        const reach = reachOf(wrote, wrote.text.indexOf("        a = 1"), verb("done"), { called: (each) => each.session });
+        const marked = marking(draft, reach.on === null ? [] : reach.acts, "done");
+        expect(implied(wrote, marked)).toEqual([]);
+        // A remark on the agent's words implies nothing: the conversation's steps offer nothing a comment implies.
+        const twenty = opened(out, at("Twenty")) as Remark;
+        const talked: Draft = { ...EMPTY, remarks: [{ ...twenty, id: "how", text: "How many?" }] };
+        expect(implied(laid([QUESTION, NOTE], [S1], banner, header, talked, NOTHING, [], drawers, undefined, { remote }), talked)).toEqual([]);
+    });
+
+    it("marks the conversation read from anywhere in it, up to its last step, folding it as the reply waits to be sent", () => {
+        const conversation = out.drawers.find((each) => each.kind === "conversation")!;
+        const reach = reachOf(out, at("Twenty"), verb("done"), { called: (each) => each.session });
+        const draft = marking(EMPTY, reach.on === null ? [] : reach.acts, "done");
+        expect(draft.marks?.map((each) => [each.action, each.block, (each.argument as { up_to: string }).up_to])).toEqual([["review-mark", conversation.view.id, "6"]]);
+        const marked = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote });
+        const fold = marked.drawers.find((each) => each.kind === "conversation")!.folds.at(-1)!;
+        expect([fold.kind, fold.closed]).toEqual(["conversation", true]);
+    });
+
     it("keeps a remark on a step under a fold not read yet under the drawer's line until it's read, then under its line", () => {
         const on = opened(out, at("Reading the records.")) as Remark;
         const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "read", text: "Which records?" }] };
         const unread = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote: DRAWER_ONLY });
-        expect(unread.text).toContain("conversation · 7 steps\nWhich records?\nyou: Build the reader.\nreading…\n");
+        expect(unread.text).toContain("conversation · 7 steps · 2 new\nWhich records?\nyou: Build the reader.\nreading…\n");
         const read = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote, previous: unread });
         expect(read.text).toContain("you: Build the reader.\nReading the records.\nWhich records?\n· Bash");
         expect(read.seated.get("read")?.outdated).toBe(false);
         // One drafted before quotes named their block waits there unconverted until its step is laid out.
         const old: Remark = { id: "old", to: S1, quote: keptQuote("Reading the records.", 0, 20), text: "Which records?", step: 1 };
         const waiting = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote: DRAWER_ONLY });
-        expect(waiting.text).toContain("conversation · 7 steps\nWhich records?\n");
+        expect(waiting.text).toContain("conversation · 7 steps · 2 new\nWhich records?\n");
         expect(waiting.converted).toBeNull();
         const placed = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote });
         expect(placed.converted?.map((each) => ("quote" in each ? [each.quote?.block.endsWith(" step 1"), each.quote?.line] : "letter"))).toEqual([[true, 0]]);
@@ -1667,14 +1731,85 @@ describe("the drawers under each agent's banner", () => {
         ]);
     });
 
-    it("says where the cursor is in a drawer for the line of keys", () => {
-        expect(placeAt(out, at("tasks 1/3"))).toBe("drawer");
-        expect(placeAt(out, at("✓ Write"))).toBe("drawer");
-        expect(placeAt(out, at("Twenty"))).toBe("words");
-        expect(placeAt(out, at("· Grep"))).toBe("aside");
-        expect(placeAt(out, at("        a = 1"))).toBe("since");
-        expect(placeAt(out, at("reader.py · created"))).toBe("since");
-        expect(placeAt(out, at("you: Build"))).toBe("aside");
+    it("marks a file of since you approved reviewed in the draft, folding it, and the drawer whole as each of its files", () => {
+        const reach = reachOf(out, at("        a = 1"), verb("done"), { called: (each) => each.session });
+        const marked = marking(EMPTY, reach.on === null ? [] : reach.acts, "done");
+        expect(marked.marks?.map((each) => [each.action, each.verb, each.block.endsWith(" file reader.py"), each.version, each.says])).toEqual([
+            ["policy-review-since", "done", true, "b1", "mark it reviewed"],
+        ]);
+        // Laid out with the mark, its file folds under its header, which says what Ctrl+Enter does with it.
+        const folded = laid([QUESTION, NOTE], [S1], banner, header, marked, NOTHING, [], drawers, undefined, { remote });
+        const file = folded.drawers.find((each) => each.kind === "since")?.folds.find((each) => each.kind === "file");
+        expect(file?.closed).toBe(true);
+        // On the drawer's line, each file its own mark, the same as on the file: every one marked, it takes them off.
+        const whole = reachOf(folded, folded.text.indexOf("since you approved ·"), verb("done"), { called: (each) => each.session });
+        const blocks = (each: typeof reach) => (each.on === null ? [] : each.acts.map((act) => (act.kind === "mark" ? act.block : "")));
+        expect(blocks(whole)).toEqual(blocks(reach));
+        expect(marking(marked, whole.on === null ? [] : whole.acts, "done").marks).toEqual([]);
+        // A file holding a remark of the operator's stays open, marked, until it's sent.
+        const remark: Remark = { id: "r", to: S1, quote: { text: "a = 1", block: marked.marks![0]!.block, version: "b1", line: 5, lines: ["        a = 1"], start: 0, end: 13 }, text: "Name it." };
+        const writing = laid([QUESTION, NOTE], [S1], banner, header, { ...marked, remarks: [remark] }, NOTHING, [], drawers, undefined, { remote });
+        expect(writing.drawers.find((each) => each.kind === "since")?.folds.find((each) => each.kind === "file")?.closed).toBe(false);
+    });
+
+    it("starts each fold as its kind says where a person's layer says it, but one a mark folded", () => {
+        const opened: Looks = { ...STANDING, folds: (STANDING.folds ?? []).map((each) => (each.name === "body" || each.name === "item" ? { ...each, starts_open: true } : each)) };
+        adopt(merged({}, opened));
+        try {
+            const read = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, done: [52] }, NOTHING, [], drawers, undefined, { remote });
+            const since = read.drawers.find((each) => each.kind === "since")!;
+            // The new module's bodies, which its view folds to show its design: open, as the kind says.
+            const bodies = since.folds.filter((each) => each.kind === "body");
+            expect(bodies.length).toBeGreaterThan(0);
+            expect(bodies.every((each) => !each.closed)).toBe(true);
+            // Every item open, as the kind says, but the one marked done, which a mark folds.
+            expect(read.regions.map((each) => [each.item.number, each.folds.find((fold) => fold.kind === "item")?.closed])).toEqual([
+                [51, false],
+                [52, true],
+            ]);
+        } finally {
+            adopt(LOOKS);
+        }
+    });
+
+    it("marks an agent's own news read and its drawers done from its banner, what asks something left and named", () => {
+        const acted = (reach: ReturnType<typeof reachOf>) =>
+            reach.on === null ? [] : reach.acts.map((each) => (each.kind === "item" ? `item ${each.number} ${each.list}` : each.kind === "mark" ? `mark ${each.offer.action} ${each.block}` : each.kind));
+        const reach = reachOf(out, at("━━ s1"), verb("done"), { called: (each) => each.session });
+        const since = out.drawers.find((each) => each.kind === "since")!;
+        const conversation = out.drawers.find((each) => each.kind === "conversation")!;
+        // The since drawer's files, each of its own; the conversation, which offers marking it read, whole.
+        expect(acted(reach)).toEqual([
+            ...findNode(out.nodes, since.view.id)!.children.filter((each) => each.kind === "block").map((each) => `mark policy-review-since ${each.id}`),
+            `mark review-mark ${conversation.view.id}`,
+        ]);
+        expect(reach.says).toBe("mark its drawers done, @51 left");
+        // Holding an item new to the operator, it's marked seen too, up to the last item the review shows.
+        const fresh = reachOf(out, at("━━ s1"), verb("done"), { called: (each) => each.session, fresh: () => true });
+        expect(acted(fresh)[0]).toBe(`mark review-mark group ${out.groups[0]?.place}`);
+        expect(fresh.says).toBe("mark it seen, its drawers done, @51 left");
+        const seen = fresh.on === null ? undefined : fresh.acts[0];
+        expect(seen?.kind === "mark" ? seen.offer.argument : null).toEqual({
+            repository: "/r/.git",
+            module: "core",
+            key: { runtime: "claude", session: "s1", agent: "a1" },
+            up_to: "52",
+        });
+        // Its news, a note ranked so, read from its banner.
+        const told = laid([QUESTION, { ...NOTE, rank: NEWS }], [S1], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
+        const news = reachOf(told, told.text.indexOf("━━ s2"), verb("done"), { called: (each) => each.session });
+        expect(news.on === null ? null : [news.says, news.acts]).toEqual(["mark its news read", [{ kind: "item", number: 52, list: "done" }]]);
+    });
+
+    it("says what each verb reaches in a drawer: a file of since you approved, the drawer on its line, the agent elsewhere", () => {
+        expect(reaches(out, at("        a = 1"), "done")).toBe("reader.py: mark it reviewed");
+        expect(reaches(out, at("reader.py · created"), "done")).toBe("reader.py: mark it reviewed");
+        expect(reaches(out, at("reader.py · created"), "decline")).toBeNull();
+        expect(reaches(out, at("since you approved ·"), "done")).toBe("since you approved · 1 to review · 1 flagged: mark every file reviewed");
+        // A task list offers nothing of its own: done reaches the agent, its news and drawers. A conversation offers
+        // marking it read, up to its last step, which done in it does.
+        expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark its drawers done, @51 left");
+        expect(reaches(out, at("Twenty"), "done")).toBe("conversation · 7 steps · 2 new: mark it read");
     });
 
     it("says in each summary line what the drawer holds: in since you approved, the files changed and those standing as reviewed", () => {
@@ -1704,7 +1839,7 @@ describe("the drawers under each agent's banner", () => {
         expect(sinceSummary({ ...SINCE, files: tests.slice(0, 1) })).toBe("since you approved on feat · 1 test");
     });
 
-    it("folds each file reviewed under one line at the drawer's end, one with flagged writes waiting staying a line in its place, which Space a and A take", () => {
+    it("folds each file reviewed under one line at the drawer's end, one with flagged writes waiting staying a line in its place, which Space d takes", () => {
         const kept = { path: "a.py", version: "a1b2c3d4e5f6", flags: [], reviewed: "2026-10-17T12:00:00Z" };
         const also = { path: "b.py", version: null, flags: [], reviewed: "2026-10-17T12:00:00Z" };
         const seen = { path: "z.py", version: "f6e5", flags: [71], since: 12 };
@@ -1721,8 +1856,10 @@ describe("the drawers under each agent's banner", () => {
         expect(sinceFileAt(since!, on("a.py · reviewed"))).toBe(kept);
         expect(sinceFileAt(since!, on("        a = 1"))).toBe(shown.files[1]);
         expect(sinceFileAt(since!, on("z.py ·"))).toBe(seen);
-        expect(placeAt(laidOut, on("a.py · reviewed"))).toBe("reviewed");
-        expect(placeAt(laidOut, on("z.py ·"))).toBe("reviewed");
+        // A settled file is reviewed already: done on it reaches the drawer, every file still to review or flagged; one
+        // with flagged writes waiting is marked reviewed on its own line, which approves them.
+        expect(reaches(laidOut, on("a.py · reviewed"), "done")).toBe("since you approved · 1 to review · 2 flagged · 2 reviewed: mark every file reviewed");
+        expect(reaches(laidOut, on("z.py ·"), "done")).toBe("z.py · as you saw it in @12 · flagged @71: mark it reviewed");
         // The header over the review names the file a reviewed line is, as it does one whose lines the cursor is on.
         const naming: Naming = { group: () => "g", item: (each) => `#${each.item.number}`, party: () => "" };
         expect(heading(laidOut, on("a.py · reviewed"), false, [], naming).map((each) => `${each.kind}: ${each.text}`)).toEqual([

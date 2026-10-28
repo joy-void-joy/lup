@@ -162,7 +162,7 @@ def test_the_socket_sends_a_watchs_replies_under_its_number_then_its_end(
             "reply": {
                 "kind": "inbox-items",
                 "items": [],
-                "reviewed": None,
+                "seen": [],
                 "answers": [],
                 "commented": [],
             },
@@ -214,7 +214,7 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
         "reply": {
             "kind": "inbox-items",
             "items": [],
-            "reviewed": None,
+            "seen": [],
             "answers": [],
             "commented": [],
         },
@@ -572,7 +572,9 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
     assert sent.json() == {
         "kind": "inbox-reviewed",
         "items": [],
+        "read": [52],
         "approved": [],
+        "declined": [],
         "noted": [],
         "kept": [],
     }
@@ -583,7 +585,9 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
         "letters": [],
         "remarks": [],
         "done": [],
+        "declined": [],
         "parked": [53],
+        "marks": [],
     }
 
 
