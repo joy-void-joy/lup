@@ -1,20 +1,20 @@
-"""How lup names a conversation to the operator and to other agents: by the name it chose or was given, its runtime's ids beside it only where another shares the name, or alone where it has none.
+"""How lup names a conversation to the operator and to other agents: by the name they chose or were given, their runtime's ids beside it only where another shares the name, or alone where they have none.
 
-`docs/launch.md`, *Names*. A conversation's name is its path, as lup's commands
-call it (`dev/explore-auth`): its session's name, its launch's as lup last kept
-it for the session (`SessionNames`, `host/names.py`), then each subagent's own
-name down to it, as its whereabouts last heard it (`Whereabouts.name`), or, from
-before they kept one, as its end was told to its parent (`Ended.name`); a
-subagent with none by its runtime's id. That's how a tag says whom an item is
+`docs/launch.md`, *Names*. A conversation's name is their path, as lup's commands
+call it (`dev/explore-auth`): their session's name, the launch's as lup last
+kept it for the session (`SessionNames`, `host/names.py`), then each subagent's
+own name down to them, as their whereabouts last heard it (`Whereabouts.name`),
+or, from before whereabouts kept one, as it was told to their parent when they
+ended (`Ended.name`); a subagent with none by their runtime's id. That's how a tag says whom an item is
 from, how `inbox` lists it, and how the dashboard and `lup-dev inbox` show it to
 the operator, so an agent is talked to and of by the name they took.
 
-Names repeat over time, a branch's above all, and a session cleared in its
+Names repeat over time, a branch's above all, and a session cleared in their
 launch keeps the launch's name, so where another conversation of the same
-repository has the same path, its runtime's ids go beside the name; and a
+repository has the same path, the runtime's ids go beside the name; and a
 conversation whose session's name lup never kept is named by those ids alone
 (`ids`). The ids never change as a conversation is renamed, so they're what
-reads one where its name doesn't (`handle`).
+reads one where their name doesn't (`handle`).
 """
 
 from itertools import groupby
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 
 def ids(conversation: Conversation) -> str:
-    """Name a conversation by its runtime's ids, which never change as it's renamed.
+    """Name a conversation by their runtime's ids, which never change as they're renamed.
 
     >>> main = Conversation(repository=Path("/r/.git"), runtime="rt", session="s1")
     >>> ids(main), ids(main.model_copy(update={"agent": "a1"}))
@@ -44,7 +44,7 @@ def ids(conversation: Conversation) -> str:
 
 
 class Roster(MutableModel):
-    """The conversations the inbox knows, each by the name lup calls it: its path, with its runtime's ids where another of its repository has the same path, or those ids alone where it has none.
+    """The conversations the inbox knows, each by the name lup calls them: their path, with their runtime's ids where another of their repository has the same path, or those ids alone where they have none.
 
     Made from the inbox as it stands (`Delivery.roster`), and read as often as
     a party is named while it does: what it finds, each repository's paths
@@ -52,24 +52,24 @@ class Roster(MutableModel):
     """
 
     names: dict[str, str]
-    """Each session's name, by its runtime's id for it: its launch's, as lup
+    """Each session's name, by the runtime's id for them: their launch's, as lup
     last kept it (`Names.all`)."""
     places: dict[str, Whereabouts]
-    """Each conversation's whereabouts, by its key, as the inbox holds them."""
+    """Each conversation's whereabouts, by their key, as the inbox holds them."""
     items: dict[int, Item]
     """Every item the inbox holds, by number: a subagent's end among them says
-    its name, from before whereabouts kept one."""
+    their name, from before whereabouts kept one."""
     version: int = 0
     """The inbox's version it was made from (`Inbox.version`)."""
     told: dict[str, str] | None = None
-    """The name each subagent's end was told with, by its conversation's key,
-    the latest where it ended more than once; none until it's first read."""
+    """The name each subagent's end was told with, by their conversation's key,
+    the latest where they ended more than once; none until it's first read."""
     known: dict[Path, dict[str, list[Conversation]]] = {}
     """By repository, the conversations of it the inbox knows, by their paths,
     as far as they've been read."""
 
     def own(self, conversation: Conversation) -> str | None:
-        """Return a conversation's own name: a session's as lup last kept it; a subagent's as its whereabouts last heard it, else as its end was told; none where lup knows none."""
+        """Return a conversation's own name: a session's as lup last kept it; a subagent's as their whereabouts last heard it, else as told when they ended; none where lup knows none."""
         if conversation.agent is None:
             return self.names.get(conversation.session)
         place = self.places.get(conversation.key())
@@ -78,7 +78,7 @@ class Roster(MutableModel):
         return self.ended().get(conversation.key())
 
     def ended(self) -> dict[str, str]:
-        """Return the name each subagent's end was told with, by its conversation's key, the latest where it ended more than once."""
+        """Return the name each subagent's end was told with, by their conversation's key, the latest where they ended more than once."""
         if self.told is None:
             self.told = {
                 item.sender.key(): item.reason.name
@@ -89,12 +89,12 @@ class Roster(MutableModel):
         return self.told
 
     def parent(self, conversation: Conversation) -> Conversation | None:
-        """Return the conversation that spawned a subagent, as its whereabouts keep it; none for a session's own, or one whose parent isn't known."""
+        """Return the conversation that spawned a subagent, as their whereabouts keep it; none for a session's own, or one whose parent isn't known."""
         place = self.places.get(conversation.key())
         return None if place is None else place.parent
 
     def path(self, conversation: Conversation, depth: int = 0) -> str | None:
-        """Return a conversation's path as lup's commands call it: its session's name, then each subagent's name down to it, an unnamed one by its runtime's id; none where its session's name isn't known."""
+        """Return a conversation's path as lup's commands call it: their session's name, then each subagent's name down to them, an unnamed one by their runtime's id; none where their session's name isn't known."""
         if conversation.agent is None:
             return self.own(conversation)
         if depth > len(self.places):
@@ -108,7 +108,7 @@ class Roster(MutableModel):
     def alike(
         self, conversation: Conversation, also: Sequence[Conversation] = ()
     ) -> list[Conversation]:
-        """Return the other conversations of `conversation`'s repository that have its path: those the inbox knows, and those of `also`, such as a session starting, which it hasn't heard yet; none where it has none."""
+        """Return the other conversations of `conversation`'s repository that have the same path: those the inbox knows, and those of `also`, such as a session starting, which it hasn't heard yet; none where they have none."""
         path = self.path(conversation)
         if path is None:
             return []
@@ -152,7 +152,7 @@ class Roster(MutableModel):
         return self.known[repository]
 
     def called(self, party: Party) -> str:
-        """Name a party as a tag's attribute says it: `operator`; a conversation by its path, its runtime's ids in brackets after it where another of its repository has the same path; by its ids alone where it has none."""
+        """Name a party as a tag's attribute says it: `operator`; a conversation by their path, their runtime's ids in brackets after it where another of their repository has the same path; by their ids alone where they have none."""
         match party:
             case Operator():
                 return "operator"
@@ -163,7 +163,7 @@ class Roster(MutableModel):
                 return f"{path} ({ids(party)})" if self.alike(party) else path
 
     def who(self, party: Party, also: Sequence[Conversation] = ()) -> str:
-        """Name a party in a sentence: the operator; a conversation as `called` names it, its path quoted, `also` among those that might share it (`alike`)."""
+        """Name a party in a sentence: the operator; a conversation as `called` names them, their path quoted, `also` among those that might share it (`alike`)."""
         match party:
             case Operator():
                 return "the operator"
@@ -178,7 +178,7 @@ class Roster(MutableModel):
     def handle(
         self, conversation: Conversation, also: Sequence[Conversation] = ()
     ) -> str:
-        """Return what reads `conversation` where a call or a command names one, as `inbox`'s `conversation` takes it: its path, where no other of its repository has it, `also` among them (`alike`); else the runtime's id for it, which never changes."""
+        """Return what reads `conversation` where a call or a command names one, as `inbox`'s `conversation` takes it: their path, where no other of their repository has it, `also` among them (`alike`); else the runtime's id for them, which never changes."""
         path = self.path(conversation)
         if path is not None and not self.alike(conversation, also):
             return path

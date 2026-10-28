@@ -764,7 +764,7 @@ def test_a_call_to_lups_tools_tells_nothing_at_its_start_and_its_result_does(
     assert returned == (first_note("Already here."), False)
 
 
-# What a Claude Code session's runtime holds for each of its conversations, as
+# What a Claude Code session's runtime holds for each of their conversations, as
 # its records say (`docs/field-notes.md`, *What a session holds queued*): the
 # tests write the records, laid out as Claude Code lays out its home.
 
@@ -777,7 +777,7 @@ def appended(path: Path, *lines: dict[str, JsonValue]) -> None:
 
 
 def enqueued(content: str) -> dict[str, JsonValue]:
-    """A line of a session's record saying Claude Code queued `content` for it."""
+    """A line of a session's record saying Claude Code queued `content` for them."""
     return {
         "type": "queue-operation",
         "operation": "enqueue",
@@ -788,7 +788,7 @@ def enqueued(content: str) -> dict[str, JsonValue]:
 
 
 def background(call: str, **result: JsonValue) -> dict[str, JsonValue]:
-    """A line of a conversation's record carrying the result of its call `call`, which says what the call started in the background."""
+    """A line of a conversation's record carrying the result of their call `call`, which says what the call started in the background."""
     return {
         "type": "user",
         "message": {
@@ -914,7 +914,7 @@ def test_wait_inbox_returns_for_a_task_of_its_own_and_never_for_its_subagent_s(
             theirs = pool.submit(
                 records.lup, sockets, "wait_inbox", {}, "a1", "general-purpose"
             ).result(timeout=60)
-            # The subagent's task is told to it alone: the session's own call
+            # The subagent's task is told to them alone: the session's own call
             # holds through it, until its own task ends.
             appended(records.transcript, enqueued(notified("b1", "m1", gate)))
             returned = waiting.result(timeout=60)
@@ -1452,7 +1452,7 @@ INITIALIZE: dict[str, JsonValue] = {
         "clientInfo": {"name": "claude-code", "version": "2.1.304"},
     },
 }
-"""A session introducing itself to lup's tool server, on the handshake revision."""
+"""A session introducing themselves to lup's tool server, on the handshake revision."""
 
 
 def dropped(
@@ -1474,7 +1474,7 @@ def dropped(
 
 
 def channel(content: str, token: str) -> str:
-    """The prompt a Claude Code session's turn starts on when it takes a channel's message (`docs/field-notes.md`, *Channels*)."""
+    """The prompt a Claude Code session's turn starts on when they take a channel's message (`docs/field-notes.md`, *Channels*)."""
     return f'<channel source="lup" wake="{token}">\n{content}\n</channel>'
 
 
@@ -1552,9 +1552,9 @@ def test_a_push_not_taken_in_time_is_put_back_and_its_launch_rung_through_the_so
     assert [line for line in said if "took nothing lup pushed" in line] == [
         (
             f"one: `{tmp_path.name}` took nothing lup pushed within 0 seconds, so "
-            "it's woken through its messaging socket from now on: its runtime may "
-            "not have loaded lup's server to push (docs/inbox.md, *How an agent "
-            "is told*)"
+            "they're woken through their messaging socket from now on: their "
+            "runtime may not have loaded lup's server to push (docs/inbox.md, *How "
+            "an agent is told*)"
         )
     ]
 
@@ -1570,7 +1570,7 @@ def test_a_turns_start_tells_what_waits_beside_its_prompt(
     tmp_path: Path,
 ) -> None:
     payload = {"claude": claude, "codex": codex}[runtime]
-    # Claude Code's prompts carry the title lup gave the session at its start.
+    # Claude Code's prompts carry the title lup gave the session at their start.
     shown = {"claude": {"session_title": tmp_path.name}, "codex": {}}[runtime]
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", runtime)
@@ -1706,7 +1706,7 @@ def test_an_ended_subagents_answer_goes_to_its_sessions_main_conversation(
     worker = f"{tmp_path.name}/general-purpose·a1"
     assert context(told) == (
         f'<ended item="2" from="{worker}" '
-        'name="general-purpose·a1">It was stopped before it ended its turn.</ended>'
+        'name="general-purpose·a1">They were stopped before they ended their turn.</ended>'
         f'\n\n<answer item="3" from="operator" for="{worker}, '
         'whose conversation had ended" question="1">\n'
         '<asked>Rename it?</asked>\n<comment id="3.1">Yes.</comment>\n</answer>'
@@ -1797,7 +1797,7 @@ def test_a_sessions_turn_failing_on_an_api_error_is_one_note_whose_reply_wakes_i
     assert noted.reason == Message(
         kind="note",
         text=(
-            "Its turn ended on an error from the model's API (rate_limit):\n"
+            "Their turn ended on an error from the model's API (rate_limit):\n"
             "API Error: Request rejected (429)"
         ),
         ending=True,
@@ -1834,7 +1834,7 @@ def test_blocked_note_and_send_reach_the_operator_a_note_raising_no_notice(
     assert unknown == (
         (
             "Not sent: no subagent of yours is `someone`. `to` takes `operator`, or "
-            "one of your own subagents by its name, its path or its runtime's id: "
+            "one of your own subagents by their name, their path or their runtime's id: "
             "none lup has heard."
         ),
         False,
@@ -1949,8 +1949,8 @@ def test_friction_how_it_felt_and_stop_reach_the_operator_from_each_runtime_and_
             for each in delivery.inbox.items.values()
             if isinstance(each.reason, HowItFelt)
         ]
-    # Each subagent has a parent, its session's own conversation, which gets a
-    # copy of its friction (@2); how it felt reaches the operator alone.
+    # Each subagent has a parent, their session's own conversation, who gets a
+    # copy of their friction (@2); how it felt reaches the operator alone.
     assert [text for text, _ in answers] == [
         "Thanks: your friction is with the operator, @1, and your parent has it too. You can carry on.",
         "Thank you for telling them. It's with the operator alone, as you wrote it, @3.",
@@ -2138,7 +2138,7 @@ def test_lup_dev_inbox_answer_asks_each_decision_in_turn_at_a_terminal(
 
 
 def named_at_start(answer: str) -> tuple[str, str]:
-    """The name a session's start told it, and the title it gave the runtime."""
+    """The name a session's start told them, and the title it gave the runtime."""
     said = json.loads(answer)["hookSpecificOutput"]
     told = said["additionalContext"]
     assert told.startswith("lup: you're `")
@@ -2213,7 +2213,7 @@ def given(answer: str) -> str | None:
 
 
 def prompt(title: str | None, **fields: object) -> str:
-    """A Claude Code prompt of session `s1`, carrying the session's title where it has one."""
+    """A Claude Code prompt of session `s1`, carrying the session's title where they have one."""
     shown = {} if title is None else {"session_title": title}
     return claude("UserPromptSubmit", prompt="Go on.", **shown, **fields)
 
@@ -2320,7 +2320,7 @@ def test_a_title_lup_found_is_never_taken_over_a_later_rename_through_lup(
         hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
         send(hook, claude("SessionStart", source="startup"))
         call(mcp, "rename", {"name": "parser-work"})
-        # The operator gives the session in the runtime the name it has in lup.
+        # The operator gives the session in the runtime the name they have in lup.
         same = send(hook, prompt("parser-work"))
         call(mcp, "rename", {"name": "gate-on-push"})
         later = send(hook, prompt("parser-work"))
@@ -2416,7 +2416,7 @@ def test_lup_dev_rename_and_send_name_a_launch_by_its_name(
 
 
 def introduction() -> str:
-    """What a subagent is told of lup's tools at its first hook, as the tests' service serves them: the inbox's, `judged`, `land` and `rename`, each by its docstring's first line."""
+    """What a subagent is told of lup's tools at their first hook, as the tests' service serves them: the inbox's, `judged`, `land` and `rename`, each by its docstring's first line."""
     served = [
         *specs(),
         *JudgeTools.model_construct().specs(),
@@ -2439,7 +2439,7 @@ def introduction() -> str:
 
 
 class Subagents:
-    """A Claude Code session's transcript and its subagents' records beside it, as Claude Code keeps them."""
+    """A Claude Code session's transcript and their subagents' records beside it, as Claude Code keeps them."""
 
     def __init__(self, tmp_path: Path, session: str = "s1") -> None:
         self.session = session
@@ -2455,7 +2455,7 @@ class Subagents:
         name: str | None = None,
         parent: str | None = None,
     ) -> None:
-        """Record subagent `agent`, of `kind`, spawned by `call`: named `name` where its parent named it, by subagent `parent` where one spawned it."""
+        """Record subagent `agent`, of `kind`, spawned by `call`: named `name` where their parent named them, by subagent `parent` where one spawned it."""
         kept: dict[str, JsonValue] = {
             "agentType": kind,
             "toolUseId": call,
@@ -2543,7 +2543,7 @@ class Subagents:
 def named_talkers(
     machine: Layout, clock: FakeClock
 ) -> list[tuple[str, str | None, int]]:
-    """Each conversation of launch `one` as the operator is shown it: its path, its parent's, its depth."""
+    """Each conversation of launch `one` as the operator is shown them: their path, their parent's, their depth."""
     listed = HostClient(layout=machine.host, clock=clock, starter=Unstarted()).listed()
     return [(each.path, each.parent, each.depth) for each in listed.talkers["one"]]
 
@@ -2852,7 +2852,7 @@ def test_an_agent_of_the_runtimes_own_kept_calling_a_tool_is_shown_nowhere_after
 
 
 class Unguided(Spawns):
-    """Says every subagent, of either runtime, was named after its id and reads none of its session's guidance."""
+    """Says every subagent, of either runtime, was named after their id and reads none of their session's guidance."""
 
     @override
     def spawned(self, launch: Register, payload: str) -> Spawned | None:
@@ -2982,7 +2982,7 @@ class Rollouts:
         self.rollout(thread).write_text(f"{line}\n")
 
     def call(self, thread: str, call: str) -> str:
-        """A call of subagent `thread`'s starting, naming its own rollout."""
+        """A call of subagent `thread`'s starting, naming their own rollout."""
         return codex(
             "PreToolUse",
             tool_name="Bash",
@@ -2994,7 +2994,7 @@ class Rollouts:
         )
 
     def ended(self, thread: str, parent: str, said: str) -> str:
-        """Subagent `thread`'s turn ending, saying `said`: naming its parent's rollout, and its own beside it."""
+        """Subagent `thread`'s turn ending, saying `said`: naming their parent's rollout, and their own beside it."""
         return codex(
             "SubagentStop",
             agent_id=thread,
@@ -3028,10 +3028,10 @@ class Rollouts:
 
 
 def handed(number: int, path: str, name: str) -> str:
-    """How item `number` is told: Claude Code's subagent at `path`, called `name`, ended its turn, its last message handed to its parent by Claude Code itself."""
+    """How item `number` is told: Claude Code's subagent at `path`, called `name`, ended their turn, their last message handed to their parent by Claude Code itself."""
     return (
         f'<ended item="{number}" from="{path}" '
-        f'name="{name}">It ended its turn. Its last message reaches you from your '
+        f'name="{name}">They ended their turn. Their last message reaches you from your '
         "runtime.</ended>"
     )
 
@@ -3081,7 +3081,7 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_and_never_for_anothers_on
 def test_wait_inbox_returns_when_its_own_subagent_fails_on_an_api_error_on_claude_code(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
-    """A subagent whose first request failed, first heard at its `StopFailure`: its parent is told the error's kind, the runtime's notice saying the rest."""
+    """A subagent whose first request failed, first heard at their `StopFailure`: their parent is told the error's kind, the runtime's notice saying the rest."""
     records = Subagents(tmp_path)
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path / "w", "one", "claude")
@@ -3099,8 +3099,8 @@ def test_wait_inbox_returns_when_its_own_subagent_fails_on_an_api_error_on_claud
     assert returned == (
         (
             '<ended item="1" from="w/parser" name="parser">'
-            "It failed on an error from the model's API (rate_limit). Your "
-            "runtime's notice of its end says more.</ended>"
+            "They failed on an error from the model's API (rate_limit). Your "
+            "runtime's notice of their end says more.</ended>"
         ),
         False,
     )
@@ -3122,7 +3122,7 @@ def test_a_subagents_end_waits_for_its_parents_call_never_holding_its_end_nor_wa
         send(hook, bash("m1"))
         send(hook, records.ended("a1", "Explore", "Parsed."))
         ended = send(hook, claude("Stop", stop_hook_active=False))
-        # The session idle: a subagent stopped, first heard at its end, and one
+        # The session idle: a subagent stopped, first heard at their end, and one
         # of Claude Code's own, a suggestion for the operator's next prompt.
         send(hook, records.ended("a3", "Plan", None))
         own = claude(
@@ -3142,7 +3142,7 @@ def test_a_subagents_end_waits_for_its_parents_call_never_holding_its_end_nor_wa
         handed(1, "w/Explore·a1", "Explore·a1")
         + "\n\n"
         + '<ended item="2" from="w/Plan·a3" name="Plan·a3">'
-        "It was stopped before it ended its turn.</ended>",
+        "They were stopped before they ended their turn.</ended>",
         False,
     )
     assert after == ""
@@ -3169,7 +3169,7 @@ def test_a_stopped_subagent_holds_nothing_and_what_waits_for_it_goes_to_its_sess
         'whose conversation had ended" question="1">\n'
         '<asked>May I?</asked>\n<comment id="2.1">Yes.</comment>\n</answer>\n\n'
         '<ended item="3" from="w/parser" name="parser">'
-        "It was stopped before it ended its turn.</ended>"
+        "They were stopped before they ended their turn.</ended>"
     )
 
 
@@ -3193,21 +3193,21 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_with_its_last_message_on_
             told = send(hook, rollouts.call("th1", "c3"))
             send(hook, rollouts.ended("th1", "t1", "Parsed: three call sites."))
             returned = waiting.result(timeout=60)
-        # One the second `spawn_agent` spawned, first heard at its end: Codex
-        # hands its last message to its parent itself.
+        # One the second `spawn_agent` spawned, first heard at their end: Codex
+        # hands their last message to their parent itself.
         send(hook, rollouts.ended("th3", "t1", "Lexed."))
         at_once = call(mcp, "wait_inbox", {})
         after = send(hook, codex_bash("d1"))
     assert context(told) == (
         '<ended item="1" from="w/th1/explorer·th2" name="explorer·th2">\n'
-        "It ended its turn. Its last message:\n"
+        "They ended their turn. Their last message:\n"
         "<said>Found three call sites.</said>\n"
         "</ended>"
     )
     assert returned == (
         (
             '<ended item="2" from="w/explorer·th1" name="explorer·th1">\n'
-            "It ended its turn. Its last message:\n"
+            "They ended their turn. Their last message:\n"
             "<said>Parsed: three call sites.</said>\n"
             "</ended>"
         ),
@@ -3216,7 +3216,7 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_with_its_last_message_on_
     assert at_once == (
         (
             '<ended item="3" from="w/lexer" name="lexer">'
-            "It ended its turn. Its last message reaches you from your runtime."
+            "They ended their turn. Their last message reaches you from your runtime."
             "</ended>"
         ),
         False,
@@ -3311,13 +3311,13 @@ def arriving(whose: str, number: int, idle: str = "") -> str:
     """What `send` answers for a message to another conversation, item `number`, with the operator's copy the next."""
     return (
         f"Your message is in the inbox of {whose}, {cited(number)}, and the operator "
-        f"has a copy, {cited(number + 1)}. It's told at its next call, its turn's end "
-        f"or its `wait_inbox`, whichever comes first{idle}."
+        f"has a copy, {cited(number + 1)}. It's told at their next call, their turn's "
+        f"end or their `wait_inbox`, whichever comes first{idle}."
     )
 
 
-WOKEN = "; idle between turns, its session is woken for it"
-"""What `send`'s answer adds for a main conversation whose runtime wakes it."""
+WOKEN = "; idle between turns, their session is woken for it"
+"""What `send`'s answer adds for a main conversation whose runtime wakes them."""
 
 
 def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_reads_a_copy(
@@ -3364,7 +3364,7 @@ def test_a_subagent_tells_its_parent_at_its_next_call_and_the_operator_reads_a_c
         f"@2, a problem from `w/parser` in {worktree} to `w`, your copy, made "
         f"{clocked(clock.now())}, waiting:\n{found}\n"
     )
-    # The subagent's own `inbox` lists its message, and the copy as whom it went to.
+    # The subagent's own `inbox` lists their message, and the copy as whom it went to.
     assert theirs == (
         "\n".join(
             [
@@ -3468,8 +3468,8 @@ def test_send_reaches_ones_own_subagents_by_name_path_or_id_and_refuses_whom_not
         send(hook, records.call("a1", "Explore", "c5"))
         renamed = sent("lexing", "Renamed.")
     yours = (
-        "`to` takes `operator`, or one of your own subagents by its name, its path "
-        "or its runtime's id: `parser`."
+        "`to` takes `operator`, or one of your own subagents by their name, their "
+        "path or their runtime's id: `parser`."
     )
     assert by_name == (arriving("your subagent `w/parser`", 1), False)
     assert by_path == (arriving("your subagent `w/parser`", 3), False)
@@ -3484,19 +3484,19 @@ def test_send_reaches_ones_own_subagents_by_name_path_or_id_and_refuses_whom_not
         for number, text in [(1, "By name."), (3, "By path."), (5, "By id.")]
     )
     assert down == (arriving("your subagent `w/parser/tokens`", 7), False)
-    # The subagent's end is held once to tell what its parent sent it.
+    # The subagent's end is held once to tell what their parent sent them.
     assert "Look at the lexer." in held
     assert gone == (
         (
             f"Not sent: your subagent `w/parser/tokens` ended at {clocked(clock.now())}, so "
-            "nothing reads its inbox: once its runtime resumes it, lup hears it again "
-            "and it can be sent to"
+            "nothing reads their inbox: once their runtime resumes them, lup hears them "
+            "again and they can be sent to"
         ),
         False,
     )
-    # Resumed, it's heard again, and reached; the Ended its parent got is @9.
+    # Resumed, they're heard again, and reached; the Ended their parent got is @9.
     assert resumed == (arriving("your subagent `w/parser/tokens`", 10), False)
-    # A subagent that renamed itself is reached by its new name once it's heard.
+    # A subagent who renamed themselves is reached by their new name once they're heard.
     assert renamed == (arriving("your subagent `w/lexing`", 12), False)
 
 
@@ -3541,7 +3541,7 @@ def test_on_codex_a_subagents_message_holds_its_parents_turns_end_and_waits_for_
         started = context(send(hook, codex("UserPromptSubmit", prompt="Go on.")))
         frames = messages.close()
     idle = (
-        "; idle between turns, it waits for the session's next turn, since its "
+        "; idle between turns, it waits for the session's next turn, since their "
         "runtime can't be woken"
     )
     assert first == (arriving("your parent `v`", 1, idle), False)
@@ -4683,12 +4683,12 @@ def test_a_reply_to_an_ended_subagent_reaches_its_session_as_the_subagents_own(
         told = send(hook, bash("b1"))
         asked = delivery.inbox.item(1).state
     assert (review.recipient, review.addressed) == (subagent.main(), subagent)
-    # Its end reached the session first (@2), as a subagent's end does.
+    # Their end reached the session first (@2), as a subagent's end does.
     assert asked == Answered(at=clock.now(), answer=3)
     worker = f"{tmp_path.name}/general-purpose·a1"
     assert context(told) == (
         f'<ended item="2" from="{worker}" '
-        'name="general-purpose·a1">It was stopped before it ended its turn.</ended>'
+        'name="general-purpose·a1">They were stopped before they ended their turn.</ended>'
         f'\n\n<review item="3" from="operator" for="{worker}, '
         'whose conversation had ended" covers="1">\n'
         '<message id="3.2">Then stop there.</message>\n'
@@ -4893,7 +4893,7 @@ def test_a_turns_end_answers_the_operators_words_told_citing_them_held_once_wher
     said: list[str],
     tmp_path: Path,
 ) -> None:
-    """An agent answers the operator in its turn's last words, which lup puts before them with the items of theirs told since its last end, and its citations of their words read; one naming no passage, or several, still lands, and the end is held once to tell the agent which, with where they read, so it fixes them with `edit`."""
+    """An agent answers the operator in their turn's last words, which lup puts before the operator with the operator's items told since their last end, and their citations of the operator's words read; one naming no passage, or several, still lands, and the end is held once to tell the agent which, with where those words read, so they fix them with `edit`."""
     payload = {"claude": claude, "codex": codex}[runtime]
     calling = {"claude": bash, "codex": codex_bash}[runtime]
     session = {"claude": "s1", "codex": "t1"}[runtime]
@@ -5055,7 +5055,7 @@ def test_a_subagents_last_words_after_the_operators_reach_them_as_its_turns_end_
     said: list[str],
     tmp_path: Path,
 ) -> None:
-    """A subagent's last words are its parent's, and reach the operator too where the operator's words reached it since it last answered them, as its turn's end: how a subagent they wrote to answers them, on either runtime."""
+    """A subagent's last words are their parent's, and reach the operator too where the operator's words reached them since they last answered those words, as their turn's end: how a subagent the operator wrote to answers them, on either runtime."""
     payload = {"claude": claude, "codex": codex}[runtime]
 
     def calling(call: str) -> str:
@@ -5405,7 +5405,7 @@ def approving(item: Item, comment: str) -> None:
 
 
 def approved_line(path: Path, comment: str) -> str:
-    """The line telling the agent its write to `path` was held for the operator's review and approved, with their `comment`."""
+    """The line telling the agent their write to `path` was held for the operator's review and approved, with their `comment`."""
     after = f": {comment}" if comment else "."
     return (
         f"lup held the write to {path} for the operator's review, "
@@ -5488,7 +5488,7 @@ def test_a_subagents_held_edit_waits_unlanded_until_the_operator_answers_making_
     tmp_path: Path,
     comment: str,
 ) -> None:
-    """A subagent edits an operator's document in a worktree of its own, its hooks naming the session's (#213)."""
+    """A subagent edits an operator's document in a worktree of their own, their hooks naming the session's (#213)."""
     documented(repo, shell)
     feat = tmp_path / "feat"
     shell.git(repo, "worktree", "add", "-q", "-b", "feat", str(feat))
@@ -6177,7 +6177,7 @@ def test_a_draft_that_answers_nothing_or_what_a_review_cant_is_refused(
         own = refused_draft(machine, clock, Draft(done=[2]))
     assert empty == (
         "the draft answers no item and writes to no agent: comment on an item, take "
-        "one off the list, or write to an agent under its banner"
+        "one off the list, or write to an agent under their banner"
     )
     assert own == "@2 is a note from the operator, which a review doesn't answer"
 
@@ -6217,7 +6217,7 @@ def test_a_message_sent_from_reading_a_conversation_quotes_each_passage_it_repli
     assert sent.reason == Message(
         kind="note", text="Carry on after.", passages=passages
     )
-    # Its recipient is said by its path, its session's name as its launch has it.
+    # Its recipient is said by their path, their session's name as their launch has it.
     assert named.name is not None
     assert listed.path(sent.recipient) == named.name
 
@@ -7026,8 +7026,8 @@ def test_quiet_runs_in_the_repositorys_process_for_the_conversation_calling(
     held = quiet({"kinds": ["importers", "rules", "importers"]})
     assert not held.error, held.text
     assert held.text.startswith(
-        "This conversation is quiet: lup doesn't tell it lup's findings on the lines "
-        "changed, and type errors in the files importing what changed after its calls"
+        "You're quiet: lup doesn't tell you lup's findings on the lines changed, "
+        "and type errors in the files importing what changed after your calls"
     )
     [asked] = judging.asked
     assert (asked.name, asked.caller) == ("quiet", caller)
@@ -7234,8 +7234,8 @@ def test_a_conversations_items_are_listed_in_every_state_as_it_wrote_and_was_tol
             '<comment id="3.2">Go.</comment>'
         )
     ]
-    # The subagent's end reaches the session (@4); the reply to its note,
-    # passed on to the session once it ended, is in both: told to the session,
+    # The subagent's end reaches the session (@4); the reply to their note,
+    # passed on to the session once they ended, is in both: told to the session,
     # and for the subagent.
     assert [each.item.number for each in mains.sent] == [1]
     assert [each.item.number for each in mains.received] == [3, 4, 5]
@@ -7251,7 +7251,7 @@ def test_a_conversations_items_are_listed_in_every_state_as_it_wrote_and_was_tol
     )
     assert [(each.item.number, each.text) for each in theirs.sent] == [
         (2, "I assumed UTF-8."),
-        (4, "It was stopped before it ended its turn."),
+        (4, "They were stopped before they ended their turn."),
     ]
     assert theirs.sent[0].item.state == Done(at=clock.now())
     passed = [(each.item, each.text) for each in mains.received[2:]]
@@ -7771,8 +7771,8 @@ def test_land_removes_worktrees_in_the_container_the_launch_has_when_it_cleans_u
         landings.flag(path, rooms, session)
         landing = pool.submit(call, mcp, "land", {})
         assert delivery.holding.wait(timeout=60)
-        # While the landing waits on the operator, the session renames itself,
-        # and lup renames its container with it.
+        # While the landing waits on the operator, the session renames themselves,
+        # and lup renames the launch's container with them.
         assert call(mcp, "rename", {"name": "review-and-plan"}) == (
             "You're `review-and-plan` now.",
             False,
@@ -8224,7 +8224,7 @@ def test_a_comment_on_a_hold_lands_nothing_and_the_next_hold_shows_what_changed_
         )
         sending(machine, clock)
         held_back, _ = landing.result(timeout=60)
-        # The agent answers it, and lands again: while that waits, it lands again on another tip.
+        # The agent answers it, and lands again: while that waits, they land again on another tip.
         landings.wrote(feat, path, second)
         again = landings.merged()
         delivery.holding.clear()
@@ -8457,13 +8457,13 @@ def test_land_of_a_branch_leaves_alone_one_made_from_its_tip_worktree_and_all(
     notices: Raised,
     said: list[str],
 ) -> None:
-    """Seen on 2026-10-23 (#252): a worker handed back `since-merge-base`, then made `since-review-instant` from its tip to start its next piece, with no commit of its own yet; the landing merged that tip, and took both branches for landed."""
+    """Seen on 2026-10-23 (#252): a worker handed back `since-merge-base`, then made `since-review-instant` from its tip to start their next piece, with no commit of its own yet; the landing merged that tip, and took both branches for landed."""
     dev, shell = landings.dev, landings.shell
     handed = landings.branched("since-merge-base")
     landings.wrote(handed, "src/pkg/since.py", '"""Since the merge base."""\n')
     branch = shell.git(dev, "rev-parse", "since-merge-base")
     # Its worker hasn't written there yet, so the judge's session index doesn't
-    # place it in its new worktree (#240): nothing says anyone works there.
+    # place them in their new worktree (#240): nothing says anyone works there.
     following = landings.branched("since-review-instant", start="since-merge-base")
     old = landings.on_forge("refs/heads/dev")
     with inboxed(machine, clock, notices, said, rooms=landings.room):
@@ -9089,7 +9089,7 @@ def test_the_github_module_s_tools_answer_through_the_server_with_and_without_ar
 def exchanged(
     machine: Layout, clock: FakeClock, tmp_path: Path, records: Subagents
 ) -> Path:
-    """Make an exchange in a launch named `w`, and return its tool socket: session `s0`'s note at 12:00; then at 13:00 session `s1`'s note, its question, and its subagent `explore-auth`'s note; at 14:00 the operator's answer, their review commenting on a passage of the note with a message, both told to `s1` at a call, its turn's end answering them, citing the comment, and the operator's reply to it, and the subagent's end."""
+    """Make an exchange in a launch named `w`, and return its tool socket: session `s0`'s note at 12:00; then at 13:00 session `s1`'s note, their question, and their subagent `explore-auth`'s note; at 14:00 the operator's answer, their review commenting on a passage of the note with a message, both told to `s1` at a call, its turn's end answering them, citing the comment, and the operator's reply to it, and the subagent's end."""
     launched(machine, clock, tmp_path / "w", "one", "claude")
     hook = machine.host.launch("one").hook
     mcp = machine.host.launch("one").mcp
@@ -9180,7 +9180,7 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
         8: f"@8  {then}  a note from the operator to you, waiting: Thanks, rest.",
         9: (
             f"@9  {then}  the end of a subagent's turn from `w/explore-auth` to "
-            "you, waiting: It ended its turn. Its last message reaches you from "
+            "you, waiting: They ended their turn. Their last message reaches you from "
             "your runtime."
         ),
     }
@@ -9198,7 +9198,7 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
     ]
     assert below.splitlines() == [
         (
-            "The exchange of `w` (claude session s1) and its 1 subagent: every "
+            "The exchange of `w` (claude session s1) and their 1 subagent: every "
             "item, oldest first."
         ),
         *(lines[number] for number in range(2, 10)),
@@ -9221,7 +9221,7 @@ def test_inbox_reads_one_conversations_exchange_by_its_name_or_its_id_a_line_eac
     ]
     assert nobody == (
         "No conversation about this repository is `nobody`: `conversation` takes "
-        "a session's name, a subagent's path or its own name, or the runtime's id "
+        "a session's name, a subagent's path or their own name, or the runtime's id "
         "for either, or the id's start, as `inbox` lines name them."
     )
 
@@ -9300,8 +9300,8 @@ def test_inbox_reads_an_exchange_whole_the_operators_words_under_what_they_answe
                 "you, waiting:"
             ),
             (
-                '<item item="9" kind="ended" from="w/explore-auth">It ended its '
-                "turn. Its last message reaches you from your runtime.</item>"
+                '<item item="9" kind="ended" from="w/explore-auth">They ended their '
+                "turn. Their last message reaches you from your runtime.</item>"
             ),
         ]
     )
@@ -9436,8 +9436,8 @@ def test_a_conversation_is_named_by_its_path_its_ids_beside_it_only_where_anothe
         for each in [earlier, later, parser, unnamed]
     }
     roster = Roster(names={"s1": "w", "s2": "w", "s4": "v"}, places=places, items={})
-    # Two sessions of the repository share `w`, so each is named with its ids;
-    # the subagent's path is its alone; the session lup kept no name for is its ids.
+    # Two sessions of the repository share `w`, so each is named with their ids;
+    # the subagent's path is theirs alone; the session lup kept no name for is their ids.
     assert [roster.called(each) for each in [earlier, later, parser, unnamed]] == [
         "w (claude session s1)",
         "w (claude session s2)",
@@ -9547,8 +9547,8 @@ def test_a_subagent_is_named_as_its_end_was_told_where_its_whereabouts_keep_no_n
     ]
     assert parsing.found == 2
     assert parsing.text.splitlines()[0] == (
-        "The exchange of `w/parser` (subagent a1 of claude session s1) and its 1 "
-        "subagent: every item, oldest first."
+        "The exchange of `w/parser` (subagent a1 of claude session s1) and their "
+        "1 subagent: every item, oldest first."
     )
 
 
@@ -9829,7 +9829,7 @@ def test_the_bearings_tell_the_session_what_is_its_and_leave_the_operators_items
         ),
         [],
     )
-    # Seven items wait on the operator, from the last session, its worker and
+    # Seven items wait on the operator, from the last session, their worker and
     # another session: theirs to answer, none of it told.
     assert page.split("\n\n")[1:] == [
         (

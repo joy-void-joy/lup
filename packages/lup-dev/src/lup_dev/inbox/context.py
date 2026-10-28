@@ -117,7 +117,7 @@ class Recording(MutableModel):
         session: str,
         agent: str | None,
     ) -> Read:
-        """Return the record of session `session` of `runtime`, or of its subagent `agent`, and what it holds as it stands.
+        """Return the record of session `session` of `runtime`, or of their subagent `agent`, and what it holds as it stands.
 
         Raise `InboxError` saying why where it can't be read: lup can't read the
         runtime's records, or the record isn't on this machine.

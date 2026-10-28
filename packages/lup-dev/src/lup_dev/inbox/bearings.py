@@ -1,8 +1,8 @@
-"""What a new main session is told, once, as it starts, of where its repository stands, as far as it's the session's to act on: the branches not landed, and what landed since the last main session started, each line saying where to read more.
+"""What a new main session is told, once, as they start, of where their repository stands, as far as it's the session's to act on: the branches not landed, and what landed since the last main session started, each line saying where to read more.
 
 `docs/inbox.md`, *A new main session's bearings*. A long main session ends
 heavy, and the next one rebuilt what was open from raw records and days of the
-inbox (#262), so a fresh one is told it at the one moment it's needed, its
+inbox (#262), so a fresh one is told it at the one moment it's needed, their
 context still empty: a session's own conversation starting anew or cleared
 (`Heard.fresh`), never a resume, a compaction, a fork or a subagent, and never
 again after.
@@ -10,12 +10,12 @@ again after.
   worktree holds uncommitted changes, with its worktree, how many commits, and
   its last. A branch the local integration branch merged but whose landing
   waits is still not landed; the release branch, on its remote, is.
-- **Running beside it:** where more than one other main conversation of the
-  repository runs, each by its name, since several sessions may work on one
+- **Running beside them:** where more than one other main conversation of the
+  repository runs, each by their name, since several sessions may work on one
   repository at once, and one's open threads aren't abandoned.
 - **Landed** on the remote's integration branch since the last main session
   started, its first-parent history, with whether that session still runs or
-  when it was last heard, and how its exchange with the operator is read.
+  when they were last heard, and how their exchange with the operator is read.
 
 What waits for the operator isn't told: it's theirs to answer, and the
 session starting can't act on it.
@@ -185,7 +185,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         return self.page(starting, last, found, running)
 
     def last(self, starting: Conversation) -> Conversation | None:
-        """Return the main conversation of `starting`'s repository lup heard start last before it; none where it heard none."""
+        """Return the main conversation of `starting`'s repository lup heard start last before them; none where it heard none."""
         mains = [
             place
             for place in self.delivery.inbox.whereabouts.values()
@@ -197,7 +197,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         return None if latest is None else latest.conversation
 
     def started(self, conversation: Conversation) -> datetime:
-        """Return when lup first heard `conversation` in the launch it was last heard in."""
+        """Return when lup first heard `conversation` in the launch they were last heard in."""
         return self.delivery.inbox.whereabouts[conversation.key()].since
 
     def page(
@@ -207,7 +207,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         found: Repository,
         running: list[Running],
     ) -> str:
-        """Say the bearings: what's not landed, the main sessions running beside it where more than one does, and what landed since `last` started."""
+        """Say the bearings: what's not landed, the main sessions running beside the one starting where more than one does, and what landed since `last` started."""
         items = self.delivery.inbox.about(starting.repository)
         reader = Reader(
             delivery=self.delivery,
@@ -235,7 +235,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
 
     @staticmethod
     def named(last: Conversation, reader: Reader) -> str:
-        """Name `last` for the session starting, which reads: by its name, its runtime's ids beside it where another shares it, the session starting among them, which lup hasn't heard yet."""
+        """Name `last` for the session starting, who reads it: by their name, their runtime's ids beside it where another shares it, the session starting among them, which lup hasn't heard yet."""
         return reader.roster.who(last, starting(reader))
 
     def unlanded(self, found: Repository) -> list[str]:
@@ -276,7 +276,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         ]
 
     def beside(self, beside: list[Running], reader: Reader) -> list[str]:
-        """Say each main session of the repository running beside the one starting, by its name, its runtime's ids beside it where another shares it (`Reader.called`), and its worktree."""
+        """Say each main session of the repository running beside the one starting, by their name, their runtime's ids beside it where another shares it (`Reader.called`), and their worktree."""
         return [
             "Main sessions of this repository running beside you:",
             *(
@@ -294,7 +294,7 @@ class RepositoryBearings(Model, Bearings, arbitrary_types_allowed=True):
         reader: Reader,
         items: list[Item],
     ) -> list[str]:
-        """Say what landed since the last main session started, whether it still runs or when it was last heard, and how its exchange with the operator is read; that none was heard before, where none was."""
+        """Say what landed since the last main session started, whether they still run or when they were last heard, and how their exchange with the operator is read; that none was heard before, where none was."""
         if last is None:
             return ["No main session of this repository was heard before you."]
         running = any(each.session == last.session for each in beside)
