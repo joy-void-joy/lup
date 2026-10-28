@@ -7,7 +7,7 @@
 // view no producer answers is its module's own, asked of the host (`module-view`) and kept live at its own triggers.
 // Every view instance has an id that stays across layouts, its module, view and argument with its repository, and
 // each of its blocks the instance's id and the block's own: what the review is kept by (`review.ts`). Pure.
-import type { Laid as Talk } from "./conversation";
+import type { Laid as Talk, Remark as TalkComment } from "./conversation";
 import type { components } from "./generated/api";
 
 export type Blocks = components["schemas"]["Blocks"];
@@ -29,7 +29,6 @@ type Usage = components["schemas"]["Usage"];
 type Call = components["schemas"]["Call"];
 type Entry = components["schemas"]["Entry"];
 type Exchange = components["schemas"]["Exchange"];
-type TalkComment = { step: number; quote: components["schemas"]["Quote"]; text: string };
 
 /** What the host answered, asked for more of an item than its own text: what it showed, or why it refused. */
 export type Answered<T> = { shown: T } | { refused: string };

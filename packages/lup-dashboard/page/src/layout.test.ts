@@ -298,7 +298,7 @@ describe("the overview", () => {
     const items = [note(1, CHILD, WAITING), note(2, OTHER), note(4, PARENT)];
     const drawers = new Map([[whose(PARENT), TASKED]]);
     const reading: Reading = {
-        draft: { ...EMPTY, done: [2], comments: [{ item: 1, text: "Why?" }] },
+        draft: { ...EMPTY, done: [2], comments: [{ id: "why", item: 1, text: "Why?" }] },
         reviewed: null,
         states: new Map([[whose(PARENT), "calling"]]),
         called: (party) => (party.agent === null ? party.session : `${party.session}/${party.agent}`),
@@ -324,7 +324,7 @@ describe("the overview", () => {
         // The cursor's entry is the deepest holding it.
         expect(cursorRow(rows, out.text.indexOf("Note 1."))?.text).toBe("@1 note");
         expect(cursorRow(rows, out.text.indexOf("━━ s1"))?.text).toBe("s1");
-        expect(itemStanding(out.regions.find((each) => each.item.number === 1)!, { ...EMPTY, parked: [1], comments: [{ item: 1, text: "x" }] }, null)).toEqual({ marks: ["parked"], draft: [], fresh: false });
+        expect(itemStanding(out.regions.find((each) => each.item.number === 1)!, { ...EMPTY, parked: [1], comments: [{ id: "x", item: 1, text: "x" }] }, null)).toEqual({ marks: ["parked"], draft: [], fresh: false });
     });
 
     it("follows the review where it doesn't nest, a subagent's group where its first item put it", () => {

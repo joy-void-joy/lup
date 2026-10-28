@@ -22,7 +22,7 @@ import {
     type Talk,
     type Whose,
 } from "./conversation";
-import { changes, cited, moved, type Span } from "./comments";
+import { cited, type Span } from "./comments";
 
 const at = (minute: number) => `2026-10-18T10:${String(minute).padStart(2, "0")}:00Z`;
 
@@ -222,13 +222,10 @@ describe("comments on the agent's words", () => {
     const out = laid(STEPS, ALONE, UNSAID);
 
     it("opens one on a line of the agent's words, quoting it, and none on any other line", () => {
-        expect(opened(out, out.text.indexOf("subagents"))).toEqual({
-            step: 1,
-            quote: { text: "subagents get their own.", start: "Each session is a JSONL file;\n".length, end: "Each session is a JSONL file;\nsubagents get their own.".length },
-            text: "",
-        });
+        const words = ["Each session is a JSONL file;", "subagents get their own."];
+        expect(opened(out, out.text.indexOf("subagents"))).toEqual({ step: 1, lines: words, first: 1, last: 1, start: 0, end: "subagents get their own.".length, text: "subagents get their own." });
         // From the start of the line, before the agent's words, it's the same line.
-        expect(opened(out, out.text.indexOf("Twenty"))?.quote?.text).toBe("Twenty kinds of line.");
+        expect(opened(out, out.text.indexOf("Twenty"))?.text).toBe("Twenty kinds of line.");
         for (const line of ["you: Build", "· Grep", "· called Bash", "  · Read"]) {
             expect(opened(out, out.text.indexOf(line))).toBeUndefined();
         }
@@ -238,22 +235,19 @@ describe("comments on the agent's words", () => {
 
     it("quotes a passage within one step, from its words' start where the selection takes whole lines, and not across steps", () => {
         const from = out.text.indexOf("JSONL");
-        expect(quoted(out, from, from + "JSONL".length)).toEqual({
-            step: 1,
-            quote: { text: "JSONL", start: "Each session is a ".length, end: "Each session is a JSONL".length },
-            text: "",
-        });
+        const words = ["Each session is a JSONL file;", "subagents get their own."];
+        expect(quoted(out, from, from + "JSONL".length)).toEqual({ step: 1, lines: words, first: 0, last: 0, start: "Each session is a ".length, end: "Each session is a JSONL".length, text: "JSONL" });
         const line = out.text.indexOf("Each");
         const next = out.text.indexOf("· called Bash");
-        expect(quoted(out, line, next)?.quote?.text).toBe("Each session is a JSONL file;\nsubagents get their own.");
+        expect(quoted(out, line, next)).toMatchObject({ first: 0, last: 1, text: "Each session is a JSONL file;\nsubagents get their own." });
         expect(quoted(out, from, out.text.indexOf("Twenty"))).toBeUndefined();
     });
 
     it("shows each comment under the line its passage ends on, in an earlier exchange as in the last", () => {
         const talk: Talk = {
             comments: [
-                { step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" },
-                { step: 6, quote: { text: "Four carry what was said.", start: 23, end: 48 }, text: "Which four?" },
+                { id: "codex", step: 1, line: 0, text: "Even for codex?" },
+                { id: "four", step: 6, line: 2, text: "Which four?" },
             ],
         };
         const commented = laid(STEPS, ALONE, talk);
@@ -275,10 +269,10 @@ describe("comments on the agent's words", () => {
                 "· Grep",
             ].join("\n"),
         );
-        expect(blockAt(commented, commented.text.indexOf("codex"))?.comment).toBe(0);
-        expect(blockAt(commented, commented.text.indexOf("Which four?"))?.comment).toBe(1);
+        expect(blockAt(commented, commented.text.indexOf("codex"))?.comment).toBe("codex");
+        expect(blockAt(commented, commented.text.indexOf("Which four?"))?.comment).toBe("four");
         // Ctrl+Enter ending it lands on the last character of what it quotes, where reading carries on.
-        expect(aboutAt(commented, talk.comments[0]!)).toBe(commented.text.indexOf("JSONL") + "JSONL".length - 1);
+        expect(aboutAt(commented, 1, 0, 18, 23)).toBe(commented.text.indexOf("JSONL") + "JSONL".length - 1);
         // The comment in the earlier exchange is inside its fold.
         const exchange = commented.folds.find((each) => each.key === "you 0")!;
         expect(commented.text.indexOf("Even for codex?")).toBeGreaterThan(exchange.from);
@@ -296,25 +290,20 @@ describe("comments on the agent's words", () => {
 
 describe("the conversation growing", () => {
     const talk: Talk = {
-        comments: [{ step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" }],
+        comments: [{ id: "codex", step: 1, line: 0, text: "Even for codex?" }],
     };
 
     it("adds what arrives at the end, everything before it where it was", () => {
         const before = laid(STEPS, ALONE, talk);
         const after = laid([...STEPS, ...MORE], ALONE, talk);
-        const made = changes(before.text, after.text);
         const last = before.text.lastIndexOf("\n") + 1;
         // What arrives lands on the last line and after it.
-        expect(made.length).toBe(1);
-        expect(made[0]!.from).toBeGreaterThanOrEqual(last);
         expect(after.text.slice(0, last)).toBe(before.text.slice(0, last));
         // The calls the conversation ended on go on: two now, each a line.
         expect(after.text.endsWith("· Grep\n· Grep\nFound the four.")).toBe(true);
         // The folds, the comments on earlier words, and a cursor reading mid-conversation stay where they were.
         expect(after.folds).toEqual(before.folds);
         expect(after.blocks[0]).toEqual(before.blocks[0]);
-        const reader = before.text.indexOf("you: Build");
-        expect(moved(reader, made, before.text)).toBe(reader);
     });
 
     it("folds the exchange that was the last once the operator speaks again, and a run once it's long enough, each named as before", () => {
@@ -581,78 +570,16 @@ describe("the items of lup's inbox in a conversation", () => {
         const asked: Beside = { ...ALONE, exchanged: { sent: [exchange({ ...ASKED, state: { state: "waiting" } }, "Which parser?")], received: [] } };
         const before = laid(CALLED, asked, UNSAID);
         const after = laid(CALLED, { ...asked, exchanged: { sent: [exchange(ASKED, "Which parser?")], received: [exchange(ANSWERED, "Asked.")] } }, UNSAID);
-        const made = changes(before.text, after.text);
         expect(before.text).toContain("→ @51 question to you · waiting on you");
         expect(after.text).toContain("→ @51 question to you · answered by @53\n  Which parser?\n· Read\n    reading its input and output…\n← @53 your answer to @51\n  Asked.\nReading the second runtime");
-        const reader = before.text.indexOf("Reading");
-        expect(after.text.slice(moved(reader, made, before.text)).startsWith("Reading")).toBe(true);
-    });
-});
-
-describe("the changes between two texts", () => {
-    const apply = (text: string, made: { from: number; to: number; insert: string }[]) =>
-        [...made].reverse().reduce((done, each) => done.slice(0, each.from) + each.insert + done.slice(each.to), text);
-
-    it("are line by line, each line both keep left where it is", () => {
-        expect(changes("a\nb\nc", "a\nb\nx\nc")).toEqual([{ from: 4, to: 4, insert: "x\n" }]);
-        expect(changes("ab", "ab")).toEqual([]);
-        expect(changes("· called Bash", "· called Bash ×2\nhi")).toEqual([{ from: 0, to: 13, insert: "· called Bash ×2\nhi" }]);
-        for (const [before, after] of [
-            ["", "a\nb"],
-            ["a\nb", ""],
-            ["a\nb\nc", "a"],
-            ["a\nb\nc", "c"],
-            ["a\nb", "a\nb\nc\nd"],
-            ["x\na\ny\nb\nz", "a\nb\nq"],
-        ] as const) {
-            expect(apply(before, changes(before, after))).toBe(after);
-        }
-    });
-
-    it("keep a reader between two of them where they were, as when a message sent clears comments above and adds below", () => {
-        const talk: Talk = { comments: [{ step: 1, quote: { text: "JSONL", start: 18, end: 23 }, text: "Even for codex?" }] };
-        const before = laid(STEPS, ALONE, talk);
-        const told = item(101, { reason: "message", passages: [], answers: [], ending: false, kind: "note", text: "Even for codex?" }, 12, {
-            sender: OPERATOR,
-            recipient: SESSION,
-            state: { state: "told", at: at(12), how: "call" },
-        });
-        const after = laid([...STEPS, ...MORE], { ...ALONE, exchanged: { sent: [], received: [exchange(told, "> JSONL\n\nEven for codex?")] } }, UNSAID);
-        const made = changes(before.text, after.text);
-        expect(made.length).toBe(2);
-        expect(apply(before.text, made)).toBe(after.text);
-        const reader = before.text.indexOf("you: Build");
-        expect(after.text.slice(moved(reader, made, before.text)).startsWith("you: Build")).toBe(true);
-    });
-
-    it("move a cursor with the character it's on, and not at the text's end", () => {
-        const added = [{ from: 4, to: 4, insert: "x\n" }];
-        expect(moved(2, added, "a\nb\nc")).toBe(2);
-        expect(moved(4, added, "a\nb\nc")).toBe(6);
-        expect(moved(5, [{ from: 5, to: 5, insert: "\nd" }], "a\nb\nc")).toBe(5);
-        expect(moved(8, [{ from: 0, to: 2, insert: "" }, { from: 4, to: 4, insert: "x\n" }], "a\nb\nc\nd\ne")).toBe(8);
-    });
-
-    it("keep a cursor on its line and column where the line is replaced, to a change's start where it's removed", () => {
-        // A header's wait said anew, the cursor on its `w`.
-        const before = "── @51 · waiting 9m ──\nx";
-        const after = "── @51 · waiting 10m ──\nx";
-        const made = changes(before, after);
-        expect(after.slice(moved(before.indexOf("waiting"), made, before))).toMatch(/^waiting 10m/);
-        // A comment's line shortened under the cursor: on its last character.
-        expect(moved(5, changes("hello \nx", "hello\nx"), "hello \nx")).toBe(4);
-        // The second of two lines replaced by one: on the one.
-        expect(moved(4, [{ from: 0, to: 5, insert: "zz" }], "ab\ncd\ne")).toBe(1);
-        // Lines removed: at the change's start, the line after them.
-        expect(moved(3, changes("a\nb\nc\nd", "a\nd"), "a\nb\nc\nd")).toBe(2);
     });
 });
 
 describe("a review it was sent", () => {
     it("says what it answers, or that it's the operator's message from the review where it answers nothing", () => {
         const told = { state: { state: "told" as const, at: at(9), how: "call" as const }, sender: OPERATOR, recipient: SESSION };
-        const written = item(60, { reason: "review", covers: [], comments: [], letters: [{ to: SESSION, text: "Rename it." }], remarks: [] }, 9, told);
-        const reviewed = item(61, { reason: "review", covers: [52], comments: [{ item: 52, quote: null, text: "Fine." }], letters: [], remarks: [] }, 9, told);
+        const written = item(60, { reason: "review", covers: [], comments: [], letters: [{ id: "", to: SESSION, text: "Rename it." }], remarks: [] }, 9, told);
+        const reviewed = item(61, { reason: "review", covers: [52], comments: [{ id: "", item: 52, quote: null, text: "Fine." }], letters: [], remarks: [] }, 9, told);
         const beside: Beside = {
             ...ALONE,
             exchanged: {

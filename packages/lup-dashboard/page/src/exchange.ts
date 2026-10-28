@@ -4,7 +4,7 @@
 // line to the passage it cites; what an edit changed; and, for an item kept with replies from before agents answered
 // in their turn's last words, the operator's comments on it and the agent's replies, each after who wrote it. Pure:
 // `review.ts` lays these lines out, and `Review.tsx` draws the citations and the passages they answer.
-import { cited, starts, type Quote } from "./comments";
+import { cited, starts, type Offsets, type Quote } from "./comments";
 import type { components } from "./generated/api";
 
 type Item = components["schemas"]["Item"];
@@ -19,7 +19,7 @@ export interface Said {
     /** The agent's item it's on, for a comment on one, a reply to one, or a ruling. */
     on: number | null;
     /** The passage of that item it's on, or of the conversation for a message sent from reading it. */
-    quote: Quote | null;
+    quote: Quote | Offsets | null;
     /** Whom a review's message or remark was written to. */
     to: Conversation | null;
     /** The decision a ruling rules on, from 1, and its verdict. */
@@ -187,15 +187,23 @@ function shownText(item: Item): string | null {
 }
 
 /**
- * Return whether a comment on `item`'s text, quoting `quote`, is outdated: the item was edited since, and its text no
- * longer holds the passage where the comment quoted it.
+ * Return whether a comment on `item`'s text, quoting `quote`, is outdated: the item was edited since, and its text
+ * doesn't hold what the comment quoted where it quoted it: the lines it quotes from the line it names, for a quote
+ * naming its block; the passage at its offsets, for one kept from before quotes did.
  */
-export function outdated(item: Item | undefined, quote: Quote | null | undefined): boolean {
+export function outdated(item: Item | undefined, quote: Quote | Offsets | null | undefined): boolean {
     if (item === undefined || quote == null || (item.edits ?? []).length === 0) {
         return false;
     }
     const text = shownText(item);
-    return text !== null && text.slice(quote.start, quote.end) !== quote.text;
+    if (text === null) {
+        return false;
+    }
+    if ("block" in quote && quote.block !== "") {
+        const lines = text.split("\n");
+        return quote.lines.some((each, at) => lines[quote.line + at] !== each);
+    }
+    return text.slice(quote.start, quote.end) !== quote.text;
 }
 
 /**
