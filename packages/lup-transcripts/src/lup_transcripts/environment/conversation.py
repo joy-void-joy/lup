@@ -2,17 +2,20 @@
 
 `docs/dashboard.md`, *The drawers*, its **Conversation** entry. Each is a pure
 layout answering `Blocks`, the layout of one of `Transcripts`' views:
-- `conversation_blocks`, the drawer: its summary line counting the steps, each
-  exchange before the operator's last words folded under the first line of
-  their words that opened it, what came before their first words under a line
-  of its own, and everything since their last words open, but for at most the
-  agent's last 20 words (`EARLIER_KIND.keeps_open`) with what follows them,
-  what came before folded under one line saying how much (`capped`);
+- `conversation_blocks`, the drawer: its summary line counting the steps and
+  those new to the operator, each exchange before their last words folded under
+  the first line of their words that opened it, what came before their first
+  words under a line of its own, and everything since they last read it open
+  and new, from the drawer's review mark or their own last words, whichever is
+  later (`Read`), but for at most the agent's last 20 words
+  (`EARLIER_KIND.keeps_open`) with what follows them, what came before folded
+  under one line saying how much (`capped`);
 - `exchange_blocks`, one earlier exchange's steps, or those its fold of what
-  came before the agent's last words holds, which the fold reads as it opens
-  (`OfExchange`), itself capped the same way, so the drawer's answer stays
-  small however long the conversation grows, and each fold opened brings in
-  20 more of the agent's words;
+  came before the agent's last words holds, or what the operator had read of
+  the latest, which the fold reads as it opens (`OfExchange`), itself capped
+  the same way, so the drawer's answer stays small however long the
+  conversation grows, and each fold opened brings in 20 more of the agent's
+  words;
 - `call_blocks`, one call's input and output, which the call's fold reads as
   it opens (`OfCall`), since each call's whole input and output is read from
   the record only on asking.
@@ -26,7 +29,8 @@ under it (`merged`).
 Each block's id names what it shows, so it stays from one answer to the next as
 the conversation grows, and a fold's id is never a line's: a fold is
 `exchange 5` (or `exchange before`), `exchange 5 until last 20` for what came
-before the agent's last 20 words in it, `calls 2`, `call <the call's id>` or
+before the agent's last 20 words in it, `exchange 5 through 40` for what the
+operator had read of it up to step 40, `calls 2`, `call <the call's id>` or
 `item 51`; a line is `step 6` (`step 6.1` on, for the operator's further
 lines), `item 64 line` for an item with no text, `text 51` for an item's text,
 and `input <id>`, `output <id>` (`.1` on) or `unread <id>` in a call's view.
@@ -48,6 +52,7 @@ from lup.blocks import (
     Load,
     Markdown,
     OfAgent,
+    Offer,
     Span,
     Tone,
     kept_open,
@@ -62,6 +67,7 @@ if TYPE_CHECKING:
 
     from lup.doors import Method
     from lup_dev.host.records import Call
+    from lup_dev.inbox.marks import ReviewMark
     from lup_dev.inbox.protocol import Exchange, Exchanged
 
 
@@ -137,11 +143,15 @@ class ConversationError(LupTranscriptsError):
 
 
 class OfExchange(OfAgent):
-    """One exchange of an agent's conversation, as its fold in the drawer reads it: by the operator's words that open it; or what came in it before the agent's last words, which its fold of what came earlier reads."""
+    """One exchange of an agent's conversation, as its fold in the drawer reads it: by the operator's words that open it; or what came in it before the agent's last words, or what the operator had read of it, which its fold of what came earlier reads."""
 
     step: int | None = Field(
         default=None,
         description="The step of your words that open it; left out, what came before your first words.",
+    )
+    through: int | None = Field(
+        default=None,
+        description="Only what came in it up to step `through`, which you had read; left out, as far as it goes.",
     )
     until_last: int | None = Field(
         default=None,
@@ -191,6 +201,54 @@ class Inboxed(Model):
 
 type Turn = Spoken | Calling | Inboxed
 """One step of the conversation, or an item of lup's inbox between its steps."""
+
+
+class Read(Model):
+    """How far the operator has read a conversation: up to the step their review mark on its drawer names, or their own last words typed to it, whichever is later, and when they moved the mark; none read where neither.
+
+    Their words typed to the agent count as a review of what came before them,
+    as a comment sent on a file does: they were reading it in its terminal.
+    """
+
+    step: int | None = None
+    """The last step they've read; none where they've read none."""
+    marked: datetime | None = None
+    """When they moved the drawer's mark, which an item of the inbox told the
+    conversation by then is read with; none where they never did."""
+
+    @classmethod
+    def of(cls, mark: ReviewMark | None, entries: list[Entry]) -> Read:
+        """Return how far the operator has read the conversation of `entries`, by its drawer's review `mark` and their own words in it."""
+        typed = [
+            step
+            for step, entry in enumerate(entries)
+            if isinstance(entry, Said) and entry.by == "operator"
+        ]
+        marked = None if mark is None or mark.up_to is None else int(mark.up_to)
+        steps = [*typed, *([] if marked is None else [marked])]
+        return cls(
+            step=max(steps, default=None), marked=None if mark is None else mark.at
+        )
+
+    def covers(self, turn: Turn) -> bool:
+        """Say whether the operator has read `turn`: a step up to theirs, an item told by the time they moved the mark."""
+        match turn:
+            case Inboxed():
+                return self.marked is not None and turn.at <= self.marked
+            case Spoken() | Calling():
+                return self.step is not None and turn.step <= self.step
+
+    def reviewed(self, turns: list[Turn]) -> int:
+        """Return how many of `turns`, from the first, the operator has read: up to the first they haven't."""
+        return next(
+            (at for at, turn in enumerate(turns) if not self.covers(turn)), len(turns)
+        )
+
+    def new(self, entries: list[Entry]) -> int:
+        """Return how many of the steps of `entries` came after what the operator has read."""
+        return len(entries) - (
+            0 if self.step is None else min(self.step + 1, len(entries))
+        )
 
 
 class Part(Model):
@@ -512,47 +570,81 @@ def capped(
     of: OfAgent,
     kind: FoldKind,
     *,
+    through: int | None = None,
     until_last: int | None,
+    read: Read | None = None,
     exchange: Method,
     call: Method,
     run: int,
 ) -> list[Block]:
-    """Lay out the turns of `part`, or only those before the agent's last `until_last` words in it: at most the agent's last `kind.keeps_open` words open, with what follows them, and what came before folded under one line saying how many steps and items, read from `exchange` as it opens (`kept_open`).
+    """Lay out the turns of `part`, or only those up to step `through` in it, or before the agent's last `until_last` words: what the operator has read of it (`read`) folded, and of the rest at most the agent's last `kind.keeps_open` words open, with what follows them, what came before them folded too, under one line saying how many steps and items and how many of them are new, read from `exchange` as it opens (`kept_open`).
 
-    The fold reads the exchange up to the agent's last words shown here and
+    Where only what they'd read folds, the fold reads the exchange up to the
+    last step they read, its id saying which (`exchange 12 through 40`), which
+    changes only as they mark more read. Where some of what's new folds too,
+    the fold reads the exchange up to the agent's last words shown here and
     those shown after, so each fold opened shows `kind.keeps_open` more of the
     agent's words, and folds what came before them the same way. Its id says
     how many of the agent's last words it comes before (`exchange 12 until
     last 20`), which a new turn of the agent's never changes, so a fold the
     operator opened stays open as the conversation grows.
     """
+    # What they'd read of it is all read: only what came after it splits again.
+    if through is None:
+        within, marking = part.turns, read
+    else:
+        bound = Read(step=through, marked=None if read is None else read.marked)
+        within, marking = part.turns[: bound.reviewed(part.turns)], None
     turns = (
-        part.turns
-        if until_last is None
-        else kept_open(part.turns, agent_s, until_last).folded
+        within if until_last is None else kept_open(within, agent_s, until_last).folded
     )
-    kept = kept_open(turns, agent_s, kind.keeps_open)
+    reviewed = 0 if marking is None else marking.reviewed(turns)
+    kept = kept_open(turns, agent_s, kind.keeps_open, reviewed)
     shown = turned(kept.shown, of, call, run)
     if not kept.folded:
         return shown
-    deeper = (until_last or 0) + (kind.keeps_open or 0)
     steps = sum(1 for each in kept.folded if not isinstance(each, Inboxed))
     items = len(kept.folded) - steps
+    new = sum(
+        1 for each in kept.folded[kept.reviewed :] if not isinstance(each, Inboxed)
+    )
     said = ", ".join(
-        [counted(steps, "earlier step"), *([counted(items, "item")] if items else [])]
+        [
+            counted(steps, "earlier step"),
+            *([counted(items, "item")] if items else []),
+            *([f"{new} new"] if new else []),
+        ]
     )
-    read = OfExchange(
-        runtime=of.runtime,
-        session=of.session,
-        agent=of.agent,
-        step=part.step(),
-        until_last=deeper,
+    only_read = marking is not None and len(kept.folded) == kept.reviewed
+    last = next(
+        (each.step for each in reversed(kept.folded) if not isinstance(each, Inboxed)),
+        None,
     )
+    if only_read and last is not None:
+        key = f"{part.key()} through {last}"
+        loaded = OfExchange(
+            runtime=of.runtime,
+            session=of.session,
+            agent=of.agent,
+            step=part.step(),
+            through=last,
+        )
+    else:
+        deeper = (until_last or 0) + (kind.keeps_open or 0)
+        key = f"{part.key()}{'' if through is None else f' through {through}'} until last {deeper}"
+        loaded = OfExchange(
+            runtime=of.runtime,
+            session=of.session,
+            agent=of.agent,
+            step=part.step(),
+            through=through,
+            until_last=deeper,
+        )
     fold = Fold(
-        id=f"{part.key()} until last {deeper}",
+        id=key,
         kind=kind.name,
         summary=[Span(text=said, tone="muted")],
-        content=Load.of(exchange, read),
+        content=Load.of(exchange, loaded),
     )
     return [fold, *shown]
 
@@ -566,12 +658,17 @@ def conversation_blocks(
     call: Method,
     earlier: FoldKind = EARLIER_KIND,
     run: int = 3,
+    mark: ReviewMark | None = None,
+    reading: Offer | None = None,
 ) -> Blocks:
-    """Lay out an agent's conversation as its drawer shows it: its summary line counting its steps, each exchange before the operator's last words folded under the first line of their words, and everything since those words open, but for at most the agent's last words `earlier` keeps open (`capped`).
+    """Lay out an agent's conversation as its drawer shows it: its summary line counting its steps and those new to the operator, each exchange before their last words folded under the first line of their words, what they've read since folded under one line, and everything after it open, but for at most the agent's last words `earlier` keeps open (`capped`).
 
-    What came before their first words folds under a line of its own, saying
-    how many steps and items and how long before their words. Each earlier
-    exchange, and what came before the agent's last words, is read from
+    How far they've read is the drawer's review `mark` or their own last
+    words, whichever is later (`Read`); where anything came after it, the
+    drawer offers `reading`, marking it read up to its last step, Space `d` on
+    its line. What came before their first words folds under a line of its
+    own, saying how many steps and items and how long before their words. Each
+    earlier exchange, and what came before the agent's last words, is read from
     `exchange`, one exchange's view, as it opens, and each call's input and
     output from `call`, one call's view (`turned`). A conversation with no
     steps is none: an empty answer, with no summary line.
@@ -579,6 +676,8 @@ def conversation_blocks(
     if not entries:
         return Blocks()
     *before, latest = parts(merged(entries, inboxed(exchanged)))
+    read = Read.of(mark, entries)
+    unread = len(latest.turns) - read.reviewed(latest.turns)
 
     def at(turn: Turn) -> datetime | None:
         match turn:
@@ -619,10 +718,23 @@ def conversation_blocks(
 
     opened = [] if latest.opening is None else words(latest.opening)
     shown = capped(
-        latest, of, earlier, until_last=None, exchange=exchange, call=call, run=run
+        latest,
+        of,
+        earlier,
+        until_last=None,
+        read=read,
+        exchange=exchange,
+        call=call,
+        run=run,
     )
+    new = read.new(entries)
+    said = [
+        f"conversation · {counted(len(entries), 'step')}",
+        *([f"{new} new"] if new else []),
+    ]
     return Blocks(
-        summary=[Span(text=f"conversation · {counted(len(entries), 'step')}")],
+        summary=[Span(text=" · ".join(said))],
+        offers=[] if reading is None or not unread else [reading],
         blocks=[
             *(folded_part(part, until) for part, until in pairwise([*before, latest])),
             *opened,
@@ -640,26 +752,26 @@ def exchange_blocks(
     call: Method,
     earlier: FoldKind = EARLIER_KIND,
     run: int = 3,
+    mark: ReviewMark | None = None,
 ) -> Blocks:
     """Lay out one exchange of an agent's conversation as its fold in the drawer shows it opened: the operator's further lines of the words that open it, then each step and item up to their next words, but for at most the agent's last words `earlier` keeps open (`capped`).
 
     The first line of their words is the fold's summary, so it isn't laid out
     again. For what came before their first words, every step and item there;
-    none where nothing came before them. With `of.until_last`, only what came
-    before the agent's last words that many, which its fold of what came
-    earlier holds, capped the same way; none where the agent said no more.
-    What came before the words kept open is read from `exchange`, this view,
-    and each call's input and output from `call`, one call's view, as each
-    fold opens.
+    none where nothing came before them. With `of.through`, only what came up
+    to that step, what the operator had read of it; with `of.until_last`, only
+    what came before the agent's last words that many, which its fold of what
+    came earlier holds, capped the same way, and, in the latest exchange, what
+    they've read of it folded as in the drawer (`mark`, `Read`); none where the
+    agent said no more. What came before the words kept open is read from
+    `exchange`, this view, and each call's input and output from `call`, one
+    call's view, as each fold opens.
 
     Raise `ConversationError` where `of.step` isn't a step of the operator's
     words.
     """
-    found = [
-        part
-        for part in parts(merged(entries, inboxed(exchanged)))
-        if part.step() == of.step
-    ]
+    every = parts(merged(entries, inboxed(exchanged)))
+    found = [part for part in every if part.step() == of.step]
     match found, of.step:
         case [part], _:
             pass
@@ -672,13 +784,19 @@ def exchange_blocks(
             )
             raise ConversationError(message)
     further = (
-        [] if part.opening is None or of.until_last is not None else words(part.opening)
+        []
+        if part.opening is None or of.until_last is not None or of.through is not None
+        else words(part.opening)
     )[1:]
+    # Only in the latest is what they've read folded apart: they read every earlier one whole.
+    latest = part is every[-1]
     shown = capped(
         part,
         of,
         earlier,
+        through=of.through,
         until_last=of.until_last,
+        read=Read.of(mark, entries) if latest else None,
         exchange=exchange,
         call=call,
         run=run,
