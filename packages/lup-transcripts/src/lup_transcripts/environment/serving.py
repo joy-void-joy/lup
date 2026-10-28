@@ -19,9 +19,12 @@ Its views read a conversation live, from the runtime's own record as it grows
 (`conversation`, the drawer under each agent's banner; `exchange`, one earlier
 exchange; `call`, one call read whole), laid out in lup's blocks
 (`environment/conversation.py`), each record read again only once it changed
-(`Recording`). Shown, the drawer is answered again at its agent's turns and
-calls and a minute apart at most; a call read whole, open in it, as a call of
-the agent's finishes, so one still running shows what it returned once it has.
+(`Recording`). The drawer keeps open at most the agent's last words its fold
+kind of what came earlier keeps (`FoldKind.keeps_open`, 20 unless a person's
+layer says), as the module's layers leave it. Shown, the drawer and each
+exchange opened in it are answered again at their agent's turns and calls and
+a minute apart at most; a call read whole, open in it, as a call of the
+agent's finishes, so one still running shows what it returned once it has.
 """
 
 import asyncio
@@ -32,7 +35,7 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic import Field
 
 import lup
-from lup.blocks import OfAgent
+from lup.blocks import FoldKind, OfAgent
 from lup.types import Model
 from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Room
 from lup_dev.git import Git
@@ -40,7 +43,8 @@ from lup_dev.host.protocol import HostError
 from lup_dev.inbox.context import Recording
 from lup_transcripts.environment import views
 from lup_transcripts.environment.conversation import (
-    Beside,
+    EARLIER_KIND,
+    FOLD_KINDS,
     OfCall,
     OfExchange,
     call_blocks,
@@ -52,9 +56,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup_dev.host.records import Record, Transcript
-    from lup_dev.inbox.protocol import Exchanged
-    from lup_dev.inbox.store import Conversation
     from lup_transcripts.environment.module import Transcripts
+
+
+GROWING = lup.Watch(
+    on=[lup.TurnStarted, lup.CallFinished, lup.TurnEnded, lup.ConversationEnded],
+    longest=timedelta(minutes=1),
+)
+"""When a view of a conversation as it grows is answered again, shown: at its
+agent's turns and calls, and a minute apart at most. The drawer's, and an
+exchange's, since what came before the agent's last words in the latest one
+moves on with each of its words."""
 
 
 class Every(Model):
@@ -186,29 +198,17 @@ class TranscriptsServing(ModuleServing):
         sessions = await asyncio.to_thread(self.kept)
         return views.found(sessions, asked.words, whole=asked.whole)
 
-    def beside(self, exchanged: Exchanged) -> Beside:
-        """Return what a conversation shows beside its steps: the items of lup's inbox it exchanged, each conversation among their parties called by its path as the core gives it, else by its runtime's ids."""
-
-        def named(party: Conversation) -> str:
-            path = exchanged.path(party)
-            if path is not None:
-                return path
-            own = f"{party.runtime} {party.session}"
-            return own if party.agent is None else f"{own} / {party.agent}"
-
-        return Beside(exchanged=exchanged, named=named)
+    def earlier(self) -> FoldKind:
+        """Return the fold kind of what came earlier in a conversation as the module's layers leave it: how many of the agent's last words it keeps open (`FoldKind.keeps_open`), a person's layer setting more or fewer."""
+        kinds = self.module.folds.resolve(FOLD_KINDS, FOLD_KINDS)
+        return next(
+            (each.entry for each in kinds if each.entry.name == EARLIER_KIND.name),
+            EARLIER_KIND,
+        )
 
     @lup.view(
         place=lup.Drawer(letter="v", called="the conversation", colour="cyan"),
-        watch=lup.Watch(
-            on=[
-                lup.TurnStarted,
-                lup.CallFinished,
-                lup.TurnEnded,
-                lup.ConversationEnded,
-            ],
-            longest=timedelta(minutes=1),
-        ),
+        watch=GROWING,
     )
     async def conversation(self, viewed: OfAgent) -> lup.Blocks:
         """Show an agent's whole conversation from its runtime's record, live: everything since your last words open, each earlier exchange folded under your words that opened it, each run of calls under one line, and the items of lup's inbox it sent and was sent where they happened."""
@@ -223,14 +223,15 @@ class TranscriptsServing(ModuleServing):
         return conversation_blocks(
             viewed,
             read.transcript.entries,
-            self.beside(exchanged),
+            exchanged,
             exchange=TranscriptsServing.exchange,
             call=TranscriptsServing.call,
+            earlier=self.earlier(),
         )
 
-    @lup.view
+    @lup.view(watch=GROWING)
     async def exchange(self, viewed: OfExchange) -> lup.Blocks:
-        """Show one earlier exchange of an agent's conversation, from your words that opened it to your next."""
+        """Show one earlier exchange of an agent's conversation, from your words that opened it to your next; or, with `--until-last`, what came in it before the agent's last words that many."""
         read = await asyncio.to_thread(
             self.recording.read,
             self.recorded,
@@ -242,8 +243,10 @@ class TranscriptsServing(ModuleServing):
         return exchange_blocks(
             viewed,
             read.transcript.entries,
-            self.beside(exchanged),
+            exchanged,
+            exchange=TranscriptsServing.exchange,
             call=TranscriptsServing.call,
+            earlier=self.earlier(),
         )
 
     @lup.view(watch=lup.Watch(on=[lup.CallFinished]))

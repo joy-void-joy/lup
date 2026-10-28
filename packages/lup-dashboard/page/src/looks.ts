@@ -164,7 +164,7 @@ function ident(name: string): string {
     return name.replace(/[^A-Za-z0-9_-]/g, (char) => `\\${(char.codePointAt(0) ?? 0).toString(16)} `);
 }
 
-/** Return the CSS the looks are drawn by: each kind's colour as a variable, and its class; each tone's class, its colour and weight. */
+/** Return the CSS the looks are drawn by: each kind's colour as a variable, its class, and the bar beside what a fold of its sets off; each tone's class, its colour and weight. */
 export function styled(looks: Merged): string {
     const rules: string[] = [];
     const variables = looks.kinds.map((each) => `--fold-${ident(each.name)}: var(--${ident(each.colour)});`);
@@ -172,6 +172,7 @@ export function styled(looks: Merged): string {
     for (const each of looks.kinds) {
         const name = ident(each.name);
         rules.push(`.fold-${name}, .buffer .cm-editor .cm-foldPlaceholder.fold-${name} { color: var(--fold-${name}); }`);
+        rules.push(`.buffer .cm-line.barred-${name} { border-left: 2px solid var(--fold-${name}); }`);
     }
     const tones = new Map(looks.tones.map((each) => [each.name, each]));
     for (const tone of looks.tones) {

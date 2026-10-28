@@ -1,4 +1,5 @@
 import "./fixtures/looks";
+import { ANSWERED, DRAWER_ONLY } from "./fixtures/conversation";
 import { ChangeSet, Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 
@@ -65,7 +66,6 @@ import {
     type Conversation,
     type Draft,
     type Drawers,
-    type Entry,
     type Fold,
     type Head,
     type Item,
@@ -1387,16 +1387,10 @@ describe("waited and fresh", () => {
 });
 
 describe("the drawers under each agent's banner", () => {
+    // Its conversation is `Transcripts`' answer of its record (`fixtures/conversation.json`): the operator's words
+    // `Build the reader.` opening an earlier exchange, the agent's `Reading the records.` and two calls in it, read as its
+    // fold opens; then their words `Ask me first.`, the agent's two paragraphs, and a call.
     const S1 = from("s1", "a1");
-    const ENTRIES: Entry[] = [
-        { kind: "said", by: "operator", text: "Build the reader.", at: "2026-10-17T11:50:00Z" },
-        { kind: "said", by: "agent", text: "Reading the records.", at: "2026-10-17T11:51:00Z" },
-        { kind: "called", tool: "Bash", at: "2026-10-17T11:52:00Z" },
-        { kind: "called", tool: "Read", at: "2026-10-17T11:52:00Z" },
-        { kind: "said", by: "operator", text: "Ask me first.", at: "2026-10-17T11:55:00Z" },
-        { kind: "said", by: "agent", text: "Twenty kinds of line.", at: "2026-10-17T11:56:00Z" },
-        { kind: "called", tool: "Grep", at: "2026-10-17T11:57:00Z" },
-    ];
     const READER = '"""Reader."""\n\n\nclass Reader:\n    def turns(self):\n        a = 1\n        b = 2\n        return a + b\n';
     const SINCE: Since = {
         kind: "policy-since",
@@ -1420,19 +1414,18 @@ describe("the drawers under each agent's banner", () => {
         ],
     };
     const DATA: AgentDrawers = {
-        entries: ENTRIES,
-        calls: new Map(),
         tasks: [
             { id: "1", subject: "Write the sampler", status: "completed", active: null },
             { id: "2", subject: "Write the models", status: "in_progress", active: "Writing the models" },
             { id: "3", subject: "Measure", status: "pending", active: null },
         ],
         usage: { used: 112_000, window: 1_000_000, model: null },
-        exchanged: null,
         since: SINCE,
     };
     const drawers: Drawers = new Map([[whose(S1), DATA]]);
-    const out = laid([QUESTION, NOTE], [S1], banner, header, EMPTY, NOTHING, [], drawers);
+    // What the host answered of the agent's views the page doesn't lay out itself: its conversation, and its earlier exchange.
+    const remote = ANSWERED;
+    const out = laid([QUESTION, NOTE], [S1], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
     const at = (text: string) => out.text.indexOf(text);
     const lines = (from: number, to: number) => out.text.slice(from, to).split("\n");
 
@@ -1451,6 +1444,8 @@ describe("the drawers under each agent's banner", () => {
             "· Read",
             "you: Ask me first.",
             "Twenty kinds of line.",
+            "",
+            "Four carry what was said.",
             "· Grep",
         ]);
         // Each drawer is its own fold, folded until opened, a line under the banner; the new module's bodies fold
@@ -1461,13 +1456,26 @@ describe("the drawers under each agent's banner", () => {
             ["since", true, `since ${whose(S1)}`],
             ["conversation", true, `conversation ${whose(S1)}`],
         ]);
-        // In the conversation, each exchange before the operator's last words folds under their words.
+        // In the conversation, `Transcripts`' view drawn, each exchange before the operator's last words folds under
+        // their words, read from its own view as it opens; the agent's words are its own lines, each of its block.
         const talked = out.drawers[2]!;
         expect(talked.folds.map((each) => [each.kind, each.label, each.closed])).toEqual([
             ["earlier", "you: Build the reader.", true],
             ["conversation", "conversation · 7 steps", true],
         ]);
-        expect(foldKey(talked.folds[0]!)).toBe(`conversation ${whose(S1)} earlier you 0`);
+        expect(foldKey(talked.folds[0]!)).toBe(`conversation ${whose(S1)} earlier exchange 0`);
+        expect([...talked.loads.values()].map((each) => [each.module, each.view, (each.argument as { step: number }).step])).toEqual([["transcripts", "exchange", 0]]);
+        expect(talked.lines.map((each) => [out.text.slice(each.from, each.to), each.block.slice(each.block.lastIndexOf("step")), each.line])).toEqual([
+            ["Reading the records.", "step 1", 0],
+            ["Twenty kinds of line.", "step 5", 0],
+            ["", "step 5", 1],
+            ["Four carry what was said.", "step 5", 2],
+        ]);
+        expect(talked.texts.map((each) => out.text.slice(each.from, each.to))).toEqual(["Reading the records.", "Twenty kinds of line.\n\nFour carry what was said."]);
+        expect(talked.toned.map((each) => [out.text.slice(each.from, each.to), each.tone]).slice(0, 2)).toEqual([
+            ["you: Build the reader.", "operator"],
+            ["· Bash", "call"],
+        ]);
         const since = out.drawers[1]!;
         expect(since.folds.map((each) => [each.kind, each.label, each.closed])).toEqual([
             ["body", "Reader", true],
@@ -1485,7 +1493,7 @@ describe("the drawers under each agent's banner", () => {
         const bare = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), UNREAD]]));
         expect(bare.drawers).toEqual([]);
         expect(bare.text).not.toContain("tasks ");
-        const empty = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, tasks: [], since: { ...SINCE, files: [] } }]]));
+        const empty = laid([QUESTION], [S1], banner, header, EMPTY, NOTHING, [], new Map([[whose(S1), { ...DATA, tasks: [], since: { ...SINCE, files: [] } }]]), undefined, { remote });
         expect(empty.drawers.map((each) => each.kind)).toEqual(["conversation"]);
         expect(empty.text).not.toContain("since you approved");
         // The conversation under the banner, the item after it.
@@ -1498,6 +1506,16 @@ describe("the drawers under each agent's banner", () => {
         const twenty = opened(out, at("Twenty"));
         expect(twenty).toMatchObject({ id: "", to: S1, quote: { text: "Twenty kinds of line.", line: 0, start: 0, end: 21 }, text: "" });
         expect(twenty !== undefined && "quote" in twenty ? twenty.quote?.block.endsWith(" step 5") : false).toBe(true);
+        expect(twenty !== undefined && "code" in twenty).toBe(false);
+        // On the agent's words read as its fold opened, on that step's block; on a passage of two of its lines, both quoted.
+        const reading = opened(out, at("Reading the records."));
+        expect(reading !== undefined && "quote" in reading ? [reading.quote?.block.endsWith(" step 1"), reading.quote?.lines] : null).toEqual([true, ["Reading the records."]]);
+        const passage = quoted(out, at("kinds"), at("Four carry") + 4);
+        expect(passage !== undefined && "quote" in passage ? [passage.quote?.text, passage.quote?.line, passage.quote?.lines] : null).toEqual([
+            "kinds of line.\n\nFour",
+            0,
+            ["Twenty kinds of line.", "", "Four carry what was said."],
+        ]);
         expect(opened(out, at("        a = 1"))).toEqual({
             id: "",
             to: S1,
@@ -1509,8 +1527,8 @@ describe("the drawers under each agent's banner", () => {
         const to = at("        return") + 8;
         const across = quoted(out, from, to);
         expect(across !== undefined && "code" in across ? across.code : null).toEqual({ worktree: "/w/feat", path: "reader.py", version: "b1", first: 6, lines: ["        a = 1", "        b = 2", "        return a + b"] });
-        for (const line of ["tasks 1/3", "✓ Write", "· Grep", "conversation ·", "since you approved", "you: Build"]) {
-            expect(opened(out, at(line))).toBeUndefined();
+        for (const line of ["tasks 1/3", "✓ Write", "· Grep", "conversation ·", "since you approved", "you: Build", "line.\n\n"]) {
+            expect(opened(out, at(line) + (line === "line.\n\n" ? 6 : 0))).toBeUndefined();
         }
         expect(opened(out, at("━━ s1"))).toEqual({ id: "", to: S1, text: "" });
     });
@@ -1524,10 +1542,10 @@ describe("the drawers under each agent's banner", () => {
             { id: "name", to: S1, quote, text: "Name it.", code: { worktree: "/w/feat", path: "reader.py", version: "b1", first: 6, lines: ["        a = 1"] } },
         ];
         const draft: Draft = { ...EMPTY, remarks };
-        const wrote = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers);
+        const wrote = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote });
         const text = wrote.text;
         expect(text.split("Which twenty?").length).toBe(2);
-        expect(text).toContain("Twenty kinds of line.\nWhich twenty?\n· Grep");
+        expect(text).toContain("Twenty kinds of line.\nWhich twenty?\n\nFour carry what was said.\n· Grep");
         expect(text).toContain("Reading the records.\nGood.\n");
         expect(text.indexOf("Good.")).toBeGreaterThan(text.indexOf("conversation · 7 steps"));
         // Opened on a line of the earlier exchange, it's there, under that line, and the header says it's in that exchange.
@@ -1553,13 +1571,36 @@ describe("the drawers under each agent's banner", () => {
         expect(withWritten(EMPTY, remarks).remarks).toEqual(remarks);
     });
 
+    it("keeps a remark on a step under a fold not read yet under the drawer's line until it's read, then under its line", () => {
+        const on = opened(out, at("Reading the records.")) as Remark;
+        const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "read", text: "Which records?" }] };
+        const unread = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote: DRAWER_ONLY });
+        expect(unread.text).toContain("conversation · 7 steps\nWhich records?\nyou: Build the reader.\nreading…\n");
+        const read = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote, previous: unread });
+        expect(read.text).toContain("you: Build the reader.\nReading the records.\nWhich records?\n· Bash");
+        expect(read.seated.get("read")?.outdated).toBe(false);
+        // One drafted before quotes named their block waits there unconverted until its step is laid out.
+        const old: Remark = { id: "old", to: S1, quote: keptQuote("Reading the records.", 0, 20), text: "Which records?", step: 1 };
+        const waiting = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote: DRAWER_ONLY });
+        expect(waiting.text).toContain("conversation · 7 steps\nWhich records?\n");
+        expect(waiting.converted).toBeNull();
+        const placed = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote });
+        expect(placed.converted?.map((each) => ("quote" in each ? [each.quote?.block.endsWith(" step 1"), each.quote?.line] : "letter"))).toEqual([[true, 0]]);
+    });
+
+    it("keeps a remark drafted before quotes named their block on a step of no words of the agent's as a message to it", () => {
+        const old: Remark = { id: "", to: S1, quote: keptQuote("Ask me first.", 0, 13), text: "And?", step: 4 };
+        const wrote = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote });
+        expect(wrote.converted).toEqual([{ id: "kept remark 0", to: S1, text: "> Ask me first.\nAnd?" }]);
+    });
+
     it("keeps each remark under its line as the agent writes above it, in its own file or one before it, its lines untouched by the changes (#311)", () => {
         const TEST = "from reader import Reader\n\n\ndef test_turns():\n    assert Reader().turns() == 3\n";
         const reader = SINCE.files![0]!;
         const test = { path: "test_reader.py", file: { path: "test_reader.py", before: null, after: { kind: "text" as const, text: TEST }, reading: null }, version: "t1", flags: [], since: null };
         const two: Since = { ...SINCE, files: [reader, test] };
         const laidWith = (since: Since, draft: Draft, previous: Laid | null) =>
-            laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], new Map([[whose(S1), { ...DATA, since }]]), undefined, { previous });
+            laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], new Map([[whose(S1), { ...DATA, since }]]), undefined, { previous, remote });
         const first = laidWith(two, EMPTY, null);
         const on = (text: string, id: string, said: string): Remark => ({ ...(opened(first, first.text.indexOf(text)) as Remark), id, text: said });
         const draft: Draft = { ...EMPTY, remarks: [on("    assert Reader()", "test", "Why 3?"), on("        return a + b", "sum", "Why a sum?")] };
@@ -1639,7 +1680,8 @@ describe("the drawers under each agent's banner", () => {
     it("says in each summary line what the drawer holds: in since you approved, the files changed and those standing as reviewed", () => {
         expect(rowLabel("tasks", { ...DATA, tasks: [] })).toBeNull();
         expect(rowLabel("tasks", DATA)).toEqual({ text: "tasks 1/3", waiting: false });
-        expect(rowLabel("conversation", DATA)).toEqual({ text: "conversation · 7 steps", waiting: false });
+        // A drawer its module answers says its own: none the page lays out.
+        expect(rowLabel("conversation", DATA)).toBeNull();
         expect(rowLabel("since", DATA)).toEqual({ text: "since you approved · 1 to review · 1 flagged", waiting: true });
         expect(sinceSummary(null)).toBe("since you approved · not read yet");
         expect(sinceSummary(SINCE)).toBe("since you approved on feat · 1 to review · 1 flagged");

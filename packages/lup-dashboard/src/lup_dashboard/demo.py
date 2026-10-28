@@ -37,11 +37,9 @@ from lup_dev.inbox.citations import resolved
 from lup_dev.inbox.delivery import body, written
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
-    Calls,
     Context,
     Conversed,
     Drafted,
-    Exchange,
     Exchanged,
     Files,
     Items,
@@ -49,13 +47,11 @@ from lup_dev.inbox.protocol import (
     KeepOrder,
     KeepTalk,
     ListInbox,
-    ListItems,
     Ordered,
     Pathed,
     Reviewed,
     SendDraft,
     SendItem,
-    ShowCalls,
     ShowContext,
     ShowConversation,
     ShowDraft,
@@ -64,6 +60,7 @@ from lup_dev.inbox.protocol import (
     ShowOrder,
     ShowTalk,
     Talked,
+    exchanged,
 )
 from lup_dev.inbox.store import (
     ApiChanged,
@@ -307,10 +304,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                     usage=standing.usage,
                     tasks=standing.tasks,
                 )
-            case ShowCalls(session=session, agent=agent, calls=ids):
-                return self.calls(session, agent, ids)
-            case ListItems(conversation=conversation):
-                return self.exchanged(conversation)
             case ShowSince(conversation=conversation, seen=seen):
                 if self.growth is None:
                     self.growth = asyncio.get_running_loop().call_later(
@@ -824,28 +817,15 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             if conversation in (each.sender, each.recipient, each.addressed)
         ]
 
-        # lup's word on a conversation's citations is its own item, and told to it, as the host lists it.
-        def told(item: Item) -> bool:
-            return item.sender != conversation or isinstance(item.reason, Unresolved)
-
-        return Exchanged(
-            sent=[
-                Exchange(item=each, text=written(each))
-                for each in items
-                if not told(each)
-            ],
-            received=[
-                Exchange(item=each, text=body(each)) for each in items if told(each)
-            ],
-            paths=[
-                each
-                for each in self.paths()
-                if any(
-                    each.conversation in (item.sender, item.recipient, item.addressed)
-                    for item in items
-                )
-            ],
-        )
+        paths = [
+            each
+            for each in self.paths()
+            if any(
+                each.conversation in (item.sender, item.recipient, item.addressed)
+                for item in items
+            )
+        ]
+        return exchanged(conversation, items, written=written, told=body, paths=paths)
 
     def paths(self) -> list[Pathed]:
         """Return each stand-in conversation the listing has, with its path."""
@@ -1588,15 +1568,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         """Return a stand-in conversation's steps (`recorded`)."""
         return steps(self.recorded(session, agent))
 
-    def calls(self, session: str, agent: str | None, ids: list[str]) -> Calls:
-        """Return the calls of a stand-in conversation asked for, read whole, in the order asked: those it holds."""
-        wholes = {
-            each.whole.id: each.whole
-            for each in self.recorded(session, agent)
-            if isinstance(each, StandIn)
-        }
-        return Calls(calls=[wholes[each] for each in ids if each in wholes])
-
     def recorded(self, session: str, agent: str | None) -> list[Said | StandIn]:
         """Return a stand-in conversation, each call with what reading it whole answers: for the parser subagent, the call that sent @47, then its moment around @51 with what led to it, then what it read since the demo began; for the first worker, a day's work (`long_conversation`); for the second runtime's session and its subagent, a render that broke; for any other, a short exchange."""
         tree = "/home/op/lup.git/tree/dev"
@@ -1974,7 +1945,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         return Context(number=number, entries=entries, anchor=5)
 
     def long_conversation(self, length: int = 300) -> list[Said | StandIn]:
-        """Return the first worker's conversation, `length` steps after its brief, as a day's work reads: what it's on, then a run of calls reading a module, changing a function, running its tests and reading them, in turn; the operator's word every hundred steps, from the fiftieth."""
+        """Return the first worker's conversation, `length` steps after its brief, as a day's work reads: what it's on, then a run of calls reading a module, changing a function, running its tests and reading them, in turn. A subagent never has the operator's typed words after its brief, so its whole run is one exchange, its drawer keeping only the agent's last words open (`EARLIER_KIND.keeps_open`)."""
         tree = worker_worktree(1)
 
         def step(at: int) -> Said | StandIn:
@@ -1982,12 +1953,6 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             module = f"packages/lup/src/lup/worker1/step_{k}.py"
             tests = f"packages/lup/tests/test_step_{k}.py"
             when = self.ago(400 - at)
-            if at % 100 == 50:
-                return Said(
-                    by="operator",
-                    text=f"Good. Carry on from step {k}.",
-                    at=when,
-                )
             match at % 5:
                 case 0:
                     return Said(

@@ -21,11 +21,30 @@ The operator's words come first, since a past session is read for what they said
 ## The conversation, live
 
 Each agent's conversation is a view (`docs/declaration.md`, *Views and blocks*), read from the runtime's own record as it grows, not the copies, and each record read again only once it changed (`Recording`):
-- `conversation <runtime> <session> [--agent <id>]`, the drawer under each agent's banner (`v`): its summary counting the steps, everything since the operator's last words open, each earlier exchange folded under their words that opened it (`e`, opening one at a time, the latest first), each run of three calls or more under one line saying how many of which (`k`), each call a line saying what it did with its input and output under it (`d`), and each item of lup's inbox the conversation sent or was sent a line where it happened, its text under it (`m`);
-- `exchange <runtime> <session> [--step <n>]`, one earlier exchange, which its fold reads as it opens, so the drawer's answer stays small;
+- `conversation <runtime> <session> [--agent <id>]`, the drawer under each agent's banner (`v`): its summary counting the steps, everything since the operator's last words open but for at most the agent's last 20 words with what follows them, what came before folded under one line saying how many steps and items (`▸ 412 earlier steps, 3 items`), each earlier exchange folded under their words that opened it (`e`, opening one at a time, the latest first), each run of three calls or more under one line saying how many of which (`k`), each call a line saying what it did with its input and output under it (`d`), and each item of lup's inbox the conversation sent or was sent a line where it happened, its text under it (`m`);
+- `exchange <runtime> <session> [--step <n>] [--until-last <n>]`, one earlier exchange, or what came in one before the agent's last words that many, which its fold reads as it opens, kept the same way, so each fold opened brings in 20 more of the agent's words and the drawer's answer stays small however long a session driven from the dashboard runs, with no typed words to split it; answered again, shown, as the drawer is;
 - `call <runtime> <session> <id>`, one call read whole, as its fold opens, and answered again while it's open and shown as a call of the agent's finishes, so one still running shows what it returned once it has.
 
-The layout is `environment/conversation.py`: pure, from the record's steps and the items the core keeps (`self.exchanges`), each block's id naming what it shows so it stays from one answer to the next. Each conversation an item's line names is said by its path, as the core gives it with the items (`Exchanged.paths`), else by its runtime's ids, in a span referring to it by those ids (`Span.conversation`), which a rename never changes. The module declares its fold kinds and tones (`folds`, `tones`).
+The layout is `environment/conversation.py`: pure, from the record's steps and the items the core keeps (`self.exchanges`), each block's id naming what it shows so it stays from one answer to the next. Each item comes with its line made by the core, for this conversation, in its kind's own words and the core's around them (`docs/inbox.md`, *A conversation's items in its view*), so the module names no kind of item: it places the line, in its tone, sent or received, its text folded under it. Each conversation a line names is said by its path, else by its runtime's ids, in a span referring to it by those ids (`Span.conversation`), which a rename never changes. The module declares its fold kinds and tones (`folds`, `tones`).
+
+**How many of the agent's words stay open** is its fold kind of what came earlier's setting (`EARLIER_KIND.keeps_open`, 20; `lup.FoldKind.keeps_open`), which only the agent's words count, never its calls, folded anyway. A person's layer keeps more or fewer, or everything open with `None`:
+
+```python
+from lup_dev import Modules, Project
+from lup_dev.declaration.kinds import Folds
+from lup_transcripts.environment.conversation import EARLIER_KIND
+from lup_transcripts.environment.module import Transcripts
+
+project = Project(
+    modules=Modules().edit(
+        Transcripts(
+            folds=Folds().replace(
+                "earlier", EARLIER_KIND.model_copy(update={"keeps_open": 40})
+            )
+        )
+    )
+)
+```
 
 ## Layout
 

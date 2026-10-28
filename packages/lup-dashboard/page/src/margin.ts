@@ -18,7 +18,7 @@ export interface Margined {
 /**
  * Return CodeMirror's folding, each placeholder drawn by the kind of the fold it stands for, of those `margined` says:
  * `⋯`, and how many lines it hides where its kind says so (`Kind.counts`), as a file's, a body's or an item's, whose
- * summary line doesn't say what it hides; a fold of no kind's as `…`.
+ * summary line doesn't say what it hides, but for one whose content isn't read yet; a fold of no kind's as `…`.
  */
 export function placeheld(margined: Margined): Extension {
     return codeFolding({
@@ -27,7 +27,7 @@ export function placeheld(margined: Margined): Extension {
             if (fold?.kind === undefined) {
                 return "";
             }
-            const hidden = state.doc.lineAt(range.to).number - state.doc.lineAt(range.from).number;
+            const hidden = fold.unread === true ? null : state.doc.lineAt(range.to).number - state.doc.lineAt(range.from).number;
             return JSON.stringify({ kind: fold.kind, hidden });
         },
         placeholderDOM: (_, onclick, prepared: string) => {
@@ -39,9 +39,9 @@ export function placeheld(margined: Margined): Extension {
                 shown.textContent = "…";
                 return shown;
             }
-            const { kind, hidden } = JSON.parse(prepared) as { kind: string; hidden: number };
+            const { kind, hidden } = JSON.parse(prepared) as { kind: string; hidden: number | null };
             shown.classList.add("fold-placeholder", `fold-${kind}`);
-            shown.textContent = kindOf(kind)?.counts === true ? `⋯ ${hidden} ${hidden === 1 ? "line" : "lines"}` : "⋯";
+            shown.textContent = kindOf(kind)?.counts === true && hidden !== null ? `⋯ ${hidden} ${hidden === 1 ? "line" : "lines"}` : "⋯";
             return shown;
         },
     });

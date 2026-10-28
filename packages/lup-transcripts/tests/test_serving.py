@@ -14,14 +14,17 @@ import pytest
 import lup
 from lup.doors import served
 from lup.programs import run
+from lup_dev import Modules, Project
+from lup_dev.declaration.kinds import Folds
+from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.serving import Lup, Publisher
 from lup_dev.host.protocol import Limits, Register
 from lup_dev.host.records import Call as RecordedCall
 from lup_dev.host.records import Reader as RecordsReader
 from lup_dev.host.records import Record, Recorded, Records, Transcript
 from lup_dev.inbox.exchanges import Exchanges
-from lup_dev.inbox.protocol import Exchanged, Pathed
-from lup_dev.inbox.store import Conversation as InboxConversation
+from lup_dev.inbox.protocol import Exchanged
+from lup_transcripts.environment.conversation import EARLIER_KIND
 from lup_transcripts.environment.module import Transcripts
 from lup_transcripts.environment.serving import TranscriptsServing, copied
 
@@ -146,32 +149,49 @@ def test_transcripts_copy_the_repository_s_records_at_its_moments(
     assert repo in under
 
 
-def test_a_conversation_beside_is_called_by_the_path_its_exchange_gives_else_by_its_runtime_s_ids(
-    tmp_path: Path,
-) -> None:
-    serving = TranscriptsServing(
-        module=Transcripts(),
-        recorded={},
-        data=tmp_path,
-        related=[],
-        publisher=Unpublished(),
-        exchanges=Unexchanged(),
-    )
-    named = InboxConversation(
-        repository=tmp_path / ".git", runtime="claude", session="s1", agent="a1"
-    )
-    unnamed = named.model_copy(update={"agent": "a2"})
-    exchanged = Exchanged(
-        sent=[], received=[], paths=[Pathed(conversation=named, path="one/parser")]
-    )
-    beside = serving.beside(exchanged)
-    assert beside.named(named) == "one/parser"
-    assert beside.named(unnamed) == "claude s1 / a2"
-
-
 def test_a_call_read_whole_is_answered_again_as_a_call_of_its_agent_s_finishes() -> (
     None
 ):
     door = served(TranscriptsServing)["call"].viewing()
     assert door is not None
     assert door.watch == lup.Watch(on=[lup.CallFinished])
+
+
+def test_a_person_s_layer_keeps_more_or_fewer_of_the_agent_s_words_open_in_the_drawer(
+    tmp_path: Path,
+) -> None:
+    keeping = EARLIER_KIND.model_copy(update={"keeps_open": 40})
+    person = Modules().edit(Transcripts(folds=Folds().replace("earlier", keeping)))
+    resolved = resolve(Project(modules=person))
+    [module] = [each for each in resolved.modules if isinstance(each, Transcripts)]
+
+    def serving(module: Transcripts) -> TranscriptsServing:
+        return TranscriptsServing(
+            module=module,
+            recorded={},
+            data=tmp_path,
+            related=[],
+            publisher=Unpublished(),
+            exchanges=Unexchanged(),
+        )
+
+    assert serving(module).earlier().keeps_open == 40
+    assert serving(Transcripts()).earlier().keeps_open == 20
+    # The looks the page reads say it with the kind.
+    assert [
+        each.keeps_open for each in resolved.looks.folds if each.name == "earlier"
+    ] == [40]
+
+
+def test_an_exchange_is_answered_again_as_the_drawer_is_since_what_came_before_the_agent_s_last_words_moves_on() -> (
+    None
+):
+    doors = served(TranscriptsServing)
+    exchange, conversation = (
+        doors["exchange"].viewing(),
+        doors["conversation"].viewing(),
+    )
+    assert exchange is not None
+    assert conversation is not None
+    assert exchange.watch == conversation.watch
+    assert lup.TurnEnded in exchange.watch.on
