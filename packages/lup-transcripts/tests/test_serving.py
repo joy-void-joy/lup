@@ -6,6 +6,7 @@ operator's.
 
 import asyncio
 import json
+import os
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -100,6 +101,80 @@ def test_a_copy_takes_what_s_missing_or_grown_and_leaves_what_s_unchanged(
     assert (target / "projects" / "p" / "s1.jsonl").read_text() == (
         source / "s1.jsonl"
     ).read_text()
+
+
+def test_a_copy_never_follows_a_link_out_of_its_record_s_folder(
+    tmp_path: Path,
+) -> None:
+    secret = tmp_path / "ssh" / "id_ed25519"
+    secret.parent.mkdir()
+    secret.write_text("PRIVATE KEY\n")
+    source = tmp_path / "home" / "projects" / "p"
+    lines(source / "s1.jsonl", {"n": 1})
+    (source / "s1").mkdir()
+    (source / "s1" / "leak.txt").symlink_to(secret)
+    (source / "s1" / "zero").symlink_to("/dev/zero")
+    (source / "s1" / "gone").symlink_to(tmp_path / "missing")
+    target = tmp_path / "copy"
+    copied([Record(source=source, place=PurePosixPath("projects", "p"))], target)
+    copy = target / "projects" / "p"
+    assert (copy / "s1.jsonl").is_file()
+    assert not (copy / "s1" / "leak.txt").exists()
+    assert not (copy / "s1" / "zero").exists()
+    assert not (copy / "s1" / "gone").exists()
+
+
+def test_a_copy_takes_a_link_between_the_runtime_s_own_files_in_the_folder(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "home" / "projects" / "p"
+    lines(source / "first" / "subagents" / "agent-a.jsonl", {"n": 1})
+    resumed = source / "second" / "subagents" / "agent-a.jsonl"
+    resumed.parent.mkdir(parents=True)
+    resumed.symlink_to(source / "first" / "subagents" / "agent-a.jsonl")
+    target = tmp_path / "copy"
+    copied([Record(source=source, place=PurePosixPath("projects", "p"))], target)
+    copy = target / "projects" / "p" / "second" / "subagents" / "agent-a.jsonl"
+    assert not copy.is_symlink()
+    assert copy.read_text() == '{"n": 1}\n'
+
+
+def test_a_copy_skips_a_named_pipe_without_waiting_on_it(tmp_path: Path) -> None:
+    source = tmp_path / "home" / "projects" / "p"
+    lines(source / "s1.jsonl", {"n": 1})
+    os.mkfifo(source / "s2.jsonl")
+    target = tmp_path / "copy"
+    assert (
+        copied([Record(source=source, place=PurePosixPath("projects", "p"))], target)
+        == 1
+    )
+    assert not (target / "projects" / "p" / "s2.jsonl").exists()
+
+
+def test_a_copy_skips_a_record_reached_through_a_link(tmp_path: Path) -> None:
+    elsewhere = tmp_path / "ssh"
+    elsewhere.mkdir()
+    (elsewhere / "id_ed25519").write_text("PRIVATE KEY\n")
+    projects = tmp_path / "home" / "projects"
+    projects.mkdir(parents=True)
+    (projects / "p").symlink_to(elsewhere)
+    target = tmp_path / "copy"
+    records = [Record(source=projects / "p", place=PurePosixPath("projects", "p"))]
+    assert copied(records, target) == 0
+    assert not (target / "projects" / "p" / "id_ed25519").exists()
+
+
+def test_a_copy_follows_a_link_in_the_home_s_own_path(tmp_path: Path) -> None:
+    real = tmp_path / "dotfiles" / "claude"
+    lines(real / "projects" / "p" / "s1.jsonl", {"n": 1})
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".claude").symlink_to(real)
+    source = home / ".claude" / "projects" / "p"
+    target = tmp_path / "copy"
+    records = [Record(source=source, place=PurePosixPath("projects", "p"))]
+    assert copied(records, target) == 1
+    assert (target / "projects" / "p" / "s1.jsonl").is_file()
 
 
 class Held(Records):
