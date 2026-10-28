@@ -72,7 +72,7 @@ CALLER = Conversation(id="c1", session="s1")
 class Nothing(Records):
     """A runtime that keeps no records."""
 
-    def kept(self, under: list[Path]) -> list[Record]:
+    def kept(self, under: list[Path], repository: Path) -> list[Record]:
         return []
 
     def conversation(self, session: str, agent: str | None) -> Path | None:

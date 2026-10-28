@@ -1,8 +1,8 @@
-// What the review and a conversation share as laid-out text: the lines the
-// operator's comments may be on, the comments written under them, the passages
-// they quote, and how a step of a conversation is said. Pure: each view lays its
-// own text out with these (`review.ts`, `conversation.ts`), and the editor they
-// share (`editor.ts`) lets the comments be written.
+// What the review's laid-out text is made of: the lines the operator's comments
+// may be on, the comments written under them, the passages they quote, and how a
+// step of an item's context is said. Pure: the review lays its text out with
+// these (`review.ts`, `exchange.ts`), and the editor (`editor.ts`) lets the
+// comments be written.
 import type { components } from "./generated/api";
 
 export type Quote = components["schemas"]["Quote"];
@@ -45,6 +45,8 @@ export interface Folding extends Span {
     label?: string;
     /** Whether it's a scope's, a group's, an item's, a drawer's or a file's, which the margin bars its full height and labels. */
     scope?: boolean;
+    /** Whether what it holds is read from another view as it opens and isn't read yet: its placeholder counts no lines. */
+    unread?: boolean;
 }
 
 /** One row of a thing said: its text, where its words start in it, and where they start in the words kept. */

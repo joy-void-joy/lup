@@ -13,7 +13,9 @@ same blocks (`Blocks.text`), so an agent reads what the operator saw.
 - `Markdown`: text the page shows as Markdown, in a tone.
 - `Fold`: a summary line and what folds under it, of one of the module's fold
   kinds (`FoldKind`), open or closed: its content given, or read as it opens
-  from another of the module's views (`Load`).
+  from another of the module's views (`Load`). A fold kind may cap how much
+  stays open after its folds, what came before folded under one of them
+  (`FoldKind.keeps_open`, `kept_open`).
 - `Diff`: a file's change, whole, what matters in it marked (`Mark`); `Code`: a
   file as it stands. The page lays out their lines, folds the runs of unchanged
   ones and each function's and class's body by the file's syntax, and
@@ -40,7 +42,7 @@ from lup.events import Event
 from lup.types import Model
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from lup.doors import Method
 
@@ -690,6 +692,42 @@ class FoldKind(Model):
     counts: bool = True
     """Whether one folded says how many lines it hides after its summary line:
     one whose summary says what it hides doesn't (`6 unchanged lines`)."""
+    keeps_open: int | None = Field(default=None, ge=1)
+    """How many of what its module counts stay open after its folds at most,
+    what came before them folded under one of them (`kept_open`): the last 20
+    of the agent's words in a conversation, so a long one's view stays small
+    however long it runs. A person's layer changes it as any field of the
+    module's; none keeps everything open."""
+
+
+class Kept[T](Model):
+    """A run of things split where what's kept open starts: those folded under one line before, and those shown."""
+
+    folded: list[T]
+    shown: list[T]
+
+
+def kept_open[T](
+    things: list[T], counted: Callable[[T], bool], most: int | None
+) -> Kept[T]:
+    """Split `things`, in order, where what's kept open starts: the last `most` that `counted` counts, from the earliest of them on, and everything after it, shown; what came before, folded. None is folded where `most` is none, or no more are counted.
+
+    What a view keeps open of a long run, as its fold kind says
+    (`FoldKind.keeps_open`), what came before folded under one line saying how
+    much and read as it opens; folding what came before the operator's review
+    mark is this helper's next case (#315).
+
+    >>> kept = kept_open(["you", "a", "call", "b", "call", "c"], lambda each: len(each) == 1, 2)
+    >>> kept.folded, kept.shown
+    (['you', 'a', 'call'], ['b', 'call', 'c'])
+    >>> kept_open(["a", "b"], lambda each: True, 2).folded
+    []
+    """
+    at = [index for index, each in enumerate(things) if counted(each)]
+    if most is None or len(at) <= most:
+        return Kept(folded=[], shown=list(things))
+    cut = at[len(at) - most] if most > 0 else len(things)
+    return Kept(folded=things[:cut], shown=things[cut:])
 
 
 SHELL_FOLDS = [

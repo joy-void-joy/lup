@@ -121,15 +121,20 @@ def landed(home: Path, wanted: dict[Path, bool]) -> None:
                 made(current, name, directory=directory)
 
 
-def regular(path: Path | str, holding: int | None = None) -> int | None:
-    """Open the file at `path`, in the directory whose descriptor is `holding` where it's given, for reading where it's a regular file, and return its descriptor; none where it isn't one, or isn't there.
+def regular(
+    path: Path | str, holding: int | None = None, *, follow: bool = False
+) -> int | None:
+    """Open the file at `path`, in the directory whose descriptor is `holding` where it's given, for reading where it's a regular file, and return its descriptor; none where it isn't one, or isn't there: the one way the host opens a file a room may have written.
 
-    Never through a link at its end, which a room could aim at any file the
-    host reads, `/dev/zero` among them, and never waiting on a pipe a room
-    left in its place: opening one doesn't block, and it's closed as what it
-    is.
+    Never waiting on a pipe a room left in its place: opening one doesn't
+    block, and it's closed as what it is. Never through a link at its end,
+    which a room could aim at any file the host reads, `/dev/zero` among them,
+    unless `follow`, for a caller that checks where the file opened is itself,
+    as `lup_dev.confined` does.
     """
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC
+    if not follow:
+        flags |= os.O_NOFOLLOW
     try:
         descriptor = os.open(path, flags, dir_fd=holding)
     except OSError:

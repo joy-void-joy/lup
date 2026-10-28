@@ -634,7 +634,7 @@ def test_a_toml_preference_keeps_the_rest_of_an_inline_table(tmp_path: Path) -> 
     }
 
 
-def test_only_a_regular_file_is_opened_to_read_never_a_link_or_a_pipe(
+def test_only_a_regular_file_is_opened_to_read_never_a_pipe_nor_a_link_unless_followed(
     tmp_path: Path,
 ) -> None:
     record = tmp_path / "record.jsonl"
@@ -655,5 +655,10 @@ def test_only_a_regular_file_is_opened_to_read_never_a_link_or_a_pipe(
             regular(name, held)
             for name in ["link.jsonl", "pipe.jsonl", "directory.jsonl", "absent"]
         ] == [None, None, None, None]
+        followed = regular("link.jsonl", held, follow=True)
+        assert followed is not None
+        os.close(followed)
+        (tmp_path / "piped.jsonl").symlink_to(tmp_path / "pipe.jsonl")
+        assert regular("piped.jsonl", held, follow=True) is None
     finally:
         os.close(held)

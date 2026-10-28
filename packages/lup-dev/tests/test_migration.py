@@ -65,8 +65,8 @@ def migration(directory: Path, home: Path) -> Migration:
         directory=directory,
         home=home,
         records=[
-            Record(source=directory / FOLDER, place=FOLDER),
-            Record(source=directory / HISTORY, place=HISTORY),
+            Record(home=directory, whose="host", place=FOLDER),
+            Record(home=directory, whose="host", place=HISTORY),
         ],
     )
 
@@ -231,7 +231,7 @@ def test_a_record_reached_through_a_link_on_its_way_is_left(tmp_path: Path) -> N
         runtime="made-up",
         directory=directory,
         home=home,
-        records=[Record(source=directory / FOLDER, place=FOLDER)],
+        records=[Record(home=directory, whose="host", place=FOLDER)],
     ).moved(dry=False)
     assert moved == Moved(
         place=FOLDER,

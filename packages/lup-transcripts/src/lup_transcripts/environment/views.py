@@ -4,13 +4,16 @@
 come first: a past session is read for what they said and what they were
 answering, which is where a design's reasons are; the whole conversation, the
 agent's text with each run of tool calls folded to a line, is there for what
-happened between.
+happened between. Each says whose home its record was kept from, since what a
+room's says is the room's word for it, and which other repository it's of,
+where it's one the declaration names beside the project.
 """
 
 from datetime import UTC, datetime
 from itertools import groupby
 
-from lup_dev.host.records import Called, Entry, Said, Transcript
+from lup.types import Model
+from lup_dev.host.records import Called, Entry, Said, Transcript, Whose
 from lup_transcripts.errors import LupTranscriptsError
 
 
@@ -18,14 +21,51 @@ class TranscriptError(LupTranscriptsError):
     """A session asked for isn't among those kept, or more than one answers to it."""
 
 
+class Session(Model):
+    """A kept session: what its record says, whose home it was kept from, and the other repository it's of, where it's one the declaration names beside the project."""
+
+    transcript: Transcript
+    whose: Whose
+    repository: str | None = None
+    """The related repository's name, as its copies are kept under; none for
+    the project's own."""
+
+
+def kept_from(whose: Whose) -> str:
+    """Say whose home a record was kept from, as a line says it.
+
+    >>> kept_from("rooms")
+    "a room's home"
+    """
+    match whose:
+        case "host":
+            return "your own directory"
+        case "rooms":
+            return "a room's home"
+        case "shared":
+            return "the home rooms share"
+
+
+def where(session: Session) -> str:
+    """Say where a session ran, and of which other repository, where it's a related one's; `?` where its record doesn't say.
+
+    >>> where(Session(transcript=Transcript(runtime="r", session="s"), whose="host", repository="atlas"))
+    '? (atlas)'
+    """
+    directory = f"{session.transcript.directory or '?'}"
+    if session.repository is None:
+        return directory
+    return f"{directory} ({session.repository})"
+
+
 def when(at: datetime | None) -> str:
     """Say a moment by the operator's own clock, to the minute; `?` where it isn't known."""
     return "?" if at is None else f"{at.astimezone():%Y-%m-%d %H:%M}"
 
 
-def begun(session: Transcript) -> datetime:
+def begun(session: Session) -> datetime:
     """Return when a session started, for ordering: the earliest moment there is where it isn't known."""
-    return session.started() or datetime.min.replace(tzinfo=UTC)
+    return session.transcript.started() or datetime.min.replace(tzinfo=UTC)
 
 
 def called(session: Transcript) -> str:
@@ -34,25 +74,30 @@ def called(session: Transcript) -> str:
     return f"`{name}` ({session.runtime} {session.session})"
 
 
-def listed(sessions: list[Transcript]) -> list[str]:
-    """Return a line for each session, newest first: when it started, its name and id, how many times the operator spoke, and where it ran."""
+def listed(sessions: list[Session]) -> list[str]:
+    """Return a line for each session, newest first: when it started, its name and id, how many times the operator spoke, where it ran, and whose home its record was kept from."""
     ordered = sorted(sessions, key=begun)
     return [
-        f"{when(each.started())}  {called(each)}  {len(each.operators())} from you"
-        f"  in {each.directory or '?'}"
+        f"{when(each.transcript.started())}  {called(each.transcript)}  "
+        f"{len(each.transcript.operators())} from you  in {where(each)}, kept from "
+        f"{kept_from(each.whose)}"
         for each in reversed(ordered)
     ]
 
 
-def chosen(sessions: list[Transcript], named: str) -> Transcript:
-    """Return the session `named` names: by its id, the start of its id, or its name.
+def chosen(sessions: list[Session], named: str, whose: Whose | None = None) -> Session:
+    """Return the session `named` names: by its id, the start of its id, or its name; among those kept from `whose` home, where it's given.
 
-    Raise `TranscriptError` where none does, or several do, naming them.
+    A record a room kept carrying a host session's id is the room's, never
+    taken for the host's, so a session kept from two homes is two, and
+    `--from` reads one. Raise `TranscriptError` where none is, or several are,
+    naming them.
     """
     found = [
         each
         for each in sessions
-        if each.session.startswith(named) or each.title == named
+        if (each.transcript.session.startswith(named) or each.transcript.title == named)
+        and (whose is None or each.whose == whose)
     ]
     match found:
         case [one]:
@@ -63,10 +108,26 @@ def chosen(sessions: list[Transcript], named: str) -> Transcript:
                 "its name: `lup-dev transcripts list` lists them"
             )
         case _:
-            message = f"several kept sessions are `{named}`: " + ", ".join(
-                called(each) for each in found
+            message = (
+                f"several kept sessions are `{named}`: "
+                + ", ".join(
+                    f"{called(each.transcript)} kept from {kept_from(each.whose)}"
+                    for each in found
+                )
+                + "; a longer id, or `--from host`, `--from rooms` or `--from "
+                "shared` for whose home it was kept from, chooses one"
             )
     raise TranscriptError(message)
+
+
+def heading(session: Session) -> str:
+    """Say a session as its reading opens: its name and id, when it started, where it ran, and whose home it was kept from, which a room's says the room writes."""
+    said = session.transcript
+    writes = "" if session.whose == "host" else ", which rooms write"
+    return (
+        f"{called(said)}, from {when(said.started())}, in {where(session)}, kept "
+        f"from {kept_from(session.whose)}{writes}"
+    )
 
 
 def indented(text: str, by: str = "    ") -> str:
@@ -74,12 +135,9 @@ def indented(text: str, by: str = "    ") -> str:
     return "\n".join(f"{by}{line}" if line else "" for line in text.splitlines())
 
 
-def answered(session: Transcript) -> str:
-    """Return the operator's words in `session`, numbered, each after what the agent last said before it: what it answered."""
-    heading = (
-        f"{called(session)}, from {when(session.started())}, in "
-        f"{session.directory or '?'}"
-    )
+def answered(kept: Session) -> str:
+    """Return the operator's words in `kept`, numbered, each after what the agent last said before it: what it answered."""
+    session = kept.transcript
 
     def part(number: int, said: Said) -> str:
         before = session.replied(said)
@@ -91,16 +149,13 @@ def answered(session: Transcript) -> str:
         return f"[{number}] {when(said.at)}\n{answering}\n  you:\n{indented(said.text)}"
 
     parts = [part(at, said) for at, said in enumerate(session.operators(), start=1)]
-    return "\n\n".join([heading, *parts]) + "\n"
+    return "\n\n".join([heading(kept), *parts]) + "\n"
 
 
-def whole(session: Transcript) -> str:
-    """Return everything said in `session`, in order, each run of tool calls folded to a line naming them."""
-    heading = (
-        f"{called(session)}, from {when(session.started())}, in "
-        f"{session.directory or '?'}"
-    )
-    return "\n\n".join([heading, *stepped(session.entries)]) + "\n"
+def whole(kept: Session) -> str:
+    """Return everything said in `kept`, in order, each run of tool calls folded to a line naming them."""
+    steps = stepped(kept.transcript.entries)
+    return "\n\n".join([heading(kept), *steps]) + "\n"
 
 
 def stepped(entries: list[Entry]) -> list[str]:
@@ -135,7 +190,7 @@ def counted(tool: str, times: int) -> str:
     return tool if times == 1 else f"{tool} x{times}"
 
 
-def found(sessions: list[Transcript], words: list[str], *, whole: bool = False) -> str:
+def found(sessions: list[Session], words: list[str], *, whole: bool = False) -> str:
     """Return each time the operator said all of `words`, any case, newest session first: the session, when, their words, and what they answered, its first line, or `whole`."""
     wanted = [word.casefold() for word in words]
 
@@ -150,16 +205,17 @@ def found(sessions: list[Transcript], words: list[str], *, whole: bool = False) 
             return f"  answering:\n{indented(before.text)}"
         return f"  answering: {first_line(before.text)}"
 
-    def hit(session: Transcript, said: Said) -> str:
+    def hit(kept: Session, said: Said) -> str:
+        session = kept.transcript
         return (
-            f"{called(session)}, {when(said.at)}\n"
+            f"{called(session)}, {when(said.at)}, kept from {kept_from(kept.whose)}\n"
             f"{answering(session.replied(said))}\n  you:\n{indented(said.text)}"
         )
 
     hits = [
-        hit(session, said)
-        for session in sorted(sessions, key=begun, reverse=True)
-        for said in session.operators()
+        hit(kept, said)
+        for kept in sorted(sessions, key=begun, reverse=True)
+        for said in kept.transcript.operators()
         if matched(said)
     ]
     if not hits:

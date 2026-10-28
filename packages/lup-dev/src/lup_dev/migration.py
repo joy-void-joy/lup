@@ -231,7 +231,8 @@ class Migration(Model):
     home: Path
     """The rooms' home they move into."""
     records: list[Record]
-    """The repository's records, each at its place in `directory`."""
+    """The repository's records in `directory`, the operator's own (`whose`
+    `host`), each at its place there."""
 
     def moved(self, *, dry: bool) -> list[Moved]:
         """Move each record into the home, or, `dry`, change nothing; return what was done of each, or what would be.
@@ -262,7 +263,7 @@ class Migration(Model):
 
     def steps(self, record: Record, *, dry: bool) -> Iterator[Step]:
         """Walk one record from the operator's directory and from the home, a directory at a time, moving what's in it unless `dry`, and yield each thing done, or left."""
-        if self.directory / record.place != record.source:
+        if record.whose != "host" or record.home != self.directory:
             yield Step(
                 kind="left",
                 place=record.place,
@@ -618,9 +619,9 @@ class Migrating(Model, arbitrary_types_allowed=True):
         shown = places.shown(directory)
         if not directory.is_dir():
             return [f"{runtime}: {shown} isn't there, so nothing of it moves."]
-        records = adapter.records.kept(under)
+        records = self.operators(adapter, under)
         others = [
-            each for each in adapter.records.kept([Path("/")]) if each not in records
+            each for each in self.operators(adapter, [Path("/")]) if each not in records
         ]
         stay = (
             [
@@ -664,6 +665,14 @@ class Migrating(Model, arbitrary_types_allowed=True):
                 else []
             ),
             *stay,
+        ]
+
+    def operators(self, adapter: HostRuntime, under: list[Path]) -> list[Record]:
+        """Return the runtime's records of sessions run under `under` that are in the operator's own directory: what moves, the rooms' homes' being where they go."""
+        return [
+            each
+            for each in adapter.records.kept(under, self.repository)
+            if each.whose == "host" and each.home == adapter.directory
         ]
 
     def checked(self, adapter: HostRuntime, places: Places) -> list[str]:

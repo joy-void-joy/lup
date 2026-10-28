@@ -259,7 +259,7 @@ from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.adapters.claude.terminal import own_settings
 from lup.adapters.claude.windows import catalogued, reach
-from lup.rooms.homes import inside, plain, regular
+from lup.rooms.homes import inside, plain
 from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, MutableModel, Settings
@@ -270,6 +270,7 @@ from lup_dev.host.records import (
     Call,
     Called,
     Entry,
+    Home,
     Queued,
     Queues,
     Queuing,
@@ -282,6 +283,9 @@ from lup_dev.host.records import (
     Usage,
     first,
     gist,
+    head,
+    homes,
+    reached,
     within,
 )
 from lup_dev.host.records import Said as Spoken
@@ -1707,14 +1711,15 @@ class ClaudeRecords(Model, Records):
     could write the operator's directory until rooms had homes of their own, so
     a line saying the repository's directory, written into the folder of
     another's, would otherwise have that other's sessions taken for the
-    repository's, copied where its rooms read them. Each record is read only
-    where it's a regular file, never through a link, never waiting on a pipe.
+    repository's, copied where its rooms read them and moved into their home
+    (`lup_dev.migration`). Each record is read as data alone
+    (`lup_dev.host.records`).
 
     A launched session's is in its room's home (`homes`), which rooms write, so
     one found there is read only where it resolves inside that home: a room
     can leave a link aimed at another home's record, or at the operator's
-    own. The records a module copies (`kept`) are the operator's directory's
-    alone.
+    own. The records a module copies (`kept`) are each home's: the
+    operator's directory's, the repository's rooms' and the shared one's.
     """
 
     directory: Path
@@ -1750,33 +1755,43 @@ class ClaudeRecords(Model, Records):
         )
 
     @override
-    def kept(self, under: list[Path]) -> list[Record]:
-        projects = self.directory / "projects"
-        folders = sorted(projects.iterdir()) if projects.is_dir() else []
-        ours = [
-            folder
-            for folder in folders
-            if folder.is_dir()
-            and (ran := ran_in(folder))
-            and filed(folder, ran)
-            and within(ran, under)
-        ]
-        histories = [
-            self.directory / "file-history" / session.stem
-            for folder in ours
-            for session in sorted(folder.glob("*.jsonl"))
-        ]
-        return [
-            *(
-                Record(source=folder, place=PurePosixPath("projects", folder.name))
-                for folder in ours
-            ),
-            *(
-                Record(source=each, place=PurePosixPath("file-history", each.name))
-                for each in histories
-                if each.is_dir()
-            ),
-        ]
+    def kept(self, under: list[Path], repository: Path) -> list[Record]:
+        """Return the folders of `projects/` whose sessions ran under `under`, and each of their sessions' file history, in each home keeping the repository's records: each only where it's reached from its home without a link, a folder's directory read off its records' heads."""
+        held = homes(self.directory, self.homes, repository, Claude().name())
+        return [record for home in held for record in kept_in(home, under)]
+
+
+def kept_in(home: Home, under: list[Path]) -> list[Record]:
+    """Return the records in one of Claude Code's homes of the sessions that ran under `under`: each folder of `projects/` they ran in, named for the directory its sessions say (`filed`), and each of their sessions' `file-history/`."""
+    directory = home.directory
+    projects = directory / "projects"
+    if not reached(directory, projects) or not projects.is_dir():
+        return []
+    ours = [
+        folder
+        for folder in sorted(projects.iterdir())
+        if folder.is_dir(follow_symlinks=False)
+        and (ran := ran_in(folder)) is not None
+        and filed(folder, ran)
+        and within(ran, under)
+    ]
+    histories = [
+        directory / "file-history" / session.stem
+        for folder in ours
+        for session in sorted(folder.glob("*.jsonl"))
+    ]
+
+    def record(place: PurePosixPath) -> Record:
+        return Record(home=directory, whose=home.whose, place=place)
+
+    return [
+        *(record(PurePosixPath("projects", folder.name)) for folder in ours),
+        *(
+            record(PurePosixPath("file-history", each.name))
+            for each in histories
+            if reached(directory, each) and each.is_dir()
+        ),
+    ]
 
 
 def folder_named(directory: Path) -> str:
@@ -1818,24 +1833,15 @@ def filed(folder: Path, ran: Path, longest: int = 200) -> bool:
 
 
 def ran_in(folder: Path) -> Path | None:
-    """Return the directory the sessions recorded in `folder` ran in, read off their first line naming one; none where none does.
-
-    Only a record that's a regular file is read, never through a link and
-    never waiting on a pipe (`lup.rooms.homes.regular`): a room could leave
-    either where a record would be.
-    """
+    """Return the directory the sessions recorded in `folder` ran in, read off their first line naming one, within each record's head (`head`); none where none does."""
     for record in sorted(folder.glob("*.jsonl")):
-        descriptor = regular(record)
-        if descriptor is None:
-            continue
-        with open(descriptor, encoding="utf-8", errors="replace") as lines:
-            for line in lines:
-                try:
-                    located = Located.model_validate_json(line)
-                except ValidationError:
-                    continue
-                if located.cwd is not None:
-                    return located.cwd
+        for line in head(record):
+            try:
+                located = Located.model_validate_json(line)
+            except ValidationError:
+                continue
+            if located.cwd is not None:
+                return located.cwd
     return None
 
 

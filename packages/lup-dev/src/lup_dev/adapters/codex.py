@@ -249,7 +249,7 @@ import lup
 from lup import events
 from lup.adapters.codex.layout import CodexLayout
 from lup.adapters.codex.settings import CodexSettings
-from lup.rooms.homes import inside, plain, regular
+from lup.rooms.homes import inside, plain
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
@@ -259,6 +259,7 @@ from lup_dev.host.records import (
     Call,
     Called,
     Entry,
+    Home,
     Reader,
     Record,
     Records,
@@ -268,6 +269,9 @@ from lup_dev.host.records import (
     Usage,
     first,
     gist,
+    head,
+    homes,
+    reached,
     within,
 )
 from lup_dev.host.records import Said as Spoken
@@ -1102,7 +1106,8 @@ class CodexRecords(Model, Records):
     A launched session's is in its room's home (`homes`), which rooms write, so
     one found there is read only where it resolves inside that home: a room
     can leave a link aimed at another home's rollout, or at the operator's
-    own. The records a module copies (`kept`) are the operator's home's alone.
+    own. The records a module copies (`kept`) are each home's: the operator's,
+    the repository's rooms' and the shared one's.
     """
 
     home: Path
@@ -1134,33 +1139,36 @@ class CodexRecords(Model, Records):
         )
 
     @override
-    def kept(self, under: list[Path]) -> list[Record]:
-        sessions = self.home / "sessions"
-        rollouts = (
-            sorted(sessions.rglob("rollout-*.jsonl")) if sessions.is_dir() else []
+    def kept(self, under: list[Path], repository: Path) -> list[Record]:
+        """Return the rollouts under `sessions/` whose sessions ran under `under`, in each home keeping the repository's records: `sessions/` only where it's reached from its home without a link, each rollout's directory read off its head."""
+        held = homes(self.home, self.homes, repository, Codex().name())
+        return [record for home in held for record in kept_in(home, under)]
+
+
+def kept_in(home: Home, under: list[Path]) -> list[Record]:
+    """Return the rollouts in one of Codex's homes of the sessions that ran under `under`, each by its path under `sessions/`.
+
+    `rglob` goes into no directory through a link, so each rollout is reached
+    from `sessions/` without one but for its own name, which `head` reads only
+    where it resolves inside its folder.
+    """
+    sessions = home.directory / "sessions"
+    if not reached(home.directory, sessions) or not sessions.is_dir():
+        return []
+    return [
+        Record(
+            home=home.directory,
+            whose=home.whose,
+            place=PurePosixPath("sessions", rollout.relative_to(sessions)),
         )
-        return [
-            Record(
-                source=rollout,
-                place=PurePosixPath("sessions", rollout.relative_to(sessions)),
-            )
-            for rollout in rollouts
-            if (ran := started_in(rollout)) is not None and within(ran, under)
-        ]
+        for rollout in sorted(sessions.rglob("rollout-*.jsonl"))
+        if (ran := started_in(rollout)) is not None and within(ran, under)
+    ]
 
 
 def started_in(rollout: Path) -> Path | None:
-    """Return the directory the session of `rollout` ran in, from its first line; none where it doesn't say.
-
-    Only a rollout that's a regular file is read, never through a link and
-    never waiting on a pipe (`lup.rooms.homes.regular`): every room could write
-    the operator's Codex home until rooms had homes of their own.
-    """
-    descriptor = regular(rollout)
-    if descriptor is None:
-        return None
-    with open(descriptor, encoding="utf-8", errors="replace") as lines:
-        first = lines.readline()
+    """Return the directory the session of `rollout` ran in, from its first line, within its head (`head`); none where it doesn't say."""
+    first = next(iter(head(rollout)), "")
     try:
         return Started.model_validate_json(first).payload.cwd
     except ValidationError:

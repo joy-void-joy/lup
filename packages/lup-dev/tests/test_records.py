@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 
 from lup_dev.adapters.claude import ClaudeQueues, ClaudeRecords
 from lup_dev.adapters.codex import CodexRecords
-from lup_dev.host.records import Queued, Record
+from lup_dev.host.records import Queued, Record, head
 from lup_dev.layout import HomesLayout
 
 
@@ -36,18 +36,93 @@ def test_claude_code_s_records_are_the_folders_whose_sessions_ran_under_the_repo
         home / "projects" / "-w-other" / "s2.jsonl", {"type": "user", "cwd": "/w/other"}
     )
     lines(home / "projects" / "-w-quiet" / "s3.jsonl", {"type": "mode"})
-    kept = ClaudeRecords(directory=home).kept([Path("/w/lup.git")])
+    kept = ClaudeRecords(directory=home).kept([Path("/w/lup.git")], REPOSITORY)
     assert kept == [
-        Record(source=ours, place=PurePosixPath("projects", "-w-lup-git-tree-dev")),
         Record(
-            source=home / "file-history" / "s1",
-            place=PurePosixPath("file-history", "s1"),
+            home=home,
+            whose="host",
+            place=PurePosixPath("projects", "-w-lup-git-tree-dev"),
         ),
+        Record(home=home, whose="host", place=PurePosixPath("file-history", "s1")),
     ]
 
 
 def test_claude_code_without_records_keeps_none(tmp_path: Path) -> None:
-    assert ClaudeRecords(directory=tmp_path / "absent").kept([tmp_path]) == []
+    records = ClaudeRecords(directory=tmp_path / "absent")
+    assert records.kept([tmp_path], REPOSITORY) == []
+
+
+REPOSITORY = Path("/w/lup.git")
+"""The repository whose records the tests keep, by its git directory."""
+
+
+def test_each_home_s_records_are_kept_and_said_whose_home_they_re_in(
+    tmp_path: Path,
+) -> None:
+    homes = HomesLayout(home=tmp_path / "homes")
+    own = tmp_path / ".claude"
+    rooms = homes.project(REPOSITORY, "claude")
+    for home, session in [(own, "s1"), (rooms, "s2"), (homes.shared("claude"), "s3")]:
+        lines(
+            home / "projects" / "-w-lup-git-tree-dev" / f"{session}.jsonl",
+            {"type": "user", "cwd": "/w/lup.git/tree/dev"},
+        )
+    another = homes.project(Path("/w/other.git"), "claude")
+    lines(
+        another / "projects" / "-w-lup-git-tree-dev" / "s4.jsonl",
+        {"type": "user", "cwd": "/w/lup.git/tree/dev"},
+    )
+    kept = ClaudeRecords(directory=own, homes=homes).kept([REPOSITORY], REPOSITORY)
+    assert [(each.whose, each.home) for each in kept] == [
+        ("host", own),
+        ("rooms", rooms),
+        ("shared", homes.shared("claude")),
+    ]
+
+
+def test_a_record_reached_through_a_link_or_a_pipe_is_never_read(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    elsewhere = tmp_path / "elsewhere"
+    lines(elsewhere / "s1.jsonl", {"type": "user", "cwd": "/w/lup.git/tree/dev"})
+    (home / "projects").mkdir(parents=True)
+    (home / "projects" / "-w-linked").symlink_to(elsewhere)
+    folder = home / "projects" / "-w-lup-git-tree-dev"
+    folder.mkdir()
+    (folder / "s2.jsonl").symlink_to(elsewhere / "s1.jsonl")
+    os.mkfifo(folder / "s3.jsonl")
+    (home / "file-history").symlink_to(elsewhere)
+    assert ClaudeRecords(directory=home).kept([REPOSITORY], REPOSITORY) == []
+    sessions = tmp_path / "codex" / "sessions"
+    sessions.mkdir(parents=True)
+    os.mkfifo(sessions / "rollout-a.jsonl")
+    (sessions / "rollout-b.jsonl").symlink_to(elsewhere / "s1.jsonl")
+    assert CodexRecords(home=sessions.parent).kept([REPOSITORY], REPOSITORY) == []
+
+
+def test_a_home_whose_own_path_runs_through_a_link_is_read(tmp_path: Path) -> None:
+    real = tmp_path / "dotfiles" / "claude"
+    lines(
+        real / "projects" / "-w-lup-git-tree-dev" / "s1.jsonl",
+        {"type": "user", "cwd": "/w/lup.git/tree/dev"},
+    )
+    (tmp_path / ".claude").symlink_to(real)
+    kept = ClaudeRecords(directory=tmp_path / ".claude").kept([REPOSITORY], REPOSITORY)
+    assert [each.place for each in kept] == [
+        PurePosixPath("projects", "-w-lup-git-tree-dev")
+    ]
+
+
+def test_a_record_s_head_is_read_only_so_far(tmp_path: Path) -> None:
+    folder = tmp_path / "projects" / "-w-lup-git-tree-dev"
+    folder.mkdir(parents=True)
+    endless = '{"type": "mode", "pad": "' + "x" * 64 + '"}'
+    (folder / "s1.jsonl").write_text(
+        endless + "\n" + json.dumps({"type": "user", "cwd": "/w/lup.git"}) + "\n"
+    )
+    assert list(head(folder / "s1.jsonl", reach=32)) == [endless[:32]]
+    assert len(list(head(folder / "s1.jsonl"))) == 2
 
 
 def test_codex_s_records_are_the_rollouts_whose_first_line_ran_under_the_repository(
@@ -61,13 +136,30 @@ def test_codex_s_records_are_the_rollouts_whose_first_line_ran_under_the_reposit
         {"type": "session_meta", "payload": {"cwd": "/w/other"}},
     )
     lines(sessions / "2026" / "10" / "17" / "rollout-c.jsonl", {"type": "turn"})
-    kept = CodexRecords(home=tmp_path / ".codex").kept([Path("/w/lup.git")])
+    home = tmp_path / ".codex"
+    kept = CodexRecords(home=home).kept([Path("/w/lup.git")], REPOSITORY)
     assert kept == [
         Record(
-            source=ours,
+            home=home,
+            whose="host",
             place=PurePosixPath("sessions", "2026", "10", "17", "rollout-a.jsonl"),
         )
     ]
+
+
+def test_codex_keeps_each_home_s_rollouts_too(tmp_path: Path) -> None:
+    homes = HomesLayout(home=tmp_path / "homes")
+    rooms = homes.project(REPOSITORY, "codex")
+    lines(
+        rooms / "sessions" / "2026" / "10" / "28" / "rollout-a.jsonl",
+        {"type": "session_meta", "payload": {"cwd": "/w/lup.git/tree/dev"}},
+    )
+    records = CodexRecords(home=tmp_path / ".codex", homes=homes)
+    [kept] = records.kept([REPOSITORY], REPOSITORY)
+    assert (kept.whose, kept.source) == (
+        "rooms",
+        rooms / "sessions" / "2026" / "10" / "28" / "rollout-a.jsonl",
+    )
 
 
 def test_a_folder_saying_it_ran_in_the_repository_under_another_directory_s_name_isn_t_its(
@@ -85,7 +177,7 @@ def test_a_folder_saying_it_ran_in_the_repository_under_another_directory_s_name
         home / "projects" / "-w-secret" / "s2.jsonl",
         {"type": "user", "cwd": "/w/secret"},
     )
-    assert ClaudeRecords(directory=home).kept([Path("/w/lup.git")]) == []
+    assert ClaudeRecords(directory=home).kept([REPOSITORY], REPOSITORY) == []
 
 
 def test_a_long_directory_s_folder_is_its_by_the_name_claude_code_cuts(
@@ -95,7 +187,7 @@ def test_a_long_directory_s_folder_is_its_by_the_name_claude_code_cuts(
     folder = f"-w-lup-git-tree-{'b' * 184}-1x9k2a"
     home = tmp_path / ".claude"
     lines(home / "projects" / folder / "s1.jsonl", {"cwd": str(directory)})
-    [kept] = ClaudeRecords(directory=home).kept([Path("/w/lup.git")])
+    [kept] = ClaudeRecords(directory=home).kept([REPOSITORY], REPOSITORY)
     assert kept.place == PurePosixPath("projects", folder)
 
 
@@ -110,13 +202,13 @@ def test_a_record_that_s_a_pipe_or_a_link_is_passed_over_unread(tmp_path: Path) 
     lines(elsewhere, {"cwd": "/w/other"})
     (ours / "1-link.jsonl").symlink_to(elsewhere)
     lines(ours / "s1.jsonl", {"cwd": "/w/lup.git/tree/dev"})
-    [kept] = ClaudeRecords(directory=home).kept([Path("/w/lup.git")])
+    [kept] = ClaudeRecords(directory=home).kept([REPOSITORY], REPOSITORY)
     assert kept.source == ours
     sessions = tmp_path / ".codex" / "sessions" / "2026" / "10" / "17"
     sessions.mkdir(parents=True)
     os.mkfifo(sessions / "rollout-pipe.jsonl")
     (sessions / "rollout-link.jsonl").symlink_to(elsewhere)
-    assert CodexRecords(home=tmp_path / ".codex").kept([Path("/w")]) == []
+    assert CodexRecords(home=tmp_path / ".codex").kept([Path("/w")], REPOSITORY) == []
 
 
 # What Claude Code holds queued for each conversation of a running session, as

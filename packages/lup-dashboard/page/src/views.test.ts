@@ -18,7 +18,7 @@ type Since = components["schemas"]["Since"];
 interface Given {
     items?: Item[];
     files?: Record<string, Answered<ChangedFile[]>>;
-    drawers?: Record<string, Partial<Omit<AgentDrawers, "calls">>>;
+    drawers?: Record<string, Partial<AgentDrawers>>;
     running?: Record<string, Running>;
     paths?: Record<string, string>;
 }
@@ -40,7 +40,7 @@ function shownOf(given: Given): Shown {
         drawers: new Map(
             Object.entries(given.drawers ?? {}).map(([key, each]) => [
                 key,
-                { entries: [], tasks: [], usage: null, exchanged: null, since: null, ...each, calls: new Map() },
+                { tasks: [], usage: null, since: null, ...each },
             ]),
         ),
         running: new Map(Object.entries(given.running ?? {})),
