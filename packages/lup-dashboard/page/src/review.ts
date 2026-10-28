@@ -58,7 +58,7 @@ import {
 import { SET_IN, above, citedOn, editedOf, markerEnd, passageOf, type Citation, type Row as Beside, type RowKind } from "./exchange";
 import { around } from "./folds";
 import type { components } from "./generated/api";
-import type { DrawerKind, FoldKind, ReviewPlace } from "./keys";
+import type { DrawerKind, FoldKind } from "./keys";
 import { adopted, kindOf, type Merged } from "./looks";
 import {
     blockId,
@@ -72,7 +72,6 @@ import {
     type Drawers,
     type Instance,
     type Mounted,
-    type Offer,
     type Remote,
     type Running,
     type Shown,
@@ -436,7 +435,7 @@ export interface Laid {
     drawn: Drawn[];
 }
 
-export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], parked: [] };
+export const EMPTY: Draft = { comments: [], letters: [], remarks: [], done: [], declined: [], parked: [], marks: [] };
 
 /** Return what names an item among the folds' owners: its number; a drawer: its kind and whose it is. */
 export function ownerOf(owner: { item: Item } | { drawer: DrawerKind; conversation: Conversation }): string {
@@ -681,20 +680,6 @@ export function news(item: Item): boolean {
 /** Whether an item is a write that landed flagged, which the review shows in its agent's "since you approved" drawer rather than as an item (`docs/dashboard.md`, *The review*). */
 export function flag(item: Item): boolean {
     return item.rank.name === "flag";
-}
-
-/** What Space a or Space x does on an item: answer it, or nothing. */
-export type Answering = { kind: "answer" } | { kind: "nothing" };
-
-/** Return what Space a or Space x does on `item`: approve or decline an approval or a held change; on any other item, nothing. */
-export function answering(item: Item): Answering {
-    switch (item.reason.reason) {
-        case "approval":
-        case "held":
-            return { kind: "answer" };
-        default:
-            return { kind: "nothing" };
-    }
 }
 
 /**
@@ -1178,7 +1163,11 @@ export function laid(
     arranging: Arranging = {},
 ): Laid {
     const parked = draft.parked ?? [];
-    const done = draft.done ?? [];
+    // Marked done or declined, an item folds; and a block marked done, as a file marked reviewed (`grammar.ts`).
+    const settling = [...(draft.done ?? []), ...(draft.declined ?? [])];
+    const markedDone = new Set((draft.marks ?? []).filter((each) => each.verb === "done").map((each) => each.block));
+    // The folds a mark or what's left for later folds, which start so whatever their kind says.
+    const byMarks = new Set<Fold>();
     // What's written, each with its id; and, by its id, what of it is anchored to its block, or kept on what it's on
     // whole, as it's laid out, having been drafted before it was.
     const named = identified(draft);
@@ -1242,6 +1231,14 @@ export function laid(
                 node.to = Math.max(end, group.banner.to);
             }
         });
+    }
+    // Each fold starts as its kind says where it says (`Kind.startsOpen`, a person's layer's), else as its view laid it
+    // out; one a mark folded stays folded.
+    for (const fold of [...regions, ...laidDrawers].flatMap((each) => each.folds).concat(groups.flatMap((each) => (each.fold === null ? [] : [each.fold])))) {
+        const starts = kindOf(fold.kind)?.startsOpen ?? null;
+        if (starts !== null && !byMarks.has(fold)) {
+            fold.closed = !starts;
+        }
     }
     const text = w.text;
     const asLaid = wrote.map((each) => converting.get(writtenId(each)) ?? each);
@@ -1581,9 +1578,14 @@ export function laid(
             }
         }
         frame("context", contextFrom);
-        // The item whole folds under its header, what folds within it inside: folded once it's marked read, or left for later.
-        const closed = isParked || done.includes(item.number);
-        into.folds.push({ of, kind: "item", name: "", label: head, closed, summary: headed, from: headed.to, to: w.at - 1, scope: true });
+        // The item whole folds under its header, what folds within it inside: folded once it's left for later, or marked
+        // done or declined, but where it holds what the operator wrote, which stays in view until it's sent.
+        const closed = isParked || (settling.includes(item.number) && into.blocks.length === 0);
+        const whole: Fold = { of, kind: "item", name: "", label: head, closed, summary: headed, from: headed.to, to: w.at - 1, scope: true };
+        into.folds.push(whole);
+        if (closed) {
+            byMarks.add(whole);
+        }
         const placedItem = part(id, "item", headed.from, w.at - 1, { children });
         w.line("", `${id} end`);
         regions.push({ item, body: view, named: `${cited(item.number)} ${namedBy(summary)}`, of, header: headed, said: said_, changed, ...into });
@@ -1805,6 +1807,13 @@ export function laid(
                         const span = into.filed[before];
                         if (span !== undefined) {
                             within.push(part(id, "block", span.from, span.to, { block }));
+                            // Marked reviewed, it folds under its header, but where it holds what the operator wrote.
+                            const writes = into.blocks.some((each) => each.from >= span.from && each.from <= span.to);
+                            const own = into.folds.find((each) => each.kind === "file" && each.summary.from === span.from);
+                            if (own !== undefined && markedDone.has(id) && !writes) {
+                                own.closed = true;
+                                byMarks.add(own);
+                            }
                         }
                         break;
                     }
@@ -1972,28 +1981,6 @@ export function barsOf(text: string, bars: readonly Bar[]): Map<number, string> 
     return new Map([...lines].map(([at, each]) => [at, `bar-${Math.min(each.depth, 3)} barred-${each.kind}`]));
 }
 
-/** Return the first of `offers` answering `verb` that runs at once, as each the page's own views offers does until #247; none where none does. */
-export function offeredOf(offers: readonly Offer[], verb: string): Offer | undefined {
-    return offers.find((each) => each.verb === verb && each.runs === "once");
-}
-
-/** Return the innermost of a view's blocks laid out at `position`, as the review's tree has it; none where no block is. */
-export function viewBlockAt(laidOut: Laid, position: number): Placed | undefined {
-    let found: Placed | undefined;
-    const walk = (parts: readonly Placed[]) => {
-        for (const each of parts) {
-            if (position >= each.from && position <= each.to) {
-                if (each.kind === "block") {
-                    found = each;
-                }
-                walk(each.children);
-            }
-        }
-    };
-    walk(laidOut.nodes);
-    return found;
-}
-
 /** Return where going to an item lands: on its first line that matters, as the judge read its files, unless it's folded whole, marked read or left for later; else on its header. */
 export function arrival(region: Region): number {
     const whole = region.folds.some((each) => each.kind === "item" && each.closed);
@@ -2021,7 +2008,7 @@ export function stepped(stops: number[], line: number, forward: boolean): number
  * `draft`, which settles it until the reply is sent.
  */
 export function toAnswer(item: Item, draft: Draft): boolean {
-    const settled = [...(draft.done ?? []), ...(draft.parked ?? [])];
+    const settled = [...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])];
     return item.rank.name === "waiting on you" && !settled.includes(item.number);
 }
 
@@ -2055,7 +2042,7 @@ export function tallied(items: Item[], draft: Draft, reviewed: string | null | u
     if (items.length === 0) {
         return "";
     }
-    const settled = [...(draft.done ?? []), ...(draft.parked ?? [])];
+    const settled = [...(draft.done ?? []), ...(draft.declined ?? []), ...(draft.parked ?? [])];
     const open = items.filter((each) => !settled.includes(each.number));
     const answering = open.filter((each) => toAnswer(each, draft)).length;
     const arrived = open.filter((each) => fresh(each, reviewed)).length;
@@ -2111,39 +2098,6 @@ export function groupAt(laidOut: Laid, position: number): Group | undefined {
 /** Return the group `position` is in, on its banner, its items or its drawers. */
 export function groupAround(laidOut: Laid, position: number): Group | undefined {
     return lastFrom(laidOut.groups, (each) => each.banner.from, position);
-}
-
-/** Return where the cursor at `head` is, outside insert mode, for the line of keys: what it's on, by what the keys there do. */
-export function placeAt(laidOut: Laid, head: number): Exclude<ReviewPlace, "insert"> {
-    if (laidOut.text === "") {
-        return "nothing";
-    }
-    if (blockAt(laidOut, head) !== undefined) {
-        return "written";
-    }
-    const group = groupAt(laidOut, head);
-    if (group !== undefined) {
-        return group.conversation === null ? "approvals" : "banner";
-    }
-    const drawer = drawerAt(laidOut, head);
-    if (drawer !== undefined) {
-        if ((head >= drawer.header.from && head <= drawer.header.to) || drawer.kind === "tasks") {
-            return "drawer";
-        }
-        if (drawer.kind === "since") {
-            return codeAt(drawer, head) !== undefined ? "since" : reviewedAt(drawer, head) !== undefined ? "reviewed" : "aside";
-        }
-        return lineAt(drawer, head) !== undefined ? "words" : "aside";
-    }
-    const region = regionAt(laidOut, head);
-    if (region === undefined || asideAt(region, head) !== undefined) {
-        return "aside";
-    }
-    const reason = region.item.reason.reason;
-    if (codeAt(region, head) !== undefined) {
-        return "file";
-    }
-    return reason === "approval" || reason === "held" ? "change" : "item";
 }
 
 /** One part of what the header over the review says: whom what's being written goes to, the group, or a fold the cursor is in, by its kind. */
@@ -2598,29 +2552,13 @@ export function quotedAt(laidOut: Laid, scope: Scope, written: Written): Span | 
     return { from: within(first, quote.start), to: within(last, seat.first === seat.last ? quote.end : endInLast(quote)) };
 }
 
-/**
- * Return `draft` with `number` in `list` if it wasn't, and out of it if it was. Put in one list, it leaves the other:
- * an item marked read is no longer left for later, which would keep it out of what's sent (`covered`), and an item
- * left for later is no longer marked read. One a draft kept from before holds in both is taken out of the other alone,
- * so the key does what it says the first time.
- */
-export function toggled(draft: Draft, list: "done" | "parked", number: number): Draft {
-    const present = draft[list] ?? [];
-    const other = list === "done" ? "parked" : "done";
-    const elsewhere = draft[other] ?? [];
-    if (present.includes(number) && !elsewhere.includes(number)) {
-        return { ...draft, [list]: present.filter((each) => each !== number) };
-    }
-    const kept = present.includes(number) ? present : [...present, number];
-    return { ...draft, [list]: kept, [other]: elsewhere.filter((each) => each !== number) };
-}
-
-/** Return the items a draft answers: each with a comment that says something, or marked done, but the parked ones. */
+/** Return the items a draft answers: each with a comment that says something, marked done or declined, but the parked ones. */
 export function covered(draft: Draft): number[] {
     const parked = draft.parked ?? [];
     const mentioned = [
         ...(draft.comments ?? []).filter((each) => each.text.trim() !== "").map((each) => each.item),
         ...(draft.done ?? []),
+        ...(draft.declined ?? []),
     ];
     return [...new Set(mentioned)].filter((each) => !parked.includes(each)).sort((a, b) => a - b);
 }

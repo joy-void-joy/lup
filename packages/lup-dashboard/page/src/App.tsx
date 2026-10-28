@@ -3,9 +3,10 @@
 // is doing, what it's working on and its context, its drawers at the group's end
 // holding its tasks, what its branch changed since the operator approved it and
 // its whole conversation; the operator's reply written into it,
-// their messages to agents and their remarks in the drawers among it, and a line
-// saying what the reply covers and who it reaches: every agent it covers or
-// writes to, each getting all of it. The palette (Ctrl+K) goes to an agent's
+// their messages to agents and their remarks in the drawers among it, and what
+// they mark, and a line saying what the next Ctrl+Enter sends, to each agent it
+// reaches, each getting all of it, and what it marks; Ctrl+Enter sends the
+// inbox's part, then applies each other mark (`sent`). The palette (Ctrl+K) goes to an agent's
 // group. Each agent's record is read at each of its hooks the host hears, which
 // the listing watched says (`Talker.activity`), and as its conversation drawer
 // opens, for its banner and its drawers, each call read whole as its fold opens,
@@ -13,16 +14,18 @@
 // since the operator last saw it as a call of its that may have written ends and
 // as its drawer opens, with the version shown, so the host answers without the
 // files where nothing changed, and laid out as it comes, live; each a minute
-// apart at most; a file marked reviewed there a line at once, as the host's
-// answer confirms or brings it back (`docs/dashboard.md`, *The review*, *The
-// drawers*).
+// apart at most; a file marked reviewed there, as the reply is sent, a line at
+// once, as the host's answer confirms or brings it back (`docs/dashboard.md`,
+// *The review*, *The drawers*).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { everyone, launches, ring, running, type Activity, type Agent, type Running } from "./agents";
 import { ask, type Asked, type Replied } from "./api";
 import { cited } from "./comments";
 import { useNow, useSame, useViews, useWatched } from "./hooks";
-import { REVIEW_PLACES, reviewKeys, type ReviewPlace } from "./keys";
+import type { Marked } from "./grammar";
+import { feed } from "./editor";
+import { reviewKeys, type Here } from "./keys";
 import { Keys } from "./Keys";
 import { adopt, merged } from "./looks";
 import { instanceOf, type Instance } from "./views";
@@ -33,7 +36,6 @@ import { Review, type DrawerKind, type Jump } from "./Review";
 import { marked, sameShown, type Marking } from "./since";
 import {
     UNREAD,
-    answer,
     changing,
     covered,
     EMPTY,
@@ -149,8 +151,8 @@ export function App() {
     const [said, setSaid] = useState<string | null>(null);
     const [demo, setDemo] = useState(false);
     const [inserting, setInserting] = useState(false);
-    // Where the review's cursor is, and whether the list of every key is open: what the line of keys says.
-    const [place, setPlace] = useState<Exclude<ReviewPlace, "insert">>("nothing");
+    // What the review's cursor is on and what each verb would do to it, and whether the list of every key is open: what the line of keys says.
+    const [here, setHere] = useState<Here>({ on: "nothing waiting", reached: [] });
     const [listing, setListing] = useState(false);
     const openList = useCallback(() => setListing(true), []);
     // The keys of a chord begun in the review, whose following keys the line of keys shows.
@@ -171,7 +173,7 @@ export function App() {
         adopt(made);
         return made;
     }, [declared]);
-    const parts = useMemo(() => reviewKeys(looks.kinds), [looks]);
+    const parts = useMemo(() => reviewKeys(looks.kinds, looks.verbs), [looks]);
     // A fold kind of another repository's taking a letter one already took is refused it, and said.
     useEffect(() => {
         if (looks.refused.length > 0) {
@@ -320,26 +322,24 @@ export function App() {
     );
     const main = useRef<HTMLElement>(null);
 
-    /** Turn the operator's switch for the agent `conversation` is: whether each flagged write of it and its subagents is held. */
-    function hold(conversation: InboxConversation) {
-        const agent = live.find((each) => each.key === whose(conversation));
+    /** Return the conversation running the switch `argument` turns is of, by its launch, session and subagent; none for one not running. */
+    function holderOf(argument: { launch?: string; session?: string; agent?: string | null }): Live | undefined {
+        return live.find((each) => each.launch.launch === argument.launch && each.talker.session === argument.session && (each.talker.agent ?? null) === (argument.agent ?? null));
+    }
+
+    /** Turn the operator's switch as the mark `argument` recorded asks (`set-holding`): whether each flagged write of an agent and its subagents is held. Return what came of it, and whether it was turned. */
+    async function holding(argument: { launch?: string; session?: string; agent?: string | null; on?: boolean }): Promise<{ ok: boolean; said: string }> {
+        const agent = holderOf(argument);
         if (agent === undefined) {
-            setSaid("The switch is turned on an agent running.");
-            return;
+            return { ok: false, said: "the switch is turned on an agent running" };
         }
-        const on = agent.talker.holding !== true;
-        const { session, agent: subagent, path } = agent.talker;
-        void ask({ kind: "set-holding", launch: agent.launch.launch, session, agent: subagent ?? null, on }).then((answer) => {
-            if (answer.kind === "refused") {
-                setSaid(answer.error);
-                return;
-            }
-            setSaid(
-                on
-                    ? `Each flagged write of ${path} and its subagents is held for your answer.`
-                    : `${path}'s flagged writes land again, flagged.`,
-            );
-        });
+        const on = argument.on === true;
+        const answer = await ask({ kind: "set-holding", launch: agent.launch.launch, session: agent.talker.session, agent: agent.talker.agent ?? null, on });
+        if (answer.kind === "refused") {
+            return { ok: false, said: answer.error };
+        }
+        const path = agent.talker.path;
+        return { ok: true, said: on ? `each flagged write of ${path} and its subagents held for your answer` : `${path}'s flagged writes landing again, flagged` };
     }
 
     useEffect(() => {
@@ -589,13 +589,14 @@ export function App() {
     );
 
     /**
-     * Mark files of an agent's branch reviewed at the versions shown, approving their flags where they stand so: each a
-     * reviewed line at once, the host's answer saying what came of it. Where the drawer stood as the page shows it, the
-     * answer is the drawer as it stands, taken in; else it's read anew, bringing back each file that moved since it was
-     * shown, its flags waiting. Refused, each is as it was.
+     * Mark files of an agent's branch reviewed at the versions shown, approving their flags where they stand so, as the
+     * reply is sent: each a reviewed line at once, the host's answer saying what came of it. Where the drawer stood as
+     * the page shows it, the answer is the drawer as it stands, taken in; else it's read anew, bringing back each file
+     * that moved since it was shown, its flags waiting. Refused, each is as it was. Return what came of it, and whether
+     * the host marked them.
      */
     const reviewSince = useCallback(
-        (conversation: InboxConversation, files: Viewed[]) => {
+        async (conversation: InboxConversation, files: Viewed[]): Promise<{ ok: boolean; said: string }> => {
             const key = whose(conversation);
             const agent = live.find((each) => each.key === key);
             const was = shown.current.get(key) ?? null;
@@ -604,86 +605,117 @@ export function App() {
             marking.current.set(key, [...(marking.current.get(key) ?? []), ...mine]);
             showSince(key);
             const request: Asked = { kind: "policy-review-since", conversation, files, seen: was?.version ?? null };
-            void answered(request, (answer) => (answer.kind === "policy-reviewed" ? answer : null)).then(async (reply) => {
-                if ("refused" in reply) {
-                    setSaid(`Not marked reviewed: ${reply.refused}`);
-                } else {
-                    const answer = reply.shown;
-                    setSaid(reviewedSaid(answer.reviewed, answer.approved ?? [], answer.moved ?? []));
-                    if (was !== null && answer.version != null && shown.current.get(key) === was) {
-                        const marked = new Map((answer.files ?? []).map((each) => [each.path, each]));
-                        shown.current.set(key, { ...was, version: answer.version, files: (was.files ?? []).map((each) => marked.get(each.path) ?? each) });
-                    } else if (agent !== undefined) {
-                        await since(agent, true);
-                    }
+            const reply = await answered(request, (answer) => (answer.kind === "policy-reviewed" ? answer : null));
+            let came: { ok: boolean; said: string };
+            if ("refused" in reply) {
+                came = { ok: false, said: `not marked reviewed: ${reply.refused}` };
+            } else {
+                const answer = reply.shown;
+                came = { ok: true, said: reviewedSaid(answer.reviewed, answer.approved ?? [], answer.moved ?? []) };
+                if (was !== null && answer.version != null && shown.current.get(key) === was) {
+                    const marked = new Map((answer.files ?? []).map((each) => [each.path, each]));
+                    shown.current.set(key, { ...was, version: answer.version, files: (was.files ?? []).map((each) => marked.get(each.path) ?? each) });
+                } else if (agent !== undefined) {
+                    await since(agent, true);
                 }
-                const left = (marking.current.get(key) ?? []).filter((each) => !mine.includes(each));
-                if (left.length === 0) {
-                    marking.current.delete(key);
-                } else {
-                    marking.current.set(key, left);
-                }
-                showSince(key);
-            });
+            }
+            const left = (marking.current.get(key) ?? []).filter((each) => !mine.includes(each));
+            if (left.length === 0) {
+                marking.current.delete(key);
+            } else {
+                marking.current.set(key, left);
+            }
+            showSince(key);
+            return came;
         },
         [live, since, showSince],
     );
 
-    const drafted = useRef(draft);
-    drafted.current = draft;
-
-    // An approval or a held change answered, the comments written under it going with the answer, each
-    // under what it quotes, and off the draft: a held change's agent reads them with its yes or no, and
-    // the session whose push asked an approval reads them as a note.
-    const approve = useCallback(
-        (number: number, approved: boolean) => {
-            const now = drafted.current;
-            const comment = answer((now.comments ?? []).filter((each) => each.item === number));
-            void ask({ kind: "inbox-answer-approval", number, approved, comment }).then((answer) => {
-                if (answer.kind === "refused") {
-                    setSaid(answer.error);
-                    return;
+    /**
+     * Apply each mark of `marks`, as the reply is sent: the files of "since you approved" marked reviewed together, one
+     * asking for each agent, and each agent's switch turned. Return the ids of those applied, and what came of each;
+     * one the host refused, or no request answers yet, stays drafted, said.
+     */
+    // lup: defer(issue=113, why="the page sends each mark's request at Ctrl+Enter until a module's actions are a door: then Ctrl+Enter has the host call each mark's declared action in the repository's process, so a send can't stop partway")
+    async function applying(marks: readonly Marked[]): Promise<{ applied: string[]; said: string[] }> {
+        const applied: string[] = [];
+        const said: string[] = [];
+        const reviews = new Map<string, { conversation: InboxConversation; files: Viewed[]; ids: string[] }>();
+        for (const mark of marks) {
+            switch (mark.action) {
+                case "policy-review-since": {
+                    const argument = mark.argument as { conversation: InboxConversation; files: Viewed[] };
+                    const key = whose(argument.conversation);
+                    const was = reviews.get(key) ?? { conversation: argument.conversation, files: [], ids: [] };
+                    const paths = new Set(was.files.map((each) => each.path));
+                    reviews.set(key, { ...was, files: [...was.files, ...argument.files.filter((each) => !paths.has(each.path))], ids: [...was.ids, mark.id] });
+                    break;
                 }
-                setSaid(`${cited(number)} ${approved ? "approved" : "declined"}.`);
-                change({ ...now, comments: (now.comments ?? []).filter((each) => each.item !== number) });
-            });
-        },
-        [change],
-    );
+                case "set-holding": {
+                    const came = await holding(mark.argument as { launch?: string; session?: string; agent?: string | null; on?: boolean });
+                    said.push(came.said);
+                    if (came.ok) {
+                        applied.push(mark.id);
+                    }
+                    break;
+                }
+                default:
+                    said.push(`${mark.says}: nothing applies it yet, kept drafted`);
+            }
+        }
+        for (const each of reviews.values()) {
+            const came = await reviewSince(each.conversation, each.files);
+            said.push(came.said);
+            if (came.ok) {
+                applied.push(...each.ids);
+            }
+        }
+        return { applied, said };
+    }
 
+    /**
+     * Send the reply: the draft kept as it stands, then its part the inbox sends, the comments, messages and remarks and
+     * each item marked done, declined or read (`inbox-send-draft`), then each other mark applied (`applying`), and the
+     * draft kept without those applied. Where the inbox refuses its part, nothing is sent and every mark stays; where a
+     * mark is refused after, what came before is sent, and that mark stays drafted, said.
+     */
     async function sent() {
         if (keeping.current !== null) {
             clearTimeout(keeping.current);
         }
         // What's sent is what the host keeps: a draft it refuses to keep isn't sent, lest the last one kept go instead.
-        const kept = await ask({ kind: "inbox-keep-draft", draft: pruned(draft) });
+        const now = pruned(draft);
+        const kept = await ask({ kind: "inbox-keep-draft", draft: now });
         if (kept.kind === "refused") {
             setSaid(kept.error);
             return;
         }
-        const answer = await ask({ kind: "inbox-send-draft" });
-        if (answer.kind === "refused") {
-            setSaid(answer.error);
-            return;
-        }
-        if (answer.kind === "inbox-reviewed") {
-            const list = (items: { number: number }[]) => items.map((each) => cited(each.number)).join(", ");
-            const approved = answer.approved ?? [];
-            const noted = answer.noted ?? [];
-            const kept = answer.kept ?? [];
-            const done = [
-                ...answer.items.map((each) => `${cited(each.number)} to ${called(each.recipient)}`),
-                ...(approved.length === 0 ? [] : [`approved ${list(approved)}`]),
-                ...noted.map((each) => `comments to ${called(each.recipient)} as ${cited(each.number)}`),
-                ...(kept.length === 0 ? [] : [`comments on ${kept.map(cited).join(", ")} kept: no session's push asked it`]),
-            ];
-            setSaid(`Sent: ${done.join("; ") || "nothing new"}.`);
+        const told: string[] = [];
+        if (covered(now).length > 0 || messages(now).length > 0 || remarks(now).length > 0) {
+            const answer = await ask({ kind: "inbox-send-draft" });
+            if (answer.kind === "refused") {
+                setSaid(answer.error);
+                return;
+            }
+            if (answer.kind === "inbox-reviewed") {
+                told.push(...reviewSaid(answer, called));
+            }
         }
         const after = await ask({ kind: "inbox-draft" });
-        if (after.kind === "inbox-drafted") {
-            setDraft(after.draft);
-            setEpoch((before) => before + 1);
+        let left = after.kind === "inbox-drafted" ? after.draft : now;
+        const marks = left.marks ?? [];
+        if (marks.length > 0) {
+            const { applied, said: came } = await applying(marks);
+            told.push(...came);
+            left = { ...left, marks: marks.filter((each) => !applied.includes(each.id)) };
+            const keptAfter = await ask({ kind: "inbox-keep-draft", draft: left });
+            if (keptAfter.kind === "refused") {
+                told.push(keptAfter.error);
+            }
         }
+        setSaid(`Sent: ${told.join("; ") || "nothing"}.`);
+        setDraft(left);
+        setEpoch((before) => before + 1);
     }
 
     /** Go to an agent's group, as the palette asks. */
@@ -697,43 +729,7 @@ export function App() {
         [live],
     );
 
-    const numbers = covered(draft);
-    const commented = numbers.filter((number) => (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== ""));
-    const coveredItems = waiting.filter((each) => numbers.includes(each.number));
-    const yesOrNo = (item: Item) => item.reason.reason === "approval" || item.reason.reason === "held";
-    // Approved by the send: an approval or a held change marked read alone, and a held change
-    // commented on, its comments going with the yes.
-    const approving = coveredItems.filter(
-        (each) => yesOrNo(each) && (each.reason.reason === "held" || !commented.includes(each.number)),
-    );
-    // An approval commented on stays unanswered, its comments going to the session whose push asked it.
-    const unanswered = coveredItems.filter((each) => each.reason.reason === "approval" && commented.includes(each.number));
-    const pushers = unanswered.flatMap((each) =>
-        each.reason.reason === "approval" && each.reason.pushed_by != null ? [called(each.reason.pushed_by)] : [],
-    );
-    // Told: the agents with a comment on their messages or questions, or a question among them,
-    // which an answer lets go; a message only marked read reaches no one.
-    const told = coveredItems.filter(
-        (each) => !yesOrNo(each) && (commented.includes(each.number) || each.reason.reason === "question"),
-    );
-    // Written to: each agent a message under its banner, or a remark in its drawers, is for, which the reply reaches whatever it covers.
-    const letters = messages(draft);
-    const remarked = remarks(draft);
-    const writtenTo = [...new Set(letters.map((each) => called(each.to)))];
-    const remarkedTo = [...new Set(remarked.map((each) => called(each.to)))];
-    const reached = [...new Set([...writtenTo, ...remarkedTo, ...told.map(named), ...pushers])];
-    const onMessages = commented.filter((number) => told.some((each) => each.number === number));
-    const read = coveredItems.filter((each) => !yesOrNo(each) && !commented.includes(each.number)).map((each) => each.number);
-    const citing = (list: number[]) => list.map(cited).join(", ");
-    const replying = numbers.length > 0 || letters.length > 0 || remarked.length > 0;
-    const covering = [
-        ...(writtenTo.length === 0 ? [] : [`${letters.length === 1 ? "a message" : "messages"} to ${writtenTo.join(", ")}`]),
-        ...(remarkedTo.length === 0 ? [] : [`${remarked.length === 1 ? "a remark" : `${remarked.length} remarks`} to ${remarkedTo.join(", ")}`]),
-        ...(onMessages.length === 0 ? [] : [`comments on ${citing(onMessages)}`]),
-        ...(read.length === 0 ? [] : [`read ${citing(read)}`]),
-        ...(approving.length === 0 ? [] : [`approving ${citing(approving.map((each) => each.number))}`]),
-        ...(unanswered.length === 0 ? [] : [`comments on ${citing(unanswered.map((each) => each.number))}, left unanswered`]),
-    ];
+    const going = toSend(draft, waiting, { called, named, holder: (argument) => holderOf(argument)?.talker.path ?? null });
     return (
         <div className="layout">
             <header className="bar">
@@ -767,19 +763,16 @@ export function App() {
                         around={around}
                         drawers={drawers}
                         send={() => {
-                            if (replying) {
+                            if (going.length > 0) {
                                 void sent();
                             }
                         }}
-                        approve={approve}
-                        reviewSince={reviewSince}
-                        hold={hold}
                         opened={opened}
                         jump={jump}
                         say={setSaid}
                         inserting={setInserting}
                         epoch={epoch}
-                        placed={setPlace}
+                        placed={setHere}
                         pending={setChord}
                         list={openList}
                         reviewed={inbox.reply?.kind === "inbox-items" ? (inbox.reply.reviewed ?? null) : null}
@@ -796,16 +789,11 @@ export function App() {
                         load={load}
                     />
                     <div className="status">
-                        {!replying ? (
+                        {going.length === 0 ? (
                             <span className="muted">No reply drafted.</span>
                         ) : (
                             <span>
-                                Your reply: {covering.join("; ")}
-                                {reached.length === 0
-                                    ? ", telling no one"
-                                    : ` — to ${reached.join(", ")}${reached.length > 1 ? ", each getting all of it" : ""}`}
-                                .{" "}
-                                <kbd>Ctrl</kbd> <kbd>Enter</kbd> sends.
+                                Your reply: {going.join(" · ")}. <kbd>Ctrl</kbd> <kbd>Enter</kbd> sends.
                             </span>
                         )}
                         {(draft.parked ?? []).length === 0 ? null : (
@@ -814,8 +802,11 @@ export function App() {
                     </div>
                     <Keys
                         parts={parts}
-                        place={inserting ? "insert" : place}
-                        places={REVIEW_PLACES}
+                        here={here}
+                        inserting={inserting}
+                        run={(keys) => {
+                            feed(keys);
+                        }}
                         open={listing}
                         setOpen={setListing}
                         pending={chord}
@@ -852,6 +843,102 @@ function bannerOf(agent: Live): string {
     return [last(agent.launch.repository), last(agent.launch.worktree), agent.talker.path].join(" · ");
 }
 
+/** How the line under the review names who a part of the reply reaches: a conversation as it's called, an item's sender, and the agent a switch is of, by its path. */
+interface Naming {
+    called: (party: Item["sender"]) => string;
+    named: (item: Item) => string;
+    holder: (argument: { launch?: string; session?: string; agent?: string | null }) => string | null;
+}
+
+/**
+ * Say what the next Ctrl+Enter sends, by where each part goes (#264, as the page knows it): to each agent the reply
+ * reaches, what reaches it, a message, a remark, the comments on its items, a question answered; then what's marked,
+ * each item read, approved and declined, each agent's files of "since you approved" reviewed and its writes held.
+ * Nothing where nothing's drafted.
+ */
+export function toSend(draft: Draft, waiting: readonly Item[], naming: Naming): string[] {
+    const numbers = covered(draft);
+    const commented = numbers.filter((number) => (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== ""));
+    const items = waiting.filter((each) => numbers.includes(each.number));
+    const declined = items.filter((each) => (draft.declined ?? []).includes(each.number));
+    const done = (item: Item) => (draft.done ?? []).includes(item.number);
+    const asked = (item: Item) => item.reason.reason === "approval" || item.reason.reason === "held";
+    // Approved by the send: an approval or a held change marked done, or only read, and a held change commented on.
+    const approving = items.filter((each) => asked(each) && !declined.includes(each) && (done(each) || each.reason.reason === "held" || !commented.includes(each.number)));
+    const to = new Map<string, string[]>();
+    const reaching = (who: string, what: string) => to.set(who, [...(to.get(who) ?? []), what]);
+    const letters = messages(draft);
+    for (const [who, count] of tallyOf(letters.map((each) => naming.called(each.to)))) {
+        reaching(who, count === 1 ? "a message" : `${count} messages`);
+    }
+    for (const [who, count] of tallyOf(remarks(draft).map((each) => naming.called(each.to)))) {
+        reaching(who, count === 1 ? "a remark" : `${count} remarks`);
+    }
+    for (const item of items) {
+        const words = commented.includes(item.number);
+        if (item.reason.reason === "approval") {
+            // An approval's comments go to the session whose push asked it, unanswered where it's neither marked done nor declined.
+            const pusher = item.reason.pushed_by ?? null;
+            if (words && pusher !== null) {
+                reaching(naming.called(pusher), `comments on ${cited(item.number)}${done(item) || declined.includes(item) ? "" : ", left unanswered"}`);
+            }
+        } else if (words || item.reason.reason === "question") {
+            reaching(naming.named(item), words ? `comments on ${cited(item.number)}` : `answering ${cited(item.number)}`);
+        }
+    }
+    const citing = (list: readonly Item[]) => list.map((each) => cited(each.number)).join(", ");
+    const read = items.filter((each) => !asked(each) && !commented.includes(each.number) && each.reason.reason !== "question");
+    const reviewing = new Map<string, number>();
+    const marked: string[] = [];
+    for (const mark of draft.marks ?? []) {
+        if (mark.action === "policy-review-since") {
+            const argument = mark.argument as { conversation: InboxConversation; files: Viewed[] };
+            const who = naming.called(argument.conversation);
+            reviewing.set(who, (reviewing.get(who) ?? 0) + argument.files.length);
+        } else if (mark.action === "set-holding") {
+            const argument = mark.argument as { launch?: string; session?: string; agent?: string | null; on?: boolean };
+            const who = naming.holder(argument) ?? "an agent no longer running";
+            marked.push(argument.on === true ? `holding ${who}'s flagged writes` : `letting ${who}'s flagged writes land`);
+        } else {
+            marked.push(mark.says);
+        }
+    }
+    return [
+        ...[...to].map(([who, what]) => `to ${who}: ${what.join(", ")}`),
+        ...(read.length === 0 ? [] : [`read ${citing(read)}`]),
+        ...(approving.length === 0 ? [] : [`approving ${citing(approving)}`]),
+        ...(declined.length === 0 ? [] : [`declining ${citing(declined)}`]),
+        ...[...reviewing].map(([who, count]) => `${count === 1 ? "a file" : `${count} files`} of ${who} reviewed`),
+        ...marked,
+    ];
+}
+
+/** Return how many times each of `names` is said, in the order first said. */
+function tallyOf(names: readonly string[]): Map<string, number> {
+    const counted = new Map<string, number>();
+    for (const each of names) {
+        counted.set(each, (counted.get(each) ?? 0) + 1);
+    }
+    return counted;
+}
+
+/** Say what sending the inbox's part of the reply did, as the host answered: each review sent and to whom, each item marked read, approved and declined, each note left, and the comments kept. */
+function reviewSaid(answer: Extract<Replied, { kind: "inbox-reviewed" }>, called: (party: Item["sender"]) => string): string[] {
+    const list = (items: readonly { number: number }[]) => items.map((each) => cited(each.number)).join(", ");
+    const approved = answer.approved ?? [];
+    const declined = answer.declined ?? [];
+    const read = answer.read ?? [];
+    const kept = answer.kept ?? [];
+    return [
+        ...answer.items.map((each) => `${cited(each.number)} to ${called(each.recipient)}`),
+        ...(read.length === 0 ? [] : [`read ${read.map(cited).join(", ")}`]),
+        ...(approved.length === 0 ? [] : [`approved ${list(approved)}`]),
+        ...(declined.length === 0 ? [] : [`declined ${list(declined)}`]),
+        ...(answer.noted ?? []).map((each) => `comments to ${called(each.recipient)} as ${cited(each.number)}`),
+        ...(kept.length === 0 ? [] : [`comments on ${kept.map(cited).join(", ")} kept: no session's push asked it`]),
+    ];
+}
+
 /** Say what marking files reviewed came to: how many, the flagged writes approved with them, and those that changed since the version shown, whose flags wait. */
 function reviewedSaid(reviewed: string[], approved: number[], moved: string[]): string {
     const files = reviewed.length === 1 ? (reviewed[0] ?? "") : `${reviewed.length} files`;
@@ -860,7 +947,7 @@ function reviewedSaid(reviewed: string[], approved: number[], moved: string[]): 
         moved.length === 0
             ? ""
             : ` ${moved.length === 1 ? moved[0] : `${moved.length} files`} changed since you read ${moved.length === 1 ? "it" : "them"}: shown with what came, ${moved.length === 1 ? "its" : "their"} flags waiting.`;
-    return `Reviewed ${files}${flags}.${waiting}`;
+    return `reviewed ${files}${flags}${waiting === "" ? "" : `.${waiting}`}`;
 }
 
 /** Whether two of what's held of an agent's drawers say the same: its branch shown the same, and the same tasks and context. */

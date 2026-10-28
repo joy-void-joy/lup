@@ -1,9 +1,10 @@
-import "./fixtures/looks";
+import { LOOKS, STANDING } from "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import type { Folding } from "./comments";
-import { around, aroundOf, depths, foldEdge, levelled, nextFold, ofKind } from "./folds";
+import { around, aroundOf, depths, foldEdge, levelled, nextFold, recursive } from "./folds";
 import type { FoldKind } from "./keys";
+import { adopt, merged, type Looks } from "./looks";
 
 // A text of lines two characters long, line `n` starting at `3n`.
 const start = (line: number) => line * 3;
@@ -35,6 +36,17 @@ describe("the folds the cursor is in", () => {
         expect(around(FOLDS, start(7)).map((each) => each.key)).toEqual(["A", "B", "C", "D"]);
         expect(around(FOLDS, start(4)).map((each) => each.key)).toEqual(["A", "B", "C"]);
         expect(around(FOLDS, start(21))).toEqual([]);
+    });
+
+    it("opens with zO every fold the cursor is in and every one within the innermost, and closes with zC every one it's in", () => {
+        expect(recursive(FOLDS, start(4), true).map((each) => each.key)).toEqual(["A", "B", "C", "D"]);
+        expect(recursive(FOLDS, start(2), true).map((each) => each.key)).toEqual(["A", "B", "C", "D", "E"]);
+        expect(recursive(FOLDS, start(7), false).map((each) => each.key)).toEqual(["A", "B", "C", "D"]);
+        expect(recursive(FOLDS, start(21), true)).toEqual([]);
+        // A call's input and output, read as it opens, isn't opened by zO from around it.
+        const deep = [fold("K", "calls", 0, 10, false), fold("L", "call", 2, 4, true)];
+        expect(recursive(deep, start(0), true).map((each) => each.key)).toEqual(["K"]);
+        expect(recursive(deep, start(3), true).map((each) => each.key)).toEqual(["K", "L"]);
     });
 
     it("sets each as deep as the folds holding it, so its column in the margin is its place among those the cursor is in", () => {
@@ -116,6 +128,17 @@ describe("opening and closing one item's folds", () => {
         expect(levelled(READ, open, false, true).map((each) => each.key)).toEqual(["file", "body", "lines", "context"]);
     });
 
+    it("leaves with `zR` and `zM` the folds of a kind a person's layer says they don't reach, as `zr` still opens them", () => {
+        const kept: Looks = { ...STANDING, folds: (STANDING.folds ?? []).map((each) => (each.name === "lines" ? { ...each, by_all: false } : each)) };
+        adopt(merged({}, kept));
+        try {
+            expect(levelled(READ, closed, true, true).map((each) => each.key)).toEqual(["item", "file", "context"]);
+            expect(levelled(READ, () => false, false, true).map((each) => each.key)).toEqual(["file", "body", "context"]);
+        } finally {
+            adopt(LOOKS);
+        }
+    });
+
     it("finds the innermost fold of a kind the cursor is in, from its summary line, for z f and the kind's letter", () => {
         const at = (key: string) => READ.find((each) => each.key === key)!;
         const lines = at("lines");
@@ -154,13 +177,6 @@ describe("opening and closing one item's folds", () => {
         // `zm` closes the runs, then each exchange, the earliest first.
         expect([false, false, false].map(step)).toEqual([["run 1", "run 2", "run 3"], ["before"], ["first"]]);
         expect(levelled(talk, closed, true, true).map((each) => each.key)).not.toContain("call 1");
-        expect(ofKind(talk, (each) => each.key !== "drawer", "call", false).map((each) => each.key)).toEqual(["call 1"]);
     });
 
-    it("opens with Space z f and a letter each fold of a kind, and the item's own so they're seen; closes with Space z F and the letter", () => {
-        expect(ofKind(READ, closed, "lines", false).map((each) => each.key)).toEqual(["item", "lines"]);
-        expect(ofKind(READ, closed, "body", false).map((each) => each.key)).toEqual(["item"]);
-        expect(ofKind(READ, closed, "body", true).map((each) => each.key)).toEqual(["body"]);
-        expect(ofKind(READ, closed, "lines", true)).toEqual([]);
-    });
 });

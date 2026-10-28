@@ -572,7 +572,9 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
     assert sent.json() == {
         "kind": "inbox-reviewed",
         "items": [],
+        "read": [52],
         "approved": [],
+        "declined": [],
         "noted": [],
         "kept": [],
     }
@@ -583,7 +585,9 @@ def test_the_demo_keeps_a_draft_and_sends_it_taking_what_it_covers_off_the_list_
         "letters": [],
         "remarks": [],
         "done": [],
+        "declined": [],
         "parked": [53],
+        "marks": [],
     }
 
 

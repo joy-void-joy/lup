@@ -23,8 +23,8 @@ import {
     pastHidden,
     reaching,
     rewritten,
-    SPACED,
     stepped,
+    verbKeys,
     UNPRESSED,
     visit,
     went,
@@ -37,8 +37,9 @@ import { LOOKS } from "./fixtures/looks";
 import { reviewKeys } from "./keys";
 import { lettered } from "./looks";
 
-const REVIEW_KEYS = reviewKeys(LOOKS.kinds);
 import { markdown, source, sourced } from "./markdown";
+
+const REVIEW_KEYS = reviewKeys(LOOKS.kinds, LOOKS.verbs);
 
 describe("vim's cursor and the marks the Markdown hides", () => {
     const comment = "a **comment** line";
@@ -391,30 +392,25 @@ describe("a chord begun", () => {
 
 describe("the chords Space leads", () => {
     const LETTERS = lettersOf(LOOKS.kinds);
-    const mapped = new Map([...SPACED, ...LETTERS.filter(([keys]) => keys.startsWith("<Space>"))]);
+    const VERBS = verbKeys(LOOKS.verbs);
+    const mapped = new Map([...VERBS, ...LETTERS.filter(([keys]) => keys.startsWith("<Space>"))]);
     // The kind of fold each letter's action finds as it's pressed.
     const kindOfAction = (action: string | undefined) => (action === undefined ? undefined : `${action.split("-")[0]}-${lettered(action.split("-")[1] ?? "")?.name}`);
 
-    it("opens the folds of a kind with Space z f and its letter, closing them with Space z F and the letter, as vim's fold keys begin with z", () => {
-        expect(["<Space>zff", "<Space>zfb", "<Space>zfu", "<Space>zfc", "<Space>zfs"].map((keys) => kindOfAction(mapped.get(keys)))).toEqual([
-            "lupFoldOpen-file",
-            "lupFoldOpen-body",
-            "lupFoldOpen-lines",
-            "lupFoldOpen-context",
-            "lupFoldOpen-since",
+    it("selects the folds of a kind fold-wise with Space f and its letter, Space F and it in the whole review, Space z leading nothing", () => {
+        expect(["<Space>ff", "<Space>fb", "<Space>fu", "<Space>fc", "<Space>fs"].map((keys) => kindOfAction(mapped.get(keys)))).toEqual([
+            "lupChoose-file",
+            "lupChoose-body",
+            "lupChoose-lines",
+            "lupChoose-context",
+            "lupChoose-since",
         ]);
-        expect(["<Space>zFf", "<Space>zFb", "<Space>zFu", "<Space>zFc", "<Space>zFs"].map((keys) => kindOfAction(mapped.get(keys)))).toEqual([
-            "lupFoldClose-file",
-            "lupFoldClose-body",
-            "lupFoldClose-lines",
-            "lupFoldClose-context",
-            "lupFoldClose-since",
-        ]);
-        // Space z, Space z f and Space z F lead, doing nothing of their own; a kind's letter right after Space z, Shift
-        // and the letter among them, and Space f, are no chord.
+        // The item's own fold isn't selected so: it's folded by za on its header, and marked from it.
+        expect(mapped.has("<Space>fi")).toBe(false);
+        expect(["<Space>Ff", "<Space>Fu", "<Space>Fd"].map((keys) => kindOfAction(mapped.get(keys)))).toEqual(["lupChooseAll-file", "lupChooseAll-lines", "lupChooseAll-call"]);
+        // Space f and Space F lead, doing nothing of their own; Space z leads nothing any more.
         const keys = [...mapped.keys()];
-        expect(keys.filter((each) => ["<Space>z", "<Space>zf", "<Space>zF"].includes(each) || each.startsWith("<Space>f"))).toEqual([]);
-        expect(keys.filter((each) => each.startsWith("<Space>z") && !each.startsWith("<Space>zf") && !each.startsWith("<Space>zF"))).toEqual([]);
+        expect(keys.filter((each) => ["<Space>f", "<Space>F"].includes(each) || each.startsWith("<Space>z"))).toEqual([]);
     });
 
     it("closes the fold of a kind the cursor is in with z f and its letter, every kind's, the item's own among them", () => {
@@ -433,17 +429,24 @@ describe("the chords Space leads", () => {
         // Each is in the list of keys, and plain zF stays vim's, unmapped.
         const listed = new Set(REVIEW_KEYS.flatMap((part) => part.keys).flatMap((key) => key.keys.split(" ")));
         expect([...around.keys()].every((keys) => listed.has(keys))).toBe(true);
-        expect([...around.keys(), ...SPACED.map(([keys]) => keys)].some((keys) => keys.startsWith("zF"))).toBe(false);
+        expect([...around.keys(), ...VERBS.map(([keys]) => keys)].some((keys) => keys.startsWith("zF"))).toBe(false);
     });
 
-    it("parks an item with Space p, leaving it for later, which no other chord begins", () => {
-        expect(mapped.get("<Space>p")).toBe("lupLater");
-        expect([...mapped.keys()].filter((keys) => keys.startsWith("<Space>p"))).toEqual(["<Space>p"]);
-        expect([...mapped.values()].filter((action) => action === "lupLater")).toHaveLength(1);
+    it("gives each verb Space and its key, the core's and those the modules declare, and no key of vim's", () => {
+        expect(VERBS).toEqual([
+            ["<Space>d", "lupVerb-done"],
+            ["<Space>x", "lupVerb-decline"],
+            ["<Space>s", "lupVerb-send"],
+            ["<Space>c", "lupVerb-comment"],
+            ["<Space>h", "lupVerb-hold"],
+            ["<Space>p", "lupVerb-pause"],
+        ]);
+        // Space a and Space A answered at once before the verbs; they're gone, and `h` is vim's again.
+        expect(["<Space>a", "<Space>A", "h"].filter((keys) => mapped.has(keys))).toEqual([]);
     });
 
     it("maps each chord the list of keys names, once, and leads each chord it names further", () => {
-        expect(new Set(SPACED.map(([keys]) => keys)).size).toBe(SPACED.length);
+        expect(new Set(VERBS.map(([keys]) => keys)).size).toBe(VERBS.length);
         const listed = REVIEW_KEYS.flatMap((part) => part.keys)
             .flatMap((key) => key.keys.split(" "))
             .filter((keys) => keys.startsWith("␣"))

@@ -3,9 +3,12 @@
 // one, empty or not; their comments written into it, each under the line it's
 // on: Space `c` opens one on the item whole; `o` or Space `c` on a banner, a
 // message to its agent, under the banner; `o` in an agent's drawer, a remark to
-// it. Ctrl+Enter elsewhere than in a comment or a message sends. Space `d`
-// marks an item read, Space `p` parks it, leaving it for later, Space `a` or
-// `x` answers an approval or a held change; `]]` and `[[` go to the next and
+// it. Ctrl+Enter elsewhere than in a comment or a message sends. Space and a
+// verb's key acts on the innermost thing at the cursor it applies to, as a
+// mark in the draft (`grammar.ts`): Space `d` marks an item read, approves an
+// approval or a held change, marks a file of "since you approved" reviewed,
+// Space `x` declines, Space `s` leaves an item for later, Space `h` holds an
+// agent's flagged writes from anywhere in its group; `]]` and `[[` go to the next and
 // previous item, landing on its first line that matters, `]a` and `[a` to the
 // next and previous item to answer, in the order they came, `]c` and `[c` to the
 // next and previous such line. Under an approval or a held change, each file it
@@ -14,16 +17,14 @@
 // triggered; the item's header counts its files by why each is open; under each
 // item, its context. Under each agent's banner, its drawers
 // (`review.ts`): its tasks, what its branch changed since the operator last saw
-// it, live, where Space `a` marks a file reviewed at the version shown and Space
-// `A` every file shown, each line changed since they last looked at its file
+// it, live, where Space `d` marks a file reviewed at the version shown and, on
+// the drawer's line, every file shown, each line changed since they last looked at its file
 // marked (`since.ts`), and its conversation, each call's input and output read
-// as its fold opens;
-// `h` on a banner turns the operator's switch to hold the agent's flagged
-// writes. Each fold has a kind, its letter in the margin beside its summary
+// as its fold opens. Each fold has a kind, its letter in the margin beside its summary
 // line, in the column of its depth, each scope a bar its full height, labelled
 // (`rails.ts`); the context, each run of unchanged lines, each test, data and
 // first approval's file and each drawer, folded until opened, and `zr`, `zm`,
-// `zR`, `zM` and Space `z` act on the item or the drawer the cursor is in. The
+// `zR` and `zM` act on the item or the drawer the cursor is in, Space `f` and a letter selecting every fold of a kind there. The
 // header over the review says where the cursor is: the group, the item or the
 // drawer, the file and the folds it's in, and, while a comment is being
 // written, whom it goes to; at its end, how many items are to answer and how
@@ -47,7 +48,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { tokensOf, within, type Filed, type Matter, type Taken } from "./code";
 import { cited, type Block, type Folding, type Span } from "./comments";
-import { closedAs, folding, hiddenAt, isFolded, mapLetters, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
+import { BARE, chosenKind, closedAs, folding, hiddenAt, isFolded, mapLetters, mapVerbs, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
 import { arrivedLines, arriving, owned, owning, ownersOf, reconcile, settling } from "./reconcile";
 import { clock, ticked, ticking, type Tick } from "./ticking";
 import { doing, since, type Activity } from "./agents";
@@ -58,8 +59,9 @@ import { redrawn, structureMargin, type Labelled, type Structured } from "./rail
 import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
-import { depths, levelled, ofKind } from "./folds";
-import type { DrawerKind, FoldKind, ReviewPlace } from "./keys";
+import { depths, levelled } from "./folds";
+import { chainAt, findNode, isMarked, marking, marksOn, reachOf, reachedIn, type Act } from "./grammar";
+import type { DrawerKind, FoldKind, Here } from "./keys";
 import { kindOf, type Merged } from "./looks";
 import { markerEnd, outdated, unfound } from "./exchange";
 import { source, sourced, without, type Source } from "./markdown";
@@ -69,7 +71,6 @@ import {
     answerAfter,
     citationsOf,
     following,
-    answering,
     arrival,
     blockAt,
     blocksOf,
@@ -80,6 +81,7 @@ import {
     foldKey,
     foldsOf,
     fresh,
+    groupAround,
     groupAt,
     heading,
     isDrawer,
@@ -87,11 +89,9 @@ import {
     isRegion,
     isRemark,
     laid,
-    offeredOf,
     news,
     opened,
     ordered,
-    placeAt,
     quoted,
     quotedAt,
     recipient,
@@ -102,9 +102,7 @@ import {
     sinceFileAt,
     stepped,
     tallied,
-    toggled,
     toKeep,
-    viewBlockAt,
     waited,
     whose,
     withWritten,
@@ -124,7 +122,6 @@ import {
     type Laid,
     type Region,
     type Scope,
-    type Viewed,
     type Where,
     type Written,
 } from "./review";
@@ -152,11 +149,6 @@ interface Props {
     /** What the host has answered of each agent, for its banner and its drawers. */
     drawers: Drawers;
     send: () => void;
-    approve: (number: number, approved: boolean) => void;
-    /** Mark files of an agent's branch reviewed at the versions shown, approving their flags where they stand so. */
-    reviewSince: (conversation: Conversation, files: Viewed[]) => void;
-    /** Turn the operator's switch for an agent: whether each flagged write of it and its subagents is held. */
-    hold: (conversation: Conversation) => void;
     /** Told each drawer the operator opens, so the page reads what it shows. */
     opened: (conversation: Conversation, kind: DrawerKind) => void;
     /** Where the page asks the review to go, as the palette does: an agent's group. */
@@ -167,8 +159,8 @@ interface Props {
     inserting: (yes: boolean) => void;
     /** Changed each time the draft is replaced from outside, as when it's sent: what was done before can't be undone. */
     epoch: number;
-    /** Told where the cursor is, outside insert mode, so the line of keys says what applies there. */
-    placed: (place: Exclude<ReviewPlace, "insert">) => void;
+    /** Told what the cursor is on, outside insert mode, and what each verb would do to it, so the line of keys says it. */
+    placed: (here: Here) => void;
     /** Told the keys of a chord begun, so what may follow is shown. */
     pending: (keys: string) => void;
     /** Open the list of every key. */
@@ -460,6 +452,7 @@ function decorations(
                 fresh(region.item, reviewed) ? "is-new" : "",
                 news(region.item) ? "is-news" : "",
                 (draft.done ?? []).includes(number) ? "is-done" : "",
+                (draft.declined ?? []).includes(number) ? "is-declined" : "",
                 (draft.parked ?? []).includes(number) ? "is-parked" : "",
             ].join(" ");
             marks.push({ from: region.header.from, to: region.header.from, value: Decoration.line({ class: states }) });
@@ -508,6 +501,13 @@ function decorations(
         }
     }
     marks.push(...citing(citationsOf(laidOut)));
+    // Each mark the draft holds beyond the items', on the first line of what it marks, saying what Ctrl+Enter does with it.
+    for (const mark of draft.marks ?? []) {
+        const node = findNode(laidOut.nodes, mark.block);
+        if (node !== undefined) {
+            marks.push({ from: node.from, to: node.from, value: Decoration.line({ class: `is-marked mark-${mark.verb}`, attributes: { "data-mark": mark.says } }) });
+        }
+    }
     marks.sort((a, b) => a.from - b.from || a.to - b.to);
     const builder = new RangeSetBuilder<Decoration>();
     for (const each of marks) {
@@ -633,9 +633,6 @@ export function Review({
     around,
     drawers,
     send,
-    approve,
-    reviewSince,
-    hold,
     opened: told,
     jump,
     say,
@@ -659,6 +656,8 @@ export function Review({
 }: Props) {
     // Where the cursor is, and whether a comment is being written: what the header says.
     const [head, setHead] = useState(0);
+    // The folds a fold-wise selection holds, while there's one: what the line of keys says the keys do to.
+    const choosing = useRef<readonly Folding[] | null>(null);
     const [commenting, setCommenting] = useState(false);
     // Where the groups go: as this page laid them out last, then as the host keeps them for those it didn't
     // (`ordered`), so each keeps its place, across reloads and on each page; and as it last told the host it laid
@@ -727,8 +726,14 @@ export function Review({
         say,
         moved: (at) => {
             setHead(at);
-            placed(placeAt(laidOut, at));
+            if (choosing.current === null) {
+                placed(hereAt(at));
+            }
             left(at);
+        },
+        chosen: (folds) => {
+            choosing.current = folds;
+            placed(folds === null ? hereAt(editor.head()) : hereChosen(folds));
         },
         list,
         pending,
@@ -791,10 +796,11 @@ export function Review({
         // Made once, with the editor.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    // The keys each kind's letter takes, after `zf`, Space `z` `f` and `]`, as the kinds known change.
+    // The keys each kind's letter takes, after `zf`, Space `f` and `F` and `]`, and each verb's after Space, as the looks change.
     useEffect(() => {
         mapLetters(looks.kinds);
         mapScopeKeys(looks.kinds);
+        mapVerbs(looks.verbs);
     }, [looks]);
     // What's laid out now, which a click on a citation, or on the passage of the operator's words it answers, reads.
     const laidNow = useRef(laidOut);
@@ -1067,23 +1073,159 @@ export function Review({
         }
     }, [jump, laidOut]);
 
-    function here() {
-        return regionAt(laidOut, editor.head());
-    }
-
-    /** Mark the item the cursor is in read, or left for later, folding it; or unmark it. */
-    function toggle(list: "done" | "parked") {
-        const region = here();
-        if (region === undefined) {
+    /**
+     * Do what the verb named `name` does where the cursor is (`reachOf`): mark what it reaches in the draft, or take the
+     * mark off where it's marked already, each thing marked folding as the layout says, however the operator left it;
+     * run what runs at once; or say why nothing there takes it. An item left for later goes to the review's end, the
+     * cursor going on to the item after it.
+     */
+    function verb(name: string) {
+        const known = looks.verbs.find((each) => each.name === name);
+        if (known === undefined) {
             return;
         }
-        if (list === "parked") {
-            const at = laidOut.regions.indexOf(region);
-            landing.current = { item: (laidOut.regions[at + 1] ?? region).item.number };
+        const reach = reachOf(laidOut, editor.head(), known, { called });
+        if (reach.on === null) {
+            say(`␣${known.key} ${known.called}: ${reach.why}.`);
+            return;
         }
-        // Marked or unmarked, it folds as that says, however it was left before.
-        kept.current.delete(foldKey({ of: region.of, kind: "item", name: "" }));
-        editor.record(toggled(editor.latest.current, list, region.item.number));
+        for (const each of reach.acts) {
+            if (each.kind === "once") {
+                act(each.offer, each.conversation);
+            }
+        }
+        const now = editor.latest.current;
+        const next = marking(now, reach.acts, name);
+        if (next === now) {
+            return;
+        }
+        for (const each of reach.acts) {
+            unkeep(each);
+        }
+        const leaving = reach.acts.find((each) => each.kind === "item" && each.list === "parked" && !isMarked(now, each, name));
+        if (leaving !== undefined && leaving.kind === "item") {
+            const at = laidOut.regions.findIndex((each) => each.item.number === leaving.number);
+            const after = laidOut.regions.slice(at + 1).find((each) => !(next.parked ?? []).includes(each.item.number));
+            landing.current = after === undefined ? null : { item: after.item.number };
+        }
+        editor.record(next);
+    }
+
+    /**
+     * Do what the verb named `name` does on each of `folds`, a visual selection's, as one mark (`reachedIn`): each thing
+     * one of them holds whole and the verb reaches, marked, or every mark taken off where each is marked already.
+     */
+    function verbOn(name: string, folds: readonly Folding[]) {
+        const known = looks.verbs.find((each) => each.name === name);
+        if (known === undefined) {
+            return;
+        }
+        const acts = reachedIn(laidOut, folds, known, { called });
+        if (acts.length === 0) {
+            say(`␣${known.key} ${known.called}: nothing selected takes it.`);
+            return;
+        }
+        for (const each of acts) {
+            if (each.kind === "once") {
+                act(each.offer, each.conversation);
+            }
+        }
+        const now = editor.latest.current;
+        const next = marking(now, acts, name);
+        if (next === now) {
+            return;
+        }
+        for (const each of acts) {
+            unkeep(each);
+        }
+        const off = acts.every((each) => isMarked(now, each, name));
+        say(`␣${known.key} ${known.called}: ${off ? "unmarked" : "marked"} ${acts.length}, sent with Ctrl+Enter.`);
+        editor.record(next);
+    }
+
+    /** Forget how the operator left the fold of what `act` marks, an item's or a file's, so it folds as the layout says once marked or unmarked. */
+    function unkeep(act: Act) {
+        if (act.kind === "item") {
+            const region = laidOut.regions.find((each) => each.item.number === act.number);
+            if (region !== undefined) {
+                kept.current.delete(foldKey({ of: region.of, kind: "item", name: "" }));
+            }
+            return;
+        }
+        if (act.kind !== "mark") {
+            return;
+        }
+        const node = findNode(laidOut.nodes, act.block);
+        const fold = node === undefined ? undefined : laidFor.folds.find((each) => each.kind === "file" && each.summary.from === node.from);
+        if (fold !== undefined) {
+            kept.current.delete(fold.key);
+        }
+    }
+
+    /**
+     * Return what the line of keys says with the cursor at `at`: what it's on, the innermost thing a verb reaches there,
+     * and what each verb would do, each with what it's on where that's another thing, as on an agent from an item.
+     */
+    function hereAt(at: number): Here {
+        if (laidOut.text === "") {
+            return { on: "nothing waiting", reached: [] };
+        }
+        const reached = looks.verbs.flatMap((each) => {
+            if (each.name === "comment") {
+                const said = commentSays(at);
+                return said === null ? [] : [{ keys: `␣${each.key}`, ...said }];
+            }
+            const reach = reachOf(laidOut, at, each, { called });
+            if (reach.on === null) {
+                // Pause is declared, and said in an agent's group, where it would act once it's built; decline on a flagged
+                // write says why it doesn't, the write having landed (#247).
+                const agent = each.name === "pause" ? groupAround(laidOut, at)?.conversation : null;
+                if (agent !== null && agent !== undefined) {
+                    return [{ keys: `␣${each.key}`, says: `${each.called}, not built yet`, on: called(agent) }];
+                }
+                const drawer = each.name === "decline" ? drawerAt(laidOut, at) : undefined;
+                const flagged = drawer?.kind === "since" && (sinceFileAt(drawer, at)?.flags ?? []).length > 0;
+                return flagged ? [{ keys: `␣${each.key}`, says: `${each.called}, not yet: a flagged write has landed, and declining it waits on holding writes at landing`, on: null }] : [];
+            }
+            return [{ keys: `␣${each.key}`, says: reach.says, on: reach.on }];
+        });
+        const writtenOn = blockAt(laidOut, at) === undefined ? null : "your comment";
+        const on = writtenOn ?? reached.find((each) => each.on !== null)?.on ?? "";
+        return { on, reached: reached.map((each) => ({ ...each, on: each.on === on ? null : each.on })) };
+    }
+
+    /**
+     * Return what the line of keys says of a fold-wise selection of `folds`: how many of its kind, and what the fold keys
+     * and each verb would do to them, the verb's key alone with Space where it isn't a motion (`BARE`).
+     */
+    function hereChosen(folds: readonly Folding[]): Here {
+        const kind = view.current?.state.field(chosenKind) ?? null;
+        const what = kindOf(kind ?? undefined)?.called ?? "folds";
+        const verbs = looks.verbs.flatMap((each) => {
+            if (each.name === "comment") {
+                return [];
+            }
+            const acts = reachedIn(laidOut, folds, each, { called });
+            return acts.length === 0 ? [] : [{ keys: `␣${each.key}${BARE.has(each.key) ? ` ${each.key}` : ""}`, says: `${each.called} ${acts.length}`, on: null }];
+        });
+        return { on: `${what}: ${folds.length} selected`, reached: [{ keys: "za zo zc", says: "toggle, open or close them", on: null }, ...verbs] };
+    }
+
+    /**
+     * Say what Space c would open at `at`, as the editor opens it (`whole`): a message to an agent, a remark on a
+     * drawer's line, on the line the cursor is on, a comment on an item whole; none where it opens none.
+     */
+    function commentSays(at: number): { says: string; on: string | null } | null {
+        const group = groupAt(laidOut, at);
+        if (group !== undefined) {
+            return group.conversation === null ? null : { says: "write to it", on: called(group.conversation) };
+        }
+        const drawer = drawerAt(laidOut, at);
+        if (drawer !== undefined) {
+            return opened(laidOut, at) === undefined ? null : { says: "remark on the line", on: null };
+        }
+        const region = regionAt(laidOut, at);
+        return region === undefined ? null : { says: "comment on it", on: region.named };
     }
 
     /** Open each fold over `target`, as a jump to it does, so the line it's on is in view, saying so under the review. */
@@ -1134,12 +1276,6 @@ export function Review({
         if (!shown) {
             scrollAfterKey(current, EditorView.scrollIntoView(target, { y: "nearest", yMargin: current.scrollDOM.clientHeight / 3 }));
         }
-    }
-
-    /** Return the "since you approved" drawer the cursor is in, where it's in one. */
-    function sinceHere(): Drawer | undefined {
-        const drawer = drawerAt(laidOut, editor.head());
-        return drawer?.kind === "since" ? drawer : undefined;
     }
 
     /** Go to `position` in the review, as the stack, the margin and the overview do, opening the folds over it, its line under the stack. */
@@ -1217,7 +1353,10 @@ export function Review({
                 const matters = scope.stops.some((each) => each >= filed.from && each <= filed.to);
                 const folded = !(filed.file.open ?? true);
                 const state = matters ? { glyph: "⚑", mark: "flagged" } : folded ? { glyph: "·", mark: "folded" } : { glyph: "◇", mark: "to-review" };
-                return { ...plain(path.split("/").at(-1) ?? path), state };
+                // Marked reviewed in the draft, it says so as an item marked read does.
+                const node = chainAt(laidOut.nodes, from).findLast((each) => each.kind === "block" && each.from === from);
+                const marked = node !== undefined && marksOn(draft, node.id).some((each) => each.verb === "done");
+                return { ...plain(path.split("/").at(-1) ?? path), state, draft: marked ? DRAFTED.read.glyph : null };
             }
             default:
                 return kindOf(kind)?.drawer === true ? labelOf("drawer", from) : null;
@@ -1284,7 +1423,18 @@ export function Review({
         opened: (position) => opened(laidOut, position),
         quoted: (from, to) => quoted(laidOut, from, to),
         about: (comment, block) => aboutAt(laidOut, comment, block),
-        toggle,
+        verb,
+        verbOn,
+        // Space f and a letter selects in the item or the drawer the cursor is in, or, on a banner, in its agent's group.
+        chooseIn: (position) => {
+            const scope = scopeAt(laidOut, position);
+            if (scope !== undefined) {
+                const own = scope.folds.find((each) => each.of === scope.of && kindOf(each.kind)?.whole === true);
+                return { from: scope.header.from, to: own?.to ?? scope.header.to };
+            }
+            const group = groupAt(laidOut, position);
+            return group === undefined ? undefined : { from: group.banner.from, to: group.fold?.to ?? group.banner.to };
+        },
         move: (forward) => {
             const current = view.current;
             if (current === null) {
@@ -1374,95 +1524,23 @@ export function Review({
             const effects = reaching(current.state, target);
             current.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true, annotations: reached.of(effects.length) });
         },
-        // Space a and Space x do what the block under the cursor offers for done and decline, the innermost: a file's
-        // line or its reviewed line in "since you approved", an item's kind's view of it anywhere in the item.
-        approve: (approved) => {
-            const verb = approved ? "done" : "decline";
-            const drawer = sinceHere();
-            if (drawer !== undefined) {
-                const file = sinceFileAt(drawer, editor.head());
-                const offer = file === undefined ? undefined : offeredOf(viewBlockAt(laidOut, editor.head())?.block?.offers ?? [], verb);
-                if (file === undefined) {
-                    say("Space a marks a file reviewed: put the cursor on one of its lines.");
-                } else if (offer === undefined) {
-                    say("A file is marked reviewed or commented on, never declined.");
-                } else {
-                    act(offer, drawer.conversation);
-                }
-                return;
-            }
-            const region = here();
-            const offer = region === undefined ? undefined : offeredOf(region.body.answer?.blocks.offers ?? [], verb);
-            if (region !== undefined && offer !== undefined) {
-                act(offer, region.item.sender.party === "conversation" ? region.item.sender : null);
-            }
-        },
-        // Space A does what the drawer under the cursor offers for done as a whole: every file it shows marked reviewed.
-        approveAll: () => {
-            const drawer = sinceHere();
-            if (drawer === undefined) {
-                say('Space A marks every file of a "since you approved" drawer reviewed: put the cursor in one.');
-                return;
-            }
-            const offer = offeredOf(drawer.view.answer?.blocks.offers ?? [], "done");
-            if (drawer.files.length === 0 || offer === undefined) {
-                say("Nothing in this drawer to mark reviewed.");
-                return;
-            }
-            act(offer, drawer.conversation);
-        },
-        // `h` on a banner does what a part of it offers for hold.
-        hold: () => {
-            const group = groupAt(laidOut, editor.head());
-            if (group === undefined || group.conversation === null) {
-                return false;
-            }
-            const offer = group.parts.flatMap((each) => each.answer?.blocks.offers ?? []).find((each) => each.verb === "hold");
-            if (offer !== undefined) {
-                act(offer, group.conversation);
-            }
-            return true;
-        },
         send,
         paint: (from, to) => painted(laidOut, from, to, freshOf),
         level: (position, opening, all, closed) => levelled(scopeFolds(position), closed, opening, all),
-        kind: (position, kind, closing, closed) => {
-            // Space z f a opens every agent's group, Space z F a closes them, to their banners, wherever the cursor is.
-            if (kind === "group") {
-                return laidFor.folds.filter((each) => each.kind === "group" && closed(each) !== closing);
-            }
-            // On a banner, Space z and a drawer's letter opens that drawer of the agent's.
-            const group = groupAt(laidOut, position);
-            if (group !== undefined) {
-                const drawer = group.drawers.find((each) => each.kind === kind);
-                return drawer === undefined ? [] : laidFor.folds.filter((each) => each.of === drawer.of && each.kind === kind && closed(each) !== closing);
-            }
-            return ofKind(scopeFolds(position), closed, kind, closing);
+        // `zO` and `zC` within the item or the drawer the cursor is in; on a banner, its group's.
+        scope: (position) => {
+            const within = scopeFolds(position);
+            return within.length > 0 ? within : laidFor.folds.filter((each) => each.kind === "group");
         },
     });
 
     /**
-     * Do what `offer` offers at once, on what's of `conversation`: until each view's actions are its module's (#247),
-     * each the request it names, as the page sent it before: an approval or a held change answered, the files of
-     * "since you approved" marked reviewed, an agent's flagged writes held.
+     * Do what `offer` offers at once, on what's of `conversation`: a module's view key. None runs yet, since a module's
+     * actions aren't a door the page reaches (#113, step 4), so it says so; the page's own views' offers are marks.
      */
     function act(offer: Offer, conversation: Conversation | null) {
-        const argument = offer.argument as Record<string, unknown>;
-        switch (offer.action) {
-            case "inbox-answer-approval":
-                approve(argument["number"] as number, argument["approved"] as boolean);
-                return;
-            case "policy-review-since":
-                reviewSince(argument["conversation"] as Conversation, argument["files"] as Viewed[]);
-                return;
-            case "set-holding":
-                if (conversation !== null) {
-                    hold(conversation);
-                }
-                return;
-            default:
-                say(`Nothing here does ${offer.says} yet.`);
-        }
+        void conversation;
+        say(`Nothing here does ${offer.says} yet: a module's actions come with #113's step 4.`);
     }
 
     /** Return the folds of the item or the drawer `position` is in, as the editor holds them: those the fold keys reach. */
@@ -1503,6 +1581,7 @@ export function Review({
                     fresh(region.item, reviewed) ? "is-new" : "",
                     news(region.item) ? "is-news" : "",
                     (draft.done ?? []).includes(number) ? "is-done" : "",
+                    (draft.declined ?? []).includes(number) ? "is-declined" : "",
                     (draft.parked ?? []).includes(number) ? "is-parked" : "",
                 ].join(" ");
             }
@@ -1531,19 +1610,16 @@ export function Review({
     };
     // What settles what a pinned header heads, so the operator knows what would validate the file they're in.
     const hintOf = (sticky: Sticky): string | null => {
-        const region = sticky.kind === "item" || sticky.kind === "file" ? regionAt(laidOut, sticky.header.from) : undefined;
-        const drawer = sticky.kind === "drawer" || sticky.kind === "file" ? drawerAt(laidOut, sticky.header.from) : undefined;
-        if (drawer?.kind === "since") {
-            return sticky.kind === "file" ? "␣a marks it reviewed" : "␣A marks every file reviewed";
-        }
-        if (region === undefined) {
+        if (sticky.kind === "group") {
             return null;
         }
-        const number = cited(region.item.number);
-        if (answering(region.item).kind === "answer") {
-            return sticky.kind === "file" ? `␣a approves ${number}, every file` : "␣a approves · ␣x declines";
-        }
-        return region.item.reason.reason === "question" ? "a comment answers it · ␣d reads it" : "␣d marks it read";
+        // What done and decline do there, from the same walk the keys take, each naming what it's on where that's another thing.
+        const here = hereAt(sticky.header.from);
+        const answers = here.reached.filter((each) => looks.verbs.some((verb) => `␣${verb.key}` === each.keys && (verb.name === "done" || verb.name === "decline")));
+        const said = answers.map((each) => `${each.keys} ${each.says}${each.on === null ? "" : ` ${each.on}`}`);
+        const region = sticky.kind === "item" ? regionAt(laidOut, sticky.header.from) : undefined;
+        const asks = region?.item.reason.reason === "question" ? ["a comment answers it"] : [];
+        return said.length === 0 && asks.length === 0 ? null : [...asks, ...said].join(" · ");
     };
     return (
         <>

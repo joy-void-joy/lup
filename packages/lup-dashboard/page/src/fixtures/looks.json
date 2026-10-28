@@ -11,7 +11,9 @@
       "chord": true,
       "whole": true,
       "counts": true,
-      "keeps_open": null
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "item",
@@ -24,7 +26,9 @@
       "chord": false,
       "whole": true,
       "counts": true,
-      "keeps_open": null
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "file",
@@ -37,7 +41,9 @@
       "chord": true,
       "whole": false,
       "counts": true,
-      "keeps_open": null
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "body",
@@ -50,7 +56,9 @@
       "chord": true,
       "whole": false,
       "counts": true,
-      "keeps_open": null
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "lines",
@@ -63,7 +71,9 @@
       "chord": true,
       "whole": false,
       "counts": false,
-      "keeps_open": null
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "context",
@@ -76,7 +86,9 @@
       "chord": true,
       "whole": false,
       "counts": false,
-      "keeps_open": null
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "earlier",
@@ -89,7 +101,9 @@
       "chord": true,
       "whole": false,
       "counts": true,
-      "keeps_open": 20
+      "keeps_open": 20,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "calls",
@@ -102,7 +116,9 @@
       "chord": true,
       "whole": false,
       "counts": false,
-      "keeps_open": null
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "items",
@@ -115,7 +131,9 @@
       "chord": true,
       "whole": false,
       "counts": false,
-      "keeps_open": null
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     },
     {
       "name": "call",
@@ -128,7 +146,9 @@
       "chord": true,
       "whole": false,
       "counts": true,
-      "keeps_open": null
+      "keeps_open": null,
+      "starts_open": null,
+      "by_all": true
     }
   ],
   "tones": [

@@ -1,8 +1,8 @@
 // What the fold keys reach among a view's folds, whatever the view: the folds
 // the cursor is in, outermost first, which the review's margin bars and header
-// show; within one item, the folds `zr` and `zm` open or close a level at a
+// show, and those `zO` and `zC` open and close with them (`recursive`); within one item, the folds `zr` and `zm` open or close a level at a
 // time, a conversation's earlier exchanges one at a time, the latest first, and
-// those Space `z` `f` or `F` and a letter open or close by kind; and where `zj`,
+// and where `zj`,
 // `zk`, `[z` and `]z` go. Folds nest, each whole inside another or beside it
 // (`review.ts`, `code.ts`). Pure: the editor folds what these return
 // (`editor.ts`; `docs/dashboard.md`, *The keys*).
@@ -21,6 +21,23 @@ export function around<F extends Pick<Folding, "summary" | "to">>(folds: readonl
 /** Return the innermost fold of `kind` that `at` is in, from its summary line to its last line, which `zf` and the kind's letter closes; none where it's in none. */
 export function aroundOf<F extends Pick<Folding, "summary" | "to" | "kind">>(folds: readonly F[], at: number, kind: FoldKind): F | undefined {
     return around(folds, at).findLast((each) => each.kind === kind);
+}
+
+/**
+ * Return the folds of `folds` that `zO` opens (`opening`) or `zC` closes at `at`, as vim's do recursively: `zO` every
+ * fold the cursor is in and every fold within the innermost of them, but a deep one within it (`Kind.opens`, `deep`),
+ * whose content is read as it opens, which its own keys open; `zC` every fold the cursor is in. None outside every fold.
+ */
+export function recursive<F extends Folded>(folds: readonly F[], at: number, opening: boolean): F[] {
+    const holding = around(folds, at);
+    const innermost = holding.at(-1);
+    if (!opening || innermost === undefined) {
+        return holding;
+    }
+    const within = folds.filter(
+        (each) => each !== innermost && each.summary.from > innermost.summary.from && each.to <= innermost.to && keysOf(each)?.opens !== "deep",
+    );
+    return [...holding, ...within];
 }
 
 /**
@@ -64,15 +81,16 @@ function keysOf(fold: Folded): Kind | undefined {
  * open at the last level any is open at, never the own one, which `za` on its header folds. At a level whose kind
  * goes back (`Kind.opens`, `back`), as a conversation's earlier exchanges, one alone: `zr` the latest folded, so each
  * reaches one step further back, `zm` the earliest open. With `all`, as `zR` and `zM`, every one of them: each folded
- * one, or each open one but the own one. Neither `zr` nor `zR` opens a deep fold (`deep`), whose content is read as
- * it opens: its own keys do.
+ * one, or each open one but the own one, but those of a kind `zR` and `zM` don't reach (`Kind.byAll`), as a person's
+ * layer may keep runs of unchanged lines. Neither `zr` nor `zR` opens a deep fold (`deep`), whose content is read as it
+ * opens: its own keys do.
  */
 export function levelled<F extends Folded>(folds: readonly F[], closed: (fold: F) => boolean, opening: boolean, all: boolean): F[] {
     const reached = opening
         ? folds.filter((each) => closed(each) && keysOf(each)?.opens !== "deep")
         : folds.filter((each) => !closed(each) && !isOwn(each));
     if (all) {
-        return reached;
+        return reached.filter((each) => keysOf(each)?.byAll !== false);
     }
     const levels = reached.flatMap((each) => levelOf(each) ?? []);
     const level = opening ? Math.min(...levels) : Math.max(...levels);
@@ -83,18 +101,6 @@ export function levelled<F extends Folded>(folds: readonly F[], closed: (fold: F
     const ordered = [...atLevel].sort((a, b) => a.summary.from - b.summary.from);
     const one = opening ? ordered.at(-1) : ordered[0];
     return one === undefined ? [] : [one];
-}
-
-/**
- * Return the folds of one item or drawer, `folds`, that Space `z` `f` and a letter opens, `closed` saying which are folded:
- * each of `kind` folded, and the own one where it's folded, so what opens is seen; or, `closing`, as Space `z` `F` and
- * the letter, each of `kind` open.
- */
-export function ofKind<F extends Folded>(folds: readonly F[], closed: (fold: F) => boolean, kind: FoldKind, closing: boolean): F[] {
-    if (closing) {
-        return folds.filter((each) => each.kind === kind && !closed(each));
-    }
-    return folds.filter((each) => (each.kind === kind || isOwn(each)) && closed(each));
 }
 
 /** Return whether `fold` is hidden in another one folded, its summary line among the lines that one hides. */

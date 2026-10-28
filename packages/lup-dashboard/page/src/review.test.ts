@@ -1,4 +1,5 @@
-import "./fixtures/looks";
+import { LOOKS, STANDING } from "./fixtures/looks";
+import { adopt, merged, type Looks } from "./looks";
 import { ANSWERED, DRAWER_ONLY } from "./fixtures/conversation";
 import { ChangeSet, Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
@@ -6,12 +7,12 @@ import { describe, expect, it } from "vitest";
 import { above, outdated, spokenOf } from "./exchange";
 import { levelled } from "./folds";
 import { reconcile, runsOf } from "./reconcile";
+import { marking, reachOf } from "./grammar";
 import {
     EMPTY,
     aboutAt,
     answer,
     answerAfter,
-    answering,
     arrival,
     blockAt,
     blocksOf,
@@ -35,7 +36,6 @@ import {
     news,
     opened,
     ordered,
-    placeAt,
     plain,
     pruned,
     quoted,
@@ -48,7 +48,6 @@ import {
     tallied,
     threadsOf,
     toAnswer,
-    toggled,
     toKeep,
     waited,
     whose,
@@ -76,6 +75,21 @@ import {
     type Since,
     type Written,
 } from "./review";
+
+/** The verb named `name`, as lup's default declaration's looks declare it. */
+function verb(name: string): (typeof LOOKS.verbs)[number] {
+    const found = LOOKS.verbs.find((each) => each.name === name);
+    if (found === undefined) {
+        throw new Error(`no verb ${name}`);
+    }
+    return found;
+}
+
+/** Say what the verb named `name` reaches at `at` in `out`, as the line of keys says it: what it's on and what it does; none where nothing takes it. */
+function reaches(out: Laid, at: number, name: string): string | null {
+    const reach = reachOf(out, at, verb(name), { called: (each) => each.session });
+    return reach.on === null ? null : `${reach.on}: ${reach.says}`;
+}
 
 const AT = "2026-10-17T12:00:00Z";
 
@@ -473,19 +487,31 @@ describe("laid", () => {
         expect(opened(out, head + 3)).toEqual({ id: "", item: 51, quote: null, text: "" });
     });
 
-    it("says where the cursor is, for the line of keys", () => {
+    it("says what each verb reaches where the cursor is, the innermost thing it applies to, from the cursor outward", () => {
         const draft: Draft = { ...EMPTY, comments: [{ id: "fine", item: 51, quote: null, text: "Fine." }] };
         const files: Around = { contexts: new Map([[51, { shown: CONTEXT }]]), files: new Map([[54, { shown: [CHANGED] }]]), answers: [], commented: [] };
         const out = laid([QUESTION, APPROVAL], [from("s3")], banner, header, draft, files);
         const at = (text: string) => out.text.indexOf(text);
-        expect(placeAt(out, at("Fine."))).toBe("written");
-        expect(placeAt(out, at("━━ s1"))).toBe("banner");
-        expect(placeAt(out, at("━━ lup"))).toBe("approvals");
-        expect(placeAt(out, at("Keep the cache"))).toBe("item");
-        expect(placeAt(out, at("Approve?"))).toBe("change");
-        expect(placeAt(out, at("a.py · changed"))).toBe("file");
-        expect(placeAt(out, at("context ·"))).toBe("aside");
-        expect(placeAt(laid([], [], banner, header, EMPTY, NOTHING), 0)).toBe("nothing");
+        // In a comment, what it's on; in an item, the item, done marking it read; an approval's kind saying what done and decline mean.
+        expect(reaches(out, at("Fine."), "done")).toBe("@51 question: mark it read");
+        expect(reaches(out, at("Keep the cache"), "done")).toBe("@51 question: mark it read");
+        expect(reaches(out, at("Keep the cache"), "decline")).toBeNull();
+        expect(reaches(out, at("Keep the cache"), "send")).toBe("@51 question: leave it for later");
+        expect(reaches(out, at("context ·"), "done")).toBe("@51 question: mark it read");
+        expect(reaches(out, at("Approve?"), "done")).toBe("@54 approval: approve");
+        expect(reaches(out, at("Approve?"), "decline")).toBe("@54 approval: decline");
+        // A file of an approval offers nothing of its own: the approval, whole.
+        expect(reaches(out, at("a.py · changed"), "done")).toBe("@54 approval: approve");
+        // On a banner, the agent: done reaching its own news, none here, a question and approvals asking something,
+        // which done would answer; hold where its banner offers it, none here, not running.
+        expect(reaches(out, at("━━ s1"), "done")).toBeNull();
+        expect(reaches(out, at("━━ s1"), "hold")).toBeNull();
+        expect(reaches(out, at("━━ lup"), "done")).toBeNull();
+        expect(reaches(out, at("━━ s3"), "done")).toBeNull();
+        expect(reaches(laid([], [], banner, header, EMPTY, NOTHING), 0, "done")).toBeNull();
+        // Pause is declared, and nothing offers it: its key says so.
+        const paused = reachOf(out, at("Keep the cache"), verb("pause"), { called: (each) => each.session });
+        expect(paused.on === null ? paused.why : "").toBe("not built yet: its host side is designed beside #157");
     });
 
     it("shows an approval's diff without git's colours", () => {
@@ -957,14 +983,11 @@ describe("comments on a changed file's lines", () => {
         expect(flagged.text.startsWith("━━ s2 ━━\n── #70 ──\na.py landed, flagged for the operator's review.\n")).toBe(true);
         expect(flagged.regions[0]!.code.length).toBeGreaterThan(0);
         expect(onItem(opened(flagged, line("L7")))).toEqual({ id: "", item: 70, quote: expect.objectContaining({ text: "a.py:7\n+L7", lines: ["L7"] }), text: "" });
-        expect(placeAt(flagged, line("L7"))).toBe("file");
-        expect(placeAt(flagged, flagged.text.indexOf("a.py landed"))).toBe("item");
+        // A flagged write is read, never declined, in its file as in its text.
+        expect(reaches(flagged, line("L7"), "done")).toBe("@70 landed, flagged: mark it read");
+        expect(reaches(flagged, flagged.text.indexOf("a.py landed"), "decline")).toBeNull();
     });
 
-    it("answers an approval or a held change with Space a and Space x, and nothing else", () => {
-        expect([answering(APPROVAL), answering(HELD)]).toEqual([{ kind: "answer" }, { kind: "answer" }]);
-        expect([answering(FLAGGED), answering(NOTE), answering(QUESTION)]).toEqual([{ kind: "nothing" }, { kind: "nothing" }, { kind: "nothing" }]);
-    });
 
     it("quotes a passage across a file's lines, and across files, each under its path and the span of its lines", () => {
         const from = at("l6");
@@ -1203,7 +1226,7 @@ describe("replies kept from before", () => {
         const [, note] = out.regions;
         expect(note!.asides.map((each) => each.kind)).toEqual(["by", "quoted", "you", "by", "agent", "agent"]);
         expect(opened(out, out.text.indexOf("A stray"))).toBeUndefined();
-        expect(placeAt(out, out.text.indexOf("A stray"))).toBe("aside");
+        expect(reaches(out, out.text.indexOf("A stray"), "done")).toBe("@52 note: mark it read");
     });
 
     it("puts a comment copies before kept on a reply under the item's header", () => {
@@ -1348,26 +1371,12 @@ describe("an answer in a turn's last words", () => {
 });
 
 describe("the draft", () => {
-    it("toggles done and parked, says what it covers, and drops comments that say nothing", () => {
-        let draft = toggled(EMPTY, "done", 52);
-        draft = { ...draft, comments: [{ id: "x", item: 53, text: "x" }, { id: "blank", item: 54, text: "  " }] };
-        expect(covered(draft)).toEqual([52, 53]);
-        expect(covered(toggled(draft, "parked", 53))).toEqual([52]);
+    it("says what it covers, items marked done or declined among it, but those parked, and drops comments that say nothing", () => {
+        const draft: Draft = { ...EMPTY, done: [52], declined: [55], comments: [{ id: "x", item: 53, text: "x" }, { id: "blank", item: 54, text: "  " }] };
+        expect(covered(draft)).toEqual([52, 53, 55]);
+        expect(covered({ ...draft, parked: [53] })).toEqual([52, 55]);
         expect(pruned(draft).comments).toEqual([{ id: "x", item: 53, text: "x" }]);
         expect(pruned({ ...draft, comments: [{ id: "x", item: 53, text: "x \n\n" }] }).comments).toEqual([{ id: "x", item: 53, text: "x" }]);
-        expect(toggled(toggled(EMPTY, "done", 52), "done", 52).done).toEqual([]);
-    });
-
-    it("marks a parked item read by taking it off the later list, so it's sent, and parks a read one unmarked", () => {
-        const parked = toggled(EMPTY, "parked", 52);
-        const read = toggled(parked, "done", 52);
-        expect(read.parked).toEqual([]);
-        expect(covered(read)).toEqual([52]);
-        const later = toggled(read, "parked", 52);
-        expect(later.done).toEqual([]);
-        expect(covered(later)).toEqual([]);
-        const both = { ...EMPTY, done: [52], parked: [52] };
-        expect(covered(toggled(both, "done", 52))).toEqual([52]);
     });
 });
 
@@ -1667,14 +1676,67 @@ describe("the drawers under each agent's banner", () => {
         ]);
     });
 
-    it("says where the cursor is in a drawer for the line of keys", () => {
-        expect(placeAt(out, at("tasks 1/3"))).toBe("drawer");
-        expect(placeAt(out, at("✓ Write"))).toBe("drawer");
-        expect(placeAt(out, at("Twenty"))).toBe("words");
-        expect(placeAt(out, at("· Grep"))).toBe("aside");
-        expect(placeAt(out, at("        a = 1"))).toBe("since");
-        expect(placeAt(out, at("reader.py · created"))).toBe("since");
-        expect(placeAt(out, at("you: Build"))).toBe("aside");
+    it("marks a file of since you approved reviewed in the draft, folding it, and the drawer whole as each of its files", () => {
+        const reach = reachOf(out, at("        a = 1"), verb("done"), { called: (each) => each.session });
+        const marked = marking(EMPTY, reach.on === null ? [] : reach.acts, "done");
+        expect(marked.marks?.map((each) => [each.action, each.verb, each.block.endsWith(" file reader.py"), each.version, each.says])).toEqual([
+            ["policy-review-since", "done", true, "b1", "mark it reviewed"],
+        ]);
+        // Laid out with the mark, its file folds under its header, which says what Ctrl+Enter does with it.
+        const folded = laid([QUESTION, NOTE], [S1], banner, header, marked, NOTHING, [], drawers, undefined, { remote });
+        const file = folded.drawers.find((each) => each.kind === "since")?.folds.find((each) => each.kind === "file");
+        expect(file?.closed).toBe(true);
+        // On the drawer's line, each file its own mark, the same as on the file: every one marked, it takes them off.
+        const whole = reachOf(folded, folded.text.indexOf("since you approved ·"), verb("done"), { called: (each) => each.session });
+        const blocks = (each: typeof reach) => (each.on === null ? [] : each.acts.map((act) => (act.kind === "mark" ? act.block : "")));
+        expect(blocks(whole)).toEqual(blocks(reach));
+        expect(marking(marked, whole.on === null ? [] : whole.acts, "done").marks).toEqual([]);
+        // A file holding a remark of the operator's stays open, marked, until it's sent.
+        const remark: Remark = { id: "r", to: S1, quote: { text: "a = 1", block: marked.marks![0]!.block, version: "b1", line: 5, lines: ["        a = 1"], start: 0, end: 13 }, text: "Name it." };
+        const writing = laid([QUESTION, NOTE], [S1], banner, header, { ...marked, remarks: [remark] }, NOTHING, [], drawers, undefined, { remote });
+        expect(writing.drawers.find((each) => each.kind === "since")?.folds.find((each) => each.kind === "file")?.closed).toBe(false);
+    });
+
+    it("starts each fold as its kind says where a person's layer says it, but one a mark folded", () => {
+        const opened: Looks = { ...STANDING, folds: (STANDING.folds ?? []).map((each) => (each.name === "body" || each.name === "item" ? { ...each, starts_open: true } : each)) };
+        adopt(merged({}, opened));
+        try {
+            const read = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, done: [52] }, NOTHING, [], drawers, undefined, { remote });
+            const since = read.drawers.find((each) => each.kind === "since")!;
+            // The new module's bodies, which its view folds to show its design: open, as the kind says.
+            const bodies = since.folds.filter((each) => each.kind === "body");
+            expect(bodies.length).toBeGreaterThan(0);
+            expect(bodies.every((each) => !each.closed)).toBe(true);
+            // Every item open, as the kind says, but the one marked done, which a mark folds.
+            expect(read.regions.map((each) => [each.item.number, each.folds.find((fold) => fold.kind === "item")?.closed])).toEqual([
+                [51, false],
+                [52, true],
+            ]);
+        } finally {
+            adopt(LOOKS);
+        }
+    });
+
+    it("marks an agent's own news read and its drawers done from its banner, what asks something left and named", () => {
+        const reach = reachOf(out, at("━━ s1"), verb("done"), { called: (each) => each.session });
+        expect(reach.on === null ? [] : reach.acts.map((each) => (each.kind === "item" ? `item ${each.number} ${each.list}` : each.kind === "mark" ? `mark ${each.offer.action}` : each.kind))).toEqual([
+            "mark policy-review-since",
+        ]);
+        expect(reach.says).toBe("mark its drawers done, @51 left");
+        // Its news, a note ranked so, read from its banner.
+        const told = laid([QUESTION, { ...NOTE, rank: NEWS }], [S1], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
+        const news = reachOf(told, told.text.indexOf("━━ s2"), verb("done"), { called: (each) => each.session });
+        expect(news.on === null ? null : [news.says, news.acts]).toEqual(["mark its news read", [{ kind: "item", number: 52, list: "done" }]]);
+    });
+
+    it("says what each verb reaches in a drawer: a file of since you approved, the drawer on its line, the agent elsewhere", () => {
+        expect(reaches(out, at("        a = 1"), "done")).toBe("reader.py: mark it reviewed");
+        expect(reaches(out, at("reader.py · created"), "done")).toBe("reader.py: mark it reviewed");
+        expect(reaches(out, at("reader.py · created"), "decline")).toBeNull();
+        expect(reaches(out, at("since you approved ·"), "done")).toBe("since you approved · 1 to review · 1 flagged: mark every file reviewed");
+        // A task list and a conversation offer nothing of their own: done reaches the agent, its news and drawers.
+        expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark its drawers done, @51 left");
+        expect(reaches(out, at("Twenty"), "done")).toBe("s1: mark its drawers done, @51 left");
     });
 
     it("says in each summary line what the drawer holds: in since you approved, the files changed and those standing as reviewed", () => {
@@ -1704,7 +1766,7 @@ describe("the drawers under each agent's banner", () => {
         expect(sinceSummary({ ...SINCE, files: tests.slice(0, 1) })).toBe("since you approved on feat · 1 test");
     });
 
-    it("folds each file reviewed under one line at the drawer's end, one with flagged writes waiting staying a line in its place, which Space a and A take", () => {
+    it("folds each file reviewed under one line at the drawer's end, one with flagged writes waiting staying a line in its place, which Space d takes", () => {
         const kept = { path: "a.py", version: "a1b2c3d4e5f6", flags: [], reviewed: "2026-10-17T12:00:00Z" };
         const also = { path: "b.py", version: null, flags: [], reviewed: "2026-10-17T12:00:00Z" };
         const seen = { path: "z.py", version: "f6e5", flags: [71], since: 12 };
@@ -1721,8 +1783,10 @@ describe("the drawers under each agent's banner", () => {
         expect(sinceFileAt(since!, on("a.py · reviewed"))).toBe(kept);
         expect(sinceFileAt(since!, on("        a = 1"))).toBe(shown.files[1]);
         expect(sinceFileAt(since!, on("z.py ·"))).toBe(seen);
-        expect(placeAt(laidOut, on("a.py · reviewed"))).toBe("reviewed");
-        expect(placeAt(laidOut, on("z.py ·"))).toBe("reviewed");
+        // A settled file is reviewed already: done on it reaches the drawer, every file still to review or flagged; one
+        // with flagged writes waiting is marked reviewed on its own line, which approves them.
+        expect(reaches(laidOut, on("a.py · reviewed"), "done")).toBe("since you approved · 1 to review · 2 flagged · 2 reviewed: mark every file reviewed");
+        expect(reaches(laidOut, on("z.py ·"), "done")).toBe("z.py · as you saw it in @12 · flagged @71: mark it reviewed");
         // The header over the review names the file a reviewed line is, as it does one whose lines the cursor is on.
         const naming: Naming = { group: () => "g", item: (each) => `#${each.item.number}`, party: () => "" };
         expect(heading(laidOut, on("a.py · reviewed"), false, [], naming).map((each) => `${each.kind}: ${each.text}`)).toEqual([
