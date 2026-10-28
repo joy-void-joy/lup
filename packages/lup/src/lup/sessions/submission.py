@@ -133,14 +133,13 @@ class Toolbox(MutableModel, Toolset, arbitrary_types_allowed=True):
             taken for taken in self.taken(friction.name) if isinstance(taken, Friction)
         ]
 
-    def how_it_felt(self) -> HowItFelt | None:
-        """Return how the agent said it was for them, the last if they said it more than once; none where they didn't."""
-        said = [
+    def how_it_felt(self) -> list[HowItFelt]:
+        """Return each time the agent said how it was for them, oldest first."""
+        return [
             taken
             for taken in self.taken(how_it_felt.name)
             if isinstance(taken, HowItFelt)
         ]
-        return said[-1] if said else None
 
     def end(self, prefix: str = "") -> End | KeepGoing | GiveUp:
         """Say whether the turn may end, counting a refused ending against the attempts.

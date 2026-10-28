@@ -66,5 +66,5 @@ class TurnResult[T](Model):
     """The remarks the agent attached to its answer, oldest first."""
     frictions: list[Friction] = []
     """What got in the agent's way, each when it did, oldest first."""
-    how_it_felt: HowItFelt | None = None
-    """How the agent said it was for them, where they said; the last, if they said it more than once."""
+    how_it_felt: list[HowItFelt] = []
+    """Each time the agent said how it was for them, oldest first."""

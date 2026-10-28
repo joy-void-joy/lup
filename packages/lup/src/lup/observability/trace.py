@@ -37,8 +37,8 @@ class CallRecord(Model):
     """The remarks the agent attached, whether it answered or not."""
     frictions: list[Friction] = []
     """What got in the agent's way, whether it answered or not."""
-    how_it_felt: HowItFelt | None = None
-    """How the agent said it was for them, where they said."""
+    how_it_felt: list[HowItFelt] = []
+    """Each time the agent said how it was for them, whether it answered or not."""
     usage: Usage | None = None
     """None where the ask failed before the runtime reported any."""
 
@@ -55,7 +55,7 @@ class Kept(Model):
     rejected: list[Rejection] = []
     notes: list[str] = []
     frictions: list[Friction] = []
-    how_it_felt: HowItFelt | None = None
+    how_it_felt: list[HowItFelt] = []
     usage: Usage | None = None
 
 
@@ -69,7 +69,7 @@ class Answered(Model):
     rejected: list[Rejection]
     notes: list[str]
     frictions: list[Friction]
-    how_it_felt: HowItFelt | None
+    how_it_felt: list[HowItFelt]
 
     @classmethod
     def of[T: BaseModel | str](cls, result: TurnResult[T]) -> Answered:

@@ -30,7 +30,7 @@ class Saying(Model):
 
     notes: list[str] = []
     frictions: list[Friction] = []
-    how_it_felt: HowItFelt | None = None
+    how_it_felt: list[HowItFelt] = []
 
 
 class Submitting(Saying):
@@ -99,14 +99,14 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         frictions: list[Friction] | None = None,
-        how_it_felt: HowItFelt | None = None,
+        how_it_felt: list[HowItFelt] | None = None,
     ) -> None:
         """Queue `value` as the accepted answer to the next ask for `output`, after what the agent says."""
         submitting = Submitting(
             submissions=[value.model_dump(mode="json")],
             notes=notes or [],
             frictions=frictions or [],
-            how_it_felt=how_it_felt,
+            how_it_felt=how_it_felt or [],
         )
         self.queue(output, submitting)
 
@@ -116,14 +116,14 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         frictions: list[Friction] | None = None,
-        how_it_felt: HowItFelt | None = None,
+        how_it_felt: list[HowItFelt] | None = None,
     ) -> None:
         """Queue `text` as the answer to the next untyped ask, after what the agent says."""
         texting = Texting(
             text=text,
             notes=notes or [],
             frictions=frictions or [],
-            how_it_felt=how_it_felt,
+            how_it_felt=how_it_felt or [],
         )
         self.queue(None, texting)
 
@@ -145,14 +145,14 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         frictions: list[Friction] | None = None,
-        how_it_felt: HowItFelt | None = None,
+        how_it_felt: list[HowItFelt] | None = None,
     ) -> None:
         """Queue the agent saying it's blocked, instead of an answer, for the next ask of `output`."""
         blocking = Blocking(
             problem=problem,
             notes=notes or [],
             frictions=frictions or [],
-            how_it_felt=how_it_felt,
+            how_it_felt=how_it_felt or [],
         )
         self.queue(output, blocking)
 
@@ -163,14 +163,14 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         *,
         notes: list[str] | None = None,
         frictions: list[Friction] | None = None,
-        how_it_felt: HowItFelt | None = None,
+        how_it_felt: list[HowItFelt] | None = None,
     ) -> None:
         """Queue the agent stopping by choice, instead of an answer, for the next ask of `output`."""
         stopping = Stopping(
             why=why,
             notes=notes or [],
             frictions=frictions or [],
-            how_it_felt=how_it_felt,
+            how_it_felt=how_it_felt or [],
         )
         self.queue(output, stopping)
 
@@ -224,9 +224,8 @@ class FakeAdapter(Model, Adapter, arbitrary_types_allowed=True):
             await toolbox.call(note.name, {"remark": remark})
         for each in script.frictions:
             await toolbox.call(friction.name, each.model_dump(mode="json"))
-        if script.how_it_felt is not None:
-            went = script.how_it_felt.model_dump(mode="json")
-            await toolbox.call(how_it_felt.name, went)
+        for each in script.how_it_felt:
+            await toolbox.call(how_it_felt.name, each.model_dump(mode="json"))
         match script:
             case Texting(text=text):
                 return RawTurn(text=text, usage=Usage(), session_id=session)

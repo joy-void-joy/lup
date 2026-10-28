@@ -465,7 +465,7 @@ def test_a_friction_and_how_it_felt_are_taken_through_the_server() -> None:
     assert turn.toolbox.frictions() == [
         Friction(text="The feed timed out; a retry would have saved it.")
     ]
-    assert turn.toolbox.how_it_felt() == HowItFelt(text="Calm.")
+    assert turn.toolbox.how_it_felt() == [HowItFelt(text="Calm.")]
 
 
 # The Stop hook: the turn's guard.

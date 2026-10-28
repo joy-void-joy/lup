@@ -270,7 +270,10 @@ def test_frictions_and_how_it_felt_are_kept_as_written_and_end_nothing() -> None
     assert "text" in empty.text
     assert isinstance(toolbox.end(), KeepGoing)
     assert toolbox.frictions() == [Friction(text=jammed), Friction(text="No city.")]
-    assert toolbox.how_it_felt() == HowItFelt(text="Smooth, and it felt fine.")
+    assert toolbox.how_it_felt() == [
+        HowItFelt(text="Nothing notable."),
+        HowItFelt(text="Smooth, and it felt fine."),
+    ]
 
 
 def test_friction_and_how_it_felt_each_take_one_text_alone() -> None:

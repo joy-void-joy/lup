@@ -54,7 +54,7 @@ class OutputMissingError(TurnError):
         rejected: list[Rejection],
         notes: list[str],
         frictions: list[Friction],
-        how_it_felt: HowItFelt | None,
+        how_it_felt: list[HowItFelt],
         usage: Usage | None,
     ) -> None:
         """Record the message, every refused attempt, what the agent said beside them, and the usage."""
@@ -80,7 +80,7 @@ class BlockedError(TurnError):
         *,
         notes: list[str],
         frictions: list[Friction],
-        how_it_felt: HowItFelt | None,
+        how_it_felt: list[HowItFelt],
         usage: Usage | None,
     ) -> None:
         """Record the agent's problem, what it said before it, and the turn's usage."""
@@ -107,7 +107,7 @@ class StoppedError(TurnError):
         *,
         notes: list[str],
         frictions: list[Friction],
-        how_it_felt: HowItFelt | None,
+        how_it_felt: list[HowItFelt],
         usage: Usage | None,
     ) -> None:
         """Record why the agent stopped, what it said before it, and the turn's usage."""
