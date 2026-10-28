@@ -162,7 +162,7 @@ def test_the_socket_sends_a_watchs_replies_under_its_number_then_its_end(
             "reply": {
                 "kind": "inbox-items",
                 "items": [],
-                "reviewed": None,
+                "seen": [],
                 "answers": [],
                 "commented": [],
             },
@@ -214,7 +214,7 @@ def test_one_socket_carries_every_watch_and_a_stopped_one_says_no_more(
         "reply": {
             "kind": "inbox-items",
             "items": [],
-            "reviewed": None,
+            "seen": [],
             "answers": [],
             "commented": [],
         },

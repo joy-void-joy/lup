@@ -60,7 +60,7 @@ import { itemStanding } from "./outline";
 import { DRAFTED, GLYPHS } from "./Outline";
 import { linesOver, stickies, type Sticky } from "./stack";
 import { depths, levelled } from "./folds";
-import { chainAt, findNode, isMarked, marking, marksOn, reachOf, reachedIn, type Act } from "./grammar";
+import { chainAt, findNode, implied, isMarked, marking, marksOn, reachOf, reachedIn, type Act, type Marked } from "./grammar";
 import type { DrawerKind, FoldKind, Here } from "./keys";
 import { kindOf, type Merged } from "./looks";
 import { markerEnd, outdated, unfound } from "./exchange";
@@ -81,6 +81,7 @@ import {
     foldKey,
     foldsOf,
     fresh,
+    type Seeing,
     groupAround,
     groupAt,
     heading,
@@ -165,8 +166,10 @@ interface Props {
     pending: (keys: string) => void;
     /** Open the list of every key. */
     list: () => void;
-    /** When the operator last settled an item of theirs: what came after is new to them. */
-    reviewed: string | null;
+    /** How far the operator has seen each group, and what they commented on in a reply sent: what an item is new by. */
+    seeing: Seeing;
+    /** Told the marks the operator's comments imply, a comment counting as a review (`implied`), as the review is laid out. */
+    implying: (marks: Marked[]) => void;
     /** What each conversation running is doing, by `whose` it is, drawn on its banner as the time passes (`ticking.ts`). */
     activities: ReadonlyMap<string, Activity | null>;
     /** Each conversation's parent, by `whose` each is: what nests a subagent's group under its parent's. */
@@ -416,7 +419,7 @@ function endings(laidOut: Laid, ends: Ends): { from: number; to: number; value: 
 function decorations(
     laidOut: Laid,
     draft: Draft,
-    reviewed: string | null,
+    seeing: Seeing,
     to: ((written: Written) => string) | null = null,
     ends: Ends = () => "",
 ): DecorationSet {
@@ -449,7 +452,7 @@ function decorations(
             const number = region.item.number;
             const states = [
                 "review-header",
-                fresh(region.item, reviewed) ? "is-new" : "",
+                fresh(region.item, seeing) ? "is-new" : "",
                 news(region.item) ? "is-news" : "",
                 (draft.done ?? []).includes(number) ? "is-done" : "",
                 (draft.declined ?? []).includes(number) ? "is-declined" : "",
@@ -641,7 +644,8 @@ export function Review({
     placed,
     pending,
     list,
-    reviewed,
+    seeing,
+    implying,
     activities,
     parents,
     states,
@@ -679,7 +683,7 @@ export function Review({
                     const told = [
                         `${cited(item.number)} ${said}`,
                         ...((item.edits ?? []).length > 0 ? ["edited"] : []),
-                        ...(fresh(item, reviewed) ? ["new"] : []),
+                        ...(fresh(item, seeing) ? ["new"] : []),
                         when(item.made),
                         ...(later ? ["later"] : []),
                     ];
@@ -692,8 +696,13 @@ export function Review({
                 called,
                 { ...arranging, previous: before.current },
             ),
-        [items, agents, banner, called, draft, around, drawers, reviewed, arranging, order],
+        [items, agents, banner, called, draft, around, drawers, seeing, arranging, order],
     );
+    // What the operator's comments imply, a comment counting as a review, shown as the draft's own marks are and sent
+    // with them.
+    const impliedMarks = useMemo(() => implied(laidOut, draft), [laidOut, draft]);
+    const withImplied = useMemo(() => (impliedMarks.length === 0 ? draft : { ...draft, marks: [...(draft.marks ?? []), ...impliedMarks] }), [draft, impliedMarks]);
+    useEffect(() => implying(impliedMarks), [impliedMarks, implying]);
     // The scopes the header stack pins the headers of.
     const roots = useMemo(() => stickies(laidOut), [laidOut]);
     const laidFor = useMemo(
@@ -909,7 +918,7 @@ export function Review({
         }
         looked.current.set(lookedAt(was.of, was.path), standing);
         // Drawn once the cursor's move is done, which this is told of while CodeMirror is still telling it.
-        queueMicrotask(() => editor.draw(decorations(laidOut, draft, reviewed, reachesOf, ends)));
+        queueMicrotask(() => editor.draw(decorations(laidOut, withImplied, seeing, reachesOf, ends)));
     }
     // Which comments each fold held as the review was last laid out, by its key: one that comes to hold another opens.
     const held = useRef(new Map<string, Set<string>>());
@@ -1020,14 +1029,14 @@ export function Review({
             places.current = shown;
         }
         landing.current = null;
-        editor.draw(decorations(laidOut, draft, reviewed, reachesOf, ends));
+        editor.draw(decorations(laidOut, withImplied, seeing, reachesOf, ends));
         // The margin says what's drawn now.
         current.dispatch({ effects: redrawn.of(null) });
         follower.tell();
         if (arriving !== null && "comment" in arriving) {
             editor.enter();
         }
-    }, [laidOut, draft, reviewed]);
+    }, [laidOut, withImplied, seeing]);
 
     // What's drawn beside the text, as it's laid out now and as each agent is doing: how long each item has waited,
     // after when it came; what each agent is doing and for how long, after the core's words on its banner; and each
@@ -1073,6 +1082,9 @@ export function Review({
         }
     }, [jump, laidOut]);
 
+    /** Say whether `item` is new to the operator, its group not seen since it came: what done on a banner marks seen. */
+    const isFresh = (item: Item) => fresh(item, seeing);
+
     /**
      * Do what the verb named `name` does where the cursor is (`reachOf`): mark what it reaches in the draft, or take the
      * mark off where it's marked already, each thing marked folding as the layout says, however the operator left it;
@@ -1084,7 +1096,7 @@ export function Review({
         if (known === undefined) {
             return;
         }
-        const reach = reachOf(laidOut, editor.head(), known, { called });
+        const reach = reachOf(laidOut, editor.head(), known, { called, fresh: isFresh });
         if (reach.on === null) {
             say(`␣${known.key} ${known.called}: ${reach.why}.`);
             return;
@@ -1120,7 +1132,7 @@ export function Review({
         if (known === undefined) {
             return;
         }
-        const acts = reachedIn(laidOut, folds, known, { called });
+        const acts = reachedIn(laidOut, folds, known, { called, fresh: isFresh });
         if (acts.length === 0) {
             say(`␣${known.key} ${known.called}: nothing selected takes it.`);
             return;
@@ -1143,7 +1155,7 @@ export function Review({
         editor.record(next);
     }
 
-    /** Forget how the operator left the fold of what `act` marks, an item's or a file's, so it folds as the layout says once marked or unmarked. */
+    /** Forget how the operator left the fold of what `act` marks, an item's, a file's or a drawer's, so it folds as the layout says once marked or unmarked. */
     function unkeep(act: Act) {
         if (act.kind === "item") {
             const region = laidOut.regions.find((each) => each.item.number === act.number);
@@ -1156,7 +1168,8 @@ export function Review({
             return;
         }
         const node = findNode(laidOut.nodes, act.block);
-        const fold = node === undefined ? undefined : laidFor.folds.find((each) => each.kind === "file" && each.summary.from === node.from);
+        const drawer = node?.kind === "view" && laidOut.drawers.some((each) => each.view.id === node.id);
+        const fold = node === undefined ? undefined : laidFor.folds.find((each) => (each.kind === "file" || (drawer && each.scope === true)) && each.summary.from === node.from);
         if (fold !== undefined) {
             kept.current.delete(fold.key);
         }
@@ -1175,7 +1188,7 @@ export function Review({
                 const said = commentSays(at);
                 return said === null ? [] : [{ keys: `␣${each.key}`, ...said }];
             }
-            const reach = reachOf(laidOut, at, each, { called });
+            const reach = reachOf(laidOut, at, each, { called, fresh: isFresh });
             if (reach.on === null) {
                 // Pause is declared, and said in an agent's group, where it would act once it's built; decline on a flagged
                 // write says why it doesn't, the write having landed (#247).
@@ -1205,7 +1218,7 @@ export function Review({
             if (each.name === "comment") {
                 return [];
             }
-            const acts = reachedIn(laidOut, folds, each, { called });
+            const acts = reachedIn(laidOut, folds, each, { called, fresh: isFresh });
             return acts.length === 0 ? [] : [{ keys: `␣${each.key}${BARE.has(each.key) ? ` ${each.key}` : ""}`, says: `${each.called} ${acts.length}`, on: null }];
         });
         return { on: `${what}: ${folds.length} selected`, reached: [{ keys: "za zo zc", says: "toggle, open or close them", on: null }, ...verbs] };
@@ -1327,7 +1340,7 @@ export function Review({
                 if (region === undefined) {
                     return null;
                 }
-                const standing = itemStanding(region, draft, reviewed);
+                const standing = itemStanding(region, draft, seeing);
                 const mark = standing.marks[0];
                 return {
                     text: cited(region.item.number),
@@ -1355,7 +1368,7 @@ export function Review({
                 const state = matters ? { glyph: "⚑", mark: "flagged" } : folded ? { glyph: "·", mark: "folded" } : { glyph: "◇", mark: "to-review" };
                 // Marked reviewed in the draft, it says so as an item marked read does.
                 const node = chainAt(laidOut.nodes, from).findLast((each) => each.kind === "block" && each.from === from);
-                const marked = node !== undefined && marksOn(draft, node.id).some((each) => each.verb === "done");
+                const marked = node !== undefined && marksOn(withImplied, node.id).some((each) => each.verb === "done");
                 return { ...plain(path.split("/").at(-1) ?? path), state, draft: marked ? DRAFTED.read.glyph : null };
             }
             default:
@@ -1550,7 +1563,7 @@ export function Review({
     }
 
     // What the overview reads beside the review as it's laid out.
-    const reading = useMemo(() => ({ draft, reviewed, states, called }), [draft, reviewed, states, called]);
+    const reading = useMemo(() => ({ draft, seeing, states, called }), [draft, seeing, states, called]);
     const focusing = useCallback((focus: (() => void) | null) => setOutlineFocus(focus), []);
 
     const naming = {
@@ -1563,7 +1576,7 @@ export function Review({
         item: (region: Region) => region.named,
         party: called,
     };
-    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, laidOut.written, naming)} tally={tallied(items, draft, reviewed)} />;
+    const where = <Heading parts={heading(laidOut, Math.min(head, laidOut.text.length), commenting, laidOut.written, naming)} tally={tallied(items, draft, seeing)} />;
     // Each header pinned is drawn as the buffer draws its line.
     const classesOf = (sticky: Sticky): string => {
         switch (sticky.kind) {
@@ -1578,7 +1591,7 @@ export function Review({
                 const number = region.item.number;
                 return [
                     "review-header",
-                    fresh(region.item, reviewed) ? "is-new" : "",
+                    fresh(region.item, seeing) ? "is-new" : "",
                     news(region.item) ? "is-news" : "",
                     (draft.done ?? []).includes(number) ? "is-done" : "",
                     (draft.declined ?? []).includes(number) ? "is-declined" : "",

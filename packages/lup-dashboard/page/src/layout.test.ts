@@ -2,7 +2,7 @@ import "./fixtures/looks";
 import { describe, expect, it } from "vitest";
 
 import { cursorRow, itemStanding, outlineOf, type Reading } from "./outline";
-import { EMPTY, barsOf, laid, nested, ownerOf, rowLabel, whose, UNREAD, type AgentDrawers, type Around, type Conversation, type Head, type Item, type Placed } from "./review";
+import { EMPTY, barsOf, laid, nested, ownerOf, rowLabel, whose, UNREAD, UNSEEN, type AgentDrawers, type Around, type Conversation, type Head, type Item, type Placed } from "./review";
 import { around, linesOver, pinned, stickies, type Geometry } from "./stack";
 import { STANDING } from "./fixtures/looks";
 import { merged } from "./looks";
@@ -357,7 +357,7 @@ describe("the overview", () => {
     const drawers = new Map([[whose(PARENT), TASKED]]);
     const reading: Reading = {
         draft: { ...EMPTY, done: [2], comments: [{ id: "why", item: 1, text: "Why?" }] },
-        reviewed: null,
+        seeing: UNSEEN,
         states: new Map([[whose(PARENT), "calling"]]),
         called: (party) => (party.agent === null ? party.session : `${party.session}/${party.agent}`),
     };
@@ -382,7 +382,7 @@ describe("the overview", () => {
         // The cursor's entry is the deepest holding it.
         expect(cursorRow(rows, out.text.indexOf("Note 1."))?.text).toBe("@1 note");
         expect(cursorRow(rows, out.text.indexOf("━━ s1"))?.text).toBe("s1");
-        expect(itemStanding(out.regions.find((each) => each.item.number === 1)!, { ...EMPTY, parked: [1], comments: [{ id: "x", item: 1, text: "x" }] }, null)).toEqual({ marks: ["parked"], draft: [], fresh: false });
+        expect(itemStanding(out.regions.find((each) => each.item.number === 1)!, { ...EMPTY, parked: [1], comments: [{ id: "x", item: 1, text: "x" }] }, { groups: new Map([[whose(CHILD), 1]]), commented: new Set() })).toEqual({ marks: ["parked"], draft: [], fresh: false });
     });
 
     it("follows the review where it doesn't nest, a subagent's group where its first item put it", () => {

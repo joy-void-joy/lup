@@ -510,7 +510,7 @@ def control_routes(
 ) -> list[Route]:
     """Route the kinds the core registers on the control socket, beside the service's own: the inbox's, over `delivery`, an item's moment read from `recorded`; the dashboard's, `dashboard`'s address; the drawer's, what a branch changed since the operator approved it, read from lup's state at `layout`; the review marks, kept there; and a module's view the dashboard shows, through `views`, watched at its own triggers, where it's given."""
     return [
-        *inbox_routes(delivery, recorded),
+        *inbox_routes(delivery, recorded, layout),
         Route.to(dashboard_shown(dashboard)),
         *since_routes(delivery, layout, LupDevSettings().lup_integration_branch),
         *marks_routes(layout, delivery.clock, delivery.inbox.changes),

@@ -33,8 +33,10 @@ from lup_dev.host.protocol import (
 )
 from lup_dev.host.records import Call, Called, Entry, Said, Task, Transcript, Usage
 from lup_dev.host.workers import Viewed, Viewing
+from lup_dev.inbox import marks
 from lup_dev.inbox.citations import resolved
 from lup_dev.inbox.delivery import body, written
+from lup_dev.inbox.marks import CORE, MarksMoved, MarkStore, MoveMarks, ReviewMark
 from lup_dev.inbox.parts import PartId
 from lup_dev.inbox.protocol import (
     Context,
@@ -50,6 +52,7 @@ from lup_dev.inbox.protocol import (
     Ordered,
     Pathed,
     Reviewed,
+    Seen,
     SendDraft,
     SendItem,
     ShowContext,
@@ -231,6 +234,9 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
     isn't lup's, whose end the page reads its drawer at."""
     grew: bool = False
     """Whether the two writes came."""
+    seeded: bool = False
+    """Whether each group has been marked seen up to its last item made 3
+    minutes before the demo began (`seen`), as the first listing does."""
 
     @override
     async def ask(self, request: Asked) -> Replied:
@@ -308,6 +314,8 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
                 return self.since(conversation, seen)
             case ReviewSince(conversation=conversation, files=viewed, seen=seen):
                 return self.reviewed(conversation, viewed, seen)
+            case MoveMarks() as moving:
+                return self.moved(moving)
             case Viewing() as viewing:
                 return await self.viewed(viewing)
             case _:
@@ -360,6 +368,50 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
             return await self.views.view(viewing)
         except LupDevError as refused:
             return Refused(error=str(refused))
+
+    def marked(self, repository: Path) -> MarkStore:
+        """Return the review marks of `repository`, kept as the host keeps them in the demo's own directory, which its modules' views read."""
+        return MarkStore(layout=self.views.layout.marks(repository))
+
+    def moved(self, moving: MoveMarks) -> MarksMoved:
+        """Move the review marks `moving` names at the demo's time, as the host does (`lup_dev.inbox.marks`); each watch answers again, a view that read one among them."""
+        at = self.clock.now()
+        marks = [
+            ReviewMark(key=each.key, up_to=each.up_to, at=at) for each in moving.marks
+        ]
+        self.marked(moving.repository).moved(moving.module, marks)
+        self.changed.set()
+        self.changed = asyncio.Event()
+        return MarksMoved(marks=marks)
+
+    def seen(self, items: list[Item]) -> list[Seen]:
+        """Return how far the operator has seen each group among `items`' senders, by the core's review mark on it, as the host reads it: each group first marked seen up to its last item made 3 minutes before the demo began, so those since are new."""
+        senders = list(
+            dict.fromkeys(
+                each.sender for each in items if isinstance(each.sender, Conversation)
+            )
+        )
+        if not self.seeded:
+            self.seeded = True
+            for sender in senders:
+                before = [
+                    each.number
+                    for each in items
+                    if each.sender == sender and each.made <= self.ago(3)
+                ]
+                if before:
+                    mark = ReviewMark(
+                        key=marks.seen(sender), up_to=str(max(before)), at=self.ago(3)
+                    )
+                    self.marked(sender.repository).moved(CORE, [mark])
+
+        def of(sender: Conversation) -> Seen | None:
+            mark = self.marked(sender.repository).of(CORE, marks.seen(sender))
+            if mark is None or mark.up_to is None:
+                return None
+            return Seen(conversation=sender, item=int(mark.up_to), at=mark.at)
+
+        return [found for each in senders if (found := of(each)) is not None]
 
     def typed(self) -> None:
         """End the reading of the approval's types: its files carry their whole reading, and each watch answers again."""
@@ -763,7 +815,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         )
 
     def items(self) -> Items:
-        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn answering the operator's review, citing it, one citation edited and one naming no passage, the note that review was on, edited since, a friction and how the work went, and two writes that landed flagged, the subagent's new module gathering three; the operator last settled an item 3 minutes ago, so those since are new."""
+        """Return what waits for the operator: a subagent's question of numbered decisions, a session's note, another's problem, an approval of a host zone, a session's write held for them, another's last words of a turn answering the operator's review, citing it, one citation edited and one naming no passage, the note that review was on, edited since, a friction and how the work went, and two writes that landed flagged, the subagent's new module gathering three; each group seen up to its last item made 3 minutes before the demo began, so those since are new (`seen`)."""
         every = self.every()
         waiting = [
             each
@@ -791,7 +843,7 @@ class Demo(MutableModel, Host, arbitrary_types_allowed=True):
         ]
         return Items(
             items=waiting,
-            reviewed=self.ago(3),
+            seen=self.seen(waiting),
             answers=answers,
             commented=[
                 each

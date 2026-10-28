@@ -26,7 +26,7 @@ export interface Labelled {
     state: { glyph: string; mark: string } | null;
     /** What the draft does with it on the next Ctrl+Enter, glyphs in the draft's colour. */
     draft: string | null;
-    /** Whether it's new to the operator since they last sent. */
+    /** Whether it's new to the operator: its group not seen since it came, nor commented on in a reply sent. */
     fresh: boolean;
 }
 

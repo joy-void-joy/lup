@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { above, outdated, spokenOf } from "./exchange";
 import { levelled } from "./folds";
 import { reconcile, runsOf } from "./reconcile";
-import { marking, reachOf } from "./grammar";
+import { findNode, implied, marking, reachOf } from "./grammar";
 import {
     EMPTY,
     aboutAt,
@@ -57,6 +57,9 @@ import {
     rowLabel,
     sinceSummary,
     UNREAD,
+    UNSEEN,
+    seeingOf,
+    type Seeing,
     type AgentDrawers,
     type Around,
     type ChangedFile,
@@ -382,11 +385,14 @@ describe("laid", () => {
     it("counts what's to answer and what's new for the header over the review, those settled in the draft left out", () => {
         const friction: Item = { ...NOTE, number: 60, reason: { reason: "friction", text: "`ls` failed" }, rank: NEWS };
         const items = [QUESTION, NOTE, friction, FLAGGED];
-        expect(tallied(items, EMPTY, null)).toBe("2 to answer");
-        expect(tallied(items, EMPTY, "2026-10-17T11:00:00Z")).toBe("2 to answer · 4 new");
-        expect(tallied(items, { ...EMPTY, done: [51], parked: [70] }, "2026-10-17T11:00:00Z")).toBe("1 to answer · 2 new");
-        expect(tallied([friction], EMPTY, "2026-10-17T13:00:00Z")).toBe("0 to answer");
-        expect(tallied([], EMPTY, "2026-10-17T11:00:00Z")).toBe("");
+        // Each group seen up to an item, as the operator marked it with Space d on its banner.
+        const seen = (upTo: number): Seeing => ({ groups: new Map([[whose(from("s1", "a1")), upTo], [whose(from("s2")), upTo]]), commented: new Set() });
+        expect(tallied(items, EMPTY, UNSEEN)).toBe("2 to answer · 4 new");
+        expect(tallied(items, EMPTY, seen(100))).toBe("2 to answer");
+        expect(tallied(items, EMPTY, seen(55))).toBe("2 to answer · 2 new");
+        expect(tallied(items, { ...EMPTY, done: [51], parked: [70] }, UNSEEN)).toBe("1 to answer · 2 new");
+        expect(tallied([friction], EMPTY, seen(60))).toBe("0 to answer");
+        expect(tallied([], EMPTY, UNSEEN)).toBe("");
     });
 
     it("shows a friction, how the work went and a stop as written", () => {
@@ -1388,10 +1394,28 @@ describe("waited and fresh", () => {
         expect(waited("2026-10-15T14:00:00Z", now)).toBe("waiting 2d");
     });
 
-    it("marks what came after the operator last settled an item, and nothing before they first did", () => {
-        expect(fresh(QUESTION, "2026-10-17T11:00:00Z")).toBe(true);
-        expect(fresh(QUESTION, "2026-10-17T12:30:00Z")).toBe(false);
-        expect(fresh(QUESTION, null)).toBe(false);
+    it("marks what came after the operator last saw its group, and nothing they commented on in a reply sent", () => {
+        const group = (upTo: number): Seeing => ({ groups: new Map([[whose(from("s1", "a1")), upTo]]), commented: new Set() });
+        expect(fresh(QUESTION, UNSEEN)).toBe(true);
+        expect(fresh(QUESTION, group(50))).toBe(true);
+        expect(fresh(QUESTION, group(51))).toBe(false);
+        expect(fresh(QUESTION, { groups: new Map(), commented: new Set([51]) })).toBe(false);
+        // lup's approvals are of no agent's group: new until commented on, or answered.
+        expect(fresh(APPROVAL, group(100))).toBe(true);
+    });
+
+    it("reads how far the operator has seen from the inbox's listing: each group's mark, and the items a review sent commented on", () => {
+        const review: Item = {
+            ...NOTE,
+            number: 80,
+            sender: { party: "operator" },
+            recipient: from("s2"),
+            reason: { reason: "review", comments: [{ item: 52, text: "Why?", quote: null }], message: "", rulings: [] } as unknown as Item["reason"],
+        };
+        const seeing = seeingOf({ kind: "inbox-items", items: [NOTE], seen: [{ conversation: from("s1", "a1"), item: 51, at: "2026-10-17T12:00:00Z" }], answers: [review], commented: [] });
+        expect(seeing.groups.get(whose(from("s1", "a1")))).toBe(51);
+        expect([...seeing.commented]).toEqual([52]);
+        expect(seeingOf(null)).toBe(UNSEEN);
     });
 });
 
@@ -1446,7 +1470,7 @@ describe("the drawers under each agent's banner", () => {
         expect(texts[0]).toEqual(["tasks 1/3", "✓ Write the sampler", "▶ Writing the models", "· Measure"]);
         expect(texts[1]?.slice(0, 2)).toEqual(["since you approved · 1 to review · 1 flagged", "reader.py · created · 8 lines · new file"]);
         expect(texts[2]).toEqual([
-            "conversation · 7 steps",
+            "conversation · 7 steps · 2 new",
             "you: Build the reader.",
             "Reading the records.",
             "· Bash",
@@ -1470,7 +1494,7 @@ describe("the drawers under each agent's banner", () => {
         const talked = out.drawers[2]!;
         expect(talked.folds.map((each) => [each.kind, each.label, each.closed])).toEqual([
             ["earlier", "you: Build the reader.", true],
-            ["conversation", "conversation · 7 steps", true],
+            ["conversation", "conversation · 7 steps · 2 new", true],
         ]);
         expect(foldKey(talked.folds[0]!)).toBe(`conversation ${whose(S1)} earlier exchange 0`);
         expect([...talked.loads.values()].map((each) => [each.module, each.view, (each.argument as { step: number }).step])).toEqual([["transcripts", "exchange", 0]]);
@@ -1580,18 +1604,49 @@ describe("the drawers under each agent's banner", () => {
         expect(withWritten(EMPTY, remarks).remarks).toEqual(remarks);
     });
 
+    it("takes a comment sent on a file of since you approved as marking it reviewed, at the version it was written on, the operator's own mark the later word", () => {
+        const on = opened(out, at("        a = 1")) as Remark;
+        const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "why", text: "Why one?" }] };
+        const wrote = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote, previous: out });
+        const [mark, ...more] = implied(wrote, draft);
+        expect(more).toEqual([]);
+        expect(mark).toMatchObject({ id: "implied why", action: "policy-review-since", verb: "done", says: "mark it reviewed", version: "b1" });
+        expect(findNode(wrote.nodes, mark!.block)?.block?.block).toBe("diff");
+        // A comment that says nothing implies nothing.
+        const blank: Draft = { ...draft, remarks: [{ ...on, id: "why", text: "  " }] };
+        expect(implied(laid([QUESTION, NOTE], [S1], banner, header, blank, NOTHING, [], drawers, undefined, { remote }), blank)).toEqual([]);
+        // Marked by the operator's own Space d, it's their mark that's sent.
+        const reach = reachOf(wrote, wrote.text.indexOf("        a = 1"), verb("done"), { called: (each) => each.session });
+        const marked = marking(draft, reach.on === null ? [] : reach.acts, "done");
+        expect(implied(wrote, marked)).toEqual([]);
+        // A remark on the agent's words implies nothing: the conversation's steps offer nothing a comment implies.
+        const twenty = opened(out, at("Twenty")) as Remark;
+        const talked: Draft = { ...EMPTY, remarks: [{ ...twenty, id: "how", text: "How many?" }] };
+        expect(implied(laid([QUESTION, NOTE], [S1], banner, header, talked, NOTHING, [], drawers, undefined, { remote }), talked)).toEqual([]);
+    });
+
+    it("marks the conversation read from anywhere in it, up to its last step, folding it as the reply waits to be sent", () => {
+        const conversation = out.drawers.find((each) => each.kind === "conversation")!;
+        const reach = reachOf(out, at("Twenty"), verb("done"), { called: (each) => each.session });
+        const draft = marking(EMPTY, reach.on === null ? [] : reach.acts, "done");
+        expect(draft.marks?.map((each) => [each.action, each.block, (each.argument as { up_to: string }).up_to])).toEqual([["review-mark", conversation.view.id, "6"]]);
+        const marked = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote });
+        const fold = marked.drawers.find((each) => each.kind === "conversation")!.folds.at(-1)!;
+        expect([fold.kind, fold.closed]).toEqual(["conversation", true]);
+    });
+
     it("keeps a remark on a step under a fold not read yet under the drawer's line until it's read, then under its line", () => {
         const on = opened(out, at("Reading the records.")) as Remark;
         const draft: Draft = { ...EMPTY, remarks: [{ ...on, id: "read", text: "Which records?" }] };
         const unread = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote: DRAWER_ONLY });
-        expect(unread.text).toContain("conversation · 7 steps\nWhich records?\nyou: Build the reader.\nreading…\n");
+        expect(unread.text).toContain("conversation · 7 steps · 2 new\nWhich records?\nyou: Build the reader.\nreading…\n");
         const read = laid([QUESTION, NOTE], [S1], banner, header, draft, NOTHING, [], drawers, undefined, { remote, previous: unread });
         expect(read.text).toContain("you: Build the reader.\nReading the records.\nWhich records?\n· Bash");
         expect(read.seated.get("read")?.outdated).toBe(false);
         // One drafted before quotes named their block waits there unconverted until its step is laid out.
         const old: Remark = { id: "old", to: S1, quote: keptQuote("Reading the records.", 0, 20), text: "Which records?", step: 1 };
         const waiting = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote: DRAWER_ONLY });
-        expect(waiting.text).toContain("conversation · 7 steps\nWhich records?\n");
+        expect(waiting.text).toContain("conversation · 7 steps · 2 new\nWhich records?\n");
         expect(waiting.converted).toBeNull();
         const placed = laid([QUESTION, NOTE], [S1], banner, header, { ...EMPTY, remarks: [old] }, NOTHING, [], drawers, undefined, { remote });
         expect(placed.converted?.map((each) => ("quote" in each ? [each.quote?.block.endsWith(" step 1"), each.quote?.line] : "letter"))).toEqual([[true, 0]]);
@@ -1718,11 +1773,28 @@ describe("the drawers under each agent's banner", () => {
     });
 
     it("marks an agent's own news read and its drawers done from its banner, what asks something left and named", () => {
+        const acted = (reach: ReturnType<typeof reachOf>) =>
+            reach.on === null ? [] : reach.acts.map((each) => (each.kind === "item" ? `item ${each.number} ${each.list}` : each.kind === "mark" ? `mark ${each.offer.action} ${each.block}` : each.kind));
         const reach = reachOf(out, at("━━ s1"), verb("done"), { called: (each) => each.session });
-        expect(reach.on === null ? [] : reach.acts.map((each) => (each.kind === "item" ? `item ${each.number} ${each.list}` : each.kind === "mark" ? `mark ${each.offer.action}` : each.kind))).toEqual([
-            "mark policy-review-since",
+        const since = out.drawers.find((each) => each.kind === "since")!;
+        const conversation = out.drawers.find((each) => each.kind === "conversation")!;
+        // The since drawer's files, each of its own; the conversation, which offers marking it read, whole.
+        expect(acted(reach)).toEqual([
+            ...findNode(out.nodes, since.view.id)!.children.filter((each) => each.kind === "block").map((each) => `mark policy-review-since ${each.id}`),
+            `mark review-mark ${conversation.view.id}`,
         ]);
         expect(reach.says).toBe("mark its drawers done, @51 left");
+        // Holding an item new to the operator, it's marked seen too, up to the last item the review shows.
+        const fresh = reachOf(out, at("━━ s1"), verb("done"), { called: (each) => each.session, fresh: () => true });
+        expect(acted(fresh)[0]).toBe(`mark review-mark group ${out.groups[0]?.place}`);
+        expect(fresh.says).toBe("mark it seen, its drawers done, @51 left");
+        const seen = fresh.on === null ? undefined : fresh.acts[0];
+        expect(seen?.kind === "mark" ? seen.offer.argument : null).toEqual({
+            repository: "/r/.git",
+            module: "core",
+            key: { runtime: "claude", session: "s1", agent: "a1" },
+            up_to: "52",
+        });
         // Its news, a note ranked so, read from its banner.
         const told = laid([QUESTION, { ...NOTE, rank: NEWS }], [S1], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
         const news = reachOf(told, told.text.indexOf("━━ s2"), verb("done"), { called: (each) => each.session });
@@ -1734,9 +1806,10 @@ describe("the drawers under each agent's banner", () => {
         expect(reaches(out, at("reader.py · created"), "done")).toBe("reader.py: mark it reviewed");
         expect(reaches(out, at("reader.py · created"), "decline")).toBeNull();
         expect(reaches(out, at("since you approved ·"), "done")).toBe("since you approved · 1 to review · 1 flagged: mark every file reviewed");
-        // A task list and a conversation offer nothing of their own: done reaches the agent, its news and drawers.
+        // A task list offers nothing of its own: done reaches the agent, its news and drawers. A conversation offers
+        // marking it read, up to its last step, which done in it does.
         expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark its drawers done, @51 left");
-        expect(reaches(out, at("Twenty"), "done")).toBe("s1: mark its drawers done, @51 left");
+        expect(reaches(out, at("Twenty"), "done")).toBe("conversation · 7 steps · 2 new: mark it read");
     });
 
     it("says in each summary line what the drawer holds: in since you approved, the files changed and those standing as reviewed", () => {

@@ -99,7 +99,7 @@ const MARKS: Part[] = [
             { keys: "·", does: "a file folded whole: automatic, a test, data, a first approval's", short: "folded" },
             { keys: "•", does: "news, to read rather than answer: a note, a turn's last words, a friction, how it went, a stop", short: "news" },
             { keys: "‖", does: "an item left for later", short: "parked" },
-            { keys: "new", does: "an item that came after you last sent", short: "new" },
+            { keys: "new", does: "an item that came after you last marked its agent seen, Space d on its banner, and that you haven't commented on", short: "new" },
             { keys: "▶ ○ ✕", does: "an agent calling a tool, between calls, ended", short: "agents" },
             { keys: "» ✓ ✔ ✗", does: "in yellow, what your next Ctrl+Enter does with it: your comment on it goes, it's marked read, it's approved, it's declined", short: "your reply" },
         ],
@@ -115,7 +115,7 @@ const LIST: Part[] = [{ title: "This palette", keys: [{ keys: "?", does: "open i
  * undone with u and sent with Ctrl+Enter, the key pressed again taking it off. A module's own verb says what it's called.
  */
 const VERBS: Readonly<Record<string, string>> = {
-    done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; on a banner, the agent's own items and drawers, its subagents' left as they are",
+    done: "mark it done: an item read; an approval or a held change approved, the comments under it going with it; a file of \"since you approved\" reviewed at the version shown, approving its flagged writes where it still stands so; on the drawer's line, every file it shows; a conversation read up to its last step; on a banner, the agent seen, its own items and drawers, its subagents' left as they are",
     decline: "decline an approval or a held change, the comments under it going with it; a comment never declines",
     send: "leave the item for later, folded at the review's end, where what's drafted on it stays drafted as the rest is sent; on one left for later, bring it back; sending to an agent or a named pile comes with piles (#312)",
     comment: "comment on it whole: an item; on a banner, a message to its agent, which its drawers' remarks go with; in a drawer, a remark on the line",

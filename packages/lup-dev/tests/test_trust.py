@@ -2164,7 +2164,7 @@ class Background:
             answerer=known,
             courier=couriers,
             post=self.delivery,
-            routes=inbox_routes(self.delivery, {}) if inboxed else [],
+            routes=inbox_routes(self.delivery, {}, machine) if inboxed else [],
             judge=NoJudge(),
             say=self.said.append,
             waker=wakers,
