@@ -28,7 +28,7 @@ agent's finishes, so one still running shows what it returned once it has.
 """
 
 import asyncio
-import shutil
+import os
 from datetime import timedelta
 from typing import TYPE_CHECKING, ClassVar
 
@@ -37,6 +37,7 @@ from pydantic import Field
 import lup
 from lup.blocks import FoldKind, OfAgent
 from lup.types import Model
+from lup_dev.confined import Confined
 from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Room
 from lup_dev.git import Git
 from lup_dev.host.protocol import HostError
@@ -105,21 +106,53 @@ def stale(source: Path, copy: Path) -> bool:
 
 
 def copied(records: list[Record], target: Path) -> int:
-    """Copy each file of `records` into `target` where it's stale, and return how many were copied."""
-    pairs = [
-        (each, target / record.place / each.relative_to(record.source))
-        for record in records
-        for each in (
-            [record.source]
-            if record.source.is_file()
-            else sorted(path for path in record.source.rglob("*") if path.is_file())
+    """Copy each file of `records` into `target` where it's stale, and return how many were copied.
+
+    A room writes the records copied, and every room of the project reads the
+    copies, so a link a room left there would copy what it names, a key in
+    `~/.ssh` say, where every room reads it. So each file is read as the host
+    reads a worktree's (`Confined`): a regular file, opened without waiting on
+    a pipe, only where it resolves inside its record's folder; a record reached
+    through a link below the runtime's home, the part a room writes, is left
+    out whole, while a link in the home's own path (a home kept in a dotfiles
+    checkout, `/home` itself a link) is the machine's and is followed. A link
+    the runtime made between its own files in the folder, as a runtime may
+    link a resumed session's subagents to the session it resumed, is copied as
+    the file it names. Each copy keeps its file's time, which `stale` compares.
+    """
+    count = 0
+    for record in records:
+        source = record.source
+        home = source.parents[len(record.place.parts) - 1]
+        if source.resolve() != home.resolve().joinpath(*record.place.parts):
+            continue
+        whole = source.is_dir(follow_symlinks=False)
+        folder = Confined(root=source if whole else source.parent)
+        files = (
+            sorted(
+                each
+                for each in source.rglob("*")
+                if not each.is_dir(follow_symlinks=False)
+            )
+            if whole
+            else [source]
         )
-    ]
-    stale_pairs = [(source, copy) for source, copy in pairs if stale(source, copy)]
-    for source, copy in stale_pairs:
-        copy.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, copy)
-    return len(stale_pairs)
+        for each in files:
+            copy = target / record.place / each.relative_to(source)
+            try:
+                if not stale(each, copy):
+                    continue
+                held = each.stat()
+            except OSError:
+                continue
+            content = folder.read(each.relative_to(folder.root))
+            if content is None:
+                continue
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            copy.write_bytes(content)
+            os.utime(copy, ns=(held.st_atime_ns, held.st_mtime_ns))
+            count += 1
+    return count
 
 
 class TranscriptsServing(ModuleServing):
