@@ -698,10 +698,16 @@ class Kit:
         self.linter = FakeLinter()
         self.clock = FakeClock()
         self.spawner = FakeSpawner()
-        # lup's data under the test's directory too: the copies of `lup-dev`
-        # trust installs live there.
+        # Each of lup's places under the test's directory: its data holds the
+        # copies of `lup-dev` trust installs, and its runtime directory the
+        # launches `registered` records, which at its default would be one
+        # directory for every test the suite's workers run at once.
         self.layout = Layout(
-            state=state, data=state.parent / "data", config=state.parent / "config"
+            state=state,
+            runtime=state.parent / "run",
+            data=state.parent / "data",
+            config=state.parent / "config",
+            cache=state.parent / "cache",
         )
         self.runtime = runtime
         self.announced = Announced(self.layout, self.clock, answering)
