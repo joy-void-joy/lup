@@ -733,7 +733,7 @@ class Lander(Model, arbitrary_types_allowed=True):
         return Baseline(
             inbox=self.delivery.inbox,
             repository=repository,
-            reviews=Reviews(layout=self.layout.reviewed(repository)),
+            reviews=Reviews.of(self.layout, repository),
         )
 
     @lup.tool(idempotent=True)

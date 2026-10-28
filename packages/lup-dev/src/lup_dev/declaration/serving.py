@@ -13,7 +13,9 @@ with their types, and gives them the module's own context through `self`: its
 data directory for the repository (`data`), the other repositories the
 declaration names (`related`), where each runtime keeps its records and how
 they're read (`recorded`), the items of lup's inbox a conversation exchanged, which the core
-keeps (`exchanges`), and the publishing door (`publish`).
+keeps (`exchanges`), its review marks, how far the operator reviewed each
+thing its views show, which the core keeps too (`marks`), and the publishing
+door (`publish`).
 
 **Who asks is the method's** (`Asker`), by its `by` parameter, which hands it its
 caller: `Agent`, a conversation of a launch's session calling a tool; `Room`,
@@ -66,6 +68,7 @@ from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import Register, Reply, Request
 from lup_dev.host.records import Recorded
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import ReviewMarks
 
 if TYPE_CHECKING:
     from lup.tools.tool import ToolSpec
@@ -280,6 +283,9 @@ class ModuleServing(Model, arbitrary_types_allowed=True):
     exchanges: Exchanges
     """Where a view reads the items of lup's inbox a conversation of the
     repository exchanged, which the core keeps."""
+    marks: ReviewMarks
+    """Where a view reads its module's review marks of the repository, which the
+    core keeps, and makes the offer moving one (`lup_dev.inbox.marks`)."""
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:

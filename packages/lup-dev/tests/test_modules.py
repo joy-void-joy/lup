@@ -57,6 +57,7 @@ from lup_dev.host.workers import (
     Workers,
 )
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import StoredMarks
 from lup_dev.inbox.protocol import Exchanged
 from lup_dev.layout import HostLayout, Layout
 from lup_dev.stored import write_model
@@ -238,6 +239,7 @@ def serving(tmp_path: Path, volume: int = 1) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path)),
     )
 
 
@@ -603,6 +605,7 @@ def listening(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
     )
 
 
@@ -672,6 +675,7 @@ def test_each_launch_s_hooks_read_its_own_runtime_s_records(tmp_path: Path) -> N
         },
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
     )
     one = launch(tmp_path)
     two = one.model_copy(update={"launch": "two", "runtime": "codex"})
@@ -754,6 +758,7 @@ def guarding(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path / "data"),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path / "data")),
     )
 
 
@@ -904,6 +909,7 @@ def viewing(tmp_path: Path) -> RepositoryModules:
         recorded={"claude": Recorded(records=Nothing(), reader=Unread())},
         layout=Layout(state=tmp_path, data=tmp_path),
         exchanges=Unexchanged(),
+        marks=StoredMarks(layout=Layout(state=tmp_path, data=tmp_path)),
     )
 
 

@@ -24,7 +24,9 @@ from lup_dev.host.records import Call as RecordedCall
 from lup_dev.host.records import Reader as RecordsReader
 from lup_dev.host.records import Record, Recorded, Records, Transcript
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import ReviewMarks, StoredMarks
 from lup_dev.inbox.protocol import Exchanged
+from lup_dev.layout import Layout
 from lup_transcripts.environment.conversation import EARLIER_KIND
 from lup_transcripts.environment.module import Transcripts
 from lup_transcripts.environment.serving import TranscriptsServing, copied
@@ -33,6 +35,16 @@ if TYPE_CHECKING:
     from lup.blocks import OfAgent
     from lup.publishing import Published, Refusal
     from lup_dev.host.courier import Conversation
+
+
+def unmarked() -> ReviewMarks:
+    """Transcripts' review marks, none made: kept where nothing is."""
+    nowhere = Layout(state=Path("/nowhere"), data=Path("/nowhere"))
+    return ReviewMarks(
+        marks=StoredMarks(layout=nowhere),
+        repository=Path("/r/.git"),
+        module="transcripts",
+    )
 
 
 class Unread(RecordsReader):
@@ -216,6 +228,7 @@ def test_transcripts_copy_the_repository_s_records_at_its_moments(
         related=[],
         publisher=Unpublished(),
         exchanges=Unexchanged(),
+        marks=unmarked(),
     )
     asyncio.run(serving.keep(lup.Stopped(), by=Lup(launch=registered)))
     assert (data / "claude" / "projects" / "p" / "s1.jsonl").is_file()
@@ -248,6 +261,7 @@ def test_a_person_s_layer_keeps_more_or_fewer_of_the_agent_s_words_open_in_the_d
             related=[],
             publisher=Unpublished(),
             exchanges=Unexchanged(),
+            marks=unmarked(),
         )
 
     assert serving(module).earlier().keeps_open == 40

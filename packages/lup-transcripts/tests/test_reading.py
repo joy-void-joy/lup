@@ -22,7 +22,9 @@ from lup_dev.host.records import (
     Transcript,
 )
 from lup_dev.inbox.exchanges import Exchanges
+from lup_dev.inbox.marks import ReviewMarks, StoredMarks
 from lup_dev.inbox.protocol import Exchanged
+from lup_dev.layout import Layout
 from lup_transcripts.environment.conversation import OfCall, OfExchange
 from lup_transcripts.environment.module import Transcripts
 from lup_transcripts.environment.serving import (
@@ -53,6 +55,16 @@ def session(name: str) -> Transcript:
             Said(by="operator", text="Now land it.", at=AT),
             Said(by="agent", text="Landed.", at=AT),
         ],
+    )
+
+
+def unmarked() -> ReviewMarks:
+    """Transcripts' review marks, none made: kept where nothing is."""
+    nowhere = Layout(state=Path("/nowhere"), data=Path("/nowhere"))
+    return ReviewMarks(
+        marks=StoredMarks(layout=nowhere),
+        repository=Path("/r/.git"),
+        module="transcripts",
     )
 
 
@@ -122,6 +134,7 @@ def serving(tmp_path: Path, *sessions: Transcript) -> TranscriptsServing:
         related=[],
         publisher=Unpublished(),
         exchanges=Exchanging(Exchanged(sent=[], received=[])),
+        marks=unmarked(),
     )
 
 

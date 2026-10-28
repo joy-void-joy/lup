@@ -261,21 +261,36 @@ class StoreLayout(Model):
 
 
 class ReviewedLayout(Model):
-    """Where one repository's files the operator marked reviewed in their agents' drawers are kept (`lup_dev.policy.reviewed`): each branch's marks, and each version marked, by git's id for it."""
+    """Where one repository's files the operator marked reviewed in their agents' drawers keep the versions marked, by git's id for each (`lup_dev.policy.reviewed`); and where each branch's marks were kept before the review marks' store held them, which an older copy of lup still reads."""
 
     home: Path
 
+    @property
+    def branches(self) -> Path:
+        """Where each branch's marks were kept before the review marks' store held them (`MarksLayout`): carried into it once, and kept for an older copy of lup, which reads them still."""
+        return self.home / "branches"
+
     def branch(self, branch: str) -> Path:
-        """Say where the marks on branch `branch` are kept, by a digest of its name, which may hold slashes."""
-        return (
-            self.home
-            / "branches"
-            / f"{hashlib.sha256(branch.encode()).hexdigest()}.json"
-        )
+        """Say where the marks on branch `branch` were kept, by a digest of its name, which may hold slashes."""
+        return self.branches / f"{hashlib.sha256(branch.encode()).hexdigest()}.json"
 
     def version(self, version: str) -> Path:
         """Say where the content git's id `version` names is kept, as it was marked."""
         return self.home / "versions" / version
+
+
+class MarksLayout(Model):
+    """Where one repository's review marks are kept (`lup_dev.inbox.marks`): one file of each module's, and the lock each is written under."""
+
+    home: Path
+
+    def module(self, module: str) -> Path:
+        """Say where module `module`'s marks are kept, one file for all of them."""
+        return self.home / f"{module}.json"
+
+    def lock(self, module: str) -> Path:
+        """Say where the lock module `module`'s marks are written under is held, so two writers never lose one's mark."""
+        return self.home / f"{module}.lock"
 
 
 class CheckoutLayout(Model):
@@ -955,8 +970,12 @@ class Layout(Model):
         return self.repository(repository) / "verdicts.jsonl"
 
     def reviewed(self, repository: Path) -> ReviewedLayout:
-        """Say where the files of a repository's branches the operator marked reviewed are kept, by its git directory."""
+        """Say where the versions of a repository's files the operator marked reviewed are kept, by its git directory."""
         return ReviewedLayout(home=self.repository(repository) / "reviewed")
+
+    def marks(self, repository: Path) -> MarksLayout:
+        """Say where a repository's review marks are kept, by its git directory."""
+        return MarksLayout(home=self.repository(repository) / "marks")
 
     def heads(self, repository: Path) -> Path:
         """Say where each worktree's `HEAD` at its last checkpoint is kept."""

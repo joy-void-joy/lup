@@ -82,6 +82,7 @@ from lup_dev.host.workers import (
 )
 from lup_dev.inbox.bearings import Repository, RepositoryBearings, Unlanded
 from lup_dev.inbox.delivery import SEPARATOR, Delivery, Waking, clocked, opening
+from lup_dev.inbox.marks import StoredMarks
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.parts import PartId, blocks
 from lup_dev.inbox.protocol import (
@@ -8065,7 +8066,7 @@ def test_a_hold_at_landing_starts_from_the_version_the_operator_marked_reviewed(
     landings.wrote(feat, path, first)
     version = landings.shell.git(feat, "rev-parse", f"HEAD:{path}")
     mark = Mark(path=Path(path), version=version, at=clock.now())
-    reviews = Reviews(layout=machine.reviewed(landings.repository))
+    reviews = Reviews.of(machine, landings.repository)
     reviews.marked("feat", [mark], {version: first.encode()})
     landings.wrote(feat, path, second)
     tip = landings.merged()
@@ -9094,6 +9095,7 @@ def test_lup_dev_transcripts_show_says_how_much_of_the_exchange_lups_inbox_holds
         recorded=cli.recorded(),
         layout=Layout.of(LupDevSettings()),
         exchanges=HostExchanges(repository=common, layout=machine.host, clock=clock),
+        marks=StoredMarks(layout=Layout.of(LupDevSettings())),
     )
     app = commanding.commands(
         "transcripts", modules.resolved.served, modules.made, OperatorAsker
