@@ -11,7 +11,8 @@
 // offer that runs at once (`Offer.runs`), a module's view key, is run as it's pressed. Pure.
 import { newId } from "./anchors";
 import type { components } from "./generated/api";
-import type { Conversation, Draft, Group, Laid, Placed, Region } from "./review";
+import { cited } from "./comments";
+import { news, type Conversation, type Draft, type Group, type Laid, type Placed, type Region } from "./review";
 import type { Block as ViewBlock, Offer } from "./views";
 
 export type Verb = components["schemas"]["Verb"];
@@ -163,7 +164,8 @@ function actsOf(blocks: readonly Placed[], verb: Verb, conversation: Conversatio
  * - **An item:** what its kind's view offers, as approving or declining an approval; else the core's, done marking it
  *   read, send leaving it for later, comment opening a comment on it whole.
  * - **An agent's group,** on its banner or anywhere in it nothing nearer takes the verb: what its banner's parts offer,
- *   as hold; done reaching its own items and drawers, its subagents' left as they are; comment a message to it.
+ *   as hold; done reaching its own news and drawers, its subagents' left as they are, and an item asking something,
+ *   which marking done would answer, left too; comment a message to it.
  */
 export function reachOf(laidOut: Laid, at: number, verb: Verb, naming: Naming): Reach {
     const chain = chainAt(laidOut.nodes, at);
@@ -257,8 +259,8 @@ function itemReach(region: Region, node: Placed, verb: Verb): Reach | null {
 
 /**
  * Return where `verb` lands on `group`, laid out at `node`: what its banner's parts offer, as hold; done marking each
- * of its own items done, or what each one's kind offers for done, and every block of its drawers offering done, its
- * subagents' groups left as they are; comment, a message to its agent. None where nothing of it takes the verb, as on
+ * of its own news read, and every block of its drawers offering done, its subagents' groups left as they are, and each
+ * item asking something, a question, an approval or a held change, left and named; comment, a message to its agent. None where nothing of it takes the verb, as on
  * lup's approvals, which no agent is.
  */
 function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, naming: Naming): Reach | null {
@@ -272,17 +274,25 @@ function groupReach(laidOut: Laid, node: Placed, group: Group, verb: Verb, namin
     }
     switch (verb.name) {
         case CORE.done: {
-            const items = node.children.flatMap((child) => {
+            // Its own news read, as #263's banner key has it: an item asking something, a question, an approval or a held
+            // change, is left alone, since marking it done answers it or approves it, and said.
+            const regions = node.children.flatMap((child) => {
                 const region = child.kind === "item" ? laidOut.regions.find((each) => `item ${each.item.number}` === child.id) : undefined;
-                const reached = region === undefined ? null : itemReach(region, child, verb);
+                return region === undefined ? [] : [{ region, child }];
+            });
+            const items = regions.flatMap(({ region, child }) => {
+                const reached = news(region.item) ? itemReach(region, child, verb) : null;
                 return reached === null || reached.on === null ? [] : reached.acts;
             });
+            const left = regions.filter(({ region }) => !news(region.item)).map(({ region }) => cited(region.item.number));
             const drawers = group.drawers.flatMap((drawer) => {
                 const placed = node.children.find((child) => child.id === drawer.view.id);
                 return placed === undefined ? [] : actsOf(offering(placed, verb), verb, drawer.conversation);
             });
             const acts = [...items, ...drawers];
-            return acts.length === 0 ? null : { on, node, says: "mark its items and drawers done", acts };
+            const what = [...(items.length === 0 ? [] : ["its news read"]), ...(drawers.length === 0 ? [] : ["its drawers done"])].join(", ");
+            const leaving = left.length === 0 ? "" : `, ${left.join(" ")} left`;
+            return acts.length === 0 ? null : { on, node, says: `mark ${what}${leaving}`, acts };
         }
         case CORE.comment:
             return conversation === null ? null : { on, node, says: "write to it", acts: [{ kind: "comment" }] };

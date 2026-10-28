@@ -1177,9 +1177,15 @@ export function Review({
             }
             const reach = reachOf(laidOut, at, each, { called });
             if (reach.on === null) {
-                // Pause is declared, and said in an agent's group, where it would act once it's built.
+                // Pause is declared, and said in an agent's group, where it would act once it's built; decline on a flagged
+                // write says why it doesn't, the write having landed (#247).
                 const agent = each.name === "pause" ? groupAround(laidOut, at)?.conversation : null;
-                return agent === null || agent === undefined ? [] : [{ keys: `␣${each.key}`, says: `${each.called}, not built yet`, on: called(agent) }];
+                if (agent !== null && agent !== undefined) {
+                    return [{ keys: `␣${each.key}`, says: `${each.called}, not built yet`, on: called(agent) }];
+                }
+                const drawer = each.name === "decline" ? drawerAt(laidOut, at) : undefined;
+                const flagged = drawer?.kind === "since" && (sinceFileAt(drawer, at)?.flags ?? []).length > 0;
+                return flagged ? [{ keys: `␣${each.key}`, says: `${each.called}, not yet: a flagged write has landed, and declining it waits on holding writes at landing`, on: null }] : [];
             }
             return [{ keys: `␣${each.key}`, says: reach.says, on: reach.on }];
         });

@@ -502,10 +502,11 @@ describe("laid", () => {
         expect(reaches(out, at("Approve?"), "decline")).toBe("@54 approval: decline");
         // A file of an approval offers nothing of its own: the approval, whole.
         expect(reaches(out, at("a.py · changed"), "done")).toBe("@54 approval: approve");
-        // On a banner, the agent: done reaching its own items; hold where its banner offers it, none here, not running.
-        expect(reaches(out, at("━━ s1"), "done")).toBe("s1: mark its items and drawers done");
+        // On a banner, the agent: done reaching its own news, none here, a question and approvals asking something,
+        // which done would answer; hold where its banner offers it, none here, not running.
+        expect(reaches(out, at("━━ s1"), "done")).toBeNull();
         expect(reaches(out, at("━━ s1"), "hold")).toBeNull();
-        expect(reaches(out, at("━━ lup"), "done")).toBe("lup's approvals: mark its items and drawers done");
+        expect(reaches(out, at("━━ lup"), "done")).toBeNull();
         expect(reaches(out, at("━━ s3"), "done")).toBeNull();
         expect(reaches(laid([], [], banner, header, EMPTY, NOTHING), 0, "done")).toBeNull();
         // Pause is declared, and nothing offers it: its key says so.
@@ -1716,12 +1717,16 @@ describe("the drawers under each agent's banner", () => {
         }
     });
 
-    it("marks an agent's own items and drawers done from its banner, its subagents' left as they are", () => {
+    it("marks an agent's own news read and its drawers done from its banner, what asks something left and named", () => {
         const reach = reachOf(out, at("━━ s1"), verb("done"), { called: (each) => each.session });
         expect(reach.on === null ? [] : reach.acts.map((each) => (each.kind === "item" ? `item ${each.number} ${each.list}` : each.kind === "mark" ? `mark ${each.offer.action}` : each.kind))).toEqual([
-            "item 51 done",
             "mark policy-review-since",
         ]);
+        expect(reach.says).toBe("mark its drawers done, @51 left");
+        // Its news, a note ranked so, read from its banner.
+        const told = laid([QUESTION, { ...NOTE, rank: NEWS }], [S1], banner, header, EMPTY, NOTHING, [], drawers, undefined, { remote });
+        const news = reachOf(told, told.text.indexOf("━━ s2"), verb("done"), { called: (each) => each.session });
+        expect(news.on === null ? null : [news.says, news.acts]).toEqual(["mark its news read", [{ kind: "item", number: 52, list: "done" }]]);
     });
 
     it("says what each verb reaches in a drawer: a file of since you approved, the drawer on its line, the agent elsewhere", () => {
@@ -1729,9 +1734,9 @@ describe("the drawers under each agent's banner", () => {
         expect(reaches(out, at("reader.py · created"), "done")).toBe("reader.py: mark it reviewed");
         expect(reaches(out, at("reader.py · created"), "decline")).toBeNull();
         expect(reaches(out, at("since you approved ·"), "done")).toBe("since you approved · 1 to review · 1 flagged: mark every file reviewed");
-        // A task list and a conversation offer nothing of their own: done reaches the agent, its items and drawers.
-        expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark its items and drawers done");
-        expect(reaches(out, at("Twenty"), "done")).toBe("s1: mark its items and drawers done");
+        // A task list and a conversation offer nothing of their own: done reaches the agent, its news and drawers.
+        expect(reaches(out, at("✓ Write"), "done")).toBe("s1: mark its drawers done, @51 left");
+        expect(reaches(out, at("Twenty"), "done")).toBe("s1: mark its drawers done, @51 left");
     });
 
     it("says in each summary line what the drawer holds: in since you approved, the files changed and those standing as reviewed", () => {
