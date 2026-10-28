@@ -31,9 +31,10 @@ export type OutlineMark = "waiting" | "news" | "parked" | "to-review" | "flagged
 
 /**
  * What the draft does with an item on the next Ctrl+Enter, all in the draft's colour: comments on it go, it's marked
- * read, or it's approved, an approval marked read alone or a held change marked read or commented on.
+ * read, it's approved, an approval or a held change marked done or read alone, or a held change commented on, or it's
+ * declined.
  */
-export type DraftMark = "comment" | "read" | "approve";
+export type DraftMark = "comment" | "read" | "approve" | "decline";
 
 /** One entry: what it is, how deep it's set in, what it says, how it stands, what the draft does with it, where it is in the review, and where going to it lands. */
 export interface OutlineRow extends Span {
@@ -96,10 +97,13 @@ export function itemStanding(region: Region, draft: Draft, reviewed: string | nu
     const number = item.number;
     const commented = (draft.comments ?? []).some((each) => each.item === number && each.text.trim() !== "");
     const done = (draft.done ?? []).includes(number);
+    const declined = (draft.declined ?? []).includes(number);
     const parked = (draft.parked ?? []).includes(number);
     const reason = item.reason.reason;
-    const approved = (reason === "approval" && done && !commented) || (reason === "held" && (done || commented));
-    const drafted: DraftMark[] = parked ? [] : [...(commented ? ["comment" as const] : []), ...(approved ? ["approve" as const] : done && reason !== "approval" ? ["read" as const] : [])];
+    // Marked done, an approval or a held change is approved, its comments going with the yes; a held change commented on is too.
+    const approved = !declined && ((reason === "approval" && done) || (reason === "held" && (done || commented)));
+    const answered: DraftMark[] = declined ? ["decline"] : approved ? ["approve"] : done && reason !== "approval" ? ["read"] : [];
+    const drafted: DraftMark[] = parked ? [] : [...(commented ? ["comment" as const] : []), ...answered];
     const marks: OutlineMark[] = parked ? ["parked"] : toAnswer(item, draft) ? ["waiting"] : news(item) && !done ? ["news"] : [];
     return { marks, draft: drafted, fresh: fresh(item, reviewed) };
 }

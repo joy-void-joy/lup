@@ -1,20 +1,21 @@
-// The line of keys under a view: where the cursor is, the keys that apply there,
-// and at its end, but in a comment, `?`, which opens the list of them all, in
-// parts; Esc, `q` or `?` closes it, the keyboard back where it was. Once a chord
-// is begun, as with Space, a panel over the line lists the keys that may follow
+// The line of keys under a view: what the cursor is on and what each verb
+// would do to it there (`Here`), or, in a comment, the keys that end it; and at
+// its end, but in a comment, `?`, which opens the list of them all, in parts;
+// Esc, `q` or `?` closes it, the keyboard back where it was. Once a chord is
+// begun, as with Space, a panel over the line lists the keys that may follow
 // and what each does, after a moment, so a chord typed whole shows none
 // (`keys.ts`; `docs/dashboard.md`, *The keys*).
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 
-import { barOf, chords, type Part } from "./keys";
+import { ENDING, WRITING, WRITING_HERE, chords, type Here, type Part } from "./keys";
 
-interface Props<P extends string> {
-    parts: Part<P>[];
-    /** Where the cursor is. */
-    place: P;
-    /** What the line says for each place, before its keys. */
-    places: Record<P, string>;
+interface Props {
+    parts: Part[];
+    /** What the cursor is on, and what each verb would do to it. */
+    here: Here;
+    /** Whether a comment is being written. */
+    inserting: boolean;
     /** Whether the list of them all is open. */
     open: boolean;
     setOpen: (open: boolean) => void;
@@ -24,7 +25,7 @@ interface Props<P extends string> {
     waits?: number;
 }
 
-export function Keys<P extends string>({ parts, place, places, open, setOpen, pending = "", waits = 250 }: Props<P>) {
+export function Keys({ parts, here, inserting, open, setOpen, pending = "", waits = 250 }: Props) {
     // The chord whose following keys are shown, once it has waited.
     const [shown, setShown] = useState("");
     useEffect(() => {
@@ -41,7 +42,8 @@ export function Keys<P extends string>({ parts, place, places, open, setOpen, pe
             setOpen(false);
         }
     }
-    const following = shown === "" ? [] : chords(parts, shown, place);
+    const following = shown === "" ? [] : chords(parts, shown);
+    const ending = WRITING.flatMap((part) => part.keys).filter((key) => ENDING.includes(key.keys));
     // The key leading to these, saying what they do together, where the list has it, as `␣z` does.
     const leading = parts.flatMap((part) => part.keys).find((key) => key.keys.split(" ").includes(shown));
     return (
@@ -65,17 +67,29 @@ export function Keys<P extends string>({ parts, place, places, open, setOpen, pe
                     </dl>
                 </div>
             )}
-            <div className={place === "insert" ? "keys inserting" : "keys"}>
-                <span className="keys-shown">
-                    <span className="keys-place">{places[place]}</span>
-                    {barOf(parts, place).map((key) => (
-                        <span key={`${key.keys} ${key.short}`}>
-                            <kbd>{key.keys}</kbd> {key.short}
-                        </span>
-                    ))}
-                </span>
+            <div className={inserting ? "keys inserting" : "keys"}>
+                {inserting ? (
+                    <span className="keys-shown">
+                        <span className="keys-place">{WRITING_HERE}</span>
+                        {ending.map((key) => (
+                            <span key={key.keys}>
+                                <kbd>{key.keys}</kbd> {key.short}
+                            </span>
+                        ))}
+                    </span>
+                ) : (
+                    <span className="keys-shown">
+                        <span className="keys-place">{here.on}</span>
+                        {here.reached.map((each) => (
+                            <span key={each.keys}>
+                                <kbd>{each.keys}</kbd> {each.on === null ? null : <span className="keys-on">{each.on}: </span>}
+                                {each.says}
+                            </span>
+                        ))}
+                    </span>
+                )}
                 {/* In a comment, `?` is a question mark. */}
-                {place === "insert" ? null : (
+                {inserting ? null : (
                     <span className="keys-all">
                         <kbd>?</kbd> all keys
                     </span>

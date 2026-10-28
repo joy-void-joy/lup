@@ -350,6 +350,26 @@ kbd {
     color: var(--muted);
 }
 
+/* Declined: struck through in the error colour, until it's sent. */
+.review-header.is-declined {
+    color: var(--err);
+    text-decoration: line-through;
+}
+
+/* What else the draft marks, on the first line of what it marks: done struck through, as an item marked read is; each
+   mark saying, in the draft's colour, what the next Ctrl+Enter does with it. */
+.buffer .cm-line.is-marked.mark-done {
+    text-decoration: line-through;
+    text-decoration-color: var(--muted);
+}
+
+.buffer .cm-line.is-marked[data-mark]::after {
+    content: "  ⏎ " attr(data-mark);
+    color: var(--warn);
+    text-decoration: none;
+    display: inline-block;
+}
+
 .commented {
     text-decoration: underline 2px var(--warn);
     text-underline-offset: 3px;
@@ -475,6 +495,11 @@ kbd {
 }
 
 .keys-place {
+    color: var(--info);
+}
+
+/* What a verb acts on where it isn't what the cursor is on, as the agent from one of its items. */
+.keys-on {
     color: var(--info);
 }
 

@@ -1,0 +1,59 @@
+import { describe, expect, it } from "vitest";
+
+import "./fixtures/looks";
+import { chainAt, isMarked, listed, marking, type Act } from "./grammar";
+import { EMPTY, type Placed } from "./review";
+import type { Offer } from "./views";
+
+const HOLD: Offer = { action: "set-holding", argument: { launch: "l1", session: "s1", agent: null, on: true }, verb: "hold", chord: null, runs: "send", commented: false, says: "hold its flagged writes" };
+
+describe("marking the draft", () => {
+    it("puts an item in one list of the draft at most, done, declined or left for later, and takes it out of every one", () => {
+        const done = listed(EMPTY, 51, "done");
+        expect([done.done, done.declined, done.parked]).toEqual([[51], [], []]);
+        const declined = listed(done, 51, "declined");
+        expect([declined.done, declined.declined, declined.parked]).toEqual([[], [51], []]);
+        const none = listed(declined, 51, null);
+        expect([none.done, none.declined, none.parked]).toEqual([[], [], []]);
+    });
+
+    it("marks what a key reaches, and pressed again where it's all marked, takes the marks off", () => {
+        const acts: Act[] = [
+            { kind: "item", number: 51, list: "done" },
+            { kind: "mark", offer: HOLD, block: "banner of s1", version: null },
+        ];
+        const once = marking(EMPTY, acts, "done");
+        expect(once.done).toEqual([51]);
+        expect(once.marks?.map((each) => [each.action, each.verb, each.block, each.says, each.argument])).toEqual([["set-holding", "done", "banner of s1", "hold its flagged writes", HOLD.argument]]);
+        expect(once.marks?.[0]?.id).not.toBe("");
+        expect(acts.every((each) => isMarked(once, each, "done"))).toBe(true);
+        const twice = marking(once, acts, "done");
+        expect([twice.done, twice.marks]).toEqual([[], []]);
+    });
+
+    it("marks what's left unmarked where only some of it is, rather than taking the rest off", () => {
+        const acts: Act[] = [
+            { kind: "item", number: 51, list: "done" },
+            { kind: "item", number: 52, list: "done" },
+        ];
+        const some = marking(EMPTY, acts.slice(0, 1), "done");
+        expect(marking(some, acts, "done").done).toEqual([51, 52]);
+    });
+
+    it("leaves the draft as it is for what marks nothing: a comment, or what runs at once", () => {
+        const acts: Act[] = [{ kind: "comment" }, { kind: "once", offer: { ...HOLD, runs: "once" }, conversation: null }];
+        expect(marking(EMPTY, acts, "comment")).toBe(EMPTY);
+    });
+});
+
+describe("the parts the cursor is in", () => {
+    const part = (id: string, kind: Placed["kind"], from: number, to: number, children: Placed[] = []): Placed => ({ id, kind, from, to, header: { from, to: from }, children });
+
+    it("finds them outermost first, an item's blank line after it counting as the item's", () => {
+        const nodes = [part("group a", "group", 0, 40, [part("group a banner", "banner", 0, 5), part("item 1", "item", 6, 20, [part("item 1 header", "header", 6, 10)])])];
+        expect(chainAt(nodes, 8).map((each) => each.id)).toEqual(["group a", "item 1", "item 1 header"]);
+        expect(chainAt(nodes, 21).map((each) => each.id)).toEqual(["group a", "item 1"]);
+        expect(chainAt(nodes, 30).map((each) => each.id)).toEqual(["group a"]);
+        expect(chainAt(nodes, 50)).toEqual([]);
+    });
+});

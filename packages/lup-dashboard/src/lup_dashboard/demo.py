@@ -2289,7 +2289,7 @@ AGENTS_MD_BEFORE = """3. **Write with your file tools.** The judge runs before a
 """
 AGENTS_MD_AFTER = """3. **Write with your file tools.** The judge runs before an Edit or Write lands,
    and a protected path's change waits in its hook for the operator's answer.
-4. **A held change is answered in the review:** Space `a` or `x`, the comments
+4. **A held change is answered in the review:** Space `d` or `x`, the comments
    under it going to the agent with the answer.
 """
 AGENTS_MD_TAIL = """

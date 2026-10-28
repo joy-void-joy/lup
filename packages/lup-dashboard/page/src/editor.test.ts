@@ -23,8 +23,8 @@ import {
     pastHidden,
     reaching,
     rewritten,
-    SPACED,
     stepped,
+    verbKeys,
     UNPRESSED,
     visit,
     went,
@@ -37,8 +37,9 @@ import { LOOKS } from "./fixtures/looks";
 import { reviewKeys } from "./keys";
 import { lettered } from "./looks";
 
-const REVIEW_KEYS = reviewKeys(LOOKS.kinds);
 import { markdown, source, sourced } from "./markdown";
+
+const REVIEW_KEYS = reviewKeys(LOOKS.kinds, LOOKS.verbs);
 
 describe("vim's cursor and the marks the Markdown hides", () => {
     const comment = "a **comment** line";
@@ -391,7 +392,8 @@ describe("a chord begun", () => {
 
 describe("the chords Space leads", () => {
     const LETTERS = lettersOf(LOOKS.kinds);
-    const mapped = new Map([...SPACED, ...LETTERS.filter(([keys]) => keys.startsWith("<Space>"))]);
+    const VERBS = verbKeys(LOOKS.verbs);
+    const mapped = new Map([...VERBS, ...LETTERS.filter(([keys]) => keys.startsWith("<Space>"))]);
     // The kind of fold each letter's action finds as it's pressed.
     const kindOfAction = (action: string | undefined) => (action === undefined ? undefined : `${action.split("-")[0]}-${lettered(action.split("-")[1] ?? "")?.name}`);
 
@@ -433,17 +435,24 @@ describe("the chords Space leads", () => {
         // Each is in the list of keys, and plain zF stays vim's, unmapped.
         const listed = new Set(REVIEW_KEYS.flatMap((part) => part.keys).flatMap((key) => key.keys.split(" ")));
         expect([...around.keys()].every((keys) => listed.has(keys))).toBe(true);
-        expect([...around.keys(), ...SPACED.map(([keys]) => keys)].some((keys) => keys.startsWith("zF"))).toBe(false);
+        expect([...around.keys(), ...VERBS.map(([keys]) => keys)].some((keys) => keys.startsWith("zF"))).toBe(false);
     });
 
-    it("parks an item with Space p, leaving it for later, which no other chord begins", () => {
-        expect(mapped.get("<Space>p")).toBe("lupLater");
-        expect([...mapped.keys()].filter((keys) => keys.startsWith("<Space>p"))).toEqual(["<Space>p"]);
-        expect([...mapped.values()].filter((action) => action === "lupLater")).toHaveLength(1);
+    it("gives each verb Space and its key, the core's and those the modules declare, and no key of vim's", () => {
+        expect(VERBS).toEqual([
+            ["<Space>d", "lupVerb-done"],
+            ["<Space>x", "lupVerb-decline"],
+            ["<Space>s", "lupVerb-send"],
+            ["<Space>c", "lupVerb-comment"],
+            ["<Space>h", "lupVerb-hold"],
+            ["<Space>p", "lupVerb-pause"],
+        ]);
+        // Space a and Space A answered at once before the verbs; they're gone, and `h` is vim's again.
+        expect(["<Space>a", "<Space>A", "h"].filter((keys) => mapped.has(keys))).toEqual([]);
     });
 
     it("maps each chord the list of keys names, once, and leads each chord it names further", () => {
-        expect(new Set(SPACED.map(([keys]) => keys)).size).toBe(SPACED.length);
+        expect(new Set(VERBS.map(([keys]) => keys)).size).toBe(VERBS.length);
         const listed = REVIEW_KEYS.flatMap((part) => part.keys)
             .flatMap((key) => key.keys.split(" "))
             .filter((keys) => keys.startsWith("␣"))

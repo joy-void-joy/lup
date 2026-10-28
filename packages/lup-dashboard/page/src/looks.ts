@@ -13,6 +13,7 @@ export type Looks = components["schemas"]["Looks"];
 export type Drawn = components["schemas"]["Drawn"];
 export type Bannered = components["schemas"]["Bannered"];
 export type Tone = components["schemas"]["Tone"];
+export type Verb = components["schemas"]["Verb"];
 type Declared = components["schemas"]["FoldKind"];
 
 /**
@@ -36,10 +37,12 @@ export interface Kind {
     drawer: boolean;
 }
 
-/** The looks merged: every kind, every tone, each repository's drawers and banner parts, and what was refused, each said once. */
+/** The looks merged: every kind, every tone, every verb, each repository's drawers and banner parts, and what was refused, each said once. */
 export interface Merged {
     kinds: Kind[];
     tones: Tone[];
+    /** The verbs the review's keys say, Space and each one's key, the core's first: each by its name, the first to declare it keeping it. */
+    verbs: Verb[];
     /** The drawers under the banner of an agent of `repository`, by its git directory, in the order they're laid out. */
     drawers: (repository: string) => Drawn[];
     /** The parts of the banner of an agent of `repository`, in the order they're said. */
@@ -47,7 +50,7 @@ export interface Merged {
     refused: string[];
 }
 
-export const UNLOOKED: Merged = { kinds: [], tones: [], drawers: () => [], banners: () => [], refused: [] };
+export const UNLOOKED: Merged = { kinds: [], tones: [], verbs: [], drawers: () => [], banners: () => [], refused: [] };
 
 /** Return the kind of fold a drawer is, named for its view: folded under its summary line under the banner, its scope whole. */
 function drawerKind(drawn: Drawn): Declared {
@@ -66,12 +69,16 @@ function named(path: string): string {
  * them: each kind by its name, the first to declare it keeping it, a drawer's after the folds of its looks; a later one
  * of another name taking a letter already taken keeps no letter, which `refused` says; the kinds outermost first, by
  * their level, in that order within one; each tone by its name, the first keeping it; each repository's drawers and
- * banner parts its own, or the stand-in's where it has none.
+ * banner parts its own, or the stand-in's where it has none; each verb by its name, the first keeping it, a later one
+ * of another name taking a key already taken refused, which `refused` says, since one key does one thing in the one
+ * buffer.
  */
 export function merged(looks: Readonly<Record<string, Looks>>, standing: Looks): Merged {
     const kinds = new Map<string, Kind>();
     const letters = new Map<string, string>();
     const tones = new Map<string, Tone>();
+    const verbs = new Map<string, Verb>();
+    const keys = new Map<string, string>();
     const refused: string[] = [];
     const take = (declared: Declared, whose: string | null, drawer: boolean) => {
         if (kinds.has(declared.name)) {
@@ -113,6 +120,20 @@ export function merged(looks: Readonly<Record<string, Looks>>, standing: Looks):
                 tones.set(tone.name, tone);
             }
         }
+        for (const verb of each.verbs ?? []) {
+            if (verbs.has(verb.name)) {
+                continue;
+            }
+            const holder = keys.get(verb.key);
+            if (holder !== undefined) {
+                if (whose !== null) {
+                    refused.push(`${named(whose)}'s verb \`${verb.name}\` takes the key ␣${verb.key}, which \`${holder}\` has: nothing reaches it.`);
+                }
+                continue;
+            }
+            keys.set(verb.key, verb.name);
+            verbs.set(verb.name, verb);
+        }
     };
     read(standing, null);
     for (const [repository, each] of Object.entries(looks)) {
@@ -122,6 +143,7 @@ export function merged(looks: Readonly<Record<string, Looks>>, standing: Looks):
     return {
         kinds: [...kinds.values()].sort((a, b) => a.level - b.level),
         tones: [...tones.values()],
+        verbs: [...verbs.values()],
         drawers: (repository) => own(repository).drawers ?? [],
         banners: (repository) => own(repository).banners ?? [],
         refused,
@@ -144,6 +166,16 @@ export function kinds(): readonly Kind[] {
 /** Return what's known now of the kind of fold named `name`; none for a kind none declares. */
 export function kindOf(name: string | undefined): Kind | undefined {
     return name === undefined ? undefined : current.kinds.find((each) => each.name === name);
+}
+
+/** Return every verb known now, the core's first. */
+export function verbs(): readonly Verb[] {
+    return current.verbs;
+}
+
+/** Return the verb named `name` known now; none where none declares it. */
+export function verbOf(name: string): Verb | undefined {
+    return current.verbs.find((each) => each.name === name);
 }
 
 /** Return the kind of fold the letter `letter` names now; none where none takes it. */

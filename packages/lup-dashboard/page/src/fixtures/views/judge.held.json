@@ -104,7 +104,7 @@
           },
           "verb": "done",
           "chord": null,
-          "runs": "once",
+          "runs": "send",
           "commented": true,
           "says": "approve"
         },
@@ -116,7 +116,7 @@
           },
           "verb": "decline",
           "chord": null,
-          "runs": "once",
+          "runs": "send",
           "commented": false,
           "says": "decline"
         }
@@ -244,7 +244,7 @@
           },
           "verb": "done",
           "chord": null,
-          "runs": "once",
+          "runs": "send",
           "commented": true,
           "says": "approve"
         },
@@ -256,7 +256,7 @@
           },
           "verb": "decline",
           "chord": null,
-          "runs": "once",
+          "runs": "send",
           "commented": false,
           "says": "decline"
         }

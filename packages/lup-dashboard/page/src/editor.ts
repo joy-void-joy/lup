@@ -2,8 +2,8 @@
 // vim, the operator's comments written into it, each under the line it's on, as
 // the only text they can change. Insert mode is writing a comment: a key that
 // enters it opens one where the cursor is, or edits the one it's in, and the
-// cursor stays in it until it ends. Space `c` opens one on the whole (an item,
-// a conversation); vim's change, `c` and a motion, on the passage it covers
+// cursor stays in it until it ends. Space `c`, the comment verb, opens one on
+// the whole (an item, a conversation); vim's change, `c` and a motion, on the passage it covers
 // (`ct.`, `ciw`, `cip`, `cc` a line's, `C` to the line's end); `o` and vim's other
 // keys of insert mode on the line; `v` and a motion, then `c` or `s`, on the
 // selection; where what's covered isn't one item's or one turn's, on the line. `]]` and
@@ -63,7 +63,7 @@ import { defineClipboard, shownBelow } from "./clipboard";
 import { saying, type Block, type Folding, type Span } from "./comments";
 import { around, aroundOf, foldEdge, levelled, nextFold } from "./folds";
 import type { FoldKind } from "./keys";
-import { lettered, type Kind } from "./looks";
+import { lettered, type Kind, type Verb } from "./looks";
 import { brokenLine, hiddenOn, markdown, openedLine, shifted, unindented } from "./markdown";
 import { placeheld, type Margined } from "./margin";
 
@@ -74,7 +74,8 @@ interface Actions {
     entered: (cm: CodeMirrorV) => void;
     left: () => void;
     finish: (cm: CodeMirrorV) => void;
-    toggle: (list: "done" | "parked") => void;
+    /** Space and a verb's key: do what the verb named `name` does where the cursor is. */
+    verb: (name: string) => void;
     move: (forward: boolean) => void;
     answer: (forward: boolean) => void;
     matter: (forward: boolean) => void;
@@ -87,11 +88,6 @@ interface Actions {
     cite: (forward: boolean) => void;
     /** `gd`: follow a citation to the passage it cites, or a passage cited back to its citation. */
     follow: () => void;
-    approve: (approved: boolean) => void;
-    /** Space `A`: mark every file of a "since you approved" drawer reviewed. */
-    approveAll: () => void;
-    /** `h` on a banner: turn the operator's switch to hold the agent's flagged writes; elsewhere it's vim's `h`, said by false. */
-    hold: () => boolean;
     list: () => void;
     fold: (how: "toggle" | "open" | "close") => void;
     foldLevel: (opening: boolean, all: boolean) => void;
@@ -349,19 +345,44 @@ function boundOf(state: EditorState): Bound {
 /** The editor a key was last pressed in, which says what the clipboard couldn't do on a yank or a put the key made. */
 let speaking: Bound | null = null;
 
+/** The verb whose key opens a comment on the thing whole, the core's (`lup.SHELL_VERBS`). */
+const COMMENTING = "comment";
+
 /**
- * Each chord Space leads in the review, as vim's keymap writes its keys, and the action it does: Space `p` parks an
- * item, leaving it for later; Space `A` marks every file of a "since you approved" drawer reviewed. The list of keys
- * (`keys.ts`) says each of them, and those a kind's letter takes (`lettersOf`).
+ * Return the keys each verb takes, as vim's keymap writes them, and the action each does, of `verbs`, the verbs known
+ * now (`looks.ts`): Space and the verb's key, which does what the verb does on the innermost thing at the cursor it
+ * applies to (`grammar.ts`); the comment verb's opens a comment on it whole. The list of keys says each (`keys.ts`).
  */
-export const SPACED: readonly (readonly [keys: string, action: string])[] = [
-    ["<Space>c", "lupCommentWhole"],
-    ["<Space>d", "lupDone"],
-    ["<Space>p", "lupLater"],
-    ["<Space>a", "lupApprove"],
-    ["<Space>x", "lupDecline"],
-    ["<Space>A", "lupApproveAll"],
-];
+export function verbKeys(verbs: readonly Verb[]): (readonly [keys: string, action: string])[] {
+    return verbs.map((each) => [`<Space>${each.key}`, `lupVerb-${each.name}`] as const);
+}
+
+/** The keys a verb took in vim's keymap as last mapped (`mapVerbs`), and the action each does. */
+let verbed = new Map<string, string>();
+
+/**
+ * Map the keys `verbs` take (`verbKeys`) into vim's keymap, as the verbs known change, the keys no verb takes now
+ * unmapped, so a key never acts for a verb none declares.
+ */
+export function mapVerbs(verbs: readonly Verb[]): void {
+    mapKeys();
+    const wanted = new Map(verbKeys(verbs));
+    const unmap = Vim.unmap as (keys: string, context?: string) => boolean;
+    for (const [keys, named] of verbed) {
+        if (wanted.get(keys) !== named) {
+            unmap(keys, "normal");
+        }
+    }
+    for (const { name } of verbs) {
+        action(`lupVerb-${name}`, (actions, cm) => (name === COMMENTING ? actions.comment(cm, "whole") : actions.verb(name)));
+    }
+    for (const [keys, named] of wanted) {
+        if (verbed.get(keys) !== named) {
+            Vim.mapCommand(keys, "action", named, {}, { context: "normal" });
+        }
+    }
+    verbed = wanted;
+}
 
 /**
  * Return the keys each kind's letter takes, as vim's keymap writes them, and the action each does, of `kinds`, the
@@ -466,9 +487,6 @@ function mapKeys(): void {
     });
     action("lupCommentLine", (actions, cm) => actions.comment(cm, "line"));
     action("lupCommentAbove", (actions, cm) => actions.comment(cm, "above"));
-    action("lupCommentWhole", (actions, cm) => actions.comment(cm, "whole"));
-    action("lupDone", (actions) => actions.toggle("done"));
-    action("lupLater", (actions) => actions.toggle("parked"));
     action("lupNext", (actions) => actions.move(true));
     action("lupPrevious", (actions) => actions.move(false));
     action("lupNextAnswer", (actions) => actions.answer(true));
@@ -482,15 +500,6 @@ function mapKeys(): void {
     action("lupNextCitation", (actions) => actions.cite(true));
     action("lupPreviousCitation", (actions) => actions.cite(false));
     action("lupFollow", (actions) => actions.follow());
-    action("lupApprove", (actions) => actions.approve(true));
-    action("lupDecline", (actions) => actions.approve(false));
-    action("lupApproveAll", (actions) => actions.approveAll());
-    // `h` holds an agent's flagged writes on its banner, and moves left, as vim's `h` does, anywhere else.
-    action("lupHold", (actions, cm) => {
-        if (!actions.hold()) {
-            Vim.handleKey(cm, "<Left>", "mapping");
-        }
-    });
     action("lupKeys", (actions) => actions.list());
     // Vim's own fold keys, which its CodeMirror mode leaves unmapped, on CodeMirror's folds.
     action("lupFoldToggle", (actions) => actions.fold("toggle"));
@@ -520,10 +529,6 @@ function mapKeys(): void {
         Vim.mapCommand(keys, "action", name, {}, { context });
     map("o", "lupCommentLine", "normal");
     map("O", "lupCommentAbove", "normal");
-    map("h", "lupHold", "normal");
-    for (const [keys, name] of SPACED) {
-        map(keys, name, "normal");
-    }
     // The list of every key, in place of vim's search backward, which `/` then `N` still does.
     map("?", "lupKeys", "normal");
     map("za", "lupFoldToggle", "normal");
@@ -1263,7 +1268,8 @@ export interface Own<C> {
     /** Go to the next or previous item to answer, as the review's `]a` and `[a` do; none where the view has none. */
     answer?: (forward: boolean) => void;
     send: () => void;
-    toggle?: (list: "done" | "parked") => void;
+    /** Do what the verb named `name` does where the cursor is, Space and its key; none where the view has no verbs. */
+    verb?: (name: string) => void;
     /** Go to the next or previous line that matters, as the review's are by the judge's reading, opening what folds it on the way. */
     matter?: (forward: boolean) => void;
     /** Go to the next or previous file's header, as the review's `]f` and `[f` do; none where the view has none. */
@@ -1274,11 +1280,6 @@ export interface Own<C> {
     cite?: (forward: boolean) => void;
     /** Follow a citation to what it cites, or back, as the review's `gd` does; none where the view has none. */
     follow?: () => void;
-    approve?: (approved: boolean) => void;
-    /** Mark every file of the "since you approved" drawer the cursor is in reviewed, as Space `A` does; none where the view has none. */
-    approveAll?: () => void;
-    /** Turn the operator's switch for the agent whose banner the cursor is on, and say whether it was on one. */
-    hold?: () => boolean;
     /** What's painted on the lines from `from` to `to` while they're in view, beyond what `draw` drew: a changed file's lines and their highlighting. */
     paint?: (from: number, to: number) => Range<Decoration>[];
     /** The folds `zr` opens (`opening`) or `zm` closes from `position`, or with `all` `zR` and `zM`; where none's said, those of every fold (`levelled`). */
@@ -1570,7 +1571,7 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 }
                 editor.dispatch({ selection: { anchor: back }, scrollIntoView: true });
             },
-            toggle: (list) => own.toggle?.(list),
+            verb: (name) => own.verb?.(name),
             move: own.move,
             answer: (forward) => own.answer?.(forward),
             matter: (forward) => own.matter?.(forward),
@@ -1588,9 +1589,6 @@ export function useEditor<D, C extends { id: string; text: string }>(config: Con
                 const effects = reaching(editor.state, target);
                 editor.dispatch({ selection: { anchor: target }, effects, scrollIntoView: true, annotations: reached.of(effects.length) });
             },
-            approve: (approved) => own.approve?.(approved),
-            approveAll: () => own.approveAll?.(),
-            hold: () => own.hold?.() ?? false,
             list: config.list,
             fold: (how) => {
                 const editor = view.current;
