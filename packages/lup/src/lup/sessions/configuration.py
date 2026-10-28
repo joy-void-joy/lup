@@ -4,18 +4,23 @@ Each runtime's adapter reads its settings file from each layer, the operator's
 own and a profile's over it, merges them (`merged`), and leaves out what would
 hand a room's code a credential or run a command in the room (`withheld`): the
 keys its adapter names, any key at any depth named like a credential
-(`Credentials.named`), and any table holding a `command`; and a URL's user
-and password are taken out of it. Rooms run lup's own hooks, and a command the
+(`Credentials.named`), any table holding a `command`, and any value or list
+entry holding a token by its shape, whatever its key (`Credentials.carries`),
+such as a permission rule's command with a login in it; and a URL's user and
+password are taken out of it, as is each parameter of its query named like a
+credential or holding one. Rooms run lup's own hooks, and a command the
 operator set up for the host, a hook or a status line, would run in the room
 with what it reads there. A wrong cut breaks a room, never the host: the host
-only copies what's left, and never runs it.
+only copies what's left, and never runs it. A secret with no shape of its own
+under a key named otherwise, a key of 32 hex digits in a header called
+`X-Key`, still reaches the room.
 """
 
 import stat
-from itertools import pairwise
+from itertools import islice, pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import SplitResult, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import JsonValue
 
@@ -70,8 +75,124 @@ def words(key: str) -> list[str]:
     return [*found, current] if current else found
 
 
+class Shape(Model):
+    """The shape a vendor gives its tokens so they can be found in text: the opening each starts with, the least a token holds after it, and whose tokens they are, with where the shape is documented."""
+
+    opening: str
+    rest: int = 16
+    """The fewest letters, digits, `_` and `-` after the opening: what tells a
+    token from a word that starts the same way."""
+    whose: str
+
+
+def body(char: str) -> bool:
+    """Say whether `char` is of a token's body: an ASCII letter or digit, `_` or `-`."""
+    return char.isascii() and (char.isalnum() or char in "_-")
+
+
+def spans(text: str, at: int, also: str = "") -> int:
+    """Return how many characters of `text` from `at` are of a token's body (`body`), or among `also`.
+
+    >>> spans("Bearer ghp_x1.y z", 7), spans("Bearer ghp_x1.y z", 7, also=".")
+    (6, 8)
+    """
+    return next(
+        (
+            count
+            for count, char in enumerate(islice(text, at, None))
+            if not body(char) and char not in also
+        ),
+        len(text) - at,
+    )
+
+
+def starts(text: str, at: int) -> bool:
+    """Say whether a word starts at `at` in `text`: at its start, or after a character that isn't of a token's body."""
+    return at == 0 or not body(text[at - 1])
+
+
+SHAPES = [
+    Shape(opening="sk-ant-", rest=32, whose="Anthropic's API keys and OAuth tokens"),
+    Shape(
+        opening="sk-",
+        rest=20,
+        whose="OpenAI's API keys, `sk-proj-` and `sk-svcacct-` among them, and those keyed like theirs, OpenRouter's `sk-or-` (gitleaks' rules)",
+    ),
+    *(
+        Shape(
+            opening=opening,
+            rest=30,
+            whose="GitHub's tokens (GitHub's blog, *Behind GitHub's new authentication token formats*, 2021)",
+        )
+        for opening in ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"]
+    ),
+    *(
+        Shape(
+            opening=opening,
+            rest=20,
+            whose="GitLab's tokens (GitLab's docs, *Token prefixes*)",
+        )
+        for opening in ["glpat-", "gldt-", "glrt-", "glptt-", "glft-", "glsoat-"]
+    ),
+    *(
+        Shape(opening=opening, whose="Slack's tokens (Slack's docs, *Token types*)")
+        for opening in ["xoxb-", "xoxp-", "xoxa-", "xoxr-", "xoxe-", "xapp-"]
+    ),
+    *(
+        Shape(
+            opening=opening,
+            whose="AWS's access key ids, long-term and temporary (AWS's IAM docs, *Unique identifier prefixes*)",
+        )
+        for opening in ["AKIA", "ASIA"]
+    ),
+    Shape(opening="AIza", rest=30, whose="Google's API keys (gitleaks' rules)"),
+    Shape(
+        opening="hf_",
+        rest=30,
+        whose="Hugging Face's access tokens (its docs, *User access tokens*)",
+    ),
+    Shape(
+        opening="npm_",
+        rest=30,
+        whose="npm's access tokens (npm's docs, *About access tokens*)",
+    ),
+    Shape(
+        opening="pypi-", rest=30, whose="PyPI's API tokens (PyPI's help, *API tokens*)"
+    ),
+    *(
+        Shape(
+            opening=opening,
+            whose="Stripe's secret and restricted keys (Stripe's docs, *API keys*)",
+        )
+        for opening in ["sk_live_", "sk_test_", "rk_live_", "rk_test_"]
+    ),
+    Shape(opening="gsk_", rest=30, whose="Groq's API keys (gitleaks' rules)"),
+    Shape(opening="xai-", rest=30, whose="xAI's API keys (gitleaks' rules)"),
+    Shape(opening="lin_api_", rest=30, whose="Linear's API keys (gitleaks' rules)"),
+    Shape(
+        opening="ntn_", rest=30, whose="Notion's integration tokens (gitleaks' rules)"
+    ),
+    Shape(opening="dop_v1_", rest=30, whose="DigitalOcean's tokens (gitleaks' rules)"),
+    Shape(
+        opening="glsa_",
+        rest=30,
+        whose="Grafana's service account tokens (gitleaks' rules)",
+    ),
+    Shape(opening="sntrys_", rest=30, whose="Sentry's tokens (gitleaks' rules)"),
+    Shape(opening="tskey-", rest=20, whose="Tailscale's keys (gitleaks' rules)"),
+    *(
+        Shape(opening=opening, rest=20, whose="Shopify's tokens (gitleaks' rules)")
+        for opening in ["shpat_", "shpca_", "shppa_", "shpss_"]
+    ),
+    Shape(opening="PMAK-", rest=30, whose="Postman's API keys (gitleaks' rules)"),
+]
+"""The token shapes `Credentials.carries` finds, one place for all: each
+vendor's own opening, as it or gitleaks' rules document it. Adding one is
+adding its line."""
+
+
 class Credentials(Model):
-    """What names a credential in a key: a word of its own, or two in a row."""
+    """What names a credential in a key, a word of its own or two in a row; and what shows one in a value, a token's shape, whatever its key."""
 
     words: list[str] = [
         "auth",
@@ -99,6 +220,14 @@ class Credentials(Model):
         Pair(first="session", second="key"),
     ]
 
+    shapes: list[Shape] = SHAPES
+    schemes: list[str] = ["Bearer", "bearer", "BEARER", "Basic", "basic", "BASIC"]
+    """HTTP's schemes for a credential in an `Authorization` header, as each is
+    written: a value holding one followed by a long word holds a credential."""
+    signed: int = 32
+    """The fewest characters of a JSON Web Token, `eyJ` and two `.` among them,
+    or of the word a scheme names."""
+
     def named(self, key: str) -> bool:
         """Say whether `key` is named like a credential.
 
@@ -110,6 +239,32 @@ class Credentials(Model):
             Pair(first=first, second=second) in self.pairs
             for first, second in pairwise(said)
         )
+
+    def carries(self, text: str) -> bool:
+        """Say whether `text` holds a credential by its shape, wherever in it a word starts: a token of a vendor's (`shapes`), a JSON Web Token, or a scheme of HTTP's followed by a long word.
+
+        >>> token = "ghp_" + "a1" * 18
+        >>> [Credentials().carries(text) for text in [f"Bash(gh api -H 'Authorization: token {token}')", "Bearer of good news", "sk-learn", "task-runner"]]
+        [True, False, False, False]
+        """
+        return any(self.shaped(text, at) for at in range(len(text)) if starts(text, at))
+
+    def shaped(self, text: str, at: int) -> bool:
+        """Say whether a credential starts at `at` in `text` (`carries`)."""
+        token = any(
+            text.startswith(each.opening, at)
+            and spans(text, at + len(each.opening)) >= each.rest
+            for each in self.shapes
+        )
+        length = spans(text, at, also=".")
+        dots = sum(1 for char in islice(text, at, at + length) if char == ".")
+        web = text.startswith("eyJ", at) and length >= self.signed and dots == 2
+        scheme = any(
+            text.startswith(f"{each} ", at)
+            and spans(text, at + len(each) + 1, also=".~+/=") >= self.signed
+            for each in self.schemes
+        )
+        return token or web or scheme
 
 
 def merged(lower: JsonObject, upper: JsonObject) -> JsonObject:
@@ -142,20 +297,30 @@ class Withheld(Model):
     left: list[Cut] = []
 
 
-def unlogged(text: str) -> str | None:
-    """Return the URL `text` without the user and password it carries; none where it isn't a URL, or carries neither.
+def unlogged(text: str, credentials: Credentials | None = None) -> str | None:
+    """Return the URL `text` without the user and password it carries, and without each parameter of its query named like a credential or holding one (`Credentials`); none where it isn't a URL, or carries none of them.
 
     >>> unlogged("https://u:p@git.example:8443/x?y=1"), unlogged("https://git.example/x")
     ('https://git.example:8443/x?y=1', None)
+    >>> unlogged("https://git.example/m.git?private_token=x&ref=main")
+    'https://git.example/m.git?ref=main'
     """
+    naming = credentials or Credentials()
     try:
         parts = urlsplit(text)
         port = parts.port
+        query = parse_qsl(parts.query, keep_blank_values=True)
     except ValueError:
         return None
     if not parts.scheme or not parts.netloc:
         return None
-    if parts.username is None and parts.password is None:
+    asked = [
+        pair
+        for pair in query
+        if not naming.named(pair[0]) and not naming.carries(pair[1])
+    ]
+    logged = parts.username is not None or parts.password is not None
+    if not logged and len(asked) == len(query):
         return None
     host = parts.hostname or ""
     bracketed = f"[{host}]" if ":" in host else host
@@ -163,12 +328,17 @@ def unlogged(text: str) -> str | None:
     return urlunsplit(
         SplitResult(
             scheme=parts.scheme,
-            netloc=netloc,
+            netloc=netloc if logged else parts.netloc,
             path=parts.path,
-            query=parts.query,
+            query=parts.query if len(asked) == len(query) else urlencode(asked),
             fragment=parts.fragment,
         )
     )
+
+
+def held(text: str, credentials: Credentials) -> bool:
+    """Say whether `text` would hand a room a credential once a URL's login and its credentials' parameters are taken out of it (`unlogged`), by a token's shape (`Credentials.carries`)."""
+    return credentials.carries(unlogged(text, credentials) or text)
 
 
 def withheld(
@@ -177,7 +347,7 @@ def withheld(
     path: list[str] | None = None,
     credentials: Credentials | None = None,
 ) -> Withheld:
-    """Leave out of `value`, at every depth, tables in lists among it: each key `blocked` gives a reason for by its path; each named like a credential; and each whose value is a table holding a `command`, which would run in the room. A URL carrying a user or a password is kept without them, and said.
+    """Leave out of `value`, at every depth, tables in lists among it: each key `blocked` gives a reason for by its path; each named like a credential; each whose value is a table holding a `command`, which would run in the room; and each value or list entry that's text holding a credential by its shape (`held`). A URL carrying a user or a password, or a parameter named like a credential or holding one, is kept without them, and said.
 
     >>> def blocked(path: list[str]) -> Why | None:
     ...     return "credential" if path == ["env"] else None
@@ -196,6 +366,8 @@ def withheld(
         match each:
             case {"command": _}:
                 return "command"
+            case str() as text if held(text, naming):
+                return "credential"
             case _:
                 return "credential" if naming.named(key) else None
 
@@ -222,15 +394,21 @@ def withheld(
                 ],
             )
         case list():
-            inner_list = [
-                withheld(each, blocked, [*at, str(place)], naming)
+            entries = [
+                Cut(key=".".join([*at, str(place)]), why="credential")
+                if isinstance(each, str) and held(each, naming)
+                else withheld(each, blocked, [*at, str(place)], naming)
                 for place, each in enumerate(value)
             ]
+            inner_list = [each for each in entries if isinstance(each, Withheld)]
             return Withheld(
                 kept=[each.kept for each in inner_list],
-                left=[left for each in inner_list for left in each.left],
+                left=[
+                    *(each for each in entries if isinstance(each, Cut)),
+                    *(left for each in inner_list for left in each.left),
+                ],
             )
-        case str() as text if (bare := unlogged(text)) is not None:
+        case str() as text if (bare := unlogged(text, naming)) is not None:
             return Withheld(kept=bare, left=[Cut(key=dotted, why="credential")])
         case _:
             return Withheld(kept=value)

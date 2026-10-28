@@ -190,6 +190,104 @@ def test_claude_layers_the_settings_leaving_out_credentials_and_commands_by_why(
     }
 
 
+# Tokens in a recognisable shape, made here rather than written out, so the
+# source holds none a secret scanner would stop.
+GITHUB_TOKEN = "ghp_" + "a1" * 18
+GITLAB_TOKEN = "glpat-" + "b2" * 10
+LITELLM_KEY = "sk-" + "c3" * 16
+SIGNED = ".".join(["eyJ" + "h" * 17, "p" * 30, "s" * 30])
+
+
+def test_claude_leaves_out_a_credential_held_in_an_ordinary_value(
+    tmp_path: Path, home: Path
+) -> None:
+    """A login in a value whose key doesn't look like one, a permission rule's command or a URL's query, never reaches the room: the entry holding it is left out, a URL's parameter taken out of it, and each said by where it was."""
+    operators = written(
+        home / ".claude" / "settings.json",
+        json.dumps(
+            {
+                "permissions": {
+                    "allow": [
+                        f'Bash(curl -H "Authorization: Bearer {GITHUB_TOKEN}" https://api.github.com)',
+                        "Bash(ls:*)",
+                        f"Bash(export SESSION={SIGNED})",
+                    ]
+                },
+                "extraKnownMarketplaces": {
+                    "corp": {
+                        "source": {
+                            "source": "git",
+                            "url": f"https://git.example/m.git?private_token={GITLAB_TOKEN}&ref=main",
+                        }
+                    }
+                },
+                "companyAnnouncements": ["Bearer of good news: the gate is green."],
+                "model": "opus",
+            }
+        ),
+    )
+    room = homed(tmp_path, "claude")
+
+    terminal = Claude().terminal(
+        TerminalSettings(directory=tmp_path / "launch", cli=CLAUDE_CLI, home=room)
+    )
+
+    assert json.loads(terminal.files[room.directory / "settings.json"]) == {
+        "permissions": {"allow": ["Bash(ls:*)"]},
+        "extraKnownMarketplaces": {
+            "corp": {
+                "source": {"source": "git", "url": "https://git.example/m.git?ref=main"}
+            }
+        },
+        "companyAnnouncements": ["Bearer of good news: the gate is green."],
+        "model": "opus",
+    }
+    assert said(terminal.left_out) == [
+        (f"`permissions.allow.0` in {operators}", "credential"),
+        (f"`permissions.allow.2` in {operators}", "credential"),
+        (f"`extraKnownMarketplaces.corp.source.url` in {operators}", "credential"),
+    ]
+    assert not [
+        each
+        for each in terminal.files.values()
+        for token in [GITHUB_TOKEN, GITLAB_TOKEN, SIGNED]
+        if token in each
+    ]
+
+
+def test_codex_leaves_out_a_model_provider_s_headers_and_a_credential_in_its_url(
+    tmp_path: Path, home: Path
+) -> None:
+    """A model provider's `http_headers` carry its key whatever they're named, as an exporter's do; a key in its URL's query is taken out of it; the names of the variables `env_http_headers` reads stay, holding none."""
+    operators = written(
+        home / ".codex" / "config.toml",
+        f"""\
+[model_providers.corp]
+base_url = "https://llm.example/v1?api_key={LITELLM_KEY}&api-version=2026-01-01"
+http_headers = {{ X-Litellm-Key = "{LITELLM_KEY}", OpenAI-Organization = "org-1" }}
+env_http_headers = {{ X-Team = "TEAM_KEY" }}
+""",
+    )
+    room = homed(tmp_path, "codex")
+    own = room.directory
+
+    terminal = Codex().terminal(
+        TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI, home=room)
+    )
+
+    assert tomllib.loads(terminal.files[own / "config.toml"])["model_providers"] == {
+        "corp": {
+            "base_url": "https://llm.example/v1?api-version=2026-01-01",
+            "env_http_headers": {"X-Team": "TEAM_KEY"},
+        }
+    }
+    assert said(terminal.left_out) == [
+        (f"`model_providers.corp.http_headers` in {operators}", "credential"),
+        (f"`model_providers.corp.base_url` in {operators}", "credential"),
+    ]
+    assert not [each for each in terminal.files.values() if LITELLM_KEY in each]
+
+
 def test_claude_off_the_operator_s_layer_reads_the_profile_s_alone(
     tmp_path: Path, home: Path
 ) -> None:
@@ -370,7 +468,7 @@ env = { DATABASE_URL = "postgres://u:p@h/d" }
     }
     assert tomllib.loads(terminal.files[own / "fast.config.toml"]) == {
         "model": "gpt-6-mini",
-        "model_providers": {"corp": {"http_headers": {}}},
+        "model_providers": {"corp": {}},
     }
     assert said(terminal.left_out) == [
         (f"`notify` in {operators}", "command"),
@@ -383,7 +481,7 @@ env = { DATABASE_URL = "postgres://u:p@h/d" }
         (f"`model_providers.corp.base_url` in {operators}", "credential"),
         (f"`model_providers.vault.auth` in {operators}", "command"),
         (f"`otel.exporter.otlp-http.headers` in {operators}", "credential"),
-        (f"`model_providers.corp.http_headers.Authorization` in {fast}", "credential"),
+        (f"`model_providers.corp.http_headers` in {fast}", "credential"),
     ]
     assert terminal.preferences is not None
     assert terminal.preferences.saved == own / "config.toml"
