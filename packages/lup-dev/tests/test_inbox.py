@@ -9508,7 +9508,6 @@ def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_start
     assert first.split("\n\n") == [
         opening,
         unlanded,
-        "Nothing waits for the operator.",
         "No main session of this repository was heard before you.",
     ]
     assert resumed == ""
@@ -9518,19 +9517,6 @@ def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_start
         [
             opening,
             unlanded,
-            "\n".join(
-                [
-                    (
-                        f"Waiting for the operator: 2 items, all from {s0} and its "
-                        "subagents (`inbox` lists them; with `number`, one whole):"
-                    ),
-                    f"- @1 a question from {s0}: Which parser?",
-                    (
-                        "- News, by kind: 1 `note` (`inbox` with those `kinds` lists "
-                        "them)."
-                    ),
-                ]
-            ),
             "\n".join(
                 [
                     (
@@ -9559,7 +9545,7 @@ def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_start
             '`inbox` with `conversation` "s1", `every` and `whole`.'
         ),
     ]
-    assert "Waiting for the operator: 2 items (`inbox` lists them" in cleared
+    assert "Waiting for the operator" not in cleared
     assert (
         "Main sessions of this repository running beside you:\n"
         f"- `two`, in {tmp_path / 'two'}.\n"
@@ -9568,7 +9554,7 @@ def test_a_new_main_session_is_told_where_its_repository_stands_once_as_it_start
     assert "`three`, the last main session (still running)" in beside
 
 
-def test_the_bearings_list_what_waits_on_the_operator_the_last_sessions_first(
+def test_the_bearings_tell_the_session_what_is_its_and_leave_the_operators_items_out(
     tmp_path: Path, clock: FakeClock
 ) -> None:
     layout = Layout(state=tmp_path / "state", runtime=tmp_path / "run", data=tmp_path)
@@ -9624,29 +9610,23 @@ def test_the_bearings_list_what_waits_on_the_operator_the_last_sessions_first(
         ),
         [],
     )
-    unlanded, waiting = page.split("\n\n")[1:3]
-    assert unlanded == (
-        "Not landed on `dev` (`git log <branch> --not --remotes` reads a "
-        "branch's commits; `git -C <worktree> status` its changes):\n"
-        '- `lexer`, with no worktree: 2 commits, the last abc1234 "Lex.", '
-        "2026-10-01 12:00."
-    )
-    assert waiting.splitlines() == [
+    # Seven items wait on the operator, from the last session, its worker and
+    # another session: theirs to answer, none of it told.
+    assert page.split("\n\n")[1:] == [
         (
-            "Waiting for the operator: 7 items, 6 from claude session s1 and its "
-            "subagents, listed first (`inbox` lists them; with `number`, one whole):"
-        ),
-        "- @1 a question from claude session s1: Which parser?",
-        (
-            "- News, by kind: 1 `how it felt`, 1 `note` (`inbox` with those `kinds` "
-            "lists them)."
+            "Not landed on `dev` (`git log <branch> --not --remotes` reads a "
+            "branch's commits; `git -C <worktree> status` its changes):\n"
+            '- `lexer`, with no worktree: 2 commits, the last abc1234 "Lex.", '
+            "2026-10-01 12:00."
         ),
         (
-            "- Flagged writes, holding their branches' landings: claude session s1, "
-            "1 file on `parser` (@2); subagent a1 of claude session s1, 2 files on "
-            "`parser` and `lexer` (@3, @5)."
+            "Landed on `dev` since claude session s1, the last main session (last "
+            "heard at 2026-10-01 12:00), started at 2026-10-01 12:00 (`git show "
+            "<commit>` reads one):\n"
+            "- Nothing.\n"
+            "What claude session s1 and the operator said to each other: `inbox` "
+            'with `conversation` "s1", `every` and `whole`.'
         ),
-        "- @7 a question from claude session s9: Which lexer?",
     ]
     nowhere = Register(
         launch="one",
