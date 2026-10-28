@@ -46,7 +46,7 @@ Everything between you and the operator goes through lup's inbox; *lup's tools* 
 - the repository at the same path as on the host: its git directory and every worktree, read and written as there;
 - the project's environment, the room's own for each worktree, outside it: made as the room starts or at the worktree's first `uv`, and gone when the session ends. The host's `.venv` reads as an empty directory you can't write;
 - the same standard machine in every room: bash and the usual tools, without the operator's own shell setup;
-- your runtime's login and history, which are the operator's own.
+- your runtime's history and state, in a home of the rooms' own, and its login, an account's every room on it shares; neither is the operator's own. Its configuration there is read-only, but for its settings, which are this session's own.
 
 **What isn't:** the rest of the operator's home, their git configuration (your git identity is set for you), an SSH key and a GitHub login. A file with a secret's name (an `.env`, a key, a credentials file) whose content isn't in its repository's git objects reads as an empty file you can't write, here or in another repository: tell the operator what needs the secret rather than looking for it. One you make is yours, and they're told of it when the session ends. Your home directory is the room's own and goes when the session ends: keep what matters in the repository, and scratch work under `tmp/`. If you need a directory of theirs, ask; once they lend it (`lup-dev mount`), it's under `/lent` and you're told where.
 
