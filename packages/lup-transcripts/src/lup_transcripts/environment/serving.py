@@ -1,4 +1,4 @@
-"""What `Transcripts` serves: copying each session's record of the repository when a launch opens and when it stops, and reading the copies.
+"""What `Transcripts` serves: copying each session's record of the repository when a launch opens, when it stops and before a room reads them, and reading the copies.
 
 The launch's runtime says which of its records are the repository's sessions'
 (`Records.kept`), from the directories they ran in: the repository's git
@@ -19,7 +19,9 @@ launch opens catches whatever an earlier launch that never stopped left.
 Its commands read the copies (`packages/lup-transcripts/README.md`, *Reading
 them*): `list` every kept session, `show` one, the operator's words first,
 `search` what the operator said; each through its runtime's reading of its
-records, for the operator or a room, saying whose home each was kept from.
+records, for the operator or a room, saying whose home each was kept from. In a
+room, each asks the host to keep first (`Keep`), one request, so what it reads
+is what the host holds as it asks.
 
 Its views read a conversation live, from the runtime's own record as it grows
 (`conversation`, the drawer under each agent's banner; `exchange`, one earlier
@@ -37,7 +39,7 @@ import asyncio
 import os
 import shutil
 from datetime import timedelta
-from typing import TYPE_CHECKING, ClassVar, get_args
+from typing import TYPE_CHECKING, ClassVar, Literal, get_args
 
 from pydantic import Field
 
@@ -47,7 +49,8 @@ from lup.types import Model
 from lup_dev.confined import Confined
 from lup_dev.declaration.serving import Lup, ModuleServing, Operator, Room
 from lup_dev.git import Git
-from lup_dev.host.protocol import HostError
+from lup_dev.host.client import FromRoom, RoomClient
+from lup_dev.host.protocol import HostError, Reply, Request
 from lup_dev.host.records import Home, Whose
 from lup_dev.inbox.context import Recording
 from lup_transcripts.environment import views
@@ -108,6 +111,19 @@ class Searched(Model):
         default=False,
         description="What each time answered whole, rather than its first line.",
     )
+
+
+class Keep(Request, reads=False):
+    """A room's ask that the host keep what the repository's sessions' records added or grew, before the room reads the copies."""
+
+    kind: Literal["transcripts-keep"] = "transcripts-keep"
+
+
+class Kept(Reply):
+    """What the host kept: how many files it copied."""
+
+    kind: Literal["transcripts-kept"] = "transcripts-kept"
+    copied: int
 
 
 WHOSE: list[Whose] = list(get_args(Whose.__value__))
@@ -225,9 +241,13 @@ def into(records: list[Record], copies: Path) -> int:
 
 
 class TranscriptsServing(ModuleServing):
-    """Keeping the repository's sessions' records: what the runtime added or grew, when a launch opens and when it stops."""
+    """Keeping the repository's sessions' records: what each runtime added or grew, when a launch opens, when it stops, and before a room reads them."""
 
     module: Transcripts
+    room: FromRoom = Field(default_factory=lambda: FromRoom(room=RoomClient()))
+    """Where a command run in a room asks the host to keep first: its launch's
+    request socket, a host running a copy from before it could be asked said
+    so."""
     recording: ClassVar[Recording] = Recording()
     """Each conversation's record as last read, kept across calls in the
     repository's process, so a record unchanged since isn't read again."""
@@ -251,6 +271,31 @@ class TranscriptsServing(ModuleServing):
         launch = by.launch
         await asyncio.to_thread(self.keeping, launch.repository, [launch.runtime])
 
+    @lup.request
+    async def refresh(self, asked: Keep, by: Room) -> Kept:
+        """Copy what every runtime added or grew of the records of the room's repository's sessions, as a room asks before it reads the copies."""
+        del asked
+        runtimes = list(self.recorded)
+        count = await asyncio.to_thread(self.keeping, by.launch.repository, runtimes)
+        return Kept(copied=count)
+
+    async def fresh(self, by: Operator | Room) -> str:
+        """Ask the host to keep first, where a room asks, so the copies it reads are what the host holds as it asks; return a line saying why it couldn't, where it couldn't, else nothing.
+
+        On the host, the copies are as the last launch's opening or stop left
+        them.
+        """
+        if not isinstance(by, Room):
+            return ""
+        try:
+            await asyncio.to_thread(self.room.ask, Keep(), Kept)
+        except HostError as unkept:
+            return (
+                "\nThese are the copies as the host last kept them, at a launch's "
+                f"opening or stop: asked to keep first, it didn't, since {unkept}.\n"
+            )
+        return ""
+
     def kept(self) -> list[views.Session]:
         """Read every session kept of the repository, of every runtime whose records the module reads, each with whose home its record was kept from: under its runtime's name and whose home it was kept in, or kept there as each runtime's were before each home's had its own place, as the host's."""
 
@@ -272,11 +317,13 @@ class TranscriptsServing(ModuleServing):
     @lup.command
     async def list(self, asked: Every, by: Operator | Room) -> str:
         """List this repository's kept sessions, newest first: when each started, its name and id, how often you spoke, where it ran, and whose home its record was kept from."""
-        del asked, by
+        del asked
+        unkept = await self.fresh(by)
         lines = views.listed(await asyncio.to_thread(self.kept))
-        return (
+        listed = (
             "\n".join(lines) if lines else "No session of this repository is kept yet."
         )
+        return f"{listed}\n{unkept}" if unkept else listed
 
     @lup.command
     async def show(self, asked: Chosen, by: Operator | Room) -> str:
@@ -289,7 +336,7 @@ class TranscriptsServing(ModuleServing):
         `lup-dev inbox --conversation` that reads them; where the host service
         can't be asked, the last line says so.
         """
-        del by
+        unkept = await self.fresh(by)
         kept = await asyncio.to_thread(self.kept)
         chosen = views.chosen(kept, asked.session, asked.home)
         said = views.whole(chosen) if asked.everything else views.answered(chosen)
@@ -301,24 +348,24 @@ class TranscriptsServing(ModuleServing):
         except HostError as unasked:
             return (
                 f"{said}\nlup's inbox wasn't asked for this session's exchange: "
-                f"{unasked}\n"
+                f"{unasked}\n{unkept}"
             )
         items = len(exchanged.sent) + len(exchanged.received)
         if not items:
-            return said
+            return f"{said}{unkept}"
         command = f"lup-dev inbox --conversation {session.session} --every --whole"
         counted = "1 item" if items == 1 else f"{items} items"
         return (
             f"{said}\nIts exchange with you through lup, which this leaves out, is "
-            f"{counted} in lup's inbox: `{command}` reads it.\n"
+            f"{counted} in lup's inbox: `{command}` reads it.\n{unkept}"
         )
 
     @lup.command
     async def search(self, asked: Searched, by: Operator | Room) -> str:
         """Find each time you said all of `words`, in any kept session: when, your words, and the first line of what they answered, or with `--whole` all of it."""
-        del by
+        unkept = await self.fresh(by)
         sessions = await asyncio.to_thread(self.kept)
-        return views.found(sessions, asked.words, whole=asked.whole)
+        return views.found(sessions, asked.words, whole=asked.whole) + unkept
 
     def earlier(self) -> FoldKind:
         """Return the fold kind of what came earlier in a conversation as the module's layers leave it: how many of the agent's last words it keeps open (`FoldKind.keeps_open`), a person's layer setting more or fewer."""

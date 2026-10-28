@@ -1,4 +1,4 @@
-"""Keeping a copy of a repository's sessions' records, when a launch opens and when it stops, each home's apart.
+"""Keeping a copy of a repository's sessions' records, when a launch opens, when it stops and before a room reads them, each home's apart.
 
 The runtimes' homes here are directories the tests write: no test reads the
 operator's.
@@ -18,8 +18,9 @@ from lup.programs import run
 from lup_dev import Modules, Project
 from lup_dev.declaration.kinds import Folds
 from lup_dev.declaration.resolve import resolve
-from lup_dev.declaration.serving import Lup, Publisher
-from lup_dev.host.protocol import Limits, Register
+from lup_dev.declaration.serving import Lup, Operator, Publisher, Room
+from lup_dev.host.client import FromRoom, RoomClient
+from lup_dev.host.protocol import HostError, Limits, Register, Reply, Request
 from lup_dev.host.records import Call as RecordedCall
 from lup_dev.host.records import Reader as RecordsReader
 from lup_dev.host.records import Record, Recorded, Records, Transcript, Whose
@@ -27,7 +28,13 @@ from lup_dev.inbox.exchanges import Exchanges
 from lup_dev.inbox.protocol import Exchanged
 from lup_transcripts.environment.conversation import EARLIER_KIND
 from lup_transcripts.environment.module import Transcripts
-from lup_transcripts.environment.serving import TranscriptsServing, copied
+from lup_transcripts.environment.serving import (
+    Every,
+    Keep,
+    Kept,
+    TranscriptsServing,
+    copied,
+)
 
 if TYPE_CHECKING:
     from lup.blocks import OfAgent
@@ -234,10 +241,31 @@ def launched(repo: Path, tmp_path: Path, runtime: str = "claude") -> Register:
     )
 
 
+class Asked(RoomClient):
+    """A room's request socket the host answers as given: keeping by the serving given, or refusing."""
+
+    serving: TranscriptsServing | None = None
+    launch: Register | None = None
+    refusal: str | None = None
+    asked: list[str] = []
+
+    def ask[R: Reply](self, request: Request, reply: type[R]) -> R:
+        self.asked.append(request.kind)
+        if self.refusal is not None:
+            raise HostError(self.refusal)
+        assert self.serving is not None
+        assert self.launch is not None
+        assert isinstance(request, Keep)
+        kept = asyncio.run(self.serving.refresh(request, Room(launch=self.launch)))
+        return reply.model_validate(kept.model_dump())
+
+
 def transcripts(
     data: Path,
     records: dict[str, Records],
+    room: RoomClient | None = None,
 ) -> TranscriptsServing:
+    asking = FromRoom(room=room or Asked(refusal="no host here"))
     return TranscriptsServing(
         module=Transcripts(),
         recorded={
@@ -248,6 +276,7 @@ def transcripts(
         related=[],
         publisher=Unpublished(),
         exchanges=Unexchanged(),
+        room=asking,
     )
 
 
@@ -309,6 +338,78 @@ def test_a_room_s_file_the_host_s_copy_matches_is_kept_once_until_the_room_chang
     assert (
         "the room's" in (copies / "rooms" / "projects" / "p" / "s1.jsonl").read_text()
     )
+
+
+class Every2(RecordsReader):
+    """A runtime whose copies hold one session in each place its copies are, read from its file's name."""
+
+    def sessions(self, copies: Path) -> list[Path]:
+        projects = copies / "projects"
+        return sorted(projects.glob("*/*.jsonl")) if projects.is_dir() else []
+
+    def read(self, record: Path) -> Transcript:
+        return Transcript(runtime="claude", session=record.stem, title=record.stem)
+
+    def calls(self, record: Path, ids: list[str]) -> list[RecordedCall]:
+        del record, ids
+        return []
+
+
+def test_a_room_s_list_asks_the_host_to_keep_first_and_says_when_it_couldn_t(
+    repo: Path, tmp_path: Path
+) -> None:
+    room = folder(tmp_path / "rooms" / "projects" / "p", "rooms")
+    lines(room.source / "fresh.jsonl", {"n": 1})
+    data = tmp_path / "data"
+    lines(data / "claude" / "projects" / "old" / "before.jsonl", {"n": 0})
+    held = Held(room)
+    launch = launched(repo, tmp_path)
+    keeping = TranscriptsServing(
+        module=Transcripts(),
+        recorded={"claude": Recorded(records=held, reader=Every2())},
+        data=data,
+        related=[],
+        publisher=Unpublished(),
+        exchanges=Unexchanged(),
+    )
+    host = Asked(serving=keeping, launch=launch)
+    serving = keeping.model_copy(update={"room": FromRoom(room=host)})
+    listed = asyncio.run(serving.list(Every(), Room(launch=launch)))
+    assert host.asked == ["transcripts-keep"]
+    assert "`fresh` (claude fresh)" in listed
+    assert "kept from a room's home" in listed
+    assert "`before` (claude before)" in listed
+    assert "kept from your own directory" in listed
+    assert "as the host last kept them" not in listed
+    old = Asked(refusal="no handler for `transcripts-keep`; it answers list")
+    refused = serving.model_copy(update={"room": FromRoom(room=old)})
+    unkept = asyncio.run(refused.list(Every(), Room(launch=launch)))
+    assert unkept.endswith(
+        "it didn't, since the host service doesn't answer `transcripts-keep` in a "
+        "room yet: it runs a copy of lup from before rooms could ask it, until the "
+        "operator approves a newer one.\n"
+    )
+    assert "`fresh` (claude fresh)" in unkept
+    quiet = asyncio.run(refused.list(Every(), Operator()))
+    assert "asked to keep first" not in quiet
+
+
+def test_a_room_s_ask_keeps_every_runtime_s_records(repo: Path, tmp_path: Path) -> None:
+    claude = folder(tmp_path / "own" / "projects" / "p")
+    codex = Record(
+        home=tmp_path / "codex",
+        whose="rooms",
+        place=PurePosixPath("sessions", "2026", "rollout-a.jsonl"),
+    )
+    lines(claude.source / "s1.jsonl", {"n": 1})
+    lines(codex.source, {"n": 2})
+    data = tmp_path / "data"
+    serving = transcripts(data, {"claude": Held(claude), "codex": Held(codex)})
+    answer = asyncio.run(serving.refresh(Keep(), Room(launch=launched(repo, tmp_path))))
+    assert answer == Kept(copied=2)
+    assert (
+        data / "codex" / "rooms" / "sessions" / "2026" / "rollout-a.jsonl"
+    ).is_file()
 
 
 def test_a_call_read_whole_is_answered_again_as_a_call_of_its_agent_s_finishes() -> (
