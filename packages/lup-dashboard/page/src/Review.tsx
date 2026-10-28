@@ -44,7 +44,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tokensOf, within, type Filed, type Matter, type Taken } from "./code";
 import { cited, type Block, type Folding, type Span } from "./comments";
 import { closedAs, folding, hiddenAt, isFolded, mapLetters, reached, reaching, rebuilt, refold, scrollAfterKey, uncovered, useEditor, vimOf, type Landing } from "./editor";
-import { arrivedLines, arriving, owned, owning, ownersOf, reconcile, runsOf, settling } from "./reconcile";
+import { arrivedLines, arriving, owned, owning, ownersOf, reconcile, settling } from "./reconcile";
 import { clock, ticked, ticking, type Tick } from "./ticking";
 import { doing, since, type Activity } from "./agents";
 import { Following } from "./follow";
@@ -931,7 +931,9 @@ export function Review({
         const runs = state.field(owning);
         const writingIn = runs.find((each) => each.owner.startsWith("written ") && head >= each.from && head <= each.to)?.owner;
         const weight = (owner: string) => (owner === writingIn ? 1e9 : owner.startsWith("written ") ? 1e6 : 1);
-        const made = reconcile(state.doc, ownersOf(state.doc, runs), laidOut.text, laidOut.owners, weight);
+        // Nothing to change where the editor holds the text already, as at each key typed in a comment.
+        const same = state.doc.length === laidOut.text.length && state.sliceDoc() === laidOut.text;
+        const made = same ? { changes: [], arrived: [] } : reconcile(state.doc, ownersOf(state.doc, runs), laidOut.text, laidOut.owners, weight);
         const changing = state.changes(made.changes);
         const visual = visualOf(current);
         const anchor = landed(laidOut, changing, arriving);
@@ -942,12 +944,12 @@ export function Review({
             selection: anchor === null ? undefined : { anchor },
             scrollIntoView: anchor !== null,
             annotations: rebuilt.of(true),
-            effects: [sourced.of(laidFor.sources), owned.of(runsOf(laidOut.text, laidOut.owners)), ...(before.current === null ? [] : [arrivedLines.of(made.arrived)])],
+            effects: [sourced.of(laidFor.sources), owned.of(laidOut.runs), ...(before.current === null ? [] : [arrivedLines.of(made.arrived)])],
         });
         if (current.state.doc.length !== laidOut.text.length || current.state.sliceDoc() !== laidOut.text) {
             // The changes always make the text laid out; were they ever not to, it's laid out whole, and said.
             console.error("lup: the review's changes didn't make its layout; laid out whole");
-            current.dispatch({ changes: { from: 0, to: current.state.doc.length, insert: laidOut.text }, annotations: rebuilt.of(true), effects: owned.of(runsOf(laidOut.text, laidOut.owners)) });
+            current.dispatch({ changes: { from: 0, to: current.state.doc.length, insert: laidOut.text }, annotations: rebuilt.of(true), effects: owned.of(laidOut.runs) });
         }
         revisualized(current, visual, changing);
         // A fold never closes over the operator's words: one coming to hold a comment it didn't, or holding the one

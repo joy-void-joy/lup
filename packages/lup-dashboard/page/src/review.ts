@@ -90,6 +90,7 @@ import {
     type Shown,
     type Span as ViewSpan,
 } from "./views";
+import type { Run } from "./reconcile";
 import { kindView, mount, producerOf } from "./views/index";
 import { plain } from "./views/core";
 import { body } from "./views/inbox";
@@ -427,6 +428,8 @@ export interface Laid {
     drawers: Drawer[];
     nodes: Placed[];
     owners: string[];
+    /** The runs of its lines of one part's each, in order, as the editor keeps them (`reconcile.ts`). */
+    runs: Run[];
     seated: ReadonlyMap<string, Seated>;
     lines: ReadonlyMap<string, Lines>;
     /** What's written as it's laid out, each with its id, what was anchored or kept on what it's on whole as it was laid out among it. */
@@ -624,6 +627,39 @@ function filedOnce(file: Filed): FileLine[] {
     return made;
 }
 
+/** A scope's own lines, by the block each is of: each block's run of them, in order, so a line's block is found among a few. */
+class OfBlocks {
+    private runs: { block: string; first: number; count: number }[] = [];
+    length = 0;
+
+    /** Add `count` lines of `block`'s after the others. */
+    add(block: string, count: number): void {
+        this.runs.push({ block, first: this.length, count });
+        this.length += count;
+    }
+
+    /** Return the block line `at` of the scope's own is of, and its line there; none past the last. */
+    at(at: number): { block: string; line: number } | undefined {
+        const run = this.runs.find((each) => at >= each.first && at < each.first + each.count);
+        return run === undefined ? undefined : { block: run.block, line: at - run.first };
+    }
+}
+
+/** Each file's lines as a comment counts them, and their version, once: laid out again at each key typed in a comment, a file's lines don't change. */
+const fileLinesKept = new WeakMap<FileLine[], Map<string | null, Lines>>();
+
+/** Return the lines of a file laid out as `lines`, and their version, the file's own `given` (`linesOf`), made once. */
+function fileLines(lines: FileLine[], given: string | null): Lines {
+    const kept = fileLinesKept.get(lines) ?? new Map<string | null, Lines>();
+    const found = kept.get(given);
+    if (found !== undefined) {
+        return found;
+    }
+    const made = linesOf(lines.map((each) => each.text), given);
+    fileLinesKept.set(lines, kept.set(given, made));
+    return made;
+}
+
 /** Return whether a view's block is a file, a change's or one as it stands. */
 function isFiled(block: ViewBlock): block is Filed {
     return block.block === "diff" || block.block === "code";
@@ -746,26 +782,60 @@ function counted(count: number, one: string): string {
     return `${count} ${one}${count === 1 ? "" : "s"}`;
 }
 
-/** The text being laid out, line by line. */
+/**
+ * The text being laid out, line by line: kept as its lines, joined once it's whole (`text`), since a string built by
+ * adding to it is copied whole each time it's read; and each line's text and end by where it starts, which is what's
+ * read of it as it's laid out.
+ */
 class Writer {
-    text = "";
+    private chunks: string[] = [];
+    private starts: number[] = [];
+    // Each line written, in order: where it starts, and its text.
+    private lineStarts: number[] = [];
+    private lineTexts: string[] = [];
+    private length = 0;
     /** Whose each line written is: the id of the innermost part laid out on it. */
     owners: string[] = [];
+    /** The runs of lines of one part's each, in order (`reconcile.ts`). */
+    runs: Run[] = [];
     /** Whose the next line is. */
     owner = "";
 
     /** Write `line` on a line of its own, `owner`'s or the writer's own, and return where it is. */
     line(line: string, owner: string = this.owner): Span {
-        const from = this.text.length;
-        this.text += `${line}\n`;
-        this.owners.push(owner);
+        const from = this.length;
+        this.add(`${line}\n`);
+        this.own(from, line, owner);
         return { from, to: from + line.length };
     }
 
     /** Write `text`, lines laid out elsewhere, each `owned` as it says by its place among them, and a line break after it. */
     lines(text: string, owned: (line: number) => string): void {
-        text.split("\n").forEach((_, at) => this.owners.push(owned(at)));
-        this.text += `${text}\n`;
+        let at = this.length;
+        this.add(`${text}\n`);
+        text.split("\n").forEach((each, index) => {
+            this.own(at, each, owned(index));
+            at += each.length + 1;
+        });
+    }
+
+    private add(chunk: string): void {
+        this.chunks.push(chunk);
+        this.starts.push(this.length);
+        this.length += chunk.length;
+    }
+
+    /** Keep a line written at `from`, its text and whose it is, its run going on where it's the last's part's. */
+    private own(from: number, text: string, owner: string): void {
+        this.lineStarts.push(from);
+        this.lineTexts.push(text);
+        this.owners.push(owner);
+        const last = this.runs.at(-1);
+        if (last !== undefined && last.owner === owner && last.to === from - 1) {
+            last.to = from + text.length;
+        } else {
+            this.runs.push({ owner, from, to: from + text.length });
+        }
     }
 
     /** Lay out what `lay` writes as `owner`'s, then go on as before. */
@@ -779,16 +849,65 @@ class Writer {
         }
     }
 
-    /** Take back everything written from `at`, the start of a line. */
+    /** Take back everything written from `at`, the start of a line written. */
     cut(at: number): void {
-        const gone = this.text.slice(at).split("\n").length - 1;
-        this.text = this.text.slice(0, at);
-        this.owners.length -= gone;
+        while ((this.starts.at(-1) ?? -1) >= at) {
+            const chunk = this.chunks.pop() ?? "";
+            this.starts.pop();
+            this.length -= chunk.length;
+        }
+        while ((this.lineStarts.at(-1) ?? -1) >= at) {
+            this.lineStarts.pop();
+            this.lineTexts.pop();
+            this.owners.pop();
+        }
+        while ((this.runs.at(-1)?.from ?? -1) >= at) {
+            this.runs.pop();
+        }
+        const last = this.runs.at(-1);
+        if (last !== undefined && last.to >= at) {
+            last.to = at - 1;
+        }
+    }
+
+    /** Return which line written starts at `from`, found by halving; none where none does. */
+    private lineAt(from: number): number | undefined {
+        let low = 0;
+        let high = this.lineStarts.length;
+        while (low < high) {
+            const middle = (low + high) >> 1;
+            if ((this.lineStarts[middle] ?? 0) < from) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return this.lineStarts[low] === from ? low : undefined;
+    }
+
+    /** Return the end of the line written starting at `from`; the text's end where none does. */
+    endOf(from: number): number {
+        const at = this.lineAt(from);
+        return at === undefined ? this.length : from + (this.lineTexts[at] ?? "").length;
+    }
+
+    /** Return the line written starting at `from`, as it was written; none where none starts there. */
+    lineFrom(from: number): string {
+        const at = this.lineAt(from);
+        return at === undefined ? "" : (this.lineTexts[at] ?? "");
+    }
+
+    /** The text written, whole. */
+    get text(): string {
+        const whole = this.chunks.join("");
+        this.chunks = [whole];
+        this.starts = [0];
+        return whole;
     }
 
     /** Where the next line starts. */
     get at(): number {
-        return this.text.length;
+        return this.length;
     }
 }
 
@@ -821,9 +940,14 @@ function layCode(w: Writer, into: Gathering, of: string, files: FileLine[], firs
     const fold = (kind: FoldKind, path: string, name: string, label: string, closed: boolean, summary: Span, from: number, to: number) =>
         into.folds.push({ of, kind, name: name === "" ? path : `${path} ${name}`, label, closed, summary, from, to, ...(kind === "file" ? { scope: true } : {}) });
     let inFile = 0;
+    // Whose a file's lines are, said once for each file.
+    let ownerOf: { file: Filed | null; whose: string } = { file: null, whose: "" };
     files.forEach((each, index) => {
         const path = each.file.path;
-        const whose = owner(each.file);
+        if (ownerOf.file !== each.file) {
+            ownerOf = { file: each.file, whose: owner(each.file) };
+        }
+        const whose = ownerOf.whose;
         inFile = each.row === null ? 0 : inFile + 1;
         if (each.opens !== null) {
             const aside = { kind: "summary" as const, ...w.line(each.opens.summary, whose) };
@@ -1080,7 +1204,7 @@ export function laid(
     // Where words written into a line by a callback are in it, which it writes as given: its first place or its last,
     // as the callback puts them first or last, else the line's end.
     const placedIn = (line: Span, words: string, last: boolean) => {
-        const shown = w.text.slice(line.from, line.to);
+        const shown = w.lineFrom(line.from);
         const at = words === "" ? -1 : last ? shown.lastIndexOf(words) : shown.indexOf(words);
         return at < 0 ? line.to : line.from + at;
     };
@@ -1111,9 +1235,9 @@ export function laid(
     {
         groups.forEach((group, at) => {
             const next = groups.findIndex((each, after) => after > at && each.depth <= group.depth);
-            const end = (next < 0 ? w.text.length : (groups[next]?.banner.from ?? w.text.length)) - 1;
+            const end = (next < 0 ? w.at : (groups[next]?.banner.from ?? w.at)) - 1;
             if (end > group.banner.to) {
-                const label = w.text.slice(group.banner.from, group.banner.to);
+                const label = w.lineFrom(group.banner.from);
                 group.fold = { of: `group ${group.place}`, kind: "group", name: "", label, closed: false, summary: group.banner, from: group.banner.to, to: end, scope: true };
             }
             const node = nodes[at];
@@ -1123,14 +1247,15 @@ export function laid(
         });
     }
     // A conversation laid in a drawer reads its lines from the whole text, once it's whole.
+    const text = w.text;
     for (const drawer of laidDrawers) {
         if (drawer.talk !== null) {
-            drawer.talk = { ...drawer.talk, text: w.text };
+            drawer.talk = { ...drawer.talk, text };
         }
     }
     const asLaid = wrote.map((each) => converting.get(writtenId(each)) ?? each);
     const converted = named.changed || converting.size > 0 ? asLaid : null;
-    return { text: w.text, groups, regions, drawers: laidDrawers, nodes: nestedNodes(nodes), owners: w.owners, seated, lines: blockLines, written: asLaid, converted, drawn: drawnAt };
+    return { text, groups, regions, drawers: laidDrawers, nodes: nestedNodes(nodes), owners: w.owners, runs: w.runs, seated, lines: blockLines, written: asLaid, converted, drawn: drawnAt };
 
     /** Return `section` with each group laid out before in its place, any other after them, in its own order. */
     function kept(section: Grouping[], isParked: boolean): Grouping[] {
@@ -1143,8 +1268,7 @@ export function laid(
 
     /** Return a part of the review laid out from `from` to `to`, its first line its header. */
     function part(id: string, kind: Placed["kind"], from: number, to: number, extra: Partial<Placed> = {}): Placed {
-        const end = w.text.indexOf("\n", from);
-        return { id, kind, from, to, header: { from, to: end < 0 ? w.text.length : Math.min(end, Math.max(to, from)) }, children: [], ...extra };
+        return { id, kind, from, to, header: { from, to: Math.min(w.endOf(from), Math.max(to, from)) }, children: [], ...extra };
     }
 
     /** Return what the operator wrote, laid out at `block`, as a part of the review: by its id. */
@@ -1189,22 +1313,22 @@ export function laid(
      * scope's lines `own` joined (`starts`), each of a block (`ofLine`), anchored to the block of the line its passage
      * ends on (`quoting`); none where it's past them.
      */
-    function anchored(quote: Quote, starts: readonly number[], length: number, ofLine: readonly { block: string; line: number }[]): Quote | null {
+    function anchored(quote: Quote, starts: readonly number[], length: number, ofLine: OfBlocks): Quote | null {
         if (ofLine.length === 0 || quote.start > length) {
             return null;
         }
         const top = lineOf([...starts], quote.start);
         const bottom = lineOf([...starts], Math.max(quote.end - 1, quote.start));
-        const last = ofLine[bottom];
+        const last = ofLine.at(bottom);
         const lines = last === undefined ? undefined : blockLines.get(last.block);
         if (last === undefined || lines === undefined) {
             return null;
         }
         // A passage running over blocks is anchored to the last, from its first line.
-        const first = ofLine[top]?.block === last.block ? top : bottom - last.line;
+        const first = ofLine.at(top)?.block === last.block ? top : bottom - last.line;
         const start = Math.max(quote.start - (starts[first] ?? 0), 0);
         const end = Math.max(quote.end - (starts[first] ?? 0), start);
-        return quoting(last.block, lines, ofLine[first]?.line ?? 0, last.line, start, end, quote.text);
+        return quoting(last.block, lines, ofLine.at(first)?.line ?? 0, last.line, start, end, quote.text);
     }
 
     function layGroup(group: Grouping, isParked: boolean, depth: number): void {
@@ -1293,24 +1417,24 @@ export function laid(
         const filedBlocks = bodyBlocks.filter(isFiled);
         const files = filedBlocks.flatMap(filedOnce);
         // Its own lines, its text's then its files', each of its block, at its line there: what comments are on.
-        const ofLine: { block: string; line: number }[] = [];
+        const ofLine = new OfBlocks();
         const firstOf = new Map<string, number>();
         const ownLines: string[] = [];
-        const ownBlock = (block: ViewBlock, lines: string[]) => {
+        const ownBlock = (block: ViewBlock, lines: Lines) => {
             const bid = blockId(view.id, block.id);
             firstOf.set(bid, ofLine.length);
-            lines.forEach((_, at) => ofLine.push({ block: bid, line: at }));
-            blockLines.set(bid, linesOf(lines, block.version ?? null));
+            ofLine.add(bid, lines.lines.length);
+            blockLines.set(bid, lines);
         };
         for (const block of bodyBlocks) {
             if (block.block === "markdown") {
                 const lines = block.text.split("\n");
-                ownBlock(block, lines);
+                ownBlock(block, linesOf(lines, block.version ?? null));
                 ownLines.push(...lines);
             }
         }
         for (const block of filedBlocks) {
-            ownBlock(block, filedOnce(block).map((each) => each.text));
+            ownBlock(block, fileLines(filedOnce(block), block.version ?? null));
             filedBy.set(blockId(view.id, block.id), block);
         }
         const own = [...ownLines, ...files.map((each) => each.text)];
@@ -1408,7 +1532,7 @@ export function laid(
         const citations = citedOn(item, ownLines);
         const textFrom = w.at;
         own.slice(0, ownCount).forEach((line, at) => {
-            const block = ofLine[at] ?? { block: `${id} text`, line: at };
+            const block = ofLine.at(at) ?? { block: `${id} text`, line: at };
             const span = w.line(line, block.block);
             into.lines.push({ ...span, own: starts[at] ?? 0, block: block.block, line: block.line });
             if (edited?.changed.includes(at) === true) {
@@ -1560,7 +1684,7 @@ export function laid(
             const blocks = answer.blocks.blocks ?? [];
             // A remark on a file's lines goes under the line it's on, each file's block its own.
             const topFiles = blocks.filter(isFiled);
-            const ofLine: { block: string; line: number }[] = [];
+            const ofLine = new OfBlocks();
             const firstOf = new Map<string, number>();
             const shownFiles: FileLine[] = [];
             for (const block of topFiles) {
@@ -1568,8 +1692,8 @@ export function laid(
                 const lines = filedOnce(block);
                 filedBy.set(bid, block);
                 firstOf.set(bid, ofLine.length);
-                lines.forEach((_, at) => ofLine.push({ block: bid, line: at }));
-                blockLines.set(bid, linesOf(lines.map((each) => each.text), block.version ?? null));
+                ofLine.add(bid, lines.length);
+                blockLines.set(bid, fileLines(lines, block.version ?? null));
                 shownFiles.push(...lines);
             }
             const starts = startsOf(shownFiles.map((each) => each.text));

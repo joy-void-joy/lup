@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { above, outdated, spokenOf } from "./exchange";
 import { levelled } from "./folds";
-import { reconcile } from "./reconcile";
+import { reconcile, runsOf } from "./reconcile";
 import {
     EMPTY,
     aboutAt,
@@ -1575,6 +1575,9 @@ describe("the drawers under each agent's banner", () => {
         expect(after.text).toContain("    def kinds(self):\n        return a + b\n\n");
         expect(after.text).toContain("        b = 2\n        return a + b\nWhy a sum?\n");
         expect([after.seated.get("test")?.outdated, after.seated.get("sum")?.outdated]).toEqual([false, false]);
+        // Whose each line is, run by run, as the editor keeps it, read from the lines as they're written.
+        expect(after.runs).toEqual(runsOf(after.text, after.owners));
+        expect(after.owners.length).toBe(after.text.split("\n").length - 1);
         // The editor's changes make the new layout and leave each remark's line as it was.
         const doc = Text.of(before.text.split("\n"));
         const made = reconcile(doc, before.owners, after.text, after.owners, (owner) => (owner.startsWith("written ") ? 1e6 : 1));
