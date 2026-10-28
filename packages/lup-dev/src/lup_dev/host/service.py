@@ -1408,9 +1408,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         first = heard.agent is not None and not conversation.linked
         if first:
             spawned = (
-                None
-                if self.spawns is None
-                else self.spawns.spawned(request.runtime, payload)
+                None if self.spawns is None else self.spawns.spawned(request, payload)
             )
             conversation = conversations.linked(conversation, spawned)
         if conversation.internal:

@@ -11,9 +11,13 @@ under that name.
 A hook's payload names its conversation's record by the path the runtime has
 for it, inside the launch's own runtime directory, which the room writes,
 links into the shared home among it. The host never follows those links: a
-path under the launch's own directory is read as the same path in the home the
-launch registered, confined there (`translated`, `Found`), and any other path
-a room names isn't read at all.
+path under the own directory of the launch whose room ran the hook is read as
+the same path in the home that launch registered, confined there
+(`translated`, `Found`), and any other path a room names isn't read at all,
+one under another launch's own directory among them. Reading a record it
+keeps, rather than answering a hook, the host takes a path a line of it names
+as any served launch's (`served`), and reads it only inside the record's own
+session folder.
 """
 
 from pathlib import Path
@@ -72,29 +76,37 @@ def home_of(layout: HostLayout, runtime: str, session: str) -> Path | None:
     return Path(place.read_text()) if place.is_file() else None
 
 
-def translated(layout: Layout, path: Path) -> Found | None:
-    """Return where `path`, a path a hook's payload names inside a launch's own runtime directory, is in the home that launch registered, with that home to read it in; none for any other path, or a launch registering no home.
+def translated(launch: Register | None, path: Path) -> Found | None:
+    """Return where `path`, a path a hook's payload names inside the own runtime directory of `launch`, the launch whose room ran the hook, is in the home it registered, with that home to read it in; none for any other path, one under another launch's own directory among them, for a launch registering no home, or for no launch.
 
-    The launch is found among those the host service serves by the own
-    directory its registration names (`Register.own`). That directory is the
-    room's to write, links into the home among it, so nothing of it is read or
-    followed on the host: only the path's place inside it is taken, laid on
-    the home.
+    `launch` is the one the host service heard the hook on, by its socket,
+    never one the payload names, so a room naming a path under another
+    launch's own directory has nothing of that launch's home read. Its own
+    directory (`Register.own`) is the room's to write, links into the home
+    among it, so nothing of it is read or followed on the host: only the
+    path's place inside it is taken, laid on the home.
     """
+    if launch is None or launch.own is None or launch.home is None:
+        return None
+    try:
+        rest = path.relative_to(launch.own)
+    except ValueError:
+        return None
+    if not rest.parts or ".." in rest.parts:
+        return None
+    return Found(record=launch.home / rest, root=launch.home)
+
+
+def served(layout: Layout) -> list[Register]:
+    """Return every launch the host service serves, as its record has it, a record that can't be read passed over: for the host reading a record it keeps, whose lines a session resumed across launches wrote in each one's own runtime directory, never for a room's request, which reads its own launch's alone (`translated`)."""
     launches = layout.host.launches
     found = sorted(launches.glob("*.json")) if launches.is_dir() else []
-    for each in found:
-        try:
-            registered = Register.model_validate_json(each.read_text())
-        except OSError, ValidationError:
-            continue
-        if registered.own is None or registered.home is None:
-            continue
-        try:
-            rest = path.relative_to(registered.own)
-        except ValueError:
-            continue
-        if not rest.parts or ".." in rest.parts:
-            return None
-        return Found(record=registered.home / rest, root=registered.home)
-    return None
+    return [launch for each in found if (launch := registration(each)) is not None]
+
+
+def registration(record: Path) -> Register | None:
+    """Return the launch recorded at `record`; none where it can't be read, or isn't a launch's record, as the conversations kept beside it aren't."""
+    try:
+        return Register.model_validate_json(record.read_text())
+    except OSError, ValidationError:
+        return None

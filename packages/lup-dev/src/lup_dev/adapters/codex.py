@@ -309,6 +309,7 @@ if TYPE_CHECKING:
 
     from lup.events import SessionEvent
     from lup.sessions.declaration import Declaration
+    from lup_dev.host.protocol import Register
 
 
 # lup: defer(issue=52, why="Codex's spelling of a tool's name in a hook, a module constant until a `Spellings` each adapter implements gives it its home")
@@ -885,7 +886,7 @@ class Subagented(Model, extra="ignore"):
     its parent's."""
 
 
-def spawned(raw: str, layout: Layout, largest: int = 1024 * 1024) -> Spawned | None:
+def spawned(raw: str, launch: Register, largest: int = 1024 * 1024) -> Spawned | None:
     """Return how the subagent a Codex hook fires for was spawned, from its own rollout's first line; none for the session's own conversation.
 
     A subagent's hooks name its own rollout (`transcript_path`), whose
@@ -926,7 +927,7 @@ def spawned(raw: str, layout: Layout, largest: int = 1024 * 1024) -> Spawned | N
         return None
     kind = payload.agent_type or None
     rollout = payload.agent_transcript_path or payload.transcript_path
-    found = None if rollout is None else translated(layout, rollout)
+    found = None if rollout is None else translated(launch, rollout)
     reading = None if found is None else opened(found.root, found.record)
     if reading is None:
         return Spawned(kind=kind, guided=True)

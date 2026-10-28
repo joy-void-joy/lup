@@ -176,8 +176,13 @@ class Spawns(ABC):
     """How each runtime recorded its subagents' spawns, which the host service reads once a subagent's first hook is heard."""
 
     @abstractmethod
-    def spawned(self, runtime: str, payload: str) -> Spawned | None:
-        """Return how the subagent one of `runtime`'s hooks fires for was spawned, as the runtime recorded it; none for the session's own conversation, or where nothing's recorded."""
+    def spawned(self, launch: Register, payload: str) -> Spawned | None:
+        """Return how the subagent one of `launch`'s hooks fires for was spawned, as its runtime recorded it; none for the session's own conversation, or where nothing's recorded.
+
+        `launch` is the one the service heard the hook from: a record the
+        payload names is read only inside its own runtime directory, in the
+        home it registered (`lup_dev.host.homes.translated`).
+        """
 
 
 class Posted(Model):

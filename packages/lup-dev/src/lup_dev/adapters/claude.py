@@ -267,7 +267,7 @@ from lup.types import JsonObject, Model, MutableModel, Settings
 from lup_dev.adapters import Adapter, Pushing
 from lup_dev.host import written
 from lup_dev.host.courier import Failure, Heard, Spawned, Telling
-from lup_dev.host.homes import Found, home_of, translated
+from lup_dev.host.homes import Found, home_of, served, translated
 from lup_dev.host.records import (
     Call,
     Called,
@@ -331,6 +331,7 @@ if TYPE_CHECKING:
 
     from lup.events import SessionEvent
     from lup.sessions.declaration import Declaration
+    from lup_dev.host.protocol import Register
 
 type Writing = Literal["Edit", "Write"]
 """The file tools whose writes are judged before they land: `PreToolUse.proposal`
@@ -668,7 +669,7 @@ class SessionStart(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self, bench.services.layout),
+            spawned_by=spawned_by(self, bench.launch),
             forgotten=self.source in get_args(ForgettingStart.__value__),
         ).apply(bench)
         if not reply.context:
@@ -726,12 +727,13 @@ class UserPromptSubmit(Payload):
         mid-turn leaves it counted. A record that lags leaves a call counted
         until its conversation's turn ends, as before. The records are read in
         the home the launch registered, where the payload names them under the
-        launch's own runtime directory, and nowhere else.
+        own runtime directory of the launch whose room ran the hook, and
+        nowhere else.
         """
         transcript = (
             None
             if self.transcript_path is None
-            else translated(bench.services.layout, self.transcript_path)
+            else translated(bench.launch, self.transcript_path)
         )
         left = [] if transcript is None else counted(bench, self.session_id)
         over = (
@@ -751,7 +753,7 @@ class UserPromptSubmit(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self, bench.services.layout),
+            spawned_by=spawned_by(self, bench.launch),
             over=over,
         ).apply(bench)
         return None
@@ -884,8 +886,8 @@ class PreToolUse(Payload):
         path = written.file_path or written.notebook_path
         return None if path is None else self.cwd / path
 
-    def started(self, layout: Layout) -> CallStarted:
-        """Return the event of this call starting, the spawn of its subagent read in the home `layout` has its launch's in.
+    def started(self, launch: Register | None) -> CallStarted:
+        """Return the event of this call starting, the spawn of its subagent read in the home `launch`, the launch whose room ran the hook, registered.
 
         A call running a subagent (`Agent`) isn't counted: its own calls are.
         One asking `isolation: "worktree"` asks for its conversation to work
@@ -897,7 +899,7 @@ class PreToolUse(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self, layout),
+            spawned_by=spawned_by(self, launch),
             call=self.tool_use_id,
             tool=self.tool_name,
             spawns=spawns,
@@ -969,7 +971,7 @@ class PreToolUse(Payload):
         worktree Claude Code names as its working directory, another
         conversation's, refused, saying the path in its own (`apart`).
         """
-        started = self.started(bench.services.layout)
+        started = self.started(bench.launch)
         if started.spawns:
             return self.spawn(bench, started)
         away = apart(bench, started, self.writes())
@@ -1079,7 +1081,7 @@ class PostToolUse(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self, bench.services.layout),
+            spawned_by=spawned_by(self, bench.launch),
             call=self.tool_use_id,
             tool=self.tool_name,
             spawns=self.tool_name in get_args(Spawning.__value__),
@@ -1149,7 +1151,7 @@ class Stop(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self, bench.services.layout),
+            spawned_by=spawned_by(self, bench.launch),
             after_block=self.stop_hook_active,
         )
         reply = ended.apply(bench)
@@ -1223,7 +1225,7 @@ class SubagentStop(Payload):
             session=self.session_id,
             agent=self.agent_id,
             cwd=self.cwd,
-            spawned_by=spawned_by(self, bench.services.layout),
+            spawned_by=spawned_by(self, bench.launch),
             final=self.stopped,
         )
         reply = ended.apply(bench)
@@ -1299,7 +1301,7 @@ class StopFailure(Payload):
                 session=self.session_id,
                 agent=self.agent_id,
                 cwd=self.cwd,
-                spawned_by=spawned_by(self, bench.services.layout),
+                spawned_by=spawned_by(self, bench.launch),
                 final=True,
             ).apply(bench)
         return None
@@ -1417,16 +1419,19 @@ reads the session's guidance, which the system prompt carries."""
 
 
 def subagent_record(
-    transcript: Path | None, agent: str, layout: Layout, largest: int = 1024 * 1024
+    transcript: Path | None,
+    agent: str,
+    launch: Register | None,
+    largest: int = 1024 * 1024,
 ) -> SubagentRecord | None:
-    """Return what Claude Code records of subagent `agent` beside the session's `transcript`, a path a hook's payload names; none where it records nothing, or not yet, or where the path isn't under a launch's own runtime directory, which is the only place the host reads one, in the home the launch registered (`lup_dev.host.homes.translated`).
+    """Return what Claude Code records of subagent `agent` beside the session's `transcript`, a path a hook's payload names; none where it records nothing, or not yet, or where the path isn't under the own runtime directory of `launch`, the launch whose room ran the hook, which is the only place the host reads one, in the home that launch registered (`lup_dev.host.homes.translated`).
 
     It's read confined to that home, at most `largest` bytes, since a room
     writes it.
     """
     if transcript is None or not plain(agent):
         return None
-    found = translated(layout, transcript)
+    found = translated(launch, transcript)
     if found is None:
         return None
     meta = found.record.with_suffix("") / "subagents" / f"agent-{agent}.meta.json"
@@ -1443,14 +1448,14 @@ def subagent_record(
         return None
 
 
-def spawned_by(payload: Payload, layout: Layout) -> str | None:
-    """Return the id of the call that spawned the subagent `payload` is of, as its record says; none for the session's own conversation, or before the record is written, at `SubagentStart`."""
-    record = subagent_record(payload.transcript_path, payload.agent_id, layout)
+def spawned_by(payload: Payload, launch: Register | None) -> str | None:
+    """Return the id of the call that spawned the subagent `payload` is of, as its record in `launch`'s home says; none for the session's own conversation, before the record is written, at `SubagentStart`, or for a hook no launch's room ran."""
+    record = subagent_record(payload.transcript_path, payload.agent_id, launch)
     return None if record is None else record.tool_use_id
 
 
-def spawned(raw: str, layout: Layout) -> Spawned | None:
-    """Return how the subagent a Claude Code hook fires for was spawned, from its record beside the session's transcript; none for the session's own conversation.
+def spawned(raw: str, launch: Register) -> Spawned | None:
+    """Return how the subagent a Claude Code hook of `launch`'s fires for was spawned, from its record beside the session's transcript, in the home `launch` registered; none for the session's own conversation.
 
     A subagent whose record isn't there is said by its type alone; one with
     neither is Claude Code's own (`Spawned.internal`), which writes no record:
@@ -1479,7 +1484,7 @@ def spawned(raw: str, layout: Layout) -> Spawned | None:
     if not payload.agent_id:
         return None
     kind = payload.agent_type or None
-    kept = subagent_record(payload.transcript_path, payload.agent_id, layout)
+    kept = subagent_record(payload.transcript_path, payload.agent_id, launch)
     if kept is None:
         return Spawned(
             kind=kind, guided=kind == FORK, internal=kind is None, handed=True
@@ -2566,18 +2571,29 @@ def saved(
     record is in its `subagents/` folder, so it's the folder holding that. A
     room's session names its saved output under its launch's own runtime
     directory, which is read as the same place in the home it registered
-    (`lup_dev.host.homes.translated`). The output is read only from inside the
+    (`lup_dev.host.homes.translated`). This is the host reading a record it
+    keeps, not answering a hook, and a session resumed in a later launch has
+    lines naming each launch's own directory, so the path is taken as any
+    served launch's (`served`). The output is read only from inside the
     session's folder, as the line names it, and only where, opened, it's
     inside `root`, or inside the folder holding the record without one, so a
-    record naming a file elsewhere, or a folder a room swapped for a link,
-    reads nothing outside the records.
+    record naming a file elsewhere, in another launch's home among them, or a
+    folder a room swapped for a link, reads nothing outside the records.
     """
     match line.tool_use_result:
         case ToolResulted(persisted_output_path=Path() as named):
             pass
         case _:
             return None
-    found = None if layout is None else translated(layout, named)
+    launches = [] if layout is None else served(layout)
+    found = next(
+        (
+            each
+            for launch in launches
+            if (each := translated(launch, named)) is not None
+        ),
+        None,
+    )
     path = named if found is None else found.record
     folder = (
         record.parent.parent
