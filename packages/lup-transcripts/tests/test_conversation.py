@@ -863,7 +863,7 @@ def test_an_item_with_no_text_is_a_line_with_nothing_folded_under_it() -> None:
     )
 
 
-# What stays open: at most the agent's last words, its calls not counted
+# What stays open: at most the agent's last words, their calls not counted
 
 
 def talking(words: int, start: int = 0) -> list[Entry]:
@@ -886,7 +886,7 @@ def test_at_most_the_agent_s_last_twenty_words_stay_open_what_came_before_under_
     None
 ):
     view = drawer(talking(25))
-    # The last 20 of its words, each after its call: the calls don't count.
+    # The last 20 of their words, each after their call: the calls don't count.
     shown = [each for each in view.blocks if isinstance(each, Markdown)]
     assert [each.text for each in shown] == [f"Word {each}." for each in range(5, 25)]
     first = view.blocks[0]
