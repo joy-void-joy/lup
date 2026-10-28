@@ -22,6 +22,9 @@ class CorePaths(Model):
         "**/bun.lock",
         "**/yarn.lock",
         "**/pnpm-lock.yaml",
+        "**/pnpm-workspace.yaml",
+        "**/.pnpmfile.cjs",
+        "**/.pnpmfile.mjs",
         "**/.npmrc",
         ".github/**",
         ".git/**",
@@ -42,9 +45,11 @@ class CorePaths(Model):
     ]
     """Every write to these asks the operator.
 
-    - Node's manifest and lockfiles, which choose what runs, and `.npmrc`, whose
-      `min-release-age` outranks the package age a room's user-level `~/.npmrc`
-      keeps (`docs/launch.md`, *The package age gate*);
+    - Node's manifest and lockfiles, which choose what runs; `.npmrc` and
+      `pnpm-workspace.yaml`, whose package age outranks the one a room's
+      user-level settings keep (`docs/launch.md`, *The package age gate*), the
+      latter naming which packages' install scripts run too; and pnpm's
+      `.pnpmfile.cjs` and `.pnpmfile.mjs`, code pnpm runs at each install;
     - what runs outside the agent's reach: CI, git's own directory and hooks,
       pre-commit, editor and container configurations, the runtimes' settings;
     - what widens a later launch, `sync.json` and `sync.json.local`;
