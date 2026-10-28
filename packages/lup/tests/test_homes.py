@@ -1,5 +1,6 @@
 """A home of the rooms' own: each runtime's terminal in a directory of the launch's own on one, what a launch makes before the run, and the preferences carried back after."""
 
+import base64
 import io
 import json
 import os
@@ -12,7 +13,7 @@ from lup.adapters.claude import Claude
 from lup.adapters.codex import Codex
 from lup.rooms.container import Mount
 from lup.rooms.homes import inside, landed, landings, lines, opened, regular
-from lup.sessions.configuration import Item, configured
+from lup.sessions.configuration import Credentials, Item, configured
 from lup.sessions.terminal import (
     Cli,
     Copy,
@@ -195,7 +196,16 @@ def test_claude_layers_the_settings_leaving_out_credentials_and_commands_by_why(
 GITHUB_TOKEN = "ghp_" + "a1" * 18
 GITLAB_TOKEN = "glpat-" + "b2" * 10
 LITELLM_KEY = "sk-" + "c3" * 16
-SIGNED = ".".join(["eyJ" + "h" * 17, "p" * 30, "s" * 30])
+SIGNED = ".".join(
+    [
+        base64.urlsafe_b64encode(b'{"alg":"HS256"}').decode(),
+        base64.urlsafe_b64encode(b'{"sub":"operator"}').decode(),
+        "s" * 43,
+    ]
+)
+"""A JSON Web Token: its header a JSON object naming its algorithm, in base64url, each part a length that takes no padding."""
+UNSIGNED = ".".join(["eyJ" + "h" * 17, "p" * 30, "s" * 30])
+"""A word shaped like a JSON Web Token, opening with `eyJ` in three parts, whose first part reads as no JSON object."""
 
 
 def test_claude_leaves_out_a_credential_held_in_an_ordinary_value(
@@ -221,7 +231,10 @@ def test_claude_leaves_out_a_credential_held_in_an_ordinary_value(
                         }
                     }
                 },
-                "companyAnnouncements": ["Bearer of good news: the gate is green."],
+                "companyAnnouncements": [
+                    "Bearer of good news: the gate is green.",
+                    f"Build {UNSIGNED} is out.",
+                ],
                 "model": "opus",
             }
         ),
@@ -239,7 +252,10 @@ def test_claude_leaves_out_a_credential_held_in_an_ordinary_value(
                 "source": {"source": "git", "url": "https://git.example/m.git?ref=main"}
             }
         },
-        "companyAnnouncements": ["Bearer of good news: the gate is green."],
+        "companyAnnouncements": [
+            "Bearer of good news: the gate is green.",
+            f"Build {UNSIGNED} is out.",
+        ],
         "model": "opus",
     }
     assert said(terminal.left_out) == [
@@ -253,6 +269,15 @@ def test_claude_leaves_out_a_credential_held_in_an_ordinary_value(
         for token in [GITHUB_TOKEN, GITLAB_TOKEN, SIGNED]
         if token in each
     ]
+
+
+def test_a_json_web_token_is_told_by_its_header_never_by_its_look() -> None:
+    """A word in three parts opening with `eyJ` is a JSON Web Token only where its first part reads, in base64url, as a JSON object naming its algorithm."""
+    credentials = Credentials()
+
+    assert credentials.carries(f"export SESSION={SIGNED}")
+    assert not credentials.carries(f"Build {UNSIGNED} is out.")
+    assert not credentials.carries("eyJhbGciOiJIUzI1NiJ9.only-two")
 
 
 def test_codex_leaves_out_a_model_provider_s_headers_and_a_credential_in_its_url(

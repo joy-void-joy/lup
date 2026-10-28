@@ -16,8 +16,9 @@ under a key named otherwise, a key of 32 hex digits in a header called
 `X-Key`, still reaches the room.
 """
 
+import base64
 import stat
-from itertools import islice, pairwise
+from itertools import groupby, pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
@@ -80,35 +81,66 @@ class Shape(Model):
 
     opening: str
     rest: int = 16
-    """The fewest letters, digits, `_` and `-` after the opening: what tells a
-    token from a word that starts the same way."""
+    """The fewest characters after the opening: what tells a token from a word
+    that starts the same way."""
     whose: str
 
+    def fits(self, word: str) -> bool:
+        """Say whether `word` is a token of this shape: its opening, then at least `rest` characters.
 
-def body(char: str) -> bool:
-    """Say whether `char` is of a token's body: an ASCII letter or digit, `_` or `-`."""
-    return char.isascii() and (char.isalnum() or char in "_-")
+        >>> shape = Shape(opening="ghp_", rest=4, whose="GitHub's")
+        >>> shape.fits("ghp_a1b2"), shape.fits("ghp_a1"), shape.fits("xghp_a1b2")
+        (True, False, False)
+        """
+        return word.startswith(self.opening) and len(word) - len(self.opening) >= (
+            self.rest
+        )
 
 
-def spans(text: str, at: int, also: str = "") -> int:
-    """Return how many characters of `text` from `at` are of a token's body (`body`), or among `also`.
+def written_in_token(char: str) -> bool:
+    """Say whether `char` is one a token is written in: an ASCII letter or digit, `-` or `_`, base64url's, or `.`, which joins a JSON Web Token's parts.
 
-    >>> spans("Bearer ghp_x1.y z", 7), spans("Bearer ghp_x1.y z", 7, also=".")
-    (6, 8)
+    Not base64's `/`, so a token written after one, as in
+    `https://ghp_…@github.com` inside a command, starts a word of its own.
     """
-    return next(
-        (
-            count
-            for count, char in enumerate(islice(text, at, None))
-            if not body(char) and char not in also
-        ),
-        len(text) - at,
-    )
+    return char.isascii() and (char.isalnum() or char in "-_.")
 
 
-def starts(text: str, at: int) -> bool:
-    """Say whether a word starts at `at` in `text`: at its start, or after a character that isn't of a token's body."""
-    return at == 0 or not body(text[at - 1])
+def tokens(text: str) -> list[str]:
+    """Return the words of `text` a token could be: each run of the characters tokens are written in (`written_in_token`), in order.
+
+    >>> tokens('Bash(export TOKEN=ghp_x1 && curl -H "Authorization: Bearer a.b-c")')
+    ['Bash', 'export', 'TOKEN', 'ghp_x1', 'curl', '-H', 'Authorization', 'Bearer', 'a.b-c']
+    """
+    return [
+        "".join(run) for written, run in groupby(text, key=written_in_token) if written
+    ]
+
+
+class JoseHeader(Model, extra="ignore"):
+    """What lup reads of a JSON Web Token's first part, its header: the algorithm it's signed or encrypted with, which every one names (RFC 7515, *"alg" Header Parameter*)."""
+
+    alg: str
+
+
+def signed(word: str) -> bool:
+    """Say whether `word` is a JSON Web Token: three parts joined by `.`, the first a JSON object naming its algorithm, in base64url without its padding (RFC 7515, *JWS Compact Serialization*).
+
+    >>> header = base64.urlsafe_b64encode(b'{"alg":"HS256"}').decode()
+    >>> signed(f"{header}.e30.c2ln"), signed("eyJhhhh.payload.sig"), signed("v1.2.3")
+    (True, False, False)
+    """
+    # lup: ignore("string-split", why="a JSON Web Token's compact form is defined as its base64url parts joined by `.` (RFC 7515), which the standard library has no reader for; each part is then read with `base64` and pydantic")
+    parts = word.split(".")
+    if len(parts) != 3:
+        return False
+    header = parts[0]
+    try:
+        decoded = base64.urlsafe_b64decode(header + "=" * (-len(header) % 4))
+        JoseHeader.model_validate_json(decoded)
+    except ValueError:
+        return False
+    return True
 
 
 SHAPES = [
@@ -221,12 +253,14 @@ class Credentials(Model):
     ]
 
     shapes: list[Shape] = SHAPES
-    schemes: list[str] = ["Bearer", "bearer", "BEARER", "Basic", "basic", "BASIC"]
-    """HTTP's schemes for a credential in an `Authorization` header, as each is
-    written: a value holding one followed by a long word holds a credential."""
-    signed: int = 32
-    """The fewest characters of a JSON Web Token, `eyJ` and two `.` among them,
-    or of the word a scheme names."""
+    schemes: list[str] = ["bearer", "basic"]
+    """HTTP's schemes for a credential in an `Authorization` header, in any
+    case: the word after one, where it's long, is its credential."""
+    after_scheme: int = 16
+    """The fewest characters of the word after a scheme for it to be read as
+    the scheme's credential: `Bearer of good news` holds none. A `Basic`
+    credential is base64, whose `+` and `/` end a word (`written_in_token`),
+    so one is found where its first such run is this long."""
 
     def named(self, key: str) -> bool:
         """Say whether `key` is named like a credential.
@@ -241,30 +275,22 @@ class Credentials(Model):
         )
 
     def carries(self, text: str) -> bool:
-        """Say whether `text` holds a credential by its shape, wherever in it a word starts: a token of a vendor's (`shapes`), a JSON Web Token, or a scheme of HTTP's followed by a long word.
+        """Say whether `text` holds a credential by its shape, whatever it's in: a word of it that's a token of a vendor's (`shapes`) or a JSON Web Token (`signed`), or one long enough after a scheme of HTTP's (`schemes`).
 
         >>> token = "ghp_" + "a1" * 18
-        >>> [Credentials().carries(text) for text in [f"Bash(gh api -H 'Authorization: token {token}')", "Bearer of good news", "sk-learn", "task-runner"]]
-        [True, False, False, False]
+        >>> [Credentials().carries(text) for text in [f"Bash(gh api -H 'Authorization: token {token}')", f"Bash(git clone https://{token}@github.com/o/r)", "Bearer of good news", "sk-learn", "task-runner"]]
+        [True, True, False, False, False]
         """
-        return any(self.shaped(text, at) for at in range(len(text)) if starts(text, at))
-
-    def shaped(self, text: str, at: int) -> bool:
-        """Say whether a credential starts at `at` in `text` (`carries`)."""
-        token = any(
-            text.startswith(each.opening, at)
-            and spans(text, at + len(each.opening)) >= each.rest
-            for each in self.shapes
+        said = tokens(text)
+        shaped = any(
+            signed(word) or any(shape.fits(word) for shape in self.shapes)
+            for word in said
         )
-        length = spans(text, at, also=".")
-        dots = sum(1 for char in islice(text, at, at + length) if char == ".")
-        web = text.startswith("eyJ", at) and length >= self.signed and dots == 2
-        scheme = any(
-            text.startswith(f"{each} ", at)
-            and spans(text, at + len(each) + 1, also=".~+/=") >= self.signed
-            for each in self.schemes
+        schemed = any(
+            before.casefold() in self.schemes and len(word) >= self.after_scheme
+            for before, word in pairwise(said)
         )
-        return token or web or scheme
+        return shaped or schemed
 
 
 def merged(lower: JsonObject, upper: JsonObject) -> JsonObject:
