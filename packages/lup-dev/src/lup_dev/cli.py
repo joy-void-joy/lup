@@ -1840,18 +1840,6 @@ def launched(
         said = choice.said()
         if said is not None:
             launcher.say(said)
-        homing = LaunchHome.of(
-            launcher.layout,
-            repository,
-            runtime,
-            choice,
-            Login(
-                runtime=runtime,
-                path=adapter.login(
-                    launcher.layout.accounts.account(choice.account).runtime(runtime)
-                ),
-            ),
-        )
         running = launcher.rules(declared.resolved.rules)
         needs = checked(host_needs(), launcher.tools).require()
         for off in needs.off:
@@ -1901,6 +1889,19 @@ def launched(
             place.mkdir(parents=True, exist_ok=True)
         launch = secrets.token_hex(8)
         own = launcher.layout.launch(launch)
+        homing = LaunchHome.of(
+            launcher.layout,
+            own,
+            repository,
+            runtime,
+            choice=choice,
+            login=Login(
+                runtime=runtime,
+                path=adapter.login(
+                    launcher.layout.accounts.account(choice.account).runtime(runtime)
+                ),
+            ),
+        )
         environments = RoomEnvironments.of(
             declared.resolved.runner, worktree, launcher.layout, launch, launcher.tools
         )
@@ -1957,6 +1958,8 @@ def launched(
             exact=name is not None,
             runner=declared.resolved.runner.command([]),
             environments=environments.own,
+            home=homing.home.shared,
+            own=homing.home.directory,
         )
         hiding = RoomSecrets.of(
             Search(

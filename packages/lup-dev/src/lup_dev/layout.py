@@ -706,6 +706,11 @@ class LaunchLayout(Model):
         return self.directory / "home"
 
     @property
+    def runtime_home(self) -> Path:
+        """The runtime's own directory for the launch, which its variable names, inside the launch's directory, mounted read-write at its path: its configuration, settings and state, gone with the launch, and links into the history its rooms share (`docs/launch.md`, *A home of the rooms' own*)."""
+        return self.directory / "runtime-home"
+
+    @property
     def room_home(self) -> Path:
         """The room's home itself, mounted read-write at the operator's home path, so what the room writes there is on disk (`Room.home_source`): beside the launch's directory, which the room mounts, rather than in it; removed when the launch ends (`vacated`)."""
         return self.directory.with_name(f"{self.directory.name}.home")
@@ -755,8 +760,9 @@ class RoomsLayout(Model):
 class HomesLayout(Model):
     """The rooms' own homes for each runtime, in place of the operator's own directories: each project's, and the one shared by every project whose profile chooses it (`docs/launch.md`, *A home of the rooms' own*).
 
-    A runtime keeps its rooms' history and state in one, which its rooms mount
-    read-write at its path. Each sits apart from every directory a room
+    A runtime's rooms share their history in one, which each mounts read-write
+    at its path, the runtime's own directory for the launch linking into it
+    (`LaunchLayout.runtime_home`). Each sits apart from every directory a room
     writes, the project's rooms' own directory among them, and only the home
     itself is mounted: a mount point can't be moved from inside a room, but a
     directory above one can, and the host follows a link in a mount's source.

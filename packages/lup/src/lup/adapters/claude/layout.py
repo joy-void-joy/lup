@@ -3,17 +3,17 @@
 The operator's directory, `~/.claude` (or `CLAUDE_CONFIG_DIR`), holds their login,
 settings and history; their state file, `~/.claude.json` (or `.claude.json` inside
 `CLAUDE_CONFIG_DIR`), holds onboarding and folder trust. A launched session uses
-neither: it runs on a home of the rooms' own (`ClaudeHome`), its configuration
-copied from theirs, and a state file of the launch's own.
+neither: it runs in a directory of the launch's own on a home of the rooms'
+own (`ClaudeHome`), its configuration copied from theirs.
 """
 
 from importlib.util import find_spec
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup.sessions.configuration import HomeLaunch, Item
+from lup.sessions.configuration import Item
 from lup.sessions.errors import RuntimeMissingError
-from lup.sessions.terminal import Preference
+from lup.sessions.terminal import Preference, Why
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -75,11 +75,13 @@ class ClaudeLayout(Model):
 
 
 class ClaudeHome(Model):
-    """What Claude Code keeps in its directory, as a home of the rooms' own lays it out (`lup.sessions.terminal.RuntimeHome`).
+    """What Claude Code keeps in its directory, as a launch lays it out on a home of the rooms' own (`lup.sessions.terminal.RuntimeHome`).
 
-    Read in the `claude-directory` docs (2026-10-27) and Claude Code's 2.1.311
-    binary; what isn't named here is history and state, which every room given
-    the home shares.
+    The directory is the launch's own: every file Claude Code reads there as
+    configuration or state is the launch's, `.config.json` among them, which
+    the 2.1.311 binary prefers over `.claude.json` and whose `env` it applies.
+    Only `shared` is linked into the home the rooms share. Read in the
+    `claude-directory` docs (2026-10-27) and the 2.1.311 binary.
     """
 
     directory: Path
@@ -91,28 +93,39 @@ class ClaudeHome(Model):
         Item(name="agents"),
         Item(name="output-styles"),
         Item(name="workflows"),
-        Item(name="agent-memory"),
         Item(name="plugins", leaving=["data"]),
         Item(name="keybindings.json", directory=False),
         Item(name="themes"),
     ]
-    """Each item of configuration, read-only in the home: the launch's copy of
-    the layers holding it, or empty. Plugins' `data/` is theirs, not
-    configuration, and may hold their tokens."""
-    own: list[str] = ["shell-snapshots", "session-env"]
-    """What each launch's session writes for itself alone: a Bash command runs
-    its session's snapshot from `shell-snapshots/` first, so a room writing
-    another's would run in it (the 2.1.311 binary)."""
-    blocked: list[str] = [
-        "env",
-        "apiKeyHelper",
-        "awsAuthRefresh",
-        "awsCredentialExport",
-        "otelHeadersHelper",
+    """Each item of configuration copied in from the layers. Plugins' `data/`
+    is theirs, not configuration, and may hold their tokens; `agent-memory/`
+    is left out, since the operator's subagents' memories hold what they
+    learnt in every project."""
+    shared: list[Item] = [
+        Item(name="projects"),
+        Item(name="file-history"),
+        Item(name="tasks"),
+        Item(name="todos"),
+        Item(name="plans"),
+        Item(name="paste-cache"),
+        Item(name="history.jsonl", directory=False),
     ]
-    """Settings left out of the copy, beside any named like a credential: the
-    variables Claude Code sets at start, and the commands it runs to fetch a
-    credential."""
+    """The history the rooms given the home share: the conversations' records
+    and their auto memory, what `/rewind` restores, task lists and plans, and
+    the prompts typed, which a resumed conversation reads."""
+    blocked: dict[str, Why] = {
+        "env": "credential",
+        "apiKeyHelper": "command",
+        "awsAuthRefresh": "command",
+        "awsCredentialExport": "command",
+        "otelHeadersHelper": "command",
+        "hooks": "command",
+        "statusLine": "command",
+    }
+    """Settings left out of the copy, beside any named like a credential and
+    any table holding a `command`: the variables Claude Code sets at start;
+    the commands it runs to fetch a credential; and the operator's hooks and
+    status line, commands set up for the host, where rooms run lup's own."""
     preferences: list[Preference] = [
         Preference(keys=["model"]),
         Preference(keys=["effortLevel"]),
@@ -127,12 +140,12 @@ class ClaudeHome(Model):
 
     @property
     def settings(self) -> Path:
-        """Where Claude Code reads its user settings and saves its preferences: the launch's own, mounted there."""
+        """Where Claude Code reads its user settings and saves its preferences."""
         return self.directory / "settings.json"
 
     @property
     def state(self) -> Path:
-        """Where Claude Code keeps its state file with its directory moved: the launch's own, mounted there."""
+        """Where Claude Code keeps its state file with its directory moved."""
         return self.directory / ".claude.json"
 
     @property
@@ -145,16 +158,6 @@ class ClaudeLaunch(Model):
     """The files a launch writes for Claude Code, in its own directory."""
 
     directory: Path
-
-    @property
-    def home(self) -> HomeLaunch:
-        """What the launch keeps of its own for Claude Code's home of the rooms' own: its copies, its empties, and what the session writes for itself."""
-        return HomeLaunch(directory=self.directory / "runtime")
-
-    @property
-    def home_settings(self) -> Path:
-        """The settings the session reads as its user settings and saves its preferences in, the operator's and the profile's layered: the launch's own, writable."""
-        return self.home.own("settings.json")
 
     @property
     def settings(self) -> Path:

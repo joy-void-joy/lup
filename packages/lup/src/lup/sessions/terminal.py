@@ -152,32 +152,36 @@ class SessionSettings(Model):
 
 
 class RuntimeHome(Model):
-    """A home of the rooms' own for the runtime of a terminal session, in place of the operator's own directory (`docs/launch.md`, *A home of the rooms' own*).
+    """Where the runtime of a terminal session keeps its directory, in place of the operator's own (`docs/launch.md`, *A home of the rooms' own*).
 
-    The runtime keeps its history and state there, which every room given the
-    home reads and writes. Its configuration there is read-only, each item the
-    launch's copy of the layers below or empty, so no room leaves another
-    configuration to load; what it saves as it runs is the launch's own, and
-    so is what it runs before a command, so no room changes what another
-    running room runs. Each runtime's adapter names the items. It logs in with
-    `login`, an account's file.
+    Its directory is the launch's own, made fresh and gone with it: the
+    configuration copied in from the layers below, the settings, the state, and
+    whatever else the runtime writes there, so nothing a room leaves in it
+    reaches another room. Only what its adapter names as history (the
+    conversations' records, the prompts' history) is shared, each item a link
+    from the directory into `shared`, so a conversation resumes in any room
+    given that home. It logs in with `login`, an account's file.
     """
 
     directory: AbsolutePath
-    """The home, mounted read-write at its path, which the runtime's variable
-    names. It must sit under no directory a room writes: a mount point can't be
-    moved from inside a room, but a directory above one can, with a link left
-    in its place for the host to follow as it mounts the home."""
+    """The launch's own directory for the runtime, mounted read-write at its
+    path, which the runtime's variable names. It must sit under no directory
+    a room writes, and be made fresh for the launch."""
+    shared: AbsolutePath
+    """The history the rooms given it share, mounted read-write at its path.
+    It must sit under no directory a room writes: a mount point can't be moved
+    from inside a room, but a directory above one can, with a link left in its
+    place for the host to follow as it mounts the home."""
     login: AbsolutePath
     """The account's login, the file the runtime's sign-in writes, mounted
-    read-write alone where the runtime reads its login in the home, so a
-    sign-in in one room is every room's on the account. It must be there, a
-    file: an empty one is no login, which the runtime's sign-in fills. The
-    same rule holds for it as for `directory`."""
+    read-write alone where the runtime reads it in `directory`, so a sign-in
+    in one room is every room's on the account. It must be there, a file: an
+    empty one is no login, which the runtime's sign-in fills. The same rule
+    holds for it as for `shared`."""
     operators: bool = True
     """Whether the operator's own configuration is the lowest layer, what
-    credentials it holds left out."""
-    own: AbsolutePath | None = None
+    credentials and commands it holds left out."""
+    layer: AbsolutePath | None = None
     """A layer of configuration over the operator's, laid out as the runtime's
     own directory: a profile's. None for none, as is a directory that isn't
     there."""
@@ -507,13 +511,34 @@ def updated(text: str, syntax: Syntax, settings: list[Setting]) -> str:
             return tomlkit.dumps(document)
 
 
+type Why = Literal["credential", "command", "unread"]
+"""Why something of the configuration copied in was left out: it would hand
+the room's code a credential, it would run a command in the room, or it
+couldn't be read as configuration, a link lup doesn't follow among it."""
+
+
+class Left(Model):
+    """Something of the configuration copied into a room that was left out, said with where it was, and why."""
+
+    said: str
+    why: Why
+
+
+class Shared(Model):
+    """The history a runtime's directory links into: where it is, and each item there, made where it isn't, with whether it's a directory."""
+
+    home: AbsolutePath
+    items: dict[Path, bool] = {}
+
+
 class Terminal(Model):
     """A declaration compiled for a terminal: how to start its runtime's CLI.
 
-    Before the command runs, the files are written, the directories made and
-    the copies copied, each into the launch's own directory, and each mount
-    inside `home` gets what it lands on there; the mounts are what the CLI
-    needs in the room, beside the room's own.
+    Before the command runs, the runtime's own directory (`home`) is made, the
+    files written, the directories made, the copies copied and the links made,
+    what each mount inside `home` lands on made there, and each item of the
+    history it links into made where it isn't (`prepare`); the mounts are what
+    the CLI needs in the room, beside the room's own.
     """
 
     command: list[str]
@@ -522,23 +547,30 @@ class Terminal(Model):
     files: dict[Path, str] = {}
     """Each file's path on the host, and its text."""
     directories: list[Path] = []
-    """Each directory made empty, for a mount of the launch's own."""
+    """Each directory made empty."""
     copies: list[Copy] = []
     """Each copied, in order, a later one over an earlier at the same place."""
+    links: dict[Path, Path] = {}
+    """Each link made, by its place, to what it names."""
     mounts: list[Mount] = []
     home: AbsolutePath | None = None
-    """The runtime's home of the rooms' own, which rooms write: what each mount
-    inside it lands on is made there first, never through a link
-    (`lup.rooms.homes`); none where the runtime has none."""
-    left_out: list[str] = []
-    """What of the configuration copied in was left out, each with where it
-    was: a credential, a helper fetching one, a link; for the launch to say."""
+    """The runtime's own directory for the launch, made fresh: what each mount
+    inside it lands on is made there; none where the runtime has none."""
+    shared: Shared | None = None
+    """The history the runtime's directory links into, which rooms write: each
+    item is made there, never through a link (`lup.rooms.homes`); none where
+    nothing is shared."""
+    left_out: list[Left] = []
+    """What of the configuration copied in was left out, and why, for the
+    launch to say."""
     preferences: Preferences | None = None
     """What the runtime saves as it runs that the launch carries back at its
     end; none where nothing is."""
 
     def prepare(self) -> None:
-        """Write the files, make the directories, copy the copies, and make the home and what each mount inside it lands on, as the command needs them before it runs."""
+        """Make what the command needs before it runs: the runtime's directory and what's in it, and the history it links into."""
+        if self.home is not None:
+            self.home.mkdir(mode=0o700, parents=True, exist_ok=True)
         for path, text in self.files.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
@@ -546,6 +578,12 @@ class Terminal(Model):
             directory.mkdir(parents=True, exist_ok=True)
         for copy in self.copies:
             copy.made()
+        for link, target in self.links.items():
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.unlink(missing_ok=True)
+            link.symlink_to(target)
         if self.home is not None:
-            self.home.mkdir(mode=0o700, parents=True, exist_ok=True)
             landed(self.home, landings(self.home, list(self.mounts)))
+        if self.shared is not None:
+            self.shared.home.mkdir(mode=0o700, parents=True, exist_ok=True)
+            landed(self.shared.home, self.shared.items)

@@ -108,9 +108,10 @@ IMPOSED = SessionSettings(
 def homed(tmp_path: Path, runtime: str) -> RuntimeHome:
     """Return a home of the rooms' own for `runtime`, the operator's configuration its lowest layer."""
     return RuntimeHome(
-        directory=tmp_path / "homes" / runtime,
+        directory=tmp_path / "launch" / "runtime-home",
+        shared=tmp_path / "homes" / runtime,
         login=tmp_path / "accounts" / "default" / runtime / "login",
-        own=tmp_path / "profile" / runtime,
+        layer=tmp_path / "profile" / runtime,
     )
 
 
@@ -733,19 +734,18 @@ def test_codex_leaves_the_operator_s_servers_out_lup_s_namesake_among_them(
         '[mcp_servers.lup]\nurl = "https://lup.example/mcp"\n'
     )
     launch = tmp_path / "launch"
+    room = homed(tmp_path, "codex")
 
-    terminal = Codex().terminal(
-        settings(launch, CODEX_CLI, home=homed(tmp_path, "codex"))
-    )
+    terminal = Codex().terminal(settings(launch, CODEX_CLI, home=room))
 
     served = [each for each in terminal.command if each.startswith("mcp_servers=")]
     assert len(served) == 1
     assert "url" not in served[0]
-    written = tomllib.loads(
-        terminal.files[launch / "runtime" / "launch" / "config.toml"]
-    )
+    written = tomllib.loads(terminal.files[room.directory / "config.toml"])
     assert "mcp_servers" not in written
-    assert terminal.left_out == [f"`mcp_servers` in {codex_home / 'config.toml'}"]
+    assert [(each.said, each.why) for each in terminal.left_out] == [
+        (f"`mcp_servers` in {codex_home / 'config.toml'}", "command")
+    ]
 
 
 CODEX_MARKERS = len(

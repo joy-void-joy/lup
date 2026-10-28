@@ -8,8 +8,9 @@ room writes it; the configuration over the operator's is the profile's own
 - before the room starts, that the home is new, so the operator knows earlier
   sessions don't resume there, and that the account holds no login yet, so the
   sign-in they're about to see is the account's;
-- what was left out of the configuration copied in, where that changed since
-  the last launch on the profile said it;
+- what was left out of the configuration copied in, a line for what would run
+  a command and one for what would hand the room a credential, each where it
+  changed since the last launch on the profile said it;
 - at the end, what the session saved that was carried back to the profile, and,
   the first time a launch sees an account's login change under it, that every
   room on the account shares that login.
@@ -17,7 +18,7 @@ room writes it; the configuration over the operator's is the profile's own
 
 from typing import TYPE_CHECKING
 
-from lup.sessions.terminal import RuntimeHome
+from lup.sessions.terminal import Left, RuntimeHome, Why
 from lup.types import Model
 from lup_dev.accounts import Login
 from lup_dev.declaration.profiles import Chosen
@@ -26,13 +27,13 @@ from lup_dev.layout import ToldLayout
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from lup_dev.layout import Layout
+    from lup_dev.layout import LaunchLayout, Layout
 
 
 class LeftOut(Model):
     """What was last left out of a profile's configuration for a runtime, as it was said."""
 
-    said: list[str] = []
+    said: list[Left] = []
 
 
 class LaunchHome(Model):
@@ -48,23 +49,26 @@ class LaunchHome(Model):
     def of(
         cls,
         layout: Layout,
+        launch: LaunchLayout,
         repository: Path,
         runtime: str,
+        *,
         choice: Chosen,
         login: Login,
     ) -> LaunchHome:
-        """Place the home of a launch of `runtime` in the repository whose git directory is `repository`, on the profile and account `choice` names, with the account's `login`."""
+        """Place the home of the launch `launch` of `runtime`, in the repository whose git directory is `repository`, on the profile and account `choice` names, with the account's `login`: the launch's own directory, and the history it links into, the project's or the one every project shares."""
         profile = choice.profile
         return cls(
             runtime=runtime,
             choice=choice,
             home=RuntimeHome(
-                directory=layout.room_home(
+                directory=launch.runtime_home,
+                shared=layout.room_home(
                     repository, runtime, shared=profile.rooms_home == "global"
                 ),
                 login=login.path,
                 operators=profile.operator_configuration,
-                own=layout.profiles.profile(profile.name).runtime(runtime),
+                layer=layout.profiles.profile(profile.name).runtime(runtime),
             ),
             told=layout.told,
         )
@@ -83,7 +87,7 @@ class LaunchHome(Model):
             else f"the rooms of every project on the profile `{profile.name}`"
         )
         new = (
-            f"This launch makes {self.home.directory}, where {self.runtime}'s "
+            f"This launch makes {self.home.shared}, where {self.runtime}'s "
             f"sessions in {whose} keep their history and state from now on, apart "
             "from your own: a session from before it doesn't resume in a room."
         )
@@ -93,12 +97,12 @@ class LaunchHome(Model):
             "the account is signed in with it."
         )
         return [
-            *([] if self.home.directory.is_dir() else [new]),
+            *([] if self.home.shared.is_dir() else [new]),
             *([] if self.login.held() else [unheld]),
         ]
 
-    def left(self, left_out: list[str]) -> list[str]:
-        """Say what was left out of the configuration copied into the room, where it isn't what the last launch on the profile said; keep it as said."""
+    def left(self, left_out: list[Left]) -> list[str]:
+        """Say what was left out of the configuration copied into the room, each reason's in a line where it isn't what the last launch on the profile said; keep it as said."""
         kept = self.told.left_out(self.choice.profile.name, self.runtime)
         before = (
             LeftOut.model_validate_json(kept.read_text())
@@ -109,15 +113,32 @@ class LaunchHome(Model):
             return []
         kept.parent.mkdir(parents=True, exist_ok=True)
         kept.write_text(LeftOut(said=left_out).model_dump_json())
-        if not left_out:
-            return []
-        listed = "; ".join(left_out)
-        said = (
-            f"Left out of the {self.runtime} configuration this room copies from "
-            "yours and the profile's, as each would hand the room's code a "
-            f"credential or isn't followed: {listed}."
+        source = (
+            f"the {self.runtime} configuration this room copies from yours and the "
+            "profile's"
         )
-        return [said]
+        reasons: dict[str, list[Why]] = {
+            "as each would run a command in the room, where rooms run lup's own hooks": [
+                "command"
+            ],
+            "as each would hand the room's code a credential or isn't followed": [
+                "credential",
+                "unread",
+            ],
+        }
+
+        def said(why: list[Why], reason: str) -> str | None:
+            now = [each.said for each in left_out if each.why in why]
+            was = [each.said for each in before.said if each.why in why]
+            if not now or now == was:
+                return None
+            return f"Left out of {source}, {reason}: {'; '.join(now)}."
+
+        return [
+            line
+            for reason, why in reasons.items()
+            if (line := said(why, reason)) is not None
+        ]
 
     def ready(self) -> str:
         """Make the account's login where there's none, and return what it holds, as `ended` compares it."""

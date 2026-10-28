@@ -1,22 +1,35 @@
-"""A runtime's configuration as a room gets it: layers merged, and what credentials it holds left out (`docs/launch.md`, *A home of the rooms' own*).
+"""A runtime's configuration as a room gets it: layers merged, and what credentials and commands it holds left out (`docs/launch.md`, *A home of the rooms' own*).
 
 Each runtime's adapter reads its settings file from each layer, the operator's
 own and a profile's over it, merges them (`merged`), and leaves out what would
-hand a room's code a credential (`withheld`): the keys its adapter names, a
-credential helper's command among them, and any key at any depth named like a
-credential (`Credentials.named`). A wrong cut breaks a room, never the host:
-the host only copies what's left, and never runs it.
+hand a room's code a credential or run a command in the room (`withheld`): the
+keys its adapter names, any key at any depth named like a credential
+(`Credentials.named`), and any table holding a `command`; and a URL's user
+and password are taken out of it. Rooms run lup's own hooks, and a command the
+operator set up for the host, a hook or a status line, would run in the room
+with what it reads there. A wrong cut breaks a room, never the host: the host
+only copies what's left, and never runs it.
 """
 
 import stat
 from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from pydantic import JsonValue
 
 from lup.rooms.container import Mount
-from lup.sessions.terminal import Copy, Syntax, TerminalError, parsed, read
+from lup.sessions.terminal import (
+    Copy,
+    Left,
+    Shared,
+    Syntax,
+    TerminalError,
+    Why,
+    parsed,
+    read,
+)
 from lup.types import JsonObject, Model
 
 if TYPE_CHECKING:
@@ -115,35 +128,83 @@ def merged(lower: JsonObject, upper: JsonObject) -> JsonObject:
     }
 
 
+class Cut(Model):
+    """A key left out of a runtime's configuration, dotted from the top, a list's entry by its place, and why."""
+
+    key: str
+    why: Why
+
+
 class Withheld(Model):
-    """A runtime's configuration with what would hand a room a credential left out, and what was."""
+    """A runtime's configuration with what would hand a room a credential or run a command left out, and what was."""
 
     kept: JsonValue
-    left: list[str] = []
-    """Each key left out, dotted from the top, a list's entry by its place."""
+    left: list[Cut] = []
+
+
+def unlogged(text: str) -> str | None:
+    """Return the URL `text` without the user and password it carries; none where it isn't a URL, or carries neither.
+
+    >>> unlogged("https://u:p@git.example:8443/x?y=1"), unlogged("https://git.example/x")
+    ('https://git.example:8443/x?y=1', None)
+    """
+    try:
+        parts = urlsplit(text)
+        port = parts.port
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc:
+        return None
+    if parts.username is None and parts.password is None:
+        return None
+    host = parts.hostname or ""
+    bracketed = f"[{host}]" if ":" in host else host
+    netloc = bracketed if port is None else f"{bracketed}:{port}"
+    return urlunsplit(
+        SplitResult(
+            scheme=parts.scheme,
+            netloc=netloc,
+            path=parts.path,
+            query=parts.query,
+            fragment=parts.fragment,
+        )
+    )
 
 
 def withheld(
     value: JsonValue,
-    blocked: Callable[[list[str]], bool],
+    blocked: Callable[[list[str]], Why | None],
     path: list[str] | None = None,
     credentials: Credentials | None = None,
 ) -> Withheld:
-    """Leave out of `value` each key `blocked` says of its path, and each named like a credential, at every depth, tables in lists among it.
+    """Leave out of `value`, at every depth, tables in lists among it: each key `blocked` gives a reason for by its path; each named like a credential; and each whose value is a table holding a `command`, which would run in the room. A URL carrying a user or a password is kept without them, and said.
 
-    >>> def blocked(path: list[str]) -> bool:
-    ...     return path == ["env"]
-    >>> withheld({"env": {"A": "1"}, "hooks": [{"token": "x", "type": "c"}], "model": "opus"}, blocked)
-    Withheld(kept={'hooks': [{'type': 'c'}], 'model': 'opus'}, left=['env', 'hooks.0.token'])
+    >>> def blocked(path: list[str]) -> Why | None:
+    ...     return "credential" if path == ["env"] else None
+    >>> cut = withheld({"env": {"A": "1"}, "line": {"command": "x"}, "hooks": [{"token": "x"}], "url": "https://a:b@h/"}, blocked)
+    >>> cut.kept, [(each.key, each.why) for each in cut.left]
+    ({'hooks': [{}], 'url': 'https://h/'}, [('env', 'credential'), ('line', 'command'), ('hooks.0.token', 'credential'), ('url', 'credential')])
     """
     at = path or []
     naming = credentials or Credentials()
+    dotted = ".".join(at)
+
+    def why(key: str, each: JsonValue) -> Why | None:
+        given = blocked([*at, key])
+        if given is not None:
+            return given
+        match each:
+            case {"command": _}:
+                return "command"
+            case _:
+                return "credential" if naming.named(key) else None
+
     match value:
         case dict():
-            cut = {
-                key: [*at, key]
-                for key in value
-                if blocked([*at, key]) or naming.named(key)
+            cut: dict[str, Why] = {
+                key: reason
+                for key, each in value.items()
+                if (reason := why(key, each)) is not None
             }
             inner = {
                 key: withheld(each, blocked, [*at, key], naming)
@@ -153,7 +214,10 @@ def withheld(
             return Withheld(
                 kept={key: each.kept for key, each in inner.items()},
                 left=[
-                    *(".".join(each) for each in cut.values()),
+                    *(
+                        Cut(key=".".join([*at, key]), why=reason)
+                        for key, reason in cut.items()
+                    ),
                     *(left for each in inner.values() for left in each.left),
                 ],
             )
@@ -166,26 +230,35 @@ def withheld(
                 kept=[each.kept for each in inner_list],
                 left=[left for each in inner_list for left in each.left],
             )
+        case str() as text if (bare := unlogged(text)) is not None:
+            return Withheld(kept=bare, left=[Cut(key=dotted, why="credential")])
         case _:
             return Withheld(kept=value)
 
 
-def kept(table: JsonObject, blocked: Callable[[list[str]], bool]) -> Layered:
+def kept(table: JsonObject, blocked: Callable[[list[str]], Why | None]) -> Kept:
     """Leave out of the table `table` what `withheld` does, returning a table.
 
-    >>> kept({"apiKeyHelper": "x", "model": "opus"}, lambda path: False).table
+    >>> kept({"apiKeyHelper": "x", "model": "opus"}, lambda path: None).table
     {'model': 'opus'}
     """
     cut = withheld(table, blocked)
     match cut.kept:
         case dict() as remaining:
-            return Layered(table=remaining, left=cut.left)
+            return Kept(table=remaining, left=cut.left)
         case _:
-            return Layered(left=cut.left)
+            return Kept(left=cut.left)
+
+
+class Kept(Model):
+    """A table of configuration with what was left out of it."""
+
+    table: JsonObject = {}
+    left: list[Cut] = []
 
 
 class Item(Model):
-    """One item of a runtime's configuration in its home, read-only there: a file or a directory by its name in the home."""
+    """One item of a runtime's configuration or history in its directory: a file or a directory, by its name there."""
 
     name: str
     directory: bool = True
@@ -194,35 +267,11 @@ class Item(Model):
     configuration, such as plugins' own data."""
 
 
-class HomeLaunch(Model):
-    """What a launch keeps of its own for a runtime's home, under its directory: the copies, the empty files and directories mounted where nothing is copied, and what the runtime writes for this launch alone."""
-
-    directory: Path
-
-    def copied(self, name: str) -> Path:
-        """Say where item `name` of the configuration is copied."""
-        return self.directory / "configuration" / name
-
-    def own(self, name: str) -> Path:
-        """Say where `name`, a file or a directory the runtime writes for this launch alone, is kept."""
-        return self.directory / "launch" / name
-
-    @property
-    def empty_directory(self) -> Path:
-        """An empty directory, mounted read-only where no layer holds a directory of configuration."""
-        return self.directory / "empty" / "directory"
-
-    @property
-    def empty_file(self) -> Path:
-        """An empty file, mounted read-only where no layer holds a file of configuration."""
-        return self.directory / "empty" / "file"
-
-
 class Layered(Model):
-    """A settings file read from each layer, what would hand a room a credential left out of each, and merged; with what was left out."""
+    """A settings file read from each layer, what would hand a room a credential or run a command left out of each, and merged; with what was left out."""
 
     table: JsonObject = {}
-    left: list[str] = []
+    left: list[Left] = []
     """Each key left out, with the file it was in, and each layer's file that
     couldn't be read as one."""
 
@@ -231,7 +280,7 @@ def layered(
     layers: list[Path],
     name: str,
     syntax: Syntax,
-    blocked: Callable[[list[str]], bool],
+    blocked: Callable[[list[str]], Why | None],
 ) -> Layered:
     """Read the settings file `name` in each of `layers`, lowest first, leave out of each what `kept` does with `blocked`, and merge them.
 
@@ -247,9 +296,8 @@ def layered(
         except FileNotFoundError:
             continue
         if not stat.S_ISREG(seen.st_mode):
-            found = found.model_copy(
-                update={"left": [*found.left, f"{path}, which isn't a file"]}
-            )
+            unread = Left(said=f"{path}, which isn't a file", why="unread")
+            found = found.model_copy(update={"left": [*found.left, unread]})
             continue
         try:
             table = parsed(read(path), syntax)
@@ -259,43 +307,45 @@ def layered(
         cut = kept(table, blocked)
         found = Layered(
             table=merged(found.table, cut.table),
-            left=[*found.left, *(f"`{key}` in {path}" for key in cut.left)],
+            left=[
+                *found.left,
+                *(
+                    Left(said=f"`{each.key}` in {path}", why=each.why)
+                    for each in cut.left
+                ),
+            ],
         )
     return found
 
 
 class Homed(Model):
-    """What a terminal compile adds for a runtime's home of the rooms' own: the copies and directories to make first, and the mounts."""
+    """What a terminal compile adds for a runtime's own directory and the history it links into."""
 
     copies: list[Copy] = []
-    directories: list[Path] = []
     files: dict[Path, str] = {}
+    links: dict[Path, Path] = {}
     mounts: list[Mount] = []
-    left: list[str] = []
+    shared: Shared | None = None
+    left: list[Left] = []
 
 
-def configured(
-    items: list[Item], layers: list[Path], home: Path, launch: HomeLaunch
-) -> Homed:
-    """Return how each of `items` reaches the home at `home`, read-only: the launch's copy of each layer holding it, lowest first, or the launch's empty file or directory where none does.
+def configured(items: list[Item], layers: list[Path], directory: Path) -> Homed:
+    """Return the copies of each of `items` the layers hold into the runtime's own `directory`, lowest first, a later layer's over an earlier's.
 
     A layer's item that's a link, or isn't of its kind, is left out and said,
     never followed: a room that once wrote the layer could have left one
     aimed at the operator's keys.
     """
 
-    def holding(item: Item) -> list[Path]:
+    def odd(item: Item) -> list[Left]:
         return [
-            layer / item.name
-            for layer in layers
-            if fits(layer / item.name, directory=item.directory)
-        ]
-
-    def odd(item: Item) -> list[str]:
-        return [
-            f"{layer / item.name}, which is a link lup doesn't follow"
-            if (layer / item.name).is_symlink()
-            else f"{layer / item.name}, which isn't a {'directory' if item.directory else 'file'}"
+            Left(
+                said=f"{layer / item.name}, which is a link lup doesn't follow"
+                if (layer / item.name).is_symlink()
+                else f"{layer / item.name}, which isn't a "
+                f"{'directory' if item.directory else 'file'}",
+                why="unread",
+            )
             for layer in layers
             if (layer / item.name).is_symlink()
             or (
@@ -304,29 +354,29 @@ def configured(
             )
         ]
 
-    copies = [
-        Copy(source=source, destination=launch.copied(item.name), leaving=item.leaving)
-        for item in items
-        for source in holding(item)
-    ]
-    mounts = [
-        Mount(
-            source=launch.copied(item.name)
-            if holding(item)
-            else launch.empty_directory
-            if item.directory
-            else launch.empty_file,
-            target=home / item.name,
-            read_only=True,
-        )
-        for item in items
-    ]
     return Homed(
-        copies=copies,
-        directories=[launch.empty_directory],
-        files={launch.empty_file: ""},
-        mounts=mounts,
+        copies=[
+            Copy(
+                source=layer / item.name,
+                destination=directory / item.name,
+                leaving=item.leaving,
+            )
+            for item in items
+            for layer in layers
+            if fits(layer / item.name, directory=item.directory)
+        ],
         left=[said for item in items for said in odd(item)],
+    )
+
+
+def linked(items: list[Item], directory: Path, shared: Path) -> Homed:
+    """Return a link from the runtime's own `directory` to each of `items` in the history `shared`, where each is made where it isn't."""
+    return Homed(
+        links={directory / item.name: shared / item.name for item in items},
+        shared=Shared(
+            home=shared,
+            items={shared / item.name: item.directory for item in items},
+        ),
     )
 
 
