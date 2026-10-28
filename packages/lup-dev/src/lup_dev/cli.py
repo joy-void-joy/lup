@@ -12,6 +12,8 @@ first (`docs/trust.md`). `launch` opens a runtime's session in
 a room for the worktree (*The command*). `host` runs the host service, handed
 the inbox as what each conversation is told at its hooks, its tools and its
 requests; `inbox` is the operator's face on it (`docs/inbox.md`, *The operator's face*).
+`stage` stages the hunks of a file an agent names, which `git add -p` would ask
+at a terminal (`docs/judging-writes.md`, *Staging part of a file*).
 """
 
 import asyncio
@@ -253,6 +255,7 @@ from lup_dev.remote.config import Gating
 from lup_dev.remote.protocol import Remotes
 from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
+from lup_dev.staging import Changed, Lines, StagingError
 from lup_dev.stored import read_model, write_model
 from lup_dev.worker import RepositoryModules, worked
 from lup_transcripts.environment import views
@@ -2799,6 +2802,70 @@ def check(
             typer.echo(output, nl=False)
             if code != 0:
                 raise typer.Exit(code=code)
+
+
+@app.command("stage")
+def stage(
+    path: Annotated[
+        Path, typer.Argument(help="The file whose hunks to list or stage.")
+    ],
+    hunks: Annotated[
+        list[int] | None,
+        typer.Argument(
+            help="The hunks to stage, by their numbers in the listing; none lists them."
+        ),
+    ] = None,
+    *,
+    first: Annotated[
+        int | None,
+        typer.Option(
+            "--from",
+            metavar="LINE",
+            help=(
+                "Stage what changed from this line of the file as it stands to "
+                "`--to`'s, both taken: the lines added there, those they replace, "
+                "and lines removed between two of them."
+            ),
+        ),
+    ] = None,
+    last: Annotated[
+        int | None,
+        typer.Option(
+            "--to",
+            metavar="LINE",
+            help="The last line `--from` takes; by default, `--from`'s own.",
+        ),
+    ] = None,
+    whole: Annotated[
+        bool,
+        typer.Option(
+            "--whole", help="List every line of each hunk, not only its first."
+        ),
+    ] = False,
+) -> None:
+    """Stage chosen hunks of a file into the index, or list them, numbered: `git add -p` without a terminal.
+
+    Given only the file, it lists its changes against the index, each hunk
+    numbered with the file's lines it covers and its first lines. Given
+    numbers, it stages those hunks; given `--from` and `--to`, what changed on
+    those lines, which splits a hunk too coarse to stage whole. Then it says
+    what it staged and how many hunks are left, numbered afresh, while the
+    file's line numbers stay as they were. It never commits, and keeps the
+    index entry's mode. `git restore --staged <path>` unstages the file whole.
+    """
+    if first is None and last is not None:
+        message = "`--to` ends the range `--from` starts: give `--from` too"
+        raise StagingError(message)
+    changed = Changed.of(path)
+    if not hunks and first is None:
+        typer.echo(changed.listed(whole=whole))
+        return
+    lines = (
+        None
+        if first is None
+        else Lines(first=first, last=first if last is None else last)
+    )
+    typer.echo(changed.stage(hunks or [], lines).said(whole=whole))
 
 
 @app.command("merge", hidden=True)

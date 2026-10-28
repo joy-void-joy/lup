@@ -8,7 +8,7 @@ Each describes a piece as it's built: what it's for, how to use it, and the reas
 - `host.md`: the host service, how a room reaches it, the one hook, and restarts.
 - `inbox.md`: lup's tools in a session, and the inbox between a session and the operator.
 - `credentials.md`: the operator's credentials used on the host: git through a remote helper, git run safely on the host, and GitHub.
-- `judging-writes.md`: the judge, what each write gets, and the gate.
+- `judging-writes.md`: the judge, what each write gets, the gate, and `lup-dev stage`, staging part of a file.
 - `conventions.md`: the reasons behind lup's code rules; `rules.md`, generated from the engine's table, gives each rule with its examples.
 - `private.md`: keeping the operator's machine out of what's published.
 - `library.md`: asking an agent from code.
