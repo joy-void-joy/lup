@@ -2492,15 +2492,17 @@ class Subagents:
             transcript_path=str(self.transcript),
         )
 
-    def ended(self, agent: str, kind: str, said: str | None) -> str:
-        """Subagent `agent`'s turn ending, saying `said`; with no message, as Claude Code ends one it stopped."""
+    def ended(
+        self, agent: str, kind: str, said: str | None, *, again: bool = False
+    ) -> str:
+        """Subagent `agent`'s turn ending, saying `said`; with no message, as Claude Code ends one it stopped; `again` where a hook held its last end."""
         return claude(
             "SubagentStop",
             session_id=self.session,
             agent_id=agent,
             agent_type=kind,
             transcript_path=str(self.transcript),
-            stop_hook_active=False,
+            stop_hook_active=again,
             **({} if said is None else {"last_assistant_message": said}),
         )
 
@@ -2993,8 +2995,8 @@ class Rollouts:
             transcript_path=str(self.rollout(thread)),
         )
 
-    def ended(self, thread: str, parent: str, said: str) -> str:
-        """Subagent `thread`'s turn ending, saying `said`: naming its parent's rollout, and its own beside it."""
+    def ended(self, thread: str, parent: str, said: str, *, again: bool = False) -> str:
+        """Subagent `thread`'s turn ending, saying `said`: naming its parent's rollout, and its own beside it; `again` where a hook held its last end."""
         return codex(
             "SubagentStop",
             agent_id=thread,
@@ -3002,7 +3004,7 @@ class Rollouts:
             transcript_path=str(self.rollout(parent)),
             agent_transcript_path=str(self.rollout(thread)),
             last_assistant_message=said,
-            stop_hook_active=False,
+            stop_hook_active=again,
         )
 
     def lup(
@@ -3222,6 +3224,75 @@ def test_wait_inbox_returns_when_its_own_subagent_ends_with_its_last_message_on_
         False,
     )
     assert after == ""
+
+
+HELD_BEFORE = (
+    "Before that, lup held an end of its turn to tell it what waited, and no "
+    "runtime hands you what it said there:"
+)
+"""What a subagent's end tells its parent before what it said at an end lup held."""
+
+
+def test_what_a_subagent_said_at_an_end_held_for_what_waited_reaches_its_parent_on_each_runtime(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    """Seen in a probe on Claude Code 2.1.303 (`docs/field-notes.md`, *A subagent's end*): held at its end, a subagent goes on, and its runtime hands its parent only what it says at its next end, so the report it ended on first reached no one."""
+    records = Subagents(tmp_path)
+    rollouts = Rollouts(tmp_path)
+
+    def sent(mcp: Path, to: str) -> None:
+        text = "Count the tests too."
+        _, error = call(mcp, "send", {"to": to, "kind": "note", "text": text})
+        assert not error
+
+    with inboxed(machine, clock, notices, said) as delivery:
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        launched(machine, clock, tmp_path / "v", "two", "codex")
+        hook, mcp = machine.host.launch("one").hook, machine.host.launch("one").mcp
+        hook2, mcp2 = machine.host.launch("two").hook, machine.host.launch("two").mcp
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook2, codex("SessionStart", source="startup"))
+        send(hook, records.spawn("t1", name="parser"))
+        records.recorded("a1", "Explore", "t1", name="parser")
+        send(hook, records.call("a1", "Explore", "c1"))
+        sent(mcp, "parser")
+        held = send(hook, records.ended("a1", "Explore", "Parsed: three call sites."))
+        let = send(
+            hook, records.ended("a1", "Explore", "And twelve tests.", again=True)
+        )
+        told = context(send(hook, bash("m1")))
+        # The first `spawn_agent`'s subagent, whose last message Codex hands on
+        # to no one.
+        rollouts.recorded("th1", "t1")
+        send(hook2, rollouts.call("th1", "d1"))
+        sent(mcp2, "th1")
+        held2 = json.loads(send(hook2, rollouts.ended("th1", "t1", "Lexed: two.")))
+        let2 = send(hook2, rollouts.ended("th1", "t1", "And one more.", again=True))
+        told2 = context(send(hook2, codex_bash("e1")))
+        places = [
+            each.held for each in delivery.inbox.whereabouts.values() if each.ended
+        ]
+    assert "Count the tests too." in context(held)
+    assert let == ""
+    assert told == (
+        '<ended item="3" from="w/parser" name="parser">\n'
+        "It ended its turn. Its last message reaches you from your runtime.\n"
+        f"{HELD_BEFORE}\n"
+        "<said>Parsed: three call sites.</said>\n"
+        "</ended>"
+    )
+    assert "Count the tests too." in held2["reason"]
+    assert let2 == ""
+    assert told2 == (
+        '<ended item="6" from="v/explorer·th1" name="explorer·th1">\n'
+        "It ended its turn. Its last message:\n"
+        "<said>And one more.</said>\n"
+        f"{HELD_BEFORE}\n"
+        "<said>Lexed: two.</said>\n"
+        "</ended>"
+    )
+    # Once handed on, what it said is no longer kept for an end to come.
+    assert places == [[], []]
 
 
 @pytest.mark.parametrize("reach", ["operator", "operator and parent"])

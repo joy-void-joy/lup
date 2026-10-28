@@ -957,6 +957,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         At its turn's end, what waits holds the end once (`holding`), but for
         quiet items (`Item.quiet`), and a call it holds learns its turn ended;
+        a subagent's end held so keeps what it said there for its parent
+        (`held_saying`), since its runtime hands on only the end it lets through;
         an end let through leaves its main conversation idle, and a subagent's
         ended (`ended`), its last words put before the operator first where
         they answer the operator's (`subagent_answered`). A subagent stopped, and a turn that failed on an error
@@ -991,6 +993,8 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                 if not unread and holding(fresh, [], after_block=heard.after_block):
                     posted = self.told(party, room, heard.fits, "turn's end")
                     if posted.items:
+                        if ended:
+                            self.held_saying(party, heard.said)
                         return posted
                 presence.turning = False
                 if ended and party.agent is not None:
@@ -1199,14 +1203,17 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
 
         Its parent is told quietly (`Item.quiet`) which subagent it was, whether
         it ended its turn, was stopped, or failed on an error from the model's
-        API, and its last message where its runtime doesn't hand that on
-        (`Ended`): at the parent's next call, or by
+        API, its last message where its runtime doesn't hand that on, and what
+        it said at each end lup held, which no runtime hands on (`Ended`): at
+        the parent's next call, or by
         `wait_inbox`, which returns on it, since the runtime wakes an idle
         parent for its subagent's end already.
         """
         place = self.inbox.whereabouts.get(party.key())
         if place is not None:
-            self.inbox.placed(place.model_copy(update={"ended": self.clock.now()}))
+            self.inbox.placed(
+                place.model_copy(update={"ended": self.clock.now(), "held": []})
+            )
         main = party.main()
         for item in self.inbox.waiting(party):
             self.inbox.kept(
@@ -1221,8 +1228,16 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             failed=None if heard.failed is None else heard.failed.kind,
             handed=conversation.handed,
             said=heard.said,
+            held=place.held,
         )
         await self.posted(news, party, place.parent, launch.worktree, quiet=True)
+
+    def held_saying(self, party: Conversation, said: str | None) -> None:
+        """Keep what subagent `party` said at an end of its turn held to tell it what waited, for its parent with its end (`Ended.held`): its runtime hands its parent only the words of the end it lets through, and nothing else would hand these on."""
+        place = self.inbox.whereabouts.get(party.key())
+        if place is None or place.parent is None or said is None or not said.strip():
+            return
+        self.inbox.placed(place.model_copy(update={"held": [*place.held, said]}))
 
     def said(self, item: Item) -> str:
         """Say `item`, whole, to the conversation it's told to: its tag, written."""
@@ -1347,12 +1362,19 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                         context=context,
                     ),
                 )
-            case Ended(name=name, heading=heading, passed=passed):
+            case Ended(
+                name=name, heading=heading, passed=passed, earlier=earlier, kept=kept
+            ):
                 said = [] if passed is None else [Tag(name="said", parts=[passed])]
+                held = (
+                    []
+                    if earlier is None
+                    else [earlier, *(Tag(name="said", parts=[each]) for each in kept)]
+                )
                 return Tag(
                     name="ended",
                     attributes={**head, "name": name},
-                    parts=[heading, *said],
+                    parts=[heading, *said, *held],
                 )
             case Unresolved(of=of, citations=citations):
                 return Tag(

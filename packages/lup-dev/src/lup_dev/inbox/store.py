@@ -242,7 +242,7 @@ class Stop(speaking.Stop):
 
 
 class Ended(Model):
-    """A subagent's end, for the conversation that spawned it: its name, whether it ended its turn, was stopped or failed, and its last message where its runtime doesn't hand that to its parent itself."""
+    """A subagent's end, for the conversation that spawned it: its name, whether it ended its turn, was stopped or failed, its last message where its runtime doesn't hand that to its parent itself, and what it said at each end lup held, which no runtime hands on."""
 
     reason: Literal["ended"] = "ended"
     name: str
@@ -260,6 +260,31 @@ class Ended(Model):
     said: str | None = None
     """Its last message, whole, where its runtime doesn't hand it on; none where
     it does, or the subagent left none."""
+    held: list[str] = []
+    """What it said at each end of its turn lup held to tell it what waited,
+    oldest first, whole: its report, often. Each runtime hands a parent only
+    the words of the end it lets through, the next one's (`docs/field-notes.md`,
+    *A subagent's end*), so lup hands these on whoever hands the last."""
+
+    @property
+    def kept(self) -> list[str]:
+        """Return what it said at each end lup held, as lup hands it on: those saying something."""
+        return [each for each in self.held if each.strip()]
+
+    @property
+    def earlier(self) -> str | None:
+        """Say what comes before what it said at each end lup held, where it held one that said something; none where it held none.
+
+        >>> Ended(name="parser", held=["Done."]).earlier
+        'Before that, lup held an end of its turn to tell it what waited, and no runtime hands you what it said there:'
+        """
+        if not self.kept:
+            return None
+        ends = "an end" if len(self.kept) == 1 else "ends"
+        return (
+            f"Before that, lup held {ends} of its turn to tell it what waited, and "
+            "no runtime hands you what it said there:"
+        )
 
     @property
     def passed(self) -> str | None:
@@ -291,15 +316,21 @@ class Ended(Model):
 
     @property
     def text(self) -> str:
-        """Say it as lup tells the parent: how it ended, then its last message, where lup hands that on.
+        """Say it as lup tells the parent: how it ended, its last message where lup hands that on, then what it said at each end lup held.
 
         >>> print(Ended(name="parser", said="Done: three call sites.").text)
         It ended its turn. Its last message:
         Done: three call sites.
         >>> print(Ended(name="parser", handed=True, said="Done.").text)
         It ended its turn. Its last message reaches you from your runtime.
+        >>> print(Ended(name="parser", handed=True, said="Done.", held=["Parsed."]).text)
+        It ended its turn. Its last message reaches you from your runtime.
+        Before that, lup held an end of its turn to tell it what waited, and no runtime hands you what it said there:
+        Parsed.
         """
-        return self.heading if self.passed is None else f"{self.heading}\n{self.passed}"
+        last = [] if self.passed is None else [self.passed]
+        held = [] if self.earlier is None else [self.earlier, *self.kept]
+        return "\n".join([self.heading, *last, *held])
 
 
 class Place(Model):
@@ -1032,6 +1063,12 @@ class Whereabouts(Model):
     """The conversation that spawned it, for a subagent a conversation spawned,
     which hears of its end and of what it says of its work; none for a session's
     own. The runtime's own agents never reach the inbox (`Spawned.internal`)."""
+    held: list[str] = []
+    """What it said at each end of its turn lup held to tell it what waited,
+    since it was heard there, oldest first: handed to its parent with its end
+    (`Ended.held`), since its runtime hands on only the end it lets through.
+    Kept here rather than in memory, so a restart of the service between the
+    two ends loses none."""
     name: str | None = None
     """A subagent's own name as its latest hook was heard, kept once its launch
     has ended, so `inbox` reads it by its name then, and `send` reaches it by
