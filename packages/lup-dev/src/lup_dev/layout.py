@@ -802,13 +802,21 @@ class HomesLayout(Model):
 
 
 class ToldLayout(Model):
-    """What a launch told the operator once, so a later launch doesn't tell it again: each account's login seen to change, and what was last left out of each profile's configuration."""
+    """What a launch told the operator once, so a later launch doesn't tell it again: each account's login seen to change, what was last left out of each profile's configuration, each repository's records moved from the operator's own directories, and how to replace their host login."""
 
     home: Path
 
     def login(self, account: str, runtime: str) -> Path:
         """Say where it's marked that the operator was told what a change of account `account`'s login for runtime `runtime` means."""
         return self.home / "logins" / account / runtime
+
+    def migrated(self, repository: Path, runtime: str) -> Path:
+        """Say where it's marked that runtime `runtime`'s records of the repository whose git directory is `repository` were moved from the operator's own directory, so a launch doesn't offer to move what a host session writes there since."""
+        return self.home / "migrated" / digest(repository) / runtime
+
+    def host_login(self, runtime: str) -> Path:
+        """Say where it's marked that a launch told the operator how to replace their own login for runtime `runtime`, which every room could read before rooms had homes of their own."""
+        return self.home / "host-logins" / runtime
 
     def left_out(self, profile: str, runtime: str) -> Path:
         """Say where what was last left out of profile `profile`'s configuration for runtime `runtime` is kept."""

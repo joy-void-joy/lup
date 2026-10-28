@@ -26,6 +26,12 @@ home, never through a link on the way:
 Nothing is removed that isn't moved: a name only once the home holds what it
 named, a directory only empty. Each thing left is said, with why. A dry run walks
 the same way, changes nothing, and says what would move.
+
+A move marks the runtime's records of the repository moved. Rooms on homes of
+their own don't write the operator's directory, so what a host session run in
+the repository writes there after is the host's, and a launch, which offers the
+move where something would move (`lup_dev.launch.moving`), doesn't offer it
+again. The command still moves whatever's there when it's run.
 """
 
 import errno
@@ -45,7 +51,7 @@ from lup_dev.git import Git
 from lup_dev.host.homes import kept
 from lup_dev.host.protocol import Register
 from lup_dev.host.records import Record, Records
-from lup_dev.host.written import Places, counted
+from lup_dev.host.written import Checked, Places, counted
 from lup_dev.layout import Layout
 from lup_dev.stored import read_model
 
@@ -527,10 +533,66 @@ class HostRuntime(Model, arbitrary_types_allowed=True):
     name: str
     directory: Path
     records: Records
-    written: Callable[[Places], list[str]]
+    written: Callable[[Places], Checked]
     recorded: Callable[[PurePosixPath], str | None]
     """The session whose own record is at a place, by the runtime's name for
     it there; none for any other place."""
+
+
+class Walked(Model):
+    """One runtime's records of a repository in the operator's own directory, and what was done of them, or would be."""
+
+    runtime: str
+    home: Path
+    """The rooms' home they move into."""
+    moved: list[Moved]
+    """What of each record moved, or would."""
+    sessions: list[str]
+    """Each session whose own record moved, or would, by its id."""
+
+    @property
+    def files(self) -> int:
+        """How many files moved, or would."""
+        return sum(each.files for each in self.moved)
+
+    @property
+    def size(self) -> int:
+        """The bytes the files that moved, or would, hold."""
+        return sum(each.size for each in self.moved)
+
+    @property
+    def left(self) -> list[Left]:
+        """What of the records stays where it is, and why."""
+        return [part for each in self.moved for part in each.left]
+
+    def moves(self) -> bool:
+        """Say whether anything moved, or would: a file or a link.
+
+        >>> from pathlib import Path
+        >>> Walked(runtime="agent", home=Path("/h"), moved=[], sessions=[]).moves()
+        False
+        """
+        return any(each.files or each.links for each in self.moved)
+
+    def amount(self) -> str:
+        """Say how much of the repository's moved, or would, in a few words: its sessions, else its records, and their size.
+
+        >>> from pathlib import Path, PurePosixPath
+        >>> moved = [Moved(place=PurePosixPath("projects", "-w"), files=3, size=2048)]
+        >>> Walked(runtime="agent", home=Path("/h"), moved=moved, sessions=["a", "b"]).amount()
+        '2 sessions of this repository, 2.0 KiB'
+        >>> Walked(runtime="agent", home=Path("/h"), moved=moved, sessions=[]).amount()
+        "1 record of this repository's sessions, 2.0 KiB"
+        """
+        counting = (
+            f"{counted(len(self.sessions), 'session', 'sessions')} of this repository"
+            if self.sessions
+            else (
+                f"{counted(len(self.moved), 'record', 'records')} of this "
+                "repository's sessions"
+            )
+        )
+        return f"{counting}, {sized(self.size)}"
 
 
 class Migrating(Model, arbitrary_types_allowed=True):
@@ -561,20 +623,28 @@ class Migrating(Model, arbitrary_types_allowed=True):
             ],
         )
 
+    def live(self) -> list[Register]:
+        """Return each launch of the repository still running, whose session would write on where its record was as it moves (`running_launches`)."""
+        return running_launches(self.layout, self.repository)
+
+    def refused(self, live: list[Register]) -> MigrationError:
+        """Return why a move can't go on while the launches `live` of the repository run."""
+        named = ", ".join(f"`{each.name or each.launch}`" for each in live)
+        message = (
+            f"a launch of this repository still runs, {named}, whose session "
+            "would write on where its record was: end each, and every session "
+            "of the repository on the host, then move"
+        )
+        return MigrationError(message)
+
     def said(self, *, move: bool) -> list[str]:
         """Move the repository's records of each runtime into its rooms' home, or, without `move`, change nothing; say what was done, or what would be, what's left, and what a host session acts on that rooms could have written.
 
         Raise `MigrationError` on a move while a launch of the repository runs.
         """
-        live = running_launches(self.layout, self.repository)
+        live = self.live()
         if move and live:
-            named = ", ".join(f"`{each.name or each.launch}`" for each in live)
-            message = (
-                f"a launch of this repository still runs, {named}, whose session "
-                "would write on where its record was: end each, and every session "
-                "of the repository on the host, then move"
-            )
-            raise MigrationError(message)
+            raise self.refused(live)
         under = self.under()
         places = self.places(under)
         return [
@@ -617,6 +687,36 @@ class Migrating(Model, arbitrary_types_allowed=True):
             ),
         ]
 
+    def walked(
+        self, adapter: HostRuntime, records: list[Record], *, move: bool
+    ) -> Walked:
+        """Move `records`, one runtime's of the repository in the operator's own directory, into its rooms' home, or, without `move`, change nothing; return what was done of them, or what would be.
+
+        A move keeps the home of each session it moved (`lup_dev.host.homes.kept`),
+        so no other room can claim its id, and marks the runtime's records of the
+        repository moved (`ToldLayout.migrated`), so a launch doesn't offer to
+        move what a host session writes there after: that stays the host's,
+        unless the command moves it.
+        """
+        runtime = adapter.name
+        home = self.layout.room_home(self.repository, runtime, shared=self.shared)
+        moved = Migration(
+            runtime=runtime, directory=adapter.directory, home=home, records=records
+        ).moved(dry=not move)
+        sessions = [
+            session
+            for each in moved
+            for place in each.placed
+            if (session := adapter.recorded(place)) is not None
+        ]
+        if move:
+            for session in sessions:
+                kept(self.layout.host, runtime, session, home, adapter.records)
+            mark = self.layout.told.migrated(self.repository, runtime)
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.touch()
+        return Walked(runtime=runtime, home=home, moved=moved, sessions=sessions)
+
     def runtime(
         self, adapter: HostRuntime, under: list[Path], places: Places, *, move: bool
     ) -> list[str]:
@@ -642,29 +742,15 @@ class Migrating(Model, arbitrary_types_allowed=True):
             if others
             else []
         )
+        walked = self.walked(adapter, records, move=move)
         if not records:
             return [
                 f"{runtime}: no record of this repository's sessions is in {shown}.",
                 *stay,
             ]
-        home = self.layout.room_home(self.repository, runtime, shared=self.shared)
-        moved = Migration(
-            runtime=runtime, directory=directory, home=home, records=records
-        ).moved(dry=not move)
-        files = sum(each.files for each in moved)
-        size = sum(each.size for each in moved)
-        left = [part for each in moved for part in each.left]
         done = "moved" if move else "would move"
-        sessions = [
-            session
-            for each in moved
-            for place in each.placed
-            if (session := adapter.recorded(place)) is not None
-        ]
-        if move:
-            for session in sessions:
-                kept(self.layout.host, runtime, session, home, adapter.records)
         reads = "The host reads" if move else "The host would read"
+        sessions = walked.sessions
         theirs = (
             "its session there from then on, as a room resuming it does."
             if len(sessions) == 1
@@ -673,14 +759,15 @@ class Migrating(Model, arbitrary_types_allowed=True):
                 "resuming one does."
             )
         )
+        left = walked.left
         return [
             (
                 f"{runtime}: {counted(len(records), 'record', 'records')} of this "
-                f"repository's sessions, {counted(files, 'file', 'files')} and "
-                f"{sized(size)}, {done} from {shown} into {places.shown(home)}, "
-                "where its rooms resume them:"
+                f"repository's sessions, {counted(walked.files, 'file', 'files')} and "
+                f"{sized(walked.size)}, {done} from {shown} into "
+                f"{places.shown(walked.home)}, where its rooms resume them:"
             ),
-            *(f"- {each.said()}" for each in moved),
+            *(f"- {each.said()}" for each in walked.moved),
             *([f"{reads} {theirs}"] if sessions else []),
             *(
                 [
@@ -701,11 +788,15 @@ class Migrating(Model, arbitrary_types_allowed=True):
             if each.whose == "host" and each.home == adapter.directory
         ]
 
+    def found(self, adapter: HostRuntime, places: Places) -> Checked:
+        """Check what a host session of one runtime acts on in the operator's own directory, which rooms could have written; nothing where the directory isn't there."""
+        if not adapter.directory.is_dir():
+            return Checked()
+        return adapter.written(places)
+
     def checked(self, adapter: HostRuntime, places: Places) -> list[str]:
         """Say what a host session of one runtime acts on in the operator's own directory, which rooms could have written."""
-        if not adapter.directory.is_dir():
-            return []
-        found = adapter.written(places)
+        found = self.found(adapter, places).said()
         if not found:
             return []
         return [

@@ -47,6 +47,7 @@ from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.forge.github import GitHubError, Visibility
 from lup_dev.host.client import HostClient, Starter
+from lup_dev.host.homes import home_of
 from lup_dev.host.names import container_name
 from lup_dev.host.protocol import (
     GitHubRepository,
@@ -70,6 +71,7 @@ from lup_dev.launch.session import (
 )
 from lup_dev.launch.trust import Outcome, Unchanged
 from lup_dev.layout import Layout, digest
+from lup_dev.migration import sized
 from lup_dev.policy.worktrees import Making
 from lup_dev.private.withheld import Facts, Withheld
 from lup_dev.private.withheld import Machine as PrivateMachine
@@ -2009,14 +2011,12 @@ def test_a_first_launch_says_its_home_is_new_and_makes_the_account_s_login_empty
     )
     new = (
         f"This launch makes {room}, where claude's sessions in this project's "
-        "rooms keep their history and state from now on, apart from your own: a "
-        "session from before it resumes in a room once you move it there, which "
-        "`lup-dev account migrate`, in your own terminal in the repository, says "
-        "how to."
+        "rooms keep their history and state from now on, apart from your own."
     )
     unheld = (
         "The account `default` holds no claude login yet: sign in when claude "
-        "asks in the room, and every room on the account is signed in with it."
+        "asks in the room. It's the account's own login, apart from your host's, "
+        "and every room on the account is signed in with it."
     )
 
     cli.launched(machine.adapter, [], project, machine.launcher)
@@ -2194,3 +2194,345 @@ def test_a_codex_launch_runs_in_its_own_home_with_the_account_s_auth_json(
         for source in mounts.values()
         if Path(source.removesuffix(":ro")).is_relative_to(theirs)
     ]
+
+
+# Moving over: a launch offering to move the repository's sessions from the
+# operator's own directory into its rooms' home, before its room starts.
+
+SESSION = "8f2c0d1e"
+"""A session of the project's from before rooms had homes, by its id."""
+
+THREAD = "019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b"
+"""A Codex thread of the project's from before rooms had homes, by its id."""
+
+SNAPSHOT = (
+    "- `shell-snapshots/`: 1 snapshot. A host session runs its own before each "
+    "command, and a room could have written any: with no host session running, "
+    "`rm ~/.claude/shell-snapshots/*`; a session makes a new one as it starts."
+)
+CLAUDE_LOGIN = (
+    "- Your host login, `.credentials.json`, was readable by every room: in a "
+    "Claude Code session on the host, run `/logout` then `/login`, so the refresh "
+    "token they could read is replaced. Whether `/logout` revokes it with the "
+    "provider isn't documented."
+)
+
+
+class Answers:
+    """The operator at their terminal: each answer in turn, each question recorded beside what the launch says."""
+
+    def __init__(self, events: Events, answers: list[str | None]) -> None:
+        self.events = events
+        self.answers = answers
+
+    def __call__(self, question: str) -> str | None:
+        self.events.record(f"asked {question}")
+        return self.answers.pop(0)
+
+
+def at_terminal(machine: Machine, *answers: str | None) -> None:
+    """Launch in a terminal, the operator answering `answers` in turn; asked past them, the test fails."""
+    machine.launcher = machine.launcher.model_copy(
+        update={"ask": Answers(machine.events, list(answers))}
+    )
+
+
+def from_before(
+    project: Path, home: Path, *, login: bool = True, snapshot: bool = True
+) -> Path:
+    """Write two sessions of the project into the operator's own `~/.claude`, as its rooms did before they had homes of their own, the first with its file history, beside another directory's; with their host login and a shell snapshot unless told not to; return the project's folder."""
+    directory = home / ".claude"
+    folder = directory / "projects" / claude.folder_named(project)
+    folder.mkdir(parents=True)
+    for session in [SESSION, "a1b2"]:
+        (folder / f"{session}.jsonl").write_text(
+            json.dumps({"cwd": str(project)}) + "\n"
+        )
+    (directory / "file-history" / SESSION).mkdir(parents=True)
+    (directory / "file-history" / SESSION / "f@v1").write_text("before")
+    other = directory / "projects" / "-w-other"
+    other.mkdir()
+    (other / "s9.jsonl").write_text(json.dumps({"cwd": "/w/other"}) + "\n")
+    if login:
+        (directory / ".credentials.json").write_text('{"claudeAiOauth": {}}')
+    if snapshot:
+        (directory / "shell-snapshots").mkdir()
+        (directory / "shell-snapshots" / "snapshot-bash-1.sh").write_text("alias")
+    return folder
+
+
+def amount(folder: Path) -> str:
+    """Say the size of the project's sessions from before, with their file history, as the launch says it."""
+    files = [*folder.glob("*.jsonl"), *folder.parent.parent.glob("file-history/*/*")]
+    return sized(sum(each.stat().st_size for each in files))
+
+
+def walk(said: list[str]) -> list[str]:
+    """Return what a launch said and asked between trust and the host's requirements: the walk through moving over."""
+    lines = [each for each in said if not each.startswith("The host zone")]
+    return lines[lines.index("trust") + 1 : lines.index("found podman")]
+
+
+def test_a_launch_moves_the_sessions_from_before_on_a_yes_and_says_what_to_check(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    folder = from_before(project, tmp_path / "home")
+    size = amount(folder)
+    machine = Machine(tmp_path, clock)
+    at_terminal(machine, "", "")
+    room = machine.layout.room_home(project / ".git", "claude", shared=False)
+
+    status = cli.launched(
+        machine.adapter, ["--resume", SESSION], project, machine.launcher
+    )
+
+    assert status == 7
+    assert walk(machine.events.said) == [
+        (
+            f"~/.claude still holds 2 sessions of this repository, {size}, which no "
+            "room resumes there. End any claude running in it on the host first."
+        ),
+        (
+            f"The session this launch resumes, `{SESSION}`, is one of them: it "
+            "resumes here once they move."
+        ),
+        "asked Move them into the rooms' home now? [Y/n] ",
+        (
+            f"Moved 2 sessions of this repository, {size}, into the rooms' home: "
+            "they resume in a room from now on."
+        ),
+        (
+            "Every room could write ~/.claude until now. Check what a host session "
+            "acts on there:"
+        ),
+        SNAPSHOT,
+        CLAUDE_LOGIN,
+        "asked Press Enter to go on. ",
+    ]
+    # Moved before the room ran, each session is where the room resumes it,
+    # kept as its home, and the other directory's stays.
+    assert (room / "projects" / folder.name / f"{SESSION}.jsonl").is_file()
+    assert (room / "file-history" / SESSION / "f@v1").read_text() == "before"
+    assert not folder.exists()
+    assert (folder.parent / "-w-other" / "s9.jsonl").is_file()
+    assert home_of(machine.layout.host, "claude", SESSION) == room
+    assert machine.layout.told.migrated(project / ".git", "claude").is_file()
+    assert machine.layout.told.host_login("claude").is_file()
+
+    # A host session run in the repository after the move is the host's: no
+    # later launch offers to move it, or asks anything.
+    folder.mkdir()
+    (folder / "c3d4.jsonl").write_text(json.dumps({"cwd": str(project)}) + "\n")
+    at_terminal(machine)
+    machine.events.said.clear()
+
+    cli.launched(machine.adapter, [], project, machine.launcher)
+
+    assert walk(machine.events.said) == []
+    assert (folder / "c3d4.jsonl").is_file()
+
+
+def test_a_no_leaves_the_sessions_says_the_resume_fails_and_the_next_launch_asks_again(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    folder = from_before(project, tmp_path / "home")
+    size = amount(folder)
+    machine = Machine(tmp_path, clock)
+    at_terminal(machine, "n")
+
+    cli.launched(machine.adapter, ["--resume", SESSION], project, machine.launcher)
+
+    assert walk(machine.events.said) == [
+        (
+            f"~/.claude still holds 2 sessions of this repository, {size}, which no "
+            "room resumes there. End any claude running in it on the host first."
+        ),
+        (
+            f"The session this launch resumes, `{SESSION}`, is one of them: it "
+            "resumes here once they move."
+        ),
+        "asked Move them into the rooms' home now? [Y/n] ",
+        (
+            "Left in ~/.claude, where a session doesn't resume in a room: the next "
+            "launch asks again, and `lup-dev account migrate --move` moves them."
+        ),
+        (
+            f"The session this launch resumes, `{SESSION}`, is one of them, so it "
+            "won't resume in this room."
+        ),
+    ]
+    assert (folder / f"{SESSION}.jsonl").is_file()
+    assert not machine.layout.told.migrated(project / ".git", "claude").exists()
+
+    # The next launch asks again, until it's answered y or n.
+    at_terminal(machine, "maybe", "y", "")
+    machine.events.said.clear()
+
+    cli.launched(machine.adapter, [], project, machine.launcher)
+
+    asked = [each for each in machine.events.said if each.startswith("asked ")]
+    assert asked == [
+        "asked Move them into the rooms' home now? [Y/n] ",
+        "asked Answer y or n. Move them into the rooms' home now? [Y/n] ",
+        "asked Press Enter to go on. ",
+    ]
+    assert not folder.exists()
+
+
+def test_another_launch_running_is_named_to_end_first_and_nothing_moves(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    folder = from_before(project, tmp_path / "home")
+    size = amount(folder)
+    machine = Machine(tmp_path, clock)
+    at_terminal(machine)
+    running = Register(
+        launch="main",
+        runtime="claude",
+        worktree=project,
+        repository=project / ".git",
+        judge=tmp_path / "judge",
+        limits=Limits(actions=[], protected=[]),
+        github=None,
+        name="handoff-triage",
+    )
+    machine.layout.host.launches.mkdir(parents=True, exist_ok=True)
+    machine.layout.host.record("main").write_text(running.model_dump_json())
+    machine.layout.launch("main").lock.parent.mkdir(parents=True, exist_ok=True)
+
+    with FileLock(machine.layout.launch("main").lock):
+        status = cli.launched(
+            machine.adapter, ["--resume", SESSION], project, machine.launcher
+        )
+
+    assert status == 7
+    assert walk(machine.events.said) == [
+        (
+            f"~/.claude still holds 2 sessions of this repository, {size}, which no "
+            "room resumes there. They move with no other launch of it running: end "
+            "`handoff-triage`, then launch again."
+        ),
+        (
+            f"The session this launch resumes, `{SESSION}`, is one of them, so it "
+            "won't resume in this room."
+        ),
+    ]
+    assert (folder / f"{SESSION}.jsonl").is_file()
+    assert not machine.layout.told.migrated(project / ".git", "claude").exists()
+
+
+def test_with_no_terminal_the_launch_says_how_to_move_them_and_goes_on(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    folder = from_before(project, tmp_path / "home")
+    size = amount(folder)
+    machine = Machine(tmp_path, clock)
+
+    status = cli.launched(machine.adapter, [], project, machine.launcher)
+
+    assert status == 7
+    assert walk(machine.events.said) == [
+        (
+            f"~/.claude still holds 2 sessions of this repository, {size}, which no "
+            "room resumes there: launch from a terminal to move them, or run "
+            "`lup-dev account migrate --move`."
+        )
+    ]
+    assert (folder / f"{SESSION}.jsonl").is_file()
+
+
+def test_a_move_finding_nothing_to_act_on_says_so_in_a_line_and_doesn_t_wait(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    folder = from_before(project, tmp_path / "home", snapshot=False)
+    size = amount(folder)
+    machine = Machine(tmp_path, clock)
+    # An earlier launch, of another repository, said how to replace the login.
+    said = machine.layout.told.host_login("claude")
+    said.parent.mkdir(parents=True)
+    said.touch()
+    at_terminal(machine, "yes")
+
+    cli.launched(machine.adapter, [], project, machine.launcher)
+
+    assert walk(machine.events.said)[-2:] == [
+        (
+            f"Moved 2 sessions of this repository, {size}, into the rooms' home: "
+            "they resume in a room from now on."
+        ),
+        "Nothing a host session acts on in ~/.claude needs checking.",
+    ]
+
+
+def test_a_profile_on_the_shared_home_moves_them_there(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    folder = from_before(project, tmp_path / "home", login=False, snapshot=False)
+    machine = Machine(tmp_path, clock, profiles=SHARING)
+    at_terminal(machine, "y")
+
+    cli.launched(machine.adapter, [], project, machine.launcher, profile="everywhere")
+
+    asked = [each for each in machine.events.said if each.startswith("asked ")]
+    assert asked == [
+        "asked Move them into the rooms' home every project shares now? [Y/n] "
+    ]
+    shared = machine.layout.homes.shared("claude")
+    assert (shared / "projects" / folder.name / f"{SESSION}.jsonl").is_file()
+
+
+def test_a_codex_launch_moves_its_threads_from_before_too(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    theirs = tmp_path / "home" / ".codex"
+    day = theirs / "sessions" / "2026" / "10" / "28"
+    day.mkdir(parents=True)
+    rollout = day / f"rollout-2026-10-28T09-00-00-{THREAD}.jsonl"
+    rollout.write_text(
+        json.dumps(
+            {"type": "session_meta", "payload": {"id": THREAD, "cwd": str(project)}}
+        )
+        + "\n"
+    )
+    (theirs / "auth.json").write_text("{}")
+    machine = Machine(tmp_path, clock)
+    kept = machine.layout.clis("codex").version("0.163.0")
+    kept.mkdir(parents=True)
+    (kept / "cli").write_text("")
+    adapter = codex.adapter().model_copy(
+        update={"channel": Offline(events=machine.events)}
+    )
+    at_terminal(machine, "", "")
+    size = sized(rollout.stat().st_size)
+
+    cli.launched(adapter, ["resume", THREAD], project, machine.launcher)
+
+    room = machine.layout.room_home(project / ".git", "codex", shared=False)
+    assert walk(machine.events.said) == [
+        (
+            f"~/.codex still holds 1 session of this repository, {size}, which no "
+            "room resumes there. End any codex running in it on the host first."
+        ),
+        (
+            f"The session this launch resumes, `{THREAD}`, is one of them: it "
+            "resumes here once they move."
+        ),
+        "asked Move them into the rooms' home now? [Y/n] ",
+        (
+            f"Moved 1 session of this repository, {size}, into the rooms' home: "
+            "they resume in a room from now on."
+        ),
+        (
+            "Every room could write ~/.codex until now. Check what a host session "
+            "acts on there:"
+        ),
+        (
+            "- Your host login, `auth.json`, was readable by every room on Codex: on "
+            "the host, run `codex logout` then `codex login`, so the refresh token "
+            "they could read is replaced. Whether `codex logout` revokes it with the "
+            "provider isn't documented."
+        ),
+        "asked Press Enter to go on. ",
+    ]
+    assert (room / rollout.relative_to(theirs)).is_file()
+    assert home_of(machine.layout.host, "codex", THREAD) == room

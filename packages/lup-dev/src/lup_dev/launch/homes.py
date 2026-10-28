@@ -5,10 +5,11 @@ chooses it (`Layout.room_home`); the login is the account's file for the
 runtime, made empty where there's none, so the runtime's own sign-in in the
 room writes it; the configuration over the operator's is the profile's own
 (`ProfilesLayout`). What's said, each where its reader needs it next:
-- before the room starts, that the home is new, so the operator knows earlier
-  sessions don't resume there until they're moved (`lup_dev.migration`), and
-  that the account holds no login yet, so the sign-in they're about to see is
-  the account's;
+- before the room starts, that the home is new, so the operator knows its
+  history is apart from theirs (the launch offers to move their earlier
+  sessions there first: `lup_dev.launch.moving`), and that the account holds
+  no login yet, so the sign-in they're about to see is the account's, apart
+  from their host login;
 - what was left out of the configuration copied in, a line for what would run
   a command and one for what would hand the room a credential, each where it
   changed since the last launch on the profile said it;
@@ -87,22 +88,16 @@ class LaunchHome(Model):
             if profile.rooms_home == "project"
             else f"the rooms of every project on the profile `{profile.name}`"
         )
-        moving = (
-            "lup-dev account migrate"
-            if profile.rooms_home == "project"
-            else "lup-dev account migrate --shared"
-        )
         new = (
             f"This launch makes {self.home.shared}, where {self.runtime}'s "
             f"sessions in {whose} keep their history and state from now on, apart "
-            "from your own: a session from before it resumes in a room once you "
-            f"move it there, which `{moving}`, in your own terminal in the "
-            "repository, says how to."
+            "from your own."
         )
         unheld = (
             f"The account `{self.choice.account}` holds no {self.runtime} login "
-            f"yet: sign in when {self.runtime} asks in the room, and every room on "
-            "the account is signed in with it."
+            f"yet: sign in when {self.runtime} asks in the room. It's the "
+            "account's own login, apart from your host's, and every room on the "
+            "account is signed in with it."
         )
         return [
             *([] if self.home.shared.is_dir() else [new]),
