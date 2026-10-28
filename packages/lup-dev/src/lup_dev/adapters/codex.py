@@ -248,7 +248,7 @@ import lup
 from lup import events
 from lup.adapters.codex.layout import CodexLayout
 from lup.adapters.codex.settings import CodexSettings
-from lup.rooms.homes import inside, plain
+from lup.rooms.homes import inside, plain, regular
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
@@ -1148,8 +1148,16 @@ class CodexRecords(Model, Records):
 
 
 def started_in(rollout: Path) -> Path | None:
-    """Return the directory the session of `rollout` ran in, from its first line; none where it doesn't say."""
-    with rollout.open(encoding="utf-8", errors="replace") as lines:
+    """Return the directory the session of `rollout` ran in, from its first line; none where it doesn't say.
+
+    Only a rollout that's a regular file is read, never through a link and
+    never waiting on a pipe (`lup.rooms.homes.regular`): every room could write
+    the operator's Codex home until rooms had homes of their own.
+    """
+    descriptor = regular(rollout)
+    if descriptor is None:
+        return None
+    with open(descriptor, encoding="utf-8", errors="replace") as lines:
         first = lines.readline()
     try:
         return Started.model_validate_json(first).payload.cwd

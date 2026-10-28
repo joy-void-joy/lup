@@ -10,7 +10,7 @@ import pytest
 from lup.adapters.claude import Claude
 from lup.adapters.codex import Codex
 from lup.rooms.container import Mount
-from lup.rooms.homes import inside, landed, landings
+from lup.rooms.homes import inside, landed, landings, regular
 from lup.sessions.configuration import HomeLaunch, Item, configured
 from lup.sessions.terminal import (
     Cli,
@@ -632,3 +632,28 @@ def test_a_toml_preference_keeps_the_rest_of_an_inline_table(tmp_path: Path) -> 
     assert tomllib.loads(carrying.into.read_text()) == {
         "tui": {"vim": True, "theme": "light"}
     }
+
+
+def test_only_a_regular_file_is_opened_to_read_never_a_link_or_a_pipe(
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "record.jsonl"
+    record.write_text("{}\n")
+    (tmp_path / "link.jsonl").symlink_to(record)
+    os.mkfifo(tmp_path / "pipe.jsonl")
+    (tmp_path / "directory.jsonl").mkdir()
+    descriptor = regular(record)
+    assert descriptor is not None
+    with open(descriptor) as read:
+        assert read.read() == "{}\n"
+    held = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        relative = regular("record.jsonl", held)
+        assert relative is not None
+        os.close(relative)
+        assert [
+            regular(name, held)
+            for name in ["link.jsonl", "pipe.jsonl", "directory.jsonl", "absent"]
+        ] == [None, None, None, None]
+    finally:
+        os.close(held)

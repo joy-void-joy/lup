@@ -259,7 +259,7 @@ from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
 from lup.adapters.claude.terminal import own_settings
 from lup.adapters.claude.windows import catalogued, reach
-from lup.rooms.homes import inside, plain
+from lup.rooms.homes import inside, plain, regular
 from lup.sessions.terminal import Cli, Hook, TerminalError
 from lup.tools.serving import Notice
 from lup.types import JsonObject, Model, MutableModel, Settings
@@ -1701,7 +1701,13 @@ class ClaudeRecords(Model, Records):
     """Claude Code's records: a folder per directory sessions ran in, under `projects/`, and each session's file history.
 
     A folder's directory is read off its records' own lines, the first naming one,
-    never from the folder's name.
+    never from the folder's name; and a folder is a directory's only where it's
+    named as Claude Code names that directory's (`folder_named`). Every room
+    could write the operator's directory until rooms had homes of their own, so
+    a line saying the repository's directory, written into the folder of
+    another's, would otherwise have that other's sessions taken for the
+    repository's, copied where its rooms read them. Each record is read only
+    where it's a regular file, never through a link, never waiting on a pipe.
 
     A launched session's is in its room's home (`homes`), which rooms write, so
     one found there is read only where it resolves inside that home: a room
@@ -1749,7 +1755,10 @@ class ClaudeRecords(Model, Records):
         ours = [
             folder
             for folder in folders
-            if folder.is_dir() and (ran := ran_in(folder)) and within(ran, under)
+            if folder.is_dir()
+            and (ran := ran_in(folder))
+            and filed(folder, ran)
+            and within(ran, under)
         ]
         histories = [
             self.directory / "file-history" / session.stem
@@ -1769,10 +1778,56 @@ class ClaudeRecords(Model, Records):
         ]
 
 
+def folder_named(directory: Path) -> str:
+    """Return the name Claude Code gives the folder of the sessions run in `directory`, before it cuts a long one (`filed`): each character but an ASCII letter or digit a `-`, one per UTF-16 unit, as its 2.1.311 binary writes it (`replace(/[^a-zA-Z0-9]/g, "-")`).
+
+    >>> folder_named(Path("/w/lup.git/tree/dev")), folder_named(Path("/w/é😀"))
+    ('-w-lup-git-tree-dev', '-w----')
+    """
+    return "".join(
+        char if char.isascii() and char.isalnum() else "-" * units(char)
+        for char in str(directory)
+    )
+
+
+def units(char: str) -> int:
+    """Return how many UTF-16 units `char` takes, as a JavaScript string counts it: two past the basic plane.
+
+    >>> units("a"), units("😀")
+    (1, 2)
+    """
+    return len(char.encode("utf-16-le")) // 2
+
+
+def filed(folder: Path, ran: Path, longest: int = 200) -> bool:
+    """Say whether `folder` is named as Claude Code names the folder of sessions run in `ran`: its name in full, or, past `longest` units, cut there with a `-` and a hash of its own after, which this doesn't check. A folder whose sessions say otherwise was written so by something else.
+
+    >>> filed(Path("/h/projects/-w-lup-git"), Path("/w/lup.git"))
+    True
+    >>> filed(Path("/h/projects/-w-other"), Path("/w/lup.git"))
+    False
+    >>> filed(Path("/h/projects/-aaa-k3j"), Path("/aaaa"), longest=4)
+    True
+    """
+    named = folder_named(ran)
+    if len(named) <= longest:
+        return folder.name == named
+    # lup: ignore("string-slice", why="Claude Code cuts a long folder's name at a count of units, and what's compared is that cut, not a format read")
+    return folder.name.startswith(f"{named[:longest]}-")
+
+
 def ran_in(folder: Path) -> Path | None:
-    """Return the directory the sessions recorded in `folder` ran in, read off their first line naming one; none where none does."""
+    """Return the directory the sessions recorded in `folder` ran in, read off their first line naming one; none where none does.
+
+    Only a record that's a regular file is read, never through a link and
+    never waiting on a pipe (`lup.rooms.homes.regular`): a room could leave
+    either where a record would be.
+    """
     for record in sorted(folder.glob("*.jsonl")):
-        with record.open(encoding="utf-8", errors="replace") as lines:
+        descriptor = regular(record)
+        if descriptor is None:
+            continue
+        with open(descriptor, encoding="utf-8", errors="replace") as lines:
             for line in lines:
                 try:
                     located = Located.model_validate_json(line)

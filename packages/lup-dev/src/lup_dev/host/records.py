@@ -6,7 +6,9 @@ directories a repository's sessions run in, `Records.kept` answers which of the
 runtime's records are theirs: each a file or a directory, and where it goes in a
 copy, so a copy keeps the runtime's own layout. A record's session is read off
 the record itself, the directory it says it ran in, never guessed from where the
-runtime filed it.
+runtime filed it; where the runtime files by directory, a record filed where
+that directory's never would be isn't taken for its, since every room could
+write the operator's own directories until rooms had homes of their own.
 """
 
 import json

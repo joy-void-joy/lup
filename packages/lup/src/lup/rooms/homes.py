@@ -121,6 +121,25 @@ def landed(home: Path, wanted: dict[Path, bool]) -> None:
                 made(current, name, directory=directory)
 
 
+def regular(path: Path | str, holding: int | None = None) -> int | None:
+    """Open the file at `path`, in the directory whose descriptor is `holding` where it's given, for reading where it's a regular file, and return its descriptor; none where it isn't one, or isn't there.
+
+    Never through a link at its end, which a room could aim at any file the
+    host reads, `/dev/zero` among them, and never waiting on a pipe a room
+    left in its place: opening one doesn't block, and it's closed as what it
+    is.
+    """
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    try:
+        descriptor = os.open(path, flags, dir_fd=holding)
+    except OSError:
+        return None
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        return None
+    return descriptor
+
+
 def inside(home: Path, path: Path) -> bool:
     """Say whether `path` resolves inside `home`, every link on the way followed: what a room left as a link elsewhere doesn't.
 

@@ -70,6 +70,54 @@ def test_codex_s_records_are_the_rollouts_whose_first_line_ran_under_the_reposit
     ]
 
 
+def test_a_folder_saying_it_ran_in_the_repository_under_another_directory_s_name_isn_t_its(
+    tmp_path: Path,
+) -> None:
+    # Every room could write ~/.claude: a line naming the repository, written
+    # first into another directory's folder, would have its sessions taken for
+    # the repository's.
+    home = tmp_path / ".claude"
+    lines(
+        home / "projects" / "-w-secret" / "0-planted.jsonl",
+        {"type": "user", "cwd": "/w/lup.git/tree/dev"},
+    )
+    lines(
+        home / "projects" / "-w-secret" / "s2.jsonl", {"type": "user", "cwd": "/w/secret"}
+    )
+    assert ClaudeRecords(directory=home).kept([Path("/w/lup.git")]) == []
+
+
+def test_a_long_directory_s_folder_is_its_by_the_name_claude_code_cuts(
+    tmp_path: Path,
+) -> None:
+    directory = Path("/w/lup.git/tree") / ("b" * 220)
+    folder = f"-w-lup-git-tree-{'b' * 184}-1x9k2a"
+    home = tmp_path / ".claude"
+    lines(home / "projects" / folder / "s1.jsonl", {"cwd": str(directory)})
+    [kept] = ClaudeRecords(directory=home).kept([Path("/w/lup.git")])
+    assert kept.place == PurePosixPath("projects", folder)
+
+
+def test_a_record_that_s_a_pipe_or_a_link_is_passed_over_unread(tmp_path: Path) -> None:
+    # A pipe would hold the read forever, and a link could aim it at any file
+    # the host reads, /dev/zero among them.
+    home = tmp_path / ".claude"
+    ours = home / "projects" / "-w-lup-git-tree-dev"
+    ours.mkdir(parents=True)
+    os.mkfifo(ours / "0-pipe.jsonl")
+    elsewhere = tmp_path / "elsewhere.jsonl"
+    lines(elsewhere, {"cwd": "/w/other"})
+    (ours / "1-link.jsonl").symlink_to(elsewhere)
+    lines(ours / "s1.jsonl", {"cwd": "/w/lup.git/tree/dev"})
+    [kept] = ClaudeRecords(directory=home).kept([Path("/w/lup.git")])
+    assert kept.source == ours
+    sessions = tmp_path / ".codex" / "sessions" / "2026" / "10" / "17"
+    sessions.mkdir(parents=True)
+    os.mkfifo(sessions / "rollout-pipe.jsonl")
+    (sessions / "rollout-link.jsonl").symlink_to(elsewhere)
+    assert CodexRecords(home=tmp_path / ".codex").kept([Path("/w")]) == []
+
+
 # What Claude Code holds queued for each conversation of a running session, as
 # its records say (`ClaudeQueues`): the shapes measured on 2.1.311.
 
